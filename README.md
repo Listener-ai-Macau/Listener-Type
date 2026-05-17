@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" alt="Listener Type" width="128" />
+  <img src="src-tauri/icons/128x128@2x.png" alt="Listener.ai app icon" width="128" />
 </p>
 
-<h1 align="center">Listener Type</h1>
+<h1 align="center">Listener.ai</h1>
 
 <p align="center">
   <strong>Local-first voice input for macOS and Windows.</strong><br/>
@@ -26,6 +26,14 @@ The app is local-first:
 - Provider credentials are stored in the platform credential vault.
 - Cloud ASR/LLM providers are bring-your-own-key.
 - Remote marketplace and OAuth are disabled until a Listener Type backend is configured.
+
+## Brand Identity
+
+Listener.ai is represented by a small puppy companion resting on the app's voice capsule. The mascot is intentionally simple: rounded floppy ears, happy closed eyes, soft cheeks, chunky paws, and a calm expression that makes voice input feel approachable instead of technical.
+
+The capsule beneath the puppy mirrors the in-app recording surface. Its five rounded vertical bars echo the live audio-level animation used while recording, with a warm amber center bar as the only highlight. The icon uses the product UI palette: quartz off-white surfaces, muted sage outlines, deep ink facial details, soft line gray, and a restrained warm amber accent.
+
+The source brand asset is kept at [docs/assets/brand/listener-ai-app-icon.png](docs/assets/brand/listener-ai-app-icon.png), and generated desktop icon assets live under [src-tauri/icons](src-tauri/icons).
 
 ## Status
 
