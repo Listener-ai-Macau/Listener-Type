@@ -1,0 +1,48 @@
+name: Release Tauri
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*-tauri'
+
+jobs:
+  windows-release-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build Windows package
+        shell: pwsh
+        run: |
+          npm ci
+          powershell -ExecutionPolicy Bypass -File scripts/windows-package-msvc.ps1
+      - name: Discover WiX tools
+        shell: pwsh
+        run: |
+          $tauriWixRoot = Join-Path $env:LOCALAPPDATA "tauri"
+          $light = Get-ChildItem -LiteralPath $tauriWixRoot -Directory -Filter "WixTools*" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName "light.exe" } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+          if (-not $light) { throw "WixTools*\light.exe not found" }
+      - name: Windows IME installer smoke
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/windows-ime-install-smoke.ps1 -InstallerPath ".artifacts\windows-msvc\Listener Type_x64-setup.exe" -InstallerKind nsis
+          if ($LASTEXITCODE -ne 0) {
+            throw "NSIS installer smoke failed"
+          }
+          powershell -ExecutionPolicy Bypass -File scripts/windows-ime-install-smoke.ps1 -InstallerPath ".artifacts\windows-msvc\Listener Type_x64_en-US.msi" -InstallerKind msi
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSI installer smoke failed"
+          }

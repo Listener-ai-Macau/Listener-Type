@@ -1,0 +1,3268 @@
+//! OpenAI-compatible chat completions client + polish prompts.
+//!
+//! 提示词在 `prompts` 模块中维护：使用 `# 角色 / # 任务 / # 通用规则 / # 输出 / # 示例`
+//! 段落式结构，每个 mode 有独立的 1-shot 示例。重写背景见 issue #47。
+
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde_json::{json, Value};
+use thiserror::Error;
+
+use crate::types::{ChineseScriptPreference, OutputLanguagePreference, PolishMode, QaChatMessage};
+
+const DEFAULT_TEMPERATURE: f32 = 0.3;
+const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+const BODY_PREVIEW_LIMIT: usize = 200;
+pub const CODEX_OAUTH_PROVIDER_ID: &str = "codex_oauth";
+pub const CODEX_DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api";
+pub const CODEX_DEFAULT_MODEL: &str = "gpt-5.3-codex-spark";
+const CODEX_MIN_TOKEN_TTL_SECS: u64 = 60;
+
+pub const PROXY_MODE_PROVIDER_DEFAULT: &str = "provider-default";
+pub const PROXY_MODE_DIRECT: &str = "direct";
+pub const PROXY_MODE_SYSTEM: &str = "system";
+pub const PROXY_MODE_CUSTOM: &str = "custom";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderProxyMode {
+    ProviderDefault,
+    Direct,
+    System,
+    Custom(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectiveProxyMode {
+    Direct,
+    System,
+    Custom,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderProxyConfig {
+    provider_id: String,
+    mode: ProviderProxyMode,
+}
+
+impl ProviderProxyConfig {
+    pub fn provider_default(provider_id: impl Into<String>) -> Self {
+        Self {
+            provider_id: provider_id.into(),
+            mode: ProviderProxyMode::ProviderDefault,
+        }
+    }
+
+    pub fn from_stored(
+        provider_id: impl Into<String>,
+        mode: Option<&str>,
+        custom_proxy_url: Option<&str>,
+    ) -> Result<Self, String> {
+        let provider_id = provider_id.into();
+        let trimmed_mode = mode.unwrap_or(PROXY_MODE_PROVIDER_DEFAULT).trim();
+        let proxy_mode = match trimmed_mode {
+            "" | PROXY_MODE_PROVIDER_DEFAULT => ProviderProxyMode::ProviderDefault,
+            PROXY_MODE_DIRECT => ProviderProxyMode::Direct,
+            PROXY_MODE_SYSTEM => ProviderProxyMode::System,
+            PROXY_MODE_CUSTOM => {
+                let url = validate_custom_proxy_url(custom_proxy_url.unwrap_or_default())?;
+                ProviderProxyMode::Custom(url)
+            }
+            _ => return Err("proxyModeInvalid".to_string()),
+        };
+        Ok(Self {
+            provider_id,
+            mode: proxy_mode,
+        })
+    }
+
+    pub fn with_mode(provider_id: impl Into<String>, mode: ProviderProxyMode) -> Self {
+        Self {
+            provider_id: provider_id.into(),
+            mode,
+        }
+    }
+
+    pub fn effective_mode(&self, base_url: &str) -> EffectiveProxyMode {
+        if should_bypass_proxy_for_base_url(base_url) {
+            return EffectiveProxyMode::Direct;
+        }
+        match &self.mode {
+            ProviderProxyMode::ProviderDefault => {
+                if provider_default_proxy_is_direct(&self.provider_id) {
+                    EffectiveProxyMode::Direct
+                } else {
+                    EffectiveProxyMode::System
+                }
+            }
+            ProviderProxyMode::Direct => EffectiveProxyMode::Direct,
+            ProviderProxyMode::System => EffectiveProxyMode::System,
+            ProviderProxyMode::Custom(_) => EffectiveProxyMode::Custom,
+        }
+    }
+
+    fn custom_proxy_url(&self) -> Option<&str> {
+        match &self.mode {
+            ProviderProxyMode::Custom(url) => Some(url.as_str()),
+            _ => None,
+        }
+    }
+}
+
+pub fn provider_default_proxy_is_direct(provider_id: &str) -> bool {
+    let normalized = provider_id.trim().to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "ark"
+            | "deepseek"
+            | "siliconflow"
+            | "mimo"
+            | "alibabacoding"
+            | "codingplanx"
+            | "volcengine"
+            | "bailian"
+            | "zhipu"
+    )
+}
+
+fn validate_custom_proxy_url(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("proxyUrlMissing".to_string());
+    }
+    let parsed = reqwest::Url::parse(trimmed).map_err(|_| "proxyUrlInvalid".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("proxyUrlInvalid".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+#[derive(Clone, Debug)]
+pub struct OpenAICompatibleConfig {
+    pub provider_id: String,
+    pub display_name: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub extra_headers: HashMap<String, String>,
+    pub temperature: f32,
+    pub request_timeout_secs: u64,
+    pub proxy_config: ProviderProxyConfig,
+    /// true = 让支持的 OpenAI-compatible provider 启用推理 / 思考；
+    /// false = 按渠道级官方参数关闭或压低思考。不做模型白名单判断，
+    /// 具体模型兼容性交给 provider 处理。
+    pub thinking_enabled: bool,
+}
+
+impl OpenAICompatibleConfig {
+    pub fn new(
+        provider_id: impl Into<String>,
+        display_name: impl Into<String>,
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        let provider_id = provider_id.into();
+        Self {
+            proxy_config: ProviderProxyConfig::provider_default(provider_id.as_str()),
+            provider_id,
+            display_name: display_name.into(),
+            base_url: base_url.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+            extra_headers: HashMap::new(),
+            temperature: DEFAULT_TEMPERATURE,
+            request_timeout_secs: DEFAULT_REQUEST_TIMEOUT_SECS,
+            thinking_enabled: false,
+        }
+    }
+
+    pub fn with_thinking_enabled(mut self, enabled: bool) -> Self {
+        self.thinking_enabled = enabled;
+        self
+    }
+
+    pub fn with_proxy_config(mut self, proxy_config: ProviderProxyConfig) -> Self {
+        self.proxy_config = proxy_config;
+        self
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum LLMError {
+    #[error("missing credentials")]
+    MissingCredentials,
+    #[error("network error: {0}")]
+    Network(String),
+    #[error("timeout")]
+    Timeout,
+    #[error("invalid response: status {status}, body: {body}")]
+    InvalidResponse { status: u16, body: String },
+    #[error("parse error: {0}")]
+    ParseError(String),
+    #[error("codex oauth credentials unavailable: {0}")]
+    CodexAuth(String),
+}
+
+pub enum ActiveLLMProvider {
+    OpenAI(OpenAICompatibleLLMProvider),
+    Codex(CodexOAuthLLMProvider),
+}
+
+impl ActiveLLMProvider {
+    /// v1 流式润色只在 OpenAI-compatible 走通；Codex 走 Responses API，shape 与
+    /// chat completions SSE 不同，留给 v2。Gemini 在 coordinator.rs 路径上自己分流，
+    /// 不进 ActiveLLMProvider 枚举。
+    pub fn supports_streaming_polish(&self) -> bool {
+        matches!(self, Self::OpenAI(_))
+    }
+
+    pub async fn polish_streaming<F, C>(
+        &self,
+        raw_text: &str,
+        mode: PolishMode,
+        hotwords: &[String],
+        style_system_prompt: &str,
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+        prior_turns: &[(String, String)],
+        on_delta: F,
+        should_cancel: C,
+    ) -> Result<String, LLMError>
+    where
+        F: Fn(&str) + Send + Sync,
+        C: Fn() -> bool + Send + Sync,
+    {
+        match self {
+            Self::OpenAI(provider) => {
+                provider
+                    .polish_streaming(
+                        raw_text,
+                        mode,
+                        hotwords,
+                        style_system_prompt,
+                        working_languages,
+                        chinese_script_preference,
+                        output_language_preference,
+                        front_app,
+                        prior_turns,
+                        on_delta,
+                        should_cancel,
+                    )
+                    .await
+            }
+            Self::Codex(_) => Err(LLMError::Network(
+                "streaming polish not implemented for codex provider (v1)".into(),
+            )),
+        }
+    }
+
+    pub async fn polish(
+        &self,
+        raw_text: &str,
+        mode: PolishMode,
+        hotwords: &[String],
+        style_system_prompt: &str,
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+        prior_turns: &[(String, String)],
+    ) -> Result<String, LLMError> {
+        match self {
+            Self::OpenAI(provider) => {
+                provider
+                    .polish(
+                        raw_text,
+                        mode,
+                        hotwords,
+                        style_system_prompt,
+                        working_languages,
+                        chinese_script_preference,
+                        output_language_preference,
+                        front_app,
+                        prior_turns,
+                    )
+                    .await
+            }
+            Self::Codex(provider) => {
+                provider
+                    .polish(
+                        raw_text,
+                        mode,
+                        hotwords,
+                        style_system_prompt,
+                        working_languages,
+                        chinese_script_preference,
+                        output_language_preference,
+                        front_app,
+                        prior_turns,
+                    )
+                    .await
+            }
+        }
+    }
+
+    pub async fn translate_to(
+        &self,
+        raw_text: &str,
+        target_language: &str,
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+    ) -> Result<String, LLMError> {
+        match self {
+            Self::OpenAI(provider) => {
+                provider
+                    .translate_to(
+                        raw_text,
+                        target_language,
+                        working_languages,
+                        chinese_script_preference,
+                        output_language_preference,
+                        front_app,
+                    )
+                    .await
+            }
+            Self::Codex(provider) => {
+                provider
+                    .translate_to(
+                        raw_text,
+                        target_language,
+                        working_languages,
+                        chinese_script_preference,
+                        output_language_preference,
+                        front_app,
+                    )
+                    .await
+            }
+        }
+    }
+
+    pub async fn answer_chat_streaming<F, C>(
+        &self,
+        messages: &[QaChatMessage],
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+        on_delta: F,
+        should_cancel: C,
+    ) -> Result<String, LLMError>
+    where
+        F: Fn(&str) + Send + Sync,
+        C: Fn() -> bool + Send + Sync,
+    {
+        match self {
+            Self::OpenAI(provider) => {
+                provider
+                    .answer_chat_streaming(
+                        messages,
+                        working_languages,
+                        chinese_script_preference,
+                        output_language_preference,
+                        front_app,
+                        on_delta,
+                        should_cancel,
+                    )
+                    .await
+            }
+            Self::Codex(provider) => {
+                provider
+                    .answer_chat_streaming(
+                        messages,
+                        working_languages,
+                        chinese_script_preference,
+                        output_language_preference,
+                        front_app,
+                        on_delta,
+                        should_cancel,
+                    )
+                    .await
+            }
+        }
+    }
+}
+
+pub struct OpenAICompatibleLLMProvider {
+    config: OpenAICompatibleConfig,
+    client: reqwest::Client,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PolishSystemPromptAssembly {
+    pub context_premise: String,
+    pub hotword_block: String,
+    pub history_instruction: String,
+    pub effective_system_prompt: String,
+    pub includes_context_premise: bool,
+    pub includes_hotword_block: bool,
+    pub includes_history_instruction: bool,
+}
+
+impl OpenAICompatibleLLMProvider {
+    pub fn new(config: OpenAICompatibleConfig) -> Self {
+        // Build reqwest client with the configured timeout. If client construction
+        // fails for some reason (it should not on a normal target), fall back to
+        // the default client so we still surface a useful error at request time.
+        let client = http_client_builder_with_proxy(
+            &config.base_url,
+            config.request_timeout_secs,
+            &config.proxy_config,
+        )
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { config, client }
+    }
+
+    pub fn config(&self) -> &OpenAICompatibleConfig {
+        &self.config
+    }
+
+    pub async fn polish(
+        &self,
+        raw_text: &str,
+        mode: PolishMode,
+        hotwords: &[String],
+        style_system_prompt: &str,
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+        prior_turns: &[(String, String)],
+    ) -> Result<String, LLMError> {
+        let (system_prompt, user_prompt) = compose_polish_prompts(
+            raw_text,
+            mode,
+            hotwords,
+            style_system_prompt,
+            working_languages,
+            chinese_script_preference,
+            output_language_preference,
+            front_app,
+            !prior_turns.is_empty(),
+        );
+        log::info!(
+            "[style-pack] llm polish assembled provider={} model={} mode={:?} base_prompt_chars={} effective_prompt_chars={} hotwords={} front_app={} prior_turns={}",
+            self.config.provider_id,
+            self.config.model,
+            mode,
+            style_system_prompt.chars().count(),
+            system_prompt.chars().count(),
+            hotwords.len(),
+            front_app.is_some(),
+            prior_turns.len()
+        );
+        if prior_turns.is_empty() {
+            self.chat_completion(&system_prompt, &user_prompt).await
+        } else {
+            self.chat_completion_with_polish_history(&system_prompt, prior_turns, &user_prompt)
+                .await
+        }
+    }
+
+    /// 润色路径的**流式**变体。Prompts 与 `polish()` 完全同源（共用 `compose_polish_prompts`
+    /// + `build_polish_history_messages`），只是 body 开 `stream: true`，SSE 一帧一帧
+    /// 喂给 `on_delta`。最终返回拼好的完整字符串供调用方写 history / 记词条命中。
+    /// `should_cancel` 让上层在用户取消时立即 break SSE 读循环，避免烧 LLM quota。
+    pub async fn polish_streaming<F, C>(
+        &self,
+        raw_text: &str,
+        mode: PolishMode,
+        hotwords: &[String],
+        style_system_prompt: &str,
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+        prior_turns: &[(String, String)],
+        on_delta: F,
+        should_cancel: C,
+    ) -> Result<String, LLMError>
+    where
+        F: Fn(&str) + Send + Sync,
+        C: Fn() -> bool + Send + Sync,
+    {
+        let (system_prompt, user_prompt) = compose_polish_prompts(
+            raw_text,
+            mode,
+            hotwords,
+            style_system_prompt,
+            working_languages,
+            chinese_script_preference,
+            output_language_preference,
+            front_app,
+            !prior_turns.is_empty(),
+        );
+        let messages = build_polish_history_messages(&system_prompt, prior_turns, &user_prompt);
+        log::info!(
+            "[llm] polish_streaming provider={} model={} prior_turns={} raw_chars={}",
+            self.config.provider_id,
+            self.config.model,
+            prior_turns.len(),
+            raw_text.chars().count()
+        );
+        self.chat_completion_messages_streaming(messages, on_delta, should_cancel)
+            .await
+    }
+
+    /// 多轮划词追问，**流式**返回。`messages` 包含历史对话（user/assistant 交替），
+    /// 最后一条必须是新一轮的 user 提问。第一条 user 消息里如果有选区，调用方应在
+    /// content 里就把选区原文注入。`on_delta` 在每个 SSE chunk 到达时被调；最终返回
+    /// 拼好的完整字符串（用于写入 messages 历史）。详见 issue #118 v2。
+    pub async fn answer_chat_streaming<F, C>(
+        &self,
+        messages: &[QaChatMessage],
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+        on_delta: F,
+        should_cancel: C,
+    ) -> Result<String, LLMError>
+    where
+        F: Fn(&str) + Send + Sync,
+        C: Fn() -> bool + Send + Sync,
+    {
+        let system_prompt = compose_qa_system_prompt(
+            working_languages,
+            chinese_script_preference,
+            output_language_preference,
+            front_app,
+        );
+        self.chat_completion_history_streaming(&system_prompt, messages, on_delta, should_cancel)
+            .await
+    }
+
+    /// 把转写翻译成 `target_language`（前端从内置语言列表里选出来的原生名）。
+    /// `working_languages` 与 `front_app` 作为前提注入头部。详见 issue #4 与 #116。
+    pub async fn translate_to(
+        &self,
+        raw_text: &str,
+        target_language: &str,
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        _output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+    ) -> Result<String, LLMError> {
+        let (system_prompt, user_prompt) = compose_translate_prompts(
+            raw_text,
+            target_language,
+            working_languages,
+            chinese_script_preference,
+            front_app,
+        );
+        self.chat_completion(&system_prompt, &user_prompt).await
+    }
+
+    /// 多轮对话感知的 polish 路径。`prior_turns` 是按时间倒序（最新在前）的
+    /// `(raw_transcript, polished_text)` 序列；这里反转成时间正序、然后展开
+    /// 成 OpenAI chat completions 的多轮 `user` / `assistant` messages，最后一条
+    /// 是当前 user prompt。LLM 会自然把 prior assistant 输出当成"我已说过、
+    /// 不复读"。配合 system prompt 里的显式指令（prompts::polish_context_instruction）
+    /// 共同保证不复读上文，仅把上文当语义上下文。
+    async fn chat_completion_with_polish_history(
+        &self,
+        system_prompt: &str,
+        prior_turns: &[(String, String)],
+        user_prompt: &str,
+    ) -> Result<String, LLMError> {
+        let url = chat_completions_url(&self.config.base_url);
+        let messages = build_polish_history_messages(system_prompt, prior_turns, user_prompt);
+        let body = self.chat_body(false, messages);
+
+        log::info!(
+            "[llm] POST {} provider={} model={} prior_turns={}",
+            url,
+            self.config.provider_id,
+            self.config.model,
+            prior_turns.len()
+        );
+
+        // 复用 send_and_extract 把 chat_completion 与本函数共享 HTTP / 解析路径。
+        self.send_chat_request(&url, &body).await
+    }
+
+    async fn chat_completion(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String, LLMError> {
+        let url = chat_completions_url(&self.config.base_url);
+        let body = self.chat_body(
+            false,
+            vec![
+                json!({ "role": "system", "content": system_prompt }),
+                json!({ "role": "user", "content": user_prompt }),
+            ],
+        );
+
+        log::info!(
+            "[llm] POST {} provider={} model={}",
+            url,
+            self.config.provider_id,
+            self.config.model
+        );
+
+        self.send_chat_request(&url, &body).await
+    }
+
+    fn chat_body(&self, stream: bool, messages: Vec<Value>) -> Value {
+        let mut body = json!({
+            "model": self.config.model,
+            "stream": stream,
+            "temperature": self.config.temperature,
+            "messages": messages,
+        });
+        apply_openai_compatible_thinking_control(&mut body, &self.config);
+        body
+    }
+
+    /// 共用的 HTTP send + body 解析。chat_completion / chat_completion_with_polish_history
+    /// 各自构造好 body 后都调到这里，避免 30 行 send/parse 重复。
+    async fn send_chat_request(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<String, LLMError> {
+        let mut request = self
+            .client
+            .post(url)
+            .header("Content-Type", "application/json");
+        if !self.config.api_key.trim().is_empty() {
+            request = request.header("Authorization", format!("Bearer {}", self.config.api_key));
+        }
+        for (k, v) in &self.config.extra_headers {
+            request = request.header(k.as_str(), v.as_str());
+        }
+        let request = request.json(body);
+
+        let response = send_with_transient_retry(request).await?;
+
+        let status = response.status();
+        let body_text = response
+            .text()
+            .await
+            .map_err(|e| LLMError::Network(e.to_string()))?;
+
+        let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
+        let preview = safe_str_slice(&body_text, preview_end);
+        log::info!("[llm] HTTP {} body={}", status.as_u16(), preview);
+
+        if !status.is_success() {
+            return Err(LLMError::InvalidResponse {
+                status: status.as_u16(),
+                body: preview.to_string(),
+            });
+        }
+
+        extract_assistant_content(&body_text)
+    }
+
+    /// 与 `chat_completion` 同条 HTTP 通路，但开 `stream: true` 并把 SSE chunk 一边
+    /// 解析、一边通过 `on_delta` 推给调用方（用于实时把答案塞进浮窗气泡）。
+    /// 最终返回拼好的完整字符串供调用方写入对话历史。
+    async fn chat_completion_history_streaming<F, C>(
+        &self,
+        system_prompt: &str,
+        history: &[QaChatMessage],
+        on_delta: F,
+        should_cancel: C,
+    ) -> Result<String, LLMError>
+    where
+        F: Fn(&str) + Send + Sync,
+        C: Fn() -> bool + Send + Sync,
+    {
+        let mut msgs: Vec<Value> = Vec::with_capacity(history.len() + 1);
+        msgs.push(json!({ "role": "system", "content": system_prompt }));
+        for m in history {
+            msgs.push(json!({ "role": m.role, "content": m.content }));
+        }
+
+        let url = chat_completions_url(&self.config.base_url);
+        let body = self.chat_body(true, msgs);
+
+        log::info!(
+            "[llm] POST {} provider={} model={} chat_turns={} stream=true",
+            url,
+            self.config.provider_id,
+            self.config.model,
+            history.len()
+        );
+
+        let mut request = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream");
+        if !self.config.api_key.trim().is_empty() {
+            request = request.header("Authorization", format!("Bearer {}", self.config.api_key));
+        }
+        for (k, v) in &self.config.extra_headers {
+            request = request.header(k.as_str(), v.as_str());
+        }
+        let request = request.json(&body);
+
+        let response = send_with_transient_retry(request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            // 失败时仍把 body 读一遍方便诊断
+            let body_text = response
+                .text()
+                .await
+                .map_err(|e| LLMError::Network(e.to_string()))?;
+            let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
+            let preview = safe_str_slice(&body_text, preview_end);
+            log::error!("[llm] HTTP {} body={}", status.as_u16(), preview);
+            return Err(LLMError::InvalidResponse {
+                status: status.as_u16(),
+                body: preview.to_string(),
+            });
+        }
+
+        // SSE 流：一帧 = 若干行，以 `\n\n` 分隔。每行如 `data: {...}` 或 `data: [DONE]`。
+        // 一个 chunk() 可能包含半帧或多帧；用 buffer 累积后再按 `\n\n` 切。
+        let mut response = response;
+        let mut buffer = String::new();
+        let mut utf8_pending: Vec<u8> = Vec::new();
+        let mut full_text = String::new();
+        let mut cancelled = false;
+        loop {
+            // 取消旗标：用户取消 / 关浮窗时立即 break，不再 drain HTTP body。
+            // 否则 reqwest 会读完整个流（包括 LLM 后续 token）烧 quota。详见 issue #161。
+            if should_cancel() {
+                log::info!("[llm] stream cancelled by caller; breaking SSE loop");
+                cancelled = true;
+                break;
+            }
+            let chunk_opt = response
+                .chunk()
+                .await
+                .map_err(|e| LLMError::Network(e.to_string()))?;
+            let Some(chunk) = chunk_opt else { break };
+            append_utf8_sse_chunk(&mut buffer, &mut utf8_pending, &chunk)?;
+
+            while let Some(idx) = buffer.find("\n\n") {
+                let event = buffer[..idx].to_string();
+                buffer.drain(..idx + 2);
+                for line in event.lines() {
+                    let Some(payload) = line
+                        .strip_prefix("data: ")
+                        .or_else(|| line.strip_prefix("data:"))
+                    else {
+                        continue;
+                    };
+                    let payload = payload.trim();
+                    if payload.is_empty() || payload == "[DONE]" {
+                        continue;
+                    }
+                    let v: Value = match serde_json::from_str(payload) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            log::warn!(
+                                "[llm] SSE parse skip: {e}; payload preview: {}",
+                                safe_str_slice(payload, 80)
+                            );
+                            continue;
+                        }
+                    };
+                    if let Some(delta) = v["choices"][0]["delta"]["content"].as_str() {
+                        if !delta.is_empty() {
+                            full_text.push_str(delta);
+                            on_delta(delta);
+                        }
+                    }
+                }
+            }
+        }
+        if !cancelled {
+            finish_utf8_sse_chunks(&mut buffer, &mut utf8_pending)?;
+        }
+
+        log::info!(
+            "[llm] HTTP 200 stream done; total chars={}",
+            full_text.chars().count()
+        );
+
+        if full_text.is_empty() {
+            return Err(LLMError::InvalidResponse {
+                status: 200,
+                body: "empty stream".to_string(),
+            });
+        }
+        Ok(full_text)
+    }
+
+    /// 把已经构造好的 `messages` 列表（包含 system + 历史 + 当前 user）作为
+    /// `stream: true` 的 body 发出去，SSE 一帧一帧解析。供 `polish_streaming` 复用，
+    /// 跟 `chat_completion_history_streaming` 的 SSE 解析逻辑同款 —— 后者多了一步从
+    /// `QaChatMessage[]` 装配 messages 的工作。
+    async fn chat_completion_messages_streaming<F, C>(
+        &self,
+        messages: Vec<Value>,
+        on_delta: F,
+        should_cancel: C,
+    ) -> Result<String, LLMError>
+    where
+        F: Fn(&str) + Send + Sync,
+        C: Fn() -> bool + Send + Sync,
+    {
+        let url = chat_completions_url(&self.config.base_url);
+        let body = self.chat_body(true, messages);
+
+        let mut request = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream");
+        if !self.config.api_key.trim().is_empty() {
+            request = request.header("Authorization", format!("Bearer {}", self.config.api_key));
+        }
+        for (k, v) in &self.config.extra_headers {
+            request = request.header(k.as_str(), v.as_str());
+        }
+        let request = request.json(&body);
+
+        let response = send_with_transient_retry(request).await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body_text = response
+                .text()
+                .await
+                .map_err(|e| LLMError::Network(e.to_string()))?;
+            let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
+            let preview = safe_str_slice(&body_text, preview_end);
+            log::error!("[llm] streaming HTTP {} body={}", status.as_u16(), preview);
+            return Err(LLMError::InvalidResponse {
+                status: status.as_u16(),
+                body: preview.to_string(),
+            });
+        }
+
+        let mut response = response;
+        let mut buffer = String::new();
+        let mut utf8_pending: Vec<u8> = Vec::new();
+        let mut full_text = String::new();
+        let mut delta_count: u64 = 0;
+        let mut cancelled = false;
+        loop {
+            if should_cancel() {
+                log::info!(
+                    "[llm] polish stream cancelled by caller after {} deltas ({} chars); breaking SSE loop",
+                    delta_count,
+                    full_text.chars().count()
+                );
+                cancelled = true;
+                break;
+            }
+            let chunk_opt = response
+                .chunk()
+                .await
+                .map_err(|e| LLMError::Network(e.to_string()))?;
+            let Some(chunk) = chunk_opt else { break };
+            append_utf8_sse_chunk(&mut buffer, &mut utf8_pending, &chunk)?;
+
+            while let Some(idx) = buffer.find("\n\n") {
+                let event = buffer[..idx].to_string();
+                buffer.drain(..idx + 2);
+                for line in event.lines() {
+                    let Some(payload) = line
+                        .strip_prefix("data: ")
+                        .or_else(|| line.strip_prefix("data:"))
+                    else {
+                        continue;
+                    };
+                    let payload = payload.trim();
+                    if payload.is_empty() || payload == "[DONE]" {
+                        continue;
+                    }
+                    let v: Value = match serde_json::from_str(payload) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            log::warn!(
+                                "[llm] polish SSE parse skip: {e}; payload preview: {}",
+                                safe_str_slice(payload, 80)
+                            );
+                            continue;
+                        }
+                    };
+                    if let Some(delta) = v["choices"][0]["delta"]["content"].as_str() {
+                        if !delta.is_empty() {
+                            full_text.push_str(delta);
+                            delta_count += 1;
+                            on_delta(delta);
+                        }
+                    }
+                }
+            }
+        }
+        if !cancelled {
+            finish_utf8_sse_chunks(&mut buffer, &mut utf8_pending)?;
+        }
+
+        log::info!(
+            "[llm] polish stream done; total deltas={} chars={}",
+            delta_count,
+            full_text.chars().count()
+        );
+
+        if full_text.is_empty() {
+            return Err(LLMError::InvalidResponse {
+                status: 200,
+                body: "empty polish stream".to_string(),
+            });
+        }
+        Ok(full_text)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CodexOAuthConfig {
+    pub base_url: String,
+    pub model: String,
+    pub auth_path: Option<PathBuf>,
+    pub reasoning_effort: Option<String>,
+    pub text_verbosity: Option<String>,
+    pub request_timeout_secs: u64,
+    pub proxy_config: ProviderProxyConfig,
+}
+
+impl CodexOAuthConfig {
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            base_url: CODEX_DEFAULT_BASE_URL.to_string(),
+            model: normalize_codex_model(model.into().as_str()),
+            auth_path: None,
+            reasoning_effort: Some("medium".to_string()),
+            text_verbosity: Some("medium".to_string()),
+            request_timeout_secs: DEFAULT_REQUEST_TIMEOUT_SECS,
+            proxy_config: ProviderProxyConfig::provider_default(CODEX_OAUTH_PROVIDER_ID),
+        }
+    }
+
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into();
+        self
+    }
+
+    pub fn with_auth_path(mut self, auth_path: PathBuf) -> Self {
+        self.auth_path = Some(auth_path);
+        self
+    }
+
+    pub fn with_thinking_enabled(mut self, enabled: bool) -> Self {
+        self.reasoning_effort = Some(if enabled { "medium" } else { "low" }.to_string());
+        self
+    }
+
+    pub fn with_proxy_config(mut self, proxy_config: ProviderProxyConfig) -> Self {
+        self.proxy_config = proxy_config;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodexOAuthCredentials {
+    pub access_token: String,
+    pub account_id: String,
+    pub expires_at_unix_secs: u64,
+}
+
+impl CodexOAuthCredentials {
+    pub fn load_default() -> Result<Self, LLMError> {
+        Self::load_from_path(&default_codex_auth_path())
+    }
+
+    pub fn load_from_path(path: &Path) -> Result<Self, LLMError> {
+        let body = std::fs::read_to_string(path).map_err(|e| {
+            LLMError::CodexAuth(format!("无法读取 Codex 登录文件 {}: {}", path.display(), e))
+        })?;
+        let json: Value = serde_json::from_str(&body)
+            .map_err(|e| LLMError::CodexAuth(format!("Codex 登录文件不是合法 JSON: {}", e)))?;
+        let tokens = json
+            .get("tokens")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| LLMError::CodexAuth("Codex 登录文件缺少 tokens 对象".into()))?;
+        let access_token = tokens
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| LLMError::CodexAuth("Codex 登录文件缺少 access_token".into()))?;
+        let account_id = tokens
+            .get("account_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| LLMError::CodexAuth("Codex 登录文件缺少 account_id".into()))?;
+
+        let payload = decode_jwt_payload(access_token)?;
+        let expires_at_unix_secs = payload
+            .get("exp")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| LLMError::CodexAuth("Codex access token 缺少 exp".into()))?;
+        let claim_account_id = payload
+            .get("https://api.openai.com/auth.chatgpt_account_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim);
+        if claim_account_id.is_some_and(|claim| claim != account_id) {
+            return Err(LLMError::CodexAuth(
+                "Codex access token 的 account id 与 auth.json 不一致".into(),
+            ));
+        }
+        let now = unix_now_secs();
+        if expires_at_unix_secs <= now + CODEX_MIN_TOKEN_TTL_SECS {
+            return Err(LLMError::CodexAuth(
+                "Codex access token 已过期或即将过期，请先在 Codex CLI/App 重新登录".into(),
+            ));
+        }
+
+        Ok(Self {
+            access_token: access_token.to_string(),
+            account_id: account_id.to_string(),
+            expires_at_unix_secs,
+        })
+    }
+}
+
+pub struct CodexOAuthLLMProvider {
+    config: CodexOAuthConfig,
+    client: reqwest::Client,
+}
+
+impl CodexOAuthLLMProvider {
+    pub fn new(config: CodexOAuthConfig) -> Self {
+        let client = http_client_builder_with_proxy(
+            &config.base_url,
+            config.request_timeout_secs,
+            &config.proxy_config,
+        )
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { config, client }
+    }
+
+    pub fn config(&self) -> &CodexOAuthConfig {
+        &self.config
+    }
+
+    pub async fn polish(
+        &self,
+        raw_text: &str,
+        mode: PolishMode,
+        hotwords: &[String],
+        style_system_prompt: &str,
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+        prior_turns: &[(String, String)],
+    ) -> Result<String, LLMError> {
+        let (system_prompt, user_prompt) = compose_polish_prompts(
+            raw_text,
+            mode,
+            hotwords,
+            style_system_prompt,
+            working_languages,
+            chinese_script_preference,
+            output_language_preference,
+            front_app,
+            !prior_turns.is_empty(),
+        );
+        log::info!(
+            "[style-pack] llm polish assembled provider=codex-oauth model={} mode={:?} base_prompt_chars={} effective_prompt_chars={} hotwords={} front_app={} prior_turns={}",
+            self.config.model,
+            mode,
+            style_system_prompt.chars().count(),
+            system_prompt.chars().count(),
+            hotwords.len(),
+            front_app.is_some(),
+            prior_turns.len()
+        );
+        let messages = build_polish_history_messages(&system_prompt, prior_turns, &user_prompt);
+        self.codex_responses(messages, |_| {}, || false).await
+    }
+
+    pub async fn translate_to(
+        &self,
+        raw_text: &str,
+        target_language: &str,
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        _output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+    ) -> Result<String, LLMError> {
+        let mut system_prompt = prompts::translate_system_prompt(target_language);
+        if let Some(premise) = context_premise(
+            working_languages,
+            chinese_script_preference,
+            OutputLanguagePreference::Auto,
+            front_app,
+        ) {
+            system_prompt = format!("{}\n\n{}", premise, system_prompt);
+        }
+        let messages = vec![
+            json!({ "role": "system", "content": system_prompt }),
+            json!({ "role": "user", "content": prompts::user_prompt(raw_text) }),
+        ];
+        self.codex_responses(messages, |_| {}, || false).await
+    }
+
+    pub async fn answer_chat_streaming<F, C>(
+        &self,
+        messages: &[QaChatMessage],
+        working_languages: &[String],
+        chinese_script_preference: ChineseScriptPreference,
+        output_language_preference: OutputLanguagePreference,
+        front_app: Option<&str>,
+        on_delta: F,
+        should_cancel: C,
+    ) -> Result<String, LLMError>
+    where
+        F: Fn(&str) + Send + Sync,
+        C: Fn() -> bool + Send + Sync,
+    {
+        let mut system_prompt = prompts::qa_system_prompt();
+        if let Some(premise) = context_premise(
+            working_languages,
+            chinese_script_preference,
+            output_language_preference,
+            front_app,
+        ) {
+            system_prompt = format!("{}\n\n{}", premise, system_prompt);
+        }
+
+        let mut request_messages = Vec::with_capacity(messages.len() + 1);
+        request_messages.push(json!({ "role": "system", "content": system_prompt }));
+        for message in messages {
+            request_messages.push(json!({ "role": message.role, "content": message.content }));
+        }
+        self.codex_responses(request_messages, on_delta, should_cancel)
+            .await
+    }
+
+    async fn codex_responses<F, C>(
+        &self,
+        messages: Vec<Value>,
+        on_delta: F,
+        should_cancel: C,
+    ) -> Result<String, LLMError>
+    where
+        F: Fn(&str) + Send + Sync,
+        C: Fn() -> bool + Send + Sync,
+    {
+        let auth_path = self
+            .config
+            .auth_path
+            .clone()
+            .unwrap_or_else(default_codex_auth_path);
+        let creds = CodexOAuthCredentials::load_from_path(&auth_path)?;
+        let url = codex_responses_url(&self.config.base_url);
+        let mut body = json!({
+            "model": normalize_codex_model(&self.config.model),
+            "store": false,
+            "stream": true,
+            "input": codex_input_from_chat_messages(&messages),
+            "include": ["reasoning.encrypted_content"],
+            "instructions": "You are Listener Type' text polishing assistant. Follow the developer messages exactly and return only the final user-visible text.",
+        });
+        if let Some(effort) = self.config.reasoning_effort.as_deref() {
+            body["reasoning"] = json!({ "effort": effort });
+        }
+        if let Some(verbosity) = self.config.text_verbosity.as_deref() {
+            body["text"] = json!({ "verbosity": verbosity });
+        }
+
+        log::info!(
+            "[llm] POST {} provider={} model={} stream=true",
+            url,
+            CODEX_OAUTH_PROVIDER_ID,
+            self.config.model
+        );
+
+        let request = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .header("Authorization", format!("Bearer {}", creds.access_token))
+            .header("chatgpt-account-id", creds.account_id)
+            .header("OpenAI-Beta", "responses=experimental")
+            .header("originator", "codex_cli_rs")
+            .json(&body);
+        let response = match request.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                if e.is_timeout() {
+                    return Err(LLMError::Timeout);
+                }
+                return Err(LLMError::Network(e.to_string()));
+            }
+        };
+
+        let status = response.status();
+        if !status.is_success() {
+            let body_text = response
+                .text()
+                .await
+                .map_err(|e| LLMError::Network(e.to_string()))?;
+            let preview_end = BODY_PREVIEW_LIMIT.min(body_text.len());
+            let preview = safe_str_slice(&body_text, preview_end);
+            log::error!("[llm] codex HTTP {} body={}", status.as_u16(), preview);
+            return Err(LLMError::InvalidResponse {
+                status: status.as_u16(),
+                body: preview.to_string(),
+            });
+        }
+
+        let mut response = response;
+        let mut buffer = String::new();
+        let mut utf8_pending: Vec<u8> = Vec::new();
+        let mut full_text = String::new();
+        let mut final_text = String::new();
+        let mut cancelled = false;
+        loop {
+            if should_cancel() {
+                log::info!("[llm] codex stream cancelled by caller; breaking SSE loop");
+                cancelled = true;
+                break;
+            }
+            let chunk_opt = response
+                .chunk()
+                .await
+                .map_err(|e| LLMError::Network(e.to_string()))?;
+            let Some(chunk) = chunk_opt else { break };
+            append_utf8_sse_chunk(&mut buffer, &mut utf8_pending, &chunk)?;
+
+            while let Some(idx) = buffer.find("\n\n") {
+                let event = buffer[..idx].to_string();
+                buffer.drain(..idx + 2);
+                handle_codex_sse_event(&event, &mut full_text, &mut final_text, &on_delta);
+            }
+        }
+        if !cancelled {
+            finish_utf8_sse_chunks(&mut buffer, &mut utf8_pending)?;
+        }
+        if !buffer.trim().is_empty() {
+            handle_codex_sse_event(&buffer, &mut full_text, &mut final_text, &on_delta);
+        }
+
+        if full_text.is_empty() && !final_text.is_empty() {
+            full_text = final_text;
+        }
+        log::info!(
+            "[llm] codex HTTP 200 stream done; total chars={}",
+            full_text.chars().count()
+        );
+        if full_text.is_empty() {
+            return Err(LLMError::InvalidResponse {
+                status: 200,
+                body: "empty stream".to_string(),
+            });
+        }
+        Ok(clean_polish_output(&full_text))
+    }
+}
+
+fn append_utf8_sse_chunk(
+    buffer: &mut String,
+    pending: &mut Vec<u8>,
+    chunk: &[u8],
+) -> Result<(), LLMError> {
+    pending.extend_from_slice(chunk);
+    drain_complete_utf8(buffer, pending)
+}
+
+fn finish_utf8_sse_chunks(buffer: &mut String, pending: &mut Vec<u8>) -> Result<(), LLMError> {
+    drain_complete_utf8(buffer, pending)?;
+    if pending.is_empty() {
+        Ok(())
+    } else {
+        Err(LLMError::Network(
+            "non-utf8 SSE chunk: stream ended in the middle of a UTF-8 codepoint".to_string(),
+        ))
+    }
+}
+
+fn drain_complete_utf8(buffer: &mut String, pending: &mut Vec<u8>) -> Result<(), LLMError> {
+    loop {
+        match std::str::from_utf8(pending) {
+            Ok(s) => {
+                buffer.push_str(s);
+                pending.clear();
+                return Ok(());
+            }
+            Err(e) => {
+                let valid_up_to = e.valid_up_to();
+                if valid_up_to > 0 {
+                    let valid = std::str::from_utf8(&pending[..valid_up_to]).expect("valid prefix");
+                    buffer.push_str(valid);
+                    pending.drain(..valid_up_to);
+                    continue;
+                }
+                if e.error_len().is_none() {
+                    return Ok(());
+                }
+                return Err(LLMError::Network(format!("non-utf8 SSE chunk: {e}")));
+            }
+        }
+    }
+}
+
+/// Slice up to `end` bytes off `s`, but don't split a UTF-8 codepoint.
+pub(crate) fn safe_str_slice(s: &str, end: usize) -> &str {
+    if end >= s.len() {
+        return s;
+    }
+    let mut cut = end;
+    while cut > 0 && !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    &s[..cut]
+}
+
+/// 构造对话感知 polish 的 chat completions 消息数组。
+///
+/// 不变量：
+/// 1. **第 0 条**永远是 `system`（含 \[system_prompt\] 整段，含 polish_context_instruction
+///    "不要复读"指令——由调用方拼好传入）。
+/// 2. **prior_turns 按时间倒序**（最新在前）作为入参——这里反转成时间正序喂给 chat：
+///    最老的 prior 在前、最新的 prior 在后、当前要润色的 user_prompt 在最末。
+/// 3. **每对 prior 展开成 (role=user, role=assistant)**：raw 走 user_prompt 包装、
+///    polished 直接当 assistant 输出。LLM 据此把 polished 当成"我已经回答过的内容"，
+///    自然不会复读。
+/// 4. **最后一条** 永远是 role=user（当前要润色的 raw_text 包装后的 user_prompt）。
+///
+/// 抽出独立函数纯粹是为了可单测——见 polish::tests::build_polish_history_messages_*。
+fn build_polish_history_messages(
+    system_prompt: &str,
+    prior_turns: &[(String, String)],
+    user_prompt: &str,
+) -> Vec<serde_json::Value> {
+    let mut messages: Vec<serde_json::Value> = Vec::with_capacity(prior_turns.len() * 2 + 2);
+    messages.push(json!({ "role": "system", "content": system_prompt }));
+    // prior_turns 按时间倒序（newest-first），反转成正序喂给 chat。
+    for (raw, polished) in prior_turns.iter().rev() {
+        messages.push(json!({ "role": "user", "content": prompts::user_prompt(raw) }));
+        messages.push(json!({ "role": "assistant", "content": polished }));
+    }
+    messages.push(json!({ "role": "user", "content": user_prompt }));
+    messages
+}
+
+fn chat_completions_url(base_url: &str) -> String {
+    let trimmed = base_url.trim();
+    if trimmed.ends_with("/chat/completions") {
+        return trimmed.to_string();
+    }
+    let without_trailing = trimmed.strip_suffix('/').unwrap_or(trimmed);
+    format!("{}/chat/completions", without_trailing)
+}
+
+pub(crate) fn http_client_builder(base_url: &str, timeout_secs: u64) -> reqwest::ClientBuilder {
+    http_client_builder_with_proxy(
+        base_url,
+        timeout_secs,
+        &ProviderProxyConfig::provider_default(""),
+    )
+}
+
+pub(crate) fn http_client_builder_with_proxy(
+    base_url: &str,
+    timeout_secs: u64,
+    proxy_config: &ProviderProxyConfig,
+) -> reqwest::ClientBuilder {
+    let builder = reqwest::Client::builder().timeout(Duration::from_secs(timeout_secs));
+    match proxy_config.effective_mode(base_url) {
+        EffectiveProxyMode::Direct => builder.no_proxy(),
+        EffectiveProxyMode::System => builder,
+        EffectiveProxyMode::Custom => {
+            let Some(proxy_url) = proxy_config.custom_proxy_url() else {
+                return builder;
+            };
+            match reqwest::Proxy::all(proxy_url) {
+                Ok(proxy) => builder.no_proxy().proxy(proxy),
+                Err(error) => {
+                    log::warn!("[network] invalid custom proxy URL ignored: {error}");
+                    builder
+                }
+            }
+        }
+    }
+}
+
+/// 发请求 + 网络抖动 retry：**只**对 `is_connect()` / `is_request()` 这两类「服务端
+/// 必然没收到」的失败重试一次。`is_timeout()` 故意**不**重试——超时时服务端可能已经
+/// 在处理请求并扣计费（LLM completion 是非幂等动作），重试会导致重复 billing + 重复
+/// completion。HTTP 4xx/5xx 不在这里触发——那些走 response.status() 分支单独处理。
+///
+/// 调用前提：传入的 RequestBuilder body 必须是内存型（json / form），不能是 stream
+/// reader——retry 用 `try_clone()` 复制 RequestBuilder，stream body 不支持。
+///
+/// 对流式 SSE 路径 retry 是安全的：connect / request 类失败发生在 TCP 握手 / HTTP
+/// 请求写出阶段，response 还没回 → on_delta 必然未被调用 → 不会有「已流式输出的字
+/// 被重复」的问题。
+async fn send_with_transient_retry(
+    request: reqwest::RequestBuilder,
+) -> Result<reqwest::Response, LLMError> {
+    const RETRY_DELAY_MS: u64 = 500;
+    let initial = request
+        .try_clone()
+        .expect("memory-backed body (json/form) must be clonable for retry");
+    match initial.send().await {
+        Ok(r) => Ok(r),
+        Err(e) if e.is_connect() || e.is_request() => {
+            log::warn!(
+                "[llm] send transient failure, retry in {}ms: {}",
+                RETRY_DELAY_MS,
+                e
+            );
+            tokio::time::sleep(Duration::from_millis(RETRY_DELAY_MS)).await;
+            match request.send().await {
+                Ok(r) => Ok(r),
+                Err(e2) => {
+                    if e2.is_timeout() {
+                        Err(LLMError::Timeout)
+                    } else {
+                        Err(LLMError::Network(e2.to_string()))
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            if e.is_timeout() {
+                Err(LLMError::Timeout)
+            } else {
+                Err(LLMError::Network(e.to_string()))
+            }
+        }
+    }
+}
+
+fn should_bypass_proxy_for_base_url(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+fn codex_responses_url(base_url: &str) -> String {
+    let trimmed = base_url.trim();
+    if trimmed.ends_with("/codex/responses") {
+        return trimmed.to_string();
+    }
+    let without_trailing = trimmed.strip_suffix('/').unwrap_or(trimmed);
+    format!("{}/codex/responses", without_trailing)
+}
+
+fn default_codex_auth_path() -> PathBuf {
+    if let Ok(path) = std::env::var("LISTENER_TYPE_CODEX_AUTH_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    default_codex_home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codex")
+        .join("auth.json")
+}
+
+fn default_codex_home_dir() -> Option<PathBuf> {
+    if let Some(home) = non_empty_env_path("HOME") {
+        return Some(home);
+    }
+    if let Some(userprofile) = non_empty_env_path("USERPROFILE") {
+        return Some(userprofile);
+    }
+    let drive = std::env::var_os("HOMEDRIVE")?;
+    let path = std::env::var_os("HOMEPATH")?;
+    let drive = drive.to_string_lossy();
+    let path = path.to_string_lossy();
+    if drive.trim().is_empty() || path.trim().is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(format!("{drive}{path}")))
+}
+
+fn non_empty_env_path(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key)
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
+fn normalize_codex_model(model: &str) -> String {
+    let trimmed = model.trim();
+    let normalized = trimmed
+        .rsplit_once('/')
+        .map(|(_, tail)| tail.trim())
+        .unwrap_or(trimmed);
+    if normalized.is_empty() {
+        CODEX_DEFAULT_MODEL.to_string()
+    } else {
+        normalized.to_string()
+    }
+}
+
+fn codex_input_from_chat_messages(messages: &[Value]) -> Vec<Value> {
+    messages
+        .iter()
+        .filter_map(|message| {
+            let role = message.get("role").and_then(|v| v.as_str())?;
+            let text = message.get("content").and_then(|v| v.as_str())?;
+            let (codex_role, content_type) = match role {
+                "system" => ("developer", "input_text"),
+                "assistant" => ("assistant", "output_text"),
+                _ => ("user", "input_text"),
+            };
+            Some(json!({
+                "type": "message",
+                "role": codex_role,
+                "content": [{ "type": content_type, "text": text }],
+            }))
+        })
+        .collect()
+}
+
+fn handle_codex_sse_event<F>(
+    event: &str,
+    full_text: &mut String,
+    final_text: &mut String,
+    on_delta: &F,
+) where
+    F: Fn(&str) + Send + Sync,
+{
+    for line in event.lines() {
+        let Some(payload) = line
+            .strip_prefix("data: ")
+            .or_else(|| line.strip_prefix("data:"))
+        else {
+            continue;
+        };
+        let payload = payload.trim();
+        if payload.is_empty() || payload == "[DONE]" {
+            continue;
+        }
+        let v: Value = match serde_json::from_str(payload) {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!(
+                    "[llm] codex SSE parse skip: {e}; payload preview: {}",
+                    safe_str_slice(payload, 80)
+                );
+                continue;
+            }
+        };
+        if let Some(delta) = extract_codex_text_delta(&v) {
+            if !delta.is_empty() {
+                full_text.push_str(delta);
+                on_delta(delta);
+            }
+        }
+        let event_type = v.get("type").and_then(|t| t.as_str()).unwrap_or_default();
+        if matches!(event_type, "response.done" | "response.completed") {
+            if let Some(text) = extract_codex_response_text(v.get("response").unwrap_or(&v)) {
+                *final_text = text;
+            }
+        }
+    }
+}
+
+fn extract_codex_text_delta(event: &Value) -> Option<&str> {
+    let event_type = event
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if !(event_type.ends_with("output_text.delta") || event_type.ends_with("text.delta")) {
+        return None;
+    }
+    event
+        .get("delta")
+        .and_then(|v| v.as_str())
+        .or_else(|| event.get("text").and_then(|v| v.as_str()))
+}
+
+fn extract_codex_response_text(response: &Value) -> Option<String> {
+    if let Some(text) = response.get("output_text").and_then(|v| v.as_str()) {
+        return Some(clean_polish_output(text));
+    }
+
+    let mut pieces = Vec::new();
+    let output = response.get("output").and_then(|v| v.as_array())?;
+    for item in output {
+        if item.get("type").and_then(|v| v.as_str()) != Some("message") {
+            continue;
+        }
+        let Some(content) = item.get("content").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for part in content {
+            let text = part
+                .get("text")
+                .and_then(|v| v.as_str())
+                .or_else(|| part.get("content").and_then(|v| v.as_str()));
+            if let Some(text) = text {
+                pieces.push(text);
+            }
+        }
+    }
+    if pieces.is_empty() {
+        None
+    } else {
+        Some(clean_polish_output(&pieces.join("")))
+    }
+}
+
+fn decode_jwt_payload(token: &str) -> Result<Value, LLMError> {
+    let payload = token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| LLMError::CodexAuth("Codex access token 不是 JWT 格式".into()))?;
+    let bytes = decode_base64_url(payload)
+        .map_err(|e| LLMError::CodexAuth(format!("Codex access token payload 解码失败: {e}")))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|e| LLMError::CodexAuth(format!("Codex access token payload 不是合法 JSON: {e}")))
+}
+
+fn decode_base64_url(input: &str) -> Result<Vec<u8>, String> {
+    let mut buffer = 0u32;
+    let mut bits = 0u8;
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    for byte in input.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'-' => 62,
+            b'_' => 63,
+            b'=' => continue,
+            _ => return Err(format!("invalid base64url byte 0x{byte:02x}")),
+        };
+        buffer = (buffer << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buffer >> bits) & 0xff) as u8);
+        }
+    }
+    Ok(out)
+}
+
+fn unix_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn apply_openai_compatible_thinking_control(body: &mut Value, config: &OpenAICompatibleConfig) {
+    match openai_compatible_thinking_control(&config.provider_id) {
+        Some(ThinkingControl::ReasoningEffort) => {
+            // OpenAI Chat Completions 的 reasoning_effort 是渠道级请求字段。
+            // 关闭时统一压到 low，避免引入模型白名单；不支持该字段的模型由 provider 自行处理。
+            body["reasoning_effort"] = json!(if config.thinking_enabled {
+                "medium"
+            } else {
+                "low"
+            });
+        }
+        Some(ThinkingControl::EnableThinking) => {
+            body["enable_thinking"] = json!(config.thinking_enabled);
+        }
+        Some(ThinkingControl::OpenRouterReasoning) => {
+            body["reasoning"] = json!({
+                "effort": if config.thinking_enabled { "medium" } else { "none" },
+                // Listener Type 的 QA/润色输出只展示最终答案；推理内容即使生成，也不应进 UI。
+                "exclude": true,
+            });
+        }
+        Some(ThinkingControl::DeepSeekThinking) => {
+            body["thinking"] = json!({
+                "type": if config.thinking_enabled { "enabled" } else { "disabled" },
+            });
+        }
+        None => {}
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThinkingControl {
+    ReasoningEffort,
+    EnableThinking,
+    OpenRouterReasoning,
+    DeepSeekThinking,
+}
+
+fn openai_compatible_thinking_control(provider_id: &str) -> Option<ThinkingControl> {
+    match provider_id.trim() {
+        "deepseek" => Some(ThinkingControl::DeepSeekThinking),
+        "openrouterFree" => Some(ThinkingControl::OpenRouterReasoning),
+        "alibabaCoding" => Some(ThinkingControl::EnableThinking),
+        "openai" | "codingPlanX" => Some(ThinkingControl::ReasoningEffort),
+        _ => None,
+    }
+}
+
+/// 把 working_languages + front_app 拼成 system prompt 头部前提：
+///     # 上下文
+///     用户的工作语言：…
+///     当前前台应用：…（请按这个 app 的常见沟通风格调整语气）
+///
+/// 两个字段都空时返回 None，调用方就不拼前缀。详见 issue #4 / #116。
+fn context_premise(
+    working_languages: &[String],
+    chinese_script_preference: ChineseScriptPreference,
+    output_language_preference: OutputLanguagePreference,
+    front_app: Option<&str>,
+) -> Option<String> {
+    let langs: Vec<&str> = working_languages
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let app = front_app.map(str::trim).filter(|s| !s.is_empty());
+
+    let script_line = match chinese_script_preference {
+        ChineseScriptPreference::Simplified => Some(
+            "中文输出偏好：简体中文。若最终输出包含中文，请统一使用简体字形（不要混用繁体）。"
+                .to_string(),
+        ),
+        ChineseScriptPreference::Traditional => Some(
+            "中文输出偏好：繁体中文。若最终输出包含中文，请统一使用繁体字形（不要混用简体）。"
+                .to_string(),
+        ),
+        ChineseScriptPreference::Auto => None,
+    };
+
+    let output_language_line = match output_language_preference {
+        OutputLanguagePreference::ZhCn => {
+            Some("最终输出语言偏好：简体中文。若回答可用中文表达，请优先使用简体中文。".to_string())
+        }
+        OutputLanguagePreference::ZhTw => {
+            Some("最終輸出語言偏好：繁體中文。若回答可用中文表達，請優先使用繁體中文。".to_string())
+        }
+        OutputLanguagePreference::En => Some(
+            "Output language preference: English. Prefer English when producing the final answer."
+                .to_string(),
+        ),
+        OutputLanguagePreference::Ja => Some(
+            "出力言語の優先設定：日本語。最終回答は可能な限り日本語で出力してください。"
+                .to_string(),
+        ),
+        OutputLanguagePreference::Ko => {
+            Some("출력 언어 선호: 한국어. 최종 답변은 가능하면 한국어로 작성해 주세요.".to_string())
+        }
+        OutputLanguagePreference::Auto => None,
+    };
+
+    if langs.is_empty() && app.is_none() && script_line.is_none() && output_language_line.is_none()
+    {
+        return None;
+    }
+
+    let mut lines = vec!["# 上下文".to_string()];
+    if !langs.is_empty() {
+        lines.push(format!(
+            "用户的工作语言：{}。处理任何文本时请把这一前提带进考虑（识别专名、判定语气、决定写法）。",
+            langs.join("、")
+        ));
+    }
+    if let Some(name) = app {
+        lines.push(format!(
+            "当前前台应用：{name}。请按这个应用的常见沟通风格调整语气——例如邮件类 app 偏正式、聊天类 app 偏口语、IDE / 文档类 app 偏技术或结构化。\u{4E0D}主动加入与用户原意无关的客套话。"
+        ));
+    }
+    if let Some(line) = script_line {
+        lines.push(line);
+    }
+    if let Some(line) = output_language_line {
+        lines.push(line);
+    }
+    Some(lines.join("\n"))
+}
+
+/// 把 polish 输入参数装配成 `(system_prompt, user_prompt)` 二元组。
+///
+/// 抽出来是为了让 OpenAI 兼容客户端 (本文件) 和谷歌原生 Gemini 客户端
+/// (`llm_gemini.rs`) 共享同一套 prompt 装配规则——不再担心两路 LLM
+/// 在 `system_prompt` 拼接顺序、context_premise 注入时机、
+/// polish_context_instruction 追加条件上慢慢漂移。
+pub(crate) fn compose_polish_prompts(
+    raw_text: &str,
+    _mode: PolishMode,
+    hotwords: &[String],
+    style_system_prompt: &str,
+    working_languages: &[String],
+    chinese_script_preference: ChineseScriptPreference,
+    output_language_preference: OutputLanguagePreference,
+    front_app: Option<&str>,
+    has_prior_turns: bool,
+) -> (String, String) {
+    let mut system_prompt = compose_system_prompt(style_system_prompt, hotwords);
+    if let Some(premise) = context_premise(
+        working_languages,
+        chinese_script_preference,
+        output_language_preference,
+        front_app,
+    ) {
+        system_prompt = format!("{}\n\n{}", premise, system_prompt);
+    }
+    // 多轮上下文模式：把"上一轮的指令是什么、不要复读上一轮答案"明确写进
+    // system prompt，配合 chat structure 让 LLM 自然不重复历史输出。
+    if has_prior_turns {
+        system_prompt = format!(
+            "{}\n\n{}",
+            system_prompt,
+            prompts::polish_context_instruction()
+        );
+    }
+    let user_prompt = prompts::user_prompt(raw_text);
+    (system_prompt, user_prompt)
+}
+
+/// 翻译路径的 `(system_prompt, user_prompt)` 装配——和 polish 一样供两路 LLM 客户端共用。
+/// 翻译模式以 `target_language` 为唯一输出语言约束，OutputLanguagePreference 在这里被
+/// 强制设为 Auto 以避免 UI 偏好（如 ja）与 target_language（如 en）冲突。
+pub(crate) fn assemble_polish_system_prompt(
+    style_system_prompt: &str,
+    hotwords: &[String],
+    working_languages: &[String],
+    chinese_script_preference: ChineseScriptPreference,
+    output_language_preference: OutputLanguagePreference,
+    front_app: Option<&str>,
+    has_prior_turns: bool,
+) -> PolishSystemPromptAssembly {
+    let (effective_system_prompt, _) = compose_polish_prompts(
+        "",
+        PolishMode::Light,
+        hotwords,
+        style_system_prompt,
+        working_languages,
+        chinese_script_preference,
+        output_language_preference,
+        front_app,
+        has_prior_turns,
+    );
+    let context_premise = context_premise(
+        working_languages,
+        chinese_script_preference,
+        output_language_preference,
+        front_app,
+    )
+    .unwrap_or_default();
+    let hotword_block = compose_hotword_block_preview(hotwords);
+    let history_instruction = if has_prior_turns {
+        prompts::polish_context_instruction().to_string()
+    } else {
+        String::new()
+    };
+    let includes_hotword_block = !hotword_block.is_empty();
+    let includes_context_premise = !context_premise.is_empty();
+    PolishSystemPromptAssembly {
+        context_premise,
+        hotword_block,
+        history_instruction,
+        effective_system_prompt,
+        includes_context_premise,
+        includes_hotword_block,
+        includes_history_instruction: has_prior_turns,
+    }
+}
+
+pub(crate) fn compose_translate_prompts(
+    raw_text: &str,
+    target_language: &str,
+    working_languages: &[String],
+    chinese_script_preference: ChineseScriptPreference,
+    front_app: Option<&str>,
+) -> (String, String) {
+    let mut system_prompt = prompts::translate_system_prompt(target_language);
+    if let Some(premise) = context_premise(
+        working_languages,
+        chinese_script_preference,
+        OutputLanguagePreference::Auto,
+        front_app,
+    ) {
+        system_prompt = format!("{}\n\n{}", premise, system_prompt);
+    }
+    let user_prompt = prompts::user_prompt(raw_text);
+    (system_prompt, user_prompt)
+}
+
+/// QA 划词问答的 system_prompt 装配。两路 LLM 客户端共用。
+pub(crate) fn compose_qa_system_prompt(
+    working_languages: &[String],
+    chinese_script_preference: ChineseScriptPreference,
+    output_language_preference: OutputLanguagePreference,
+    front_app: Option<&str>,
+) -> String {
+    let mut system_prompt = prompts::qa_system_prompt();
+    if let Some(premise) = context_premise(
+        working_languages,
+        chinese_script_preference,
+        output_language_preference,
+        front_app,
+    ) {
+        system_prompt = format!("{}\n\n{}", premise, system_prompt);
+    }
+    system_prompt
+}
+
+/// 构建「热词 + 错别字纠错」模块文本：agent-style 措辞，把模型当成接到一段 ASR 转写
+/// 的写作助手，明确告诉它「输入可能有错别字，按这个列表 + 上下文修正」。
+///
+/// 内置 default prompt 里的 `{{HOTWORDS}}` 占位符被这段文本替换；用户自定义 prompt
+/// 没占位符时 compose_system_prompt 兜底拼到末尾。
+///
+/// 这段文本 100% 对齐 compose_hotword_block_preview，让 Style Pack 设置页的预览跟
+/// 实际发给 LLM 的 prompt 一致。
+fn build_hotword_block(hotwords: &[String]) -> String {
+    let cleaned: Vec<String> = hotwords
+        .iter()
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .collect();
+
+    if cleaned.is_empty() {
+        return "# 热词与纠错（系统内置）\n\
+            你接到的转写来自 ASR，可能含错别字 / 同音误识别 / 形近词。\
+            按上下文自动纠回正确字面：常见模式如「跟目录 / 根木鹿」→「根目录」、\
+            「代码厂」→「代码仓」、「编一编」→「编译」、英文短词同音（如 VIP / ZIP）按上下文判断、\
+            带次版本号产品名（GPT-5.6 不省略成 GPT-5）。\
+            人名 / 品牌名 / 含义会变化的词原样保留，不强行改字。"
+            .to_string();
+    }
+
+    let bullets = cleaned
+        .iter()
+        .map(|h| format!("- {}", h))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "# 热词与纠错（系统内置）\n\
+         你接到的转写来自 ASR，可能含错别字。用户希望以下写法在输出中保持准确；\
+         当转写中出现这些词的同音或形近误识别时，优先按上述写法输出，不做无关词的机械替换：\n\
+         {bullets}\n\
+         \n\
+         上面热词的纠偏指令优先于通用规则 2 的「原样保留」——当转写词是热词的同音 / 形近误识别\
+         （例：转写出「VIP」而热词里有「ZIP」），就按热词写法输出，不要因为它看起来像英文专有名词\
+         或中英混输而保留误识别结果。\n\
+         \n\
+         转写中其它 ASR 错别字按上下文自动纠回正确字面：常见模式如「跟目录 / 根木鹿」→「根目录」、\
+         英文短词同音（如 VIP / ZIP）按上下文判断、带次版本号产品名（GPT-5.6 不省略成 GPT-5）。\
+         人名 / 品牌名 / 含义会变化的词原样保留。",
+        bullets = bullets
+    )
+}
+
+/// 系统提示词组装：先把内置 default prompt 的 `{{HOTWORDS}}` 占位符替换为实际热词块；
+/// 用户自定义 prompt 没占位符时 fallback 行为：
+/// - hotwords 非空 → 末尾追加热词块（兼容历史 prompt 仍能拿到热词）
+/// - hotwords 空 → 不附加任何东西（用户决定自己 prompt 的内容，不强行注入）
+fn compose_system_prompt(style_system_prompt: &str, hotwords: &[String]) -> String {
+    let base = style_system_prompt.trim_end();
+    if base.contains(crate::types::HOTWORDS_PLACEHOLDER) {
+        let block = build_hotword_block(hotwords);
+        return base.replace(crate::types::HOTWORDS_PLACEHOLDER, &block);
+    }
+    let has_hotwords = hotwords.iter().any(|h| !h.trim().is_empty());
+    if !has_hotwords {
+        return base.to_string();
+    }
+    format!("{}\n\n{}", base, build_hotword_block(hotwords))
+}
+
+fn compose_hotword_block_preview(hotwords: &[String]) -> String {
+    // Style Pack 设置页的预览 100% 跟 system prompt 用同一段文本，避免「设置里看到一段、
+    // 实际发给 LLM 是另一段」的不一致。空热词时返回纯错别字纠错指南。
+    build_hotword_block(hotwords)
+}
+
+fn extract_assistant_content(body: &str) -> Result<String, LLMError> {
+    let json: Value = serde_json::from_str(body)
+        .map_err(|e| LLMError::ParseError(format!("not valid JSON: {}", e)))?;
+    let choices = json
+        .get("choices")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| LLMError::ParseError("missing choices array".into()))?;
+    let first = choices
+        .first()
+        .ok_or_else(|| LLMError::ParseError("choices array is empty".into()))?;
+    let content = first
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| LLMError::ParseError("message.content is not a string".into()))?;
+    Ok(clean_polish_output(content))
+}
+
+/// Best-effort cleanup of common LLM "introduction" prefixes and markdown fences.
+///
+/// Matches a small set of known leading phrases (`根据您给的内容...`, `整理如下...`, etc.)
+/// and strips them. We don't have the `regex` crate, so we use prefix checks plus
+/// an iterative trim — if the model stacks two boilerplate sentences we'll still
+/// strip both.
+///
+/// `pub(crate)` because `llm_gemini` 也要在它自己的解析路径上跑同一套清洗，
+/// 否则 polish prompt 已经禁用的"以下是整理后的内容"前缀只在 OpenAI 兼容路径生效。
+pub(crate) fn clean_polish_output(content: &str) -> String {
+    let without_thinking = strip_thinking_blocks(content);
+    let trimmed = without_thinking.trim();
+    let stripped = strip_markdown_fence(trimmed);
+    let mut output = stripped.to_string();
+
+    loop {
+        let before_len = output.len();
+        output = strip_leading_boilerplate(&output).to_string();
+        output = output.trim_start().to_string();
+        if output.len() == before_len {
+            break;
+        }
+    }
+
+    output.trim().to_string()
+}
+
+/// Strip model reasoning blocks so only the final polished text is inserted.
+///
+/// Thinking-capable OpenAI-compatible models commonly return their reasoning in
+/// `<think>...</think>` before the final answer. Match only explicit `think`
+/// tags, with optional attributes and ASCII casing variants, so normal prose is
+/// left untouched.
+fn strip_thinking_blocks(text: &str) -> Cow<'_, str> {
+    let mut cursor = 0;
+    let mut output: Option<String> = None;
+
+    while let Some((open_start, open_end)) = find_think_open(&text[cursor..]) {
+        let open_start = cursor + open_start;
+        let open_end = cursor + open_end;
+        let Some((_, close_end)) = find_think_close(&text[open_end..]) else {
+            break;
+        };
+        let close_end = open_end + close_end;
+
+        output
+            .get_or_insert_with(|| String::with_capacity(text.len()))
+            .push_str(&text[cursor..open_start]);
+        cursor = close_end;
+    }
+
+    match output {
+        Some(mut output) => {
+            output.push_str(&text[cursor..]);
+            Cow::Owned(output)
+        }
+        None => Cow::Borrowed(text),
+    }
+}
+
+fn find_think_open(text: &str) -> Option<(usize, usize)> {
+    let mut cursor = 0;
+    while let Some(offset) = text[cursor..].find('<') {
+        let start = cursor + offset;
+        if let Some(end) = parse_think_open_at(text, start) {
+            return Some((start, end));
+        }
+        cursor = start + '<'.len_utf8();
+    }
+    None
+}
+
+fn find_think_close(text: &str) -> Option<(usize, usize)> {
+    let mut cursor = 0;
+    while let Some(offset) = text[cursor..].find('<') {
+        let start = cursor + offset;
+        if let Some(end) = parse_think_close_at(text, start) {
+            return Some((start, end));
+        }
+        cursor = start + '<'.len_utf8();
+    }
+    None
+}
+
+fn parse_think_open_at(text: &str, start: usize) -> Option<usize> {
+    let tag_start = start + '<'.len_utf8();
+    if text.as_bytes().get(tag_start) == Some(&b'/') {
+        return None;
+    }
+    parse_think_tag_end(text, tag_start, true)
+}
+
+fn parse_think_close_at(text: &str, start: usize) -> Option<usize> {
+    let slash = start + '<'.len_utf8();
+    if text.as_bytes().get(slash) != Some(&b'/') {
+        return None;
+    }
+    parse_think_tag_end(text, slash + '/'.len_utf8(), false)
+}
+
+fn parse_think_tag_end(text: &str, tag_start: usize, allow_attributes: bool) -> Option<usize> {
+    let tag_end = tag_start.checked_add("think".len())?;
+    if tag_end > text.len() || !text[tag_start..tag_end].eq_ignore_ascii_case("think") {
+        return None;
+    }
+
+    let next = text.as_bytes().get(tag_end).copied()?;
+    if next == b'>' {
+        return Some(tag_end + 1);
+    }
+    if !next.is_ascii_whitespace() {
+        return None;
+    }
+
+    if allow_attributes {
+        return text[tag_end..].find('>').map(|offset| tag_end + offset + 1);
+    }
+
+    let suffix = &text[tag_end..];
+    let trimmed = suffix.trim_start_matches(|c: char| c.is_ascii_whitespace());
+    if trimmed.starts_with('>') {
+        Some(text.len() - trimmed.len() + 1)
+    } else {
+        None
+    }
+}
+
+fn strip_markdown_fence(text: &str) -> &str {
+    if !(text.starts_with("```") && text.ends_with("```")) {
+        return text;
+    }
+    let mut lines: Vec<&str> = text.lines().collect();
+    if lines.len() < 2 {
+        return text;
+    }
+    lines.remove(0);
+    lines.pop();
+    // Re-borrow as &str by stitching is impossible without alloc; fallback to
+    // returning the original slice if the cheap path can't strip.
+    // Find the byte offsets of the first newline and the last fence to slice in place.
+    let after_first_line = match text.find('\n') {
+        Some(i) => i + 1,
+        None => return text,
+    };
+    let before_last_fence = match text.rfind("```") {
+        Some(i) => i,
+        None => return text,
+    };
+    if before_last_fence <= after_first_line {
+        return text;
+    }
+    text[after_first_line..before_last_fence].trim_matches(['\n', ' ', '\t', '\r'].as_ref())
+}
+
+/// Known introduction phrases that some models prepend even when prompted not to.
+const LEADING_BOILERPLATE_PREFIXES: &[&str] = &[
+    "根据您给的内容",
+    "根据您提供的内容",
+    "根据你给的内容",
+    "根据你提供的内容",
+    "以下是整理后的内容",
+    "以下是优化后的内容",
+    "以下为整理后的内容",
+    "以下是结构化整理后的内容",
+    "我整理如下",
+    "我已整理如下",
+    "整理如下",
+    "优化如下",
+    "结构化整理如下",
+];
+
+const BOILERPLATE_END_CHARS: &[char] = &['。', '：', ':', '，', ',', '\n'];
+
+fn strip_leading_boilerplate(text: &str) -> &str {
+    for prefix in LEADING_BOILERPLATE_PREFIXES {
+        if let Some(after_prefix) = text.strip_prefix(prefix) {
+            // Trim characters after the prefix up to (and including) the first
+            // sentence-ending punctuation or newline.
+            for (idx, c) in after_prefix.char_indices() {
+                if BOILERPLATE_END_CHARS.contains(&c) {
+                    let cut = prefix.len() + idx + c.len_utf8();
+                    return &text[cut..];
+                }
+            }
+            // No terminator: drop the prefix only.
+            return after_prefix;
+        }
+    }
+    text
+}
+
+pub mod prompts {
+    use crate::types::PolishMode;
+
+    /// 内置风格 prompt 文本放在 `types.rs`，因为 Style Pack 默认值属于 value layer 数据。
+    /// 保留这个 wrapper，让现有 polish 测试与调用点继续使用 `polish::prompts::system_prompt`，
+    /// 同时不重新引入 `types -> polish` 反向依赖。
+    pub fn system_prompt(mode: PolishMode) -> String {
+        crate::types::default_style_system_prompt_for_mode(mode)
+    }
+
+    /// 把原始转写包在 `<raw_transcript>` 信封里，和 system prompt 的\u{201C}文本对象\u{201D}框架呼应。
+    /// 框架词措辞经 #305 调整：\u{4E0D}再说\u{201C}它不是问题、不是任务\u{201D}，\
+    /// \u{907F}\u{514D}\u{8BEF}\u{5BFC} LLM 把已经书面化的输入当作\u{201C}\u{5DF2}\u{6574}\u{7406}\u{597D}\u{201D}\
+    /// 而原样 passthrough。
+    pub fn user_prompt(raw_transcript: &str) -> String {
+        let escaped = raw_transcript.replace("</raw_transcript>", "<\\/raw_transcript>");
+        format!(
+            "下面是本次语音输入的原始转写。\
+             请按 system prompt 中当前 mode 的任务描述进行整理后输出，\
+             整理结果会被原样插入到当前 app 的光标位置。\n\n\
+             <raw_transcript>\n{}\n</raw_transcript>\n\n\
+             只输出整理后的文本正文。",
+            escaped
+        )
+    }
+
+    /// 对话感知 polish 模式下追加到 system prompt 末尾的指令——告诉 LLM 看到的
+    /// 历史 user / assistant turns 是为了**理解上下文**（代词、不完整句子的指代），
+    /// 而**不是**让它把上文复读出来。每次只输出当前 user message 的整理结果。
+    /// 详见 PR-A 的「对话感知润色」需求。
+    pub fn polish_context_instruction() -> &'static str {
+        "# 多轮上下文使用规则\n\
+         上面的对话历史是给你提供前文语境（代词指代、未完整句子等），\u{4EE5}\u{4FBF}\u{6B63}\u{786E}\u{7406}\u{89E3}\u{6700}\u{65B0}\
+         一条用户消息要表达的意思。\n\
+         **不要复读、改写或合并历史中已经整理过的内容**——历史里的 assistant 输出已经被插入到\
+         用户的文档里了，再次出现就是重复。每次只输出**当前最新一条** user message 的整理结果，\
+         不要把上文带进来。"
+    }
+
+    /// 划词语音问答 system prompt — 用户选中一段文字后口头提问，要求基于选区给出简短答案。
+    /// 详见 issue #118。
+    pub fn qa_system_prompt() -> String {
+        "# 任务（基于选区的语音问答）\n\
+         用户选中了一段文字，并对它提了一个语音问题。请基于选中内容回答这个问题。\n\
+         \n\
+         ## 输入约定\n\
+         - 选中文本可能很短（一个词），也可能很长（被截断时尾部有 […truncated…]）。\n\
+         - 提问可能很口语化（\u{201C}这是啥意思\u{201D} / \u{201C}和数据库啥区别\u{201D}），按字面理解。\n\
+         - 选中文本可能为空（用户没选中），那就只回答语音问题，不编造选区。\n\
+         \n\
+         ## 输出约定\n\
+         - 用 Markdown，但不要 H1/H2 大标题。可以用粗体、列表、行内代码。\n\
+         - 控制在 3 段以内，约 200 字以内（除非用户明确要求长篇）。\n\
+         - 用大白话，不要客套话（\u{201C}希望能帮到你\u{201D}等）。\n\
+         - 不要重复用户的提问。\n\
+         - 如果选中文本和提问无关，按提问独立回答，**不编造选区里没有的信息**。"
+            .to_string()
+    }
+
+    /// 翻译模式 system prompt — 用户在「翻译」页选定的目标语言（内置 15 种自然语言原生名）。
+    /// LLM 自己理解（"繁体中文"/"English"/"美式英文"/"日本語" 都行）。
+    /// 此 prompt 之上还有 working_languages_premise 拼出的"# 上下文"前提。
+    pub fn translate_system_prompt(target_language: &str) -> String {
+        format!(
+            "# 任务（翻译输出）\n\
+             把下面收到的一段语音转写翻译成 \u{300C}{lang}\u{300D}。\n\
+             这是用户对着语音输入工具说的话——他正在某个 app 的输入框前，\
+             转译结果会直接被插入到光标位置。\n\
+             \n\
+             # 翻译规则\n\
+             ## 必须保留原文（不要翻译）\n\
+             - 人名、地名、品牌名（OpenAI、Tauri、字节跳动、张三 等）。\n\
+             - 代码标识符、技术术语（useState、async/await、HTTP、Rust crate 名 等）。\n\
+             - URL、邮箱、文件路径、命令行片段。\n\
+             - 说话人**故意**用源语言夹进来的英文/技术词，按原样保留，\u{4E0D}替换为目标语言对应词。\n\
+             \n\
+             ## 主体翻译\n\
+             - 句子骨架、动作、形容、连接词翻译成 \u{300C}{lang}\u{300D}。\n\
+             - **保持原说话语气**：口语就维持口语化（\u{4E0D}强行正式化），书面就维持书面。\n\
+             - **保持原意**：不增不减、不解释、不扩写、不替用户做决策。\
+             如\"我想给老板发个邮件说今天我们要推迟发布\"应翻译成\"I want to email my boss saying we need to delay the release today\"，\
+             \u{800C}\u{4E0D}\u{662F}主动生成邮件正文。\n\
+             - 数字、日期、时间用目标语言地区常见写法（\"5月1日下午两点\" → \"May 1, 2 PM\"；\
+             \"明天上午十点\" → \"tomorrow at 10 AM\"；\"100块\" → \"100 yuan\"）。\n\
+             - 转写已经是目标语言时：去明显口癖（嗯、那个、就是、um、you know）+ 补必要标点，\u{4E0D}做风格改写。\n\
+             \n\
+             ## 边界 case\n\
+             - 转写非常短（一两个字）也照译，\u{4E0D}因为短就硬补内容。\n\
+             - 转写是命令式（\"加个空格 / 删除最后一行\"）时，照原意翻译，\u{4E0D}改成陈述句。\n\
+             - 转写全是 fillers（\"嗯嗯啊那个\"）时，输出空字符串。\n\
+             \n\
+             # 输出\n\
+             只输出翻译后的正文，\u{4E0D}带 \u{300C}翻译：\u{300D}\u{300C}译文：\u{300D}\u{300C}Translation:\u{300D}之类前缀，\
+             \u{4E0D}加引号、\u{4E0D}加 markdown 围栏。",
+            lang = target_language
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex as StdMutex;
+    use std::thread;
+
+    static CODEX_AUTH_FIXTURE_COUNTER: AtomicU64 = AtomicU64::new(0);
+    static ENV_LOCK: StdMutex<()> = StdMutex::new(());
+
+    struct EnvSnapshot {
+        values: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvSnapshot {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self {
+                values: keys
+                    .iter()
+                    .map(|key| (*key, std::env::var_os(key)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            for (key, value) in &self.values {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    fn unique_codex_auth_path(label: &str) -> PathBuf {
+        let id = CODEX_AUTH_FIXTURE_COUNTER.fetch_add(1, Ordering::SeqCst);
+        std::env::temp_dir().join(format!(
+            "listener-type-codex-{label}-{}-{}-{id}.json",
+            std::process::id(),
+            unix_now_secs()
+        ))
+    }
+
+    fn write_codex_auth_fixture(account_id: &str, exp: u64) -> PathBuf {
+        let path = unique_codex_auth_path(&format!("auth-{account_id}"));
+        let token = fixture_access_token(account_id, exp);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"tokens":{{"access_token":"{}","account_id":"{}"}}}}"#,
+                token, account_id
+            ),
+        )
+        .unwrap();
+        path
+    }
+
+    fn fixture_access_token(account_id: &str, exp: u64) -> String {
+        let header = base64_url_no_pad(r#"{"alg":"none"}"#);
+        let payload = base64_url_no_pad(&format!(
+            r#"{{"exp":{},"https://api.openai.com/auth.chatgpt_account_id":"{}"}}"#,
+            exp, account_id
+        ));
+        format!("{}.{}.sig", header, payload)
+    }
+
+    fn fixture_access_token_without_account_claim(exp: u64) -> String {
+        let header = base64_url_no_pad(r#"{"alg":"none"}"#);
+        let payload = base64_url_no_pad(&format!(r#"{{"exp":{}}}"#, exp));
+        format!("{}.{}.sig", header, payload)
+    }
+
+    #[test]
+    fn utf8_sse_decoder_preserves_multibyte_split_across_chunks() {
+        let mut buffer = String::new();
+        let mut pending = Vec::new();
+        let event = "data: {\"choices\":[{\"delta\":{\"content\":\"你好🙂\"}}]}\n\n";
+        let bytes = event.as_bytes();
+        let split = event.find("好").expect("contains CJK char") + 1;
+
+        append_utf8_sse_chunk(&mut buffer, &mut pending, &bytes[..split]).unwrap();
+        assert!(!pending.is_empty());
+        assert!(!buffer.contains('好'));
+
+        append_utf8_sse_chunk(&mut buffer, &mut pending, &bytes[split..]).unwrap();
+        finish_utf8_sse_chunks(&mut buffer, &mut pending).unwrap();
+        assert_eq!(buffer, event);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn utf8_sse_decoder_rejects_invalid_byte() {
+        let mut buffer = String::new();
+        let mut pending = Vec::new();
+        let err = append_utf8_sse_chunk(&mut buffer, &mut pending, b"data: \xff\n\n")
+            .expect_err("invalid byte should fail");
+        assert!(err.to_string().contains("non-utf8 SSE chunk"));
+    }
+
+    #[test]
+    fn utf8_sse_decoder_rejects_unfinished_codepoint_on_finish() {
+        let mut buffer = String::new();
+        let mut pending = Vec::new();
+        append_utf8_sse_chunk(&mut buffer, &mut pending, &[0xE4]).unwrap();
+        let err = finish_utf8_sse_chunks(&mut buffer, &mut pending)
+            .expect_err("unfinished codepoint should fail at EOF");
+        assert!(err.to_string().contains("middle of a UTF-8 codepoint"));
+    }
+
+    #[tokio::test]
+    async fn polish_streaming_handles_multibyte_split_in_http_chunk() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let event = "data: {\"choices\":[{\"delta\":{\"content\":\"你🙂好\"}}]}\n\n";
+        let split = split_inside(event, "🙂");
+        let first = event.as_bytes()[..split].to_vec();
+        let second = event.as_bytes()[split..].to_vec();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_http_request(&mut stream);
+            let request_text = String::from_utf8_lossy(&request);
+            assert!(request_text.starts_with("POST /chat/completions HTTP/1.1"));
+            write_chunked_sse_response(&mut stream, &[&first, &second]);
+        });
+
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "ark",
+            "Ark",
+            format!("http://{}", addr),
+            "",
+            "test-model",
+        ));
+        let deltas = StdMutex::new(String::new());
+        let output = provider
+            .polish_streaming(
+                "原文",
+                PolishMode::Raw,
+                &[],
+                "",
+                &[],
+                ChineseScriptPreference::Auto,
+                OutputLanguagePreference::Auto,
+                None,
+                &[],
+                |delta| deltas.lock().unwrap().push_str(delta),
+                || false,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output, "你🙂好");
+        assert_eq!(*deltas.lock().unwrap(), "你🙂好");
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn qa_streaming_handles_multibyte_split_in_http_chunk() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let event = "data: {\"choices\":[{\"delta\":{\"content\":\"答🙂案\"}}]}\n\n";
+        let split = split_inside(event, "🙂");
+        let first = event.as_bytes()[..split].to_vec();
+        let second = event.as_bytes()[split..].to_vec();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_http_request(&mut stream);
+            let request_text = String::from_utf8_lossy(&request);
+            assert!(request_text.starts_with("POST /chat/completions HTTP/1.1"));
+            write_chunked_sse_response(&mut stream, &[&first, &second]);
+        });
+
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "ark",
+            "Ark",
+            format!("http://{}", addr),
+            "",
+            "test-model",
+        ));
+        let messages = vec![QaChatMessage {
+            role: "user".into(),
+            content: "问题".into(),
+        }];
+        let deltas = StdMutex::new(String::new());
+        let output = provider
+            .answer_chat_streaming(
+                &messages,
+                &[],
+                ChineseScriptPreference::Auto,
+                OutputLanguagePreference::Auto,
+                None,
+                |delta| deltas.lock().unwrap().push_str(delta),
+                || false,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output, "答🙂案");
+        assert_eq!(*deltas.lock().unwrap(), "答🙂案");
+        server.join().unwrap();
+    }
+
+    fn base64_url_no_pad(input: &str) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let bytes = input.as_bytes();
+        let mut out = String::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            let b0 = bytes[i];
+            let b1 = bytes.get(i + 1).copied().unwrap_or(0);
+            let b2 = bytes.get(i + 2).copied().unwrap_or(0);
+            out.push(TABLE[(b0 >> 2) as usize] as char);
+            out.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
+            if i + 1 < bytes.len() {
+                out.push(TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize] as char);
+            }
+            if i + 2 < bytes.len() {
+                out.push(TABLE[(b2 & 0b0011_1111) as usize] as char);
+            }
+            i += 3;
+        }
+        out
+    }
+
+    fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+        let mut buf = [0u8; 8192];
+        let mut request = Vec::new();
+        loop {
+            let n = stream.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            request.extend_from_slice(&buf[..n]);
+            let Some(header_end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+                continue;
+            };
+            let header_text = String::from_utf8_lossy(&request[..header_end + 4]);
+            let content_length = header_text
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("content-length:")
+                        .or_else(|| line.strip_prefix("Content-Length:"))
+                })
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            if request.len() >= header_end + 4 + content_length {
+                break;
+            }
+        }
+        request
+    }
+
+    fn write_chunked_sse_response(stream: &mut std::net::TcpStream, chunks: &[&[u8]]) {
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        for chunk in chunks {
+            write!(stream, "{:X}\r\n", chunk.len()).unwrap();
+            stream.write_all(chunk).unwrap();
+            stream.write_all(b"\r\n").unwrap();
+        }
+        stream.write_all(b"0\r\n\r\n").unwrap();
+    }
+
+    fn split_inside(haystack: &str, needle: &str) -> usize {
+        haystack.find(needle).expect("needle exists") + 1
+    }
+
+    // ──────────────── 对话感知 polish 的 chat 消息构造 ────────────────
+    // 用户的核心顾虑：让 LLM 拿到上下文但**不要把上下文吐出来**。
+    // 这里的不变量保证「不复读」靠两层防御：
+    //   1. role=assistant 标记历史的 polished 输出，LLM 自然把它当成"已说过的"
+    //   2. system prompt 末尾追加 polish_context_instruction 显式禁止复读
+    // 下面 3 个 test 把构造路径锁死，未来回归就能立刻暴露。
+
+    #[test]
+    fn build_polish_history_messages_empty_prior_falls_back_to_two_messages() {
+        // prior_turns 空时只剩 system + user，跟单轮 chat_completion 同构。
+        let msgs = build_polish_history_messages("SYS", &[], "USER_NOW");
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[0]["content"], "SYS");
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[1]["content"], "USER_NOW");
+    }
+
+    #[test]
+    fn build_polish_history_messages_orders_prior_oldest_to_newest_then_current() {
+        // 入参约定 prior_turns 是 newest-first（match HistoryStore::recent_within_minutes
+        // 的返回顺序）。chat 需要 oldest-first 的时间序，build_* 必须 reverse。
+        // 顺序错了 LLM 会看到「未来→过去→当前」错乱时间轴。
+        let prior = vec![
+            ("raw-newest".to_string(), "polish-newest".to_string()),
+            ("raw-mid".to_string(), "polish-mid".to_string()),
+            ("raw-oldest".to_string(), "polish-oldest".to_string()),
+        ];
+        let msgs = build_polish_history_messages("SYS", &prior, "USER_NOW");
+
+        // 1 system + 3 turns × 2 + 1 current = 8 条
+        assert_eq!(
+            msgs.len(),
+            8,
+            "应该是 system + 3×(user/assistant) + 当前 user"
+        );
+
+        // [0] system
+        assert_eq!(msgs[0]["role"], "system");
+        // [1,2] = oldest 那一对
+        assert_eq!(msgs[1]["role"], "user");
+        assert!(
+            msgs[1]["content"].as_str().unwrap().contains("raw-oldest"),
+            "第一条 user 应当是最老的 raw，包装在 user_prompt 里"
+        );
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert_eq!(msgs[2]["content"], "polish-oldest");
+        // [3,4] = mid
+        assert_eq!(msgs[3]["role"], "user");
+        assert!(msgs[3]["content"].as_str().unwrap().contains("raw-mid"));
+        assert_eq!(msgs[4]["role"], "assistant");
+        assert_eq!(msgs[4]["content"], "polish-mid");
+        // [5,6] = newest 那一对
+        assert_eq!(msgs[5]["role"], "user");
+        assert!(msgs[5]["content"].as_str().unwrap().contains("raw-newest"));
+        assert_eq!(msgs[6]["role"], "assistant");
+        assert_eq!(msgs[6]["content"], "polish-newest");
+        // [7] = 当前要润色的 user
+        assert_eq!(msgs[7]["role"], "user");
+        assert_eq!(msgs[7]["content"], "USER_NOW");
+    }
+
+    #[test]
+    fn build_polish_history_messages_keeps_polished_text_at_assistant_role() {
+        // 关键不变量：历史 polish 必须在 assistant role 上，**不**能跟当前 user 混淆。
+        // 一旦把 polish 放进 user role（比如重构时 typo），LLM 会以为这是
+        // 用户新说的话，可能再润色一遍 → 输出复读上文，违反"不复读"目标。
+        let prior = vec![("我说点什么".into(), "我说点什么。".into())];
+        let msgs = build_polish_history_messages("SYS", &prior, "现在说的话");
+
+        // 第二条（idx=2）必须是 assistant + polished_text
+        assert_eq!(
+            msgs[2]["role"], "assistant",
+            "polished_text 必须挂在 assistant role；放到 user 会让 LLM 当成新输入再润色"
+        );
+        assert_eq!(msgs[2]["content"], "我说点什么。");
+
+        // 检查最末条仍然是当前 user prompt，没被混进 assistant
+        let last = msgs.last().expect("non-empty");
+        assert_eq!(last["role"], "user");
+        assert_eq!(last["content"], "现在说的话");
+    }
+
+    #[test]
+    fn polish_context_instruction_explicitly_forbids_repeating_prior_assistant_output() {
+        // 第二层防御：system prompt 必须含明确的「不要复读历史 assistant」指令。
+        // 仅靠 chat structure 不够——一些模型在长上下文里仍可能 echo prior turns。
+        // 文案可以改、但下面这些关键词不能丢。
+        let s = prompts::polish_context_instruction();
+        assert!(s.contains("不要"), "需要中文显式禁止指令");
+        assert!(
+            s.contains("复读") || s.contains("重复") || s.contains("不要把上文带进来"),
+            "需要明确禁止复读语义"
+        );
+        assert!(
+            s.contains("assistant") || s.contains("已经整理"),
+            "需要点名是 assistant role 的历史输出 / 整理后内容"
+        );
+        assert!(
+            s.contains("当前") && s.contains("最新"),
+            "需要明确：只输出当前最新一条"
+        );
+    }
+
+    #[test]
+    fn clean_polish_output_strips_think_tag_block() {
+        let content =
+            "<think>先分析用户意图。\n这里可能很长。</think>\n\n请明天上午十点提醒我开会。";
+
+        assert_eq!(clean_polish_output(content), "请明天上午十点提醒我开会。");
+    }
+
+    #[test]
+    fn clean_polish_output_strips_think_tag_with_attributes_and_case() {
+        let content = r#"<THINK reason="true">hidden</THINK>
+最终文本。"#;
+
+        assert_eq!(clean_polish_output(content), "最终文本。");
+    }
+
+    #[test]
+    fn clean_polish_output_strips_multiple_think_blocks() {
+        let content = "<think>one</think>第一句。<think>two</think>第二句。";
+
+        assert_eq!(clean_polish_output(content), "第一句。第二句。");
+    }
+
+    #[test]
+    fn strip_thinking_blocks_ignores_non_think_and_unclosed_tags() {
+        assert!(matches!(
+            strip_thinking_blocks("普通文本"),
+            Cow::Borrowed(_)
+        ));
+        assert_eq!(
+            strip_thinking_blocks("<thinking>保留</thinking>正文"),
+            "<thinking>保留</thinking>正文"
+        );
+        assert_eq!(
+            strip_thinking_blocks("<think>未闭合正文"),
+            "<think>未闭合正文"
+        );
+    }
+
+    #[test]
+    fn openai_chat_body_adds_reasoning_effort_for_openai_channel() {
+        let provider = OpenAICompatibleLLMProvider::new(
+            OpenAICompatibleConfig::new(
+                "openai",
+                "OpenAI",
+                "https://api.openai.com/v1",
+                "k",
+                "any-model",
+            )
+            .with_thinking_enabled(true),
+        );
+
+        let body = provider.chat_body(false, vec![json!({ "role": "user", "content": "hi" })]);
+
+        assert_eq!(body["reasoning_effort"], "medium");
+    }
+
+    #[test]
+    fn openai_chat_body_lowers_reasoning_when_disabled_for_channel() {
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "codingPlanX",
+            "Coding Plan X",
+            "https://api.codingplanx.ai/v1",
+            "k",
+            "any-model",
+        ));
+
+        let body = provider.chat_body(false, vec![json!({ "role": "user", "content": "hi" })]);
+
+        assert_eq!(body["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn openai_chat_body_adds_enable_thinking_for_alibaba_channel() {
+        let provider = OpenAICompatibleLLMProvider::new(
+            OpenAICompatibleConfig::new(
+                "alibabaCoding",
+                "Alibaba Coding",
+                "https://coding-intl.dashscope.aliyuncs.com/v1",
+                "k",
+                "any-model",
+            )
+            .with_thinking_enabled(true),
+        );
+
+        let body = provider.chat_body(false, vec![json!({ "role": "user", "content": "hi" })]);
+
+        assert_eq!(body["enable_thinking"], true);
+    }
+
+    #[test]
+    fn openai_chat_body_adds_openrouter_reasoning_control() {
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "openrouterFree",
+            "OpenRouter",
+            "https://openrouter.ai/api/v1",
+            "k",
+            "openai/gpt-5-mini",
+        ));
+
+        let body = provider.chat_body(true, vec![json!({ "role": "user", "content": "hi" })]);
+
+        assert_eq!(body["reasoning"]["effort"], "none");
+        assert_eq!(body["reasoning"]["exclude"], true);
+    }
+
+    #[test]
+    fn openai_chat_body_adds_openrouter_reasoning_by_channel_not_model() {
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "openrouterFree",
+            "OpenRouter",
+            "https://openrouter.ai/api/v1",
+            "k",
+            "qwen/qwen3-coder:free",
+        ));
+
+        let body = provider.chat_body(true, vec![json!({ "role": "user", "content": "hi" })]);
+
+        assert_eq!(body["reasoning"]["effort"], "none");
+        assert_eq!(body["reasoning"]["exclude"], true);
+    }
+
+    #[test]
+    fn openai_chat_body_adds_deepseek_thinking_toggle_by_channel() {
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "deepseek",
+            "DeepSeek",
+            "https://api.deepseek.com/v1",
+            "k",
+            "any-model",
+        ));
+
+        let body = provider.chat_body(false, vec![json!({ "role": "user", "content": "hi" })]);
+
+        assert_eq!(body["thinking"]["type"], "disabled");
+    }
+
+    #[test]
+    fn provider_default_proxy_policy_splits_domestic_and_overseas_vendors() {
+        for provider in [
+            "ark",
+            "deepseek",
+            "siliconflow",
+            "mimo",
+            "alibabaCoding",
+            "codingPlanX",
+            "volcengine",
+            "bailian",
+            "zhipu",
+        ] {
+            let config = ProviderProxyConfig::provider_default(provider);
+            assert_eq!(
+                config.effective_mode("https://example.com/v1"),
+                EffectiveProxyMode::Direct,
+                "{provider} should default to direct"
+            );
+        }
+
+        for provider in [
+            "openai",
+            "openrouterFree",
+            "gemini",
+            CODEX_OAUTH_PROVIDER_ID,
+            "cometapi",
+            "custom",
+            "unknown",
+        ] {
+            let config = ProviderProxyConfig::provider_default(provider);
+            assert_eq!(
+                config.effective_mode("https://example.com/v1"),
+                EffectiveProxyMode::System,
+                "{provider} should default to system proxy"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_proxy_policy_overrides_provider_default_but_not_loopback() {
+        let deepseek_system =
+            ProviderProxyConfig::with_mode("deepseek", ProviderProxyMode::System);
+        assert_eq!(
+            deepseek_system.effective_mode("https://api.deepseek.com/v1"),
+            EffectiveProxyMode::System
+        );
+
+        let openai_direct = ProviderProxyConfig::with_mode("openai", ProviderProxyMode::Direct);
+        assert_eq!(
+            openai_direct.effective_mode("https://api.openai.com/v1"),
+            EffectiveProxyMode::Direct
+        );
+
+        let openai_system = ProviderProxyConfig::with_mode("openai", ProviderProxyMode::System);
+        assert_eq!(
+            openai_system.effective_mode("http://127.0.0.1:11434/v1"),
+            EffectiveProxyMode::Direct
+        );
+    }
+
+    #[test]
+    fn custom_proxy_policy_validates_http_proxy_url() {
+        let config = ProviderProxyConfig::from_stored(
+            "openai",
+            Some(PROXY_MODE_CUSTOM),
+            Some("http://127.0.0.1:7890"),
+        )
+        .unwrap();
+        assert_eq!(
+            config.effective_mode("https://api.openai.com/v1"),
+            EffectiveProxyMode::Custom
+        );
+
+        assert_eq!(
+            ProviderProxyConfig::from_stored("openai", Some(PROXY_MODE_CUSTOM), Some(""))
+                .unwrap_err(),
+            "proxyUrlMissing"
+        );
+        assert_eq!(
+            ProviderProxyConfig::from_stored(
+                "openai",
+                Some(PROXY_MODE_CUSTOM),
+                Some("socks5://127.0.0.1:1080"),
+            )
+            .unwrap_err(),
+            "proxyUrlInvalid"
+        );
+    }
+
+    #[test]
+    fn openai_chat_body_omits_thinking_control_for_unknown_provider() {
+        let provider = OpenAICompatibleLLMProvider::new(
+            OpenAICompatibleConfig::new(
+                "custom",
+                "Custom",
+                "https://example.test/v1",
+                "k",
+                "custom-model",
+            )
+            .with_thinking_enabled(true),
+        );
+
+        let body = provider.chat_body(false, vec![json!({ "role": "user", "content": "hi" })]);
+
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("enable_thinking").is_none());
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn structured_prompt_anchors_on_high_density_examples_and_term_protection() {
+        let prompt = prompts::system_prompt(PolishMode::Structured);
+
+        // v1.3.0 设计哲学回归：简洁规则 + 高密度演示性示例。
+        // 任务首段 + 双层格式 + 事项数规则三件事必须靠前讲清楚。
+        assert!(prompt.contains("# 任务（清晰结构）"));
+        assert!(prompt.contains("# 双层格式"));
+        assert!(prompt.contains("第一层（主题）"));
+        assert!(prompt.contains("第二层（子项）"));
+        assert!(prompt.contains("# 事项数 → 输出形态"));
+
+        // 防回归：模型名、字段名、布尔值和版本号必须被显式保护。
+        assert!(prompt.contains("Claude"));
+        assert!(prompt.contains("Gemini"));
+        assert!(prompt.contains("Cappuccino"));
+        assert!(prompt.contains("Coder"));
+        assert!(prompt.contains("LongCat"));
+        assert!(prompt.contains("Secret Key"));
+        assert!(prompt.contains("true / false / null"));
+        assert!(prompt.contains("不要把 GPT 5.5 写成 GPT 5"));
+
+        // 4 个核心示例的锚点：超长 GitHub 请求、已编号工作日报、散乱长口述、AI 日报。
+        assert!(prompt.contains("帮忙给 GitHub 提个请求，主要包含以下内容："));
+        assert!(prompt.contains("代码与功能优化"));
+        assert!(prompt.contains("今天的工作小结如下："));
+        assert!(prompt.contains("Gemini 3.2 版本更名为 Gemini 3.5"));
+        assert!(prompt.contains("remote control 的参数值更改为 true"));
+    }
+
+    #[test]
+    fn structured_prompt_keeps_regrouping_and_no_loss_guards() {
+        let prompt = prompts::system_prompt(PolishMode::Structured);
+
+        // v1.3.0 回归的关键规则：已编号 ≠ 不用改、≥3 必须重组、≤2 不硬塞层级。
+        assert!(
+            prompt.contains("照抄原结构 = 失败"),
+            "Structured prompt 必须把照抄原结构判为失败"
+        );
+        assert!(
+            prompt.contains("不硬塞层级"),
+            "Structured prompt 必须避免短输入过度结构化"
+        );
+        assert!(
+            prompt.contains("不丢失任何一件事"),
+            "Structured prompt 必须明确防止事项丢失"
+        );
+        assert!(
+            prompt.contains("不补充用户没说过的实现方案"),
+            "Structured prompt 必须禁止替用户编造实现方案"
+        );
+        assert!(
+            prompt.contains("即使原文已经写成"),
+            "Structured prompt 必须显式说明已编号的输入也要重新归类"
+        );
+    }
+
+    #[test]
+    fn user_prompt_no_longer_says_input_is_not_a_task() {
+        // 回归 #305：旧 framing "它不是问题，也不是任务" 会让 LLM 把
+        // 已书面化的输入误判为"已经整理好"。新 framing 让位给 system
+        // prompt 的 mode 描述。
+        let user = prompts::user_prompt("发布前要做几件事。");
+        assert!(
+            !user.contains("\u{4E0D}是问题"),
+            "user_prompt 必须去掉\"它不是问题\"的强 framing"
+        );
+        assert!(
+            !user.contains("\u{4E0D}是任务"),
+            "user_prompt 必须去掉\"它不是任务\"的强 framing"
+        );
+        assert!(
+            user.contains("system prompt"),
+            "user_prompt 应当指向 system prompt 的 mode 描述"
+        );
+        assert!(user.contains("<raw_transcript>"));
+    }
+
+    #[test]
+    fn compose_system_prompt_prefers_correct_spelling_for_hotwords() {
+        let prompt = compose_system_prompt(
+            &prompts::system_prompt(PolishMode::Light),
+            &["GitHub".into(), "Listener Type".into()],
+        );
+
+        assert!(prompt.contains("用户希望以下写法在输出中保持准确"));
+        assert!(prompt.contains("同音或形近误识别时，优先按上述写法输出"));
+        assert!(prompt.contains("- GitHub"));
+        assert!(prompt.contains("- Listener Type"));
+    }
+
+    #[test]
+    fn hotword_preview_uses_correct_misrecognition_wording() {
+        let preview = compose_hotword_block_preview(&["Listener Type".into()]);
+
+        assert!(preview.contains("同音或形近误识别时，优先按上述写法输出"));
+        assert!(!preview.contains("近形词识别"));
+    }
+
+    #[test]
+    fn compose_system_prompt_uses_user_style_system_prompt_as_base() {
+        let prompt = compose_system_prompt("像正式邮件，但结尾不要客套话", &[]);
+
+        assert_eq!(prompt, "像正式邮件，但结尾不要客套话");
+    }
+
+    #[test]
+    fn common_rules_include_auto_correction_and_natural_organization() {
+        // 所有 mode 都要带上"自动纠错"（规则 5）和"按整体意图组织成自然书面表达"
+        // 的扩展（规则 3）。任一缺失说明 COMMON_RULES 被回退掉了。
+        for mode in [
+            PolishMode::Raw,
+            PolishMode::Light,
+            PolishMode::Structured,
+            PolishMode::Formal,
+        ] {
+            let prompt = prompts::system_prompt(mode);
+            assert!(
+                prompt.contains("5) 自动纠错"),
+                "{mode:?} prompt 缺少自动纠错规则"
+            );
+            assert!(
+                prompt.contains("根目录"),
+                "{mode:?} prompt 缺少根目录纠错示例"
+            );
+            assert!(
+                prompt.contains("按用户的整体意图把零碎口语组织成协调、自然的书面表达"),
+                "{mode:?} prompt 缺少自然组织扩展"
+            );
+        }
+    }
+
+    #[test]
+    fn codex_oauth_reads_codex_app_auth_file_without_refresh() {
+        let exp = unix_now_secs() + 3600;
+        let auth_path = write_codex_auth_fixture("acct-listener-type", exp);
+
+        let creds = CodexOAuthCredentials::load_from_path(&auth_path).unwrap();
+
+        assert_eq!(
+            creds.access_token,
+            fixture_access_token("acct-listener-type", exp)
+        );
+        assert_eq!(creds.account_id, "acct-listener-type");
+        assert!(creds.expires_at_unix_secs > unix_now_secs());
+
+        let _ = std::fs::remove_file(auth_path);
+    }
+
+    #[test]
+    fn codex_oauth_accepts_real_auth_file_without_account_claim() {
+        let path = unique_codex_auth_path("auth-no-claim");
+        let exp = unix_now_secs() + 3600;
+        let token = fixture_access_token_without_account_claim(exp);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"tokens":{{"access_token":"{}","account_id":"acct-listener-type"}}}}"#,
+                token
+            ),
+        )
+        .unwrap();
+
+        let creds = CodexOAuthCredentials::load_from_path(&path).unwrap();
+
+        assert_eq!(creds.account_id, "acct-listener-type");
+        assert_eq!(creds.expires_at_unix_secs, exp);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn codex_oauth_rejects_mismatched_account_claim() {
+        let path = unique_codex_auth_path("auth-mismatch");
+        let token = fixture_access_token("acct-a", unix_now_secs() + 3600);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"tokens":{{"access_token":"{}","account_id":"acct-b"}}}}"#,
+                token
+            ),
+        )
+        .unwrap();
+
+        let err = CodexOAuthCredentials::load_from_path(&path).unwrap_err();
+
+        assert!(matches!(err, LLMError::CodexAuth(_)));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn default_codex_auth_path_falls_back_to_userprofile_when_home_missing() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _env = EnvSnapshot::capture(&[
+            "LISTENER_TYPE_CODEX_AUTH_PATH",
+            "HOME",
+            "USERPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+        ]);
+        let userprofile = std::env::temp_dir().join("listener-type-codex-userprofile");
+        std::env::remove_var("LISTENER_TYPE_CODEX_AUTH_PATH");
+        std::env::remove_var("HOME");
+        std::env::set_var("USERPROFILE", &userprofile);
+        std::env::remove_var("HOMEDRIVE");
+        std::env::remove_var("HOMEPATH");
+
+        assert_eq!(
+            default_codex_auth_path(),
+            userprofile.join(".codex").join("auth.json")
+        );
+    }
+
+    #[test]
+    fn codex_oauth_config_lowers_reasoning_when_thinking_disabled() {
+        let config = CodexOAuthConfig::new("gpt-5.5").with_thinking_enabled(false);
+
+        assert_eq!(config.reasoning_effort.as_deref(), Some("low"));
+    }
+
+    #[tokio::test]
+    async fn codex_oauth_provider_streams_text_from_codex_responses() {
+        let auth_path = write_codex_auth_fixture("acct-listener-type", unix_now_secs() + 3600);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_http_request(&mut stream);
+            let request_text = String::from_utf8_lossy(&request);
+            let request_text_lower = request_text.to_ascii_lowercase();
+            assert!(request_text.starts_with("POST /codex/responses HTTP/1.1"));
+            assert!(request_text_lower.contains("authorization: bearer "));
+            assert!(request_text_lower.contains("chatgpt-account-id: acct-listener-type"));
+            assert!(request_text_lower.contains("openai-beta: responses=experimental"));
+            assert!(request_text_lower.contains("originator: codex_cli_rs"));
+            assert!(request_text.contains(r#""store":false"#));
+            assert!(request_text.contains(r#""stream":true"#));
+            assert!(request_text.contains(r#""role":"developer"#));
+            assert!(request_text.contains(r#""type":"input_text"#));
+            assert!(request_text.contains(r#""reasoning":{"effort":"medium"}"#));
+            assert!(!request_text.contains(r#""temperature":"#));
+
+            let body = concat!(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"最终🙂\"}\n\n",
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"文本。\"}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n"
+            );
+            let split = split_inside(body, "🙂");
+            write_chunked_sse_response(
+                &mut stream,
+                &[&body.as_bytes()[..split], &body.as_bytes()[split..]],
+            );
+        });
+
+        let provider = CodexOAuthLLMProvider::new(
+            CodexOAuthConfig::new("gpt-5.5")
+                .with_base_url(format!("http://{}", addr))
+                .with_auth_path(auth_path.clone()),
+        );
+        let output = provider
+            .polish(
+                "原文",
+                PolishMode::Raw,
+                &[],
+                "",
+                &[],
+                ChineseScriptPreference::Auto,
+                OutputLanguagePreference::Auto,
+                None,
+                &[],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output, "最终🙂文本。");
+        server.join().unwrap();
+        let _ = std::fs::remove_file(auth_path);
+    }
+
+    #[tokio::test]
+    async fn chat_completion_omits_authorization_when_api_key_is_empty() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 8192];
+            let mut request = Vec::new();
+            loop {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request_text = String::from_utf8_lossy(&request);
+            assert!(!request_text.contains("Authorization: Bearer"));
+
+            let body = r#"{"choices":[{"message":{"content":"最终文本。"}}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "ark",
+            "Doubao Ark",
+            format!("http://{}", addr),
+            "",
+            "deepseek-v3-2",
+        ));
+
+        let output = provider
+            .polish(
+                "原文",
+                PolishMode::Raw,
+                &[],
+                "",
+                &[],
+                ChineseScriptPreference::Auto,
+                OutputLanguagePreference::Auto,
+                None,
+                &[],
+            )
+            .await
+            .unwrap();
+        assert_eq!(output, "最终文本。");
+
+        server.join().unwrap();
+    }
+}

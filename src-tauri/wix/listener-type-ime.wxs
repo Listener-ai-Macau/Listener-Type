@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Directory Id="ListenerTypeImeDirectory" Name="windows-ime">
+        <Directory Id="ListenerTypeImeX64Directory" Name="x64">
+          <Component Id="ListenerTypeImeDllX64Component" Guid="{3C730828-2BBA-48B6-B14D-192F2FC8B7B2}" Win64="yes">
+            <File Id="ListenerTypeImeDllX64" Name="ListenerTypeIme.dll" Source="src-tauri\target\windows-ime-msvc\x64\Release\ListenerTypeIme.dll" KeyPath="yes" />
+          </Component>
+        </Directory>
+        <Directory Id="ListenerTypeImeX86Directory" Name="x86">
+          <Component Id="ListenerTypeImeDllX86Component" Guid="{117DE44A-ED53-423B-B317-F8FDB074F8B9}" Win64="no">
+            <File Id="ListenerTypeImeDllX86" Name="ListenerTypeIme.dll" Source="src-tauri\target\windows-ime-msvc\x86\Release\ListenerTypeIme.dll" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </DirectoryRef>
+    <CustomAction
+      Id="RegisterListenerTypeImeX64"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[System64Folder]regsvr32.exe&quot; /s &quot;[#ListenerTypeImeDllX64]&quot;'
+      Return="check" />
+    <CustomAction
+      Id="RegisterListenerTypeImeX86"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s &quot;[#ListenerTypeImeDllX86]&quot;'
+      Return="check" />
+    <CustomAction
+      Id="UnregisterListenerTypeImeX64"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[#ListenerTypeImeDllX64]&quot;'
+      Return="ignore" />
+    <CustomAction
+      Id="UnregisterListenerTypeImeX86"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s /u &quot;[#ListenerTypeImeDllX86]&quot;'
+      Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- Issue #321: unregister the old DLL before InstallFiles whenever a
+           previous version is installed, so Windows Installer can overwrite
+           ListenerTypeIme.dll instead of failing on a sharing violation. The
+           previous condition (REMOVE="ALL") only fired during dedicated
+           uninstall and skipped the auto-update / minor-upgrade path. -->
+      <Custom Action="UnregisterListenerTypeImeX86" Before="InstallFiles"><![CDATA[Installed AND NOT REMOVE]]></Custom>
+      <Custom Action="UnregisterListenerTypeImeX64" Before="UnregisterListenerTypeImeX86"><![CDATA[Installed AND NOT REMOVE]]></Custom>
+      <Custom Action="RegisterListenerTypeImeX64" After="InstallFiles"><![CDATA[NOT REMOVE]]></Custom>
+      <Custom Action="RegisterListenerTypeImeX86" After="RegisterListenerTypeImeX64"><![CDATA[NOT REMOVE]]></Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

@@ -1,0 +1,21 @@
+name: Engineering task
+description: Track Listener Type implementation work
+title: "[Task]: "
+labels: ["task"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+    validations:
+      required: true
+  - type: textarea
+    id: source-map
+    attributes:
+      label: Expected source map
+      description: List files or traceability sections likely affected.
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Commands and manual smoke checks required.
