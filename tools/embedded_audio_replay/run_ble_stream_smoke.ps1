@@ -1,15 +1,18 @@
 param(
+    [ValidateSet("serial-toggle", "manual-key")]
+    [string]$TriggerMode = "serial-toggle",
     [string]$Port = "COM3",
     [string]$DeviceName = "listener",
     [string]$BluetoothAddress = "DCB4D91112CE",
     [int]$TimeoutMs = 45000,
     [int]$NotifyReadyTimeoutSeconds = 20,
     [double]$NotifySettleSeconds = 2.0,
-    [int]$NoNotificationTimeoutSeconds = 12,
-    [int]$PlaybackCount = 2,
-    [int]$RecordPlaybackIndex = 2,
-    [int]$PreRecordDelayMs = 1200,
-    [int]$PostPlaybackRecordMs = 1200,
+    [int]$NoNotificationTimeoutSeconds = 8,
+    [int]$PlaybackCount = 1,
+    [int]$RecordPlaybackIndex = 1,
+    [int]$PreRecordDelayMs = 300,
+    [int]$ManualTriggerReadyDelayMs = 700,
+    [int]$PostPlaybackRecordMs = 500,
     [string]$Sentence,
     [string]$WavPath,
     [string]$VoiceName = "Microsoft Huihui Desktop",
@@ -836,11 +839,13 @@ try {
         $insertionTarget = Start-InsertionTarget -Path $insertionTargetPath
     }
 
-    $serialWindow = Start-SerialRecordingWindow `
-        -PortName $Port `
-        -DurationMs $recordingWindowMs `
-        -SerialLogPath $serialLogPath `
-        -StartSignalPath $serialStartSignalPath
+    if ($TriggerMode -eq "serial-toggle") {
+        $serialWindow = Start-SerialRecordingWindow `
+            -PortName $Port `
+            -DurationMs $recordingWindowMs `
+            -SerialLogPath $serialLogPath `
+            -StartSignalPath $serialStartSignalPath
+    }
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = (Resolve-Path $ListenerExe).Path
@@ -883,15 +888,25 @@ try {
                 [void](Focus-ProcessWindow -Process $insertionTarget.Process)
                 Start-Sleep -Milliseconds 150
             }
-            Set-Content -Path $serialStartSignalPath -Value "start" -Encoding ASCII
-            $recordingStarted = $true
+            if ($TriggerMode -eq "serial-toggle") {
+                Set-Content -Path $serialStartSignalPath -Value "start" -Encoding ASCII
+                $recordingStarted = $true
+            } else {
+                Write-Output "manual_trigger_ready=1"
+                Write-Output "manual_trigger_hint=press KEY1 while the playback sentence is audible"
+                Start-Sleep -Milliseconds $ManualTriggerReadyDelayMs
+            }
             Start-Sleep -Milliseconds $PreRecordDelayMs
         }
         $player.PlaySync()
         if ($index -eq $RecordPlaybackIndex) {
-            $serialReport = Wait-SerialRecordingWindow -Window $serialWindow
-            $serialWindow = $null
-            $recordingStarted = $false
+            if ($TriggerMode -eq "serial-toggle") {
+                $serialReport = Wait-SerialRecordingWindow -Window $serialWindow
+                $serialWindow = $null
+                $recordingStarted = $false
+            } else {
+                Write-Output "manual_trigger_playback_done=1"
+            }
         } elseif ($index -lt $PlaybackCount) {
             Start-Sleep -Milliseconds 700
         }
@@ -916,7 +931,7 @@ try {
             break
         }
         if ($capturedLog -match "submit-embedded-audio-ble-stream failed") {
-            throw "Listener-Type BLE stream failed after serial-triggered playback"
+            throw "Listener-Type BLE stream failed after triggered playback"
         }
         if (-not $streamStarted -and (Get-Date) -ge $noNotificationDeadline) {
             $hint = ""
@@ -925,7 +940,7 @@ try {
             } elseif ($serialReport -and $serialReport.record_start_rejected) {
                 $hint = "; firmware serial reported record start rejected"
             }
-            throw "No BLE audio notifications arrived within $NoNotificationTimeoutSeconds seconds after serial-triggered playback$hint"
+            throw "No BLE audio notifications arrived within $NoNotificationTimeoutSeconds seconds after triggered playback$hint"
         }
     }
     if (-not $doneMatch -or -not $doneMatch.Success) {
@@ -988,7 +1003,7 @@ try {
 
     $report = [pscustomobject]@{
         status = $status
-        trigger = "serial-toggle"
+        trigger = $TriggerMode
         port = $Port
         sentence = $Sentence
         transcript = $transcript
@@ -996,7 +1011,12 @@ try {
         tts_gain = $TtsGain
         playback_count = $PlaybackCount
         record_playback_index = $RecordPlaybackIndex
+        wav_duration_ms = $wavDurationMs
+        recording_window_ms = $recordingWindowMs
+        pre_record_delay_ms = $PreRecordDelayMs
+        post_playback_record_ms = $PostPlaybackRecordMs
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
+        manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReport
         pcm_bytes = $pcmBytes
@@ -1039,12 +1059,17 @@ try {
     }
     $report = [pscustomobject]@{
         status = "FAIL"
-        trigger = "serial-toggle"
+        trigger = $TriggerMode
         port = $Port
         sentence = $Sentence
         wav_path = $WavPath
         tts_gain = $TtsGain
+        wav_duration_ms = $wavDurationMs
+        recording_window_ms = $recordingWindowMs
+        pre_record_delay_ms = $PreRecordDelayMs
+        post_playback_record_ms = $PostPlaybackRecordMs
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
+        manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReport
         verify_insertion = [bool]$VerifyInsertion

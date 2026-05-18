@@ -5,7 +5,7 @@
 //! insertion, persists history, emits `capsule:state` events to the capsule
 //! window.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -48,8 +48,9 @@ use crate::selection::capture_selection;
 #[cfg(target_os = "windows")]
 use crate::types::PasteShortcut;
 use crate::types::{
-    CapsulePayload, CapsuleState, ChineseScriptPreference, DictationSession, HotkeyCapability,
-    HotkeyStatus, HotkeyStatusState, InsertStatus, OutputLanguagePreference, PolishMode,
+    CapsulePayload, CapsuleState, ChineseScriptPreference, DictationInputSource, DictationSession,
+    HotkeyCapability, HotkeyStatus, HotkeyStatusState, InsertStatus, OutputLanguagePreference,
+    PolishMode,
 };
 #[cfg(target_os = "windows")]
 use crate::windows_ime_ipc::ImeSubmitTarget;
@@ -60,12 +61,15 @@ mod dictation;
 mod qa;
 mod resources;
 
+const EMBEDDED_BLE_BACKGROUND_LISTEN_TIMEOUT_MS: u64 = 60_000;
+
 #[cfg(test)]
 use dictation::dictation_error_code;
 use dictation::{
     begin_session, cancel_session, end_session, handle_pressed, handle_pressed_edge,
     handle_released, handle_released_edge, request_stop_during_starting,
-    submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream, submit_embedded_audio_file,
+    submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
+    submit_embedded_audio_ble_stream_background, submit_embedded_audio_file,
     submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,
     submit_embedded_audio_streaming_notifications,
 };
@@ -127,6 +131,8 @@ struct Inner {
     audio_archive_active: AtomicBool,
     /// 当前嵌入式 BLE 音频会话的传输统计，随同一条 dictation history 写入。
     embedded_audio_stats: Mutex<Option<crate::embedded_audio::SessionStats>>,
+    /// Listener BLE 输入源的后台订阅代次。设置变化时递增，旧监听循环会自然退出。
+    embedded_ble_listener_generation: AtomicU64,
     recording_mute: Mutex<SharedRecordingMuteState>,
     hotkey: Mutex<Option<HotkeyMonitor>>,
     hotkey_status: Mutex<HotkeyStatus>,
@@ -216,6 +222,7 @@ impl Coordinator {
                     recorder: Mutex::new(None),
                     audio_archive_active: AtomicBool::new(false),
                     embedded_audio_stats: Mutex::new(None),
+                    embedded_ble_listener_generation: AtomicU64::new(0),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
                     hotkey_status: Mutex::new(HotkeyStatus::default()),
@@ -267,6 +274,7 @@ impl Coordinator {
                 recorder: Mutex::new(None),
                 audio_archive_active: AtomicBool::new(false),
                 embedded_audio_stats: Mutex::new(None),
+                embedded_ble_listener_generation: AtomicU64::new(0),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
                 hotkey_status: Mutex::new(HotkeyStatus::default()),
@@ -753,6 +761,11 @@ impl Coordinator {
     }
 
     pub async fn start_dictation(&self) -> Result<(), String> {
+        if self.inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle {
+            self.refresh_embedded_ble_listener();
+            log::info!("[coord] start_dictation routed to Listener BLE background listener");
+            return Ok(());
+        }
         begin_session(&self.inner).await
     }
 
@@ -810,6 +823,24 @@ impl Coordinator {
 
     pub fn cancel_dictation(&self) {
         cancel_session(&self.inner);
+    }
+
+    pub fn refresh_embedded_ble_listener(&self) {
+        let generation = self
+            .inner
+            .embedded_ble_listener_generation
+            .fetch_add(1, Ordering::SeqCst)
+            + 1;
+        let source = self.inner.prefs.get().dictation_input_source;
+        if source != DictationInputSource::EmbeddedBle {
+            log::info!("[embedded-ble] background listener disabled (source={source:?})");
+            return;
+        }
+
+        let inner = Arc::clone(&self.inner);
+        async_runtime::spawn(async move {
+            embedded_ble_background_listener_loop(inner, generation).await;
+        });
     }
 
     /// 返回当前听写阶段（read-only 快照），供 CLI 入口在 dispatch toggle 时决策。
@@ -1615,6 +1646,52 @@ fn mark_translation_modifier_seen(inner: &Arc<Inner>) {
             .store(true, Ordering::SeqCst);
         log::info!("[coord] translation modifier seen during {phase:?}");
     }
+}
+
+async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u64) {
+    log::info!("[embedded-ble] background listener started generation={generation}");
+    loop {
+        if inner.shutdown.load(Ordering::SeqCst)
+            || inner
+                .embedded_ble_listener_generation
+                .load(Ordering::SeqCst)
+                != generation
+        {
+            break;
+        }
+        if inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle {
+            break;
+        }
+
+        match submit_embedded_audio_ble_stream_background(
+            &inner,
+            Some(EMBEDDED_BLE_BACKGROUND_LISTEN_TIMEOUT_MS),
+        )
+        .await
+        {
+            Ok(result) => {
+                log::info!(
+                    "[embedded-ble] background session completed pcm_bytes={} missing_packets={}",
+                    result.reconstructed_pcm_bytes,
+                    result.stats.missing_packet_count
+                );
+            }
+            Err(err) => {
+                if inner.shutdown.load(Ordering::SeqCst)
+                    || inner
+                        .embedded_ble_listener_generation
+                        .load(Ordering::SeqCst)
+                        != generation
+                    || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
+                {
+                    break;
+                }
+                log::warn!("[embedded-ble] background listen retrying after: {err}");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    }
+    log::info!("[embedded-ble] background listener stopped generation={generation}");
 }
 
 fn hotkey_bridge_loop(inner: Arc<Inner>, rx: mpsc::Receiver<HotkeyEvent>) {
@@ -3844,8 +3921,8 @@ fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
 }
 
 /// 终止态（Done / Cancelled / Error）后延迟 N ms 把胶囊改回 Idle，让浮窗自动消失。
-/// 用户点 ✕ / ✓ / 中途出错 / 按 Esc 都走这里，统一 2 秒。
-const CAPSULE_AUTO_HIDE_DELAY_MS: u64 = 2000;
+/// 硬件 BLE 听写的日常路径需要按键结束后立刻收起；详细结果可在历史记录里复盘。
+const CAPSULE_AUTO_HIDE_DELAY_MS: u64 = 0;
 
 /// Coordinator 全局超时保护：防止 ASR await_final_result() 永远挂起。
 /// 设置为 15 秒（比 ASR 的 12 秒 FINAL_RESULT_TIMEOUT 稍长），

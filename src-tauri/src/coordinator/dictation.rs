@@ -483,7 +483,12 @@ pub(super) async fn handle_pressed_edge(inner: &Arc<Inner>) {
 }
 
 pub(super) async fn handle_pressed(inner: &Arc<Inner>) {
-    let mode = inner.prefs.get().hotkey.mode;
+    let prefs = inner.prefs.get();
+    let mode = prefs.hotkey.mode;
+    if prefs.dictation_input_source == DictationInputSource::EmbeddedBle {
+        log::info!("[coord] hotkey press ignored; Listener BLE input is driven by hardware key");
+        return;
+    }
     let phase = inner.state.lock().phase;
     log::info!("[coord] hotkey pressed (mode={mode:?}, phase={phase:?})");
     match (mode, phase) {
@@ -522,7 +527,12 @@ pub(super) async fn handle_released_edge(inner: &Arc<Inner>) {
 }
 
 pub(super) async fn handle_released(inner: &Arc<Inner>) {
-    let mode = inner.prefs.get().hotkey.mode;
+    let prefs = inner.prefs.get();
+    let mode = prefs.hotkey.mode;
+    if prefs.dictation_input_source == DictationInputSource::EmbeddedBle {
+        log::info!("[coord] hotkey release ignored; Listener BLE input is driven by hardware key");
+        return;
+    }
     let phase = inner.state.lock().phase;
     log::info!("[coord] hotkey released (mode={mode:?}, phase={phase:?})");
     if mode == HotkeyMode::Hold {
@@ -1181,6 +1191,21 @@ pub(super) async fn submit_embedded_audio_ble_stream(
     inner: &Arc<Inner>,
     timeout_ms: Option<u64>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    submit_embedded_audio_ble_stream_impl(inner, timeout_ms, true).await
+}
+
+pub(super) async fn submit_embedded_audio_ble_stream_background(
+    inner: &Arc<Inner>,
+    timeout_ms: Option<u64>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    submit_embedded_audio_ble_stream_impl(inner, timeout_ms, false).await
+}
+
+async fn submit_embedded_audio_ble_stream_impl(
+    inner: &Arc<Inner>,
+    timeout_ms: Option<u64>,
+    emit_idle_capture_errors: bool,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let capture_task = tauri::async_runtime::spawn_blocking(move || {
@@ -1209,7 +1234,9 @@ pub(super) async fn submit_embedded_audio_ble_stream(
     if let Err(err) = capture_result {
         if !streaming.terminal_received {
             let message = format!("嵌入式 BLE 流式抓音中断: {err}");
-            streaming.abort_active_session(inner, &message);
+            if emit_idle_capture_errors || streaming.session.is_some() {
+                streaming.abort_active_session(inner, &message);
+            }
             return Err(message);
         }
     }
@@ -1217,7 +1244,9 @@ pub(super) async fn submit_embedded_audio_ble_stream(
         if streaming.collector.inner().terminal_received() {
             streaming.finish_pending_stop_after_capture(inner).await?;
         } else {
-            streaming.abort_active_session(inner, "嵌入式 BLE 流式会话尚未收到结束包");
+            if emit_idle_capture_errors || streaming.session.is_some() {
+                streaming.abort_active_session(inner, "嵌入式 BLE 流式会话尚未收到结束包");
+            }
         }
     }
     streaming.into_submission_result()

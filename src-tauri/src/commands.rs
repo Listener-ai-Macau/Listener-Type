@@ -174,6 +174,7 @@ pub fn set_settings(
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
     persist_settings(&*coord, prefs.clone())?;
+    coord.refresh_embedded_ble_listener();
     // refresh_tray_microphone_menu 内部会调用 NSStatusItem.set_menu，必须在主线程上跑。
     // set_settings 本身是同步 Tauri command，在 IPC handler 线程上执行；从这里直接调
     // 会触发 macOS 主线程断言或在 dispatch 队列上死锁，导致整个 UI 无响应（用户改

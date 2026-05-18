@@ -58,7 +58,7 @@ use tauri::menu::{
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime};
 
-use crate::types::PolishMode;
+use crate::types::{DictationInputSource, PolishMode};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -201,7 +201,7 @@ pub fn run() {
             }
 
             // 菜单栏图标 — 与 Swift `MenuBarController` 同语义：
-            // 左键点 → 显示/聚焦主窗口；菜单含「显示主窗口」「退出」。
+            // 左键点 → 显示/聚焦主窗口；右键菜单只保留日常切换项与退出。
             let tray_menu = build_tray_menu(app, &coordinator)?;
             let menu = tray_menu.menu;
 
@@ -218,10 +218,12 @@ pub fn run() {
                     .menu(&menu)
                     .show_menu_on_left_click(false)
                     .on_menu_event(move |app, event| match event.id.as_ref() {
-                        "toggle" => show_main_window(app),
                         "quit" => app.exit(0),
                         id => {
                             if handle_style_tray_menu_event(app, id) {
+                                return;
+                            }
+                            if handle_input_source_tray_menu_event(app, id) {
                                 return;
                             }
                             handle_microphone_tray_menu_event(app, id);
@@ -249,6 +251,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             coordinator.bind_app(app_handle);
             coordinator.start_hotkey_listener();
+            coordinator.refresh_embedded_ble_listener();
             // QA / custom combo hotkeys use `global-hotkey` (Carbon on macOS).
             // Start those after RunEvent::Ready, when the AppKit event loop is live.
             if std::env::var("LISTENER_TYPE_SHOW_MAIN_ON_START").ok().as_deref() == Some("1") {
@@ -432,6 +435,10 @@ struct StyleTrayMenu {
     submenu: Submenu<tauri::Wry>,
 }
 
+struct InputSourceTrayMenu {
+    submenu: Submenu<tauri::Wry>,
+}
+
 struct TrayMenu {
     menu: Menu<tauri::Wry>,
     microphone_items: Vec<commands::TrayMicrophoneMenuItem>,
@@ -476,11 +483,19 @@ fn parse_tray_polish_mode_id(id: &str) -> Option<PolishMode> {
     }
 }
 
+fn parse_tray_input_source_id(id: &str) -> Option<DictationInputSource> {
+    match id {
+        "input-source-microphone" => Some(DictationInputSource::Microphone),
+        "input-source-embedded-ble" => Some(DictationInputSource::EmbeddedBle),
+        _ => None,
+    }
+}
+
 fn build_tray_menu<M: Manager<tauri::Wry>>(
     app: &M,
     coordinator: &Arc<coordinator::Coordinator>,
 ) -> tauri::Result<TrayMenu> {
-    let toggle = MenuItemBuilder::with_id("toggle", "显示主窗口").build(app)?;
+    let input_source_menu = build_input_source_tray_menu(app, coordinator)?;
     let microphone_menu = build_microphone_tray_menu(app, coordinator)?;
     let quit = MenuItemBuilder::with_id("quit", "退出 Listener Type").build(app)?;
     let mut builder = MenuBuilder::new(app);
@@ -493,7 +508,7 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
         builder = builder.item(&style_menu.submenu);
     }
     let menu = builder
-        .items(&[&toggle, &microphone_menu.submenu, &quit])
+        .items(&[&input_source_menu.submenu, &microphone_menu.submenu, &quit])
         .build()?;
     Ok(TrayMenu {
         menu,
@@ -521,6 +536,23 @@ fn build_style_tray_menu<M: Manager<tauri::Wry>>(
     Ok(StyleTrayMenu {
         submenu: submenu.build()?,
     })
+}
+
+fn build_input_source_tray_menu<M: Manager<tauri::Wry>>(
+    app: &M,
+    coordinator: &Arc<coordinator::Coordinator>,
+) -> tauri::Result<InputSourceTrayMenu> {
+    let selected = coordinator.prefs().get().dictation_input_source;
+    let microphone = CheckMenuItemBuilder::with_id("input-source-microphone", "麦克风")
+        .checked(selected == DictationInputSource::Microphone)
+        .build(app)?;
+    let embedded_ble = CheckMenuItemBuilder::with_id("input-source-embedded-ble", "Listener BLE")
+        .checked(selected == DictationInputSource::EmbeddedBle)
+        .build(app)?;
+    let submenu = SubmenuBuilder::with_id(app, "input-source", "输入源")
+        .items(&[&microphone, &embedded_ble])
+        .build()?;
+    Ok(InputSourceTrayMenu { submenu })
 }
 
 fn build_microphone_tray_menu<M: Manager<tauri::Wry>>(
@@ -657,6 +689,26 @@ fn handle_microphone_tray_menu_event(app: &AppHandle, id: &str) {
     let _ = app.emit("prefs:changed", &prefs);
 
     commands::sync_tray_microphone_selection(&items, &selected.device_name);
+}
+
+fn handle_input_source_tray_menu_event(app: &AppHandle, id: &str) -> bool {
+    let Some(source) = parse_tray_input_source_id(id) else {
+        return false;
+    };
+
+    let coord = app.state::<Arc<coordinator::Coordinator>>();
+    let mut prefs = coord.prefs().get();
+    prefs.dictation_input_source = source;
+    if let Err(err) = coord.prefs().set(prefs.clone()) {
+        log::warn!("[tray] save input source preference failed: {err}");
+        return true;
+    }
+    let _ = app.emit("prefs:changed", &prefs);
+    coord.refresh_embedded_ble_listener();
+    if let Err(err) = refresh_tray_microphone_menu(app) {
+        log::warn!("[tray] refresh after input source change failed: {err}");
+    }
+    true
 }
 
 fn handle_style_tray_menu_event(app: &AppHandle, id: &str) -> bool {
