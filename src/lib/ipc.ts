@@ -456,6 +456,10 @@ export function getSettings(): Promise<UserPreferences> {
   return invokeOrMock('get_settings', undefined, () => ({ ...mockSettings }));
 }
 
+export function isMainWindowStartHidden(): Promise<boolean> {
+  return invokeOrMock('is_main_window_start_hidden', undefined, () => false);
+}
+
 export function getDefaultStyleSystemPrompts(): Promise<StyleSystemPrompts> {
   return invokeOrMock('get_default_style_system_prompts', undefined, () => ({ ...mockDefaultStyleSystemPrompts }));
 }

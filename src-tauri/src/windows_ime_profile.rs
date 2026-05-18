@@ -301,7 +301,12 @@ mod windows_impl {
         let profile_guid = parse_guid(LISTENER_TYPE_PROFILE_GUID_BRACED)?;
 
         with_input_processor_profiles(|profiles| unsafe {
-            profiles.EnableLanguageProfile(&clsid, LISTENER_TYPE_TSF_LANG_ID, &profile_guid, true)?;
+            profiles.EnableLanguageProfile(
+                &clsid,
+                LISTENER_TYPE_TSF_LANG_ID,
+                &profile_guid,
+                true,
+            )?;
             profiles.ChangeCurrentLanguage(LISTENER_TYPE_TSF_LANG_ID)?;
             profiles.ActivateLanguageProfile(&clsid, LISTENER_TYPE_TSF_LANG_ID, &profile_guid)
         })?;
@@ -492,8 +497,9 @@ mod windows_impl {
         if !immersive_category_exists || !systray_category_exists {
             return RegistrationInspection::Broken {
                 dll_path: Some(dll_path),
-                reason: "Listener Type TSF immersive support registration is missing; reinstall the IME"
-                    .to_string(),
+                reason:
+                    "Listener Type TSF immersive support registration is missing; reinstall the IME"
+                        .to_string(),
             };
         }
 

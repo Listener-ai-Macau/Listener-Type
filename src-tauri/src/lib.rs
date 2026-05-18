@@ -20,8 +20,8 @@ mod commands;
 mod coordinator;
 mod coordinator_state;
 mod correction;
-mod embedded_ble;
 mod embedded_audio;
+mod embedded_ble;
 mod global_hotkey_runtime;
 mod hotkey;
 mod insertion;
@@ -171,16 +171,22 @@ pub fn run() {
                     // 老版 Windows 静默失败，不阻塞。
                     apply_windows_caption_color(&main);
                 }
-                // 静默启动开关：prefs.start_minimized = true → 不弹主窗口，
-                // 用户从菜单栏 / 托盘点击访问。开机自启时尤其有用，避免每次
-                // 登录都被主窗口打扰。LISTENER_TYPE_SHOW_MAIN_ON_START=1 仍保留
-                // 老的强制 show 路径（手动 dispatch 测试 / dev 用），优先级高
-                // 于 prefs。
+                // 静默启动开关：prefs.start_minimized = true 或测试脚本设置
+                // LISTENER_TYPE_HIDE_MAIN_ON_START=1 → 不弹主窗口，用户从菜单栏 /
+                // 托盘点击访问。LISTENER_TYPE_SHOW_MAIN_ON_START=1 仍保留老的强制
+                // show 路径（手动 dispatch 测试 / dev 用），优先级最高。
                 let force_show =
                     std::env::var("LISTENER_TYPE_SHOW_MAIN_ON_START").ok().as_deref() == Some("1");
-                let suppress_show = !force_show && coordinator.prefs().get().start_minimized;
+                let hide_main_on_start = std::env::var("LISTENER_TYPE_HIDE_MAIN_ON_START")
+                    .ok()
+                    .as_deref()
+                    == Some("1");
+                let suppress_show =
+                    !force_show && (hide_main_on_start || coordinator.prefs().get().start_minimized);
                 if suppress_show {
-                    log::info!("[main] start_minimized=true → 跳过初始 show，等用户点托盘");
+                    log::info!(
+                        "[main] start minimized/hidden requested → 跳过初始 show，等用户点托盘"
+                    );
                 } else if let Err(e) = main.show() {
                     log::warn!("[main] initial show failed: {e}");
                 }
@@ -269,6 +275,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
+            commands::is_main_window_start_hidden,
             commands::get_default_style_system_prompts,
             commands::set_settings,
             commands::get_update_channel,
@@ -311,8 +318,11 @@ pub fn run() {
             commands::start_dictation,
             commands::stop_dictation,
             commands::submit_embedded_audio_notifications,
+            commands::submit_embedded_audio_streaming_notifications,
             commands::submit_embedded_audio_file,
+            commands::submit_embedded_audio_streaming_file,
             commands::submit_embedded_audio_ble_once,
+            commands::submit_embedded_audio_ble_stream,
             commands::cancel_dictation,
             commands::handle_window_hotkey_event,
             #[cfg(debug_assertions)]
@@ -892,12 +902,29 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
                 }
             });
         }
-        cli::CliIntent::SubmitEmbeddedAudioBleOnce { timeout_ms } => {
+        cli::CliIntent::SubmitEmbeddedAudioStreamingFile { path, format } => {
             let coord = Arc::clone(&coordinator);
             tauri::async_runtime::spawn(async move {
                 log::info!(
-                    "[cli] submit-embedded-audio-ble-once: timeout_ms={timeout_ms:?}"
+                    "[cli] submit-embedded-audio-streaming-file: path={} format={format:?}",
+                    path.display()
                 );
+                match coord.submit_embedded_audio_streaming_file(path, format).await {
+                    Ok(result) => log::info!(
+                        "[cli] submit-embedded-audio-streaming-file done: pcm_bytes={} missing_packets={}",
+                        result.reconstructed_pcm_bytes,
+                        result.stats.missing_packet_count
+                    ),
+                    Err(err) => {
+                        log::warn!("[cli] submit-embedded-audio-streaming-file failed: {err}")
+                    }
+                }
+            });
+        }
+        cli::CliIntent::SubmitEmbeddedAudioBleOnce { timeout_ms } => {
+            let coord = Arc::clone(&coordinator);
+            tauri::async_runtime::spawn(async move {
+                log::info!("[cli] submit-embedded-audio-ble-once: timeout_ms={timeout_ms:?}");
                 match coord.submit_embedded_audio_ble_once(timeout_ms).await {
                     Ok(result) => log::info!(
                         "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={}",
@@ -905,6 +932,20 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
                         result.stats.missing_packet_count
                     ),
                     Err(err) => log::warn!("[cli] submit-embedded-audio-ble-once failed: {err}"),
+                }
+            });
+        }
+        cli::CliIntent::SubmitEmbeddedAudioBleStream { timeout_ms } => {
+            let coord = Arc::clone(&coordinator);
+            tauri::async_runtime::spawn(async move {
+                log::info!("[cli] submit-embedded-audio-ble-stream: timeout_ms={timeout_ms:?}");
+                match coord.submit_embedded_audio_ble_stream(timeout_ms).await {
+                    Ok(result) => log::info!(
+                        "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={}",
+                        result.reconstructed_pcm_bytes,
+                        result.stats.missing_packet_count
+                    ),
+                    Err(err) => log::warn!("[cli] submit-embedded-audio-ble-stream failed: {err}"),
                 }
             });
         }
@@ -1369,7 +1410,8 @@ mod tests {
 
     #[test]
     fn oversized_log_rotates_to_single_archive() {
-        let dir = std::env::temp_dir().join(format!("listener-type-log-rotate-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("listener-type-log-rotate-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let log = dir.join("listener-type.log");
@@ -1393,7 +1435,8 @@ mod tests {
 
     #[test]
     fn small_log_does_not_rotate() {
-        let dir = std::env::temp_dir().join(format!("listener-type-log-small-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("listener-type-log-small-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let log = dir.join("listener-type.log");
@@ -1411,7 +1454,8 @@ mod tests {
 
     #[test]
     fn missing_log_does_not_rotate() {
-        let dir = std::env::temp_dir().join(format!("listener-type-log-missing-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("listener-type-log-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let log = dir.join("listener-type.log");

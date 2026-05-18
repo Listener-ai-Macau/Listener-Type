@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | Hotkey start/stop/cancel | `src-tauri/src/global_hotkey_runtime.rs`, `src-tauri/src/platform_hotkey.rs`, `src-tauri/src/combo_hotkey.rs`, `src/components/Capsule.tsx` | Rust hotkey tests, manual hotkey smoke |
 | Audio recording | `src-tauri/src/recorder.rs`, `src-tauri/src/audio.rs` | Rust unit tests, microphone smoke |
+| Embedded BLE audio ingest | `src-tauri/src/embedded_audio.rs`, `src-tauri/src/embedded_ble.rs`, `src-tauri/src/coordinator/dictation.rs`, `tools/embedded_audio_replay/**` | VKA1 replay tests, cargo check, hardware BLE smoke |
 | ASR routing | `src-tauri/src/asr.rs`, `src-tauri/src/asr/*`, `src/pages/LocalAsr.tsx` | Provider validation, local ASR smoke |
 | Polish/output modes | `src-tauri/src/polish.rs`, `src-tauri/src/llm_*.rs`, `src/pages/Style.tsx` | Rust unit tests, style pack smoke |
 | Insert and clipboard fallback | `src-tauri/src/inserter.rs`, `src-tauri/src/windows_ime.rs`, `windows-ime/**` | macOS insertion smoke, Windows IME smoke |

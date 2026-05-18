@@ -9,6 +9,7 @@ import {
   checkMicrophonePermission,
   getHotkeyStatus,
   handleWindowHotkeyEvent,
+  isMainWindowStartHidden,
   isTauri,
 } from './lib/ipc';
 import {
@@ -45,6 +46,9 @@ export function App({ isCapsule, isQa }: AppProps) {
       if (cancelled) return;
       import('@tauri-apps/api/window')
         .then(async ({ getCurrentWindow }) => {
+          if (await isMainWindowStartHidden()) {
+            return;
+          }
           const currentWindow = getCurrentWindow();
           if (!(await currentWindow.isVisible())) {
             await currentWindow.show();

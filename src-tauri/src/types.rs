@@ -111,6 +111,9 @@ pub struct DictationSession {
     /// `None` / `Some(false)` 都按"无录音"处理；旧 JSON 不带这字段也兼容。
     #[serde(default)]
     pub has_audio_recording: Option<bool>,
+    /// 嵌入式 BLE 音频会话的传输统计。普通麦克风听写和旧历史记录为 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedded_audio_stats: Option<crate::embedded_audio::SessionStats>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1698,7 +1701,9 @@ impl HotkeyCapability {
                 supports_modifier_only_trigger: true,
                 supports_side_specific_modifiers: true,
                 explicit_fallback_available: false,
-                status_hint: Some("授权辅助功能后，通常需要完全退出并重新打开 Listener Type。".into()),
+                status_hint: Some(
+                    "授权辅助功能后，通常需要完全退出并重新打开 Listener Type。".into(),
+                ),
             }
         }
 

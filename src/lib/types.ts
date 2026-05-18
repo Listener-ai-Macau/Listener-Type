@@ -21,6 +21,8 @@ export interface DictationSession {
   /** 该会话是否在录音时归档了原始 wav（取决于当时 prefs.recordAudioForDebug）。
    *  true 时前端在 History 渲染播放按钮，凭 id 通过 read_audio_recording IPC 拿字节流。 */
   hasAudioRecording: boolean | null;
+  /** 嵌入式 BLE 音频会话的传输统计；普通麦克风听写和旧历史记录没有该字段。 */
+  embeddedAudioStats?: EmbeddedAudioSessionStats | null;
 }
 
 export type EmbeddedAudioSessionErrorCode =

@@ -24,6 +24,67 @@ cargo run --manifest-path tools\embedded_audio_replay\Cargo.toml -- `
 - pretty JSON 报告
 - 单行 `replay_result_json=...`，用于 pipeline/脚本提取结构化结果
 
+## 运行流式 replay
+
+```powershell
+cargo run --manifest-path tools\embedded_audio_replay\Cargo.toml -- `
+  --input path\to\audio.wav `
+  --format wav `
+  --mode stream `
+  --session-id 1000 `
+  --payload-bytes 480 `
+  --terminal stop
+```
+
+流式模式会逐条 notification 调用 `StreamingSessionCollector`，报告 `started`、`pcm_chunk`、`stopped`、`cancelled`、`error` 和 `ignored` 事件。报告中的 `streaming` 字段会记录 chunk sequence、每包 PCM 字节数、streamed PCM hash、terminal event，以及是否能按流式 chunk 重组回输入 PCM。
+
+`--terminal cancel` 和 `--terminal error` 可用于无硬件验证 cancel/error 收尾路径。
+
+## Listener-Type 调试入口
+
+桌面端保留 batch 入口，并新增对应的 streaming 入口。两组入口复用同一套 VKA1 parser、collector、ASR provider 和 coordinator 收尾逻辑：
+
+```powershell
+# batch file replay: 完整重组 PCM 后再进入 ASR
+listener-type --submit-embedded-audio path\to\audio.wav
+
+# streaming file replay: session_start 创建 ASR consumer，audio_data 到一包推一包
+listener-type --submit-embedded-audio-stream path\to\audio.wav
+
+# batch BLE: 等 stop/cancel/error 终止包后提交
+listener-type --submit-embedded-audio-ble-once 120000
+
+# streaming BLE: notification 到达即进入 coordinator streaming path
+listener-type --submit-embedded-audio-ble-stream 120000
+```
+
+`--submit-embedded-audio-wav-stream` 和 `--submit-embedded-audio-pcm16le-stream` 可显式指定文件格式；不带格式时按现有 batch 入口规则推断。流式 BLE 入口仍需要设备在线，并按协作协议获取硬件资源锁后再跑真实 smoke。
+
+## 自动 BLE 流式 smoke
+
+真实设备 smoke 默认不要人工按 KEY1。优先使用串口控制命令模拟按键，并把录音窗口对齐到第二遍 TTS 播放：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\embedded_audio_replay\run_ble_stream_smoke.ps1 `
+  -Port COM3 `
+  -BluetoothAddress DCB4D91112CE `
+  -VerifyHistory
+```
+
+脚本会：
+
+1. 默认通过 COM3 RTS 脉冲 reset 设备；需要跳过时加 `-NoResetBeforeCapture`。
+2. 调用固件仓库的 `ensure_ble_hid_connection.ps1` 预热 BLE。
+3. 以隐藏主窗口模式启动 `listener-type --submit-embedded-audio-ble-stream 45000`，避免测试时把主界面弹到前台。
+4. 提前打开串口日志监听，等到 Listener-Type 日志出现 `ValueChanged handler registered`，并记录固件侧 notify/transport 状态。
+5. 播放第一遍随机中文 TTS 作为预热。
+6. 在第二遍播放前向串口 helper 发信号，由 helper 通过 COM3 发送 `~VREC:TOGGLE` 开始录音，播放后自动发送一次停止，并保存固件串口日志。
+7. 若第二遍播放后 20 秒内没有看到 `embedded audio streaming dictation started`，直接失败并输出 Listener-Type 日志和固件串口日志路径，避免长时间空等。
+8. 开启 `-VerifyHistory` 时，脚本会检查 `history.json` 中本次记录带有 `embeddedAudioStats`；需要自动打开临时 Notepad 做光标落字检查时再加 `-VerifyInsertion`，人工观察当前光标时不需要。
+9. 输出 `ble_stream_smoke_result_json=...`，包含原句、识别文本、插入目标、历史记录、PCM 字节数、缺包数、Listener-Type 日志和串口日志路径。
+
+只有串口触发不可用、需要验证实体按键本身，或设备不在线时，才需要人工介入。默认配置按 60 秒内的快速 smoke 设计；需要长录音时可调 `-TimeoutMs`，需要更久等待首包时可调 `-NoNotificationTimeoutSeconds`。若要把缺包视为失败，加 `-FailOnMissingPackets`；默认有最终 ASR 文本但存在缺包时输出 `WARNING`，便于继续调查尾包 flush/停止时序。
+
 ## 生成随机 TTS fixture
 
 ```powershell

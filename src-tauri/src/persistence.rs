@@ -1092,9 +1092,19 @@ struct StylePackArchiveManifest {
     compatible_app_version: Option<String>,
     /// Marketplace 上游关系。旧 ZIP 没有此字段时自动为 None；
     /// 兼容早期口误/拼写包里可能出现的 `orion*` 字段名。
-    #[serde(default, alias = "orionPackId", alias = "orion_pack_id", alias = "origin_pack_id")]
+    #[serde(
+        default,
+        alias = "orionPackId",
+        alias = "orion_pack_id",
+        alias = "origin_pack_id"
+    )]
     origin_pack_id: Option<String>,
-    #[serde(default, alias = "orionAuthorLogin", alias = "orion_author_login", alias = "origin_author_login")]
+    #[serde(
+        default,
+        alias = "orionAuthorLogin",
+        alias = "orion_author_login",
+        alias = "origin_author_login"
+    )]
     origin_author_login: Option<String>,
 }
 
@@ -2302,7 +2312,8 @@ impl CredentialsVault {
 mod tests {
     use super::{
         chunk_json_payload, list_vocab_presets, read_preferences, save_vocab_presets,
-        sync_style_pack_preferences, validate_correction_rule_syntax, KEYRING_CHUNK_MAX_UTF16_UNITS,
+        sync_style_pack_preferences, validate_correction_rule_syntax,
+        KEYRING_CHUNK_MAX_UTF16_UNITS,
     };
     use crate::types::{builtin_style_packs, CustomStylePrompts, VocabPreset, VocabPresetStore};
     use std::fs;

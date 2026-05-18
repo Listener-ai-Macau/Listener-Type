@@ -210,7 +210,7 @@ impl TryFrom<u8> for PacketType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionErrorCode {
     None,
@@ -257,7 +257,7 @@ impl SessionErrorCode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEndReason {
     Stop,
@@ -582,7 +582,7 @@ pub enum IgnoredPacketReason {
     DuplicateOrShorterPacket,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionStats {
     pub session_id: Option<u32>,
@@ -1273,6 +1273,46 @@ mod tests {
                 session_id: 205,
                 expected_packet_count: 2,
             }
+        );
+        assert!(collector.inner().has_successful_complete_session());
+        assert_eq!(collector.inner().reconstructed_pcm(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn streaming_collector_accepts_tail_audio_after_stop() {
+        let mut collector = StreamingSessionCollector::default();
+
+        collector
+            .handle_notification(&packet(PacketType::SessionStart, 209, 0, &[], Some(0)))
+            .expect("start");
+        collector
+            .handle_notification(&packet(PacketType::AudioData, 209, 0, &[1, 2], None))
+            .expect("audio 0");
+        let stopped = collector
+            .handle_notification(&packet(PacketType::SessionStop, 209, 2, &[], Some(0)))
+            .expect("stop");
+
+        assert_eq!(
+            stopped,
+            StreamingSessionEvent::Stopped {
+                session_id: 209,
+                expected_packet_count: 2,
+            }
+        );
+        assert!(!collector.inner().has_successful_complete_session());
+        assert_eq!(collector.inner().missing_packet_indices(), vec![1]);
+
+        let tail = collector
+            .handle_notification(&packet(PacketType::AudioData, 209, 1, &[3, 4], None))
+            .expect("tail audio");
+
+        assert_eq!(
+            tail,
+            StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+                session_id: 209,
+                packet_sequence: 1,
+                pcm: vec![3, 4],
+            })
         );
         assert!(collector.inner().has_successful_complete_session());
         assert_eq!(collector.inner().reconstructed_pcm(), vec![1, 2, 3, 4]);

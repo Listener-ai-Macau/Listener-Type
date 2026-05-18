@@ -65,7 +65,9 @@ use dictation::dictation_error_code;
 use dictation::{
     begin_session, cancel_session, end_session, handle_pressed, handle_pressed_edge,
     handle_released, handle_released_edge, request_stop_during_starting,
-    submit_embedded_audio_ble_once, submit_embedded_audio_file, submit_embedded_audio_notifications,
+    submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream, submit_embedded_audio_file,
+    submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,
+    submit_embedded_audio_streaming_notifications,
 };
 use qa::{close_qa_panel, handle_qa_hotkey_pressed, QaPhase, QaSessionState};
 #[cfg(test)]
@@ -123,6 +125,8 @@ struct Inner {
     /// 决定 DictationSession.has_audio_recording 字段。比单纯读 prefs.record_audio_for_debug
     /// 更准确：用户开了开关但路径无法创建（权限 / 磁盘满）也算 false。
     audio_archive_active: AtomicBool,
+    /// 当前嵌入式 BLE 音频会话的传输统计，随同一条 dictation history 写入。
+    embedded_audio_stats: Mutex<Option<crate::embedded_audio::SessionStats>>,
     recording_mute: Mutex<SharedRecordingMuteState>,
     hotkey: Mutex<Option<HotkeyMonitor>>,
     hotkey_status: Mutex<HotkeyStatus>,
@@ -211,6 +215,7 @@ impl Coordinator {
                     asr: Mutex::new(None),
                     recorder: Mutex::new(None),
                     audio_archive_active: AtomicBool::new(false),
+                    embedded_audio_stats: Mutex::new(None),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
                     hotkey_status: Mutex::new(HotkeyStatus::default()),
@@ -261,6 +266,7 @@ impl Coordinator {
                 asr: Mutex::new(None),
                 recorder: Mutex::new(None),
                 audio_archive_active: AtomicBool::new(false),
+                embedded_audio_stats: Mutex::new(None),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
                 hotkey_status: Mutex::new(HotkeyStatus::default()),
@@ -765,6 +771,13 @@ impl Coordinator {
         submit_embedded_audio_notifications(&self.inner, notifications).await
     }
 
+    pub async fn submit_embedded_audio_streaming_notifications(
+        &self,
+        notifications: Vec<Vec<u8>>,
+    ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+        submit_embedded_audio_streaming_notifications(&self.inner, notifications).await
+    }
+
     pub async fn submit_embedded_audio_file(
         &self,
         path: std::path::PathBuf,
@@ -773,11 +786,26 @@ impl Coordinator {
         submit_embedded_audio_file(&self.inner, path, format).await
     }
 
+    pub async fn submit_embedded_audio_streaming_file(
+        &self,
+        path: std::path::PathBuf,
+        format: Option<crate::embedded_audio::EmbeddedAudioInputFormat>,
+    ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+        submit_embedded_audio_streaming_file(&self.inner, path, format).await
+    }
+
     pub async fn submit_embedded_audio_ble_once(
         &self,
         timeout_ms: Option<u64>,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
         submit_embedded_audio_ble_once(&self.inner, timeout_ms).await
+    }
+
+    pub async fn submit_embedded_audio_ble_stream(
+        &self,
+        timeout_ms: Option<u64>,
+    ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+        submit_embedded_audio_ble_stream(&self.inner, timeout_ms).await
     }
 
     pub fn cancel_dictation(&self) {
@@ -2903,6 +2931,7 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
             duration_ms: Some(raw.duration_ms),
             dictionary_entry_count: None,
             has_audio_recording: None,
+            embedded_audio_stats: None,
         };
         let prefs_snapshot = inner.prefs.get();
         if let Err(e) = inner.history.append_with_retention(
@@ -4123,7 +4152,10 @@ fn hide_capsule_window_if_present() {
         SWP_NOMOVE, SWP_NOSIZE, SW_HIDE,
     };
 
-    let title: Vec<u16> = "Listener Type Capsule".encode_utf16().chain(once(0)).collect();
+    let title: Vec<u16> = "Listener Type Capsule"
+        .encode_utf16()
+        .chain(once(0))
+        .collect();
     let hwnd = match unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) } {
         Ok(hwnd) => hwnd,
         Err(_) => return,
