@@ -1099,9 +1099,17 @@ pub(super) async fn submit_embedded_audio_streaming_notifications(
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let mut streaming = EmbeddedStreamingDictation::default();
     for notification in notifications {
-        if streaming.handle_notification(inner, &notification).await? {
-            break;
+        match streaming.handle_notification(inner, &notification).await {
+            Ok(true) => break,
+            Ok(false) => {}
+            Err(err) => {
+                streaming.abort_active_session(inner, &err);
+                return Err(err);
+            }
         }
+    }
+    if !streaming.terminal_received {
+        streaming.abort_active_session(inner, "嵌入式音频流式会话尚未收到结束包");
     }
     streaming.into_submission_result()
 }
@@ -1170,14 +1178,30 @@ pub(super) async fn submit_embedded_audio_ble_stream(
 
     let mut streaming = EmbeddedStreamingDictation::default();
     while let Some(notification) = rx.recv().await {
-        if streaming.handle_notification(inner, &notification).await? {
-            break;
+        match streaming.handle_notification(inner, &notification).await {
+            Ok(true) => break,
+            Ok(false) => {}
+            Err(err) => {
+                streaming.abort_active_session(inner, &err);
+                return Err(err);
+            }
         }
     }
 
-    capture_task
+    let capture_result = capture_task
         .await
-        .map_err(|err| format!("嵌入式 BLE 流式抓音任务失败: {err}"))??;
+        .map_err(|err| format!("嵌入式 BLE 流式抓音任务失败: {err}"))
+        .and_then(|result| result);
+    if let Err(err) = capture_result {
+        if !streaming.terminal_received {
+            let message = format!("嵌入式 BLE 流式抓音中断: {err}");
+            streaming.abort_active_session(inner, &message);
+            return Err(message);
+        }
+    }
+    if !streaming.terminal_received {
+        streaming.abort_active_session(inner, "嵌入式 BLE 流式会话尚未收到结束包");
+    }
     streaming.into_submission_result()
 }
 
@@ -1344,16 +1368,21 @@ impl EmbeddedStreamingDictation {
         if self.embedded_session_id != Some(embedded_session_id) {
             return;
         }
+        self.abort_active_session(inner, message);
+    }
+
+    fn abort_active_session(&mut self, inner: &Arc<Inner>, message: &str) {
         if let Some(session) = self.session.take() {
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
             set_phase_idle_if_session_matches(inner, session.session_id);
         }
+        let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
         emit_capsule(
             inner,
             CapsuleState::Error,
             0.0,
-            0,
+            elapsed,
             Some(message.to_string()),
             None,
         );
