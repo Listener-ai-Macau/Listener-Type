@@ -89,7 +89,7 @@ mod windows_ble {
             .map_err(|err| format!("BLE service collection size failed: {err}"))?;
         if count == 0 {
             return Err(format!(
-                "未找到嵌入式音频 BLE 服务 {SERVICE_UUID:?}；请确认设备已配对并在线"
+                "Embedded audio BLE service {SERVICE_UUID:?} not found; ensure device is paired and online"
             ));
         }
 
@@ -125,7 +125,7 @@ mod windows_ble {
         }
 
         Err(last_error.unwrap_or_else(|| {
-            "未找到可订阅的嵌入式音频 BLE notify 特征".to_string()
+            "No subscribable embedded audio BLE notify characteristic found".to_string()
         }))
     }
 
@@ -237,5 +237,5 @@ pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, Str
 
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
-    Err("嵌入式 BLE 音频入口当前只支持 Windows".to_string())
+    Err("Embedded BLE audio input is only supported on Windows".to_string())
 }
