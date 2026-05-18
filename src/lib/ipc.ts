@@ -73,6 +73,7 @@ let mockSettings: UserPreferences = {
   showCapsule: true,
   muteDuringRecording: false,
   microphoneDeviceName: '',
+  dictationInputSource: 'microphone',
   activeAsrProvider: 'foundry-local-whisper',
   activeLlmProvider: 'ark',
   llmThinkingEnabled: false,

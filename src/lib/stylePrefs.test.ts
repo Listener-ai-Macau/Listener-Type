@@ -32,6 +32,7 @@ const previousPrefs: UserPreferences = {
   showCapsule: true,
   muteDuringRecording: false,
   microphoneDeviceName: '',
+  dictationInputSource: 'microphone',
   activeAsrProvider: 'volcengine',
   activeLlmProvider: 'ark',
   llmThinkingEnabled: false,

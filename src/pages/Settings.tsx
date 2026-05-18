@@ -27,9 +27,12 @@ import {
   setDictationHotkey,
   startMicrophoneLevelMonitor,
   stopMicrophoneLevelMonitor,
+  submitEmbeddedAudioBleOnce,
   validateProviderCredentials,
 } from '../lib/ipc';
 import type {
+  DictationInputSource,
+  EmbeddedAudioSubmissionResult,
   HotkeyBinding,
   HotkeyMode,
   HotkeyTrigger,
@@ -71,6 +74,8 @@ export type SettingsSectionId = 'recording' | 'providers' | 'shortcuts' | 'permi
 // 里误开 CPU 推理（之前提案：把 local-qwen3 / foundry-local-whisper 从主 ASR
 // 下拉藏进高级）。位置末尾也是「实验性」语义在 macOS 系统偏好里的惯用位置。
 const SECTION_ORDER: SettingsSectionId[] = ['recording', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
+
+type EmbeddedBleProbeStatus = 'idle' | 'checking' | 'ok' | 'error';
 
 async function autostartIsEnabled(): Promise<boolean> {
   const { invoke } = await import('@tauri-apps/api/core');
@@ -200,6 +205,9 @@ function RecordingSection() {
   const [microphoneDevicesLoaded, setMicrophoneDevicesLoaded] = useState(false);
   const [microphoneDevicesError, setMicrophoneDevicesError] = useState<string | null>(null);
   const [microphonePickerOpen, setMicrophonePickerOpen] = useState(false);
+  const [embeddedBleProbeStatus, setEmbeddedBleProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
+  const [embeddedBleProbeMessage, setEmbeddedBleProbeMessage] = useState('');
+  const [embeddedBleProbeResult, setEmbeddedBleProbeResult] = useState<EmbeddedAudioSubmissionResult | null>(null);
   // Wayland 下 rdev 监听不可用（issue #420）。改用 pull 模型：mount 时 invoke 拉状态。
   // 不能依赖一次性 event — Settings 模态是按需 mount，emit 早在 setup 阶段发完了。
   // XDG_SESSION_TYPE 在进程生命周期内不会变，拉一次即可，无需 polling 或 listener。
@@ -294,6 +302,8 @@ function RecordingSection() {
     savePrefs({ ...prefs, muteDuringRecording });
   const onMicrophoneDeviceChange = (microphoneDeviceName: string) =>
     savePrefs({ ...prefs, microphoneDeviceName });
+  const onDictationInputSourceChange = (dictationInputSource: DictationInputSource) =>
+    savePrefs({ ...prefs, dictationInputSource });
   const onRestoreClipboardChange = (restoreClipboardAfterPaste: boolean) =>
     savePrefs({ ...prefs, restoreClipboardAfterPaste });
   const onPasteShortcutChange = (pasteShortcut: PasteShortcut) =>
@@ -362,6 +372,28 @@ function RecordingSection() {
   const selectedMicrophoneLabel = effectiveMicrophoneDeviceName
     ? effectiveMicrophoneDeviceName
     : t('settings.recording.microphoneDefault');
+  const selectedInputSource = prefs.dictationInputSource ?? 'microphone';
+  const embeddedBleSupported = detectOS() === 'win';
+  const runEmbeddedBleProbe = async () => {
+    if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
+    setEmbeddedBleProbeStatus('checking');
+    setEmbeddedBleProbeMessage('');
+    setEmbeddedBleProbeResult(null);
+    try {
+      const result = await submitEmbeddedAudioBleOnce(30_000);
+      setEmbeddedBleProbeResult(result);
+      setEmbeddedBleProbeStatus('ok');
+      setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleProbeOk', {
+        packets: result.stats.receivedPacketCount,
+        missing: result.stats.missingPacketCount,
+        seconds: result.stats.durationSeconds.toFixed(1),
+      }));
+    } catch (err) {
+      setEmbeddedBleProbeResult(null);
+      setEmbeddedBleProbeStatus('error');
+      setEmbeddedBleProbeMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   return (
     <>
@@ -416,6 +448,55 @@ function RecordingSection() {
               {l}
             </button>
           ))}
+        </div>
+      </SettingRow>
+      <SettingRow label={t('settings.recording.inputSourceLabel')} desc={t('settings.recording.inputSourceDesc')}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 430 }}>
+          <div style={{ display: 'inline-flex', alignSelf: 'flex-start', padding: 2, borderRadius: 8, background: 'rgba(0,0,0,0.05)' }}>
+            {([
+              ['microphone', t('settings.recording.inputSourceMicrophone'), 'mic'],
+              ['embeddedBle', t('settings.recording.inputSourceEmbeddedBle'), 'bolt'],
+            ] as const).map(([value, label, icon]) => {
+              const active = selectedInputSource === value;
+              return (
+                <button
+                  key={value}
+                  onClick={() => onDictationInputSourceChange(value)}
+                  style={{
+                    minWidth: 112,
+                    height: 28,
+                    padding: '0 10px',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    border: 0,
+                    borderRadius: 6,
+                    fontFamily: 'inherit',
+                    background: active ? '#fff' : 'transparent',
+                    color: active ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
+                    boxShadow: active ? '0 1px 2px rgba(0,0,0,.08)' : 'none',
+                    cursor: 'default',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    transition: 'background 0.16s var(--ol-motion-quick), color 0.16s var(--ol-motion-quick), box-shadow 0.18s var(--ol-motion-soft)',
+                  }}
+                >
+                  <Icon name={icon} size={13} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {selectedInputSource === 'embeddedBle' && (
+            <EmbeddedBleStatusPanel
+              supported={embeddedBleSupported}
+              status={embeddedBleProbeStatus}
+              message={embeddedBleProbeMessage}
+              result={embeddedBleProbeResult}
+              onProbe={() => void runEmbeddedBleProbe()}
+            />
+          )}
         </div>
       </SettingRow>
       <SettingRow label={t('settings.recording.microphoneLabel')} desc={t('settings.recording.microphoneDesc')}>
@@ -633,6 +714,94 @@ function RecordingSection() {
       </SettingRow>
     </Collapsible>
     </>
+  );
+}
+
+function EmbeddedBleStatusPanel({
+  supported,
+  status,
+  message,
+  result,
+  onProbe,
+}: {
+  supported: boolean;
+  status: EmbeddedBleProbeStatus;
+  message: string;
+  result: EmbeddedAudioSubmissionResult | null;
+  onProbe: () => void;
+}) {
+  const { t } = useTranslation();
+  const pillTone: 'outline' | 'ok' | 'blue' = !supported ? 'outline' : status === 'ok' ? 'ok' : status === 'checking' ? 'blue' : 'outline';
+  const statusLabel = !supported
+    ? t('settings.recording.embeddedBleUnsupported')
+    : status === 'checking'
+      ? t('settings.recording.embeddedBleChecking')
+      : status === 'ok'
+        ? t('settings.recording.embeddedBleReady')
+        : status === 'error'
+          ? t('settings.recording.embeddedBleError')
+          : t('settings.recording.embeddedBleIdle');
+  const stats = result?.stats;
+
+  return (
+    <div
+      style={{
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '0.5px solid var(--ol-line-soft)',
+        background: 'rgba(0,0,0,0.025)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <Pill tone={pillTone} size="sm">{statusLabel}</Pill>
+        <Btn
+          variant="ghost"
+          size="sm"
+          icon="refresh"
+          disabled={!supported || status === 'checking'}
+          onClick={onProbe}
+        >
+          {status === 'checking'
+            ? t('settings.recording.embeddedBleTesting')
+            : t('settings.recording.embeddedBleTestOnce')}
+        </Btn>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
+        {supported ? t('settings.recording.embeddedBleStatusDesc') : t('settings.recording.embeddedBleUnsupportedDesc')}
+      </div>
+      {message && (
+        <div
+          style={{
+            fontSize: 11.5,
+            color: status === 'error' ? 'var(--ol-err)' : 'var(--ol-ok)',
+            lineHeight: 1.5,
+            overflowWrap: 'anywhere',
+          }}
+          title={message}
+        >
+          {message}
+        </div>
+      )}
+      {stats && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <Pill tone="outline" size="sm">
+            {t('settings.recording.embeddedBlePackets', {
+              received: stats.receivedPacketCount,
+              expected: stats.expectedPacketCount ?? stats.receivedPacketCount,
+            })}
+          </Pill>
+          <Pill tone={stats.missingPacketCount === 0 ? 'ok' : 'outline'} size="sm">
+            {t('settings.recording.embeddedBleMissing', { count: stats.missingPacketCount })}
+          </Pill>
+          <Pill tone="outline" size="sm">
+            {t('settings.recording.embeddedBleDuration', { seconds: stats.durationSeconds.toFixed(1) })}
+          </Pill>
+        </div>
+      )}
+    </div>
   );
 }
 
