@@ -42,6 +42,19 @@ pwsh -NoProfile -File tools\embedded_audio_replay\generate_tts_fixtures.ps1 `
 4. 写出 `manifest.seed<seed>.json`。
 5. 输出单行 `tts_fixture_result_json=...`。
 
+## 识别准确度报告
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\embedded_audio_replay\measure_asr_accuracy.ps1 `
+  -Seed 20260518 `
+  -Count 6 `
+  -OutDir artifacts\embedded_audio_accuracy
+```
+
+脚本会复用 seeded TTS fixture，逐条调用 `tools/volcengine_asr_probe`，并在同一个目录写出 `accuracy.seed<seed>.json`。报告会记录原句、ASR transcript、简繁/标点/空白归一化后的文本、每句 CER、平均 CER 和最大 CER。
+
+输出会包含单行 `asr_accuracy_result_json=...`，用于 pipeline 提取报告路径和汇总状态。高 CER 会返回 `WARNING` 但不让脚本失败；ASR 调用失败或空 transcript 会返回 `FAIL` 并以非零状态退出。
+
 ## 当前边界
 
-这个工具只验证软件协议和 PCM 重组，不调用 ASR provider，也不连接真实 BLE 设备。进入 `P13.2` 时，需要选择可用的 `Listener-Type` ASR provider；进入真实设备验证时，需要 BLE 设备和硬件 gate。
+`generate_tts_fixtures.ps1` 只验证软件协议和 PCM 重组，不调用 ASR provider，也不连接真实 BLE 设备。`measure_asr_accuracy.ps1` 会调用本机已配置的火山 ASR provider；进入真实设备验证时，需要 BLE 设备和硬件 gate。
