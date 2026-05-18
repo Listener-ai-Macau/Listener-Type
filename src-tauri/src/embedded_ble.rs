@@ -32,13 +32,16 @@ mod windows_ble {
     use std::time::{Duration, Instant};
 
     use windows::core::{GUID, HSTRING};
-    use windows::Devices::Bluetooth::BluetoothCacheMode;
     use windows::Devices::Bluetooth::GenericAttributeProfile::{
-        GattCharacteristic, GattClientCharacteristicConfigurationDescriptorValue,
-        GattCommunicationStatus, GattDeviceService, GattValueChangedEventArgs,
+        GattCharacteristic, GattCharacteristicProperties,
+        GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
+        GattDeviceService, GattValueChangedEventArgs, GattWriteResult,
     };
-    use windows::Devices::Enumeration::DeviceInformation;
-    use windows::Foundation::{EventRegistrationToken, TypedEventHandler};
+    use windows::Devices::Bluetooth::{BluetoothCacheMode, BluetoothLEDevice};
+    use windows::Devices::Enumeration::{DeviceAccessStatus, DeviceInformation};
+    use windows::Foundation::{
+        AsyncStatus, EventRegistrationToken, IAsyncOperation, TypedEventHandler,
+    };
     use windows::Storage::Streams::{DataReader, IBuffer};
 
     const SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091a);
@@ -57,7 +60,8 @@ mod windows_ble {
         timeout: Duration,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
     ) -> Result<(), String> {
-        let characteristic = open_notify_characteristic()?;
+        let target = open_notify_target()?;
+        let characteristic = target.characteristic.clone();
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
         let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
             move |_sender, args| {
@@ -72,20 +76,22 @@ mod windows_ble {
             },
         );
 
-        let token = characteristic
-            .ValueChanged(&handler)
-            .map_err(|err| format!("BLE ValueChanged handler registration failed: {err}"))?;
-        let mut cleanup = NotifyCleanup::new(characteristic.clone(), token);
-        let status = characteristic
-            .WriteClientCharacteristicConfigurationDescriptorAsync(
-                GattClientCharacteristicConfigurationDescriptorValue::Notify,
-            )
-            .map_err(|err| format!("BLE CCCD notify write failed: {err}"))?
-            .get()
-            .map_err(|err| format!("BLE CCCD notify write wait failed: {err}"))?;
+        let mut cleanup = NotifyCleanup::new(target);
+        log::info!("[embedded-ble] enabling notify CCCD");
+        let status = write_cccd_with_timeout(
+            &characteristic,
+            GattClientCharacteristicConfigurationDescriptorValue::Notify,
+            Duration::from_secs(5),
+        )?;
         if status != GattCommunicationStatus::Success {
             return Err(format!("BLE CCCD notify write returned status={status:?}"));
         }
+        log::info!("[embedded-ble] notify CCCD enabled");
+        let token = characteristic
+            .ValueChanged(&handler)
+            .map_err(|err| format!("BLE ValueChanged handler registration failed: {err}"))?;
+        cleanup.set_token(token);
+        log::info!("[embedded-ble] ValueChanged handler registered");
 
         let deadline = Instant::now() + timeout;
         loop {
@@ -112,7 +118,7 @@ mod windows_ble {
         }
     }
 
-    fn open_notify_characteristic() -> Result<GattCharacteristic, String> {
+    fn open_notify_target() -> Result<OpenNotifyTarget, String> {
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(SERVICE_UUID)
             .map_err(|err| format!("BLE service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
@@ -148,13 +154,38 @@ mod windows_ble {
                     continue;
                 }
             };
-            match open_notify_characteristic_for_service(&id) {
-                Ok(characteristic) => {
-                    log::info!("[embedded-ble] selected service index={index} name={name}");
-                    return Ok(characteristic);
+
+            let mut candidate_error = None;
+            if let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
+                match open_notify_target_for_device(address) {
+                    Ok(target) => {
+                        log::info!(
+                            "[embedded-ble] selected device path index={index} name={name} address={address:012X}"
+                        );
+                        return Ok(target);
+                    }
+                    Err(err) => {
+                        candidate_error = Some(format!(
+                            "{name}: BLE device path {address:012X} failed: {err}"
+                        ));
+                    }
+                }
+            }
+
+            match open_notify_target_for_service(&id) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] selected service-id fallback index={index} name={name}"
+                    );
+                    return Ok(target);
                 }
                 Err(err) => {
-                    last_error = Some(format!("{name}: {err}"));
+                    last_error = Some(match candidate_error {
+                        Some(previous) => {
+                            format!("{previous}; service-id fallback failed: {err}")
+                        }
+                        None => format!("{name}: {err}"),
+                    });
                 }
             }
         }
@@ -164,13 +195,129 @@ mod windows_ble {
         }))
     }
 
-    fn open_notify_characteristic_for_service(
-        service_id: &HSTRING,
-    ) -> Result<GattCharacteristic, String> {
+    fn open_notify_target_for_device(address: u64) -> Result<OpenNotifyTarget, String> {
+        let device = open_ble_device(address)?;
+        if let Ok(access) = device
+            .RequestAccessAsync()
+            .and_then(|operation| operation.get())
+        {
+            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
+                return Err(format!("BLE device access denied status={access:?}"));
+            }
+        }
+
+        let services_result = device
+            .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, BluetoothCacheMode::Cached)
+            .map_err(|err| format!("BLE cached service discovery failed: {err}"))?
+            .get()
+            .map_err(|err| format!("BLE cached service discovery wait failed: {err}"))?;
+        let status = services_result
+            .Status()
+            .map_err(|err| format!("BLE cached service status read failed: {err}"))?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!(
+                "BLE cached service discovery returned status={status:?}"
+            ));
+        }
+
+        let services = services_result
+            .Services()
+            .map_err(|err| format!("BLE cached service list read failed: {err}"))?;
+        let count = services
+            .Size()
+            .map_err(|err| format!("BLE cached service list size failed: {err}"))?;
+        if count == 0 {
+            return Err(format!(
+                "service {SERVICE_UUID:?} not found from BLE device"
+            ));
+        }
+
+        let mut last_error = None;
+        for index in 0..count {
+            let service = match services.GetAt(index) {
+                Ok(service) => service,
+                Err(err) => {
+                    last_error = Some(format!("read BLE cached service failed: {err}"));
+                    continue;
+                }
+            };
+            match open_notify_characteristic_from_service(&service, BluetoothCacheMode::Cached) {
+                Ok(characteristic) => {
+                    return Ok(OpenNotifyTarget {
+                        characteristic,
+                        service: Some(service),
+                        device: Some(device),
+                    });
+                }
+                Err(err) => {
+                    last_error = Some(err);
+                    let _ = service.Close();
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "No subscribable embedded audio BLE notify characteristic found on device".to_string()
+        }))
+    }
+
+    fn open_ble_device(address: u64) -> Result<BluetoothLEDevice, String> {
+        let device = BluetoothLEDevice::FromBluetoothAddressAsync(address)
+            .map_err(|err| format!("BLE device open by address failed: {err}"))?
+            .get()
+            .map_err(|err| format!("BLE device open by address wait failed: {err}"))?;
+
+        let device_id = device
+            .DeviceId()
+            .map(|id| id.to_string_lossy())
+            .unwrap_or_default();
+        if device_id.is_empty() {
+            return Ok(device);
+        }
+
+        match BluetoothLEDevice::FromIdAsync(&HSTRING::from(device_id.as_str()))
+            .and_then(|operation| operation.get())
+        {
+            Ok(device_by_id) => {
+                let _ = device.Close();
+                Ok(device_by_id)
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] BLE device reopen by id failed, using address handle: {err}"
+                );
+                Ok(device)
+            }
+        }
+    }
+
+    fn open_notify_target_for_service(service_id: &HSTRING) -> Result<OpenNotifyTarget, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
             .map_err(|err| format!("BLE service open failed: {err}"))?
             .get()
             .map_err(|err| format!("BLE service open wait failed: {err}"))?;
+
+        let characteristic =
+            open_notify_characteristic_from_service(&service, BluetoothCacheMode::Uncached)?;
+        Ok(OpenNotifyTarget {
+            characteristic,
+            service: Some(service),
+            device: None,
+        })
+    }
+
+    fn open_notify_characteristic_from_service(
+        service: &GattDeviceService,
+        cache_mode: BluetoothCacheMode,
+    ) -> Result<GattCharacteristic, String> {
+        if let Ok(access) = service
+            .RequestAccessAsync()
+            .and_then(|operation| operation.get())
+        {
+            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
+                return Err(format!("BLE service access denied status={access:?}"));
+            }
+        }
         if let Ok(session) = service.Session() {
             if session.CanMaintainConnection().unwrap_or(false) {
                 let _ = session.SetMaintainConnection(true);
@@ -178,7 +325,7 @@ mod windows_ble {
         }
 
         let result = service
-            .GetCharacteristicsForUuidWithCacheModeAsync(NOTIFY_UUID, BluetoothCacheMode::Uncached)
+            .GetCharacteristicsForUuidWithCacheModeAsync(NOTIFY_UUID, cache_mode)
             .map_err(|err| format!("BLE characteristic discovery failed: {err}"))?
             .get()
             .map_err(|err| format!("BLE characteristic discovery wait failed: {err}"))?;
@@ -200,9 +347,34 @@ mod windows_ble {
         {
             return Err(format!("notify characteristic {NOTIFY_UUID:?} not found"));
         }
-        characteristics
+
+        let characteristic = characteristics
             .GetAt(0)
-            .map_err(|err| format!("BLE notify characteristic read failed: {err}"))
+            .map_err(|err| format!("BLE notify characteristic read failed: {err}"))?;
+        let properties = characteristic
+            .CharacteristicProperties()
+            .map_err(|err| format!("BLE notify characteristic properties read failed: {err}"))?;
+        if !properties.contains(GattCharacteristicProperties::Notify) {
+            return Err("BLE notify characteristic does not advertise NOTIFY".to_string());
+        }
+        Ok(characteristic)
+    }
+
+    pub(super) fn parse_bluetooth_address_from_device_id(device_id: &str) -> Option<u64> {
+        let upper = device_id.to_ascii_uppercase();
+        let suffix = upper
+            .rsplit_once("DEV_")
+            .map(|(_, suffix)| suffix)
+            .or_else(|| upper.rsplit_once('_').map(|(_, suffix)| suffix))?;
+        let hex: String = suffix
+            .chars()
+            .filter(|ch| ch.is_ascii_hexdigit())
+            .take(12)
+            .collect();
+        if hex.len() != 12 {
+            return None;
+        }
+        u64::from_str_radix(&hex, 16).ok()
     }
 
     fn buffer_to_vec(buffer: &IBuffer) -> windows::core::Result<Vec<u8>> {
@@ -213,31 +385,109 @@ mod windows_ble {
         Ok(bytes)
     }
 
-    struct NotifyCleanup {
+    fn write_cccd_with_timeout(
+        characteristic: &GattCharacteristic,
+        value: GattClientCharacteristicConfigurationDescriptorValue,
+        timeout: Duration,
+    ) -> Result<GattCommunicationStatus, String> {
+        let operation = characteristic
+            .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(value)
+            .map_err(|err| format!("BLE CCCD write failed: {err}"))?;
+        let result = wait_gatt_write_result(operation, timeout)?;
+        let status = result
+            .Status()
+            .map_err(|err| format!("BLE CCCD write status read failed: {err}"))?;
+        let protocol_error = result
+            .ProtocolError()
+            .ok()
+            .and_then(|value| value.Value().ok());
+        if let Some(protocol_error) = protocol_error {
+            log::warn!("[embedded-ble] CCCD write protocol_error={protocol_error}");
+        }
+        Ok(status)
+    }
+
+    fn wait_gatt_write_result(
+        operation: IAsyncOperation<GattWriteResult>,
+        timeout: Duration,
+    ) -> Result<GattWriteResult, String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match operation
+                .Status()
+                .map_err(|err| format!("BLE CCCD write async status failed: {err}"))?
+            {
+                AsyncStatus::Completed => {
+                    return operation
+                        .GetResults()
+                        .map_err(|err| format!("BLE CCCD write result failed: {err}"));
+                }
+                AsyncStatus::Error => {
+                    let code = operation.ErrorCode().ok();
+                    let _ = operation.Close();
+                    return Err(format!("BLE CCCD write async error: {code:?}"));
+                }
+                AsyncStatus::Canceled => {
+                    let _ = operation.Close();
+                    return Err("BLE CCCD write async canceled".to_string());
+                }
+                AsyncStatus::Started => {
+                    if Instant::now() >= deadline {
+                        let _ = operation.Cancel();
+                        let _ = operation.Close();
+                        return Err(format!(
+                            "BLE CCCD write timed out after {} ms",
+                            timeout.as_millis()
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                status => {
+                    let _ = operation.Close();
+                    return Err(format!("BLE CCCD write unknown async status={status:?}"));
+                }
+            }
+        }
+    }
+
+    struct OpenNotifyTarget {
         characteristic: GattCharacteristic,
+        service: Option<GattDeviceService>,
+        device: Option<BluetoothLEDevice>,
+    }
+
+    struct NotifyCleanup {
+        target: OpenNotifyTarget,
         token: Option<EventRegistrationToken>,
         notify_disabled: bool,
     }
 
     impl NotifyCleanup {
-        fn new(characteristic: GattCharacteristic, token: EventRegistrationToken) -> Self {
+        fn new(target: OpenNotifyTarget) -> Self {
             Self {
-                characteristic,
-                token: Some(token),
+                target,
+                token: None,
                 notify_disabled: false,
             }
+        }
+
+        fn set_token(&mut self, token: EventRegistrationToken) {
+            self.token = Some(token);
         }
 
         fn disable_notify(&mut self) {
             if self.notify_disabled {
                 return;
             }
-            let _ = self
+            if let Ok(operation) = self
+                .target
                 .characteristic
-                .WriteClientCharacteristicConfigurationDescriptorAsync(
+                .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
                     GattClientCharacteristicConfigurationDescriptorValue::None,
                 )
-                .and_then(|operation| operation.get().map(|_| ()));
+            {
+                let _ = wait_gatt_write_result(operation, Duration::from_secs(2));
+            }
             self.notify_disabled = true;
         }
     }
@@ -246,7 +496,13 @@ mod windows_ble {
         fn drop(&mut self) {
             self.disable_notify();
             if let Some(token) = self.token.take() {
-                let _ = self.characteristic.RemoveValueChanged(token);
+                let _ = self.target.characteristic.RemoveValueChanged(token);
+            }
+            if let Some(service) = self.target.service.take() {
+                let _ = service.Close();
+            }
+            if let Some(device) = self.target.device.take() {
+                let _ = device.Close();
             }
         }
     }
@@ -311,5 +567,27 @@ mod tests {
     #[test]
     fn invalid_notification_is_not_terminal() {
         assert!(!is_terminal_notification(b"not-vka1"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_bluetooth_address_from_service_instance_id() {
+        assert_eq!(
+            super::windows_ble::parse_bluetooth_address_from_device_id(
+                r"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3091A}_DCB4D91112CE"
+            ),
+            Some(0xDCB4_D911_12CE)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_bluetooth_address_from_device_instance_id() {
+        assert_eq!(
+            super::windows_ble::parse_bluetooth_address_from_device_id(
+                r"BTHLE\DEV_DCB4D91112CE\7&29C9821A&0&0000"
+            ),
+            Some(0xDCB4_D911_12CE)
+        );
     }
 }
