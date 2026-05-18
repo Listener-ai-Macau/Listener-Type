@@ -40,6 +40,26 @@ cargo run --manifest-path tools\embedded_audio_replay\Cargo.toml -- `
 
 `--terminal cancel` 和 `--terminal error` 可用于无硬件验证 cancel/error 收尾路径。
 
+## Listener-Type 调试入口
+
+桌面端保留 batch 入口，并新增对应的 streaming 入口。两组入口复用同一套 VKA1 parser、collector、ASR provider 和 coordinator 收尾逻辑：
+
+```powershell
+# batch file replay: 完整重组 PCM 后再进入 ASR
+listener-type --submit-embedded-audio path\to\audio.wav
+
+# streaming file replay: session_start 创建 ASR consumer，audio_data 到一包推一包
+listener-type --submit-embedded-audio-stream path\to\audio.wav
+
+# batch BLE: 等 stop/cancel/error 终止包后提交
+listener-type --submit-embedded-audio-ble-once 120000
+
+# streaming BLE: notification 到达即进入 coordinator streaming path
+listener-type --submit-embedded-audio-ble-stream 120000
+```
+
+`--submit-embedded-audio-wav-stream` 和 `--submit-embedded-audio-pcm16le-stream` 可显式指定文件格式；不带格式时按现有 batch 入口规则推断。流式 BLE 入口仍需要设备在线，并按协作协议获取硬件资源锁后再跑真实 smoke。
+
 ## 生成随机 TTS fixture
 
 ```powershell
