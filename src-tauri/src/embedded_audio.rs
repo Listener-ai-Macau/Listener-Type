@@ -610,6 +610,106 @@ pub struct EmbeddedAudioSubmissionResult {
     pub reconstructed_pcm_bytes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamingPcmChunk {
+    pub session_id: u32,
+    pub packet_sequence: u16,
+    pub pcm: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamingSessionEvent {
+    Started {
+        session_id: u32,
+    },
+    PcmChunk(StreamingPcmChunk),
+    Stopped {
+        session_id: u32,
+        expected_packet_count: u16,
+    },
+    Cancelled {
+        session_id: u32,
+        expected_packet_count: u16,
+    },
+    Error {
+        session_id: u32,
+        expected_packet_count: u16,
+        error_code: SessionErrorCode,
+    },
+    Ignored(IgnoredPacketReason),
+}
+
+#[derive(Debug, Default)]
+pub struct StreamingSessionCollector {
+    inner: SessionCollector,
+}
+
+impl StreamingSessionCollector {
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn handle_notification(
+        &mut self,
+        notification: &[u8],
+    ) -> Result<StreamingSessionEvent, ParseError> {
+        let packet = parse_packet(notification)?;
+        Ok(self.handle_packet(packet))
+    }
+
+    pub fn handle_packet(&mut self, packet: Packet<'_>) -> StreamingSessionEvent {
+        let header = packet.header;
+        let pcm = (header.packet_type == PacketType::AudioData)
+            .then(|| packet.payload_pcm().to_vec())
+            .unwrap_or_default();
+        let event = self.inner.handle_packet(packet);
+        match event {
+            SessionEvent::Started { session_id } => StreamingSessionEvent::Started { session_id },
+            SessionEvent::AudioData {
+                session_id,
+                packet_sequence,
+                ..
+            } => StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+                session_id,
+                packet_sequence,
+                pcm,
+            }),
+            SessionEvent::Stopped {
+                session_id,
+                expected_packet_count,
+            } => StreamingSessionEvent::Stopped {
+                session_id,
+                expected_packet_count,
+            },
+            SessionEvent::Cancelled {
+                session_id,
+                expected_packet_count,
+            } => StreamingSessionEvent::Cancelled {
+                session_id,
+                expected_packet_count,
+            },
+            SessionEvent::Error {
+                session_id,
+                expected_packet_count,
+                error_code,
+            } => StreamingSessionEvent::Error {
+                session_id,
+                expected_packet_count,
+                error_code,
+            },
+            SessionEvent::Ignored(reason) => StreamingSessionEvent::Ignored(reason),
+        }
+    }
+
+    pub fn inner(&self) -> &SessionCollector {
+        &self.inner
+    }
+
+    pub fn into_inner(self) -> SessionCollector {
+        self.inner
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SessionCollector {
     session_id: Option<u32>,
@@ -1131,6 +1231,130 @@ mod tests {
         assert!(collector.has_successful_complete_session());
         assert_eq!(collector.reconstructed_pcm(), pcm);
         assert_eq!(collector.stats().expected_packet_count, Some(3));
+    }
+
+    #[test]
+    fn streaming_collector_emits_pcm_chunk_per_audio_packet() {
+        let mut collector = StreamingSessionCollector::default();
+
+        let started = collector
+            .handle_notification(&packet(PacketType::SessionStart, 205, 0, &[], Some(0)))
+            .expect("start");
+        let chunk_0 = collector
+            .handle_notification(&packet(PacketType::AudioData, 205, 0, &[1, 2], None))
+            .expect("audio 0");
+        let chunk_1 = collector
+            .handle_notification(&packet(PacketType::AudioData, 205, 1, &[3, 4], None))
+            .expect("audio 1");
+        let stopped = collector
+            .handle_notification(&packet(PacketType::SessionStop, 205, 2, &[], Some(0)))
+            .expect("stop");
+
+        assert_eq!(started, StreamingSessionEvent::Started { session_id: 205 });
+        assert_eq!(
+            chunk_0,
+            StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+                session_id: 205,
+                packet_sequence: 0,
+                pcm: vec![1, 2],
+            })
+        );
+        assert_eq!(
+            chunk_1,
+            StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+                session_id: 205,
+                packet_sequence: 1,
+                pcm: vec![3, 4],
+            })
+        );
+        assert_eq!(
+            stopped,
+            StreamingSessionEvent::Stopped {
+                session_id: 205,
+                expected_packet_count: 2,
+            }
+        );
+        assert!(collector.inner().has_successful_complete_session());
+        assert_eq!(collector.inner().reconstructed_pcm(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn streaming_collector_preserves_batch_collector_behavior_for_duplicates() {
+        let mut collector = StreamingSessionCollector::default();
+
+        collector
+            .handle_notification(&packet(PacketType::AudioData, 206, 0, &[1, 2], None))
+            .expect("audio small");
+        let replacement = collector
+            .handle_notification(&packet(PacketType::AudioData, 206, 0, &[1, 2, 3, 4], None))
+            .expect("audio larger");
+        let duplicate = collector
+            .handle_notification(&packet(PacketType::AudioData, 206, 0, &[9], None))
+            .expect("audio duplicate");
+
+        assert_eq!(
+            replacement,
+            StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+                session_id: 206,
+                packet_sequence: 0,
+                pcm: vec![1, 2, 3, 4],
+            })
+        );
+        assert_eq!(
+            duplicate,
+            StreamingSessionEvent::Ignored(IgnoredPacketReason::DuplicateOrShorterPacket)
+        );
+        assert_eq!(collector.inner().reconstructed_pcm(), vec![1, 2, 3, 4]);
+        assert_eq!(collector.inner().stats().replaced_packet_count, 1);
+        assert_eq!(collector.inner().stats().duplicate_packet_count, 1);
+    }
+
+    #[test]
+    fn streaming_collector_surfaces_cancel_and_error_terminal_events() {
+        let mut cancel_collector = StreamingSessionCollector::default();
+        cancel_collector
+            .handle_notification(&build_session_start_notification(207))
+            .expect("cancel start");
+        let cancelled = cancel_collector
+            .handle_notification(&build_session_cancel_notification(207, 0))
+            .expect("cancel");
+
+        assert_eq!(
+            cancelled,
+            StreamingSessionEvent::Cancelled {
+                session_id: 207,
+                expected_packet_count: 0,
+            }
+        );
+        assert_eq!(
+            cancel_collector.inner().stats().end_reason,
+            Some(SessionEndReason::Cancel)
+        );
+
+        let mut error_collector = StreamingSessionCollector::default();
+        error_collector
+            .handle_notification(&build_session_start_notification(208))
+            .expect("error start");
+        let errored = error_collector
+            .handle_notification(&build_session_error_notification(
+                208,
+                1,
+                SessionErrorCode::LinkLost,
+            ))
+            .expect("error");
+
+        assert_eq!(
+            errored,
+            StreamingSessionEvent::Error {
+                session_id: 208,
+                expected_packet_count: 1,
+                error_code: SessionErrorCode::LinkLost,
+            }
+        );
+        assert_eq!(
+            error_collector.inner().stats().end_reason,
+            Some(SessionEndReason::Error(SessionErrorCode::LinkLost))
+        );
     }
 
     #[test]
