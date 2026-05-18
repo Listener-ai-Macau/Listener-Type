@@ -1320,6 +1320,16 @@ pub async fn submit_embedded_audio_notifications(
 }
 
 #[tauri::command]
+pub async fn submit_embedded_audio_streaming_notifications(
+    coord: CoordinatorState<'_>,
+    notifications: Vec<Vec<u8>>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    coord
+        .submit_embedded_audio_streaming_notifications(notifications)
+        .await
+}
+
+#[tauri::command]
 pub async fn submit_embedded_audio_file(
     coord: CoordinatorState<'_>,
     path: String,
@@ -1331,11 +1341,30 @@ pub async fn submit_embedded_audio_file(
 }
 
 #[tauri::command]
+pub async fn submit_embedded_audio_streaming_file(
+    coord: CoordinatorState<'_>,
+    path: String,
+    format: Option<crate::embedded_audio::EmbeddedAudioInputFormat>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    coord
+        .submit_embedded_audio_streaming_file(PathBuf::from(path), format)
+        .await
+}
+
+#[tauri::command]
 pub async fn submit_embedded_audio_ble_once(
     coord: CoordinatorState<'_>,
     timeout_ms: Option<u64>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     coord.submit_embedded_audio_ble_once(timeout_ms).await
+}
+
+#[tauri::command]
+pub async fn submit_embedded_audio_ble_stream(
+    coord: CoordinatorState<'_>,
+    timeout_ms: Option<u64>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    coord.submit_embedded_audio_ble_stream(timeout_ms).await
 }
 
 #[tauri::command]

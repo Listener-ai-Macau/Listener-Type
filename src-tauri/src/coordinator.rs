@@ -65,7 +65,9 @@ use dictation::dictation_error_code;
 use dictation::{
     begin_session, cancel_session, end_session, handle_pressed, handle_pressed_edge,
     handle_released, handle_released_edge, request_stop_during_starting,
-    submit_embedded_audio_ble_once, submit_embedded_audio_file, submit_embedded_audio_notifications,
+    submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream, submit_embedded_audio_file,
+    submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,
+    submit_embedded_audio_streaming_notifications,
 };
 use qa::{close_qa_panel, handle_qa_hotkey_pressed, QaPhase, QaSessionState};
 #[cfg(test)]
@@ -765,6 +767,13 @@ impl Coordinator {
         submit_embedded_audio_notifications(&self.inner, notifications).await
     }
 
+    pub async fn submit_embedded_audio_streaming_notifications(
+        &self,
+        notifications: Vec<Vec<u8>>,
+    ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+        submit_embedded_audio_streaming_notifications(&self.inner, notifications).await
+    }
+
     pub async fn submit_embedded_audio_file(
         &self,
         path: std::path::PathBuf,
@@ -773,11 +782,26 @@ impl Coordinator {
         submit_embedded_audio_file(&self.inner, path, format).await
     }
 
+    pub async fn submit_embedded_audio_streaming_file(
+        &self,
+        path: std::path::PathBuf,
+        format: Option<crate::embedded_audio::EmbeddedAudioInputFormat>,
+    ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+        submit_embedded_audio_streaming_file(&self.inner, path, format).await
+    }
+
     pub async fn submit_embedded_audio_ble_once(
         &self,
         timeout_ms: Option<u64>,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
         submit_embedded_audio_ble_once(&self.inner, timeout_ms).await
+    }
+
+    pub async fn submit_embedded_audio_ble_stream(
+        &self,
+        timeout_ms: Option<u64>,
+    ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+        submit_embedded_audio_ble_stream(&self.inner, timeout_ms).await
     }
 
     pub fn cancel_dictation(&self) {

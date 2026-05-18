@@ -34,8 +34,15 @@ pub enum CliIntent {
         path: PathBuf,
         format: Option<crate::embedded_audio::EmbeddedAudioInputFormat>,
     },
+    /// 调试 / 自动化入口：把本地 16k mono i16 WAV/PCM 拆成 VKA1 事件流送入听写链路。
+    SubmitEmbeddedAudioStreamingFile {
+        path: PathBuf,
+        format: Option<crate::embedded_audio::EmbeddedAudioInputFormat>,
+    },
     /// 调试 / 自动化入口：订阅一次嵌入式 BLE notify，会话结束后送入听写链路。
     SubmitEmbeddedAudioBleOnce { timeout_ms: Option<u64> },
+    /// 调试 / 自动化入口：订阅嵌入式 BLE notify，收到 audio_data 立刻送入 ASR。
+    SubmitEmbeddedAudioBleStream { timeout_ms: Option<u64> },
 }
 
 /// 扫描 argv 找第一个能识别的 intent。未知参数静默忽略，绝不 panic。
@@ -72,8 +79,37 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
                     });
                 }
             }
+            "--submit-embedded-audio-stream" => {
+                if let Some(path) = next_path_arg(&mut args) {
+                    return Some(CliIntent::SubmitEmbeddedAudioStreamingFile {
+                        path,
+                        format: None,
+                    });
+                }
+            }
+            "--submit-embedded-audio-wav-stream" => {
+                if let Some(path) = next_path_arg(&mut args) {
+                    return Some(CliIntent::SubmitEmbeddedAudioStreamingFile {
+                        path,
+                        format: Some(crate::embedded_audio::EmbeddedAudioInputFormat::Wav),
+                    });
+                }
+            }
+            "--submit-embedded-audio-pcm16le-stream" => {
+                if let Some(path) = next_path_arg(&mut args) {
+                    return Some(CliIntent::SubmitEmbeddedAudioStreamingFile {
+                        path,
+                        format: Some(crate::embedded_audio::EmbeddedAudioInputFormat::Pcm16Le),
+                    });
+                }
+            }
             "--submit-embedded-audio-ble-once" => {
                 return Some(CliIntent::SubmitEmbeddedAudioBleOnce {
+                    timeout_ms: next_u64_arg(&mut args),
+                });
+            }
+            "--submit-embedded-audio-ble-stream" => {
+                return Some(CliIntent::SubmitEmbeddedAudioBleStream {
                     timeout_ms: next_u64_arg(&mut args),
                 });
             }
@@ -185,6 +221,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_recognizes_embedded_audio_streaming_file() {
+        let args = vec![
+            "listener-type",
+            "--submit-embedded-audio-stream",
+            "input.wav",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::SubmitEmbeddedAudioStreamingFile {
+                path: PathBuf::from("input.wav"),
+                format: None,
+            })
+        );
+    }
+
+    #[test]
     fn parse_ignores_embedded_audio_flag_without_path() {
         let args = vec!["listener-type", "--submit-embedded-audio"];
         assert_eq!(parse_cli_intent(&args), None);
@@ -211,6 +263,21 @@ mod tests {
         assert_eq!(
             parse_cli_intent(&args),
             Some(CliIntent::SubmitEmbeddedAudioBleOnce { timeout_ms: None })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_ble_stream() {
+        let args = vec![
+            "listener-type",
+            "--submit-embedded-audio-ble-stream",
+            "90000",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::SubmitEmbeddedAudioBleStream {
+                timeout_ms: Some(90_000),
+            })
         );
     }
 

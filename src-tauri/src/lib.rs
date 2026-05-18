@@ -311,8 +311,11 @@ pub fn run() {
             commands::start_dictation,
             commands::stop_dictation,
             commands::submit_embedded_audio_notifications,
+            commands::submit_embedded_audio_streaming_notifications,
             commands::submit_embedded_audio_file,
+            commands::submit_embedded_audio_streaming_file,
             commands::submit_embedded_audio_ble_once,
+            commands::submit_embedded_audio_ble_stream,
             commands::cancel_dictation,
             commands::handle_window_hotkey_event,
             #[cfg(debug_assertions)]
@@ -892,6 +895,25 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
                 }
             });
         }
+        cli::CliIntent::SubmitEmbeddedAudioStreamingFile { path, format } => {
+            let coord = Arc::clone(&coordinator);
+            tauri::async_runtime::spawn(async move {
+                log::info!(
+                    "[cli] submit-embedded-audio-streaming-file: path={} format={format:?}",
+                    path.display()
+                );
+                match coord.submit_embedded_audio_streaming_file(path, format).await {
+                    Ok(result) => log::info!(
+                        "[cli] submit-embedded-audio-streaming-file done: pcm_bytes={} missing_packets={}",
+                        result.reconstructed_pcm_bytes,
+                        result.stats.missing_packet_count
+                    ),
+                    Err(err) => {
+                        log::warn!("[cli] submit-embedded-audio-streaming-file failed: {err}")
+                    }
+                }
+            });
+        }
         cli::CliIntent::SubmitEmbeddedAudioBleOnce { timeout_ms } => {
             let coord = Arc::clone(&coordinator);
             tauri::async_runtime::spawn(async move {
@@ -905,6 +927,20 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
                         result.stats.missing_packet_count
                     ),
                     Err(err) => log::warn!("[cli] submit-embedded-audio-ble-once failed: {err}"),
+                }
+            });
+        }
+        cli::CliIntent::SubmitEmbeddedAudioBleStream { timeout_ms } => {
+            let coord = Arc::clone(&coordinator);
+            tauri::async_runtime::spawn(async move {
+                log::info!("[cli] submit-embedded-audio-ble-stream: timeout_ms={timeout_ms:?}");
+                match coord.submit_embedded_audio_ble_stream(timeout_ms).await {
+                    Ok(result) => log::info!(
+                        "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={}",
+                        result.reconstructed_pcm_bytes,
+                        result.stats.missing_packet_count
+                    ),
+                    Err(err) => log::warn!("[cli] submit-embedded-audio-ble-stream failed: {err}"),
                 }
             });
         }
