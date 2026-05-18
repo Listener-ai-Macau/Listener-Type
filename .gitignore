@@ -4,6 +4,7 @@ dist/
 *.local
 .env
 .vite/
+artifacts/
 .artifacts/
 .omx/
 .task/

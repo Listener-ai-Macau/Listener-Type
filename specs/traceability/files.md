@@ -98,6 +98,11 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/windows_ime_protocol.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_session.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/tauri.conf.json` | Build and release config | Build, updater and audit scripts |
+| `tools/embedded_audio_replay/Cargo.lock` | Embedded BLE audio | VKA1 replay smoke and seeded ASR accuracy |
+| `tools/embedded_audio_replay/Cargo.toml` | Embedded BLE audio | VKA1 replay smoke and seeded ASR accuracy |
+| `tools/embedded_audio_replay/generate_tts_fixtures.ps1` | Embedded BLE audio | Seeded TTS fixture generation |
+| `tools/embedded_audio_replay/measure_asr_accuracy.ps1` | Embedded BLE audio | Seeded ASR accuracy / CER report |
+| `tools/embedded_audio_replay/src/main.rs` | Embedded BLE audio | VKA1 replay smoke |
 | `tools/volcengine_asr_probe/Cargo.lock` | ASR providers | Volcengine ASR smoke and cargo check |
 | `tools/volcengine_asr_probe/Cargo.toml` | ASR providers | Volcengine ASR smoke and cargo check |
 | `tools/volcengine_asr_probe/src/asr/mod.rs` | ASR providers | Volcengine ASR smoke and cargo check |
@@ -183,6 +188,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/pages/_atoms.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AboutUpdateControl.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AdvancedSection.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/settings/EmbeddedBleStatusPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/LanguageSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/PermissionsSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/ShortcutsSection.tsx` | React UI | TypeScript build and visual smoke |
