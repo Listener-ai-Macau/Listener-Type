@@ -20,9 +20,9 @@ use crate::persistence::{
     PreferencesStore,
 };
 use crate::polish::{
-    http_client_builder_with_proxy, CodexOAuthConfig, CodexOAuthCredentials,
-    CodexOAuthLLMProvider, LLMError, OpenAICompatibleConfig, OpenAICompatibleLLMProvider,
-    ProviderProxyConfig, CODEX_DEFAULT_MODEL, CODEX_OAUTH_PROVIDER_ID,
+    http_client_builder_with_proxy, CodexOAuthConfig, CodexOAuthCredentials, CodexOAuthLLMProvider,
+    LLMError, OpenAICompatibleConfig, OpenAICompatibleLLMProvider, ProviderProxyConfig,
+    CODEX_DEFAULT_MODEL, CODEX_OAUTH_PROVIDER_ID,
 };
 use crate::recorder::{AudioConsumer, Recorder};
 use crate::types::{
@@ -60,6 +60,14 @@ impl AudioConsumer for LevelProbeConsumer {
 #[tauri::command]
 pub fn get_settings(coord: CoordinatorState<'_>) -> UserPreferences {
     coord.prefs().get()
+}
+
+#[tauri::command]
+pub fn is_main_window_start_hidden() -> bool {
+    std::env::var("LISTENER_TYPE_HIDE_MAIN_ON_START")
+        .ok()
+        .as_deref()
+        == Some("1")
 }
 
 #[tauri::command]
@@ -360,7 +368,8 @@ fn parse_latest_beta_from_atom(body: &str) -> Option<LatestBetaRelease> {
         if !tag_name.ends_with("-beta-tauri") {
             continue;
         }
-        let html_url = format!("https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/{tag_name}");
+        let html_url =
+            format!("https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/{tag_name}");
         let published_at =
             extract_between(entry_body, "<updated>", "</updated>").unwrap_or_default();
         return Some(LatestBetaRelease {
@@ -723,7 +732,10 @@ fn read_openai_provider_config(kind: &str) -> Result<ProviderConfig, String> {
     })
 }
 
-fn read_provider_proxy_config(kind: &str, provider_id: &str) -> Result<ProviderProxyConfig, String> {
+fn read_provider_proxy_config(
+    kind: &str,
+    provider_id: &str,
+) -> Result<ProviderProxyConfig, String> {
     let (mode_account, url_account) = match kind {
         "llm" => (
             CredentialAccount::LlmProxyMode,
@@ -1214,7 +1226,8 @@ fn is_valid_local_pack_id(s: &str) -> bool {
     if s.is_empty() || s.len() > 128 {
         return false;
     }
-    s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_')
+    s.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_')
 }
 
 // ─────────────────────────── vocab ───────────────────────────
@@ -2450,8 +2463,8 @@ fn marketplace_url_from_prefs(prefs: &UserPreferences) -> Result<String, String>
     if configured.is_empty() {
         return Err(MARKETPLACE_BACKEND_DISABLED.to_string());
     }
-    let parsed = reqwest::Url::parse(configured)
-        .map_err(|e| format!("invalid marketplace url: {e}"))?;
+    let parsed =
+        reqwest::Url::parse(configured).map_err(|e| format!("invalid marketplace url: {e}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("marketplace url must use http or https".into());
     }
@@ -2501,8 +2514,10 @@ pub async fn marketplace_list(
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("marketplace HTTP {status}: {body}"));
     }
-    let items: Vec<MarketplaceListItem> =
-        resp.json().await.map_err(|e| format!("parse failed: {e}"))?;
+    let items: Vec<MarketplaceListItem> = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse failed: {e}"))?;
     Ok(items)
 }
 
@@ -2946,6 +2961,8 @@ pub async fn github_device_flow_poll(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "windows")]
+    use super::release_foundry_runtime_if_inactive;
     use super::{
         active_asr_is_keyless_for_validation, active_foundry_model_from_prefs,
         asr_configured_for_provider, asr_transcriptions_url, fetch_provider_models,
@@ -2955,10 +2972,8 @@ mod tests {
         parse_model_ids, persist_settings, validate_foundry_model_alias, ProviderConfig,
         SettingsWriter,
     };
-    use crate::polish::ProviderProxyConfig;
-    #[cfg(target_os = "windows")]
-    use super::release_foundry_runtime_if_inactive;
     use crate::persistence::CredentialsSnapshot;
+    use crate::polish::ProviderProxyConfig;
     use crate::types::{
         ComboBinding, HotkeyBinding, HotkeyMode, HotkeyTrigger, ShortcutBinding, UserPreferences,
     };
@@ -3688,13 +3703,17 @@ mod tests {
         // 长度对但含 `/`：dash 位置错或非 hex 字符都不通过
         assert!(!is_valid_session_id("550e8400-e29b-41d4-a716-44665544/000"));
         assert!(!is_valid_session_id("550e8400_e29b_41d4_a716_446655440000")); // 用 _ 代 -
-        // 非 hex 字符
+                                                                               // 非 hex 字符
         assert!(!is_valid_session_id("550e8400-e29b-41d4-a716-44665544000g"));
         // 长度不对（35 / 37）
         assert!(!is_valid_session_id("550e8400-e29b-41d4-a716-44665544000"));
-        assert!(!is_valid_session_id("550e8400-e29b-41d4-a716-4466554400000"));
+        assert!(!is_valid_session_id(
+            "550e8400-e29b-41d4-a716-4466554400000"
+        ));
         // NUL 字节
-        assert!(!is_valid_session_id("550e8400-e29b-41d4-a716-44665544\x00000"));
+        assert!(!is_valid_session_id(
+            "550e8400-e29b-41d4-a716-44665544\x00000"
+        ));
         // 百分号编码与绝对路径
         assert!(!is_valid_session_id("%2e%2e/recordings/x"));
         assert!(!is_valid_session_id("/Users/attacker/secret.wav"));
@@ -3705,7 +3724,9 @@ mod tests {
         assert!(is_valid_local_pack_id("builtin.light"));
         assert!(is_valid_local_pack_id("builtin.structured"));
         assert!(is_valid_local_pack_id("custom.meeting"));
-        assert!(is_valid_local_pack_id("550e8400-e29b-41d4-a716-446655440000"));
+        assert!(is_valid_local_pack_id(
+            "550e8400-e29b-41d4-a716-446655440000"
+        ));
         assert!(is_valid_local_pack_id("my_pack_v2"));
         assert!(is_valid_local_pack_id("Pack-2026.05"));
     }

@@ -81,8 +81,8 @@ impl GeminiProvider {
             config.request_timeout_secs,
             &config.proxy_config,
         )
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
         Self { config, client }
     }
 

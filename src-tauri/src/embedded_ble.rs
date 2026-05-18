@@ -26,6 +26,8 @@ fn is_terminal_notification(notification: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
+const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[cfg(target_os = "windows")]
 mod windows_ble {
     use std::sync::mpsc;
@@ -77,6 +79,16 @@ mod windows_ble {
         );
 
         let mut cleanup = NotifyCleanup::new(target);
+        log::info!("[embedded-ble] resetting notify CCCD before enable");
+        match write_cccd_with_timeout(
+            &characteristic,
+            GattClientCharacteristicConfigurationDescriptorValue::None,
+            Duration::from_secs(2),
+        ) {
+            Ok(status) => log::info!("[embedded-ble] notify CCCD reset status={status:?}"),
+            Err(err) => log::warn!("[embedded-ble] notify CCCD reset skipped: {err}"),
+        }
+        std::thread::sleep(Duration::from_millis(150));
         log::info!("[embedded-ble] enabling notify CCCD");
         let status = write_cccd_with_timeout(
             &characteristic,
@@ -94,6 +106,8 @@ mod windows_ble {
         log::info!("[embedded-ble] ValueChanged handler registered");
 
         let deadline = Instant::now() + timeout;
+        let mut collector = crate::embedded_audio::SessionCollector::default();
+        let mut stop_drain_deadline: Option<Instant> = None;
         loop {
             let now = Instant::now();
             if now >= deadline {
@@ -103,15 +117,54 @@ mod windows_ble {
                 ));
             }
             let remaining = deadline.saturating_duration_since(now);
-            let notification = rx
-                .recv_timeout(remaining)
-                .map_err(|err| format!("BLE embedded audio notification wait failed: {err}"))?;
+            let receive_timeout = stop_drain_deadline
+                .map(|drain_deadline| drain_deadline.saturating_duration_since(now).min(remaining))
+                .unwrap_or(remaining);
+            let notification = match rx.recv_timeout(receive_timeout) {
+                Ok(notification) => notification,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if stop_drain_deadline
+                        .is_some_and(|drain_deadline| Instant::now() >= drain_deadline)
+                    {
+                        log::warn!(
+                            "[embedded-ble] stop drain timed out after {} ms; closing notify with remaining missing packets",
+                            super::STOP_DRAIN_TIMEOUT.as_millis()
+                        );
+                        cleanup.disable_notify();
+                        return Ok(());
+                    }
+                    return Err(
+                        "BLE embedded audio notification wait failed: timed out waiting on channel"
+                            .to_string(),
+                    );
+                }
+                Err(err) => {
+                    return Err(format!(
+                        "BLE embedded audio notification wait failed: {err}"
+                    ));
+                }
+            };
             let terminal = super::is_terminal_notification(&notification);
+            let local_event = collector.handle_notification(&notification).ok();
             on_event(crate::embedded_ble::BleNotificationEvent {
                 notification,
                 terminal,
             })?;
-            if terminal {
+            if matches!(
+                local_event,
+                Some(crate::embedded_audio::SessionEvent::Cancelled { .. })
+                    | Some(crate::embedded_audio::SessionEvent::Error { .. })
+            ) {
+                cleanup.disable_notify();
+                return Ok(());
+            }
+            if matches!(
+                local_event,
+                Some(crate::embedded_audio::SessionEvent::Stopped { .. })
+            ) {
+                stop_drain_deadline = Some(Instant::now() + super::STOP_DRAIN_TIMEOUT);
+            }
+            if collector.has_successful_complete_session() {
                 cleanup.disable_notify();
                 return Ok(());
             }

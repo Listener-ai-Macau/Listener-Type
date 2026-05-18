@@ -244,11 +244,7 @@ mod tests {
 
     #[test]
     fn parse_recognizes_embedded_ble_once_with_timeout() {
-        let args = vec![
-            "listener-type",
-            "--submit-embedded-audio-ble-once",
-            "90000",
-        ];
+        let args = vec!["listener-type", "--submit-embedded-audio-ble-once", "90000"];
         assert_eq!(
             parse_cli_intent(&args),
             Some(CliIntent::SubmitEmbeddedAudioBleOnce {

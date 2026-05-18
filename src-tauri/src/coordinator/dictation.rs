@@ -18,6 +18,18 @@ const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 4.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
 
+fn clear_embedded_audio_stats(inner: &Arc<Inner>) {
+    *inner.embedded_audio_stats.lock() = None;
+}
+
+fn store_embedded_audio_stats(inner: &Arc<Inner>, stats: crate::embedded_audio::SessionStats) {
+    *inner.embedded_audio_stats.lock() = Some(stats);
+}
+
+fn take_embedded_audio_stats(inner: &Arc<Inner>) -> Option<crate::embedded_audio::SessionStats> {
+    inner.embedded_audio_stats.lock().take()
+}
+
 struct EmbeddedAudioDictationSession {
     session_id: SessionId,
     active_asr: String,
@@ -73,6 +85,7 @@ struct EmbeddedStreamingDictation {
     collector: crate::embedded_audio::StreamingSessionCollector,
     session: Option<EmbeddedAudioDictationSession>,
     embedded_session_id: Option<u32>,
+    pending_stop_expected_packet_count: Option<u16>,
     terminal_received: bool,
 }
 
@@ -550,6 +563,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         }
         session_id
     };
+    clear_embedded_audio_stats(inner);
     #[cfg(target_os = "windows")]
     {
         let prepared = inner.windows_ime.prepare_session();
@@ -1200,7 +1214,11 @@ pub(super) async fn submit_embedded_audio_ble_stream(
         }
     }
     if !streaming.terminal_received {
-        streaming.abort_active_session(inner, "嵌入式 BLE 流式会话尚未收到结束包");
+        if streaming.collector.inner().terminal_received() {
+            streaming.finish_pending_stop_after_capture(inner).await?;
+        } else {
+            streaming.abort_active_session(inner, "嵌入式 BLE 流式会话尚未收到结束包");
+        }
     }
     streaming.into_submission_result()
 }
@@ -1233,6 +1251,7 @@ impl EmbeddedStreamingDictation {
                 Ok(false)
             }
             crate::embedded_audio::StreamingSessionEvent::PcmChunk(chunk) => {
+                let chunk_session_id = chunk.session_id;
                 self.begin_session_if_needed(inner, chunk.session_id)
                     .await?;
                 let session = self
@@ -1240,16 +1259,40 @@ impl EmbeddedStreamingDictation {
                     .as_mut()
                     .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
                 session.consume_streaming_pcm(inner, &chunk.pcm)?;
+                if let Some(expected_packet_count) = self.pending_stop_expected_packet_count {
+                    if self.collector.inner().has_successful_complete_session() {
+                        self.finish_streaming_session(
+                            inner,
+                            chunk_session_id,
+                            expected_packet_count,
+                        )
+                        .await?;
+                        self.terminal_received = true;
+                        return Ok(true);
+                    }
+                }
                 Ok(false)
             }
             crate::embedded_audio::StreamingSessionEvent::Stopped {
                 session_id,
                 expected_packet_count,
             } => {
-                self.finish_streaming_session(inner, session_id, expected_packet_count)
-                    .await?;
-                self.terminal_received = true;
-                Ok(true)
+                self.pending_stop_expected_packet_count = Some(expected_packet_count);
+                if self.collector.inner().has_successful_complete_session() {
+                    self.finish_streaming_session(inner, session_id, expected_packet_count)
+                        .await?;
+                    self.terminal_received = true;
+                    Ok(true)
+                } else {
+                    let stats = self.collector.inner().stats();
+                    log::info!(
+                        "[coord] embedded audio streaming stop received; waiting for tail packets (expected={}, received={}, missing={})",
+                        expected_packet_count,
+                        stats.received_packet_count,
+                        stats.missing_packet_count
+                    );
+                    Ok(false)
+                }
             }
             crate::embedded_audio::StreamingSessionEvent::Cancelled { session_id, .. } => {
                 self.abort_streaming_session(inner, session_id, "嵌入式音频会话已取消");
@@ -1328,6 +1371,7 @@ impl EmbeddedStreamingDictation {
                 stats.missing_packet_indices
             );
         }
+        store_embedded_audio_stats(inner, stats.clone());
 
         let session = self
             .session
@@ -1357,6 +1401,29 @@ impl EmbeddedStreamingDictation {
             archive_active
         );
         end_session(inner).await
+    }
+
+    async fn finish_pending_stop_after_capture(
+        &mut self,
+        inner: &Arc<Inner>,
+    ) -> Result<(), String> {
+        let embedded_session_id = self
+            .embedded_session_id
+            .ok_or_else(|| "嵌入式 BLE 流式会话尚未收到开始包".to_string())?;
+        let expected_packet_count = self
+            .pending_stop_expected_packet_count
+            .or_else(|| {
+                self.collector
+                    .inner()
+                    .stats()
+                    .expected_packet_count
+                    .and_then(|count| u16::try_from(count).ok())
+            })
+            .ok_or_else(|| "嵌入式 BLE 流式会话尚未收到结束包".to_string())?;
+        self.finish_streaming_session(inner, embedded_session_id, expected_packet_count)
+            .await?;
+        self.terminal_received = true;
+        Ok(())
     }
 
     fn abort_streaming_session(
@@ -1419,6 +1486,7 @@ async fn begin_embedded_audio_dictation_session(
         begin_session_state(&mut state, capture_focus_target(), capture_frontmost_app())
             .ok_or_else(|| "当前已有听写会话在运行，暂不能提交嵌入式音频".to_string())?
     };
+    clear_embedded_audio_stats(inner);
     #[cfg(target_os = "windows")]
     {
         let prepared = inner.windows_ime.prepare_session();
@@ -1756,6 +1824,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         Some(a) => a,
         None => {
             restore_prepared_windows_ime_session(inner, current_session_id);
+            clear_embedded_audio_stats(inner);
             inner.state.lock().phase = SessionPhase::Idle;
             return Ok(());
         }
@@ -1996,6 +2065,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     if inner.state.lock().cancelled {
         log::info!("[coord] cancel detected after ASR — discarding transcript");
         restore_prepared_windows_ime_session(inner, current_session_id);
+        clear_embedded_audio_stats(inner);
         // PR #387 的「cancel 后清 focus_target」契约要在 Processing 路径上也成立。
         // cancel_session 在 Processing 阶段故意跳过 finish_cancel_session_state（让
         // 这里收尾），但此前的 end_session 没把 focus_target 清掉。logic-review
@@ -2040,6 +2110,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
             // 通过原始录音定位"是不是麦克风太小声 / ASR 模型问题"的场景。修 pr_agent
             // "Missing Audio" 反馈。
             has_audio_recording: Some(inner.audio_archive_active.load(Ordering::Relaxed)),
+            embedded_audio_stats: take_embedded_audio_stats(inner),
         };
         let prefs_snapshot = inner.prefs.get();
         if let Err(e) = inner.history.append_with_retention(
@@ -2366,6 +2437,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         // 用 begin_session 时 Recorder::start 返回的实际写盘状态，而不是 prefs 开关——
         // 开关打开但路径创建失败时这里是 false，避免前端渲染播放按钮后端 404。
         has_audio_recording: Some(inner.audio_archive_active.load(Ordering::Relaxed)),
+        embedded_audio_stats: take_embedded_audio_stats(inner),
     };
     if let Err(e) = inner.history.append_with_retention(
         session,

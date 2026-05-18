@@ -25,7 +25,7 @@ import {
   shouldShowHotkeyModeMigrationPrompt,
 } from '../lib/hotkeyMigration';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
-import { getCredentials } from '../lib/ipc';
+import { getCredentials, isMainWindowStartHidden } from '../lib/ipc';
 import {
   PROVIDER_SETUP_PROMPT_DEFERRED_KEY,
   shouldShowProviderSetupPrompt,
@@ -110,6 +110,9 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (await isMainWindowStartHidden()) {
+        return;
+      }
       const credentials = await getCredentials();
       const promptDeferredValue = window.sessionStorage.getItem(PROVIDER_SETUP_PROMPT_DEFERRED_KEY);
       if (!cancelled && shouldShowProviderSetupPrompt(credentials, promptDeferredValue)) {

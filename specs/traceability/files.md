@@ -102,6 +102,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `tools/embedded_audio_replay/Cargo.toml` | Embedded BLE audio | VKA1 replay smoke and seeded ASR accuracy |
 | `tools/embedded_audio_replay/generate_tts_fixtures.ps1` | Embedded BLE audio | Seeded TTS fixture generation |
 | `tools/embedded_audio_replay/measure_asr_accuracy.ps1` | Embedded BLE audio | Seeded ASR accuracy / CER report |
+| `tools/embedded_audio_replay/run_ble_stream_smoke.ps1` | Embedded BLE audio | Serial-triggered BLE streaming smoke |
 | `tools/embedded_audio_replay/src/main.rs` | Embedded BLE audio | VKA1 replay smoke |
 | `tools/volcengine_asr_probe/Cargo.lock` | ASR providers | Volcengine ASR smoke and cargo check |
 | `tools/volcengine_asr_probe/Cargo.toml` | ASR providers | Volcengine ASR smoke and cargo check |

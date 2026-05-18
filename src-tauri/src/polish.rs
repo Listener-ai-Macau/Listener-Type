@@ -417,8 +417,8 @@ impl OpenAICompatibleLLMProvider {
             config.request_timeout_secs,
             &config.proxy_config,
         )
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
         Self { config, client }
     }
 
@@ -1046,8 +1046,8 @@ impl CodexOAuthLLMProvider {
             config.request_timeout_secs,
             &config.proxy_config,
         )
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
         Self { config, client }
     }
 
@@ -2860,8 +2860,7 @@ mod tests {
 
     #[test]
     fn explicit_proxy_policy_overrides_provider_default_but_not_loopback() {
-        let deepseek_system =
-            ProviderProxyConfig::with_mode("deepseek", ProviderProxyMode::System);
+        let deepseek_system = ProviderProxyConfig::with_mode("deepseek", ProviderProxyMode::System);
         assert_eq!(
             deepseek_system.effective_mode("https://api.deepseek.com/v1"),
             EffectiveProxyMode::System
