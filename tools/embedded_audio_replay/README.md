@@ -24,6 +24,22 @@ cargo run --manifest-path tools\embedded_audio_replay\Cargo.toml -- `
 - pretty JSON 报告
 - 单行 `replay_result_json=...`，用于 pipeline/脚本提取结构化结果
 
+## 运行流式 replay
+
+```powershell
+cargo run --manifest-path tools\embedded_audio_replay\Cargo.toml -- `
+  --input path\to\audio.wav `
+  --format wav `
+  --mode stream `
+  --session-id 1000 `
+  --payload-bytes 480 `
+  --terminal stop
+```
+
+流式模式会逐条 notification 调用 `StreamingSessionCollector`，报告 `started`、`pcm_chunk`、`stopped`、`cancelled`、`error` 和 `ignored` 事件。报告中的 `streaming` 字段会记录 chunk sequence、每包 PCM 字节数、streamed PCM hash、terminal event，以及是否能按流式 chunk 重组回输入 PCM。
+
+`--terminal cancel` 和 `--terminal error` 可用于无硬件验证 cancel/error 收尾路径。
+
 ## 生成随机 TTS fixture
 
 ```powershell
