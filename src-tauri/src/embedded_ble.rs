@@ -5,17 +5,38 @@
 
 use std::time::Duration;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BleNotificationEvent {
+    pub notification: Vec<u8>,
+    pub terminal: bool,
+}
+
+pub type BleNotificationHandler<'a> = dyn FnMut(BleNotificationEvent) -> Result<(), String> + 'a;
+
+fn is_terminal_notification(notification: &[u8]) -> bool {
+    crate::embedded_audio::parse_packet(notification)
+        .map(|packet| {
+            matches!(
+                packet.header.packet_type,
+                crate::embedded_audio::PacketType::SessionStop
+                    | crate::embedded_audio::PacketType::SessionCancel
+                    | crate::embedded_audio::PacketType::SessionError
+            )
+        })
+        .unwrap_or(false)
+}
+
 #[cfg(target_os = "windows")]
 mod windows_ble {
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
     use windows::core::{GUID, HSTRING};
+    use windows::Devices::Bluetooth::BluetoothCacheMode;
     use windows::Devices::Bluetooth::GenericAttributeProfile::{
         GattCharacteristic, GattClientCharacteristicConfigurationDescriptorValue,
         GattCommunicationStatus, GattDeviceService, GattValueChangedEventArgs,
     };
-    use windows::Devices::Bluetooth::BluetoothCacheMode;
     use windows::Devices::Enumeration::DeviceInformation;
     use windows::Foundation::{EventRegistrationToken, TypedEventHandler};
     use windows::Storage::Streams::{DataReader, IBuffer};
@@ -24,6 +45,18 @@ mod windows_ble {
     const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b);
 
     pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
+        let mut notifications = Vec::new();
+        capture_notification_events(timeout, &mut |event| {
+            notifications.push(event.notification);
+            Ok(())
+        })?;
+        Ok(notifications)
+    }
+
+    pub fn capture_notification_events(
+        timeout: Duration,
+        on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
+    ) -> Result<(), String> {
         let characteristic = open_notify_characteristic()?;
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
         let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
@@ -55,7 +88,6 @@ mod windows_ble {
         }
 
         let deadline = Instant::now() + timeout;
-        let mut notifications = Vec::new();
         loop {
             let now = Instant::now();
             if now >= deadline {
@@ -68,11 +100,14 @@ mod windows_ble {
             let notification = rx
                 .recv_timeout(remaining)
                 .map_err(|err| format!("BLE embedded audio notification wait failed: {err}"))?;
-            let terminal = is_terminal_notification(&notification);
-            notifications.push(notification);
+            let terminal = super::is_terminal_notification(&notification);
+            on_event(crate::embedded_ble::BleNotificationEvent {
+                notification,
+                terminal,
+            })?;
             if terminal {
                 cleanup.disable_notify();
-                return Ok(notifications);
+                return Ok(());
             }
         }
     }
@@ -178,19 +213,6 @@ mod windows_ble {
         Ok(bytes)
     }
 
-    fn is_terminal_notification(notification: &[u8]) -> bool {
-        crate::embedded_audio::parse_packet(notification)
-            .map(|packet| {
-                matches!(
-                    packet.header.packet_type,
-                    crate::embedded_audio::PacketType::SessionStop
-                        | crate::embedded_audio::PacketType::SessionCancel
-                        | crate::embedded_audio::PacketType::SessionError
-                )
-            })
-            .unwrap_or(false)
-    }
-
     struct NotifyCleanup {
         characteristic: GattCharacteristic,
         token: Option<EventRegistrationToken>,
@@ -235,7 +257,59 @@ pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, Str
     windows_ble::capture_notifications_once(timeout)
 }
 
+#[cfg(target_os = "windows")]
+pub fn capture_notification_events(
+    timeout: Duration,
+    on_event: &mut BleNotificationHandler<'_>,
+) -> Result<(), String> {
+    windows_ble::capture_notification_events(timeout, on_event)
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn capture_notification_events(
+    _timeout: Duration,
+    _on_event: &mut BleNotificationHandler<'_>,
+) -> Result<(), String> {
+    Err("Embedded BLE audio input is only supported on Windows".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::embedded_audio::{
+        build_audio_data_notification, build_session_cancel_notification,
+        build_session_error_notification, build_session_start_notification,
+        build_session_stop_notification, SessionErrorCode,
+    };
+
+    #[test]
+    fn terminal_detection_only_matches_stop_cancel_error() {
+        assert!(!is_terminal_notification(
+            &build_session_start_notification(1)
+        ));
+        assert!(!is_terminal_notification(
+            &build_audio_data_notification(1, 0, &[1, 2]).expect("audio packet")
+        ));
+        assert!(is_terminal_notification(&build_session_stop_notification(
+            1, 1
+        )));
+        assert!(is_terminal_notification(
+            &build_session_cancel_notification(1, 1)
+        ));
+        assert!(is_terminal_notification(&build_session_error_notification(
+            1,
+            1,
+            SessionErrorCode::LinkLost,
+        )));
+    }
+
+    #[test]
+    fn invalid_notification_is_not_terminal() {
+        assert!(!is_terminal_notification(b"not-vka1"));
+    }
 }
