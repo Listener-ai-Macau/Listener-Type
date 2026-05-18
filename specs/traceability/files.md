@@ -76,6 +76,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/coordinator/resources.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator_state.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/correction.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_audio.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/global_hotkey_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/insertion.rs` | Core app | Build and targeted tests |
@@ -96,6 +98,10 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/windows_ime_protocol.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_session.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/tauri.conf.json` | Build and release config | Build, updater and audit scripts |
+| `tools/volcengine_asr_probe/Cargo.lock` | ASR providers | Volcengine ASR smoke and cargo check |
+| `tools/volcengine_asr_probe/Cargo.toml` | ASR providers | Volcengine ASR smoke and cargo check |
+| `tools/volcengine_asr_probe/src/asr/mod.rs` | ASR providers | Volcengine ASR smoke and cargo check |
+| `tools/volcengine_asr_probe/src/main.rs` | ASR providers | Volcengine ASR smoke and cargo check |
 | `src-tauri/vendor/qwen-asr/Makefile` | Vendored local ASR engine | Cargo check and local ASR smoke |
 | `src-tauri/vendor/qwen-asr/asr_regression.py` | Vendored local ASR engine | Cargo check and local ASR smoke |
 | `src-tauri/vendor/qwen-asr/download_model.sh` | Vendored local ASR engine | Cargo check and local ASR smoke |

@@ -1,5 +1,6 @@
 //! Tauri command surface — every IPC entry the React UI invokes lives here.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -1306,6 +1307,35 @@ pub async fn start_dictation(coord: CoordinatorState<'_>) -> Result<(), String> 
 #[tauri::command]
 pub async fn stop_dictation(coord: CoordinatorState<'_>) -> Result<(), String> {
     coord.stop_dictation().await
+}
+
+#[tauri::command]
+pub async fn submit_embedded_audio_notifications(
+    coord: CoordinatorState<'_>,
+    notifications: Vec<Vec<u8>>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    coord
+        .submit_embedded_audio_notifications(notifications)
+        .await
+}
+
+#[tauri::command]
+pub async fn submit_embedded_audio_file(
+    coord: CoordinatorState<'_>,
+    path: String,
+    format: Option<crate::embedded_audio::EmbeddedAudioInputFormat>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    coord
+        .submit_embedded_audio_file(PathBuf::from(path), format)
+        .await
+}
+
+#[tauri::command]
+pub async fn submit_embedded_audio_ble_once(
+    coord: CoordinatorState<'_>,
+    timeout_ms: Option<u64>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    coord.submit_embedded_audio_ble_once(timeout_ms).await
 }
 
 #[tauri::command]

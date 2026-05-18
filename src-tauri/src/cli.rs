@@ -15,11 +15,13 @@
 //!   launcher 标志）不报错。
 //! - **同一份解析复用**首次启动 + single-instance 回调两个入口，行为完全一致。
 
+use std::path::PathBuf;
+
 /// 桌面环境快捷键能给 Listener Type 触发的动作集合。
 ///
 /// 与 modifier-only / combo 热键对齐 — 只覆盖「单次触发」语义，不含 push-to-talk
 /// （桌面 OS 级快捷键大多只在 key-press 触发，不传 key-release，无法支持「按住说话」）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliIntent {
     /// 等价于按一次主听写热键：Idle → 开始；Listening → 结束。
     ToggleDictation,
@@ -27,6 +29,13 @@ pub enum CliIntent {
     ToggleQa,
     /// 等价于按 Esc：取消当前听写 session。
     CancelDictation,
+    /// 调试 / 自动化入口：把本地 16k mono i16 WAV/PCM 当成嵌入式音频送入听写链路。
+    SubmitEmbeddedAudioFile {
+        path: PathBuf,
+        format: Option<crate::embedded_audio::EmbeddedAudioInputFormat>,
+    },
+    /// 调试 / 自动化入口：订阅一次嵌入式 BLE notify，会话结束后送入听写链路。
+    SubmitEmbeddedAudioBleOnce { timeout_ms: Option<u64> },
 }
 
 /// 扫描 argv 找第一个能识别的 intent。未知参数静默忽略，绝不 panic。
@@ -36,15 +45,68 @@ pub enum CliIntent {
 pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
     // 跳过 argv[0]（自身路径），逐项匹配。命中第一个就返回 —
     // 多个 flag 时取首个，避免出现"toggle + cancel"这种自相矛盾组合。
-    for arg in args.iter().skip(1) {
+    let mut args = args.iter().skip(1).peekable();
+    while let Some(arg) = args.next() {
         match arg.as_ref() {
             "--toggle-dictation" => return Some(CliIntent::ToggleDictation),
             "--toggle-qa" => return Some(CliIntent::ToggleQa),
             "--cancel-dictation" | "--cancel" => return Some(CliIntent::CancelDictation),
+            "--submit-embedded-audio" => {
+                if let Some(path) = next_path_arg(&mut args) {
+                    return Some(CliIntent::SubmitEmbeddedAudioFile { path, format: None });
+                }
+            }
+            "--submit-embedded-audio-wav" => {
+                if let Some(path) = next_path_arg(&mut args) {
+                    return Some(CliIntent::SubmitEmbeddedAudioFile {
+                        path,
+                        format: Some(crate::embedded_audio::EmbeddedAudioInputFormat::Wav),
+                    });
+                }
+            }
+            "--submit-embedded-audio-pcm16le" => {
+                if let Some(path) = next_path_arg(&mut args) {
+                    return Some(CliIntent::SubmitEmbeddedAudioFile {
+                        path,
+                        format: Some(crate::embedded_audio::EmbeddedAudioInputFormat::Pcm16Le),
+                    });
+                }
+            }
+            "--submit-embedded-audio-ble-once" => {
+                return Some(CliIntent::SubmitEmbeddedAudioBleOnce {
+                    timeout_ms: next_u64_arg(&mut args),
+                });
+            }
             _ => {}
         }
     }
     None
+}
+
+fn next_path_arg<'a, S, I>(args: &mut std::iter::Peekable<I>) -> Option<PathBuf>
+where
+    S: AsRef<str> + 'a,
+    I: Iterator<Item = &'a S>,
+{
+    let next: &str = (*args.peek()?).as_ref();
+    if next.starts_with("--") {
+        return None;
+    }
+    args.next().map(|value| PathBuf::from(value.as_ref()))
+}
+
+fn next_u64_arg<'a, S, I>(args: &mut std::iter::Peekable<I>) -> Option<u64>
+where
+    S: AsRef<str> + 'a,
+    I: Iterator<Item = &'a S>,
+{
+    let next: &str = (*args.peek()?).as_ref();
+    if next.starts_with("--") {
+        return None;
+    }
+    let parsed = next.parse().ok()?;
+    let _ = args.next();
+    Some(parsed)
 }
 
 #[cfg(test)]
@@ -83,6 +145,76 @@ mod tests {
     }
 
     #[test]
+    fn parse_recognizes_embedded_audio_file_with_inferred_format() {
+        let args = vec!["listener-type", "--submit-embedded-audio", "input.wav"];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::SubmitEmbeddedAudioFile {
+                path: PathBuf::from("input.wav"),
+                format: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_audio_wav_file() {
+        let args = vec!["listener-type", "--submit-embedded-audio-wav", "input.raw"];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::SubmitEmbeddedAudioFile {
+                path: PathBuf::from("input.raw"),
+                format: Some(crate::embedded_audio::EmbeddedAudioInputFormat::Wav),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_audio_pcm_file() {
+        let args = vec![
+            "listener-type",
+            "--submit-embedded-audio-pcm16le",
+            "input.pcm",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::SubmitEmbeddedAudioFile {
+                path: PathBuf::from("input.pcm"),
+                format: Some(crate::embedded_audio::EmbeddedAudioInputFormat::Pcm16Le),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_ignores_embedded_audio_flag_without_path() {
+        let args = vec!["listener-type", "--submit-embedded-audio"];
+        assert_eq!(parse_cli_intent(&args), None);
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_ble_once_with_timeout() {
+        let args = vec![
+            "listener-type",
+            "--submit-embedded-audio-ble-once",
+            "90000",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::SubmitEmbeddedAudioBleOnce {
+                timeout_ms: Some(90_000),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_ble_once_without_timeout() {
+        let args = vec!["listener-type", "--submit-embedded-audio-ble-once"];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::SubmitEmbeddedAudioBleOnce { timeout_ms: None })
+        );
+    }
+
+    #[test]
     fn parse_accepts_cancel_alias() {
         // --cancel 也接受（research doc 5 节里写成 --cancel；为兼容两种写法都收）。
         let args = vec!["listener-type", "--cancel"];
@@ -113,7 +245,12 @@ mod tests {
 
     #[test]
     fn parse_finds_intent_among_unknown_args() {
-        let args = vec!["listener-type", "/path/to/file", "--toggle-dictation", "extra"];
+        let args = vec![
+            "listener-type",
+            "/path/to/file",
+            "--toggle-dictation",
+            "extra",
+        ];
         assert_eq!(parse_cli_intent(&args), Some(CliIntent::ToggleDictation));
     }
 }

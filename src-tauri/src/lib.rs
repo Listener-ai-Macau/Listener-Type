@@ -20,6 +20,8 @@ mod commands;
 mod coordinator;
 mod coordinator_state;
 mod correction;
+mod embedded_ble;
+mod embedded_audio;
 mod global_hotkey_runtime;
 mod hotkey;
 mod insertion;
@@ -308,6 +310,9 @@ pub fn run() {
             commands::save_vocab_presets,
             commands::start_dictation,
             commands::stop_dictation,
+            commands::submit_embedded_audio_notifications,
+            commands::submit_embedded_audio_file,
+            commands::submit_embedded_audio_ble_once,
             commands::cancel_dictation,
             commands::handle_window_hotkey_event,
             #[cfg(debug_assertions)]
@@ -869,6 +874,39 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
         cli::CliIntent::CancelDictation => {
             log::info!("[cli] cancel-dictation: invoking cancel");
             coordinator.cancel_dictation();
+        }
+        cli::CliIntent::SubmitEmbeddedAudioFile { path, format } => {
+            let coord = Arc::clone(&coordinator);
+            tauri::async_runtime::spawn(async move {
+                log::info!(
+                    "[cli] submit-embedded-audio-file: path={} format={format:?}",
+                    path.display()
+                );
+                match coord.submit_embedded_audio_file(path, format).await {
+                    Ok(result) => log::info!(
+                        "[cli] submit-embedded-audio-file done: pcm_bytes={} missing_packets={}",
+                        result.reconstructed_pcm_bytes,
+                        result.stats.missing_packet_count
+                    ),
+                    Err(err) => log::warn!("[cli] submit-embedded-audio-file failed: {err}"),
+                }
+            });
+        }
+        cli::CliIntent::SubmitEmbeddedAudioBleOnce { timeout_ms } => {
+            let coord = Arc::clone(&coordinator);
+            tauri::async_runtime::spawn(async move {
+                log::info!(
+                    "[cli] submit-embedded-audio-ble-once: timeout_ms={timeout_ms:?}"
+                );
+                match coord.submit_embedded_audio_ble_once(timeout_ms).await {
+                    Ok(result) => log::info!(
+                        "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={}",
+                        result.reconstructed_pcm_bytes,
+                        result.stats.missing_packet_count
+                    ),
+                    Err(err) => log::warn!("[cli] submit-embedded-audio-ble-once failed: {err}"),
+                }
+            });
         }
     }
 }

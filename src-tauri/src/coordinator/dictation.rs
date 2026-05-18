@@ -1,3 +1,4 @@
+use std::fs;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -12,6 +13,7 @@ use super::*;
 /// 同一个 hotkey 边沿之间的最小间隔。低于此阈值的连按整体作为误触丢弃 ——
 /// 避免微动开关回弹 / 用户手抖双击造成的空转写报错和 ASR session 抢资源。
 const HOTKEY_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
+const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
 
 /// 跑流式润色路径（opt-in，跨平台）。
 ///
@@ -997,6 +999,266 @@ pub(super) async fn finish_starting_session(inner: &Arc<Inner>, session_id: Sess
             }
         }
     }
+}
+
+pub(super) async fn submit_embedded_audio_notifications(
+    inner: &Arc<Inner>,
+    notifications: Vec<Vec<u8>>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    let collector =
+        crate::embedded_audio::collect_notifications(notifications.iter().map(Vec::as_slice))
+            .map_err(|err| format!("嵌入式音频包解析失败: {err}"))?;
+    let stats = collector.stats();
+    if !stats.terminal_received {
+        return Err("嵌入式音频会话尚未收到结束包".to_string());
+    }
+    if stats.end_reason != Some(crate::embedded_audio::SessionEndReason::Stop) {
+        return Err(format!("嵌入式音频会话未正常结束: {:?}", stats.end_reason));
+    }
+
+    let pcm = collector.reconstructed_pcm();
+    if pcm.is_empty() {
+        return Err("嵌入式音频会话没有可识别的 PCM 数据".to_string());
+    }
+    if pcm.len() % 2 != 0 {
+        return Err("嵌入式音频 PCM 长度不是 16-bit 对齐".to_string());
+    }
+
+    let reconstructed_pcm_bytes = pcm.len();
+    submit_embedded_pcm_for_dictation(inner, &pcm).await?;
+    Ok(crate::embedded_audio::EmbeddedAudioSubmissionResult {
+        stats,
+        reconstructed_pcm_bytes,
+    })
+}
+
+pub(super) async fn submit_embedded_audio_file(
+    inner: &Arc<Inner>,
+    path: std::path::PathBuf,
+    format: Option<crate::embedded_audio::EmbeddedAudioInputFormat>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    let pcm = crate::embedded_audio::read_input_pcm(&path, format)
+        .map_err(|err| format!("读取嵌入式音频文件失败 ({}): {err}", path.display()))?;
+    let notifications = crate::embedded_audio::build_session_replay_notifications(
+        crate::embedded_audio::ReplayConfig {
+            session_id: embedded_audio_file_session_id(),
+            payload_pcm_bytes: crate::embedded_audio::DEFAULT_REPLAY_PAYLOAD_PCM_BYTES,
+        },
+        &pcm,
+    )
+    .map_err(|err| format!("构造嵌入式音频回放包失败: {err}"))?;
+    submit_embedded_audio_notifications(inner, notifications).await
+}
+
+pub(super) async fn submit_embedded_audio_ble_once(
+    inner: &Arc<Inner>,
+    timeout_ms: Option<u64>,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
+    let notifications =
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::capture_notifications_once(timeout)
+        })
+        .await
+        .map_err(|err| format!("嵌入式 BLE 抓音任务失败: {err}"))??;
+    submit_embedded_audio_notifications(inner, notifications).await
+}
+
+fn embedded_audio_file_session_id() -> u32 {
+    (chrono::Utc::now().timestamp_millis() as u64 & u32::MAX as u64) as u32
+}
+
+async fn submit_embedded_pcm_for_dictation(inner: &Arc<Inner>, pcm: &[u8]) -> Result<(), String> {
+    let current_session_id = {
+        let mut state = inner.state.lock();
+        begin_session_state(&mut state, capture_focus_target(), capture_frontmost_app())
+            .ok_or_else(|| "当前已有听写会话在运行，暂不能提交嵌入式音频".to_string())?
+    };
+    #[cfg(target_os = "windows")]
+    {
+        let prepared = inner.windows_ime.prepare_session();
+        let mut slots = inner.prepared_windows_ime_session.lock();
+        store_prepared_windows_ime_session(&mut slots, current_session_id, prepared);
+    }
+    inner
+        .translation_modifier_seen
+        .store(false, Ordering::SeqCst);
+
+    if let Err(message) = ensure_asr_credentials() {
+        log::warn!("[coord] embedded audio ASR credential gate failed: {message}");
+        emit_capsule(
+            inner,
+            CapsuleState::Error,
+            0.0,
+            0,
+            Some(message.clone()),
+            None,
+        );
+        restore_prepared_windows_ime_session(inner, current_session_id);
+        inner.state.lock().phase = SessionPhase::Idle;
+        schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS);
+        return Err(message);
+    }
+
+    let active_asr = CredentialsVault::get_active_asr();
+    let consumer = match build_embedded_audio_asr_consumer(inner, current_session_id, &active_asr) {
+        Ok(consumer) => consumer,
+        Err(message) => {
+            log::warn!("[coord] embedded audio ASR setup failed: {message}");
+            emit_capsule(
+                inner,
+                CapsuleState::Error,
+                0.0,
+                0,
+                Some(message.clone()),
+                None,
+            );
+            restore_prepared_windows_ime_session(inner, current_session_id);
+            cancel_asr_for_session(inner, current_session_id);
+            inner.state.lock().phase = SessionPhase::Idle;
+            schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS);
+            return Err(message);
+        }
+    };
+
+    let archive_active = archive_embedded_audio_if_enabled(inner, current_session_id, pcm);
+    inner
+        .audio_archive_active
+        .store(archive_active, std::sync::atomic::Ordering::Relaxed);
+
+    {
+        let mut state = inner.state.lock();
+        if state.session_id != current_session_id || state.phase != SessionPhase::Starting {
+            cancel_asr_for_session(inner, current_session_id);
+            restore_prepared_windows_ime_session(inner, current_session_id);
+            return Ok(());
+        }
+        state.phase = SessionPhase::Listening;
+    }
+
+    emit_capsule(
+        inner,
+        CapsuleState::Recording,
+        embedded_pcm_peak_level(pcm),
+        0,
+        None,
+        None,
+    );
+    for chunk in pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
+        consumer.consume_pcm_chunk(chunk);
+    }
+    log::info!(
+        "[coord] embedded audio submitted to dictation pipeline (asr={active_asr}, pcm_bytes={})",
+        pcm.len()
+    );
+
+    end_session(inner).await
+}
+
+fn build_embedded_audio_asr_consumer(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    active_asr: &str,
+) -> Result<Arc<dyn crate::recorder::AudioConsumer>, String> {
+    #[cfg(target_os = "windows")]
+    if foundry::is_foundry_local_whisper(active_asr) {
+        let prefs = inner.prefs.get();
+        let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
+            prefs.foundry_local_asr_model.clone()
+        } else {
+            foundry::DEFAULT_MODEL_ALIAS.to_string()
+        };
+        let language_hint = prefs.foundry_local_asr_language_hint.trim().to_string();
+        let language_hint = if language_hint.is_empty() {
+            None
+        } else {
+            Some(language_hint)
+        };
+        let local = Arc::new(FoundryLocalWhisperAsr::new(
+            Arc::clone(&inner.foundry_local_runtime),
+            model_alias,
+            prefs.foundry_local_runtime_source.clone(),
+            language_hint,
+        ));
+        store_asr_for_session(
+            inner,
+            session_id,
+            ActiveAsr::FoundryLocalWhisper(Arc::clone(&local)),
+        );
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
+        return Ok(consumer);
+    }
+
+    if is_whisper_compatible_provider(active_asr) {
+        let (api_key, base_url, model, proxy_config) =
+            read_whisper_credentials().map_err(|err| err.to_string())?;
+        let whisper_prompt =
+            crate::asr::whisper::build_prompt_from_phrases(&enabled_phrases(inner));
+        let client = http_client_builder_with_proxy(&base_url, 30, &proxy_config)
+            .build()
+            .map_err(|err| format!("build Whisper HTTP client failed: {err}"))?;
+        let whisper = Arc::new(WhisperBatchASR::new_with_client(
+            api_key,
+            base_url,
+            model,
+            whisper_prompt,
+            client,
+        ));
+        store_asr_for_session(inner, session_id, ActiveAsr::Whisper(Arc::clone(&whisper)));
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = whisper;
+        return Ok(consumer);
+    }
+
+    Err(format!(
+        "嵌入式音频入口当前支持 Foundry Local Whisper 或 Whisper 兼容 ASR，当前 provider={active_asr}"
+    ))
+}
+
+fn archive_embedded_audio_if_enabled(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    pcm: &[u8],
+) -> bool {
+    if !inner.prefs.get().record_audio_for_debug {
+        return false;
+    }
+
+    let prefs = inner.prefs.get();
+    let _ = crate::persistence::prune_recordings(
+        prefs.history_retention_days,
+        prefs.audio_recording_max_entries,
+    );
+    let path = match crate::persistence::recording_path_for_session(&session_id.to_string()) {
+        Ok(path) => path,
+        Err(err) => {
+            log::warn!("[coord] embedded audio archive path failed: {err}");
+            return false;
+        }
+    };
+    let samples: Vec<i16> = pcm
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+    let wav = crate::asr::wav::encode_wav_16k_mono(&samples);
+    match fs::write(&path, wav) {
+        Ok(()) => true,
+        Err(err) => {
+            log::warn!(
+                "[coord] embedded audio archive write failed at {}: {err}",
+                path.display()
+            );
+            false
+        }
+    }
+}
+
+fn embedded_pcm_peak_level(pcm: &[u8]) -> f32 {
+    let peak = pcm
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]).unsigned_abs())
+        .max()
+        .unwrap_or(0);
+    (peak as f32 / i16::MAX as f32).clamp(0.0, 1.0)
 }
 
 pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {

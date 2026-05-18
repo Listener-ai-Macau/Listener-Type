@@ -7,7 +7,9 @@ import type {
   CorrectionRule,
   CredentialsStatus,
   DictationSession,
+  EmbeddedAudioInputFormat,
   DictionaryEntry,
+  EmbeddedAudioSubmissionResult,
   HotkeyCapability,
   MarketplaceDetail,
   MarketplaceListItem,
@@ -652,6 +654,89 @@ export function startDictation(): Promise<void> {
 
 export function stopDictation(): Promise<void> {
   return invokeOrMock('stop_dictation', undefined, () => undefined);
+}
+
+export function submitEmbeddedAudioNotifications(
+  notifications: number[][],
+): Promise<EmbeddedAudioSubmissionResult> {
+  return invokeOrMock('submit_embedded_audio_notifications', { notifications }, () => ({
+    reconstructedPcmBytes: 0,
+    stats: {
+      sessionId: null,
+      explicitStartReceived: false,
+      startInferredFromAudio: false,
+      terminalReceived: false,
+      endReason: null,
+      expectedPacketCount: null,
+      receivedPacketCount: 0,
+      missingPacketCount: 0,
+      missingPacketIndices: [],
+      receivedPcmBytes: 0,
+      reconstructedPcmBytes: 0,
+      silenceFilledBytes: 0,
+      duplicatePacketCount: 0,
+      replacedPacketCount: 0,
+      ignoredForeignPacketCount: 0,
+      durationSeconds: 0,
+    },
+  }));
+}
+
+export function submitEmbeddedAudioFile(
+  path: string,
+  format?: EmbeddedAudioInputFormat,
+): Promise<EmbeddedAudioSubmissionResult> {
+  return invokeOrMock('submit_embedded_audio_file', { path, format: format ?? null }, () => ({
+    reconstructedPcmBytes: 0,
+    stats: {
+      sessionId: null,
+      explicitStartReceived: false,
+      startInferredFromAudio: false,
+      terminalReceived: false,
+      endReason: null,
+      expectedPacketCount: null,
+      receivedPacketCount: 0,
+      missingPacketCount: 0,
+      missingPacketIndices: [],
+      receivedPcmBytes: 0,
+      reconstructedPcmBytes: 0,
+      silenceFilledBytes: 0,
+      duplicatePacketCount: 0,
+      replacedPacketCount: 0,
+      ignoredForeignPacketCount: 0,
+      durationSeconds: 0,
+    },
+  }));
+}
+
+export function submitEmbeddedAudioBleOnce(
+  timeoutMs?: number,
+): Promise<EmbeddedAudioSubmissionResult> {
+  return invokeOrMock(
+    'submit_embedded_audio_ble_once',
+    { timeoutMs: timeoutMs ?? null },
+    () => ({
+      reconstructedPcmBytes: 0,
+      stats: {
+        sessionId: null,
+        explicitStartReceived: false,
+        startInferredFromAudio: false,
+        terminalReceived: false,
+        endReason: null,
+        expectedPacketCount: null,
+        receivedPacketCount: 0,
+        missingPacketCount: 0,
+        missingPacketIndices: [],
+        receivedPcmBytes: 0,
+        reconstructedPcmBytes: 0,
+        silenceFilledBytes: 0,
+        duplicatePacketCount: 0,
+        replacedPacketCount: 0,
+        ignoredForeignPacketCount: 0,
+        durationSeconds: 0,
+      },
+    }),
+  );
 }
 
 export function cancelDictation(): Promise<void> {

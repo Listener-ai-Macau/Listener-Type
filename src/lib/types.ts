@@ -23,6 +23,49 @@ export interface DictationSession {
   hasAudioRecording: boolean | null;
 }
 
+export type EmbeddedAudioSessionErrorCode =
+  | 'none'
+  | 'queue_full'
+  | 'notify_timeout'
+  | 'link_lost'
+  | 'sequence_overflow'
+  | 'invalid_state'
+  | 'no_memory'
+  | 'packet_too_large'
+  | 'transport'
+  | { unknown: number };
+
+export type EmbeddedAudioSessionEndReason =
+  | 'stop'
+  | 'cancel'
+  | { error: EmbeddedAudioSessionErrorCode };
+
+export interface EmbeddedAudioSessionStats {
+  sessionId: number | null;
+  explicitStartReceived: boolean;
+  startInferredFromAudio: boolean;
+  terminalReceived: boolean;
+  endReason: EmbeddedAudioSessionEndReason | null;
+  expectedPacketCount: number | null;
+  receivedPacketCount: number;
+  missingPacketCount: number;
+  missingPacketIndices: number[];
+  receivedPcmBytes: number;
+  reconstructedPcmBytes: number;
+  silenceFilledBytes: number;
+  duplicatePacketCount: number;
+  replacedPacketCount: number;
+  ignoredForeignPacketCount: number;
+  durationSeconds: number;
+}
+
+export interface EmbeddedAudioSubmissionResult {
+  stats: EmbeddedAudioSessionStats;
+  reconstructedPcmBytes: number;
+}
+
+export type EmbeddedAudioInputFormat = 'wav' | 'pcm16le';
+
 export interface DictionaryEntry {
   id: string;
   phrase: string;
@@ -119,6 +162,8 @@ export type ComboBinding = ShortcutBinding;
  *  - shiftInsert : xterm / urxvt 等老派 X11 终端
  *  详见 issue #360。 */
 export type PasteShortcut = 'ctrlV' | 'ctrlShiftV' | 'shiftInsert';
+
+export type DictationInputSource = 'microphone' | 'embeddedBle';
 
 export type WindowsImeInstallState =
   | 'installed'
@@ -220,6 +265,8 @@ export interface UserPreferences {
   muteDuringRecording: boolean;
   /** 录音输入设备名称。空字符串 = 使用系统默认麦克风。 */
   microphoneDeviceName: string;
+  /** 听写输入源。默认麦克风；embeddedBle 用于嵌入式 VKA1 BLE 音频入口。 */
+  dictationInputSource: DictationInputSource;
   activeAsrProvider: string;
   activeLlmProvider: string;
   /** LLM 思考模式开关。默认关闭，保持既有尽量关闭思考的行为。详见 issue #402。 */

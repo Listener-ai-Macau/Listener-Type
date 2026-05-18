@@ -60,6 +60,14 @@ pub enum PasteShortcut {
     ShiftInsert,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DictationInputSource {
+    #[default]
+    Microphone,
+    EmbeddedBle,
+}
+
 /// Auto-update 渠道。决定 Settings → 关于 里展示哪一类版本信息。
 /// `Stable` 沿用 `tauri-plugin-updater` 的默认 endpoints（即 `tauri.conf.json`
 /// 里的 `latest-{{target}}-{{arch}}.json`），与发版 pipeline 对齐。
@@ -492,6 +500,9 @@ pub struct UserPreferences {
     /// 录音输入设备名称。空字符串 = 使用系统默认麦克风。
     #[serde(default)]
     pub microphone_device_name: String,
+    /// 听写输入源。v1 默认麦克风；EmbeddedBle 用于嵌入式 VKA1 BLE 音频入口。
+    #[serde(default)]
+    pub dictation_input_source: DictationInputSource,
     pub active_asr_provider: String, // "volcengine" | "apple-speech" | ...
     pub active_llm_provider: String, // "ark" | "openai" | ...
     /// LLM 思考模式开关。默认 false 以保持既有「尽量关闭思考」行为；
@@ -710,6 +721,8 @@ struct UserPreferencesWire {
     mute_during_recording: bool,
     #[serde(default)]
     microphone_device_name: String,
+    #[serde(default)]
+    dictation_input_source: DictationInputSource,
     active_asr_provider: String,
     active_llm_provider: String,
     #[serde(default)]
@@ -786,6 +799,7 @@ impl Default for UserPreferencesWire {
             show_capsule: prefs.show_capsule,
             mute_during_recording: prefs.mute_during_recording,
             microphone_device_name: prefs.microphone_device_name,
+            dictation_input_source: prefs.dictation_input_source,
             active_asr_provider: prefs.active_asr_provider,
             active_llm_provider: prefs.active_llm_provider,
             llm_thinking_enabled: prefs.llm_thinking_enabled,
@@ -861,6 +875,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             show_capsule: wire.show_capsule,
             mute_during_recording: wire.mute_during_recording,
             microphone_device_name: wire.microphone_device_name,
+            dictation_input_source: wire.dictation_input_source,
             active_asr_provider: wire.active_asr_provider,
             active_llm_provider: wire.active_llm_provider,
             llm_thinking_enabled: wire.llm_thinking_enabled,
@@ -1261,6 +1276,7 @@ impl Default for UserPreferences {
             show_capsule: true,
             mute_during_recording: false,
             microphone_device_name: String::new(),
+            dictation_input_source: DictationInputSource::Microphone,
             active_asr_provider: default_active_asr_provider(),
             active_llm_provider: "ark".into(),
             llm_thinking_enabled: false,
