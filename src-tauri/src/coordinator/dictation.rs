@@ -14,6 +14,9 @@ use super::*;
 /// 避免微动开关回弹 / 用户手抖双击造成的空转写报错和 ASR session 抢资源。
 const HOTKEY_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
 const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
+const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
+const EMBEDDED_AUDIO_MAX_GAIN: f64 = 4.0;
+const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
 
 /// 跑流式润色路径（opt-in，跨平台）。
 ///
@@ -1055,12 +1058,11 @@ pub(super) async fn submit_embedded_audio_ble_once(
     timeout_ms: Option<u64>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
-    let notifications =
-        tauri::async_runtime::spawn_blocking(move || {
-            crate::embedded_ble::capture_notifications_once(timeout)
-        })
-        .await
-        .map_err(|err| format!("嵌入式 BLE 抓音任务失败: {err}"))??;
+    let notifications = tauri::async_runtime::spawn_blocking(move || {
+        crate::embedded_ble::capture_notifications_once(timeout)
+    })
+    .await
+    .map_err(|err| format!("嵌入式 BLE 抓音任务失败: {err}"))??;
     submit_embedded_audio_notifications(inner, notifications).await
 }
 
@@ -1101,30 +1103,41 @@ async fn submit_embedded_pcm_for_dictation(inner: &Arc<Inner>, pcm: &[u8]) -> Re
     }
 
     let active_asr = CredentialsVault::get_active_asr();
-    let consumer = match build_embedded_audio_asr_consumer(inner, current_session_id, &active_asr) {
-        Ok(consumer) => consumer,
-        Err(message) => {
-            log::warn!("[coord] embedded audio ASR setup failed: {message}");
-            emit_capsule(
-                inner,
-                CapsuleState::Error,
-                0.0,
-                0,
-                Some(message.clone()),
-                None,
-            );
-            restore_prepared_windows_ime_session(inner, current_session_id);
-            cancel_asr_for_session(inner, current_session_id);
-            inner.state.lock().phase = SessionPhase::Idle;
-            schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS);
-            return Err(message);
-        }
-    };
+    let consumer =
+        match build_embedded_audio_asr_consumer(inner, current_session_id, &active_asr).await {
+            Ok(consumer) => consumer,
+            Err(message) => {
+                log::warn!("[coord] embedded audio ASR setup failed: {message}");
+                emit_capsule(
+                    inner,
+                    CapsuleState::Error,
+                    0.0,
+                    0,
+                    Some(message.clone()),
+                    None,
+                );
+                restore_prepared_windows_ime_session(inner, current_session_id);
+                cancel_asr_for_session(inner, current_session_id);
+                inner.state.lock().phase = SessionPhase::Idle;
+                schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS);
+                return Err(message);
+            }
+        };
 
     let archive_active = archive_embedded_audio_if_enabled(inner, current_session_id, pcm);
     inner
         .audio_archive_active
         .store(archive_active, std::sync::atomic::Ordering::Relaxed);
+    let (asr_pcm, gain_stats) = normalize_embedded_pcm_for_asr(pcm);
+    if gain_stats.gain > 1.0 {
+        log::info!(
+            "[coord] embedded audio normalized for ASR (rms_before={:.1}, peak_before={}, gain={:.2}, clipped_samples={})",
+            gain_stats.rms_before,
+            gain_stats.peak_before,
+            gain_stats.gain,
+            gain_stats.clipped_samples
+        );
+    }
 
     {
         let mut state = inner.state.lock();
@@ -1139,23 +1152,25 @@ async fn submit_embedded_pcm_for_dictation(inner: &Arc<Inner>, pcm: &[u8]) -> Re
     emit_capsule(
         inner,
         CapsuleState::Recording,
-        embedded_pcm_peak_level(pcm),
+        embedded_pcm_peak_level(&asr_pcm),
         0,
         None,
         None,
     );
-    for chunk in pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
+    for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
         consumer.consume_pcm_chunk(chunk);
     }
     log::info!(
-        "[coord] embedded audio submitted to dictation pipeline (asr={active_asr}, pcm_bytes={})",
-        pcm.len()
+        "[coord] embedded audio submitted to dictation pipeline (asr={active_asr}, pcm_bytes={}, asr_pcm_bytes={}, gain={:.2})",
+        pcm.len(),
+        asr_pcm.len(),
+        gain_stats.gain
     );
 
     end_session(inner).await
 }
 
-fn build_embedded_audio_asr_consumer(
+async fn build_embedded_audio_asr_consumer(
     inner: &Arc<Inner>,
     session_id: SessionId,
     active_asr: &str,
@@ -1209,9 +1224,32 @@ fn build_embedded_audio_asr_consumer(
         return Ok(consumer);
     }
 
-    Err(format!(
-        "嵌入式音频入口当前支持 Foundry Local Whisper 或 Whisper 兼容 ASR，当前 provider={active_asr}"
-    ))
+    if is_bailian_provider(active_asr) {
+        let asr = Arc::new(BailianRealtimeASR::new(read_bailian_credentials()));
+        asr.open_session()
+            .await
+            .map_err(|err| format!("打开 Bailian ASR 连接失败: {err}"))?;
+        store_asr_for_session(inner, session_id, ActiveAsr::Bailian(Arc::clone(&asr)));
+        let bridge = Arc::new(DeferredAsrBridge::new());
+        let target: Arc<dyn crate::asr::AudioConsumer> = asr;
+        bridge.attach(target);
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge;
+        return Ok(consumer);
+    }
+
+    let asr = Arc::new(VolcengineStreamingASR::new(
+        read_volc_credentials(),
+        enabled_hotwords(inner),
+    ));
+    asr.open_session()
+        .await
+        .map_err(|err| format!("打开火山 ASR 连接失败: {err}"))?;
+    store_asr_for_session(inner, session_id, ActiveAsr::Volcengine(Arc::clone(&asr)));
+    let bridge = Arc::new(DeferredAsrBridge::new());
+    let target: Arc<dyn crate::asr::AudioConsumer> = asr;
+    bridge.attach(target);
+    let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge;
+    Ok(consumer)
 }
 
 fn archive_embedded_audio_if_enabled(
@@ -1259,6 +1297,67 @@ fn embedded_pcm_peak_level(pcm: &[u8]) -> f32 {
         .max()
         .unwrap_or(0);
     (peak as f32 / i16::MAX as f32).clamp(0.0, 1.0)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EmbeddedPcmGainStats {
+    rms_before: f64,
+    peak_before: u16,
+    gain: f64,
+    clipped_samples: usize,
+}
+
+fn normalize_embedded_pcm_for_asr(pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
+    let (rms_before, peak_before) = embedded_pcm_rms_and_peak(pcm);
+    let mut stats = EmbeddedPcmGainStats {
+        rms_before,
+        peak_before,
+        gain: 1.0,
+        clipped_samples: 0,
+    };
+
+    if rms_before <= 0.0 || rms_before >= EMBEDDED_AUDIO_TARGET_RMS {
+        return (pcm.to_vec(), stats);
+    }
+
+    let gain = (EMBEDDED_AUDIO_TARGET_RMS / rms_before).min(EMBEDDED_AUDIO_MAX_GAIN);
+    if gain < EMBEDDED_AUDIO_MIN_GAIN {
+        return (pcm.to_vec(), stats);
+    }
+
+    let mut normalized = Vec::with_capacity(pcm.len());
+    let mut clipped_samples = 0usize;
+    for chunk in pcm.chunks_exact(2) {
+        let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+        let scaled = (sample as f64 * gain).round();
+        let clamped = scaled.clamp(i16::MIN as f64, i16::MAX as f64);
+        if (scaled - clamped).abs() > f64::EPSILON {
+            clipped_samples += 1;
+        }
+        normalized.extend_from_slice(&(clamped as i16).to_le_bytes());
+    }
+
+    stats.gain = gain;
+    stats.clipped_samples = clipped_samples;
+    (normalized, stats)
+}
+
+fn embedded_pcm_rms_and_peak(pcm: &[u8]) -> (f64, u16) {
+    let mut sum_squares = 0.0f64;
+    let mut sample_count = 0usize;
+    let mut peak = 0u16;
+    for chunk in pcm.chunks_exact(2) {
+        let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+        let abs = sample.unsigned_abs();
+        peak = peak.max(abs);
+        sum_squares += (sample as f64) * (sample as f64);
+        sample_count += 1;
+    }
+    if sample_count == 0 {
+        (0.0, peak)
+    } else {
+        ((sum_squares / sample_count as f64).sqrt(), peak)
+    }
 }
 
 pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
@@ -1993,8 +2092,9 @@ fn append_typed_prefix(target: &mut String, delta: &str, typed_chars: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        append_typed_prefix, default_done_message, dictation_error_code, finalize_polished_text,
-        streaming_insert_eligible, wayland_done_message,
+        append_typed_prefix, default_done_message, dictation_error_code, embedded_pcm_rms_and_peak,
+        finalize_polished_text, normalize_embedded_pcm_for_asr, streaming_insert_eligible,
+        wayland_done_message,
     };
     use crate::types::{ChineseScriptPreference, CorrectionRule, InsertStatus, PolishMode};
 
@@ -2006,6 +2106,13 @@ mod tests {
             enabled: true,
             created_at: String::new(),
         }
+    }
+
+    fn pcm_from_samples(samples: &[i16]) -> Vec<u8> {
+        samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect()
     }
 
     #[test]
@@ -2136,5 +2243,30 @@ mod tests {
             dictation_error_code(InsertStatus::Failed, false, false, true, true),
             Some("waylandClipboardWriteFailed")
         );
+    }
+
+    #[test]
+    fn embedded_pcm_normalization_boosts_low_rms_despite_single_peak() {
+        let mut samples = vec![500i16; 999];
+        samples.push(i16::MAX);
+        let pcm = pcm_from_samples(&samples);
+
+        let (normalized, stats) = normalize_embedded_pcm_for_asr(&pcm);
+        let (rms_after, _) = embedded_pcm_rms_and_peak(&normalized);
+
+        assert_eq!(normalized.len(), pcm.len());
+        assert!(stats.gain > 1.5, "gain={}", stats.gain);
+        assert!(stats.clipped_samples > 0);
+        assert!(rms_after > stats.rms_before);
+    }
+
+    #[test]
+    fn embedded_pcm_normalization_leaves_loud_audio_unchanged() {
+        let pcm = pcm_from_samples(&vec![3_000i16; 256]);
+
+        let (normalized, stats) = normalize_embedded_pcm_for_asr(&pcm);
+
+        assert_eq!(stats.gain, 1.0);
+        assert_eq!(normalized, pcm);
     }
 }
