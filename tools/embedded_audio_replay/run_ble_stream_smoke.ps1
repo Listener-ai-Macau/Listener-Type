@@ -16,7 +16,7 @@ param(
     [int]$RecordingStartTimeoutMs = 2500,
     [int]$ManualTriggerReadyDelayMs = 700,
     [int]$PostPlaybackRecordMs = 500,
-    [ValidateSet("normal", "fast", "low-volume", "fast-low-volume")]
+    [ValidateSet("normal", "fast", "low-volume", "fast-low-volume", "noisy", "punctuation")]
     [string]$AudioProfile = "normal",
     [string]$ExpectedText,
     [string]$Sentence,
@@ -104,6 +104,12 @@ function Get-SmokeAudioProfile {
         }
         "fast-low-volume" {
             return [ordered]@{ name = "fast-low-volume"; tts_rate = 3; tts_gain = 1.8; minimum_accuracy = 0.65; warning_only = $true }
+        }
+        "noisy" {
+            return [ordered]@{ name = "noisy"; tts_rate = 0; tts_gain = 4.0; minimum_accuracy = 0.70; warning_only = $false }
+        }
+        "punctuation" {
+            return [ordered]@{ name = "punctuation"; tts_rate = 0; tts_gain = 4.0; minimum_accuracy = 0.60; warning_only = $true }
         }
         default {
             return [ordered]@{ name = "normal"; tts_rate = 0; tts_gain = 4.0; minimum_accuracy = 0.85; warning_only = $false }
