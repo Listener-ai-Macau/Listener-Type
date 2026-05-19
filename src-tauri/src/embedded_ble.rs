@@ -26,11 +26,16 @@ fn is_terminal_notification(notification: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+// After STOP, keep the data plane open until the packet-count contract is
+// satisfied. This timeout is rolling idle time after the last notification,
+// not a hard cap from STOP, so tail packets can still arrive without UI linger.
+const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[cfg(target_os = "windows")]
 mod windows_ble {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     use windows::core::{GUID, HSTRING};
@@ -60,6 +65,18 @@ mod windows_ble {
 
     pub fn capture_notification_events(
         timeout: Duration,
+        on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
+    ) -> Result<(), String> {
+        capture_notification_events_until_cancelled(
+            timeout,
+            Arc::new(AtomicBool::new(false)),
+            on_event,
+        )
+    }
+
+    pub fn capture_notification_events_until_cancelled(
+        timeout: Duration,
+        cancel_requested: Arc<AtomicBool>,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
     ) -> Result<(), String> {
         let target = open_notify_target()?;
@@ -110,33 +127,58 @@ mod windows_ble {
         let mut stop_drain_deadline: Option<Instant> = None;
         loop {
             let now = Instant::now();
+            if cancel_requested.load(Ordering::SeqCst) {
+                log::info!("[embedded-ble] capture cancelled by caller; closing notify");
+                cleanup.disable_notify();
+                return Ok(());
+            }
             if now >= deadline {
                 return Err(format!(
                     "BLE embedded audio capture timed out after {} ms",
                     timeout.as_millis()
                 ));
             }
+            if stop_drain_deadline.is_some_and(|drain_deadline| now >= drain_deadline) {
+                let stats = collector.stats();
+                let reason = format!(
+                    "BLE embedded audio stop drain idle timed out after {} ms (expected={:?}, received={}, missing={:?})",
+                    super::STOP_DRAIN_TIMEOUT.as_millis(),
+                    stats.expected_packet_count,
+                    stats.received_packet_count,
+                    stats.missing_packet_indices
+                );
+                log::warn!("[embedded-ble] {reason}");
+                cleanup.disable_notify();
+                return Err(reason);
+            }
             let remaining = deadline.saturating_duration_since(now);
             let receive_timeout = stop_drain_deadline
                 .map(|drain_deadline| drain_deadline.saturating_duration_since(now).min(remaining))
                 .unwrap_or(remaining);
+            let receive_timeout = receive_timeout.min(Duration::from_millis(100));
             let notification = match rx.recv_timeout(receive_timeout) {
                 Ok(notification) => notification,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if stop_drain_deadline
-                        .is_some_and(|drain_deadline| Instant::now() >= drain_deadline)
-                    {
-                        log::warn!(
-                            "[embedded-ble] stop drain timed out after {} ms; closing notify with remaining missing packets",
-                            super::STOP_DRAIN_TIMEOUT.as_millis()
-                        );
+                    let now = Instant::now();
+                    if cancel_requested.load(Ordering::SeqCst) {
+                        log::info!("[embedded-ble] capture cancelled by caller; closing notify");
                         cleanup.disable_notify();
                         return Ok(());
                     }
-                    return Err(
-                        "BLE embedded audio notification wait failed: timed out waiting on channel"
-                            .to_string(),
-                    );
+                    if stop_drain_deadline.is_some_and(|drain_deadline| now >= drain_deadline) {
+                        let stats = collector.stats();
+                        let reason = format!(
+                            "BLE embedded audio stop drain idle timed out after {} ms (expected={:?}, received={}, missing={:?})",
+                            super::STOP_DRAIN_TIMEOUT.as_millis(),
+                            stats.expected_packet_count,
+                            stats.received_packet_count,
+                            stats.missing_packet_indices
+                        );
+                        log::warn!("[embedded-ble] {reason}");
+                        cleanup.disable_notify();
+                        return Err(reason);
+                    }
+                    continue;
                 }
                 Err(err) => {
                     return Err(format!(
@@ -167,6 +209,9 @@ mod windows_ble {
             if collector.has_successful_complete_session() {
                 cleanup.disable_notify();
                 return Ok(());
+            }
+            if collector.terminal_received() && stop_drain_deadline.is_some() {
+                stop_drain_deadline = Some(Instant::now() + super::STOP_DRAIN_TIMEOUT);
             }
         }
     }
@@ -574,6 +619,15 @@ pub fn capture_notification_events(
     windows_ble::capture_notification_events(timeout, on_event)
 }
 
+#[cfg(target_os = "windows")]
+pub fn capture_notification_events_until_cancelled(
+    timeout: Duration,
+    cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_event: &mut BleNotificationHandler<'_>,
+) -> Result<(), String> {
+    windows_ble::capture_notification_events_until_cancelled(timeout, cancel_requested, on_event)
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
@@ -582,6 +636,15 @@ pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, St
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notification_events(
     _timeout: Duration,
+    _on_event: &mut BleNotificationHandler<'_>,
+) -> Result<(), String> {
+    Err("Embedded BLE audio input is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn capture_notification_events_until_cancelled(
+    _timeout: Duration,
+    _cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
     _on_event: &mut BleNotificationHandler<'_>,
 ) -> Result<(), String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())

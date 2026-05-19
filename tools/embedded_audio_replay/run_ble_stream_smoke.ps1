@@ -1,27 +1,36 @@
 param(
-    [ValidateSet("serial-toggle", "manual-key")]
+    [ValidateSet("serial-toggle", "serial-cancel", "manual-key")]
     [string]$TriggerMode = "serial-toggle",
     [string]$Port = "COM3",
     [string]$DeviceName = "listener",
     [string]$BluetoothAddress = "DCB4D91112CE",
     [int]$TimeoutMs = 45000,
     [int]$NotifyReadyTimeoutSeconds = 20,
-    [double]$NotifySettleSeconds = 2.0,
+    [double]$NotifySettleSeconds = 0.8,
     [int]$NoNotificationTimeoutSeconds = 8,
     [int]$PlaybackCount = 1,
     [int]$RecordPlaybackIndex = 1,
+    [int]$RandomSentenceCount = 1,
+    [int]$SilentAudioMs = 2500,
     [int]$PreRecordDelayMs = 300,
+    [int]$RecordingStartTimeoutMs = 2500,
     [int]$ManualTriggerReadyDelayMs = 700,
     [int]$PostPlaybackRecordMs = 500,
+    [ValidateSet("normal", "fast", "low-volume", "fast-low-volume")]
+    [string]$AudioProfile = "normal",
+    [string]$ExpectedText,
     [string]$Sentence,
     [string]$WavPath,
     [string]$VoiceName = "Microsoft Huihui Desktop",
-    [double]$TtsGain = 2.5,
+    [int]$TtsRate = 0,
+    [double]$TtsGain = 4.0,
     [string]$ListenerExe,
     [string]$FirmwareRepo,
     [string]$OutDir = "artifacts\embedded_stream_smoke",
     [int]$MaxMissingPackets = 0,
     [switch]$FailOnMissingPackets,
+    [switch]$SilentAudio,
+    [switch]$ExpectNoText,
     [switch]$NoResetBeforeCapture,
     [switch]$SkipEnsureBle,
     [switch]$VerifyInsertion,
@@ -71,9 +80,111 @@ function Read-NewLogText {
     }
 }
 
+function Write-SmokeTrace {
+    param([string]$Message)
+    if ([string]::IsNullOrWhiteSpace($script:TraceLogPath)) {
+        return
+    }
+    Add-Content -Path $script:TraceLogPath -Value "$(Get-Date -Format o) $Message" -Encoding UTF8
+}
+
+function Get-SmokeUtcNow {
+    return (Get-Date).ToUniversalTime().ToString("o")
+}
+
+function Get-SmokeAudioProfile {
+    param([string]$Name)
+    switch ($Name) {
+        "fast" {
+            return [ordered]@{ name = "fast"; tts_rate = 5; tts_gain = 4.0; minimum_accuracy = 0.78; warning_only = $false }
+        }
+        "low-volume" {
+            return [ordered]@{ name = "low-volume"; tts_rate = 0; tts_gain = 1.8; minimum_accuracy = 0.72; warning_only = $false }
+        }
+        "fast-low-volume" {
+            return [ordered]@{ name = "fast-low-volume"; tts_rate = 5; tts_gain = 1.8; minimum_accuracy = 0.65; warning_only = $true }
+        }
+        default {
+            return [ordered]@{ name = "normal"; tts_rate = 0; tts_gain = 4.0; minimum_accuracy = 0.85; warning_only = $false }
+        }
+    }
+}
+
+function ConvertTo-SmokeJsonString {
+    param([string]$Text)
+    if ($null -eq $Text) {
+        return "null"
+    }
+    $builder = [System.Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    foreach ($ch in $Text.ToCharArray()) {
+        $code = [int][char]$ch
+        switch ($code) {
+            8 { [void]$builder.Append('\b'); break }
+            9 { [void]$builder.Append('\t'); break }
+            10 { [void]$builder.Append('\n'); break }
+            12 { [void]$builder.Append('\f'); break }
+            13 { [void]$builder.Append('\r'); break }
+            34 { [void]$builder.Append('\"'); break }
+            92 { [void]$builder.Append('\\'); break }
+            default {
+                if ($code -lt 32) {
+                    [void]$builder.Append('\u')
+                    [void]$builder.Append($code.ToString('x4', [System.Globalization.CultureInfo]::InvariantCulture))
+                } else {
+                    [void]$builder.Append($ch)
+                }
+            }
+        }
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function ConvertTo-SmokeJsonValue {
+    param($Value)
+    if ($null -eq $Value) {
+        return "null"
+    }
+    if ($Value -is [bool]) {
+        if ($Value) { return "true" }
+        return "false"
+    }
+    if ($Value -is [byte] -or $Value -is [sbyte] -or
+        $Value -is [int16] -or $Value -is [uint16] -or
+        $Value -is [int32] -or $Value -is [uint32] -or
+        $Value -is [int64] -or $Value -is [uint64] -or
+        $Value -is [single] -or $Value -is [double] -or $Value -is [decimal]) {
+        return [System.Convert]::ToString($Value, [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [System.Collections.IDictionary] -or
+        $Value -is [System.Collections.Specialized.OrderedDictionary]) {
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($key in $Value.Keys) {
+            $parts.Add((ConvertTo-SmokeJsonString ([string]$key)) + ":" + (ConvertTo-SmokeJsonValue $Value[$key]))
+        }
+        return "{" + ([string]::Join(",", $parts)) + "}"
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [string])) {
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($item in $Value) {
+            $parts.Add((ConvertTo-SmokeJsonValue $item))
+        }
+        return "[" + ([string]::Join(",", $parts)) + "]"
+    }
+    return ConvertTo-SmokeJsonString ([string]$Value)
+}
+
 function Get-LatestAsrTranscriptFromLog {
     param([string]$Text)
 
+    return [string](Get-AsrTranscriptSummaryFromLog -Text $Text).final_text
+}
+
+function Get-AsrTranscriptSummaryFromLog {
+    param([string]$Text)
+
+    $updates = New-Object System.Collections.Generic.List[string]
     $latest = ""
     foreach ($line in ($Text -split "(`r`n|`n)")) {
         $marker = "server JSON:"
@@ -89,11 +200,107 @@ function Get-LatestAsrTranscriptFromLog {
             $payload = $jsonText | ConvertFrom-Json
             if ($payload.result -and -not [string]::IsNullOrWhiteSpace([string]$payload.result.text)) {
                 $latest = [string]$payload.result.text
+                if ($updates.Count -eq 0 -or $updates[$updates.Count - 1] -ne $latest) {
+                    $updates.Add($latest)
+                }
+                continue
             }
         } catch {
         }
+        $match = [regex]::Match($jsonText, '"text"\s*:\s*"((?:\\.|[^"\\])*)"')
+        if ($match.Success) {
+            try {
+                $candidate = [string](('"' + $match.Groups[1].Value + '"') | ConvertFrom-Json)
+            } catch {
+                $candidate = [string]$match.Groups[1].Value
+            }
+            if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                $latest = $candidate
+                if ($updates.Count -eq 0 -or $updates[$updates.Count - 1] -ne $latest) {
+                    $updates.Add($latest)
+                }
+            }
+        }
     }
-    return $latest
+    $partialCount = [Math]::Max(0, $updates.Count - 1)
+    $lastPartial = ""
+    if ($partialCount -gt 0) {
+        $lastPartial = $updates[$partialCount - 1]
+    }
+    return [ordered]@{
+        final_text = $latest
+        asr_text_update_count = $updates.Count
+        partial_preview_count = $partialCount
+        last_partial_preview = $lastPartial
+        text_updates = @($updates)
+    }
+}
+
+function Normalize-AccuracyText {
+    param([string]$Text)
+    if ($null -eq $Text) {
+        return ""
+    }
+    $normalized = $Text.Normalize([System.Text.NormalizationForm]::FormKC).ToLowerInvariant()
+    $builder = [System.Text.StringBuilder]::new()
+    foreach ($ch in $normalized.ToCharArray()) {
+        if ([char]::IsLetterOrDigit($ch)) {
+            [void]$builder.Append($ch)
+        }
+    }
+    return $builder.ToString()
+}
+
+function Get-EditDistance {
+    param(
+        [string]$Expected,
+        [string]$Actual
+    )
+    if ($Expected -eq $Actual) {
+        return 0
+    }
+    $previous = New-Object int[] ($Actual.Length + 1)
+    for ($i = 0; $i -le $Actual.Length; $i++) {
+        $previous[$i] = $i
+    }
+    for ($i = 1; $i -le $Expected.Length; $i++) {
+        $current = New-Object int[] ($Actual.Length + 1)
+        $current[0] = $i
+        for ($j = 1; $j -le $Actual.Length; $j++) {
+            $cost = if ($Expected[$i - 1] -eq $Actual[$j - 1]) { 0 } else { 1 }
+            $insertCost = $current[$j - 1] + 1
+            $deleteCost = $previous[$j] + 1
+            $replaceCost = $previous[$j - 1] + $cost
+            $current[$j] = [Math]::Min([Math]::Min($insertCost, $deleteCost), $replaceCost)
+        }
+        $previous = $current
+    }
+    return $previous[$Actual.Length]
+}
+
+function Measure-TranscriptAccuracy {
+    param(
+        [string]$Expected,
+        [string]$Transcript
+    )
+    $expectedNormalized = Normalize-AccuracyText -Text $Expected
+    $transcriptNormalized = Normalize-AccuracyText -Text $Transcript
+    $distance = Get-EditDistance -Expected $expectedNormalized -Actual $transcriptNormalized
+    if ($expectedNormalized.Length -eq 0) {
+        $cer = if ($transcriptNormalized.Length -eq 0) { 0.0 } else { 1.0 }
+    } else {
+        $cer = $distance / [double]$expectedNormalized.Length
+    }
+    $accuracy = [Math]::Max(0.0, 1.0 - $cer)
+    return [ordered]@{
+        expected_text = $Expected
+        normalized_expected = $expectedNormalized
+        normalized_transcript = $transcriptNormalized
+        edit_distance = $distance
+        reference_length = $expectedNormalized.Length
+        cer = [Math]::Round($cer, 6)
+        accuracy = [Math]::Round($accuracy, 6)
+    }
 }
 
 function Get-WavDurationMilliseconds {
@@ -209,13 +416,68 @@ function Start-InsertionTarget {
     $parent = Split-Path -Parent $Path
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     Set-Content -Path $Path -Value "" -Encoding UTF8
-    $process = Start-Process -FilePath "notepad.exe" `
-        -ArgumentList (Quote-ProcessArgument $Path) `
+    $targetScript = Join-Path ([System.IO.Path]::GetTempPath()) "listener_ble_insert_target_$PID.ps1"
+    $targetStdout = "$Path.target.stdout.log"
+    $targetStderr = "$Path.target.stderr.log"
+    $targetScriptBody = @'
+param([string]$Path)
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$form = [System.Windows.Forms.Form]::new()
+$form.Text = "Listener BLE Smoke Target"
+$form.Width = 900
+$form.Height = 320
+$form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+$form.TopMost = $true
+
+$textBox = [System.Windows.Forms.TextBox]::new()
+$textBox.Multiline = $true
+$textBox.Dock = [System.Windows.Forms.DockStyle]::Fill
+$textBox.AcceptsReturn = $true
+$textBox.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 14)
+$form.Controls.Add($textBox)
+
+$timer = [System.Windows.Forms.Timer]::new()
+$timer.Interval = 200
+$timer.Add_Tick({
+    [System.IO.File]::WriteAllText($Path, $textBox.Text, [System.Text.Encoding]::UTF8)
+})
+$form.Add_Shown({
+    $textBox.Focus()
+})
+$form.Add_FormClosed({
+    [System.IO.File]::WriteAllText($Path, $textBox.Text, [System.Text.Encoding]::UTF8)
+    $timer.Stop()
+    $timer.Dispose()
+})
+
+$timer.Start()
+[System.Windows.Forms.Application]::Run($form)
+'@
+    Set-Content -Path $targetScript -Value $targetScriptBody -Encoding UTF8
+    $process = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList @(
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-STA",
+            "-File",
+            (Quote-ProcessArgument $targetScript),
+            "-Path",
+            (Quote-ProcessArgument $Path)
+        ) `
+        -RedirectStandardOutput $targetStdout `
+        -RedirectStandardError $targetStderr `
         -PassThru
     [void](Focus-ProcessWindow -Process $process)
-    return [pscustomobject]@{
+    return [ordered]@{
         Process = $process
         Path = $Path
+        ScriptPath = $targetScript
+        StdoutPath = $targetStdout
+        StderrPath = $targetStderr
     }
 }
 
@@ -225,10 +487,7 @@ function Read-InsertionTargetText {
     if (-not $Target) {
         return $null
     }
-    Add-Type -AssemblyName System.Windows.Forms
-    [void](Focus-ProcessWindow -Process $Target.Process)
-    [System.Windows.Forms.SendKeys]::SendWait("^s")
-    Start-Sleep -Milliseconds 700
+    Start-Sleep -Milliseconds 500
     if (-not (Test-Path $Target.Path)) {
         return ""
     }
@@ -258,6 +517,9 @@ function Stop-InsertionTarget {
         } catch {
         }
     }
+    if ($Target.ScriptPath) {
+        Remove-Item -LiteralPath $Target.ScriptPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Get-HistoryPath {
@@ -265,6 +527,31 @@ function Get-HistoryPath {
         return Join-Path $env:APPDATA "Listener Type\history.json"
     }
     return $null
+}
+
+function Get-RecordingsRoot {
+    if ($env:APPDATA) {
+        return Join-Path $env:APPDATA "Listener Type\recordings"
+    }
+    return $null
+}
+
+function Find-LatestRecordingAfter {
+    param([datetime]$StartedAt)
+
+    $root = Get-RecordingsRoot
+    if (-not $root -or -not (Test-Path $root)) {
+        return $null
+    }
+    $threshold = $StartedAt.ToUniversalTime().AddMinutes(-1)
+    $candidate = Get-ChildItem -Path $root -Filter "*.wav" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTimeUtc -ge $threshold } |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+    if (-not $candidate) {
+        return $null
+    }
+    return $candidate.FullName
 }
 
 function Find-SmokeHistorySession {
@@ -356,6 +643,53 @@ function Wait-SmokeHistorySession {
         Start-Sleep -Milliseconds 300
     } while ((Get-Date) -lt $deadline)
     return $null
+}
+
+function Convert-SerialReportForJson {
+    param($Report)
+    if (-not $Report) {
+        return $null
+    }
+    return [pscustomobject]@{
+        serial_log_path = [string]$Report.serial_log_path
+        serial_line_count = [int]$Report.serial_line_count
+        notify_enabled = [bool]$Report.notify_enabled
+        stream_ready = [bool]$Report.stream_ready
+        streaming_queued = [bool]$Report.streaming_queued
+        transport_not_ready = [bool]$Report.transport_not_ready
+        record_start_rejected = [bool]$Report.record_start_rejected
+        recording_start_seen = [bool]$Report.recording_start_seen
+        recording_stop_seen = [bool]$Report.recording_stop_seen
+        recording_cancel_seen = [bool]$Report.recording_cancel_seen
+        cancel_requested = [bool]$Report.cancel_requested
+        cancel_completed = [bool]$Report.cancel_completed
+    }
+}
+
+function Convert-HistorySessionForJson {
+    param($Session)
+    if (-not $Session) {
+        return $null
+    }
+    $stats = $Session.embeddedAudioStats
+    $statsReport = $null
+    if ($stats) {
+        $statsReport = [ordered]@{
+            receivedPcmBytes = [int64]$stats.receivedPcmBytes
+            reconstructedPcmBytes = [int64]$stats.reconstructedPcmBytes
+            missingPacketCount = [int64]$stats.missingPacketCount
+            expectedPacketCount = $stats.expectedPacketCount
+            terminalReceived = [bool]$stats.terminalReceived
+        }
+    }
+    return [ordered]@{
+        id = [string]$Session.id
+        createdAt = [string]$Session.createdAt
+        rawTranscript = [string]$Session.rawTranscript
+        finalText = [string]$Session.finalText
+        insertStatus = [string]$Session.insertStatus
+        embeddedAudioStats = $statsReport
+    }
 }
 
 function Send-SerialCommand {
@@ -457,9 +791,14 @@ ser.close()
 function Start-SerialRecordingWindow {
     param(
         [string]$PortName,
-        [int]$DurationMs,
+        [int]$MaxRecordMs,
         [string]$SerialLogPath,
         [string]$StartSignalPath,
+        [string]$StopSignalPath,
+        [string]$RecordingStartedSignalPath,
+        [int]$RecordingStartTimeoutMs,
+        [ValidateSet("toggle", "cancel")]
+        [string]$EndCommand = "toggle",
         [int]$MaxWaitSeconds = 120
     )
 
@@ -471,10 +810,14 @@ import sys
 import time
 
 port = sys.argv[1]
-duration_ms = int(sys.argv[2])
+max_record_ms = int(sys.argv[2])
 log_path = pathlib.Path(sys.argv[3])
 start_signal_path = pathlib.Path(sys.argv[4])
-max_wait_seconds = int(sys.argv[5])
+stop_signal_path = pathlib.Path(sys.argv[5])
+recording_started_signal_path = pathlib.Path(sys.argv[6])
+recording_start_timeout_ms = int(sys.argv[7])
+end_command = sys.argv[8]
+max_wait_seconds = int(sys.argv[9])
 lines = []
 buffer = bytearray()
 
@@ -517,6 +860,32 @@ def wait_for_start_signal(ser):
         time.sleep(0.05)
     raise RuntimeError(f"timed out waiting for start signal: {start_signal_path}")
 
+def contains(text):
+    return any(text in line for line in lines)
+
+def wait_for_recording_start(ser):
+    deadline = time.monotonic() + (recording_start_timeout_ms / 1000.0)
+    while time.monotonic() < deadline:
+        poll_lines(ser)
+        if contains("recording start source="):
+            recording_started_signal_path.write_text("recording_start_seen", encoding="ascii")
+            return
+        time.sleep(0.02)
+    raise RuntimeError("timed out waiting for firmware recording start log")
+
+def wait_for_stop_signal(ser):
+    deadline = time.monotonic() + (max_record_ms / 1000.0)
+    while time.monotonic() < deadline:
+        poll_lines(ser)
+        if stop_signal_path.exists():
+            try:
+                stop_signal_path.unlink()
+            except OSError:
+                pass
+            return
+        time.sleep(0.02)
+    raise RuntimeError(f"timed out waiting for stop signal: {stop_signal_path}")
+
 ser = serial.Serial()
 ser.port = port
 ser.baudrate = 115200
@@ -534,8 +903,12 @@ try:
     ser.reset_input_buffer()
     wait_for_start_signal(ser)
     send_command(ser, "~VREC:TOGGLE")
-    poll_until(ser, time.monotonic() + (duration_ms / 1000.0))
-    send_command(ser, "~VREC:TOGGLE")
+    wait_for_recording_start(ser)
+    wait_for_stop_signal(ser)
+    if end_command == "cancel":
+        send_command(ser, "~VREC:CANCEL")
+    else:
+        send_command(ser, "~VREC:TOGGLE")
     poll_until(ser, time.monotonic() + 1.5)
 finally:
     try:
@@ -544,9 +917,6 @@ finally:
     finally:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("\n".join(lines), encoding="utf-8")
-
-def contains(text):
-    return any(text in line for line in lines)
 
 notify_enabled = any(
     ("audio notify subscription changed" in line and "notify=1" in line)
@@ -566,6 +936,13 @@ summary = {
     "record_start_rejected": contains("record session start rejected"),
     "recording_start_seen": contains("recording start source="),
     "recording_stop_seen": contains("recording stop source="),
+    "recording_cancel_seen": contains("recording cancel source="),
+    "cancel_requested": contains("record session cancel requested"),
+    "cancel_completed": (
+        contains("record session canceled")
+        or contains("recording cancel source=")
+        or contains("record session canceled before activation")
+    ),
 }
 print(json.dumps(summary, ensure_ascii=False), flush=True)
 '@
@@ -578,9 +955,13 @@ print(json.dumps(summary, ensure_ascii=False), flush=True)
     $psi.Arguments = @(
         Quote-ProcessArgument $tempScript
         Quote-ProcessArgument $PortName
-        Quote-ProcessArgument ([string]$DurationMs)
+        Quote-ProcessArgument ([string]$MaxRecordMs)
         Quote-ProcessArgument $SerialLogPath
         Quote-ProcessArgument $StartSignalPath
+        Quote-ProcessArgument $StopSignalPath
+        Quote-ProcessArgument $RecordingStartedSignalPath
+        Quote-ProcessArgument ([string]$RecordingStartTimeoutMs)
+        Quote-ProcessArgument $EndCommand
         Quote-ProcessArgument ([string]$MaxWaitSeconds)
     ) -join " "
     $psi.UseShellExecute = $false
@@ -593,7 +974,28 @@ print(json.dumps(summary, ensure_ascii=False), flush=True)
         Process = $process
         ScriptPath = $tempScript
         SerialLogPath = $SerialLogPath
+        RecordingStartedSignalPath = $RecordingStartedSignalPath
     }
+}
+
+function Wait-RecordingStartedSignal {
+    param(
+        $Window,
+        [int]$TimeoutMs
+    )
+
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $deadline) {
+        if ($Window -and $Window.Process.HasExited) {
+            $stderr = $Window.Process.StandardError.ReadToEnd()
+            throw "serial recording window exited before recording start: $stderr"
+        }
+        if ($Window -and (Test-Path $Window.RecordingStartedSignalPath)) {
+            return
+        }
+        Start-Sleep -Milliseconds 25
+    }
+    throw "Timed out waiting for firmware recording start confirmation"
 }
 
 function Wait-SerialRecordingWindow {
@@ -641,27 +1043,46 @@ function Stop-SerialRecordingWindow {
 }
 
 function New-RandomSentence {
+    param([int]$Count = 1)
+
     $sentences = @(
         "火山识别和蓝牙传输正在接受测试。",
         "蓝牙音频正在发送到火山识别，请检查文本结果。",
-        "这是一段新的合成语音，用来检查蓝牙传输。",
-        "如果这句话能被识别出来，说明流式上传已经连通。",
-        "自动化测试正在模拟按键录音，并验证端到端听写链路。"
+        "蓝牙手动按键测试成功。",
+        "请把这句话写到当前光标位置。",
+        "减少人工参与测试正在进行。",
+        "这次测试会检查识别结果和光标输出。",
+        "蓝牙数据传输完成后会插入文字。"
     )
-    return Get-Random -InputObject $sentences
+    if ($Count -le 1) {
+        return Get-Random -InputObject $sentences
+    }
+
+    $selected = New-Object System.Collections.Generic.List[string]
+    $pool = @($sentences)
+    for ($index = 0; $index -lt $Count; $index++) {
+        if ($pool.Count -eq 0) {
+            $pool = @($sentences)
+        }
+        $choice = Get-Random -InputObject $pool
+        $selected.Add([string]$choice)
+        $pool = @($pool | Where-Object { $_ -ne $choice })
+    }
+    return [string]::Join("", $selected)
 }
 
 function New-TtsWave {
     param(
         [string]$Text,
         [string]$Path,
-        [string]$PreferredVoice
+        [string]$PreferredVoice,
+        [int]$Rate = 0
     )
     Add-Type -AssemblyName System.Speech
     $synth = [System.Speech.Synthesis.SpeechSynthesizer]::new()
     try {
         $synth.Volume = 100
-        $synth.Rate = -1
+        $synth.Rate = [Math]::Max(-10, [Math]::Min(10, $Rate))
         $voices = @($synth.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name })
         if ($voices -contains $PreferredVoice) {
             $synth.SelectVoice($PreferredVoice)
@@ -682,6 +1103,40 @@ function New-TtsWave {
         $synth.Speak($Text)
     } finally {
         $synth.Dispose()
+    }
+}
+
+function New-SilenceWave {
+    param(
+        [string]$Path,
+        [int]$DurationMs
+    )
+
+    $sampleRate = 16000
+    $bytesPerSample = 2
+    $sampleCount = [int][System.Math]::Max(1, [System.Math]::Ceiling($sampleRate * ($DurationMs / 1000.0)))
+    $dataSize = $sampleCount * $bytesPerSample
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+    $writer = [System.IO.BinaryWriter]::new($stream)
+    try {
+        $writer.Write([System.Text.Encoding]::ASCII.GetBytes("RIFF"))
+        $writer.Write([uint32](36 + $dataSize))
+        $writer.Write([System.Text.Encoding]::ASCII.GetBytes("WAVE"))
+        $writer.Write([System.Text.Encoding]::ASCII.GetBytes("fmt "))
+        $writer.Write([uint32]16)
+        $writer.Write([uint16]1)
+        $writer.Write([uint16]1)
+        $writer.Write([uint32]$sampleRate)
+        $writer.Write([uint32]($sampleRate * $bytesPerSample))
+        $writer.Write([uint16]$bytesPerSample)
+        $writer.Write([uint16]16)
+        $writer.Write([System.Text.Encoding]::ASCII.GetBytes("data"))
+        $writer.Write([uint32]$dataSize)
+        $zeros = New-Object byte[] $dataSize
+        $writer.Write($zeros)
+    } finally {
+        $writer.Dispose()
+        $stream.Dispose()
     }
 }
 
@@ -765,22 +1220,42 @@ if ($PlaybackCount -lt 1) {
 if ($RecordPlaybackIndex -lt 1 -or $RecordPlaybackIndex -gt $PlaybackCount) {
     throw "RecordPlaybackIndex must be between 1 and PlaybackCount"
 }
+if ($RandomSentenceCount -lt 1) {
+    throw "RandomSentenceCount must be >= 1"
+}
 if ($NoNotificationTimeoutSeconds -lt 1) {
     throw "NoNotificationTimeoutSeconds must be >= 1"
 }
 
 $RunStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$script:TraceLogPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.trace.log"
+Write-SmokeTrace "start trigger=$TriggerMode port=$Port timeout_ms=$TimeoutMs"
+$AudioProfileConfig = Get-SmokeAudioProfile -Name $AudioProfile
+if (-not $PSBoundParameters.ContainsKey("TtsRate")) {
+    $TtsRate = [int]$AudioProfileConfig.tts_rate
+}
+if (-not $PSBoundParameters.ContainsKey("TtsGain")) {
+    $TtsGain = [double]$AudioProfileConfig.tts_gain
+}
 if (-not $Sentence) {
-    $Sentence = New-RandomSentence
+    $Sentence = New-RandomSentence -Count $RandomSentenceCount
+}
+if (-not $ExpectedText -and -not $ExpectNoText) {
+    $ExpectedText = $Sentence
 }
 if (-not $WavPath) {
     $WavPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.wav"
 }
 $WavPath = Resolve-RepoPath $WavPath
 if (-not (Test-Path $WavPath)) {
-    New-TtsWave -Text $Sentence -Path $WavPath -PreferredVoice $VoiceName
-    Boost-WavPcm16 -Path $WavPath -Gain $TtsGain
+    if ($SilentAudio) {
+        New-SilenceWave -Path $WavPath -DurationMs $SilentAudioMs
+    } else {
+        New-TtsWave -Text $Sentence -Path $WavPath -PreferredVoice $VoiceName -Rate $TtsRate
+        Boost-WavPcm16 -Path $WavPath -Gain $TtsGain
+    }
 }
+Write-SmokeTrace "wav_ready path=$WavPath sentence=$Sentence profile=$AudioProfile rate=$TtsRate gain=$TtsGain silent=$([bool]$SilentAudio)"
 $wavDurationMs = Get-WavDurationMilliseconds -Path $WavPath
 $recordingWindowMs = [System.Math]::Max(
     1000,
@@ -788,7 +1263,10 @@ $recordingWindowMs = [System.Math]::Max(
 )
 $serialLogPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.serial.log"
 $serialStartSignalPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.start.signal"
+$serialStopSignalPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.stop.signal"
+$serialRecordingStartedSignalPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.recording-started.signal"
 Remove-Item -LiteralPath $serialStartSignalPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $serialStopSignalPath -Force -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $ListenerExe)) {
     $env:PATH = "C:\Users\Billy\.cargo\bin;$env:PATH"
@@ -796,14 +1274,19 @@ if (-not (Test-Path $ListenerExe)) {
 }
 
 if (-not $NoResetBeforeCapture) {
+    Write-SmokeTrace "serial_reset_start"
     Reset-SerialTarget -PortName $Port
     Start-Sleep -Seconds 2
+    Write-SmokeTrace "serial_reset_done"
 } else {
+    Write-SmokeTrace "serial_cancel_start"
     Send-SerialCommand -PortName $Port -Command "~VREC:CANCEL"
     Start-Sleep -Milliseconds 500
+    Write-SmokeTrace "serial_cancel_done"
 }
 
 if (-not $SkipEnsureBle) {
+    Write-SmokeTrace "ensure_ble_start"
     $ensureScript = Join-Path $FirmwareRepo "tools\ensure_ble_hid_connection.ps1"
     if (-not (Test-Path $ensureScript)) {
         throw "BLE ensure script not found: $ensureScript"
@@ -814,6 +1297,7 @@ if (-not $SkipEnsureBle) {
         -DurationSeconds 8 `
         -PollIntervalSeconds 2 `
         -ExitOnReady
+    Write-SmokeTrace "ensure_ble_done"
 }
 
 $logPath = Join-Path $env:LOCALAPPDATA "Listener Type\Logs\listener-type.log"
@@ -822,6 +1306,8 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $logOffsetValue = if (Test-Path $logPath) { (Get-Item $logPath).Length } else { 0 }
 $logOffset = [ref]$logOffsetValue
 $capturedLog = ""
+$listenerChildStdoutLog = Join-Path $OutDir "listener-type-child-$RunStamp.stdout.log"
+$listenerChildStderrLog = Join-Path $OutDir "listener-type-child-$RunStamp.stderr.log"
 
 Get-Process listener-type -ErrorAction SilentlyContinue | Stop-Process -Force
 
@@ -832,29 +1318,64 @@ $recordingStarted = $false
 $insertionTarget = $null
 $insertedText = $null
 $historySession = $null
+$historyLookupSkipped = $false
+$recordingArchivePath = $null
+$recordPlaybackDurationMs = $null
 $smokeStartedAt = Get-Date
+$timeline = [ordered]@{
+    smoke_started_at_utc = $smokeStartedAt.ToUniversalTime().ToString("o")
+}
+$scriptExitCode = 0
+$usesSerialSignal = @("serial-toggle", "serial-cancel") -contains $TriggerMode
+$serialEndCommand = if ($TriggerMode -eq "serial-cancel") { "cancel" } else { "toggle" }
+$expectedStreamFailure = $null
 try {
     if ($VerifyInsertion) {
         $insertionTargetPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.target.txt"
         $insertionTarget = Start-InsertionTarget -Path $insertionTargetPath
+        Write-SmokeTrace "insertion_target_started path=$insertionTargetPath"
     }
 
-    if ($TriggerMode -eq "serial-toggle") {
+    if ($usesSerialSignal) {
         $serialWindow = Start-SerialRecordingWindow `
             -PortName $Port `
-            -DurationMs $recordingWindowMs `
+            -MaxRecordMs ([System.Math]::Max(15000, $recordingWindowMs + 10000)) `
             -SerialLogPath $serialLogPath `
-            -StartSignalPath $serialStartSignalPath
+            -StartSignalPath $serialStartSignalPath `
+            -StopSignalPath $serialStopSignalPath `
+            -RecordingStartedSignalPath $serialRecordingStartedSignalPath `
+            -RecordingStartTimeoutMs $RecordingStartTimeoutMs `
+            -EndCommand $serialEndCommand
+        Write-SmokeTrace "serial_window_started path=$serialLogPath"
     }
 
-    $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = (Resolve-Path $ListenerExe).Path
-    $psi.Arguments = "--submit-embedded-audio-ble-stream $TimeoutMs"
-    $psi.WorkingDirectory = $RepoRoot
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.EnvironmentVariables["LISTENER_TYPE_HIDE_MAIN_ON_START"] = "1"
-    $process = [System.Diagnostics.Process]::Start($psi)
+    $oldHideMain = $env:LISTENER_TYPE_HIDE_MAIN_ON_START
+    $oldDisableBle = $env:LISTENER_TYPE_DISABLE_BACKGROUND_BLE
+    $oldForceRaw = $env:LISTENER_TYPE_FORCE_RAW_OUTPUT
+    $oldRecordEmbedded = $env:LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG
+    $oldForegroundInsert = $env:LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK
+    try {
+        $env:LISTENER_TYPE_HIDE_MAIN_ON_START = "1"
+        $env:LISTENER_TYPE_DISABLE_BACKGROUND_BLE = "1"
+        $env:LISTENER_TYPE_FORCE_RAW_OUTPUT = "1"
+        $env:LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG = "1"
+        $env:LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK = "1"
+        $process = Start-Process -FilePath (Resolve-Path $ListenerExe).Path `
+            -ArgumentList @("--submit-embedded-audio-ble-stream", ([string]$TimeoutMs)) `
+            -WorkingDirectory $RepoRoot `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $listenerChildStdoutLog `
+            -RedirectStandardError $listenerChildStderrLog `
+            -PassThru
+        $timeline["listener_started_at_utc"] = Get-SmokeUtcNow
+        Write-SmokeTrace "listener_started pid=$($process.Id)"
+    } finally {
+        if ($null -eq $oldHideMain) { Remove-Item Env:LISTENER_TYPE_HIDE_MAIN_ON_START -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_HIDE_MAIN_ON_START = $oldHideMain }
+        if ($null -eq $oldDisableBle) { Remove-Item Env:LISTENER_TYPE_DISABLE_BACKGROUND_BLE -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_DISABLE_BACKGROUND_BLE = $oldDisableBle }
+        if ($null -eq $oldForceRaw) { Remove-Item Env:LISTENER_TYPE_FORCE_RAW_OUTPUT -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_FORCE_RAW_OUTPUT = $oldForceRaw }
+        if ($null -eq $oldRecordEmbedded) { Remove-Item Env:LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG = $oldRecordEmbedded }
+        if ($null -eq $oldForegroundInsert) { Remove-Item Env:LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK = $oldForegroundInsert }
+    }
 
     $readyDeadline = (Get-Date).AddSeconds($NotifyReadyTimeoutSeconds)
     $notifyReady = $false
@@ -875,6 +1396,8 @@ try {
     if (-not $notifyReady) {
         throw "Timed out waiting for BLE notify registration"
     }
+    $timeline["notify_ready_at_utc"] = Get-SmokeUtcNow
+    Write-SmokeTrace "notify_ready"
     Start-Sleep -Milliseconds ([int]($NotifySettleSeconds * 1000))
 
     $streamStartedPattern = "embedded audio streaming dictation started"
@@ -887,10 +1410,16 @@ try {
             if ($VerifyInsertion -and $insertionTarget) {
                 [void](Focus-ProcessWindow -Process $insertionTarget.Process)
                 Start-Sleep -Milliseconds 150
+                Write-SmokeTrace "insertion_target_focused"
             }
-            if ($TriggerMode -eq "serial-toggle") {
+            if ($usesSerialSignal) {
                 Set-Content -Path $serialStartSignalPath -Value "start" -Encoding ASCII
                 $recordingStarted = $true
+                $timeline["serial_start_signal_at_utc"] = Get-SmokeUtcNow
+                Write-SmokeTrace "serial_start_signal_written"
+                Wait-RecordingStartedSignal -Window $serialWindow -TimeoutMs $RecordingStartTimeoutMs
+                $timeline["firmware_recording_started_at_utc"] = Get-SmokeUtcNow
+                Write-SmokeTrace "firmware_recording_start_seen"
             } else {
                 Write-Output "manual_trigger_ready=1"
                 Write-Output "manual_trigger_hint=press KEY1 while the playback sentence is audible"
@@ -898,12 +1427,33 @@ try {
             }
             Start-Sleep -Milliseconds $PreRecordDelayMs
         }
-        $player.PlaySync()
+        Write-SmokeTrace "playback_start index=$index"
+        $playbackStartedAt = Get-Date
         if ($index -eq $RecordPlaybackIndex) {
-            if ($TriggerMode -eq "serial-toggle") {
+            $timeline["record_playback_started_at_utc"] = $playbackStartedAt.ToUniversalTime().ToString("o")
+        }
+        $player.PlaySync()
+        $playbackElapsedMs = [int][System.Math]::Round(((Get-Date) - $playbackStartedAt).TotalMilliseconds)
+        if ($index -eq $RecordPlaybackIndex) {
+            $timeline["record_playback_done_at_utc"] = Get-SmokeUtcNow
+        }
+        Write-SmokeTrace "playback_done index=$index actual_ms=$playbackElapsedMs"
+        if ($index -eq $RecordPlaybackIndex) {
+            $recordPlaybackDurationMs = $playbackElapsedMs
+            if ($usesSerialSignal) {
+                Start-Sleep -Milliseconds $PostPlaybackRecordMs
+                Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
+                $timeline["serial_stop_signal_at_utc"] = Get-SmokeUtcNow
+                Write-SmokeTrace "serial_stop_signal_written"
                 $serialReport = Wait-SerialRecordingWindow -Window $serialWindow
                 $serialWindow = $null
                 $recordingStarted = $false
+                $timeline["serial_window_done_at_utc"] = Get-SmokeUtcNow
+                Write-SmokeTrace "serial_window_done"
+                if ($VerifyInsertion -and $insertionTarget) {
+                    [void](Focus-ProcessWindow -Process $insertionTarget.Process -Retries 5)
+                    Write-SmokeTrace "insertion_target_refocused_after_serial"
+                }
             } else {
                 Write-Output "manual_trigger_playback_done=1"
             }
@@ -916,8 +1466,14 @@ try {
     $noNotificationDeadline = (Get-Date).AddSeconds($NoNotificationTimeoutSeconds)
     $doneDeadline = (Get-Date).AddMilliseconds($TimeoutMs + 10000)
     $doneMatch = $null
+    $lastInsertionTargetFocusAt = Get-Date
     while ((Get-Date) -lt $doneDeadline) {
         Start-Sleep -Milliseconds 300
+        if ($VerifyInsertion -and $insertionTarget -and (((Get-Date) - $lastInsertionTargetFocusAt).TotalMilliseconds -ge 1000)) {
+            [void](Focus-ProcessWindow -Process $insertionTarget.Process -Retries 3)
+            $lastInsertionTargetFocusAt = Get-Date
+            Write-SmokeTrace "insertion_target_refocused"
+        }
         $capturedLog += Read-NewLogText -Path $logPath -Offset $logOffset
         if (-not $streamStarted -and $capturedLog -match $streamStartedPattern) {
             $streamStarted = $true
@@ -928,9 +1484,21 @@ try {
             [System.Text.RegularExpressions.RegexOptions]::RightToLeft
         )
         if ($doneMatch.Success) {
+            $timeline["stream_done_at_utc"] = Get-SmokeUtcNow
+            Write-SmokeTrace "done_match"
             break
         }
-        if ($capturedLog -match "submit-embedded-audio-ble-stream failed") {
+        $failedMatch = [regex]::Match(
+            $capturedLog,
+            "submit-embedded-audio-ble-stream failed: (.+)",
+            [System.Text.RegularExpressions.RegexOptions]::RightToLeft
+        )
+        if ($failedMatch.Success) {
+            if ($ExpectNoText) {
+                $expectedStreamFailure = $failedMatch.Groups[1].Value.Trim()
+                Write-SmokeTrace "expected_stream_failure=$expectedStreamFailure"
+                break
+            }
             throw "Listener-Type BLE stream failed after triggered playback"
         }
         if (-not $streamStarted -and (Get-Date) -ge $noNotificationDeadline) {
@@ -943,27 +1511,47 @@ try {
             throw "No BLE audio notifications arrived within $NoNotificationTimeoutSeconds seconds after triggered playback$hint"
         }
     }
-    if (-not $doneMatch -or -not $doneMatch.Success) {
+    if ((-not $doneMatch -or -not $doneMatch.Success) -and -not $expectedStreamFailure) {
         throw "Timed out waiting for Listener-Type BLE stream completion"
     }
-    Start-Sleep -Milliseconds 1200
+    Start-Sleep -Milliseconds 200
     $capturedLog += Read-NewLogText -Path $logPath -Offset $logOffset
+    if (Test-Path $listenerChildStdoutLog) {
+        $capturedLog += "`n"
+        $capturedLog += Get-Content -Path $listenerChildStdoutLog -Raw -ErrorAction SilentlyContinue
+    }
 
-    $transcript = Get-LatestAsrTranscriptFromLog -Text $capturedLog
-    $missingPackets = [int]$doneMatch.Groups[2].Value
-    $pcmBytes = [int]$doneMatch.Groups[1].Value
+    Write-SmokeTrace "parse_transcript_start"
+    $asrSummary = Get-AsrTranscriptSummaryFromLog -Text $capturedLog
+    $transcript = [string]$asrSummary.final_text
+    $missingPackets = if ($doneMatch -and $doneMatch.Success) { [int]$doneMatch.Groups[2].Value } else { 0 }
+    $pcmBytes = if ($doneMatch -and $doneMatch.Success) { [int]$doneMatch.Groups[1].Value } else { 0 }
+    $timeline["transcript_parsed_at_utc"] = Get-SmokeUtcNow
+    Write-SmokeTrace "parse_transcript_done transcript_len=$($transcript.Length) pcm=$pcmBytes missing=$missingPackets"
     $status = if ($missingPackets -gt $MaxMissingPackets) { "WARNING" } else { "PASS" }
     if ($FailOnMissingPackets -and $missingPackets -gt $MaxMissingPackets) {
         $status = "FAIL"
     }
     $verificationErrors = @()
-    if ($VerifyHistory -or $VerifyInsertion) {
+    $needsHistoryLookup = $VerifyHistory -and -not $VerifyInsertion
+    if ($VerifyInsertion -and [string]::IsNullOrWhiteSpace($transcript)) {
+        $needsHistoryLookup = $true
+    }
+    if ($needsHistoryLookup) {
+        $timeline["history_wait_started_at_utc"] = Get-SmokeUtcNow
+        Write-SmokeTrace "history_wait_start"
         $historySession = Wait-SmokeHistorySession `
             -StartedAt $smokeStartedAt `
             -Transcript $transcript `
             -ExpectedPcmBytes $pcmBytes `
-            -TimeoutSeconds 15
+            -TimeoutSeconds 3
+        $timeline["history_wait_done_at_utc"] = Get-SmokeUtcNow
+        Write-SmokeTrace "history_wait_done found=$([bool]$historySession)"
+    } elseif ($VerifyHistory -or $VerifyInsertion) {
+        $historyLookupSkipped = $true
+        Write-SmokeTrace "history_wait_skipped transcript_len=$($transcript.Length) verify_insertion=$VerifyInsertion verify_history=$VerifyHistory"
     }
+    $recordingArchivePath = Find-LatestRecordingAfter -StartedAt $smokeStartedAt
     if ($historySession -and [string]::IsNullOrWhiteSpace($transcript)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$historySession.rawTranscript)) {
             $transcript = [string]$historySession.rawTranscript
@@ -976,74 +1564,165 @@ try {
             $transcript = $historyTranscript
         }
     }
-    if ($VerifyHistory) {
-        if (-not $historySession) {
-            $verificationErrors += "history session was not written for this BLE smoke"
-        } elseif (-not $historySession.embeddedAudioStats) {
-            $verificationErrors += "history session does not include embeddedAudioStats"
+    if ($usesSerialSignal) {
+        if (-not $serialReport) {
+            $verificationErrors += "serial recording report missing"
+        } else {
+            if (-not [bool]$serialReport.recording_start_seen) {
+                $verificationErrors += "firmware recording start was not confirmed before playback"
+            }
+            if ($TriggerMode -eq "serial-cancel") {
+                if (-not [bool]$serialReport.cancel_completed) {
+                    $verificationErrors += "firmware recording cancel was not confirmed after playback"
+                }
+            } else {
+                if (-not [bool]$serialReport.recording_stop_seen) {
+                    $verificationErrors += "firmware recording stop was not confirmed after playback"
+                }
+            }
         }
     }
+    $insertionVerified = $false
     if ($VerifyInsertion) {
+        $timeline["insertion_read_started_at_utc"] = Get-SmokeUtcNow
+        Write-SmokeTrace "insertion_read_start"
         $insertedText = Read-InsertionTargetText -Target $insertionTarget
+        $timeline["insertion_read_done_at_utc"] = Get-SmokeUtcNow
+        Write-SmokeTrace "insertion_read_done len=$(([string]$insertedText).Length)"
         $expectedText = ""
         if ($historySession -and -not [string]::IsNullOrWhiteSpace([string]$historySession.finalText)) {
             $expectedText = [string]$historySession.finalText
         } elseif (-not [string]::IsNullOrWhiteSpace($transcript)) {
             $expectedText = $transcript
         }
-        if ([string]::IsNullOrWhiteSpace($expectedText)) {
+        if ($ExpectNoText) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$insertedText)) {
+                $verificationErrors += "target editor contains text during no-text expectation"
+            }
+        } elseif ([string]::IsNullOrWhiteSpace($expectedText)) {
             $verificationErrors += "no transcript/final text available for insertion verification"
         } elseif (-not ([string]$insertedText).Contains($expectedText)) {
             $verificationErrors += "target editor does not contain final text"
+        } else {
+            $insertionVerified = $true
+        }
+    }
+    if ($ExpectNoText) {
+        $historyRaw = if ($historySession) { [string]$historySession.rawTranscript } else { "" }
+        $historyFinal = if ($historySession) { [string]$historySession.finalText } else { "" }
+        if (-not [string]::IsNullOrWhiteSpace($transcript)) {
+            $verificationErrors += "transcript was produced during no-text expectation"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($historyRaw) -or -not [string]::IsNullOrWhiteSpace($historyFinal)) {
+            $verificationErrors += "history text was produced during no-text expectation"
+        }
+    } elseif ($VerifyHistory) {
+        if (-not $historySession) {
+            if (-not $insertionVerified) {
+                $verificationErrors += "history session was not written for this BLE smoke"
+            }
+        } elseif (-not $historySession.embeddedAudioStats) {
+            if (-not $insertionVerified) {
+                $verificationErrors += "history session does not include embeddedAudioStats"
+            }
         }
     }
     if ($verificationErrors.Count -gt 0) {
         $status = "FAIL"
     }
 
-    $report = [pscustomobject]@{
+    Write-SmokeTrace "report_object_start"
+    $serialReportJson = Convert-SerialReportForJson -Report $serialReport
+    $historySessionJson = Convert-HistorySessionForJson -Session $historySession
+    $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
+    $accuracyReport = Measure-TranscriptAccuracy -Expected $ExpectedText -Transcript $finalText
+    $insertStatus = if ($historySessionJson -and -not [string]::IsNullOrWhiteSpace([string]$historySessionJson.insertStatus)) {
+        [string]$historySessionJson.insertStatus
+    } elseif ($insertionVerified) {
+        "inserted"
+    } else {
+        $null
+    }
+    $report = [ordered]@{
         status = $status
         trigger = $TriggerMode
         port = $Port
+        audio_profile = $AudioProfile
         sentence = $Sentence
+        expected_text = $ExpectedText
         transcript = $transcript
+        final_text = $finalText
+        partial_preview_count = [int]$asrSummary.partial_preview_count
+        last_partial_preview = [string]$asrSummary.last_partial_preview
+        asr_text_update_count = [int]$asrSummary.asr_text_update_count
+        asr_text_updates = @($asrSummary.text_updates)
+        normalized_expected = $accuracyReport.normalized_expected
+        normalized_transcript = $accuracyReport.normalized_transcript
+        cer = $accuracyReport.cer
+        accuracy = $accuracyReport.accuracy
+        accuracy_threshold = [double]$AudioProfileConfig.minimum_accuracy
+        accuracy_warning_only = [bool]$AudioProfileConfig.warning_only
         wav_path = $WavPath
+        tts_rate = $TtsRate
         tts_gain = $TtsGain
+        random_sentence_count = $RandomSentenceCount
+        silent_audio = [bool]$SilentAudio
+        silent_audio_ms = $SilentAudioMs
+        expect_no_text = [bool]$ExpectNoText
+        expected_stream_failure = $expectedStreamFailure
         playback_count = $PlaybackCount
         record_playback_index = $RecordPlaybackIndex
+        record_playback_actual_ms = $recordPlaybackDurationMs
         wav_duration_ms = $wavDurationMs
         recording_window_ms = $recordingWindowMs
         pre_record_delay_ms = $PreRecordDelayMs
+        recording_start_timeout_ms = $RecordingStartTimeoutMs
         post_playback_record_ms = $PostPlaybackRecordMs
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
         manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
-        serial_report = $serialReport
+        serial_report = $serialReportJson
         pcm_bytes = $pcmBytes
         missing_packets = $missingPackets
         max_missing_packets = $MaxMissingPackets
         verify_insertion = [bool]$VerifyInsertion
         verify_history = [bool]$VerifyHistory
+        history_lookup_skipped = [bool]$historyLookupSkipped
+        insert_status = $insertStatus
+        insertion_verified = [bool]$insertionVerified
+        insertion_target_used = [bool]$insertionTarget
         insertion_target_path = if ($insertionTarget) { $insertionTarget.Path } else { $null }
         inserted_text = $insertedText
         history_path = Get-HistoryPath
-        history_session = $historySession
+        recording_archive_path = $recordingArchivePath
+        history_session = $historySessionJson
         verification_errors = $verificationErrors
+        timeline = $timeline
+        started_at_utc = $smokeStartedAt.ToUniversalTime().ToString("o")
         log_path = $logPath
     }
-    $pretty = $report | ConvertTo-Json -Depth 8
-    $compact = $report | ConvertTo-Json -Depth 8 -Compress
+    Write-SmokeTrace "report_object_done"
+    Write-SmokeTrace "json_convert_start"
+    $compact = ConvertTo-SmokeJsonValue $report
+    $pretty = $compact
+    Write-SmokeTrace "json_convert_done"
     $reportPath = Join-Path $OutDir "ble-stream-smoke.$((Get-Date).ToString('yyyyMMdd-HHmmss')).json"
+    $timeline["report_write_started_at_utc"] = Get-SmokeUtcNow
+    Write-SmokeTrace "report_write_start path=$reportPath status=$status"
     Set-Content -Path $reportPath -Value $pretty -Encoding UTF8
     Write-Output $pretty
     Write-Output "ble_stream_smoke_result_json=$compact"
+    Write-SmokeTrace "report_write_done"
     if ($status -eq "FAIL") {
-        exit 1
+        $scriptExitCode = 1
     }
 } catch {
     $caughtError = $_
+    Write-SmokeTrace "catch error=$($caughtError.Exception.Message)"
     if ($recordingStarted) {
         try {
+            Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
+            Write-SmokeTrace "catch_serial_stop_signal_written"
             $serialReport = Wait-SerialRecordingWindow -Window $serialWindow
             $serialWindow = $null
         } catch {
@@ -1057,41 +1736,87 @@ try {
         } catch {
         }
     }
-    $report = [pscustomobject]@{
+    $recordingArchivePath = Find-LatestRecordingAfter -StartedAt $smokeStartedAt
+    $serialReportJson = Convert-SerialReportForJson -Report $serialReport
+    $asrSummary = Get-AsrTranscriptSummaryFromLog -Text $capturedLog
+    $transcript = [string]$asrSummary.final_text
+    $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
+    $accuracyReport = Measure-TranscriptAccuracy -Expected $ExpectedText -Transcript $finalText
+    $report = [ordered]@{
         status = "FAIL"
         trigger = $TriggerMode
         port = $Port
+        audio_profile = $AudioProfile
         sentence = $Sentence
+        expected_text = $ExpectedText
+        transcript = $transcript
+        final_text = $finalText
+        partial_preview_count = [int]$asrSummary.partial_preview_count
+        last_partial_preview = [string]$asrSummary.last_partial_preview
+        asr_text_update_count = [int]$asrSummary.asr_text_update_count
+        asr_text_updates = @($asrSummary.text_updates)
+        normalized_expected = $accuracyReport.normalized_expected
+        normalized_transcript = $accuracyReport.normalized_transcript
+        cer = $accuracyReport.cer
+        accuracy = $accuracyReport.accuracy
+        accuracy_threshold = [double]$AudioProfileConfig.minimum_accuracy
+        accuracy_warning_only = [bool]$AudioProfileConfig.warning_only
         wav_path = $WavPath
+        tts_rate = $TtsRate
         tts_gain = $TtsGain
+        random_sentence_count = $RandomSentenceCount
+        silent_audio = [bool]$SilentAudio
+        silent_audio_ms = $SilentAudioMs
+        expect_no_text = [bool]$ExpectNoText
+        expected_stream_failure = $expectedStreamFailure
+        record_playback_actual_ms = $recordPlaybackDurationMs
         wav_duration_ms = $wavDurationMs
         recording_window_ms = $recordingWindowMs
         pre_record_delay_ms = $PreRecordDelayMs
+        recording_start_timeout_ms = $RecordingStartTimeoutMs
         post_playback_record_ms = $PostPlaybackRecordMs
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
         manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
-        serial_report = $serialReport
+        serial_report = $serialReportJson
         verify_insertion = [bool]$VerifyInsertion
         verify_history = [bool]$VerifyHistory
+        insert_status = $null
+        insertion_target_used = [bool]$insertionTarget
         insertion_target_path = if ($insertionTarget) { $insertionTarget.Path } else { $null }
         inserted_text = $insertedText
         history_path = Get-HistoryPath
+        recording_archive_path = $recordingArchivePath
         error = $caughtError.Exception.Message
+        timeline = $timeline
+        started_at_utc = $smokeStartedAt.ToUniversalTime().ToString("o")
         log_path = $logPath
     }
-    $pretty = $report | ConvertTo-Json -Depth 8
-    $compact = $report | ConvertTo-Json -Depth 8 -Compress
+    $compact = ConvertTo-SmokeJsonValue $report
+    $pretty = $compact
+    $reportPath = Join-Path $OutDir "ble-stream-smoke.$((Get-Date).ToString('yyyyMMdd-HHmmss')).json"
+    $timeline["catch_report_write_started_at_utc"] = Get-SmokeUtcNow
+    Write-SmokeTrace "catch_report_write_start path=$reportPath"
+    Set-Content -Path $reportPath -Value $pretty -Encoding UTF8
     Write-Output $pretty
     Write-Output "ble_stream_smoke_result_json=$compact"
-    exit 1
+    Write-SmokeTrace "catch_report_write_done"
+    $scriptExitCode = 1
 } finally {
+    Write-SmokeTrace "finally_start"
     Stop-SerialRecordingWindow -Window $serialWindow
     Stop-InsertionTarget -Target $insertionTarget
     if ($process -and -not $process.HasExited) {
         try {
             $process.Kill()
+            [void]$process.WaitForExit(2000)
         } catch {
         }
     }
+    if ($process) { try { $process.Dispose() } catch {} }
+    Write-SmokeTrace "finally_done"
+}
+
+if ($scriptExitCode -ne 0) {
+    exit $scriptExitCode
 }

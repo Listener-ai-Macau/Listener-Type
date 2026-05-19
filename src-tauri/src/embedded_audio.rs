@@ -809,6 +809,13 @@ impl SessionCollector {
         self.audio_packets.len()
     }
 
+    pub fn inferred_expected_packet_count_from_received(&self) -> Option<u16> {
+        self.audio_packets
+            .keys()
+            .next_back()
+            .map(|sequence| sequence.saturating_add(1))
+    }
+
     pub fn received_pcm_bytes(&self) -> usize {
         self.packet_pcm_bytes.values().sum()
     }

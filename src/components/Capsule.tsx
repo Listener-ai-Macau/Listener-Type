@@ -173,11 +173,15 @@ function Pill({ os, state, level, insertedChars, message, onCancel, onConfirm }:
   let center: JSX.Element;
   switch (state) {
     case 'recording':
-      center = <AudioBars level={level} />;
+      center = message
+        ? <CenterText os={os} kind="processing" text={message} color="var(--ol-ink)" />
+        : <AudioBars level={level} />;
       break;
     case 'transcribing':
     case 'polishing':
-      center = (
+      center = message ? (
+        <CenterText os={os} kind="processing" text={message} color="var(--ol-ink)" />
+      ) : (
         <div
           style={{
             display: 'inline-flex',
