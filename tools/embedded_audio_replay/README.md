@@ -85,6 +85,35 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\embedded_audio_replay\
 
 只有串口触发不可用、需要验证实体按键本身，或设备不在线时，才需要人工介入。默认配置按 60 秒内的快速 smoke 设计；需要长录音时可调 `-TimeoutMs`，需要更久等待首包时可调 `-NoNotificationTimeoutSeconds`。若要把缺包视为失败，加 `-FailOnMissingPackets`；默认有最终 ASR 文本但存在缺包时输出 `WARNING`，便于继续调查尾包 flush/停止时序。
 
+### BLE stream smoke report schema
+
+`run_ble_stream_smoke.ps1` writes the same JSON object to the timestamped report file and the single-line `ble_stream_smoke_result_json=...` output. The object includes `report_schema` so firmware-side matrix code can validate the contract without scraping this README.
+
+Required fields are stable across PASS, WARNING, and FAIL reports:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `PASS`, `WARNING`, or `FAIL`. |
+| `trigger` | Trigger mode: `serial-toggle`, `serial-cancel`, or `manual-key`. |
+| `audio_profile` | TTS/audio profile used for the run. |
+| `expected_text` | Text the run intended ASR to produce. |
+| `transcript` | Best transcript available after log/history fallback. |
+| `final_text` | Final text used by accuracy and insertion checks. |
+| `partial_preview_count` | Count of non-final ASR text updates observed before final text. |
+| `last_partial_preview` | Last partial preview before the final transcript, or empty string. |
+| `asr_text_update_count` | Number of distinct ASR text updates parsed from logs. |
+| `asr_text_updates` | Ordered list of parsed ASR text updates. |
+| `inserted_text` | Text read from the temporary insertion target when `-VerifyInsertion` is used; otherwise null. |
+| `history_session` | Matched history session object when available; null when not requested or not found. |
+| `recording_archive_path` | Captured embedded recording archive path when one was written. |
+| `timeline` | UTC timestamps for major smoke phases. |
+| `started_at_utc` | UTC start time for this smoke run. |
+| `log_path` | Listener-Type log captured for this run. |
+
+Optional fields are present when the corresponding subsystem participates: `history_session.embeddedAudioStats`, `history_session.insertStatus`, `serial_report`, `serial_log_path`, `insertion_target_path`, `expected_stream_failure`, and `error`.
+
+Diagnostic fields are for quality gates and debugging, not control flow: `normalized_expected`, `normalized_transcript`, `cer`, `accuracy`, `accuracy_threshold`, `accuracy_warning_only`, `wav_path`, `tts_rate`, `tts_gain`, `random_sentence_count`, `pcm_bytes`, `missing_packets`, and `verification_errors`.
+
 ## 生成随机 TTS fixture
 
 ```powershell

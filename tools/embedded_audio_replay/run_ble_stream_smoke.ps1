@@ -93,6 +93,55 @@ function Get-SmokeUtcNow {
     return (Get-Date).ToUniversalTime().ToString("o")
 }
 
+function Get-SmokeReportSchema {
+    return [ordered]@{
+        name = "ble_stream_smoke_report"
+        schema_version = 1
+        required = @(
+            "status",
+            "trigger",
+            "audio_profile",
+            "expected_text",
+            "transcript",
+            "final_text",
+            "partial_preview_count",
+            "last_partial_preview",
+            "asr_text_update_count",
+            "asr_text_updates",
+            "inserted_text",
+            "history_session",
+            "recording_archive_path",
+            "timeline",
+            "started_at_utc",
+            "log_path"
+        )
+        optional = @(
+            "history_session.embeddedAudioStats",
+            "history_session.insertStatus",
+            "serial_report",
+            "serial_log_path",
+            "insertion_target_path",
+            "expected_stream_failure",
+            "error"
+        )
+        diagnostic = @(
+            "normalized_expected",
+            "normalized_transcript",
+            "cer",
+            "accuracy",
+            "accuracy_threshold",
+            "accuracy_warning_only",
+            "wav_path",
+            "tts_rate",
+            "tts_gain",
+            "random_sentence_count",
+            "pcm_bytes",
+            "missing_packets",
+            "verification_errors"
+        )
+    }
+}
+
 function Get-SmokeAudioProfile {
     param([string]$Name)
     switch ($Name) {
@@ -1924,6 +1973,7 @@ try {
         $null
     }
     $report = [ordered]@{
+        report_schema = Get-SmokeReportSchema
         status = $status
         trigger = $TriggerMode
         port = $Port
@@ -2027,6 +2077,7 @@ try {
     $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
     $accuracyReport = Measure-TranscriptAccuracy -Expected $ExpectedText -Transcript $finalText
     $report = [ordered]@{
+        report_schema = Get-SmokeReportSchema
         status = "FAIL"
         trigger = $TriggerMode
         port = $Port
@@ -2070,6 +2121,7 @@ try {
         insertion_target_path = if ($insertionTarget) { $insertionTarget.Path } else { $null }
         inserted_text = $insertedText
         history_path = Get-HistoryPath
+        history_session = $null
         recording_archive_path = $recordingArchivePath
         error = $caughtError.Exception.Message
         timeline = $timeline
