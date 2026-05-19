@@ -13,7 +13,8 @@
     "check:cloud": "node scripts/check-cloud-services.mjs",
     "check:docs": "node scripts/check-doc-inheritance.mjs",
     "check:traceability": "node scripts/check-traceability.mjs",
-    "check:tauri-info": "node scripts/check-tauri-info.mjs"
+    "check:tauri-info": "node scripts/check-tauri-info.mjs",
+    "test:rules": "node --experimental-strip-types src/lib/capsulePreviewRules.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
