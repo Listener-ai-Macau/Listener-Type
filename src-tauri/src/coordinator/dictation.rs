@@ -1,6 +1,7 @@
 use std::fs;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::coordinator_state::request_stop_during_starting_state;
 use crate::correction::apply_correction_rules;
@@ -15,11 +16,51 @@ use super::*;
 const HOTKEY_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
 const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
 const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
-const EMBEDDED_AUDIO_MAX_GAIN: f64 = 4.0;
+const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
 
 fn clear_embedded_audio_stats(inner: &Arc<Inner>) {
     *inner.embedded_audio_stats.lock() = None;
+}
+
+fn clear_embedded_audio_partial_preview(inner: &Arc<Inner>) {
+    *inner.embedded_audio_partial_preview.lock() = None;
+}
+
+fn current_embedded_audio_partial_preview(inner: &Arc<Inner>) -> Option<String> {
+    inner.embedded_audio_partial_preview.lock().clone()
+}
+
+fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: SessionId, text: String) {
+    let preview = text.trim().to_string();
+    if preview.is_empty() {
+        return;
+    }
+    {
+        let mut slot = inner.embedded_audio_partial_preview.lock();
+        if slot.as_deref() == Some(preview.as_str()) {
+            return;
+        }
+        *slot = Some(preview.clone());
+    }
+
+    let (should_emit, capsule_state, elapsed) = {
+        let state = inner.state.lock();
+        let active_session = state.session_id == session_id;
+        let capsule_state = match state.phase {
+            SessionPhase::Starting | SessionPhase::Listening => CapsuleState::Recording,
+            SessionPhase::Processing | SessionPhase::Inserting => CapsuleState::Transcribing,
+            _ => CapsuleState::Idle,
+        };
+        (
+            active_session && capsule_state != CapsuleState::Idle,
+            capsule_state,
+            state.started_at.elapsed().as_millis() as u64,
+        )
+    };
+    if should_emit {
+        emit_capsule(inner, capsule_state, 0.0, elapsed, Some(preview), None);
+    }
 }
 
 fn store_embedded_audio_stats(inner: &Arc<Inner>, stats: crate::embedded_audio::SessionStats) {
@@ -70,7 +111,7 @@ impl EmbeddedAudioDictationSession {
             CapsuleState::Recording,
             embedded_pcm_peak_level(&asr_pcm),
             elapsed,
-            None,
+            current_embedded_audio_partial_preview(inner),
             None,
         );
         for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
@@ -574,6 +615,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         session_id
     };
     clear_embedded_audio_stats(inner);
+    clear_embedded_audio_partial_preview(inner);
     #[cfg(target_os = "windows")]
     {
         let prepared = inner.windows_ime.prepare_session();
@@ -1171,7 +1213,35 @@ pub(super) async fn submit_embedded_audio_streaming_file(
         &pcm,
     )
     .map_err(|err| format!("构造嵌入式音频流式回放包失败: {err}"))?;
-    submit_embedded_audio_streaming_notifications(inner, notifications).await
+    let mut streaming = EmbeddedStreamingDictation::default();
+    for notification in notifications {
+        let packet_duration = crate::embedded_audio::parse_packet(&notification)
+            .ok()
+            .filter(|packet| {
+                packet.header.packet_type == crate::embedded_audio::PacketType::AudioData
+            })
+            .map(|packet| {
+                Duration::from_secs_f64(
+                    packet.header.packet_pcm_bytes as f64
+                        / crate::embedded_audio::PCM_BYTES_PER_SECOND as f64,
+                )
+            });
+        match streaming.handle_notification(inner, &notification).await {
+            Ok(true) => break,
+            Ok(false) => {}
+            Err(err) => {
+                streaming.abort_active_session(inner, &err);
+                return Err(err);
+            }
+        }
+        if let Some(duration) = packet_duration {
+            tokio::time::sleep(duration).await;
+        }
+    }
+    if !streaming.terminal_received {
+        streaming.abort_active_session(inner, "嵌入式音频流式文件回放尚未收到结束包");
+    }
+    streaming.into_submission_result()
 }
 
 pub(super) async fn submit_embedded_audio_ble_once(
@@ -1208,24 +1278,35 @@ async fn submit_embedded_audio_ble_stream_impl(
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let cancel_capture = Arc::new(AtomicBool::new(false));
+    let cancel_capture_for_task = Arc::clone(&cancel_capture);
     let capture_task = tauri::async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::capture_notification_events(timeout, &mut |event| {
-            tx.send(event.notification)
-                .map_err(|_| "嵌入式音频流式处理已结束".to_string())
-        })
+        crate::embedded_ble::capture_notification_events_until_cancelled(
+            timeout,
+            cancel_capture_for_task,
+            &mut |event| {
+                tx.send(event.notification)
+                    .map_err(|_| "嵌入式音频流式处理已结束".to_string())
+            },
+        )
     });
 
     let mut streaming = EmbeddedStreamingDictation::default();
     while let Some(notification) = rx.recv().await {
         match streaming.handle_notification(inner, &notification).await {
-            Ok(true) => break,
+            Ok(true) => {
+                cancel_capture.store(true, Ordering::SeqCst);
+                break;
+            }
             Ok(false) => {}
             Err(err) => {
                 streaming.abort_active_session(inner, &err);
+                cancel_capture.store(true, Ordering::SeqCst);
                 return Err(err);
             }
         }
     }
+    cancel_capture.store(true, Ordering::SeqCst);
 
     let capture_result = capture_task
         .await
@@ -1307,6 +1388,7 @@ impl EmbeddedStreamingDictation {
                 expected_packet_count,
             } => {
                 self.pending_stop_expected_packet_count = Some(expected_packet_count);
+                self.show_transcribing_after_stop(inner);
                 if self.collector.inner().has_successful_complete_session() {
                     self.finish_streaming_session(inner, session_id, expected_packet_count)
                         .await?;
@@ -1401,6 +1483,7 @@ impl EmbeddedStreamingDictation {
             );
         }
         store_embedded_audio_stats(inner, stats.clone());
+        self.show_transcribing_after_stop(inner);
 
         let session = self
             .session
@@ -1486,6 +1569,20 @@ impl EmbeddedStreamingDictation {
         self.terminal_received = true;
     }
 
+    fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
+        if self.session.is_some() {
+            let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
+            emit_capsule(
+                inner,
+                CapsuleState::Transcribing,
+                0.0,
+                elapsed,
+                current_embedded_audio_partial_preview(inner),
+                None,
+            );
+        }
+    }
+
     fn into_submission_result(
         self,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
@@ -1516,6 +1613,7 @@ async fn begin_embedded_audio_dictation_session(
             .ok_or_else(|| "当前已有听写会话在运行，暂不能提交嵌入式音频".to_string())?
     };
     clear_embedded_audio_stats(inner);
+    clear_embedded_audio_partial_preview(inner);
     #[cfg(target_os = "windows")]
     {
         let prepared = inner.windows_ime.prepare_session();
@@ -1528,6 +1626,7 @@ async fn begin_embedded_audio_dictation_session(
     inner
         .audio_archive_active
         .store(false, std::sync::atomic::Ordering::Relaxed);
+    emit_capsule(inner, CapsuleState::Recording, 0.0, 0, None, None);
 
     if let Err(message) = ensure_asr_credentials() {
         log::warn!("[coord] embedded audio ASR credential gate failed: {message}");
@@ -1567,7 +1666,7 @@ async fn begin_embedded_audio_dictation_session(
             }
         };
 
-    let archive_pcm = inner.prefs.get().record_audio_for_debug.then(Vec::new);
+    let archive_pcm = record_embedded_audio_for_debug_enabled(inner).then(Vec::new);
     Ok(EmbeddedAudioDictationSession {
         session_id: current_session_id,
         active_asr,
@@ -1712,6 +1811,10 @@ async fn build_embedded_audio_asr_consumer(
         read_volc_credentials(),
         enabled_hotwords(inner),
     ));
+    let inner_for_partial = Arc::clone(inner);
+    asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
+        update_embedded_audio_partial_preview(&inner_for_partial, session_id, text);
+    })));
     asr.open_session()
         .await
         .map_err(|err| format!("打开火山 ASR 连接失败: {err}"))?;
@@ -1728,7 +1831,7 @@ fn archive_embedded_audio_if_enabled(
     session_id: SessionId,
     pcm: &[u8],
 ) -> bool {
-    if !inner.prefs.get().record_audio_for_debug {
+    if !record_embedded_audio_for_debug_enabled(inner) {
         return false;
     }
 
@@ -1759,6 +1862,13 @@ fn archive_embedded_audio_if_enabled(
             false
         }
     }
+}
+
+fn record_embedded_audio_for_debug_enabled(inner: &Arc<Inner>) -> bool {
+    inner.prefs.get().record_audio_for_debug
+        || std::env::var("LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG")
+            .map(|value| value == "1")
+            .unwrap_or(false)
 }
 
 fn embedded_pcm_peak_level(pcm: &[u8]) -> f32 {
@@ -1841,7 +1951,14 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     };
 
     let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
-    emit_capsule(inner, CapsuleState::Transcribing, 0.0, elapsed, None, None);
+    emit_capsule(
+        inner,
+        CapsuleState::Transcribing,
+        0.0,
+        elapsed,
+        current_embedded_audio_partial_preview(inner),
+        None,
+    );
 
     if let Some(rec) = take_recorder_for_session(inner, current_session_id) {
         rec.stop();
@@ -2182,19 +2299,34 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
             raw.text = corrected;
         }
     }
-    emit_capsule(inner, CapsuleState::Polishing, 0.0, elapsed, None, None);
+    emit_capsule(
+        inner,
+        CapsuleState::Polishing,
+        0.0,
+        elapsed,
+        Some(raw.text.clone()),
+        None,
+    );
 
     let prefs = inner.prefs.get();
-    let pack = match inner
-        .style_packs
-        .get_or_default_active(&prefs.active_style_pack_id)
-    {
-        Ok(pack) => pack,
-        Err(error) => {
-            log::warn!(
-                "[coord] active style pack unavailable, falling back to builtin light: {error}"
-            );
-            crate::types::builtin_style_pack_for_mode(PolishMode::Light)
+    let force_raw_output = std::env::var("LISTENER_TYPE_FORCE_RAW_OUTPUT")
+        .map(|value| value == "1")
+        .unwrap_or(false);
+    let pack = if force_raw_output {
+        log::info!("[coord] force raw output enabled by LISTENER_TYPE_FORCE_RAW_OUTPUT");
+        crate::types::builtin_style_pack_for_mode(PolishMode::Raw)
+    } else {
+        match inner
+            .style_packs
+            .get_or_default_active(&prefs.active_style_pack_id)
+        {
+            Ok(pack) => pack,
+            Err(error) => {
+                log::warn!(
+                    "[coord] active style pack unavailable, falling back to builtin light: {error}"
+                );
+                crate::types::builtin_style_pack_for_mode(PolishMode::Light)
+            }
         }
     };
     let mode = pack.base_mode;
@@ -2322,6 +2454,14 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         &correction_rules,
         already_streamed,
     );
+    emit_capsule(
+        inner,
+        CapsuleState::Polishing,
+        0.0,
+        elapsed,
+        Some(polished.clone()),
+        None,
+    );
     // 原子化最后一次 cancel 检查 + 转 Inserting：
     // 在同一 lock 内决定「丢弃」还是「进入 Inserting」。一旦设到 Inserting，
     // cancel_session 就拒绝介入（Cmd+V 已发出，撤销不掉）。这是 audit HIGH #2 的修复，
@@ -2354,6 +2494,10 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     let prefs = inner.prefs.get();
     let restore_clipboard = prefs.restore_clipboard_after_paste;
     let allow_non_tsf_insertion_fallback = prefs.allow_non_tsf_insertion_fallback;
+    let allow_foreground_insert_fallback =
+        std::env::var("LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK")
+            .map(|value| value == "1")
+            .unwrap_or(false);
     let paste_shortcut = prefs.paste_shortcut;
     // 流式路径下，字符已经通过 Unicode keystroke 落到光标处，跳过 inserter.insert。
     let status = if already_streamed {
@@ -2382,6 +2526,30 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         }
         status
     } else if focus_ready_for_paste {
+        #[cfg(target_os = "windows")]
+        {
+            let ime_target = capture_ime_submit_target();
+            insert_with_windows_ime_first(
+                inner,
+                current_session_id,
+                &polished,
+                restore_clipboard,
+                allow_non_tsf_insertion_fallback,
+                paste_shortcut,
+                ime_target,
+            )
+            .await
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            inner
+                .inserter
+                .insert(&polished, restore_clipboard, paste_shortcut)
+        }
+    } else if allow_foreground_insert_fallback {
+        log::warn!(
+            "[coord] original insertion target is not foreground; inserting into current foreground by LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK"
+        );
         #[cfg(target_os = "windows")]
         {
             let ime_target = capture_ime_submit_target();

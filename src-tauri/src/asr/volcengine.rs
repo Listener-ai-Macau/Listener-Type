@@ -30,6 +30,8 @@ const TARGET_AUDIO_CHUNK_BYTES: usize = 6_400;
 const BYTES_PER_MS: f64 = 32.0;
 const HOTWORD_CAP: usize = 80;
 const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);
+const AUDIO_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(3);
+const FINAL_SILENCE_FRAMES: usize = 3; // 600 ms, using 200 ms TARGET_AUDIO_CHUNK_BYTES frames.
 
 #[derive(Clone, Debug)]
 pub struct VolcengineCredentials {
@@ -69,6 +71,7 @@ pub enum VolcengineASRError {
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
 type SharedWriter = Arc<AsyncMutex<Option<WsSink>>>;
+type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Sync state shared across the receive loop, the public API, and the
 /// audio-consumer fast path.
@@ -82,6 +85,8 @@ struct SyncState {
     final_tx: Option<oneshot::Sender<Result<RawTranscript, VolcengineASRError>>>,
     runtime: Option<Handle>,
     start: Option<Instant>,
+    last_audio_enqueue: Option<Instant>,
+    finishing: bool,
     /// 最近一次 partial（非 final）的累积 transcript。服务端在 final 帧到达前
     /// 关闭连接 / 网络中断时，作为 fallback 回给上层，避免「用户的话已经识别出来
     /// 但没拿到 final」就丢光。
@@ -92,6 +97,7 @@ pub struct VolcengineStreamingASR {
     credentials: VolcengineCredentials,
     hotwords: Vec<DictionaryHotword>,
     state: ParkingMutex<SyncState>,
+    partial_callback: ParkingMutex<Option<PartialTranscriptCallback>>,
     /// Guards the WebSocket write half so concurrent `send` calls serialize.
     /// Stored as Arc so spawned send tasks can hold their own clone — independent
     /// of the lifetime of any particular `&self` borrow.
@@ -115,6 +121,7 @@ impl VolcengineStreamingASR {
             credentials,
             hotwords,
             state: ParkingMutex::new(SyncState::default()),
+            partial_callback: ParkingMutex::new(None),
             writer: Arc::new(AsyncMutex::new(None)),
             final_rx: ParkingMutex::new(None),
             audio_tx: ParkingMutex::new(None),
@@ -125,6 +132,20 @@ impl VolcengineStreamingASR {
 
     pub fn is_connected(&self) -> bool {
         self.state.lock().is_connected
+    }
+
+    pub fn set_partial_transcript_callback(
+        &self,
+        callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    ) {
+        *self.partial_callback.lock() = callback;
+    }
+
+    fn emit_partial_transcript(&self, text: &str) {
+        let callback = self.partial_callback.lock().clone();
+        if let Some(callback) = callback {
+            callback(text.to_string());
+        }
     }
 
     pub async fn open_session(self: &Arc<Self>) -> Result<(), VolcengineASRError> {
@@ -179,6 +200,8 @@ impl VolcengineStreamingASR {
             st.final_tx = Some(tx);
             st.runtime = Some(Handle::current());
             st.start = Some(Instant::now());
+            st.last_audio_enqueue = Some(Instant::now());
+            st.finishing = false;
             st.last_partial_text.clear();
         }
         self.pending_sends.store(0, Ordering::SeqCst);
@@ -211,6 +234,47 @@ impl VolcengineStreamingASR {
                 }
             }
         });
+        let keepalive_tx = self.audio_tx.lock().as_ref().cloned();
+        if let Some(keepalive_tx) = keepalive_tx {
+            let weak_for_keepalive = Arc::downgrade(self);
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(AUDIO_KEEPALIVE_INTERVAL).await;
+                    let Some(this) = weak_for_keepalive.upgrade() else {
+                        break;
+                    };
+                    let seq = {
+                        let mut st = this.state.lock();
+                        if !st.is_connected || st.finishing {
+                            break;
+                        }
+                        if st
+                            .last_audio_enqueue
+                            .is_some_and(|last| last.elapsed() < AUDIO_KEEPALIVE_INTERVAL)
+                        {
+                            continue;
+                        }
+                        let seq = st.next_sequence;
+                        st.next_sequence += 1;
+                        st.bytes_sent += TARGET_AUDIO_CHUNK_BYTES;
+                        st.frames_sent += 1;
+                        st.last_audio_enqueue = Some(Instant::now());
+                        seq
+                    };
+                    this.pending_sends.fetch_add(1, Ordering::SeqCst);
+                    if keepalive_tx
+                        .send((seq, vec![0; TARGET_AUDIO_CHUNK_BYTES]))
+                        .is_err()
+                    {
+                        if this.pending_sends.fetch_sub(1, Ordering::SeqCst) == 1 {
+                            this.send_done.notify_waiters();
+                        }
+                        break;
+                    }
+                    log::debug!("[asr] sent silence keepalive frame seq={seq}");
+                }
+            });
+        }
 
         // Send the first frame: full client request with seq=1.
         let payload_json = self.build_first_frame_payload(&connect_id);
@@ -266,6 +330,7 @@ impl VolcengineStreamingASR {
     }
 
     pub async fn send_last_frame(&self) -> Result<(), VolcengineASRError> {
+        self.state.lock().finishing = true;
         // 等所有 fire-and-forget 发送完成。否则末帧（NegativeSequence）可能比尾部
         // chunk 先到服务端，被识别为「流已结束」之后再到的 chunk 全部丢弃 = 尾句吞掉。
         // 给一个 800ms 上限避免极端网络下永远等。
@@ -306,6 +371,23 @@ impl VolcengineStreamingASR {
             {
                 let mut st = self.state.lock();
                 st.bytes_sent += len;
+                st.frames_sent += 1;
+            }
+            send_binary(&self.writer, frame).await?;
+        }
+
+        for _ in 0..FINAL_SILENCE_FRAMES {
+            let seq = self.allocate_positive_seq();
+            let frame = frame::build(
+                MessageType::AudioOnlyRequest,
+                Flags::PositiveSequence,
+                Serialization::None,
+                &vec![0; TARGET_AUDIO_CHUNK_BYTES],
+                Some(seq),
+            );
+            {
+                let mut st = self.state.lock();
+                st.bytes_sent += TARGET_AUDIO_CHUNK_BYTES;
                 st.frames_sent += 1;
             }
             send_binary(&self.writer, frame).await?;
@@ -439,7 +521,7 @@ impl VolcengineStreamingASR {
                 code,
                 body.chars().take(200).collect::<String>()
             );
-            self.signal_error(VolcengineASRError::ConnectionFailed(format!(
+            self.fallback_to_partial_or_error(VolcengineASRError::ConnectionFailed(format!(
                 "ASR error {}: {}",
                 code, body
             )));
@@ -489,10 +571,21 @@ impl VolcengineStreamingASR {
             }
         }
 
-        // 缓存最新的 partial transcript：服务端在 final 帧前断连时 fallback 用。
-        // 仅在非空且不是 final 时更新（final 走另一条路径）。
+        // 缓存最新的 partial transcript：服务端在 final 帧前断连时 fallback 用，
+        // 同时把稳定预览推给胶囊。仅在内容变化时 emit，避免音频帧刷屏。
         if !has_final && !full_text.is_empty() {
-            self.state.lock().last_partial_text = full_text.clone();
+            let changed = {
+                let mut state = self.state.lock();
+                if state.last_partial_text == full_text {
+                    false
+                } else {
+                    state.last_partial_text = full_text.clone();
+                    true
+                }
+            };
+            if changed {
+                self.emit_partial_transcript(&full_text);
+            }
         }
 
         if has_final {
@@ -578,6 +671,9 @@ impl AudioConsumer for VolcengineStreamingASR {
                 st.bytes_sent += chunk.len();
                 st.frames_sent += 1;
                 out.push((seq, chunk));
+            }
+            if !out.is_empty() {
+                st.last_audio_enqueue = Some(Instant::now());
             }
             out
         };

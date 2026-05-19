@@ -131,6 +131,9 @@ struct Inner {
     audio_archive_active: AtomicBool,
     /// 当前嵌入式 BLE 音频会话的传输统计，随同一条 dictation history 写入。
     embedded_audio_stats: Mutex<Option<crate::embedded_audio::SessionStats>>,
+    /// 嵌入式 BLE 流式 ASR 的最近一次 partial preview。只用于胶囊视觉反馈；
+    /// 光标仍只在 final text 完成后写入。
+    embedded_audio_partial_preview: Mutex<Option<String>>,
     /// Listener BLE 输入源的后台订阅代次。设置变化时递增，旧监听循环会自然退出。
     embedded_ble_listener_generation: AtomicU64,
     recording_mute: Mutex<SharedRecordingMuteState>,
@@ -222,6 +225,7 @@ impl Coordinator {
                     recorder: Mutex::new(None),
                     audio_archive_active: AtomicBool::new(false),
                     embedded_audio_stats: Mutex::new(None),
+                    embedded_audio_partial_preview: Mutex::new(None),
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
@@ -274,6 +278,7 @@ impl Coordinator {
                 recorder: Mutex::new(None),
                 audio_archive_active: AtomicBool::new(false),
                 embedded_audio_stats: Mutex::new(None),
+                embedded_audio_partial_preview: Mutex::new(None),
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
@@ -831,6 +836,16 @@ impl Coordinator {
             .embedded_ble_listener_generation
             .fetch_add(1, Ordering::SeqCst)
             + 1;
+        if std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
+            .ok()
+            .as_deref()
+            == Some("1")
+        {
+            log::info!(
+                "[embedded-ble] background listener disabled by LISTENER_TYPE_DISABLE_BACKGROUND_BLE"
+            );
+            return;
+        }
         let source = self.inner.prefs.get().dictation_input_source;
         if source != DictationInputSource::EmbeddedBle {
             log::info!("[embedded-ble] background listener disabled (source={source:?})");
