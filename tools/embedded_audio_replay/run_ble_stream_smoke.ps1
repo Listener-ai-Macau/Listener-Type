@@ -14,7 +14,7 @@ param(
     [int]$SilentAudioMs = 2500,
     [int]$PreRecordDelayMs = 300,
     [int]$RecordingStartTimeoutMs = 2500,
-    [int]$ManualTriggerReadyDelayMs = 700,
+    [int]$ManualTriggerReadyDelayMs = 20000,
     [int]$PostPlaybackRecordMs = 500,
     [ValidateSet("normal", "fast", "low-volume", "fast-low-volume", "noisy", "punctuation")]
     [string]$AudioProfile = "normal",
@@ -1720,8 +1720,18 @@ try {
                 Write-SmokeTrace "firmware_recording_start_seen"
             } else {
                 Write-Output "manual_trigger_ready=1"
-                Write-Output "manual_trigger_hint=press KEY1 while the playback sentence is audible"
-                Start-Sleep -Milliseconds $ManualTriggerReadyDelayMs
+                Write-Output "manual_trigger_hint=press KEY1 once to start recording; playback begins after the capsule appears"
+                $timeline["manual_start_ready_at_utc"] = Get-SmokeUtcNow
+                if (-not $SkipCapsuleVisibleGate) {
+                    if (-not (Wait-CapsuleWindowVisible -TimeoutMs $ManualTriggerReadyDelayMs -ProcessId $process.Id)) {
+                        $timeline["capsule_visible_failed_at_utc"] = Get-SmokeUtcNow
+                        throw "Recording capsule did not become visible after manual KEY1 start; aborting before audio playback"
+                    }
+                    $timeline["manual_start_capsule_visible_at_utc"] = Get-SmokeUtcNow
+                    Write-SmokeTrace "manual_start_capsule_visible"
+                } else {
+                    Start-Sleep -Milliseconds $ManualTriggerReadyDelayMs
+                }
             }
             if (-not $SkipCapsuleVisibleGate) {
                 if (-not (Wait-CapsuleWindowVisible -TimeoutMs 1800 -ProcessId $process.Id)) {
@@ -1773,6 +1783,8 @@ try {
                 }
             } else {
                 Write-Output "manual_trigger_playback_done=1"
+                Write-Output "manual_trigger_stop_hint=press KEY1 once to stop recording now"
+                $timeline["manual_stop_ready_at_utc"] = Get-SmokeUtcNow
             }
         } elseif ($index -lt $PlaybackCount) {
             Start-Sleep -Milliseconds 700

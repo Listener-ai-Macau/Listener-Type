@@ -9,6 +9,7 @@ pub mod bailian;
 mod frame;
 pub mod local;
 pub mod volcengine;
+mod volcengine_transcript;
 pub mod wav;
 pub mod whisper;
 

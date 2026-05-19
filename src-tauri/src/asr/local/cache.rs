@@ -7,11 +7,18 @@
 //! 调度规则：每次会话结束后 spawn 一个 sleep+check 任务；任务在到点时检查
 //! `last_used`——如果中间又被使用过则不释放，否则 drop 引擎让 OS 回收 RAM。
 
+#[cfg(target_os = "macos")]
 use std::path::Path;
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+#[cfg(target_os = "macos")]
+use std::time::Instant;
 
+use std::time::Duration;
+
+#[cfg(target_os = "macos")]
 use anyhow::Result;
+#[cfg(target_os = "macos")]
 use parking_lot::Mutex;
 
 #[cfg(target_os = "macos")]

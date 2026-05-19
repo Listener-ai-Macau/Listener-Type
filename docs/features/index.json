@@ -168,6 +168,27 @@
       ]
     },
     {
+      "id": "embedded_ble_dictation_quality",
+      "status": "implemented",
+      "summary": "Volcengine transcript merge module extraction, BLE smoke report schema, capsule partial preview rules, and warning cleanup.",
+      "doc": "embedded-ble-dictation-quality.md",
+      "primary_paths": [
+        "src-tauri/src/asr/volcengine_transcript.rs",
+        "src-tauri/src/asr/volcengine.rs",
+        "src/lib/capsulePreviewRules.ts",
+        "src/components/Capsule.tsx",
+        "tools/embedded_audio_replay/run_ble_stream_smoke.ps1"
+      ],
+      "validation": [
+        "cargo fmt --check",
+        "cargo check",
+        "npm run build"
+      ],
+      "known_limits": [
+        "Windows test binary has STATUS_ENTRYPOINT_NOT_FOUND; compile-only verification"
+      ]
+    },
+    {
       "id": "updater_release",
       "status": "implemented",
       "summary": "Tauri updater integration and release scripts support manual and background update checks.",

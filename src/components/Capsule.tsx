@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { detectOS, type OS } from './WindowChrome';
 import {
@@ -7,6 +7,7 @@ import {
   getCapsulePillMetrics,
 } from '../lib/capsuleLayout';
 import { invokeOrMock, isTauri } from '../lib/ipc';
+import { truncatePreview, PREVIEW_FINAL_TRANSITION } from '../lib/capsulePreviewRules';
 import type { CapsulePayload, CapsuleState } from '../lib/types';
 
 interface AudioBarsProps {
@@ -64,15 +65,7 @@ interface CenterTextProps {
 }
 
 function compactCapsuleText(text: string, os: OS, kind: CenterTextProps['kind']): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  const maxChars = os === 'win'
-    ? (kind === 'processing' ? 34 : 28)
-    : (kind === 'processing' ? 18 : 14);
-  const chars = Array.from(normalized);
-  if (chars.length <= maxChars) {
-    return normalized;
-  }
-  return `...${chars.slice(chars.length - maxChars).join('')}`;
+  return truncatePreview(text, os, kind);
 }
 
 function CenterText({ os, kind, text, color = 'var(--ol-ink-3)' }: CenterTextProps) {
@@ -165,15 +158,17 @@ interface PillProps {
   level: number;
   insertedChars: number;
   message?: string;
+  stopAcknowledged?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }
 
-function Pill({ os, state, level, insertedChars, message, onCancel, onConfirm }: PillProps) {
+function Pill({ os, state, level, insertedChars, message, stopAcknowledged = false, onCancel, onConfirm }: PillProps) {
   const { t } = useTranslation();
   const metrics = getCapsulePillMetrics(os);
   const processingLayout = getCapsuleMessageLayout(os, 'processing');
   const enabled = state === 'recording';
+  const showStopAck = state === 'transcribing' && stopAcknowledged;
 
   // "thinking" 扫光速度：进入 transcribing/polishing 的头 2 秒走快速（0.9s/cycle，提示
   // 「流式刚开始」），之后切回慢速（2.4s）作为稳态。切回 idle / done / 其他 state 也复位
@@ -198,7 +193,7 @@ function Pill({ os, state, level, insertedChars, message, onCancel, onConfirm }:
       break;
     case 'transcribing':
     case 'polishing':
-      center = message ? (
+      center = message && !showStopAck ? (
         <CenterText os={os} kind="processing" text={message} color="var(--ol-ink)" />
       ) : (
         <div
@@ -213,7 +208,9 @@ function Pill({ os, state, level, insertedChars, message, onCancel, onConfirm }:
             justifyContent: 'center',
             // state 进入动画 —— 用户从 recording 切到 polishing 时多一道淡入提示，
             // 比纯切换 center 内容更容易被感知。
-            animation: 'cap-state-enter 220ms var(--ol-motion-soft) both',
+            animation: showStopAck
+              ? 'cap-stop-ack-center 420ms var(--ol-motion-soft) both'
+              : 'cap-state-enter 220ms var(--ol-motion-soft) both',
           }}
         >
           <span
@@ -268,6 +265,9 @@ function Pill({ os, state, level, insertedChars, message, onCancel, onConfirm }:
   const scale = os === 'win' ? 1 : 1 + ambient * 0.018;
   const shadowAlpha = 0.20 + ambient * 0.10;
   const useBackdrop = true;
+  const stopAckRing = showStopAck
+    ? '0 0 0 3px rgba(0, 122, 255, 0.16), '
+    : '';
 
   return (
     <div
@@ -286,13 +286,13 @@ function Pill({ os, state, level, insertedChars, message, onCancel, onConfirm }:
         WebkitBackdropFilter: useBackdrop ? 'blur(28px) saturate(180%)' : 'none',
         border: '1px solid rgba(255, 255, 255, 0.55)',
         boxShadow: os === 'win'
-          ? `0 10px 24px -14px rgba(0, 0, 0, ${(0.24 + ambient * 0.06).toFixed(3)}), 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 0.5px 0 rgba(255, 255, 255, 0.55)`
-          : `0 18px 50px -10px rgba(0, 0, 0, ${shadowAlpha.toFixed(3)}), 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 0.5px 0 rgba(255, 255, 255, 0.55)`,
+          ? `${stopAckRing}0 10px 24px -14px rgba(0, 0, 0, ${(0.24 + ambient * 0.06).toFixed(3)}), 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 0.5px 0 rgba(255, 255, 255, 0.55)`
+          : `${stopAckRing}0 18px 50px -10px rgba(0, 0, 0, ${shadowAlpha.toFixed(3)}), 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 0.5px 0 rgba(255, 255, 255, 0.55)`,
         color: 'var(--ol-ink)',
         fontFamily: 'var(--ol-font-sans)',
         transform: `scale(${scale.toFixed(4)})`,
         transformOrigin: 'center',
-        transition: 'transform 0.08s var(--ol-motion-quick), box-shadow 0.08s var(--ol-motion-quick)',
+        transition: 'transform 0.08s var(--ol-motion-quick), box-shadow 0.12s var(--ol-motion-quick)',
         willChange: 'transform, box-shadow',
       }}
     >
@@ -307,7 +307,8 @@ function Pill({ os, state, level, insertedChars, message, onCancel, onConfirm }:
 
 // 与 @keyframes capsule-out 的时长一致。BLE 听写的 final text 已在胶囊里预览，
 // 退出动画只负责视觉收尾，避免文字落屏前出现一段空白等待。
-const EXIT_ANIM_MS = 140;
+const EXIT_ANIM_MS = PREVIEW_FINAL_TRANSITION.exitAnimMs;
+const STOP_ACK_MS = PREVIEW_FINAL_TRANSITION.stopAckMs;
 // 初始可见 state：Tauri 内运行从 idle 开始（等后端 capsule:state 事件），
 // 浏览器 dev 模式从 recording 开始以便直接看到胶囊。
 const INITIAL_VISIBLE_STATE: CapsuleState = isTauri ? 'idle' : 'recording';
@@ -328,6 +329,8 @@ export function Capsule() {
   // - 若期间 state 又切回非 idle（例如用户连按热键），立刻中止 leaving 并恢复显示。
   const [leaving, setLeaving] = useState<boolean>(false);
   const [lastVisibleState, setLastVisibleState] = useState<CapsuleState>(INITIAL_VISIBLE_STATE);
+  const previousStateRef = useRef<CapsuleState>(INITIAL_VISIBLE_STATE);
+  const [stopAcknowledged, setStopAcknowledged] = useState<boolean>(false);
   // Windows 端 host 在翻译模式从 84 长到 118；macOS / Linux 上 capsuleLayout 已固定 42 忽略此参数。
   const hostMetrics = getCapsuleHostMetrics(os, translation);
 
@@ -358,6 +361,22 @@ export function Capsule() {
       if (unlisten) unlisten();
     };
   }, []);
+
+  // Stop feedback: common voice UIs acknowledge the stop action immediately by
+  // switching from waveform/recording to a processing affordance before final text.
+  useEffect(() => {
+    const previous = previousStateRef.current;
+    previousStateRef.current = state;
+    if (previous === 'recording' && state === 'transcribing') {
+      setStopAcknowledged(true);
+      const timer = setTimeout(() => setStopAcknowledged(false), STOP_ACK_MS);
+      return () => clearTimeout(timer);
+    }
+    if (state !== 'transcribing') {
+      setStopAcknowledged(false);
+    }
+    return undefined;
+  }, [state]);
 
   // 退出动画调度：在 state 真正进入 idle 时，先用 capsule-out 播放 EXIT_ANIM_MS，再卸载。
   // 设计要点：
@@ -482,6 +501,7 @@ export function Capsule() {
         level={leaving ? 0 : level}
         insertedChars={insertedChars}
         message={message}
+        stopAcknowledged={!leaving && renderedState === 'transcribing' && stopAcknowledged}
         onCancel={onCancel}
         onConfirm={onConfirm}
       />
@@ -506,6 +526,11 @@ export function Capsule() {
         @keyframes cap-state-enter {
           from { opacity: 0; transform: translateY(2px); }
           to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes cap-stop-ack-center {
+          0%   { opacity: 0; transform: translateY(4px) scale(.96); }
+          45%  { opacity: 1; transform: translateY(0) scale(1.03); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
     </div>

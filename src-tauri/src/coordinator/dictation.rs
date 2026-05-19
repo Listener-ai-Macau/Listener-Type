@@ -29,6 +29,24 @@ fn clear_embedded_audio_partial_preview(inner: &Arc<Inner>) {
     *inner.embedded_audio_partial_preview.lock() = None;
 }
 
+fn clear_embedded_audio_stop_feedback(inner: &Arc<Inner>) {
+    inner
+        .embedded_audio_stop_feedback_latched
+        .store(false, Ordering::SeqCst);
+}
+
+fn latch_embedded_audio_stop_feedback(inner: &Arc<Inner>) {
+    inner
+        .embedded_audio_stop_feedback_latched
+        .store(true, Ordering::SeqCst);
+}
+
+fn embedded_audio_stop_feedback_latched(inner: &Arc<Inner>) -> bool {
+    inner
+        .embedded_audio_stop_feedback_latched
+        .load(Ordering::SeqCst)
+}
+
 fn current_embedded_audio_partial_preview(inner: &Arc<Inner>) -> Option<String> {
     inner.embedded_audio_partial_preview.lock().clone()
 }
@@ -49,10 +67,18 @@ fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: Session
     let (should_emit, capsule_state, elapsed) = {
         let state = inner.state.lock();
         let active_session = state.session_id == session_id;
-        let capsule_state = match state.phase {
-            SessionPhase::Starting | SessionPhase::Listening => CapsuleState::Recording,
-            SessionPhase::Processing | SessionPhase::Inserting => CapsuleState::Transcribing,
-            _ => CapsuleState::Idle,
+        let capsule_state = if matches!(
+            state.phase,
+            SessionPhase::Starting | SessionPhase::Listening
+        ) && embedded_audio_stop_feedback_latched(inner)
+        {
+            CapsuleState::Transcribing
+        } else {
+            match state.phase {
+                SessionPhase::Starting | SessionPhase::Listening => CapsuleState::Recording,
+                SessionPhase::Processing | SessionPhase::Inserting => CapsuleState::Transcribing,
+                _ => CapsuleState::Idle,
+            }
         };
         (
             active_session && capsule_state != CapsuleState::Idle,
@@ -109,9 +135,14 @@ impl EmbeddedAudioDictationSession {
         }
 
         let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
+        let capsule_state = if embedded_audio_stop_feedback_latched(inner) {
+            CapsuleState::Transcribing
+        } else {
+            CapsuleState::Recording
+        };
         emit_capsule(
             inner,
-            CapsuleState::Recording,
+            capsule_state,
             embedded_pcm_peak_level(&asr_pcm),
             elapsed,
             current_embedded_audio_partial_preview(inner),
@@ -1600,6 +1631,7 @@ impl EmbeddedStreamingDictation {
 
     fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
         if self.session.is_some() {
+            latch_embedded_audio_stop_feedback(inner);
             let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
             emit_capsule(
                 inner,
@@ -1643,6 +1675,7 @@ async fn begin_embedded_audio_dictation_session(
     };
     clear_embedded_audio_stats(inner);
     clear_embedded_audio_partial_preview(inner);
+    clear_embedded_audio_stop_feedback(inner);
     #[cfg(target_os = "windows")]
     {
         let prepared = inner.windows_ime.prepare_session();

@@ -134,6 +134,9 @@ struct Inner {
     /// 嵌入式 BLE 流式 ASR 的最近一次 partial preview。只用于胶囊视觉反馈；
     /// 光标仍只在 final text 完成后写入。
     embedded_audio_partial_preview: Mutex<Option<String>>,
+    /// 嵌入式 BLE 收到停止包后锁存胶囊的停止反馈。SessionPhase 仍保持 Listening，
+    /// 让 end_session 接管最终处理，同时避免尾包 / partial preview 把 UI 刷回 Recording。
+    embedded_audio_stop_feedback_latched: AtomicBool,
     /// Listener BLE 输入源的后台订阅代次。设置变化时递增，旧监听循环会自然退出。
     embedded_ble_listener_generation: AtomicU64,
     recording_mute: Mutex<SharedRecordingMuteState>,
@@ -226,6 +229,7 @@ impl Coordinator {
                     audio_archive_active: AtomicBool::new(false),
                     embedded_audio_stats: Mutex::new(None),
                     embedded_audio_partial_preview: Mutex::new(None),
+                    embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
@@ -279,6 +283,7 @@ impl Coordinator {
                 audio_archive_active: AtomicBool::new(false),
                 embedded_audio_stats: Mutex::new(None),
                 embedded_audio_partial_preview: Mutex::new(None),
+                embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
@@ -2058,7 +2063,9 @@ fn debug_transcript_override_text() -> Option<String> {
 }
 
 fn ensure_microphone_permission(_inner: &Arc<Inner>) -> Result<(), String> {
-    use crate::permissions::{self, PermissionStatus};
+    use crate::permissions;
+    #[cfg(not(target_os = "windows"))]
+    use crate::permissions::PermissionStatus;
 
     #[cfg(target_os = "windows")]
     {
@@ -2068,25 +2075,25 @@ fn ensure_microphone_permission(_inner: &Arc<Inner>) -> Result<(), String> {
         return Ok(());
     }
 
-    let status = permissions::check_microphone();
-    if matches!(
-        status,
-        PermissionStatus::Granted | PermissionStatus::NotApplicable
-    ) {
-        return Ok(());
-    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let status = permissions::check_microphone();
+        if matches!(
+            status,
+            PermissionStatus::Granted | PermissionStatus::NotApplicable
+        ) {
+            return Ok(());
+        }
 
-    // 听写路径不抢前台焦点：缺 mic 权限时直接请求系统授权，不再先 show_main_window。
-    // 用户在设置页手动点“请求权限”仍走 request_microphone_from_foreground，那是显式操作。
-    // 这里若系统不弹框，后续会通过 capsule error 引导用户主动去权限页处理。详见 #166。
-    let requested = permissions::request_microphone();
-    if matches!(
-        requested,
-        PermissionStatus::Granted | PermissionStatus::NotApplicable
-    ) {
-        Ok(())
-    } else {
-        Err(format!("需要麦克风权限，当前状态: {requested:?}"))
+        let requested = permissions::request_microphone();
+        if matches!(
+            requested,
+            PermissionStatus::Granted | PermissionStatus::NotApplicable
+        ) {
+            Ok(())
+        } else {
+            Err(format!("需要麦克风权限，当前状态: {requested:?}"))
+        }
     }
 }
 
