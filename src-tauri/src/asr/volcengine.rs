@@ -906,6 +906,12 @@ fn merge_streaming_transcript(previous: &str, current: &str) -> String {
     if previous.contains(current) {
         return previous.to_string();
     }
+    if compact_transcript_contains_window(previous, current) {
+        return previous.to_string();
+    }
+    if compact_transcript_contains_window(current, previous) {
+        return current.to_string();
+    }
 
     if is_same_prefix_streaming_revision(previous, current) {
         return current.to_string();
@@ -1012,6 +1018,39 @@ fn compact_transcript_for_duplicate_check(text: &str) -> String {
                 )
         })
         .collect()
+}
+
+fn compact_transcript_contains_window(container: &str, window: &str) -> bool {
+    const MIN_EXACT_WINDOW_CHARS: usize = 6;
+    const MIN_FUZZY_WINDOW_CHARS: usize = 12;
+    const MAX_FUZZY_WINDOW_CER: f64 = 0.12;
+
+    let container = compact_transcript_for_duplicate_check(container);
+    let window = compact_transcript_for_duplicate_check(window);
+    let window_len = window.chars().count();
+    if window_len < MIN_EXACT_WINDOW_CHARS {
+        return false;
+    }
+    if container.contains(&window) {
+        return true;
+    }
+
+    let container_chars: Vec<char> = container.chars().collect();
+    if window_len < MIN_FUZZY_WINDOW_CHARS || container_chars.len() < window_len {
+        return false;
+    }
+
+    let max_distance = ((window_len as f64) * MAX_FUZZY_WINDOW_CER).floor() as usize;
+    if max_distance == 0 {
+        return false;
+    }
+    for start in 0..=container_chars.len() - window_len {
+        let candidate: String = container_chars[start..start + window_len].iter().collect();
+        if char_edit_distance(&candidate, &window) <= max_distance {
+            return true;
+        }
+    }
+    false
 }
 
 fn is_unstable_initial_partial(previous: &str, current: &str) -> bool {
@@ -1487,6 +1526,14 @@ mod tests {
             merge_streaming_transcript("已经有稳定正文", "哎呀"),
             "已经有稳定正文"
         );
+    }
+
+    #[test]
+    fn merge_streaming_transcript_ignores_restarted_middle_window() {
+        let stable = "这段录音正在验证长时间语音输入，如果某一步失败就先修最基础的链路，再继续往后跑。后端需要把最终结果稳定地交给系统输入链路，最后把异常现象整理成清晰的结论。";
+        let restarted_window = "如果某一步失败，就先修最基础的链路，再继续往后跑，后端需要把最终结果稳定的交给系统输入链路，最后把。";
+
+        assert_eq!(merge_streaming_transcript(stable, restarted_window), stable);
     }
 
     #[test]
