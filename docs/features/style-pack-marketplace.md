@@ -28,7 +28,7 @@ Do not use old service domains or OAuth clients.
 - Frontend marketplace UI: `src/pages/Marketplace.tsx`, `src/components/MarketplaceModal.tsx`, `src/pages/Style.tsx`.
 - IPC wrappers: `src/lib/ipc.ts`.
 - Backend commands: `src-tauri/src/commands.rs`.
-- Local pack storage: `src-tauri/src/style_packs.rs`, `src-tauri/src/persistence.rs`.
+- Local pack storage and archive import/export: `src-tauri/src/persistence.rs`.
 
 ## Verification
 

@@ -1,7 +1,7 @@
 # P13 嵌入式音频软件对接 — 参考文档
 
 日期：2026-05-18
-协议：各仓库 `!docs/ai_collaboration_protocol.md`
+协议：共享 `C:\Users\Billy\Desktop\listener\docs\ai_collaboration_protocol.md`
 归档状态：`docs/features/p13_status.json`（P13 已完成，JSON 保留执行证据）
 
 ## 目标

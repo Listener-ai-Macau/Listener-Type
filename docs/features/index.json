@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-05-19",
+  "features": [
+    {
+      "id": "dictation_pipeline",
+      "status": "implemented",
+      "summary": "Global hotkey or embedded BLE audio feeds ASR, polish/style, cursor insertion, clipboard fallback, and history.",
+      "doc": "dictation-pipeline.md",
+      "primary_paths": [
+        "src-tauri/src/coordinator/dictation.rs",
+        "src-tauri/src/recorder.rs",
+        "src-tauri/src/asr/",
+        "src-tauri/src/polish.rs",
+        "src-tauri/src/insertion.rs",
+        "src-tauri/src/persistence.rs",
+        "src/components/Capsule.tsx"
+      ],
+      "validation": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run",
+        "npm run build"
+      ],
+      "known_limits": [
+        "Direct cargo test execution may be blocked by local Windows runtime/DLL state",
+        "Real insertion behavior depends on focused target app and platform permissions"
+      ]
+    },
+    {
+      "id": "embedded_ble_audio_p13",
+      "status": "implemented",
+      "summary": "Firmware VKA1 BLE audio sessions can be replayed or streamed into the normal dictation pipeline.",
+      "doc": "p13_embedded_audio_software_integration.md",
+      "primary_paths": [
+        "src-tauri/src/embedded_audio.rs",
+        "src-tauri/src/embedded_ble.rs",
+        "src-tauri/src/coordinator/dictation.rs",
+        "tools/embedded_audio_replay/"
+      ],
+      "validation": [
+        "cargo test --manifest-path tools/embedded_audio_replay/Cargo.toml",
+        "powershell -NoProfile -ExecutionPolicy Bypass -File tools/embedded_audio_replay/run_ble_stream_smoke.ps1 -Port COM3 -VerifyHistory"
+      ],
+      "known_limits": [
+        "Real BLE smoke requires firmware device, COM3/BLE locks, and working ASR credentials"
+      ]
+    },
+    {
+      "id": "style_pack_marketplace",
+      "status": "implemented",
+      "summary": "Local-first style packs support create/edit/activate/import/export, with remote marketplace calls disabled unless configured.",
+      "doc": "style-pack-marketplace.md",
+      "primary_paths": [
+        "src/pages/Style.tsx",
+        "src/pages/Marketplace.tsx",
+        "src/components/MarketplaceModal.tsx",
+        "src/lib/ipc.ts",
+        "src-tauri/src/commands.rs",
+        "src-tauri/src/persistence.rs"
+      ],
+      "validation": [
+        "node scripts/check-cloud-services.mjs",
+        "npm run build"
+      ],
+      "known_limits": [
+        "Listener Type does not ship with a production marketplace backend by default"
+      ]
+    },
+    {
+      "id": "local_asr_management",
+      "status": "implemented",
+      "summary": "Local ASR UI and command layer manage Qwen3-ASR and Windows Foundry Local Whisper model/runtime lifecycle.",
+      "doc": "local-asr-management.md",
+      "primary_paths": [
+        "src/pages/LocalAsr.tsx",
+        "src/pages/settings/AdvancedSection.tsx",
+        "src-tauri/src/asr/local/",
+        "src-tauri/src/commands.rs",
+        "tools/foundry_asr_probe/",
+        "tools/foundry_runtime_prepare/"
+      ],
+      "validation": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run",
+        "npm run build"
+      ],
+      "known_limits": [
+        "Foundry Local is Windows-only",
+        "Qwen3-ASR runtime support is platform-specific and may be model/download constrained"
+      ]
+    },
+    {
+      "id": "qa_selection_ask",
+      "status": "implemented",
+      "summary": "Selection Ask and QA panel provide a separate hotkey-driven question flow with a floating QA window.",
+      "doc": "qa-selection-ask.md",
+      "primary_paths": [
+        "src-tauri/src/coordinator/qa.rs",
+        "src-tauri/src/qa_hotkey.rs",
+        "src-tauri/src/selection.rs",
+        "src/pages/QaPanel.tsx",
+        "src/pages/SelectionAsk.tsx"
+      ],
+      "validation": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run",
+        "npm run build"
+      ],
+      "known_limits": [
+        "Selection capture and window behavior depend on OS accessibility/windowing support"
+      ]
+    },
+    {
+      "id": "translation_shortcut",
+      "status": "implemented",
+      "summary": "Translation has its own page and shortcut wiring, isolated from dictation and QA bindings.",
+      "doc": "translation-shortcut.md",
+      "primary_paths": [
+        "src/pages/Translation.tsx",
+        "src/pages/settings/ShortcutsSection.tsx",
+        "src-tauri/src/commands.rs",
+        "src-tauri/src/coordinator.rs"
+      ],
+      "validation": [
+        "node scripts/check-hotkey-recorder.mjs",
+        "npm run build"
+      ],
+      "known_limits": [
+        "Hotkey availability varies by OS and desktop environment"
+      ]
+    },
+    {
+      "id": "vocab_correction",
+      "status": "implemented",
+      "summary": "Vocabulary entries, presets, and correction rules feed ASR/polish context and session hit tracking.",
+      "doc": "vocab-correction.md",
+      "primary_paths": [
+        "src/pages/Vocab.tsx",
+        "src/lib/vocabPresets.ts",
+        "src-tauri/src/correction.rs",
+        "src-tauri/src/persistence.rs",
+        "src-tauri/src/commands.rs"
+      ],
+      "validation": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run",
+        "npm run build"
+      ],
+      "known_limits": [
+        "Vocabulary improves context but does not guarantee ASR provider recognition"
+      ]
+    },
+    {
+      "id": "windows_ime_insertion",
+      "status": "implemented",
+      "summary": "Windows insertion uses IME/TSF IPC where available and falls back through the normal insertion/clipboard paths.",
+      "doc": "windows-ime-insertion.md",
+      "primary_paths": [
+        "windows-ime/",
+        "src-tauri/src/windows_ime_ipc.rs",
+        "src-tauri/src/windows_ime_profile.rs",
+        "src-tauri/src/windows_ime_protocol.rs",
+        "src-tauri/src/windows_ime_session.rs",
+        "src-tauri/src/insertion.rs"
+      ],
+      "validation": [
+        "powershell -ExecutionPolicy Bypass -File scripts/windows-ime-build.ps1",
+        "powershell -ExecutionPolicy Bypass -File scripts/windows-ime-install-smoke.ps1"
+      ],
+      "known_limits": [
+        "Windows-only and depends on TSF registration and target app behavior"
+      ]
+    },
+    {
+      "id": "updater_release",
+      "status": "implemented",
+      "summary": "Tauri updater integration and release scripts support manual and background update checks.",
+      "doc": "updater-release.md",
+      "primary_paths": [
+        "src/components/AutoUpdate.tsx",
+        "src/components/AutoUpdateGate.tsx",
+        "src-tauri/src/lib.rs",
+        "docs/release/",
+        "scripts/write-updater-manifest.mjs"
+      ],
+      "validation": [
+        "node scripts/write-updater-manifest.test.mjs",
+        "npm run build"
+      ],
+      "known_limits": [
+        "Actual delivery depends on signed release artifacts and configured updater endpoints"
+      ]
+    }
+  ]
+}

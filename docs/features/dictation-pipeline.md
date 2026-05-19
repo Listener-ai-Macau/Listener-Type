@@ -18,12 +18,12 @@ flowchart LR
 
 | Stage | Main files |
 | --- | --- |
-| Hotkey runtime | `src-tauri/src/global_hotkey_runtime.rs`, `src-tauri/src/platform_hotkey.rs`, `src-tauri/src/combo_hotkey.rs`, `src-tauri/src/qa_hotkey.rs` |
-| Recording | `src-tauri/src/recorder.rs`, `src-tauri/src/audio.rs`, `src/components/Capsule.tsx` |
+| Hotkey runtime | `src-tauri/src/global_hotkey_runtime.rs`, `src-tauri/src/hotkey.rs`, `src-tauri/src/combo_hotkey.rs`, `src-tauri/src/qa_hotkey.rs`, `src-tauri/src/shortcut_binding.rs` |
+| Recording | `src-tauri/src/recorder.rs`, `src-tauri/src/audio_mute.rs`, `src/components/Capsule.tsx` |
 | Embedded BLE audio | `src-tauri/src/embedded_audio.rs`, `src-tauri/src/embedded_ble.rs`, `src-tauri/src/coordinator/dictation.rs`, `tools/embedded_audio_replay/**` |
-| ASR | `src-tauri/src/asr.rs`, `src-tauri/src/asr/*`, `src/pages/LocalAsr.tsx` |
+| ASR | `src-tauri/src/asr/mod.rs`, `src-tauri/src/asr/*`, `src/pages/LocalAsr.tsx` |
 | Polish | `src-tauri/src/polish.rs`, `src-tauri/src/llm_*.rs`, `src/pages/Style.tsx` |
-| Insertion | `src-tauri/src/inserter.rs`, `src-tauri/src/windows_ime.rs`, `windows-ime/**` |
+| Insertion | `src-tauri/src/insertion.rs`, `src-tauri/src/unicode_keystroke.rs`, `src-tauri/src/windows_ime_*`, `windows-ime/**` |
 | State/history | `src-tauri/src/coordinator.rs`, `src-tauri/src/persistence.rs`, `src/pages/History.tsx` |
 
 ## Behavioral Rules
