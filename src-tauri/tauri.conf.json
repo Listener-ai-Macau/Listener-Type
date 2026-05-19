@@ -28,6 +28,7 @@
         "titleBarStyle": "Overlay",
         "trafficLightPosition": { "x": 14, "y": 20 },
         "visible": false,
+        "focus": false,
         "acceptFirstMouse": true
       },
       {
@@ -43,6 +44,7 @@
         "skipTaskbar": true,
         "resizable": false,
         "focus": false,
+        "focusable": false,
         "visible": false,
         "center": false,
         "acceptFirstMouse": true

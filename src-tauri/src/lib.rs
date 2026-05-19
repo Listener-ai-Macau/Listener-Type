@@ -114,6 +114,7 @@ pub fn run() {
             // Capsule 启动时定位到屏幕底部居中并隐藏；coordinator 按需显示。
             // 与 Swift `CapsuleWindowController.repositionToBottomCenter` 同语义。
             if let Some(capsule) = app.get_webview_window("capsule") {
+                prepare_capsule_window_for_overlay(&capsule);
                 if let Err(e) = position_capsule_bottom_center(&capsule, false) {
                     log::warn!("[capsule] position failed: {e}");
                 }
@@ -1256,6 +1257,57 @@ pub(crate) fn hide_qa_window<R: tauri::Runtime>(app: &AppHandle<R>) {
     }
 }
 
+pub(crate) fn prepare_capsule_window_for_overlay<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+) {
+    if let Err(e) = window.set_focusable(false) {
+        log::warn!("[capsule] set_focusable(false) failed: {e}");
+    }
+    apply_capsule_windows_no_activate_style(window);
+}
+
+#[cfg(target_os = "windows")]
+fn apply_capsule_windows_no_activate_style<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW,
+    };
+
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(raw) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = HWND(raw.hwnd.get() as *mut _);
+    if hwnd.0.is_null() {
+        return;
+    }
+
+    let current = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+    let desired = (current as u32) | WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0;
+    if desired as isize != current {
+        unsafe {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, desired as isize);
+            let _ = SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_capsule_windows_no_activate_style<R: tauri::Runtime>(_window: &tauri::WebviewWindow<R>) {}
+
 #[cfg(target_os = "windows")]
 fn show_qa_window_no_activate<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> bool {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -1311,11 +1363,11 @@ struct CapsuleWindowBounds {
 fn capsule_window_bounds(translation_active: bool) -> CapsuleWindowBounds {
     #[cfg(target_os = "windows")]
     {
-        const WINDOWS_CAPSULE_PILL_WIDTH: f64 = 196.0;
+        const WINDOWS_CAPSULE_PILL_WIDTH: f64 = 280.0;
         const WINDOWS_CAPSULE_SIDE_INSET: f64 = 12.0;
         CapsuleWindowBounds {
-            // Keep the existing Windows hitbox width, but express it as
-            // pill width (196) + symmetric 12px side insets for shadow room.
+            // Keep the Windows hitbox in sync with the frontend pill width plus
+            // symmetric side insets for shadow room.
             width: WINDOWS_CAPSULE_PILL_WIDTH + WINDOWS_CAPSULE_SIDE_INSET * 2.0,
             height: if translation_active { 118.0 } else { 84.0 },
             bottom_inset: 12.0,
@@ -1416,7 +1468,7 @@ mod tests {
         #[cfg(target_os = "windows")]
         assert_eq!(
             (bounds.width, bounds.height, bounds.bottom_inset),
-            (220.0, 84.0, 12.0)
+            (304.0, 84.0, 12.0)
         );
 
         #[cfg(not(target_os = "windows"))]
@@ -1432,7 +1484,7 @@ mod tests {
         #[cfg(target_os = "windows")]
         assert_eq!(
             (bounds.width, bounds.height, bounds.bottom_inset),
-            (220.0, 118.0, 12.0)
+            (304.0, 118.0, 12.0)
         );
 
         #[cfg(not(target_os = "windows"))]

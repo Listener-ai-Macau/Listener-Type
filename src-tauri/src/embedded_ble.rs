@@ -29,7 +29,7 @@ fn is_terminal_notification(notification: &[u8]) -> bool {
 // After STOP, keep the data plane open until the packet-count contract is
 // satisfied. This timeout is rolling idle time after the last notification,
 // not a hard cap from STOP, so tail packets can still arrive without UI linger.
-const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[cfg(target_os = "windows")]
 mod windows_ble {

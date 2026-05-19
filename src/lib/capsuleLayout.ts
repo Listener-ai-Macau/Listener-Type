@@ -26,9 +26,9 @@ export interface CapsuleMessageLayout {
 export function getCapsulePillMetrics(os: OS): CapsulePillMetrics {
   if (os === 'win') {
     // Windows metrics describe the visible outer footprint of the pill.
-    // Runtime window bounds reserve 12px side insets around a 196px pill, so
+    // Runtime window bounds reserve 12px side insets around the pill, so
     // frontend layout must match the native capsule sizing contract.
-    return { width: 196, height: 52, textWidth: 104, boxSizing: 'border-box' };
+    return { width: 280, height: 52, textWidth: 192, boxSizing: 'border-box' };
   }
 
   return { width: 176, height: 42, textWidth: 84, boxSizing: 'border-box' };

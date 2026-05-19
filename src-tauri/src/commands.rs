@@ -63,11 +63,19 @@ pub fn get_settings(coord: CoordinatorState<'_>) -> UserPreferences {
 }
 
 #[tauri::command]
-pub fn is_main_window_start_hidden() -> bool {
-    std::env::var("LISTENER_TYPE_HIDE_MAIN_ON_START")
+pub fn is_main_window_start_hidden(coord: CoordinatorState<'_>) -> bool {
+    if std::env::var("LISTENER_TYPE_SHOW_MAIN_ON_START")
         .ok()
         .as_deref()
         == Some("1")
+    {
+        return false;
+    }
+    let hide_main_on_start = std::env::var("LISTENER_TYPE_HIDE_MAIN_ON_START")
+        .ok()
+        .as_deref()
+        == Some("1");
+    hide_main_on_start || coord.prefs().get().start_minimized
 }
 
 #[tauri::command]
