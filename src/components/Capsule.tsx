@@ -63,29 +63,48 @@ interface CenterTextProps {
   color?: string;
 }
 
+function compactCapsuleText(text: string, os: OS, kind: CenterTextProps['kind']): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const maxChars = os === 'win'
+    ? (kind === 'processing' ? 34 : 28)
+    : (kind === 'processing' ? 18 : 14);
+  const chars = Array.from(normalized);
+  if (chars.length <= maxChars) {
+    return normalized;
+  }
+  return `...${chars.slice(chars.length - maxChars).join('')}`;
+}
+
 function CenterText({ os, kind, text, color = 'var(--ol-ink-3)' }: CenterTextProps) {
   const metrics = getCapsulePillMetrics(os);
   const layout = getCapsuleMessageLayout(os, kind);
+  const compactText = compactCapsuleText(text, os, kind);
+  const lineHeight = layout.allowWrap ? 1.2 : 1;
+  const fontSize = 11;
   return (
     <span
       style={{
-        fontSize: 11,
+        fontSize,
         fontWeight: 500,
         color,
         width: '100%',
         maxWidth: metrics.textWidth,
         minWidth: 0,
+        flex: '0 1 auto',
         textAlign: 'center',
-        lineHeight: layout.allowWrap ? 1.2 : 1,
+        lineHeight,
+        maxHeight: fontSize * lineHeight * layout.lineClamp,
         whiteSpace: layout.allowWrap ? 'normal' : 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
         display: '-webkit-box',
         WebkitBoxOrient: 'vertical',
         WebkitLineClamp: layout.lineClamp,
       }}
     >
-      {text}
+      {compactText}
     </span>
   );
 }
@@ -286,10 +305,9 @@ function Pill({ os, state, level, insertedChars, message, onCancel, onConfirm }:
   );
 }
 
-// 与 @keyframes capsule-out 的 0.36s 时长一致——必须同步，否则定时器先于
-// 动画结束就 unmount → 用户看到半截动画被截断。
-// v1.3.1-6: 从 240ms 加到 360ms 让用户看清退出动画（240ms 太快感知不到）。
-const EXIT_ANIM_MS = 360;
+// 与 @keyframes capsule-out 的时长一致。BLE 听写的 final text 已在胶囊里预览，
+// 退出动画只负责视觉收尾，避免文字落屏前出现一段空白等待。
+const EXIT_ANIM_MS = 140;
 // 初始可见 state：Tauri 内运行从 idle 开始（等后端 capsule:state 事件），
 // 浏览器 dev 模式从 recording 开始以便直接看到胶囊。
 const INITIAL_VISIBLE_STATE: CapsuleState = isTauri ? 'idle' : 'recording';
@@ -322,6 +340,11 @@ export function Capsule() {
       const handle = await listen<CapsulePayload>('capsule:state', event => {
         const p = event.payload;
         setState(p.state);
+        if (p.state === 'idle') {
+          setLevel(0);
+          setTranslation(false);
+          return;
+        }
         setLevel(p.level ?? 0);
         setMessage(p.message ?? undefined);
         if (p.insertedChars != null) setInsertedChars(p.insertedChars);
@@ -400,11 +423,8 @@ export function Capsule() {
         // 三平台一致 —— 旧版 Windows 走 animation:'none' 的分支已删除。
         // transformOrigin 默认就是 50% 50%，所以 scaleX 天然以中央为锚点。
         animation: leaving
-          // v1.3.1-6 调整：
-          // - 入场 .26s → .38s，cubic-bezier 加强 spring overshoot（更曲线感）
-          // - 出场 .24s → .36s（前面 EXIT_ANIM_MS 也同步到 360），曲线改成 ease-in-out 平滑
-          //   收缩 + 下移 + 淡出三段同步进行
-          ? 'capsule-out .36s cubic-bezier(.55,.06,.68,.19) forwards'
+          // 入场保留一点弹性；出场压短，让 final text 上屏和胶囊消失更贴近同一瞬间。
+          ? `capsule-out ${EXIT_ANIM_MS}ms cubic-bezier(.55,.06,.68,.19) forwards`
           : 'capsule-in .38s cubic-bezier(.16,.86,.32,1.18) both',
         transformOrigin: 'center',
         willChange: 'transform, opacity',

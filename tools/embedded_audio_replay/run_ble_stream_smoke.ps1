@@ -33,6 +33,7 @@ param(
     [switch]$ExpectNoText,
     [switch]$NoResetBeforeCapture,
     [switch]$SkipEnsureBle,
+    [switch]$SkipCapsuleVisibleGate,
     [switch]$VerifyInsertion,
     [switch]$VerifyHistory
 )
@@ -96,13 +97,13 @@ function Get-SmokeAudioProfile {
     param([string]$Name)
     switch ($Name) {
         "fast" {
-            return [ordered]@{ name = "fast"; tts_rate = 5; tts_gain = 4.0; minimum_accuracy = 0.78; warning_only = $false }
+            return [ordered]@{ name = "fast"; tts_rate = 3; tts_gain = 4.0; minimum_accuracy = 0.78; warning_only = $false }
         }
         "low-volume" {
             return [ordered]@{ name = "low-volume"; tts_rate = 0; tts_gain = 1.8; minimum_accuracy = 0.72; warning_only = $false }
         }
         "fast-low-volume" {
-            return [ordered]@{ name = "fast-low-volume"; tts_rate = 5; tts_gain = 1.8; minimum_accuracy = 0.65; warning_only = $true }
+            return [ordered]@{ name = "fast-low-volume"; tts_rate = 3; tts_gain = 1.8; minimum_accuracy = 0.65; warning_only = $true }
         }
         default {
             return [ordered]@{ name = "normal"; tts_rate = 0; tts_gain = 4.0; minimum_accuracy = 0.85; warning_only = $false }
@@ -371,7 +372,17 @@ function Ensure-WindowInterop {
     }
     Add-Type @"
 using System;
+using System.Text;
 using System.Runtime.InteropServices;
+
+public struct ListenerSmokeRect {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+}
+
+public delegate bool ListenerSmokeEnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
 public static class ListenerSmokeWindow {
     [DllImport("user32.dll")]
@@ -379,8 +390,175 @@ public static class ListenerSmokeWindow {
 
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(ListenerSmokeEnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out ListenerSmokeRect lpRect);
 }
 "@
+}
+
+function Get-WindowTitleByHandle {
+    param([IntPtr]$Handle)
+
+    if ($Handle -eq [IntPtr]::Zero) {
+        return ""
+    }
+    $titleBuilder = [System.Text.StringBuilder]::new(256)
+    [void][ListenerSmokeWindow]::GetWindowText($Handle, $titleBuilder, $titleBuilder.Capacity)
+    return $titleBuilder.ToString()
+}
+
+function Get-ForegroundWindowSnapshot {
+    Ensure-WindowInterop
+    $handle = [ListenerSmokeWindow]::GetForegroundWindow()
+    [uint32]$processId = 0
+    if ($handle -ne [IntPtr]::Zero) {
+        [void][ListenerSmokeWindow]::GetWindowThreadProcessId($handle, [ref]$processId)
+    }
+    return [pscustomobject]@{
+        Handle = $handle
+        ProcessId = [int]$processId
+        Title = Get-WindowTitleByHandle -Handle $handle
+        Visible = ($handle -ne [IntPtr]::Zero -and [ListenerSmokeWindow]::IsWindowVisible($handle))
+    }
+}
+
+function Write-ForegroundTrace {
+    param(
+        [string]$Label,
+        $Snapshot
+    )
+    if (-not $Snapshot) {
+        Write-SmokeTrace "$Label foreground=<null>"
+        return
+    }
+    Write-SmokeTrace "$Label foreground_pid=$($Snapshot.ProcessId) foreground_visible=$($Snapshot.Visible) foreground_title=$($Snapshot.Title)"
+}
+
+function Restore-ForegroundWindow {
+    param(
+        $Snapshot,
+        [string]$Label
+    )
+
+    if (-not $Snapshot -or $Snapshot.Handle -eq [IntPtr]::Zero) {
+        Write-SmokeTrace "$Label foreground_restore_skipped reason=no_snapshot"
+        return $false
+    }
+    Ensure-WindowInterop
+    if (-not [ListenerSmokeWindow]::IsWindow($Snapshot.Handle)) {
+        Write-SmokeTrace "$Label foreground_restore_skipped reason=stale_window"
+        return $false
+    }
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        [void][ListenerSmokeWindow]::ShowWindow($Snapshot.Handle, 9)
+        [void][ListenerSmokeWindow]::SetForegroundWindow($Snapshot.Handle)
+        Start-Sleep -Milliseconds (80 * $attempt)
+        $current = Get-ForegroundWindowSnapshot
+        Write-ForegroundTrace -Label "$Label`_after_restore_$attempt" -Snapshot $current
+        if ($current.Handle -eq $Snapshot.Handle) {
+            return $true
+        }
+        if ($current.ProcessId -eq $Snapshot.ProcessId -and $current.Visible) {
+            return $true
+        }
+    }
+    try {
+        Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction SilentlyContinue
+        [void][Microsoft.VisualBasic.Interaction]::AppActivate([int]$Snapshot.ProcessId)
+        Start-Sleep -Milliseconds 160
+        $current = Get-ForegroundWindowSnapshot
+        Write-ForegroundTrace -Label "$Label`_after_appactivate" -Snapshot $current
+        if ($current.Handle -eq $Snapshot.Handle) {
+            return $true
+        }
+        if ($current.ProcessId -eq $Snapshot.ProcessId -and $current.Visible) {
+            return $true
+        }
+    } catch {
+        Write-SmokeTrace "$Label foreground_restore_appactivate_failed error=$($_.Exception.Message)"
+    }
+    return $false
+}
+
+function Test-CapsuleWindowVisible {
+    param([int]$ProcessId = 0)
+
+    Ensure-WindowInterop
+    $handle = [ListenerSmokeWindow]::FindWindow($null, "Listener Type Capsule")
+    if ($handle -ne [IntPtr]::Zero -and [ListenerSmokeWindow]::IsWindowVisible($handle)) {
+        return $true
+    }
+    if ($ProcessId -le 0) {
+        return $false
+    }
+
+    $found = $false
+    $callback = [ListenerSmokeEnumWindowsProc]{
+        param([IntPtr]$hWnd, [IntPtr]$lParam)
+
+        [uint32]$windowPid = 0
+        [void][ListenerSmokeWindow]::GetWindowThreadProcessId($hWnd, [ref]$windowPid)
+        if ($windowPid -ne [uint32]$ProcessId -or -not [ListenerSmokeWindow]::IsWindowVisible($hWnd)) {
+            return $true
+        }
+
+        $title = Get-WindowTitleByHandle -Handle $hWnd
+        $rect = New-Object ListenerSmokeRect
+        if (-not [ListenerSmokeWindow]::GetWindowRect($hWnd, [ref]$rect)) {
+            return $true
+        }
+        $width = [int]($rect.Right - $rect.Left)
+        $height = [int]($rect.Bottom - $rect.Top)
+        Write-SmokeTrace "window_visible pid=$windowPid title=$title rect=$($rect.Left),$($rect.Top),$width,$height"
+        if ($title -match "Capsule" -or ($width -ge 180 -and $width -le 420 -and $height -ge 50 -and $height -le 190)) {
+            $script:CapsuleWindowFound = $true
+            return $false
+        }
+        return $true
+    }
+    $script:CapsuleWindowFound = $false
+    [void][ListenerSmokeWindow]::EnumWindows($callback, [IntPtr]::Zero)
+    $found = [bool]$script:CapsuleWindowFound
+    $script:CapsuleWindowFound = $false
+    return $found
+}
+
+function Wait-CapsuleWindowVisible {
+    param(
+        [int]$TimeoutMs = 1800,
+        [int]$ProcessId = 0
+    )
+
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-CapsuleWindowVisible -ProcessId $ProcessId) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 80
+    }
+    return $false
 }
 
 function Focus-ProcessWindow {
@@ -529,6 +707,25 @@ function Get-HistoryPath {
     return $null
 }
 
+function Read-SmokeHistorySessions {
+    $historyPath = Get-HistoryPath
+    if (-not $historyPath -or -not (Test-Path $historyPath)) {
+        return @()
+    }
+    $raw = Get-Content -Path $historyPath -Raw -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return @()
+    }
+    $parsed = $raw | ConvertFrom-Json
+    if ($null -eq $parsed) {
+        return @()
+    }
+    if ($parsed -is [System.Array]) {
+        return $parsed
+    }
+    return @($parsed)
+}
+
 function Get-RecordingsRoot {
     if ($env:APPDATA) {
         return Join-Path $env:APPDATA "Listener Type\recordings"
@@ -561,15 +758,7 @@ function Find-SmokeHistorySession {
         [int]$ExpectedPcmBytes = 0
     )
 
-    $historyPath = Get-HistoryPath
-    if (-not $historyPath -or -not (Test-Path $historyPath)) {
-        return $null
-    }
-    $raw = Get-Content -Path $historyPath -Raw -ErrorAction SilentlyContinue
-    if ([string]::IsNullOrWhiteSpace($raw)) {
-        return $null
-    }
-    $sessions = @($raw | ConvertFrom-Json)
+    $sessions = @(Read-SmokeHistorySessions)
     $threshold = $StartedAt.ToUniversalTime().AddMinutes(-2)
     $candidates = @()
     foreach ($session in $sessions) {
@@ -621,6 +810,23 @@ function Find-SmokeHistorySession {
         return $null
     }
     return ($candidates | Sort-Object Score, Created -Descending | Select-Object -First 1).Session
+}
+
+function Find-SmokeHistorySessionById {
+    param(
+        [string]$SessionId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SessionId)) {
+        return $null
+    }
+    $sessions = @(Read-SmokeHistorySessions)
+    foreach ($session in $sessions) {
+        if ([string]$session.id -eq $SessionId) {
+            return $session
+        }
+    }
+    return $null
 }
 
 function Wait-SmokeHistorySession {
@@ -1189,9 +1395,28 @@ function Boost-WavPcm16 {
         return
     }
 
+    $peak = 0
     for ($i = $dataOffset; $i + 1 -lt ($dataOffset + $dataSize); $i += 2) {
         $sample = [BitConverter]::ToInt16($bytes, $i)
-        $scaled = [int][Math]::Round($sample * $Gain)
+        $abs = [Math]::Abs([int]$sample)
+        if ($abs -gt $peak) {
+            $peak = $abs
+        }
+    }
+    if ($peak -le 0) {
+        return
+    }
+
+    $targetPeak = 26000.0
+    $effectiveGain = [Math]::Min($Gain, $targetPeak / [double]$peak)
+    if ($effectiveGain -le 0.0) {
+        return
+    }
+    Write-SmokeTrace ("wav_gain requested={0:0.###} effective={1:0.###} peak={2} target_peak={3}" -f $Gain, $effectiveGain, $peak, [int]$targetPeak)
+
+    for ($i = $dataOffset; $i + 1 -lt ($dataOffset + $dataSize); $i += 2) {
+        $sample = [BitConverter]::ToInt16($bytes, $i)
+        $scaled = [int][Math]::Round($sample * $effectiveGain)
         if ($scaled -gt [int16]::MaxValue) {
             $scaled = [int16]::MaxValue
         } elseif ($scaled -lt [int16]::MinValue) {
@@ -1309,6 +1534,8 @@ $capturedLog = ""
 $listenerChildStdoutLog = Join-Path $OutDir "listener-type-child-$RunStamp.stdout.log"
 $listenerChildStderrLog = Join-Path $OutDir "listener-type-child-$RunStamp.stderr.log"
 
+$foregroundBeforeListenerStart = Get-ForegroundWindowSnapshot
+Write-ForegroundTrace -Label "before_listener_start" -Snapshot $foregroundBeforeListenerStart
 Get-Process listener-type -ErrorAction SilentlyContinue | Stop-Process -Force
 
 $process = $null
@@ -1321,6 +1548,7 @@ $historySession = $null
 $historyLookupSkipped = $false
 $recordingArchivePath = $null
 $recordPlaybackDurationMs = $null
+$recordPlaybackStarted = $false
 $smokeStartedAt = Get-Date
 $timeline = [ordered]@{
     smoke_started_at_utc = $smokeStartedAt.ToUniversalTime().ToString("o")
@@ -1399,6 +1627,19 @@ try {
     $timeline["notify_ready_at_utc"] = Get-SmokeUtcNow
     Write-SmokeTrace "notify_ready"
     Start-Sleep -Milliseconds ([int]($NotifySettleSeconds * 1000))
+    $foregroundAfterListenerReady = Get-ForegroundWindowSnapshot
+    Write-ForegroundTrace -Label "after_listener_ready" -Snapshot $foregroundAfterListenerReady
+    if (
+        $process -and
+        $foregroundAfterListenerReady.ProcessId -eq $process.Id -and
+        $foregroundBeforeListenerStart.ProcessId -ne $process.Id
+    ) {
+        $restoredForeground = Restore-ForegroundWindow -Snapshot $foregroundBeforeListenerStart -Label "listener_start_focus"
+        if (-not $restoredForeground) {
+            $timeline["listener_start_focus_stolen_at_utc"] = Get-SmokeUtcNow
+            throw "Listener-Type startup stole foreground focus before playback; aborting before audio playback"
+        }
+    }
 
     $streamStartedPattern = "embedded audio streaming dictation started"
     Add-Type -AssemblyName System.Windows.Forms
@@ -1412,6 +1653,8 @@ try {
                 Start-Sleep -Milliseconds 150
                 Write-SmokeTrace "insertion_target_focused"
             }
+            $foregroundBeforeCapsule = Get-ForegroundWindowSnapshot
+            Write-ForegroundTrace -Label "before_capsule" -Snapshot $foregroundBeforeCapsule
             if ($usesSerialSignal) {
                 Set-Content -Path $serialStartSignalPath -Value "start" -Encoding ASCII
                 $recordingStarted = $true
@@ -1425,11 +1668,30 @@ try {
                 Write-Output "manual_trigger_hint=press KEY1 while the playback sentence is audible"
                 Start-Sleep -Milliseconds $ManualTriggerReadyDelayMs
             }
+            if (-not $SkipCapsuleVisibleGate) {
+                if (-not (Wait-CapsuleWindowVisible -TimeoutMs 1800 -ProcessId $process.Id)) {
+                    $timeline["capsule_visible_failed_at_utc"] = Get-SmokeUtcNow
+                    throw "Recording capsule did not become visible before playback; aborting before audio playback"
+                }
+                $timeline["capsule_visible_at_utc"] = Get-SmokeUtcNow
+                Write-SmokeTrace "capsule_visible"
+                Start-Sleep -Milliseconds 80
+                $foregroundAfterCapsule = Get-ForegroundWindowSnapshot
+                Write-ForegroundTrace -Label "after_capsule" -Snapshot $foregroundAfterCapsule
+                if (
+                    $foregroundAfterCapsule.ProcessId -eq $process.Id -and
+                    $foregroundBeforeCapsule.ProcessId -ne $process.Id
+                ) {
+                    $timeline["capsule_focus_stolen_at_utc"] = Get-SmokeUtcNow
+                    throw "Recording capsule stole foreground focus before playback; aborting before audio playback"
+                }
+            }
             Start-Sleep -Milliseconds $PreRecordDelayMs
         }
         Write-SmokeTrace "playback_start index=$index"
         $playbackStartedAt = Get-Date
         if ($index -eq $RecordPlaybackIndex) {
+            $recordPlaybackStarted = $true
             $timeline["record_playback_started_at_utc"] = $playbackStartedAt.ToUniversalTime().ToString("o")
         }
         $player.PlaySync()
@@ -1551,7 +1813,19 @@ try {
         $historyLookupSkipped = $true
         Write-SmokeTrace "history_wait_skipped transcript_len=$($transcript.Length) verify_insertion=$VerifyInsertion verify_history=$VerifyHistory"
     }
-    $recordingArchivePath = Find-LatestRecordingAfter -StartedAt $smokeStartedAt
+    if ($recordPlaybackStarted -or $recordingStarted -or $pcmBytes -gt 0) {
+        $recordingArchivePath = Find-LatestRecordingAfter -StartedAt $smokeStartedAt
+    } else {
+        Write-SmokeTrace "recording_archive_lookup_skipped reason=no_record_playback"
+    }
+    if (-not $historySession -and $recordingArchivePath) {
+        $recordingSessionId = [System.IO.Path]::GetFileNameWithoutExtension($recordingArchivePath)
+        $historySession = Find-SmokeHistorySessionById -SessionId $recordingSessionId
+        if ($historySession) {
+            $timeline["history_recording_id_fallback_at_utc"] = Get-SmokeUtcNow
+            Write-SmokeTrace "history_recording_id_fallback found=1 session_id=$recordingSessionId"
+        }
+    }
     if ($historySession -and [string]::IsNullOrWhiteSpace($transcript)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$historySession.rawTranscript)) {
             $transcript = [string]$historySession.rawTranscript
@@ -1736,7 +2010,11 @@ try {
         } catch {
         }
     }
-    $recordingArchivePath = Find-LatestRecordingAfter -StartedAt $smokeStartedAt
+    if ($recordPlaybackStarted -or $recordingStarted) {
+        $recordingArchivePath = Find-LatestRecordingAfter -StartedAt $smokeStartedAt
+    } else {
+        Write-SmokeTrace "recording_archive_lookup_skipped reason=no_record_playback"
+    }
     $serialReportJson = Convert-SerialReportForJson -Report $serialReport
     $asrSummary = Get-AsrTranscriptSummaryFromLog -Text $capturedLog
     $transcript = [string]$asrSummary.final_text

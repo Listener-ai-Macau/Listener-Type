@@ -4195,8 +4195,8 @@ fn show_capsule_window_no_activate<R: tauri::Runtime>(
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-        SWP_SHOWWINDOW, SW_SHOWNOACTIVATE,
+        IsWindowVisible, SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE,
     };
 
     let Ok(handle) = window.window_handle() else {
@@ -4219,7 +4219,7 @@ fn show_capsule_window_no_activate<R: tauri::Runtime>(
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
         )
     };
-    true
+    unsafe { IsWindowVisible(hwnd).as_bool() }
 }
 
 // macOS / Linux 上不走 no-activate 路径：胶囊由 emit_capsule 的 fallback
@@ -4310,6 +4310,7 @@ fn emit_capsule(
     let app_for_main = app.clone();
     let _ = app.run_on_main_thread(move || {
         let Some(window) = app_for_main.get_webview_window("capsule") else {
+            log::warn!("[capsule] emit requested but capsule window is missing");
             return;
         };
         let show_capsule = inner_for_main.prefs.get().show_capsule;
@@ -4318,9 +4319,17 @@ fn emit_capsule(
         // Windows 上 linger 的真实问题（截图选中 / 死区 / 拖拽卡顿）由 #140 加的
         // `hide_capsule_window_if_present()` Win32 hard-hide 在 visible=false 分支
         // 处理，不依赖把 Done/Cancelled/Error 打成 invisible。详见 PR #140 评论。
+        crate::prepare_capsule_window_for_overlay(&window);
         maybe_position_capsule_bottom_center(&inner_for_main, &window, translation);
         if show_capsule && visible {
-            if !show_capsule_window_no_activate(&app_for_main, &window) {
+            let shown_no_activate = show_capsule_window_no_activate(&app_for_main, &window);
+            log::info!(
+                "[capsule] show request state={state:?} shown_no_activate={shown_no_activate}"
+            );
+            if !shown_no_activate {
+                #[cfg(target_os = "windows")]
+                log::warn!("[capsule] no-activate show failed; skipped activating fallback");
+                #[cfg(not(target_os = "windows"))]
                 let _ = window.show();
             }
             // macOS/Windows 优先走 no-activate show，避免录音胶囊抢走主窗口点击焦点。
@@ -4328,6 +4337,9 @@ fn emit_capsule(
             #[cfg(target_os = "macos")]
             crate::restore_main_window_key_if_active(&app_for_main);
         } else {
+            log::info!(
+                "[capsule] hide request state={state:?} show_capsule={show_capsule} visible={visible}"
+            );
             hide_capsule_window_if_present();
             let _ = window.hide();
         }

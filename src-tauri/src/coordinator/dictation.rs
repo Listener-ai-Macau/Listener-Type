@@ -15,6 +15,8 @@ use super::*;
 /// 避免微动开关回弹 / 用户手抖双击造成的空转写报错和 ASR session 抢资源。
 const HOTKEY_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
 const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
+const EMBEDDED_AUDIO_ASR_PREROLL_MS: usize = 800;
+const EMBEDDED_AUDIO_ASR_PREROLL_BYTES: usize = 16_000 * 2 * EMBEDDED_AUDIO_ASR_PREROLL_MS / 1_000;
 const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
@@ -81,6 +83,7 @@ struct EmbeddedAudioDictationSession {
     boosted_chunk_count: usize,
     max_gain: f64,
     clipped_samples: usize,
+    asr_preroll_sent: bool,
 }
 
 impl EmbeddedAudioDictationSession {
@@ -96,7 +99,7 @@ impl EmbeddedAudioDictationSession {
             archive_pcm.extend_from_slice(pcm);
         }
 
-        let (asr_pcm, gain_stats) = normalize_embedded_pcm_for_asr(pcm);
+        let (asr_pcm, gain_stats) = prepare_embedded_streaming_pcm_for_asr(&self.active_asr, pcm);
         self.streamed_pcm_bytes += pcm.len();
         self.normalized_pcm_bytes += asr_pcm.len();
         if gain_stats.gain > 1.0 {
@@ -114,11 +117,37 @@ impl EmbeddedAudioDictationSession {
             current_embedded_audio_partial_preview(inner),
             None,
         );
+        feed_embedded_asr_preroll_if_needed(self);
         for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
             self.consumer.consume_pcm_chunk(chunk);
         }
         Ok(())
     }
+}
+
+fn embedded_audio_asr_preroll_enabled(active_asr: &str) -> bool {
+    active_asr == "volcengine"
+}
+
+fn feed_embedded_asr_preroll_if_needed(session: &mut EmbeddedAudioDictationSession) {
+    if session.asr_preroll_sent {
+        return;
+    }
+    session.asr_preroll_sent = true;
+    if !embedded_audio_asr_preroll_enabled(&session.active_asr) {
+        return;
+    }
+
+    let silence = vec![0u8; EMBEDDED_AUDIO_ASR_PREROLL_BYTES];
+    for chunk in silence.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
+        session.consumer.consume_pcm_chunk(chunk);
+    }
+    log::info!(
+        "[coord] embedded audio ASR preroll inserted (asr={}, ms={}, bytes={})",
+        session.active_asr,
+        EMBEDDED_AUDIO_ASR_PREROLL_MS,
+        EMBEDDED_AUDIO_ASR_PREROLL_BYTES
+    );
 }
 
 #[derive(Default)]
@@ -1677,6 +1706,7 @@ async fn begin_embedded_audio_dictation_session(
         boosted_chunk_count: 0,
         max_gain: 1.0,
         clipped_samples: 0,
+        asr_preroll_sent: false,
     })
 }
 
@@ -1700,7 +1730,7 @@ fn activate_embedded_audio_dictation_session(
 }
 
 async fn submit_embedded_pcm_for_dictation(inner: &Arc<Inner>, pcm: &[u8]) -> Result<(), String> {
-    let session = begin_embedded_audio_dictation_session(inner).await?;
+    let mut session = begin_embedded_audio_dictation_session(inner).await?;
     let current_session_id = session.session_id;
     let active_asr = session.active_asr.clone();
     let consumer = Arc::clone(&session.consumer);
@@ -1727,6 +1757,7 @@ async fn submit_embedded_pcm_for_dictation(inner: &Arc<Inner>, pcm: &[u8]) -> Re
     ) {
         return Ok(());
     }
+    feed_embedded_asr_preroll_if_needed(&mut session);
     for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
         consumer.consume_pcm_chunk(chunk);
     }
@@ -2643,7 +2674,13 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     ) {
         log::error!("[coord] history append failed: {e}");
     }
-    let done_message = if tsf_required_insert_failed {
+    let done_message = if status == InsertStatus::Inserted
+        && !polish_error.is_some()
+        && !tsf_required_insert_failed
+        && !wayland_session
+    {
+        Some(polished.clone())
+    } else if tsf_required_insert_failed {
         Some("TSF 未上屏，已禁止非 TSF 兜底".to_string())
     } else if wayland_session {
         wayland_done_message(status, polish_error.is_some())
@@ -2736,8 +2773,10 @@ fn append_typed_prefix(target: &mut String, delta: &str, typed_chars: usize) -> 
 mod tests {
     use super::{
         append_typed_prefix, default_done_message, dictation_error_code, embedded_pcm_rms_and_peak,
-        finalize_polished_text, normalize_embedded_pcm_for_asr, streaming_insert_eligible,
-        wayland_done_message,
+        finalize_polished_text, normalize_embedded_pcm_for_asr,
+        prepare_embedded_streaming_pcm_for_asr, streaming_insert_eligible, wayland_done_message,
+        EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
+        EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
     use crate::types::{ChineseScriptPreference, CorrectionRule, InsertStatus, PolishMode};
 
@@ -2912,4 +2951,43 @@ mod tests {
         assert_eq!(stats.gain, 1.0);
         assert_eq!(normalized, pcm);
     }
+
+    #[test]
+    fn volcengine_streaming_keeps_ble_chunks_unmodified() {
+        let pcm = pcm_from_samples(&[100, -100, 80, -80]);
+
+        let (prepared, stats) = prepare_embedded_streaming_pcm_for_asr("volcengine", &pcm);
+
+        assert_eq!(prepared, pcm);
+        assert_eq!(stats.gain, 1.0);
+    }
+
+    #[test]
+    fn embedded_asr_preroll_is_frame_aligned() {
+        assert_eq!(EMBEDDED_AUDIO_ASR_PREROLL_MS, 800);
+        assert_eq!(EMBEDDED_AUDIO_ASR_PREROLL_BYTES, 25_600);
+        assert_eq!(
+            EMBEDDED_AUDIO_ASR_PREROLL_BYTES % EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
+            0
+        );
+    }
+}
+
+fn prepare_embedded_streaming_pcm_for_asr(
+    active_asr: &str,
+    pcm: &[u8],
+) -> (Vec<u8>, EmbeddedPcmGainStats) {
+    let (rms_before, peak_before) = embedded_pcm_rms_and_peak(pcm);
+    let stats = EmbeddedPcmGainStats {
+        rms_before,
+        peak_before,
+        gain: 1.0,
+        clipped_samples: 0,
+    };
+
+    if active_asr == "volcengine" {
+        return (pcm.to_vec(), stats);
+    }
+
+    normalize_embedded_pcm_for_asr(pcm)
 }
