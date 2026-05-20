@@ -477,7 +477,7 @@ pub fn partial_actual_size(partial: &Path) -> u64 {
     let total_size = match std::fs::metadata(partial) {
         Ok(m) => m.len(),
         Err(e) => {
-            eprintln!(
+            log::warn!(
                 "[local-asr] partial_actual_size: stat partial failed ({}): {}",
                 partial.display(),
                 e
@@ -497,7 +497,7 @@ pub fn partial_actual_size(partial: &Path) -> u64 {
         Err(e) => {
             // idx 不可读 → 不知道哪些 chunk 已落盘，sparse 全长不可信，只能回 0。
             // 但日志要留，否则进度条无故归零没法排查。
-            eprintln!(
+            log::warn!(
                 "[local-asr] partial_actual_size: read idx failed ({}): {}",
                 idx_path.display(),
                 e
