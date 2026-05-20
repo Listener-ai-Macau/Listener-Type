@@ -17,7 +17,8 @@
     "test:rules": "node --experimental-strip-types src/lib/capsulePreviewRules.test.ts",
     "test:layout": "node --experimental-strip-types src/lib/capsuleLayout.test.ts",
     "test": "npm run test:rules && npm run test:layout",
-    "check:dark-mode": "node scripts/check-dark-mode.mjs"
+    "check:dark-mode": "node scripts/check-dark-mode.mjs",
+    "verify": "node scripts/verify-frontend.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
