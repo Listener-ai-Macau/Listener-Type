@@ -727,10 +727,10 @@ fn read_openai_provider_config(kind: &str) -> Result<ProviderConfig, String> {
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
     if api_key_required && api_key.trim().is_empty() {
-        return Err("API Key 为空".to_string());
+        return Err("apiKeyMissing".to_string());
     }
     if base_url.trim().is_empty() {
-        return Err("Endpoint 为空".to_string());
+        return Err("endpointMissing".to_string());
     }
     let proxy_config = read_provider_proxy_config(kind, &provider_id)?;
     Ok(ProviderConfig {
@@ -860,7 +860,7 @@ async fn validate_bailian_asr_provider() -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
     if api_key.trim().is_empty() {
-        return Err("API Key 为空".to_string());
+        return Err("apiKeyMissing".to_string());
     }
     let endpoint = CredentialsVault::get(CredentialAccount::AsrEndpoint)
         .map_err(|e| e.to_string())?
@@ -1025,7 +1025,7 @@ async fn fetch_provider_models(config: &ProviderConfig) -> Result<Vec<String>, S
     );
     let client = http_client_builder_with_proxy(&config.base_url, 15, &config.proxy_config)
         .build()
-        .map_err(|e| format!("HTTP client 初始化失败: {e}"))?;
+        .map_err(|_| "providerClientInitFailed".to_string())?;
     let mut request = client.get(&url);
     if !config.api_key.trim().is_empty() {
         // 谷歌原生 generativelanguage.googleapis.com 不识别 Bearer Authorization,
@@ -1038,16 +1038,16 @@ async fn fetch_provider_models(config: &ProviderConfig) -> Result<Vec<String>, S
     }
     let response = request.send().await.map_err(|e| {
         if e.is_timeout() {
-            "请求超时".to_string()
+            "providerRequestTimeout".to_string()
         } else {
-            format!("网络错误: {e}")
+            "providerNetworkError".to_string()
         }
     })?;
     let status = response.status();
     let body = response
         .text()
         .await
-        .map_err(|e| format!("读取响应失败: {e}"))?;
+        .map_err(|_| "providerReadResponseFailed".to_string())?;
     if !status.is_success() {
         return Err(format!("providerHttpStatus:{}", status.as_u16()));
     }
@@ -1075,11 +1075,11 @@ fn models_url(base_url: &str) -> String {
 
 fn parse_model_ids(body: &str) -> Result<Vec<String>, String> {
     let json: Value =
-        serde_json::from_str(body).map_err(|e| format!("模型列表不是有效 JSON: {e}"))?;
+        serde_json::from_str(body).map_err(|_| "providerInvalidModelList".to_string())?;
     let data = json
         .get("data")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| "模型列表缺少 data 数组".to_string())?;
+        .ok_or_else(|| "providerInvalidModelList".to_string())?;
     let mut models = data
         .iter()
         .filter_map(|item| item.get("id").and_then(|id| id.as_str()))
@@ -1105,11 +1105,11 @@ fn parse_model_ids(body: &str) -> Result<Vec<String>, String> {
 /// 模型可能未暴露这个字段，宁误显示也不要把新模型挡在外面。
 fn parse_gemini_model_ids(body: &str) -> Result<Vec<String>, String> {
     let json: Value =
-        serde_json::from_str(body).map_err(|e| format!("模型列表不是有效 JSON: {e}"))?;
+        serde_json::from_str(body).map_err(|_| "providerInvalidModelList".to_string())?;
     let models = json
         .get("models")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| "Gemini 模型列表缺少 models 数组".to_string())?;
+        .ok_or_else(|| "providerInvalidModelList".to_string())?;
     let mut ids = models
         .iter()
         .filter(|item| {

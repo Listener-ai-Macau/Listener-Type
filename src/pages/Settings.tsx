@@ -9,6 +9,10 @@ import { ShortcutRecorder } from '../components/ShortcutRecorder';
 import { detectOS } from '../components/WindowChrome';
 import { isHotkeyModeMigrationNoticeActive } from '../lib/hotkeyMigration';
 import {
+  classifyEmbeddedBleProbeError,
+  classifyProviderConnectionError,
+} from '../lib/providerSetup';
+import {
   getHotkeyBindingCodes,
   getHotkeyBindingLabel,
   getHotkeyCodeLabel,
@@ -390,7 +394,7 @@ function RecordingSection() {
     } catch (err) {
       setEmbeddedBleProbeResult(null);
       setEmbeddedBleProbeStatus('error');
-      setEmbeddedBleProbeMessage(err instanceof Error ? err.message : String(err));
+      setEmbeddedBleProbeMessage(embeddedBleProbeErrorMessage(err, t));
     }
   };
 
@@ -494,6 +498,7 @@ function RecordingSection() {
               message={embeddedBleProbeMessage}
               result={embeddedBleProbeResult}
               onProbe={() => void runEmbeddedBleProbe()}
+              onUseMicrophone={() => void onDictationInputSourceChange('microphone')}
             />
           )}
         </div>
@@ -2137,25 +2142,58 @@ function ProviderTools({ kind, modelAccount, onModelSelected }: { kind: 'llm' | 
 
 
 function providerErrorMessage(error: unknown, t: ReturnType<typeof useTranslation>['t']): string {
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.startsWith('providerHttpStatus:')) {
-    return t('settings.providers.providerHttpStatus', { status: message.split(':')[1] || '?' });
+  switch (classifyProviderConnectionError(error)) {
+    case 'apiKeyRejected':
+      return t('settings.providers.providerAuthRejected');
+    case 'rateLimited':
+      return t('settings.providers.providerRateLimited');
+    case 'providerUnavailable':
+      return t('settings.providers.providerUnavailable');
+    case 'network':
+      return t('settings.providers.providerNetworkError');
+    case 'timeout':
+      return t('settings.providers.requestTimeout');
+    case 'apiKeyMissing':
+      return t('settings.providers.apiKeyMissing');
+    case 'endpointMissing':
+      return t('settings.providers.endpointMissing');
+    case 'endpointInvalid':
+      return t('settings.providers.endpointInvalid');
+    case 'httpsRequired':
+      return t('settings.providers.endpointMustUseHttps');
+    case 'modelMissing':
+      return t('settings.providers.modelMissing');
+    case 'modelsEmpty':
+      return t('settings.providers.modelsEmpty');
+    case 'responseInvalid':
+      return t('settings.providers.providerResponseInvalid');
+    case 'proxy': {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === 'proxyUrlMissing') return t('settings.providers.proxyUrlMissing');
+      if (message === 'proxyUrlInvalid') return t('settings.providers.proxyUrlInvalid');
+      if (message === 'proxyModeInvalid') return t('settings.providers.proxyModeInvalid');
+      return t('common.operationFailed');
+    }
+    case 'generic':
+    default:
+      return t('settings.providers.providerHttpStatus');
   }
-  if (message === 'endpointMustUseHttps') return t('settings.providers.endpointMustUseHttps');
-  if (message === 'endpointInvalid') return t('settings.providers.endpointInvalid');
-  if (message === 'providerResponseTooLarge') return t('settings.providers.responseTooLarge');
-  if (message === 'asrInvalidJson') return t('settings.providers.asrInvalidJson');
-  if (message === 'asrMissingTextField') return t('settings.providers.asrMissingTextField');
-  if (message === 'providerNetworkError') return t('common.networkError');
-  if (message === 'providerReadResponseFailed' || message === 'providerClientInitFailed') return t('common.operationFailed');
-  if (message === 'providerRequestTimeout') return t('settings.providers.requestTimeout');
-  if (message.includes('API Key')) return t('settings.providers.apiKeyMissing');
-  if (message.includes('Endpoint')) return t('settings.providers.endpointMissing');
-  if (message === 'proxyUrlMissing') return t('settings.providers.proxyUrlMissing');
-  if (message === 'proxyUrlInvalid') return t('settings.providers.proxyUrlInvalid');
-  if (message === 'proxyModeInvalid') return t('settings.providers.proxyModeInvalid');
-  if (message.includes('timeout') || message.includes('超时')) return t('settings.providers.requestTimeout');
-  return t('common.operationFailed');
+}
+
+function embeddedBleProbeErrorMessage(error: unknown, t: ReturnType<typeof useTranslation>['t']): string {
+  switch (classifyEmbeddedBleProbeError(error)) {
+    case 'noDevice':
+      return t('settings.recording.embeddedBleNoDevice');
+    case 'accessDenied':
+      return t('settings.recording.embeddedBleAccessDenied');
+    case 'timeout':
+      return t('settings.recording.embeddedBleTimeout');
+    case 'notify':
+      return t('settings.recording.embeddedBleNotifyFailed');
+    case 'generic':
+    default:
+      return t('settings.recording.embeddedBleGenericError');
+  }
 }
 
 type CredentialFieldStatus = 'idle' | 'saving' | 'saved' | 'readError' | 'saveError' | 'copied' | 'copyError';
