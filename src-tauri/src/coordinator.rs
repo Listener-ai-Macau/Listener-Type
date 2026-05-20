@@ -168,6 +168,9 @@ struct Inner {
     /// 最近一次应用到 capsule 窗口的几何状态。避免录音 level tick 反复触发
     /// resize / reposition。
     capsule_layout: Mutex<Option<CapsuleLayoutState>>,
+    /// 限流：Recording 状态下 UI show/position 操作的最小间隔（100ms）。
+    /// emit_to 事件不受限，保证电平条实时更新。
+    capsule_ui_throttle: Mutex<Option<std::time::Instant>>,
     /// QA 用的 ASR 句柄（始终是 Volcengine 流式）。
     qa_asr: Mutex<Option<Arc<VolcengineStreamingASR>>>,
     /// QA 用的 Recorder 句柄。
@@ -245,6 +248,7 @@ impl Coordinator {
                     qa_hotkey: Mutex::new(None),
                     qa_state: Mutex::new(QaSessionState::default()),
                     capsule_layout: Mutex::new(None),
+                    capsule_ui_throttle: Mutex::new(None),
                     qa_asr: Mutex::new(None),
                     qa_recorder: Mutex::new(None),
                     qa_stream_cancelled: Arc::new(AtomicBool::new(false)),
@@ -299,6 +303,7 @@ impl Coordinator {
                 qa_hotkey: Mutex::new(None),
                 qa_state: Mutex::new(QaSessionState::default()),
                 capsule_layout: Mutex::new(None),
+                capsule_ui_throttle: Mutex::new(None),
                 qa_asr: Mutex::new(None),
                 qa_recorder: Mutex::new(None),
                 qa_stream_cancelled: Arc::new(AtomicBool::new(false)),
@@ -4300,57 +4305,61 @@ fn emit_capsule(
         translation,
     };
 
-    // visible / translation 是「这一帧 capsule:state event 的 payload」内容 ——
-    // 必须在 call-site（即音频线程触发 emit_capsule 时）就算定，否则 main thread
-    // 闭包里读到的将是「下一帧」的 state，跟实际下发给 JS 的 payload 不一致。
     let visible = !matches!(state, CapsuleState::Idle);
 
-    // emit_capsule 会被 cpal process_callback（音频回调线程）调用 ~30 Hz —— 在该
-    // 线程上调用 NSWindow / HWND API 会撞 macOS dispatch_assert_queue_fail SIGTRAP
-    // 或者 Win32 SendMessage 死锁。把 window.show/hide + 位置调整 marshal 到主线程；
-    // app.emit_to 走 Tauri 内部事件总线，本身线程安全，保留同步调用。详见 audit 3.2.2。
-    //
-    // show_capsule（用户偏好）在主线程执行时再读 —— 用户可以在录音过程中改设置，
-    // 闭包入队到真正跑之间窗口上限是一两帧（~16-33ms），用最新值消除 stale-pref
-    // 闪烁。pr_agent 关注点 — 见 audit follow-up。
-    let inner_for_main = Arc::clone(inner);
-    let app_for_main = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let Some(window) = app_for_main.get_webview_window("capsule") else {
-            log::warn!("[capsule] emit requested but capsule window is missing");
-            return;
-        };
-        let show_capsule = inner_for_main.prefs.get().show_capsule;
-        // 三平台统一：Done / Cancelled / Error 状态保留 ~1.5s toast
-        // （schedule_capsule_idle 之后会回 Idle 隐藏）。
-        // Windows 上 linger 的真实问题（截图选中 / 死区 / 拖拽卡顿）由 #140 加的
-        // `hide_capsule_window_if_present()` Win32 hard-hide 在 visible=false 分支
-        // 处理，不依赖把 Done/Cancelled/Error 打成 invisible。详见 PR #140 评论。
-        crate::prepare_capsule_window_for_overlay(&window);
-        maybe_position_capsule_bottom_center(&inner_for_main, &window, translation);
-        if show_capsule && visible {
-            let shown_no_activate = show_capsule_window_no_activate(&app_for_main, &window);
-            log::info!(
-                "[capsule] show request state={state:?} shown_no_activate={shown_no_activate}"
-            );
-            if !shown_no_activate {
-                #[cfg(target_os = "windows")]
-                log::warn!("[capsule] no-activate show failed; skipped activating fallback");
-                #[cfg(not(target_os = "windows"))]
-                let _ = window.show();
+    // 限流：Recording 状态下，UI show/position 操作最小间隔 100ms。
+    // emit_to 事件不受限，保证电平条实时更新。
+    let is_recording_tick = matches!(state, CapsuleState::Recording);
+    let skip_ui = if is_recording_tick {
+        let mut throttle = inner.capsule_ui_throttle.lock();
+        match *throttle {
+            Some(last) if last.elapsed() < std::time::Duration::from_millis(100) => true,
+            _ => {
+                *throttle = Some(std::time::Instant::now());
+                false
             }
-            // macOS/Windows 优先走 no-activate show，避免录音胶囊抢走主窗口点击焦点。
-            // 若 fallback 到 show()，Listener Type 已是前台 app 时再把 key window 还给 main。
-            #[cfg(target_os = "macos")]
-            crate::restore_main_window_key_if_active(&app_for_main);
-        } else {
-            log::info!(
-                "[capsule] hide request state={state:?} show_capsule={show_capsule} visible={visible}"
-            );
-            hide_capsule_window_if_present();
-            let _ = window.hide();
         }
-    });
+    } else {
+        // 状态转换（非 Recording）总是执行 UI 操作并重置限流
+        if !is_recording_tick {
+            *inner.capsule_ui_throttle.lock() = None;
+        }
+        false
+    };
+
+    if !skip_ui {
+        let inner_for_main = Arc::clone(inner);
+        let app_for_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let Some(window) = app_for_main.get_webview_window("capsule") else {
+                log::warn!("[capsule] emit requested but capsule window is missing");
+                return;
+            };
+            let show_capsule = inner_for_main.prefs.get().show_capsule;
+            crate::prepare_capsule_window_for_overlay(&window);
+            maybe_position_capsule_bottom_center(&inner_for_main, &window, translation);
+            if show_capsule && visible {
+                let shown_no_activate = show_capsule_window_no_activate(&app_for_main, &window);
+                log::info!(
+                    "[capsule] show request state={state:?} shown_no_activate={shown_no_activate}"
+                );
+                if !shown_no_activate {
+                    #[cfg(target_os = "windows")]
+                    log::warn!("[capsule] no-activate show failed; skipped activating fallback");
+                    #[cfg(not(target_os = "windows"))]
+                    let _ = window.show();
+                }
+                #[cfg(target_os = "macos")]
+                crate::restore_main_window_key_if_active(&app_for_main);
+            } else {
+                log::info!(
+                    "[capsule] hide request state={state:?} show_capsule={show_capsule} visible={visible}"
+                );
+                hide_capsule_window_if_present();
+                let _ = window.hide();
+            }
+        });
+    }
 
     let _ = app.emit_to("capsule", "capsule:state", payload);
 }
