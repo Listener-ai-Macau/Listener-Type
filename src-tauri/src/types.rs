@@ -1312,7 +1312,7 @@ impl Default for UserPreferences {
             update_channel: UpdateChannel::default(),
             history_retention_days: default_history_retention_days(),
             polish_context_window_minutes: default_polish_context_window_minutes(),
-            start_minimized: false,
+            start_minimized: true,
             dark_mode: false,
             streaming_insert: true,
             streaming_insert_default_migrated: true,

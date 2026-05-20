@@ -620,10 +620,10 @@ const shellStyle: CSSProperties = {
   overflow: 'hidden',
   // 浮窗 focus:false 在 macOS 上会让 backdrop-filter 不工作（透到桌面文字），所以
   // 改成接近不透明的实色背景。blur 仅作锦上添花，不再依赖它保证可读性。
-  background: 'rgba(255, 255, 255, 0.97)',
+  background: 'var(--ol-glass-bg-strong)',
   backdropFilter: 'blur(24px) saturate(180%)',
   WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-  border: '0.5px solid rgba(0, 0, 0, 0.08)',
+  border: '0.5px solid var(--ol-line)',
   boxShadow: 'var(--ol-shadow-lg)',
   fontFamily: 'var(--ol-font-sans)',
   color: 'var(--ol-ink)',
@@ -757,8 +757,8 @@ const statusBarStyle: CSSProperties = {
   alignItems: 'center',
   gap: 8,
   padding: '0 14px',
-  borderTop: '0.5px solid rgba(0, 0, 0, 0.06)',
-  background: 'rgba(255,255,255,0.4)',
+  borderTop: '0.5px solid var(--ol-line-soft)',
+  background: 'var(--ol-glass-bg)',
 };
 
 const globalCss = `

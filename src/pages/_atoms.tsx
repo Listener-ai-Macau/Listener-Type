@@ -44,7 +44,7 @@ export function Card({ children, style, padding = 18, glassy = false, className 
     <div
       className={className}
       style={{
-        background: glassy ? 'rgba(255,255,255,0.55)' : 'var(--ol-surface)',
+        background: glassy ? 'var(--ol-glass-bg)' : 'var(--ol-surface)',
         backdropFilter: glassy ? 'blur(20px) saturate(160%)' : undefined,
         WebkitBackdropFilter: glassy ? 'blur(20px) saturate(160%)' : undefined,
         border: '0.5px solid var(--ol-line)',

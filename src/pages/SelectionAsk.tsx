@@ -133,7 +133,7 @@ export function SelectionAsk() {
                 width: 16,
                 height: 16,
                 borderRadius: 999,
-                background: '#fff',
+                background: 'var(--ol-white)',
                 boxShadow: '0 1px 2px rgba(0,0,0,.2)',
                 transition: 'left .16s var(--ol-motion-spring)',
               }}

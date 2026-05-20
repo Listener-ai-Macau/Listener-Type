@@ -182,7 +182,7 @@ pub fn run() {
                     }
                     // Win11 22H2+: 把原生标题栏底色调成白色，与应用 sidebar 视觉统一。
                     // 老版 Windows 静默失败，不阻塞。
-                    apply_windows_caption_color(&main);
+                    apply_windows_caption_color_for_theme(&main, coordinator.prefs().get().dark_mode);
                 }
                 // 静默启动开关：prefs.start_minimized = true 或测试脚本设置
                 // LISTENER_TYPE_HIDE_MAIN_ON_START=1 → 不弹主窗口，用户从菜单栏 /
@@ -699,6 +699,12 @@ fn handle_dark_mode_toggle(app: &AppHandle) {
     }
     let _ = app.emit("prefs:changed", &prefs);
     let _ = app.emit("dark-mode-changed", prefs.dark_mode);
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(window) = app.get_webview_window("main") {
+            apply_windows_caption_color_for_theme(&window, prefs.dark_mode);
+        }
+    }
 }
 
 fn handle_microphone_tray_menu_event(app: &AppHandle, id: &str) {
@@ -760,6 +766,11 @@ fn handle_style_tray_menu_event(app: &AppHandle, id: &str) -> bool {
 /// 返回错误，仅打 warn 不阻塞启动。
 #[cfg(target_os = "windows")]
 fn apply_windows_caption_color<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    apply_windows_caption_color_for_theme(window, false);
+}
+
+#[cfg(target_os = "windows")]
+fn apply_windows_caption_color_for_theme<R: Runtime>(window: &tauri::WebviewWindow<R>, dark: bool) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CAPTION_COLOR};
@@ -777,16 +788,16 @@ fn apply_windows_caption_color<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     };
     let hwnd = HWND(handle.hwnd.get() as *mut core::ffi::c_void);
 
-    // COLORREF 0x00BBGGRR 编码——选用 rgb(245,245,247) 跟 WindowChrome 的 glass linear-gradient
-    // 起始色一致，减小原生 caption bar 跟应用磨砂玻璃的色差（用户反馈：纯白 caption + 半透灰 glass
-    // 色差很丑）。R=0xF5 G=0xF5 B=0xF7 → COLORREF = 0x00F7F5F5。
-    let glass_match: u32 = 0x00F7F5F5;
+    // COLORREF 0x00BBGGRR 编码。
+    // Light: rgb(245,245,247) → 0x00F7F5F5（跟 WindowChrome glass 起始色一致）
+    // Dark:  rgb(28,28,31)    → 0x001F1C1C（跟 --ol-canvas 一致）
+    let colorref: u32 = if dark { 0x001F1C1C } else { 0x00F7F5F5 };
     unsafe {
         if let Err(e) = DwmSetWindowAttribute(
             hwnd,
             DWMWA_CAPTION_COLOR,
-            &glass_match as *const _ as *const core::ffi::c_void,
-            std::mem::size_of_val(&glass_match) as u32,
+            &colorref as *const _ as *const core::ffi::c_void,
+            std::mem::size_of_val(&colorref) as u32,
         ) {
             log::warn!("[main] set caption color failed (likely pre-22H2 Win): {e}");
         }

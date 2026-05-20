@@ -269,12 +269,12 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
             style={{
               flex: 1, minWidth: 0,
               overflow: 'hidden',
-              background: 'rgba(255, 255, 255, 0.62)',
+              background: 'var(--ol-glass-bg)',
               backdropFilter: 'blur(18px) saturate(170%)',
               WebkitBackdropFilter: 'blur(18px) saturate(170%)',
               borderRadius: 'var(--ol-window-console-radius)',
-              border: '0.5px solid rgba(0,0,0,0.06)',
-              boxShadow: '0 1px 0 rgba(255,255,255,0.8) inset, 0 8px 24px -12px rgba(15,17,22,0.10), 0 2px 6px -2px rgba(15,17,22,0.06)',
+              border: '0.5px solid var(--ol-line)',
+              boxShadow: '0 1px 0 var(--ol-line-soft) inset, 0 8px 24px -12px rgba(15,17,22,0.10), 0 2px 6px -2px rgba(15,17,22,0.06)',
               display: 'flex',
               flexDirection: 'column',
             }}
@@ -398,7 +398,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           font-weight: 600;
         }
         .ol-nav-btn:not(.ol-nav-btn-active):hover {
-          background: rgba(0,0,0,0.04);
+          background: var(--ol-surface-2);
           color: var(--ol-ink);
         }
         @keyframes ol-page-slide {
@@ -445,7 +445,7 @@ function ProviderSetupPrompt({ onLater, onOpenSettings }: { onLater: () => void;
           width: 360,
           borderRadius: 12,
           background: 'var(--ol-surface)',
-          border: '0.5px solid rgba(0,0,0,.08)',
+          border: '0.5px solid var(--ol-line)',
           boxShadow: '0 24px 70px -24px rgba(15,17,22,.38), 0 0 0 0.5px rgba(0,0,0,.06)',
           padding: 20,
           animation: 'ol-prompt-pop 0.26s var(--ol-motion-spring)',
@@ -538,7 +538,7 @@ function HotkeyModeMigrationPrompt({ onLater, onOpenSettings }: { onLater: () =>
           width: 380,
           borderRadius: 12,
           background: 'var(--ol-surface)',
-          border: '0.5px solid rgba(0,0,0,.08)',
+          border: '0.5px solid var(--ol-line)',
           boxShadow: '0 24px 70px -24px rgba(15,17,22,.38), 0 0 0 0.5px rgba(0,0,0,.06)',
           padding: 20,
           animation: 'ol-prompt-pop 0.26s var(--ol-motion-spring)',
@@ -619,9 +619,9 @@ function FooterIcon({ name, tip, active, onClick }: FooterIconProps) {
   const [hover, setHover] = useState(false);
   // 选中（active）= popover 打开，深灰；hover = 浅灰；其它 = 透明
   const background = active
-    ? 'rgba(0,0,0,0.10)'
+    ? 'var(--ol-surface-2)'
     : hover
-      ? 'rgba(0,0,0,0.05)'
+      ? 'var(--ol-line-soft)'
       : 'transparent';
   return (
     <button

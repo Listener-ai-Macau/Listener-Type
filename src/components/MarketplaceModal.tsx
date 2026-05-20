@@ -70,7 +70,7 @@ export function MarketplaceModal({ onClose }: MarketplaceModalProps) {
               display: 'inline-flex', alignItems: 'center', gap: 6,
               padding: '4px 10px', borderRadius: 999,
               border: loggedIn ? '0.5px solid var(--ol-line)' : '0.5px solid rgba(239,68,68,0.32)',
-              background: loggedIn ? 'rgba(255,255,255,0.85)' : 'rgba(239,68,68,0.08)',
+              background: loggedIn ? 'var(--ol-glass-bg-strong)' : 'rgba(239,68,68,0.08)',
               color: loggedIn ? 'var(--ol-ink-2)' : 'var(--ol-red, #ef4444)',
               fontSize: 11.5, fontWeight: 500,
               cursor: 'default',
@@ -91,7 +91,7 @@ export function MarketplaceModal({ onClose }: MarketplaceModalProps) {
             width: 32, height: 32,
             border: '0.5px solid var(--ol-line)',
             borderRadius: 8,
-            background: 'rgba(255,255,255,0.85)',
+            background: 'var(--ol-glass-bg-strong)',
             color: 'var(--ol-ink-2)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'default',
@@ -105,7 +105,7 @@ export function MarketplaceModal({ onClose }: MarketplaceModalProps) {
             (e.currentTarget as HTMLButtonElement).style.color = 'var(--ol-ink)';
           }}
           onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.85)';
+            (e.currentTarget as HTMLButtonElement).style.background = 'var(--ol-glass-bg-strong)';
             (e.currentTarget as HTMLButtonElement).style.color = 'var(--ol-ink-2)';
           }}
           aria-label="close"

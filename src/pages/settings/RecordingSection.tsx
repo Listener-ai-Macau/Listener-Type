@@ -207,8 +207,8 @@ function WaylandHotkeyCallout() {
                 gap: 8,
                 padding: '8px 10px',
                 borderRadius: 8,
-                background: 'rgba(255,255,255,0.7)',
-                border: '0.5px solid rgba(0,0,0,0.08)',
+                background: 'var(--ol-glass-bg)',
+                border: '0.5px solid var(--ol-line)',
                 flex: 1,
                 minWidth: 0,
               }}
@@ -237,7 +237,7 @@ function WaylandHotkeyCallout() {
                   fontWeight: 500,
                   border: '0.5px solid rgba(0,0,0,0.12)',
                   borderRadius: 6,
-                  background: '#fff',
+                  background: 'var(--ol-white)',
                   color: 'var(--ol-ink-2)',
                   cursor: 'pointer',
                   fontFamily: 'inherit',
@@ -587,8 +587,8 @@ function MicrophonePickerDialog({
           width: 450,
           maxWidth: 'calc(100vw - 48px)',
           borderRadius: 16,
-          background: 'rgba(255,255,255,0.96)',
-          border: '0.5px solid rgba(0,0,0,0.12)',
+          background: 'var(--ol-glass-bg-strong)',
+          border: '0.5px solid var(--ol-line)',
           boxShadow: '0 24px 70px rgba(0,0,0,0.28)',
           padding: 24,
           animation: 'olMicPickerPopIn 160ms cubic-bezier(.2,.8,.2,1)',
@@ -700,7 +700,7 @@ function MicrophonePickerDialog({
                     ? 'rgba(101,123,112,0.08)'
                     : hovered
                       ? 'rgba(0,0,0,0.035)'
-                      : '#fff',
+                      : 'var(--ol-white)',
                   boxShadow: active
                     ? '0 0 0 3px rgba(101,123,112,0.08)'
                     : hovered
@@ -1085,7 +1085,7 @@ export function RecordingSection() {
               style={{
                 padding: '5px 14px', fontSize: 12, fontWeight: 500,
                 border: 0, borderRadius: 6, fontFamily: 'inherit',
-                background: prefs.hotkey.mode === v ? '#fff' : 'transparent',
+                background: prefs.hotkey.mode === v ? 'var(--ol-white)' : 'transparent',
                 color: prefs.hotkey.mode === v ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
                 boxShadow: prefs.hotkey.mode === v ? '0 1px 2px rgba(0,0,0,.08)' : 'none',
                 cursor: 'default',
@@ -1118,7 +1118,7 @@ export function RecordingSection() {
                     border: 0,
                     borderRadius: 6,
                     fontFamily: 'inherit',
-                    background: active ? '#fff' : 'transparent',
+                    background: active ? 'var(--ol-white)' : 'transparent',
                     color: active ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
                     boxShadow: active ? '0 1px 2px rgba(0,0,0,.08)' : 'none',
                     cursor: 'default',

@@ -43,7 +43,7 @@ function useDarkMode() {
           localStorage.setItem('ol-dark-mode', String(event.payload));
         });
       } catch { /* non-tauri */ }
-    });
+    })();
     return () => { unlisten?.(); };
   }, []);
 }
