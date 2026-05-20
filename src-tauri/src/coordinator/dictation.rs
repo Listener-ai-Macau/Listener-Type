@@ -1321,24 +1321,26 @@ pub(super) async fn submit_embedded_audio_ble_stream(
     inner: &Arc<Inner>,
     timeout_ms: Option<u64>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-    submit_embedded_audio_ble_stream_impl(inner, timeout_ms, true).await
+    submit_embedded_audio_ble_stream_impl(inner, timeout_ms, true, Arc::new(AtomicBool::new(false)))
+        .await
 }
 
 pub(super) async fn submit_embedded_audio_ble_stream_background(
     inner: &Arc<Inner>,
     timeout_ms: Option<u64>,
+    cancel_capture: Arc<AtomicBool>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-    submit_embedded_audio_ble_stream_impl(inner, timeout_ms, false).await
+    submit_embedded_audio_ble_stream_impl(inner, timeout_ms, false, cancel_capture).await
 }
 
 async fn submit_embedded_audio_ble_stream_impl(
     inner: &Arc<Inner>,
     timeout_ms: Option<u64>,
     emit_idle_capture_errors: bool,
+    cancel_capture: Arc<AtomicBool>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-    let cancel_capture = Arc::new(AtomicBool::new(false));
     let cancel_capture_for_task = Arc::clone(&cancel_capture);
     let capture_task = tauri::async_runtime::spawn_blocking(move || {
         crate::embedded_ble::capture_notification_events_until_cancelled(

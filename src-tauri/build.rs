@@ -2,7 +2,20 @@ fn main() {
     #[cfg(target_os = "macos")]
     build_qwen_asr_macos();
 
+    #[cfg(target_os = "windows")]
+    configure_windows_test_manifest();
+
     tauri_build::build();
+}
+
+#[cfg(target_os = "windows")]
+fn configure_windows_test_manifest() {
+    // Some Windows UI dependencies import TaskDialogIndirect from comctl32 v6.
+    // Cargo's test harness does not get Tauri's app manifest, so embed the SxS
+    // dependency explicitly or the test exe exits before Rust code runs.
+    println!(
+        "cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
+    );
 }
 
 /// 编译 antirez/qwen-asr 的 C 源（仅 macOS）。

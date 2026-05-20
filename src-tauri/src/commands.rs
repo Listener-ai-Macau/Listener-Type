@@ -3353,7 +3353,7 @@ mod tests {
             .unwrap()
             .clone()
             .expect("settings saved");
-        assert_eq!(saved.hotkey.trigger, HotkeyTrigger::RightOption);
+        assert_eq!(saved.hotkey.trigger, HotkeyBinding::default().trigger);
         assert_eq!(saved.hotkey.mode, prefs.hotkey.mode);
         assert_eq!(
             saved.qa_hotkey.unwrap().primary,

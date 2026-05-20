@@ -34,8 +34,8 @@ const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 #[cfg(target_os = "windows")]
 mod windows_ble {
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::mpsc;
     use std::sync::Arc;
+    use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
     use std::time::{Duration, Instant};
 
     use windows::core::{GUID, HSTRING};
@@ -53,6 +53,7 @@ mod windows_ble {
 
     const SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091a);
     const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b);
+    const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
 
     pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
         let mut notifications = Vec::new();
@@ -79,6 +80,8 @@ mod windows_ble {
         cancel_requested: Arc<AtomicBool>,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
     ) -> Result<(), String> {
+        let capture_guard = BleCaptureGuard::enter(timeout)?;
+        let capture_id = capture_guard.session_id();
         let target = open_notify_target()?;
         let characteristic = target.characteristic.clone();
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
@@ -95,18 +98,24 @@ mod windows_ble {
             },
         );
 
-        let mut cleanup = NotifyCleanup::new(target);
-        log::info!("[embedded-ble] resetting notify CCCD before enable");
+        let mut cleanup = NotifyCleanup::new(capture_id, target);
+        log::info!("[embedded-ble] capture #{capture_id}: resetting notify CCCD before enable");
         match write_cccd_with_timeout(
             &characteristic,
             GattClientCharacteristicConfigurationDescriptorValue::None,
             Duration::from_secs(2),
         ) {
-            Ok(status) => log::info!("[embedded-ble] notify CCCD reset status={status:?}"),
-            Err(err) => log::warn!("[embedded-ble] notify CCCD reset skipped: {err}"),
+            Ok(status) => {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: notify CCCD reset status={status:?}"
+                )
+            }
+            Err(err) => {
+                log::warn!("[embedded-ble] capture #{capture_id}: notify CCCD reset skipped: {err}")
+            }
         }
         std::thread::sleep(Duration::from_millis(150));
-        log::info!("[embedded-ble] enabling notify CCCD");
+        log::info!("[embedded-ble] capture #{capture_id}: enabling notify CCCD");
         let status = write_cccd_with_timeout(
             &characteristic,
             GattClientCharacteristicConfigurationDescriptorValue::Notify,
@@ -115,12 +124,12 @@ mod windows_ble {
         if status != GattCommunicationStatus::Success {
             return Err(format!("BLE CCCD notify write returned status={status:?}"));
         }
-        log::info!("[embedded-ble] notify CCCD enabled");
+        log::info!("[embedded-ble] capture #{capture_id}: notify CCCD enabled");
         let token = characteristic
             .ValueChanged(&handler)
             .map_err(|err| format!("BLE ValueChanged handler registration failed: {err}"))?;
         cleanup.set_token(token);
-        log::info!("[embedded-ble] ValueChanged handler registered");
+        log::info!("[embedded-ble] capture #{capture_id}: ValueChanged handler registered");
 
         let deadline = Instant::now() + timeout;
         let mut collector = crate::embedded_audio::SessionCollector::default();
@@ -128,7 +137,9 @@ mod windows_ble {
         loop {
             let now = Instant::now();
             if cancel_requested.load(Ordering::SeqCst) {
-                log::info!("[embedded-ble] capture cancelled by caller; closing notify");
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: cancelled by caller; closing notify"
+                );
                 cleanup.disable_notify();
                 return Ok(());
             }
@@ -161,7 +172,9 @@ mod windows_ble {
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
                     if cancel_requested.load(Ordering::SeqCst) {
-                        log::info!("[embedded-ble] capture cancelled by caller; closing notify");
+                        log::info!(
+                            "[embedded-ble] capture #{capture_id}: cancelled by caller; closing notify"
+                        );
                         cleanup.disable_notify();
                         return Ok(());
                     }
@@ -548,6 +561,72 @@ mod windows_ble {
         }
     }
 
+    #[derive(Default)]
+    struct BleCaptureGateState {
+        next_session_id: u64,
+        last_closed_at: Option<Instant>,
+    }
+
+    fn capture_gate() -> &'static Mutex<BleCaptureGateState> {
+        static GATE: OnceLock<Mutex<BleCaptureGateState>> = OnceLock::new();
+        GATE.get_or_init(|| Mutex::new(BleCaptureGateState::default()))
+    }
+
+    struct BleCaptureGuard {
+        guard: MutexGuard<'static, BleCaptureGateState>,
+        session_id: u64,
+        started_at: Instant,
+    }
+
+    impl BleCaptureGuard {
+        fn enter(timeout: Duration) -> Result<Self, String> {
+            let mut guard = capture_gate()
+                .lock()
+                .map_err(|_| "BLE capture gate is poisoned".to_string())?;
+            if let Some(last_closed_at) = guard.last_closed_at {
+                let elapsed = last_closed_at.elapsed();
+                if elapsed < RECONNECT_COOLDOWN {
+                    let delay = RECONNECT_COOLDOWN - elapsed;
+                    log::info!(
+                        "[embedded-ble] waiting {} ms before reconnect after previous capture cleanup",
+                        delay.as_millis()
+                    );
+                    std::thread::sleep(delay);
+                }
+            }
+            guard.next_session_id = guard.next_session_id.wrapping_add(1);
+            if guard.next_session_id == 0 {
+                guard.next_session_id = 1;
+            }
+            let session_id = guard.next_session_id;
+            log::info!(
+                "[embedded-ble] capture #{session_id}: opening serialized BLE notify session timeout_ms={}",
+                timeout.as_millis()
+            );
+            Ok(Self {
+                guard,
+                session_id,
+                started_at: Instant::now(),
+            })
+        }
+
+        fn session_id(&self) -> u64 {
+            self.session_id
+        }
+    }
+
+    impl Drop for BleCaptureGuard {
+        fn drop(&mut self) {
+            let elapsed_ms = self.started_at.elapsed().as_millis();
+            self.guard.last_closed_at = Some(Instant::now());
+            log::info!(
+                "[embedded-ble] capture #{}: released BLE notify session after {} ms",
+                self.session_id,
+                elapsed_ms
+            );
+        }
+    }
+
     struct OpenNotifyTarget {
         characteristic: GattCharacteristic,
         service: Option<GattDeviceService>,
@@ -555,14 +634,16 @@ mod windows_ble {
     }
 
     struct NotifyCleanup {
+        capture_id: u64,
         target: OpenNotifyTarget,
         token: Option<EventRegistrationToken>,
         notify_disabled: bool,
     }
 
     impl NotifyCleanup {
-        fn new(target: OpenNotifyTarget) -> Self {
+        fn new(capture_id: u64, target: OpenNotifyTarget) -> Self {
             Self {
+                capture_id,
                 target,
                 token: None,
                 notify_disabled: false,
@@ -577,25 +658,56 @@ mod windows_ble {
             if self.notify_disabled {
                 return;
             }
-            if let Ok(operation) = self
+            self.remove_handler();
+            log::info!(
+                "[embedded-ble] capture #{}: disabling notify CCCD",
+                self.capture_id
+            );
+            match self
                 .target
                 .characteristic
                 .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
                     GattClientCharacteristicConfigurationDescriptorValue::None,
-                )
-            {
-                let _ = wait_gatt_write_result(operation, Duration::from_secs(2));
+                ) {
+                Ok(operation) => match wait_gatt_write_result(operation, Duration::from_secs(2)) {
+                    Ok(status) => log::info!(
+                        "[embedded-ble] capture #{}: notify CCCD disabled status={status:?}",
+                        self.capture_id
+                    ),
+                    Err(err) => log::warn!(
+                        "[embedded-ble] capture #{}: notify CCCD disable skipped: {err}",
+                        self.capture_id
+                    ),
+                },
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] capture #{}: notify CCCD disable operation could not start: {err}",
+                        self.capture_id
+                    );
+                }
             }
             self.notify_disabled = true;
+        }
+
+        fn remove_handler(&mut self) {
+            if let Some(token) = self.token.take() {
+                match self.target.characteristic.RemoveValueChanged(token) {
+                    Ok(()) => log::info!(
+                        "[embedded-ble] capture #{}: ValueChanged handler removed",
+                        self.capture_id
+                    ),
+                    Err(err) => log::warn!(
+                        "[embedded-ble] capture #{}: ValueChanged handler remove failed: {err}",
+                        self.capture_id
+                    ),
+                }
+            }
         }
     }
 
     impl Drop for NotifyCleanup {
         fn drop(&mut self) {
             self.disable_notify();
-            if let Some(token) = self.token.take() {
-                let _ = self.target.characteristic.RemoveValueChanged(token);
-            }
             if let Some(service) = self.target.service.take() {
                 let _ = service.Close();
             }
