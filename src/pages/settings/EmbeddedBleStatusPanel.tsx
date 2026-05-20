@@ -10,12 +10,14 @@ export function EmbeddedBleStatusPanel({
   message,
   result,
   onProbe,
+  onUseMicrophone,
 }: {
   supported: boolean;
   status: EmbeddedBleProbeStatus;
   message: string;
   result: EmbeddedAudioSubmissionResult | null;
   onProbe: () => void;
+  onUseMicrophone?: () => void;
 }) {
   const { t } = useTranslation();
   const pillTone: 'outline' | 'ok' | 'blue' = !supported ? 'outline' : status === 'ok' ? 'ok' : status === 'checking' ? 'blue' : 'outline';
@@ -70,6 +72,16 @@ export function EmbeddedBleStatusPanel({
           title={message}
         >
           {message}
+        </div>
+      )}
+      {supported && status === 'error' && onUseMicrophone && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <Btn variant="ghost" size="sm" icon="refresh" onClick={onProbe}>
+            {t('settings.recording.embeddedBleRetry')}
+          </Btn>
+          <Btn variant="soft" size="sm" icon="mic" onClick={onUseMicrophone}>
+            {t('settings.recording.embeddedBleUseMicrophone')}
+          </Btn>
         </div>
       )}
       {stats && (

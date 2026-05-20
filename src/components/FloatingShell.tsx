@@ -168,6 +168,11 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     openSettings('providers');
   };
 
+  const openRecordingSettingsFromProviderPrompt = () => {
+    rememberProviderPrompt();
+    openSettings('recording');
+  };
+
   const openHotkeyRecordingSettings = () => {
     window.localStorage.setItem(HOTKEY_MODE_MIGRATION_ACK_KEY, '1');
     setHotkeyModePromptOpen(false);
@@ -373,6 +378,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         <ProviderSetupPrompt
           onLater={rememberProviderPrompt}
           onOpenSettings={openProviderSettings}
+          onOpenRecording={openRecordingSettingsFromProviderPrompt}
         />
       ) : hotkeyModePromptOpen ? (
         <HotkeyModeMigrationPrompt
@@ -422,7 +428,15 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   );
 }
 
-function ProviderSetupPrompt({ onLater, onOpenSettings }: { onLater: () => void; onOpenSettings: () => void }) {
+function ProviderSetupPrompt({
+  onLater,
+  onOpenSettings,
+  onOpenRecording,
+}: {
+  onLater: () => void;
+  onOpenSettings: () => void;
+  onOpenRecording: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <div
@@ -490,6 +504,24 @@ function ProviderSetupPrompt({ onLater, onOpenSettings }: { onLater: () => void;
             }}
           >
             {t('shell.providerPrompt.later')}
+          </button>
+          <button
+            onClick={onOpenRecording}
+            style={{
+              height: 32,
+              padding: '0 14px',
+              borderRadius: 8,
+              border: '0.5px solid var(--ol-line-strong)',
+              background: 'rgba(101,123,112,0.08)',
+              color: 'var(--ol-ink)',
+              fontFamily: 'inherit',
+              fontSize: 12.5,
+              fontWeight: 500,
+              cursor: 'default',
+              transition: 'background 0.16s var(--ol-motion-quick), transform 0.12s var(--ol-motion-quick)',
+            }}
+          >
+            {t('shell.providerPrompt.testAudio')}
           </button>
           <button
             onClick={onOpenSettings}

@@ -1,9 +1,17 @@
 import {
   areProvidersConfigured,
+  classifyEmbeddedBleProbeError,
+  classifyProviderConnectionError,
   shouldShowProviderSetupPrompt,
-} from './providerSetup';
+} from './providerSetup.ts';
 
 function assertEqual(actual: boolean, expected: boolean, name: string) {
+  if (actual !== expected) {
+    throw new Error(`${name}: expected ${expected}, got ${actual}`);
+  }
+}
+
+function assertStringEqual(actual: string, expected: string, name: string) {
   if (actual !== expected) {
     throw new Error(`${name}: expected ${expected}, got ${actual}`);
   }
@@ -107,4 +115,40 @@ assertEqual(
   ),
   false,
   'do not show prompt when providers are already configured',
+);
+
+assertStringEqual(
+  classifyProviderConnectionError('providerHttpStatus:401'),
+  'apiKeyRejected',
+  'provider 401 becomes an API-key action, not a raw status',
+);
+
+assertStringEqual(
+  classifyProviderConnectionError('providerHttpStatus:429'),
+  'rateLimited',
+  'provider 429 becomes a rate-limit action',
+);
+
+assertStringEqual(
+  classifyProviderConnectionError('providerNetworkError'),
+  'network',
+  'provider network code becomes network action',
+);
+
+assertStringEqual(
+  classifyProviderConnectionError('llmModelMissing'),
+  'modelMissing',
+  'missing LLM model is a model action',
+);
+
+assertStringEqual(
+  classifyEmbeddedBleProbeError('Embedded audio BLE service not found; ensure device is paired and online'),
+  'noDevice',
+  'BLE not-found probe error becomes no-device action',
+);
+
+assertStringEqual(
+  classifyEmbeddedBleProbeError('BLE CCCD notify write returned status=AccessDenied'),
+  'accessDenied',
+  'BLE access denied probe error becomes permission action',
 );
