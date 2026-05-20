@@ -36,16 +36,7 @@ export function WindowChrome({
   const consoleRadius = os === 'mac' ? 20 : os === 'win' ? WIN_CONSOLE_RADIUS : 14;
   const titlebarHeight = os === 'mac' ? MAC_TITLEBAR_HEIGHT : 0;
 
-  // 两个平台用同一份半透明玻璃 background + backdropFilter，让 sidebar 透明地坐在
-  // 磨砂底板上时有可见的玻璃感。
-  // Windows: Tauri transparent:true + lib.rs apply_mica 提供 Win11 Mica 透出来；
-  // macOS: NSVisualEffectView 提供材质。
-  // alpha 0.92：和原生 Win11 caption（lib.rs 设为 rgb(245,245,247)）色差最小，玻璃感仍可见。
-  const background = `
-    radial-gradient(120% 80% at 0% 0%, rgba(255,255,251,0.74) 0%, rgba(255,255,251,0) 62%),
-    radial-gradient(100% 70% at 100% 100%, rgba(101,123,112,0.12) 0%, rgba(101,123,112,0) 56%),
-    linear-gradient(180deg, rgba(247,245,239,0.94) 0%, rgba(225,221,207,0.90) 100%)
-  `;
+  const background = 'var(--ol-window-bg)';
 
   return (
     <div

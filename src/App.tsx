@@ -26,7 +26,31 @@ interface AppProps {
 
 type Gate = 'checking' | 'onboarding' | 'ready';
 
+function useDarkMode() {
+  useEffect(() => {
+    // Fast path: restore from last session
+    if (localStorage.getItem('ol-dark-mode') === 'true') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+    if (!isTauri) return;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<boolean>('dark-mode-changed', event => {
+          const theme = event.payload ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+          localStorage.setItem('ol-dark-mode', String(event.payload));
+        });
+      } catch { /* non-tauri */ }
+    })();
+    return () => { unlisten?.(); };
+  }, []);
+}
+
 export function App({ isCapsule, isQa }: AppProps) {
+  useDarkMode();
+
   if (isCapsule) {
     return <Capsule />;
   }
@@ -186,11 +210,11 @@ function StartupShell() {
           fontWeight: 500,
           padding: '10px 16px',
           borderRadius: 999,
-          background: 'rgba(255, 255, 255, 0.55)',
+          background: 'var(--ol-glass-bg)',
           backdropFilter: 'blur(20px) saturate(180%)',
           WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-          border: '0.5px solid rgba(0, 0, 0, 0.06)',
-          boxShadow: '0 4px 14px -6px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0,0,0,0.04)',
+          border: '0.5px solid var(--ol-line-soft)',
+          boxShadow: 'var(--ol-shadow-md)',
         }}
       >
         <img src="AppIcon.png" alt="" style={{ width: 18, height: 18, borderRadius: 4 }} />

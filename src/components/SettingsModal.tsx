@@ -124,7 +124,7 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
                     right: 0,
                     top: pillRect.top,
                     height: pillRect.height,
-                    background: '#fff',
+                    background: 'var(--ol-white)',
                     borderRadius: 8,
                     boxShadow: '0 1px 2px rgba(0,0,0,.05), 0 0 0 0.5px rgba(0,0,0,.06)',
                     transition: 'top 0.36s var(--ol-motion-spring), height 0.36s var(--ol-motion-spring)',
@@ -269,7 +269,7 @@ function PersonalizeSection() {
                   height: 28,
                   border: 0,
                   borderRadius: 6,
-                  background: selected ? '#fff' : 'transparent',
+                  background: selected ? 'var(--ol-white)' : 'transparent',
                   color: selected ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
                   fontFamily: 'inherit',
                   fontSize: 12,
@@ -517,7 +517,7 @@ function BetaChannelControl() {
 const btnGhost: CSSProperties = {
   padding: '5px 10px', fontSize: 12, borderRadius: 6,
   border: '0.5px solid var(--ol-line-strong)',
-  background: '#fff', color: 'var(--ol-ink-2)',
+  background: 'var(--ol-white)', color: 'var(--ol-ink-2)',
   cursor: 'default', fontFamily: 'inherit',
   transition: 'background 0.16s var(--ol-motion-quick), border-color 0.16s var(--ol-motion-quick)',
 };

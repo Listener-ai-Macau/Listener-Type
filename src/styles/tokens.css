@@ -61,7 +61,59 @@
   --ol-warn: #b9894f;
   --ol-warn-soft: rgba(185, 137, 79, 0.14);
   --ol-err: #bd6259;
+
+  /* Window backplate gradient */
+  --ol-window-bg:
+    radial-gradient(120% 80% at 0% 0%, rgba(255,255,251,0.74) 0%, rgba(255,255,251,0) 62%),
+    radial-gradient(100% 70% at 100% 100%, rgba(101,123,112,0.12) 0%, rgba(101,123,112,0) 56%),
+    linear-gradient(180deg, rgba(247,245,239,0.94) 0%, rgba(225,221,207,0.90) 100%);
 }
+
+[data-theme="dark"] {
+  --ol-white: #1c1c1f;
+  --ol-canvas: #111113;
+  --ol-surface: #1c1c1f;
+  --ol-surface-2: rgba(255, 255, 255, 0.07);
+  --ol-line: rgba(255, 255, 255, 0.12);
+  --ol-line-strong: rgba(255, 255, 255, 0.20);
+  --ol-line-soft: rgba(255, 255, 255, 0.07);
+
+  --ol-ink: #e8e6df;
+  --ol-ink-2: #c8c6bd;
+  --ol-ink-3: #8e8c83;
+  --ol-ink-4: #6a685f;
+  --ol-ink-5: #3a3833;
+
+  --ol-blue: #8fa89c;
+  --ol-blue-hover: #a0bfb0;
+  --ol-blue-soft: rgba(143, 168, 156, 0.16);
+  --ol-blue-ring: rgba(143, 168, 156, 0.28);
+
+  --ol-glass-bg: rgba(28, 28, 31, 0.72);
+  --ol-glass-bg-strong: rgba(28, 28, 31, 0.88);
+  --ol-glass-border: rgba(255, 255, 255, 0.10);
+
+  --ol-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.20), 0 0 0 0.5px rgba(255, 255, 255, 0.04);
+  --ol-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.28), 0 0 0 0.5px rgba(255, 255, 255, 0.05);
+  --ol-shadow-lg: 0 24px 52px rgba(0, 0, 0, 0.40), 0 0 0 0.5px rgba(255, 255, 255, 0.05);
+  --ol-shadow-xl: 0 36px 80px -18px rgba(0, 0, 0, 0.50), 0 48px 110px -28px rgba(0, 0, 0, 0.40);
+
+  --ol-ok: #6aaa8a;
+  --ol-ok-soft: rgba(106, 170, 138, 0.16);
+  --ol-warn: #d4a464;
+  --ol-warn-soft: rgba(212, 164, 100, 0.16);
+  --ol-err: #d47a72;
+
+  /* Window backplate gradient — dark */
+  --ol-window-bg:
+    radial-gradient(120% 80% at 0% 0%, rgba(40,40,44,0.80) 0%, rgba(40,40,44,0) 62%),
+    radial-gradient(100% 70% at 100% 100%, rgba(143,168,156,0.10) 0%, rgba(143,168,156,0) 56%),
+    linear-gradient(180deg, rgba(28,28,31,0.96) 0%, rgba(18,18,20,0.94) 100%);
+}
+
+.ol-thinscroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); }
+[data-theme="dark"] .ol-thinscroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); }
+[data-theme="dark"] .ol-thinscroll::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
 
 * { box-sizing: border-box; }
 

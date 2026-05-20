@@ -731,10 +731,10 @@ export function Style() {
                     border: '0.5px solid',
                     borderColor: pack.active ? 'var(--ol-blue)' : 'var(--ol-line)',
                     background: pack.active
-                      ? 'linear-gradient(180deg, rgba(239,246,255,0.92), rgba(255,255,255,0.98))'
+                      ? 'var(--ol-surface)'
                       : isBuiltin
-                        ? 'linear-gradient(180deg, rgba(248,250,252,0.92), rgba(241,245,249,0.85))'
-                        : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
+                        ? 'var(--ol-surface-2)'
+                        : 'var(--ol-surface)',
                     borderRadius: 18,
                     padding: 16,
                     boxShadow: pack.active ? '0 0 0 3px var(--ol-blue-ring)' : 'none',
@@ -1093,8 +1093,8 @@ export function Style() {
                   <Card
                     padding={16}
                     style={{
-                      background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(246,248,252,0.95))',
-                      border: '0.5px solid rgba(148,163,184,0.24)',
+                      background: 'var(--ol-surface)',
+                      border: '0.5px solid var(--ol-line)',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -1198,7 +1198,7 @@ export function Style() {
                         key={`${draft.id}-example-${index}`}
                         padding={16}
                         style={{
-                          background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))',
+                          background: 'var(--ol-surface)',
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
@@ -1243,7 +1243,7 @@ export function Style() {
                             <textarea
                               value={example.input}
                               onChange={event => patchExample(index, { input: event.target.value })}
-                              style={{ ...textareaStyle, minHeight: 120, background: '#fff' }}
+                              style={{ ...textareaStyle, minHeight: 120, background: 'var(--ol-white)' }}
                             />
                           </div>
 
@@ -1261,7 +1261,7 @@ export function Style() {
                             <textarea
                               value={example.output}
                               onChange={event => patchExample(index, { output: event.target.value })}
-                              style={{ ...textareaStyle, minHeight: 120, background: '#fff' }}
+                              style={{ ...textareaStyle, minHeight: 120, background: 'var(--ol-white)' }}
                             />
                           </div>
                         </div>
@@ -1283,8 +1283,8 @@ function MetaItem({ label, value }: { label: string; value: string }) {
     <div
       style={{
         borderRadius: 12,
-        border: '0.5px solid rgba(148,163,184,0.2)',
-        background: 'rgba(255,255,255,0.92)',
+        border: '0.5px solid var(--ol-line)',
+        background: 'var(--ol-glass-bg-strong)',
         padding: '10px 12px',
       }}
     >
@@ -1320,8 +1320,8 @@ function DirectiveRow({
         gap: 12,
         padding: '10px 12px',
         borderRadius: 12,
-        border: '0.5px solid rgba(148,163,184,0.2)',
-        background: 'rgba(255,255,255,0.92)',
+        border: '0.5px solid var(--ol-line)',
+        background: 'var(--ol-glass-bg-strong)',
       }}
     >
       <div style={{ minWidth: 0 }}>
@@ -1342,7 +1342,7 @@ const inputStyle: CSSProperties = {
   padding: '9px 11px',
   borderRadius: 10,
   border: '0.5px solid var(--ol-line-strong)',
-  background: '#fff',
+  background: 'var(--ol-white)',
   color: 'var(--ol-ink)',
   font: 'inherit',
   fontSize: 12.5,
@@ -1354,7 +1354,7 @@ const textareaStyle: CSSProperties = {
   padding: '11px 12px',
   borderRadius: 12,
   border: '0.5px solid var(--ol-line-strong)',
-  background: '#fff',
+  background: 'var(--ol-white)',
   color: 'var(--ol-ink)',
   font: 'inherit',
   fontSize: 12.5,

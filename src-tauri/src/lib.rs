@@ -111,6 +111,18 @@ pub fn run() {
             init_file_logger();
             log::info!("=== Listener Type 启动 ===");
 
+            // Panic hook: catch Rust panics and emit to frontend so the user sees
+            // an error card instead of a silent white-screen crash.
+            {
+                let handle = app.handle().clone();
+                std::panic::set_hook(Box::new(move |info| {
+                    let msg = format!("{info}");
+                    log::error!("[panic] {msg}");
+                    let payload = serde_json::json!({ "message": msg });
+                    let _ = handle.emit("panic:error", payload);
+                }));
+            }
+
             // Capsule 启动时定位到屏幕底部居中并隐藏；coordinator 按需显示。
             // 与 Swift `CapsuleWindowController.repositionToBottomCenter` 同语义。
             if let Some(capsule) = app.get_webview_window("capsule") {
@@ -170,7 +182,7 @@ pub fn run() {
                     }
                     // Win11 22H2+: 把原生标题栏底色调成白色，与应用 sidebar 视觉统一。
                     // 老版 Windows 静默失败，不阻塞。
-                    apply_windows_caption_color(&main);
+                    apply_windows_caption_color_for_theme(&main, coordinator.prefs().get().dark_mode);
                 }
                 // 静默启动开关：prefs.start_minimized = true 或测试脚本设置
                 // LISTENER_TYPE_HIDE_MAIN_ON_START=1 → 不弹主窗口，用户从菜单栏 /
@@ -220,6 +232,7 @@ pub fn run() {
                     .show_menu_on_left_click(false)
                     .on_menu_event(move |app, event| match event.id.as_ref() {
                         "quit" => app.exit(0),
+                        "dark-mode" => handle_dark_mode_toggle(app),
                         id => {
                             if handle_style_tray_menu_event(app, id) {
                                 return;
@@ -500,6 +513,9 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
 ) -> tauri::Result<TrayMenu> {
     let input_source_menu = build_input_source_tray_menu(app, coordinator)?;
     let microphone_menu = build_microphone_tray_menu(app, coordinator)?;
+    let dark_mode = CheckMenuItemBuilder::with_id("dark-mode", "深色模式")
+        .checked(coordinator.prefs().get().dark_mode)
+        .build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出 Listener Type").build(app)?;
     let mut builder = MenuBuilder::new(app);
     let style_menu = if tray_style_menu_enabled() {
@@ -511,7 +527,7 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
         builder = builder.item(&style_menu.submenu);
     }
     let menu = builder
-        .items(&[&input_source_menu.submenu, &microphone_menu.submenu, &quit])
+        .items(&[&dark_mode, &input_source_menu.submenu, &microphone_menu.submenu, &quit])
         .build()?;
     Ok(TrayMenu {
         menu,
@@ -675,6 +691,24 @@ fn start_tray_microphone_watcher(app: AppHandle) {
     }
 }
 
+fn handle_dark_mode_toggle(app: &AppHandle) {
+    let coord = app.state::<Arc<coordinator::Coordinator>>();
+    let mut prefs = coord.prefs().get();
+    prefs.dark_mode = !prefs.dark_mode;
+    if let Err(err) = coord.prefs().set(prefs.clone()) {
+        log::warn!("[tray] save dark mode preference failed: {err}");
+        return;
+    }
+    let _ = app.emit("prefs:changed", &prefs);
+    let _ = app.emit("dark-mode-changed", prefs.dark_mode);
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(window) = app.get_webview_window("main") {
+            apply_windows_caption_color_for_theme(&window, prefs.dark_mode);
+        }
+    }
+}
+
 fn handle_microphone_tray_menu_event(app: &AppHandle, id: &str) {
     let tray_items = app.state::<commands::TrayMicrophoneMenuState>();
     let items = tray_items.lock();
@@ -734,6 +768,11 @@ fn handle_style_tray_menu_event(app: &AppHandle, id: &str) -> bool {
 /// 返回错误，仅打 warn 不阻塞启动。
 #[cfg(target_os = "windows")]
 fn apply_windows_caption_color<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    apply_windows_caption_color_for_theme(window, false);
+}
+
+#[cfg(target_os = "windows")]
+fn apply_windows_caption_color_for_theme<R: Runtime>(window: &tauri::WebviewWindow<R>, dark: bool) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CAPTION_COLOR};
@@ -751,16 +790,16 @@ fn apply_windows_caption_color<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     };
     let hwnd = HWND(handle.hwnd.get() as *mut core::ffi::c_void);
 
-    // COLORREF 0x00BBGGRR 编码——选用 rgb(245,245,247) 跟 WindowChrome 的 glass linear-gradient
-    // 起始色一致，减小原生 caption bar 跟应用磨砂玻璃的色差（用户反馈：纯白 caption + 半透灰 glass
-    // 色差很丑）。R=0xF5 G=0xF5 B=0xF7 → COLORREF = 0x00F7F5F5。
-    let glass_match: u32 = 0x00F7F5F5;
+    // COLORREF 0x00BBGGRR 编码。
+    // Light: rgb(245,245,247) → 0x00F7F5F5（跟 WindowChrome glass 起始色一致）
+    // Dark:  rgb(28,28,31)    → 0x001F1C1C（跟 --ol-canvas 一致）
+    let colorref: u32 = if dark { 0x001F1C1C } else { 0x00F7F5F5 };
     unsafe {
         if let Err(e) = DwmSetWindowAttribute(
             hwnd,
             DWMWA_CAPTION_COLOR,
-            &glass_match as *const _ as *const core::ffi::c_void,
-            std::mem::size_of_val(&glass_match) as u32,
+            &colorref as *const _ as *const core::ffi::c_void,
+            std::mem::size_of_val(&colorref) as u32,
         ) {
             log::warn!("[main] set caption color failed (likely pre-22H2 Win): {e}");
         }

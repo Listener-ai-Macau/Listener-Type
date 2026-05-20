@@ -23,7 +23,7 @@ export function SwitchLite({ on: initial = false }: SwitchLiteProps) {
       <span
         style={{
           position: 'absolute', top: 2, left: on ? 16 : 2,
-          width: 14, height: 14, borderRadius: 999, background: '#fff',
+          width: 14, height: 14, borderRadius: 999, background: 'var(--ol-white)',
           boxShadow: '0 1px 2px rgba(0,0,0,.25)', transition: 'left .16s var(--ol-motion-spring)',
         }}
       />

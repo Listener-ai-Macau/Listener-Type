@@ -125,7 +125,7 @@ function CircleButton({ variant, enabled, onClick }: CircleButtonProps) {
         background: isCancel ? 'rgba(255, 255, 255, 0.55)' : 'rgba(255, 255, 255, 0.92)',
         backdropFilter: useBackdrop ? 'blur(12px) saturate(160%)' : 'none',
         WebkitBackdropFilter: useBackdrop ? 'blur(12px) saturate(160%)' : 'none',
-        color: 'var(--ol-ink)',
+        color: '#171714',
         border: '0.8px solid rgba(0, 0, 0, 0.08)',
         display: 'inline-flex',
         alignItems: 'center',
@@ -173,44 +173,30 @@ function Pill({ os, state, level, insertedChars, message, stopAcknowledged = fal
   const errorActive = state === 'error';
   const showStopAck = state === 'transcribing' && stopAcknowledged;
 
-  // "thinking" 扫光速度：进入 transcribing/polishing 的头 2 秒走快速（0.9s/cycle，提示
-  // 「流式刚开始」），之后切回慢速（2.4s）作为稳态。切回 idle / done / 其他 state 也复位
-  // 为 fast，下次进入时从头开始 burst。
-  const [shineFast, setShineFast] = useState(true);
-  useEffect(() => {
-    if (state === 'transcribing' || state === 'polishing') {
-      setShineFast(true);
-      const t = setTimeout(() => setShineFast(false), 2000);
-      return () => clearTimeout(t);
-    }
-    setShineFast(true);
-    return undefined;
-  }, [state]);
+  // Apple-style: during transcribing/polishing the partial text preview stays
+  // visible with a subtle pulse, plus a small spinner on the right — no overlay.
 
   let center: JSX.Element;
   switch (state) {
     case 'recording':
       center = message
-        ? <CenterText os={os} kind="processing" text={message} color="var(--ol-ink)" />
+        ? <CenterText os={os} kind="processing" text={message} color="#171714" />
         : <AudioBars level={level} />;
       break;
     case 'transcribing':
-    case 'polishing':
-      center = message && !showStopAck ? (
-        <CenterText os={os} kind="processing" text={message} color="var(--ol-ink)" />
-      ) : (
+    case 'polishing': {
+      const displayText = message || t('capsule.thinking');
+      const compactText = compactCapsuleText(displayText, os, 'processing');
+      center = (
         <div
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            // 左右 4px 内边距 + 外层 gap 已经让 "thinking" ↔ ✗/✓ 视觉间距落在 ~4-5px。
-            padding: '0 4px',
+            gap: 5,
             width: '100%',
             maxWidth: metrics.textWidth,
             minWidth: 0,
             justifyContent: 'center',
-            // state 进入动画 —— 用户从 recording 切到 polishing 时多一道淡入提示，
-            // 比纯切换 center 内容更容易被感知。
             animation: showStopAck
               ? 'cap-stop-ack-center 420ms var(--ol-motion-soft) both'
               : 'cap-state-enter 220ms var(--ol-motion-soft) both',
@@ -218,39 +204,42 @@ function Pill({ os, state, level, insertedChars, message, stopAcknowledged = fal
         >
           <span
             style={{
-              // v1.3.1-7 用户拍板：黑色底字 + 蓝色扫光（亮黄太显眼，黑底更稳）。
-              // 字号保持 17，字重 700 → 600 稍细一些。
-              fontSize: 17,
-              fontWeight: 600,
-              letterSpacing: 0,
-              // line-height: 1 下 g/y/p 等下伸字符会被 clip，给 padding 留 descender 空间。
-              paddingBlock: 1,
-              color: 'var(--ol-ink-2)',
-              backgroundImage:
-                'linear-gradient(100deg, var(--ol-ink) 0%, var(--ol-ink) 35%, var(--ol-blue) 50%, var(--ol-ink) 65%, var(--ol-ink) 100%)',
-              backgroundSize: '220% auto',
-              WebkitBackgroundClip: 'text',
-              backgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              // 进入流式的头 ~2 秒用 0.9s 高速扫光（视觉提示「刚开始」），之后 React 副作用
-              // 切到 2.4s 慢速。duration 变化时浏览器不重启动画，会平滑减速。
-              animation: `cap-shine ${shineFast ? '0.9s' : '2.4s'} linear infinite`,
+              fontSize: 11,
+              fontWeight: 500,
+              color: '#171714',
               minWidth: 0,
               textAlign: 'center',
-              lineHeight: processingLayout.allowWrap ? 1.3 : 1.25,
+              lineHeight: processingLayout.allowWrap ? 1.2 : 1,
               whiteSpace: processingLayout.allowWrap ? 'normal' : 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               display: '-webkit-box',
               WebkitBoxOrient: 'vertical',
               WebkitLineClamp: processingLayout.lineClamp,
+              // Apple-style: text stays static, only the spinner conveys "processing".
             }}
           >
-            {t('capsule.thinking')}
+            {compactText}
           </span>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            style={{ flexShrink: 0, animation: 'cap-spin 0.8s linear infinite' }}
+          >
+            <circle
+              cx="6" cy="6" r="4.5"
+              fill="none"
+              stroke="var(--ol-blue)"
+              strokeWidth="1.5"
+              strokeDasharray="8 4"
+              strokeLinecap="round"
+            />
+          </svg>
         </div>
       );
       break;
+    }
     case 'done':
       center = <CenterText os={os} kind="default" text={message || t('capsule.inserted', { count: insertedChars })} />;
       break;
@@ -535,9 +524,8 @@ export function Capsule() {
           from { opacity: 1; transform: scaleX(1)   translateY(0); }
           to   { opacity: 0; transform: scaleX(.18) translateY(8px); }
         }
-        @keyframes cap-shine {
-          0%   { background-position: 200% center; }
-          100% { background-position: -200% center; }
+        @keyframes cap-spin {
+          to { transform: rotate(360deg); }
         }
         @keyframes cap-state-enter {
           from { opacity: 0; transform: translateY(2px); }
