@@ -100,6 +100,7 @@ let mockSettings: UserPreferences = {
   historyRetentionDays: 7,
   polishContextWindowMinutes: 5,
   startMinimized: false,
+  darkMode: false,
   updateChannel: 'stable',
   streamingInsert: true,
   streamingInsertDefaultMigrated: true,

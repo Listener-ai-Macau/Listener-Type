@@ -26,7 +26,31 @@ interface AppProps {
 
 type Gate = 'checking' | 'onboarding' | 'ready';
 
+function useDarkMode() {
+  useEffect(() => {
+    // Fast path: restore from last session
+    if (localStorage.getItem('ol-dark-mode') === 'true') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+    if (!isTauri) return;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<boolean>('dark-mode-changed', event => {
+          const theme = event.payload ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+          localStorage.setItem('ol-dark-mode', String(event.payload));
+        });
+      } catch { /* non-tauri */ }
+    });
+    return () => { unlisten?.(); };
+  }, []);
+}
+
 export function App({ isCapsule, isQa }: AppProps) {
+  useDarkMode();
+
   if (isCapsule) {
     return <Capsule />;
   }

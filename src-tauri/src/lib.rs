@@ -232,6 +232,7 @@ pub fn run() {
                     .show_menu_on_left_click(false)
                     .on_menu_event(move |app, event| match event.id.as_ref() {
                         "quit" => app.exit(0),
+                        "dark-mode" => handle_dark_mode_toggle(app),
                         id => {
                             if handle_style_tray_menu_event(app, id) {
                                 return;
@@ -510,6 +511,9 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
 ) -> tauri::Result<TrayMenu> {
     let input_source_menu = build_input_source_tray_menu(app, coordinator)?;
     let microphone_menu = build_microphone_tray_menu(app, coordinator)?;
+    let dark_mode = CheckMenuItemBuilder::with_id("dark-mode", "深色模式")
+        .checked(coordinator.prefs().get().dark_mode)
+        .build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出 Listener Type").build(app)?;
     let mut builder = MenuBuilder::new(app);
     let style_menu = if tray_style_menu_enabled() {
@@ -521,7 +525,7 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
         builder = builder.item(&style_menu.submenu);
     }
     let menu = builder
-        .items(&[&input_source_menu.submenu, &microphone_menu.submenu, &quit])
+        .items(&[&dark_mode, &input_source_menu.submenu, &microphone_menu.submenu, &quit])
         .build()?;
     Ok(TrayMenu {
         menu,
@@ -683,6 +687,18 @@ fn start_tray_microphone_watcher(app: AppHandle) {
     {
         log::warn!("[tray] start microphone watcher failed: {err}");
     }
+}
+
+fn handle_dark_mode_toggle(app: &AppHandle) {
+    let coord = app.state::<Arc<coordinator::Coordinator>>();
+    let mut prefs = coord.prefs().get();
+    prefs.dark_mode = !prefs.dark_mode;
+    if let Err(err) = coord.prefs().set(prefs.clone()) {
+        log::warn!("[tray] save dark mode preference failed: {err}");
+        return;
+    }
+    let _ = app.emit("prefs:changed", &prefs);
+    let _ = app.emit("dark-mode-changed", prefs.dark_mode);
 }
 
 fn handle_microphone_tray_menu_event(app: &AppHandle, id: &str) {
