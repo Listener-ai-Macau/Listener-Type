@@ -139,6 +139,9 @@ struct Inner {
     embedded_audio_stop_feedback_latched: AtomicBool,
     /// Listener BLE 输入源的后台订阅代次。设置变化时递增，旧监听循环会自然退出。
     embedded_ble_listener_generation: AtomicU64,
+    /// 当前 Listener BLE 后台订阅的取消旗标。刷新输入源或退出时主动置位，
+    /// 避免旧 WinRT notify 订阅等待 60s 超时后才释放设备。
+    embedded_ble_listener_cancel: Mutex<Option<Arc<AtomicBool>>>,
     recording_mute: Mutex<SharedRecordingMuteState>,
     hotkey: Mutex<Option<HotkeyMonitor>>,
     hotkey_status: Mutex<HotkeyStatus>,
@@ -234,6 +237,7 @@ impl Coordinator {
                     embedded_audio_partial_preview: Mutex::new(None),
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
+                    embedded_ble_listener_cancel: Mutex::new(None),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
                     hotkey_status: Mutex::new(HotkeyStatus::default()),
@@ -289,6 +293,7 @@ impl Coordinator {
                 embedded_audio_partial_preview: Mutex::new(None),
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),
+                embedded_ble_listener_cancel: Mutex::new(None),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
                 hotkey_status: Mutex::new(HotkeyStatus::default()),
@@ -375,6 +380,7 @@ impl Coordinator {
     #[allow(dead_code)]
     pub fn request_shutdown(&self) {
         self.inner.shutdown.store(true, Ordering::SeqCst);
+        cancel_embedded_ble_listener_capture(&self.inner, "shutdown");
     }
 
     pub fn start_hotkey_listener(&self) {
@@ -826,6 +832,7 @@ impl Coordinator {
         &self,
         timeout_ms: Option<u64>,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+        cancel_embedded_ble_listener_capture(&self.inner, "foreground once-shot capture");
         submit_embedded_audio_ble_once(&self.inner, timeout_ms).await
     }
 
@@ -833,6 +840,7 @@ impl Coordinator {
         &self,
         timeout_ms: Option<u64>,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+        cancel_embedded_ble_listener_capture(&self.inner, "foreground streaming capture");
         submit_embedded_audio_ble_stream(&self.inner, timeout_ms).await
     }
 
@@ -846,6 +854,7 @@ impl Coordinator {
             .embedded_ble_listener_generation
             .fetch_add(1, Ordering::SeqCst)
             + 1;
+        cancel_embedded_ble_listener_capture(&self.inner, "refresh");
         if std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
             .ok()
             .as_deref()
@@ -1688,9 +1697,11 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
             break;
         }
 
+        let cancel_capture = install_embedded_ble_listener_cancel(&inner, generation);
         match submit_embedded_audio_ble_stream_background(
             &inner,
             Some(EMBEDDED_BLE_BACKGROUND_LISTEN_TIMEOUT_MS),
+            Arc::clone(&cancel_capture),
         )
         .await
         {
@@ -1702,6 +1713,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 );
             }
             Err(err) => {
+                clear_embedded_ble_listener_cancel(&inner, &cancel_capture);
                 if inner.shutdown.load(Ordering::SeqCst)
                     || inner
                         .embedded_ble_listener_generation
@@ -1713,10 +1725,47 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 }
                 log::warn!("[embedded-ble] background listen retrying after: {err}");
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                continue;
             }
         }
+        clear_embedded_ble_listener_cancel(&inner, &cancel_capture);
     }
     log::info!("[embedded-ble] background listener stopped generation={generation}");
+}
+
+fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> Arc<AtomicBool> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let previous = {
+        let mut slot = inner.embedded_ble_listener_cancel.lock();
+        slot.replace(Arc::clone(&cancel))
+    };
+    if let Some(previous) = previous {
+        previous.store(true, Ordering::SeqCst);
+        log::warn!(
+            "[embedded-ble] replaced an active background capture cancel flag (generation={generation})"
+        );
+    }
+    log::info!("[embedded-ble] background capture armed generation={generation}");
+    cancel
+}
+
+fn clear_embedded_ble_listener_cancel(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>) {
+    let mut slot = inner.embedded_ble_listener_cancel.lock();
+    if slot
+        .as_ref()
+        .is_some_and(|active| Arc::ptr_eq(active, cancel))
+    {
+        *slot = None;
+        log::info!("[embedded-ble] background capture cancel flag cleared");
+    }
+}
+
+fn cancel_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
+    let previous = inner.embedded_ble_listener_cancel.lock().take();
+    if let Some(cancel) = previous {
+        cancel.store(true, Ordering::SeqCst);
+        log::info!("[embedded-ble] requested active background capture stop ({reason})");
+    }
 }
 
 fn hotkey_bridge_loop(inner: Arc<Inner>, rx: mpsc::Receiver<HotkeyEvent>) {
@@ -3276,6 +3325,32 @@ mod tests {
 
     fn session_id(n: u128) -> SessionId {
         Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn embedded_ble_listener_cancel_replacement_is_pointer_safe() {
+        let coordinator = Coordinator::new();
+        let first = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        assert!(!first.load(Ordering::SeqCst));
+
+        let second = install_embedded_ble_listener_cancel(&coordinator.inner, 2);
+        assert!(first.load(Ordering::SeqCst));
+
+        clear_embedded_ble_listener_cancel(&coordinator.inner, &first);
+        assert!(coordinator
+            .inner
+            .embedded_ble_listener_cancel
+            .lock()
+            .as_ref()
+            .is_some_and(|active| Arc::ptr_eq(active, &second)));
+
+        cancel_embedded_ble_listener_capture(&coordinator.inner, "test");
+        assert!(second.load(Ordering::SeqCst));
+        assert!(coordinator
+            .inner
+            .embedded_ble_listener_cancel
+            .lock()
+            .is_none());
     }
 
     #[tokio::test]
