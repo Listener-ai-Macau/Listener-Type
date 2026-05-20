@@ -1,60 +1,88 @@
+import assert from 'node:assert/strict';
 import {
+  getCapsulePillMetrics,
   getCapsuleHostMetrics,
   getCapsuleMessageLayout,
-  getCapsulePillMetrics,
 } from './capsuleLayout.ts';
 
-function assertEqual<T>(actual: T, expected: T, name: string) {
-  if (actual !== expected) {
-    throw new Error(`${name}: expected ${expected}, got ${actual}`);
-  }
+// ── Pill metrics ──────────────────────────────────────────────
+
+// Windows pill
+{
+  const m = getCapsulePillMetrics('win');
+  assert.strictEqual(m.width, 280, 'win pill width');
+  assert.strictEqual(m.height, 52, 'win pill height');
+  assert.strictEqual(m.textWidth, 192, 'win text width');
+  assert.strictEqual(m.boxSizing, 'border-box', 'win box-sizing');
+  assert.ok(m.textWidth < m.width, 'text area smaller than pill');
 }
 
-const winMetrics = getCapsulePillMetrics('win');
-assertEqual(winMetrics.width, 196, 'windows capsule widens pill');
-assertEqual(winMetrics.height, 52, 'windows capsule increases pill height');
-assertEqual(winMetrics.textWidth, 104, 'windows capsule keeps side controls clear');
-assertEqual(winMetrics.boxSizing, 'border-box', 'windows capsule pill width is an outer border-box metric');
+// macOS pill
+{
+  const m = getCapsulePillMetrics('mac');
+  assert.strictEqual(m.width, 176, 'mac pill width');
+  assert.strictEqual(m.height, 42, 'mac pill height');
+  assert.strictEqual(m.textWidth, 84, 'mac text width');
+}
 
-const winHost = getCapsuleHostMetrics('win', false);
-assertEqual(winHost.width, 220, 'windows capsule host keeps the current outer hitbox width');
-assertEqual(winHost.height, 84, 'windows capsule host keeps regular height');
-assertEqual(winHost.horizontalInset, 12, 'windows capsule host keeps symmetric shadow insets');
-assertEqual(winHost.boxSizing, 'border-box', 'windows capsule host inset is reserved inside the native width');
-assertEqual(
-  winHost.width,
-  winMetrics.width + winHost.horizontalInset * 2,
-  'windows capsule host width derives from pill width plus symmetric side insets',
-);
-assertEqual(
-  winHost.width - winHost.horizontalInset * 2,
-  winMetrics.width,
-  'windows capsule host keeps the visible pill width after reserving side insets',
-);
+// ── Host metrics ──────────────────────────────────────────────
 
-const winHostWithTranslation = getCapsuleHostMetrics('win', true);
-assertEqual(winHostWithTranslation.width, 220, 'windows translation capsule keeps the same outer width');
-assertEqual(winHostWithTranslation.height, 118, 'windows translation capsule grows vertically only');
-assertEqual(winHostWithTranslation.horizontalInset, 12, 'windows translation capsule keeps symmetric side insets');
-assertEqual(winHostWithTranslation.boxSizing, 'border-box', 'windows translation host keeps the same inset-reserving box model');
+// Windows without translation
+{
+  const h = getCapsuleHostMetrics('win', false);
+  assert.strictEqual(h.width, 304, 'win host width = pill(280) + insets(24)');
+  assert.strictEqual(h.height, 84, 'win host height without translation');
+  assert.strictEqual(h.horizontalInset, 12, 'win horizontal inset');
+  assert.strictEqual(h.bottomInset, 12, 'win bottom inset');
+  assert.strictEqual(
+    h.width, getCapsulePillMetrics('win').width + h.horizontalInset * 2,
+    'host width = pill width + 2 * inset',
+  );
+}
 
-const macMetrics = getCapsulePillMetrics('mac');
-assertEqual(macMetrics.width, 176, 'mac capsule keeps existing pill width');
-assertEqual(macMetrics.height, 42, 'mac capsule keeps existing pill height');
-assertEqual(macMetrics.textWidth, 84, 'mac capsule keeps existing text slot');
-assertEqual(macMetrics.boxSizing, 'border-box', 'mac capsule keeps the existing border-box pill model');
+// Windows with translation
+{
+  const h = getCapsuleHostMetrics('win', true);
+  assert.strictEqual(h.width, 304, 'translation keeps same width');
+  assert.strictEqual(h.height, 118, 'translation grows height');
+}
 
-const macHost = getCapsuleHostMetrics('mac', false);
-assertEqual(macHost.boxSizing, 'border-box', 'mac capsule host keeps the existing border-box box model');
+// macOS host
+{
+  const h = getCapsuleHostMetrics('mac', false);
+  assert.strictEqual(h.width, 176, 'mac host width');
+  assert.strictEqual(h.height, 42, 'mac host height');
+  assert.strictEqual(h.horizontalInset, 0, 'mac no inset');
+}
 
-const winErrorLayout = getCapsuleMessageLayout('win', 'error');
-assertEqual(winErrorLayout.lineClamp, 2, 'windows error message allows two lines');
-assertEqual(winErrorLayout.allowWrap, true, 'windows error message wraps');
+// ── Message layout ────────────────────────────────────────────
 
-const winProcessingLayout = getCapsuleMessageLayout('win', 'processing');
-assertEqual(winProcessingLayout.lineClamp, 2, 'windows processing label allows two lines');
-assertEqual(winProcessingLayout.allowWrap, true, 'windows processing label wraps');
+// Windows processing/error allows 2-line wrap
+{
+  const lp = getCapsuleMessageLayout('win', 'processing');
+  assert.strictEqual(lp.allowWrap, true, 'win processing wraps');
+  assert.strictEqual(lp.lineClamp, 2, 'win processing 2 lines');
 
-const macErrorLayout = getCapsuleMessageLayout('mac', 'error');
-assertEqual(macErrorLayout.lineClamp, 1, 'mac error message stays single-line');
-assertEqual(macErrorLayout.allowWrap, false, 'mac error message stays nowrap');
+  const le = getCapsuleMessageLayout('win', 'error');
+  assert.strictEqual(le.allowWrap, true, 'win error wraps');
+  assert.strictEqual(le.lineClamp, 2, 'win error 2 lines');
+}
+
+// Windows default is single line
+{
+  const l = getCapsuleMessageLayout('win', 'default');
+  assert.strictEqual(l.allowWrap, false, 'win default no wrap');
+  assert.strictEqual(l.lineClamp, 1, 'win default 1 line');
+}
+
+// macOS never wraps
+{
+  const lp = getCapsuleMessageLayout('mac', 'processing');
+  assert.strictEqual(lp.allowWrap, false, 'mac processing no wrap');
+  assert.strictEqual(lp.lineClamp, 1, 'mac always 1 line');
+
+  const le = getCapsuleMessageLayout('mac', 'error');
+  assert.strictEqual(le.allowWrap, false, 'mac error no wrap');
+}
+
+console.log('capsuleLayout: all assertions passed');
