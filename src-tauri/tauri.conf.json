@@ -98,6 +98,10 @@
       "entitlements": "Entitlements.plist"
     },
     "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
       "nsis": {
         "installMode": "perMachine",
         "installerHooks": "nsis/listener-type-ime-hooks.nsh"

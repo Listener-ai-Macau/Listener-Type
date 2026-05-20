@@ -13,7 +13,7 @@ import { SavedToast } from './SavedToast';
 import { useSavedToastListener } from '../lib/savedEvent';
 import { readFontScale, setFontScale, type FontScaleId } from '../lib/fontScale';
 import {
-  exportErrorLog,
+  exportDiagnosticPackage,
   fetchLatestBetaRelease,
   getUpdateChannel,
   openExternal,
@@ -323,12 +323,12 @@ function AboutMini() {
     qqCopiedRef.current = window.setTimeout(() => setQqCopied(false), 1500);
   };
 
-  const onExportLog = async () => {
+  const onExportDiagnosticPackage = async () => {
     setExportStatus('busy');
     setExportMessage('');
     try {
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const target = await exportErrorLog(`listener-type-${ts}.log`);
+      const target = await exportDiagnosticPackage(`listener-type-diagnostic-${ts}.json`);
       if (target == null) {
         setExportStatus('idle');
         return;
@@ -390,10 +390,10 @@ function AboutMini() {
           {qqCopied && <span style={{ fontSize: 11, color: 'var(--ol-ok)', whiteSpace: 'nowrap' }}>{t('common.copied')}</span>}
         </div>
       </Row>
-      <Row label={t('modal.about.exportErrorLog')} desc={t('modal.about.exportErrorLogDesc')}>
+      <Row label={t('modal.about.exportDiagnosticPackage')} desc={t('modal.about.exportDiagnosticPackageDesc')}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button style={btnGhost} onClick={onExportLog} disabled={exportStatus === 'busy'}>
-            {exportStatus === 'busy' ? t('modal.about.exporting') : t('modal.about.exportErrorLogBtn')}
+          <button style={btnGhost} onClick={onExportDiagnosticPackage} disabled={exportStatus === 'busy'}>
+            {exportStatus === 'busy' ? t('modal.about.exporting') : t('modal.about.exportDiagnosticPackageBtn')}
           </button>
           {exportStatus === 'ok' && (
             <span style={{ fontSize: 11, color: 'var(--ol-ok)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 220 }}
