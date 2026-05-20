@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import i18n from "./i18n"; // 副作用：触发 i18next init
 import "./styles/tokens.css";
 import "./styles/global.css";
@@ -15,7 +16,9 @@ const root = ReactDOM.createRoot(document.getElementById("root")!);
 const renderApp = () => {
   root.render(
     <React.StrictMode>
-      <App isCapsule={isCapsule} isQa={isQa} />
+      <ErrorBoundary>
+        <App isCapsule={isCapsule} isQa={isQa} />
+      </ErrorBoundary>
     </React.StrictMode>,
   );
 };

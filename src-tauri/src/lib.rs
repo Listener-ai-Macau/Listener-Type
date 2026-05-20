@@ -111,6 +111,18 @@ pub fn run() {
             init_file_logger();
             log::info!("=== Listener Type 启动 ===");
 
+            // Panic hook: catch Rust panics and emit to frontend so the user sees
+            // an error card instead of a silent white-screen crash.
+            {
+                let handle = app.handle().clone();
+                std::panic::set_hook(Box::new(move |info| {
+                    let msg = format!("{info}");
+                    log::error!("[panic] {msg}");
+                    let payload = serde_json::json!({ "message": msg });
+                    let _ = handle.emit("panic:error", payload);
+                }));
+            }
+
             // Capsule 启动时定位到屏幕底部居中并隐藏；coordinator 按需显示。
             // 与 Swift `CapsuleWindowController.repositionToBottomCenter` 同语义。
             if let Some(capsule) = app.get_webview_window("capsule") {
