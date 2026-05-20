@@ -152,3 +152,15 @@ assertStringEqual(
   'accessDenied',
   'BLE access denied probe error becomes permission action',
 );
+
+assertStringEqual(
+  classifyEmbeddedBleProbeError('BLE embedded audio capture timed out after 30000 ms'),
+  'timeout',
+  'BLE capture timeout becomes timeout action',
+);
+
+assertStringEqual(
+  classifyEmbeddedBleProbeError('BLE ValueChanged handler registration failed'),
+  'notify',
+  'BLE ValueChanged failures become notify action',
+);

@@ -64,6 +64,54 @@ mod windows_ble {
         Ok(notifications)
     }
 
+    pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
+        let capture_guard = BleCaptureGuard::enter(timeout)?;
+        let capture_id = capture_guard.session_id();
+        let target = open_notify_target()?;
+        let characteristic = target.characteristic.clone();
+        let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
+            |_sender, _args| Ok(()),
+        );
+        let mut cleanup = NotifyCleanup::new(capture_id, target);
+
+        log::info!("[embedded-ble] probe #{capture_id}: resetting notify CCCD before enable");
+        match write_cccd_with_timeout(
+            &characteristic,
+            GattClientCharacteristicConfigurationDescriptorValue::None,
+            Duration::from_secs(2),
+        ) {
+            Ok(status) => {
+                log::info!(
+                    "[embedded-ble] probe #{capture_id}: notify CCCD reset status={status:?}"
+                )
+            }
+            Err(err) => {
+                log::warn!("[embedded-ble] probe #{capture_id}: notify CCCD reset skipped: {err}")
+            }
+        }
+        std::thread::sleep(Duration::from_millis(150));
+
+        let notify_timeout = timeout.clamp(Duration::from_secs(1), Duration::from_secs(10));
+        log::info!("[embedded-ble] probe #{capture_id}: enabling notify CCCD");
+        let status = write_cccd_with_timeout(
+            &characteristic,
+            GattClientCharacteristicConfigurationDescriptorValue::Notify,
+            notify_timeout,
+        )?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!("BLE CCCD notify write returned status={status:?}"));
+        }
+        log::info!("[embedded-ble] probe #{capture_id}: notify CCCD enabled");
+
+        let token = characteristic
+            .ValueChanged(&handler)
+            .map_err(|err| format!("BLE ValueChanged handler registration failed: {err}"))?;
+        cleanup.set_token(token);
+        log::info!("[embedded-ble] probe #{capture_id}: ValueChanged handler registered");
+        cleanup.disable_notify();
+        Ok(())
+    }
+
     pub fn capture_notification_events(
         timeout: Duration,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
@@ -724,6 +772,11 @@ pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, Str
 }
 
 #[cfg(target_os = "windows")]
+pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
+    windows_ble::probe_notify_subscription(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn capture_notification_events(
     timeout: Duration,
     on_event: &mut BleNotificationHandler<'_>,
@@ -742,6 +795,11 @@ pub fn capture_notification_events_until_cancelled(
 
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
+    Err("Embedded BLE audio input is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn probe_notify_subscription(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
 }
 

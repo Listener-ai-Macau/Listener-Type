@@ -4,7 +4,7 @@
 //
 // Ported verbatim from design_handoff_listener_type/variants.jsx::FloatingShell.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import { WindowChrome, detectOS, type OS } from './WindowChrome';
@@ -25,12 +25,14 @@ import {
   shouldShowHotkeyModeMigrationPrompt,
 } from '../lib/hotkeyMigration';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
+import { OPEN_DEMO_MODE_EVENT, requestDemoMode } from '../lib/demoMode';
 import { getCredentials, isMainWindowStartHidden } from '../lib/ipc';
 import {
   PROVIDER_SETUP_PROMPT_DEFERRED_KEY,
   shouldShowProviderSetupPrompt,
 } from '../lib/providerSetup';
 import { type SettingsSectionId } from '../pages/Settings';
+import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { useAppState, type AppTab } from '../state/useAppState';
 
 interface NavItem {
@@ -49,6 +51,9 @@ const NAV_BASE: Array<Omit<NavItem, 'name'>> = [
   { id: 'selectionAsk', icon: 'selectionAsk', cmp: SelectionAsk },
 ];
 
+const BLE_PAIRING_PROMPT_ACK_KEY = 'ol.blePairingPromptAck';
+const BLE_PAIRING_PROMPT_DEFERRED_KEY = 'ol.blePairingPromptDeferredThisSession';
+
 interface FloatingShellProps {
   os?: OS;
   initialTab?: AppTab;
@@ -66,9 +71,11 @@ export function FloatingShell({ os: osProp, initialTab = 'overview', initialSett
 
 function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initialTab: AppTab; initialSettings: boolean }) {
   const { t } = useTranslation();
+  const { prefs, updatePrefs } = useHotkeySettings();
   const { currentTab, setCurrentTab, settingsOpen, setSettingsOpen } = useAppState(initialTab, initialSettings);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId | undefined>();
   const [providerPromptOpen, setProviderPromptOpen] = useState(false);
+  const [blePairingPromptOpen, setBlePairingPromptOpen] = useState(false);
   const [hotkeyModePromptOpen, setHotkeyModePromptOpen] = useState(false);
 
   // tab 切换的 cross-fade：旧页 blur+fade out（180ms），结束后挂载新页（走 ol-page-slide enter）。
@@ -125,12 +132,45 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   }, []);
 
   useEffect(() => {
+    if (os !== 'win' || !prefs) return;
+    let cancelled = false;
+    (async () => {
+      if (await isMainWindowStartHidden()) {
+        return;
+      }
+      const acknowledgedValue = window.localStorage.getItem(BLE_PAIRING_PROMPT_ACK_KEY);
+      const deferredValue = window.sessionStorage.getItem(BLE_PAIRING_PROMPT_DEFERRED_KEY);
+      if (
+        !cancelled &&
+        acknowledgedValue !== '1' &&
+        deferredValue !== '1' &&
+        (prefs.dictationInputSource ?? 'microphone') !== 'embeddedBle'
+      ) {
+        setBlePairingPromptOpen(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [os, prefs?.dictationInputSource]);
+
+  useEffect(() => {
     const acknowledgedValue = window.localStorage.getItem(HOTKEY_MODE_MIGRATION_ACK_KEY);
     const deferredValue = window.sessionStorage.getItem(HOTKEY_MODE_MIGRATION_DEFERRED_KEY);
     if (shouldShowHotkeyModeMigrationPrompt(acknowledgedValue, deferredValue)) {
       setHotkeyModePromptOpen(true);
     }
   }, []);
+
+  useEffect(() => {
+    const showDemo = () => {
+      setCurrentTab('overview');
+      setSettingsOpen(false);
+      setProviderPromptOpen(false);
+    };
+    window.addEventListener(OPEN_DEMO_MODE_EVENT, showDemo);
+    return () => window.removeEventListener(OPEN_DEMO_MODE_EVENT, showDemo);
+  }, [setCurrentTab, setSettingsOpen]);
 
   // 之前监听的 NAVIGATE_LOCAL_ASR_EVENT 已无意义——「模型设置」独立 tab 已下线，
   // 模型管理 UI 现在通过 Settings → Advanced 的 <LocalAsr embedded /> 渲染，
@@ -144,6 +184,16 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const deferHotkeyModePrompt = () => {
     window.sessionStorage.setItem(HOTKEY_MODE_MIGRATION_DEFERRED_KEY, '1');
     setHotkeyModePromptOpen(false);
+  };
+
+  const deferBlePairingPrompt = () => {
+    window.sessionStorage.setItem(BLE_PAIRING_PROMPT_DEFERRED_KEY, '1');
+    setBlePairingPromptOpen(false);
+  };
+
+  const keepMicrophoneFromBlePrompt = () => {
+    window.localStorage.setItem(BLE_PAIRING_PROMPT_ACK_KEY, '1');
+    setBlePairingPromptOpen(false);
   };
 
   const openSettings = (section?: SettingsSectionId) => {
@@ -173,9 +223,25 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     openSettings('recording');
   };
 
+  const openDemoFromProviderPrompt = () => {
+    rememberProviderPrompt();
+    requestDemoMode();
+  };
+
   const openHotkeyRecordingSettings = () => {
     window.localStorage.setItem(HOTKEY_MODE_MIGRATION_ACK_KEY, '1');
     setHotkeyModePromptOpen(false);
+    openSettings('recording');
+  };
+
+  const openBlePairingSettings = () => {
+    window.localStorage.setItem(BLE_PAIRING_PROMPT_ACK_KEY, '1');
+    setBlePairingPromptOpen(false);
+    if (prefs && (prefs.dictationInputSource ?? 'microphone') !== 'embeddedBle') {
+      void updatePrefs({ ...prefs, dictationInputSource: 'embeddedBle' }).catch(error => {
+        console.warn('[ble-pairing] failed to switch input source', error);
+      });
+    }
     openSettings('recording');
   };
 
@@ -318,7 +384,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
               }}
             >
               {displayTab === 'overview' ? (
-                <Overview onOpenHistory={() => setCurrentTab('history')} onOpenProvidersSettings={() => { setSettingsOpen(true); }} />
+                <Overview onOpenHistory={() => setCurrentTab('history')} onOpenProvidersSettings={() => openSettings('providers')} />
               ) : (
                 <Page />
               )}
@@ -379,11 +445,18 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           onLater={rememberProviderPrompt}
           onOpenSettings={openProviderSettings}
           onOpenRecording={openRecordingSettingsFromProviderPrompt}
+          onOpenDemo={openDemoFromProviderPrompt}
         />
       ) : hotkeyModePromptOpen ? (
         <HotkeyModeMigrationPrompt
           onLater={deferHotkeyModePrompt}
           onOpenSettings={openHotkeyRecordingSettings}
+        />
+      ) : blePairingPromptOpen ? (
+        <BlePairingPrompt
+          onLater={deferBlePairingPrompt}
+          onUseMicrophone={keepMicrophoneFromBlePrompt}
+          onOpenPairing={openBlePairingSettings}
         />
       ) : null}
 
@@ -428,14 +501,14 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   );
 }
 
-function ProviderSetupPrompt({
+function BlePairingPrompt({
   onLater,
-  onOpenSettings,
-  onOpenRecording,
+  onUseMicrophone,
+  onOpenPairing,
 }: {
   onLater: () => void;
-  onOpenSettings: () => void;
-  onOpenRecording: () => void;
+  onUseMicrophone: () => void;
+  onOpenPairing: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -456,7 +529,92 @@ function ProviderSetupPrompt({
     >
       <div
         style={{
-          width: 360,
+          width: 390,
+          borderRadius: 12,
+          background: 'var(--ol-surface)',
+          border: '0.5px solid rgba(0,0,0,.08)',
+          boxShadow: '0 24px 70px -24px rgba(15,17,22,.38), 0 0 0 0.5px rgba(0,0,0,.06)',
+          padding: 20,
+          animation: 'ol-prompt-pop 0.26s var(--ol-motion-spring)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <div
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 8,
+              background: 'rgba(101,123,112,0.10)',
+              color: 'var(--ol-blue)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <Icon name="bolt" size={17} />
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ol-ink)' }}>{t('shell.blePairingPrompt.title')}</div>
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--ol-ink-3)', lineHeight: 1.55 }}>
+          {t('shell.blePairingPrompt.body')}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button
+            onClick={onLater}
+            style={promptSecondaryButtonStyle}
+          >
+            {t('shell.blePairingPrompt.later')}
+          </button>
+          <button
+            onClick={onUseMicrophone}
+            style={promptSoftButtonStyle}
+          >
+            {t('shell.blePairingPrompt.useMicrophone')}
+          </button>
+          <button
+            onClick={onOpenPairing}
+            style={promptPrimaryButtonStyle}
+          >
+            {t('shell.blePairingPrompt.openPairing')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProviderSetupPrompt({
+  onLater,
+  onOpenSettings,
+  onOpenRecording,
+  onOpenDemo,
+}: {
+  onLater: () => void;
+  onOpenSettings: () => void;
+  onOpenRecording: () => void;
+  onOpenDemo: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 70,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 28,
+        background: 'rgba(15,17,22,0.28)',
+        backdropFilter: 'blur(6px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(6px) saturate(140%)',
+        animation: 'ol-prompt-fade 0.2s var(--ol-motion-soft)',
+      }}
+    >
+      <div
+        style={{
+          width: 430,
           borderRadius: 12,
           background: 'var(--ol-surface)',
           border: '0.5px solid rgba(0,0,0,.08)',
@@ -486,7 +644,7 @@ function ProviderSetupPrompt({
         <div style={{ fontSize: 12.5, color: 'var(--ol-ink-3)', lineHeight: 1.55 }}>
           {t('shell.providerPrompt.body')}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <button
             onClick={onLater}
             style={{
@@ -541,11 +699,71 @@ function ProviderSetupPrompt({
           >
             {t('shell.providerPrompt.openSettings')}
           </button>
+          <button
+            onClick={onOpenDemo}
+            style={{
+              height: 32,
+              padding: '0 14px',
+              borderRadius: 8,
+              border: '0.5px solid var(--ol-line-strong)',
+              background: 'rgba(101,123,112,0.08)',
+              color: 'var(--ol-ink)',
+              fontFamily: 'inherit',
+              fontSize: 12.5,
+              fontWeight: 500,
+              cursor: 'default',
+              transition: 'background 0.16s var(--ol-motion-quick), transform 0.12s var(--ol-motion-quick)',
+            }}
+          >
+            {t('shell.providerPrompt.openDemo')}
+          </button>
         </div>
       </div>
     </div>
   );
 }
+
+const promptSecondaryButtonStyle: CSSProperties = {
+  height: 32,
+  padding: '0 13px',
+  borderRadius: 8,
+  border: '0.5px solid var(--ol-line-strong)',
+  background: 'var(--ol-surface)',
+  color: 'var(--ol-ink-3)',
+  fontFamily: 'inherit',
+  fontSize: 12.5,
+  fontWeight: 500,
+  cursor: 'default',
+  transition: 'background 0.16s var(--ol-motion-quick), border-color 0.16s var(--ol-motion-quick)',
+};
+
+const promptSoftButtonStyle: CSSProperties = {
+  height: 32,
+  padding: '0 14px',
+  borderRadius: 8,
+  border: '0.5px solid var(--ol-line-strong)',
+  background: 'rgba(101,123,112,0.08)',
+  color: 'var(--ol-ink)',
+  fontFamily: 'inherit',
+  fontSize: 12.5,
+  fontWeight: 500,
+  cursor: 'default',
+  transition: 'background 0.16s var(--ol-motion-quick), transform 0.12s var(--ol-motion-quick)',
+};
+
+const promptPrimaryButtonStyle: CSSProperties = {
+  height: 32,
+  padding: '0 14px',
+  borderRadius: 8,
+  border: 0,
+  background: 'var(--ol-ink)',
+  color: '#fff',
+  fontFamily: 'inherit',
+  fontSize: 12.5,
+  fontWeight: 500,
+  cursor: 'default',
+  transition: 'background 0.16s var(--ol-motion-quick), transform 0.12s var(--ol-motion-quick)',
+};
 
 function HotkeyModeMigrationPrompt({ onLater, onOpenSettings }: { onLater: () => void; onOpenSettings: () => void }) {
   const { t } = useTranslation();

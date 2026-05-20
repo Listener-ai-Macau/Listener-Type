@@ -326,6 +326,7 @@ pub fn run() {
             commands::submit_embedded_audio_file,
             commands::submit_embedded_audio_streaming_file,
             commands::submit_embedded_audio_ble_once,
+            commands::probe_embedded_audio_ble_subscription,
             commands::submit_embedded_audio_ble_stream,
             commands::cancel_dictation,
             commands::handle_window_hotkey_event,
