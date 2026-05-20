@@ -3318,13 +3318,19 @@ fn resolve_ark_endpoint_with_policy(
 mod tests {
     use super::dictation::abort_recording_with_error;
     use super::*;
-    use crate::types::{HotkeyMode, HotkeyTrigger};
+    use crate::types::{DictationInputSource, HotkeyMode, HotkeyTrigger};
     use once_cell::sync::Lazy;
 
     static ENV_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
 
     fn session_id(n: u128) -> SessionId {
         Uuid::from_u128(n)
+    }
+
+    fn force_microphone_input_for_test(coordinator: &Coordinator) {
+        let mut prefs = coordinator.inner.prefs.get();
+        prefs.dictation_input_source = DictationInputSource::Microphone;
+        coordinator.inner.prefs.replace_for_tests(prefs);
     }
 
     #[test]
@@ -3363,6 +3369,7 @@ mod tests {
         std::env::set_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN", "1");
 
         let coordinator = Coordinator::new();
+        force_microphone_input_for_test(&coordinator);
         coordinator.inject_hotkey_click_for_dev().await.unwrap();
 
         assert_eq!(coordinator.inner.state.lock().phase, SessionPhase::Idle);
@@ -3375,6 +3382,7 @@ mod tests {
         std::env::set_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN", "1");
 
         let coordinator = Coordinator::new();
+        force_microphone_input_for_test(&coordinator);
         let old_session_id = coordinator.inner.state.lock().session_id;
         {
             let mut state = coordinator.inner.state.lock();
@@ -3399,6 +3407,7 @@ mod tests {
         std::env::set_var("LISTENER_TYPE_HOTKEY_INJECTION_DRY_RUN", "1");
 
         let coordinator = Coordinator::new();
+        force_microphone_input_for_test(&coordinator);
         let old_session_id = {
             let mut state = coordinator.inner.state.lock();
             state.phase = SessionPhase::Processing;
