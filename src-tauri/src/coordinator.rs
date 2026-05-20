@@ -142,6 +142,9 @@ struct Inner {
     /// 当前 Listener BLE 后台订阅的取消旗标。刷新输入源或退出时主动置位，
     /// 避免旧 WinRT notify 订阅等待 60s 超时后才释放设备。
     embedded_ble_listener_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// 当前嵌入式 BLE 抓音循环的取消标志。胶囊取消走 cancel_session 时会置位，
+    /// 让 blocking BLE notify loop 及时退出。
+    embedded_ble_cancel_flag: Mutex<Option<Arc<AtomicBool>>>,
     recording_mute: Mutex<SharedRecordingMuteState>,
     hotkey: Mutex<Option<HotkeyMonitor>>,
     hotkey_status: Mutex<HotkeyStatus>,
@@ -238,6 +241,7 @@ impl Coordinator {
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     embedded_ble_listener_cancel: Mutex::new(None),
+                    embedded_ble_cancel_flag: Mutex::new(None),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
                     hotkey_status: Mutex::new(HotkeyStatus::default()),
@@ -294,6 +298,7 @@ impl Coordinator {
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 embedded_ble_listener_cancel: Mutex::new(None),
+                embedded_ble_cancel_flag: Mutex::new(None),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
                 hotkey_status: Mutex::new(HotkeyStatus::default()),
