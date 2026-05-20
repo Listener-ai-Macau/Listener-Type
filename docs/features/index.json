@@ -1,7 +1,25 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-19",
+  "updated_at": "2026-05-20",
   "features": [
+    {
+      "id": "demo_content_package",
+      "status": "implemented",
+      "summary": "Offline first-run demo content covers AI-era anxiety, light character response, and voice-to-expression polish without requiring device, network, or API key.",
+      "doc": "demo-content-package.md",
+      "primary_paths": [
+        "src/pages/Overview.tsx",
+        "src/lib/demoMode.ts",
+        "src/i18n/"
+      ],
+      "validation": [
+        "npm run build",
+        "manual review of demo-content-package.md"
+      ],
+      "known_limits": [
+        "Runtime OOBE smoke is covered by production-readiness step 2.4/2.5"
+      ]
+    },
     {
       "id": "dictation_pipeline",
       "status": "implemented",
