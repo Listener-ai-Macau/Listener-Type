@@ -799,12 +799,15 @@ fn init_file_logger() {
     let log_dir = log_dir_path();
     let _ = std::fs::create_dir_all(&log_dir);
     let log_file = log_dir.join("listener-type.log");
-    if let Err(e) = rotate_log_if_too_large(&log_file) {
-        eprintln!("[logger] WARN 日志轮转失败: {e}");
-    }
+    let rotation_err = rotate_log_if_too_large(&log_file).err();
+    let level = if cfg!(debug_assertions) {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    };
     let config = ConfigBuilder::new().set_time_format_rfc3339().build();
     let mut loggers: Vec<Box<dyn simplelog::SharedLogger>> = vec![TermLogger::new(
-        LevelFilter::Info,
+        level,
         config.clone(),
         TerminalMode::Mixed,
         ColorChoice::Auto,
@@ -814,9 +817,12 @@ fn init_file_logger() {
         .append(true)
         .open(&log_file)
     {
-        loggers.push(WriteLogger::new(LevelFilter::Info, config, file));
+        loggers.push(WriteLogger::new(level, config, file));
     }
     let _ = CombinedLogger::init(loggers);
+    if let Some(e) = rotation_err {
+        log::warn!("[logger] 日志轮转失败: {e}");
+    }
 }
 
 fn rotate_log_if_too_large(path: &std::path::Path) -> std::io::Result<()> {
