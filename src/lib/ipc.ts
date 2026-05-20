@@ -744,6 +744,14 @@ export function submitEmbeddedAudioBleOnce(
   );
 }
 
+export function probeEmbeddedAudioBleSubscription(timeoutMs?: number): Promise<void> {
+  return invokeOrMock(
+    'probe_embedded_audio_ble_subscription',
+    { timeoutMs: timeoutMs ?? null },
+    () => undefined,
+  );
+}
+
 export function cancelDictation(): Promise<void> {
   return invokeOrMock('cancel_dictation', undefined, () => undefined);
 }
@@ -955,7 +963,7 @@ export function requestMicrophonePermission(): Promise<PermissionStatus> {
   return invokeOrMock('request_microphone_permission', undefined, () => 'granted' as const);
 }
 
-export function openSystemSettings(pane: 'accessibility' | 'microphone'): Promise<void> {
+export function openSystemSettings(pane: 'accessibility' | 'microphone' | 'bluetooth'): Promise<void> {
   return invokeOrMock('open_system_settings', { pane }, () => undefined);
 }
 

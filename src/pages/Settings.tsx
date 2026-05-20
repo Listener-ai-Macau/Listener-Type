@@ -18,12 +18,15 @@ import {
   getHotkeyCodeLabel,
 } from '../lib/hotkey';
 import { createHotkeyRecorderState, orderHotkeyCodes, updateHotkeyRecorderState } from '../lib/hotkeyRecorder';
+import { requestDemoMode } from '../lib/demoMode';
 import {
   isTauri,
   isWaylandCliMode,
   listMicrophoneDevices,
   openExternal,
+  openSystemSettings,
   listProviderModels,
+  probeEmbeddedAudioBleSubscription,
   readCredential,
   setActiveAsrProvider,
   setActiveLlmProvider,
@@ -59,7 +62,11 @@ import { AdvancedSection } from './settings/AdvancedSection';
 import { ShortcutsSection } from './settings/ShortcutsSection';
 import { PermissionsSection } from './settings/PermissionsSection';
 import { LanguageSection } from './settings/LanguageSection';
-import { EmbeddedBleStatusPanel, type EmbeddedBleProbeStatus } from './settings/EmbeddedBleStatusPanel';
+import {
+  EmbeddedBleStatusPanel,
+  type EmbeddedBleProbeStatus,
+  type EmbeddedBleWizardStep,
+} from './settings/EmbeddedBleStatusPanel';
 
 export { Toggle } from './settings/shared';
 export { AboutUpdateControl } from './settings/AboutUpdateControl';
@@ -190,7 +197,7 @@ export function Settings({ embedded = false, initialSection = 'recording' }: Set
           }}
         >
           {section === 'recording' && <RecordingSection />}
-          {section === 'providers' && <ProvidersSection />}
+          {section === 'providers' && <ProvidersSection onOpenRecording={() => setSection('recording')} />}
           {section === 'shortcuts' && <ShortcutsSection />}
           {section === 'permissions' && <PermissionsSection />}
           {section === 'language' && <LanguageSection />}
@@ -209,6 +216,7 @@ function RecordingSection() {
   const [microphoneDevicesError, setMicrophoneDevicesError] = useState<string | null>(null);
   const [microphonePickerOpen, setMicrophonePickerOpen] = useState(false);
   const [embeddedBleProbeStatus, setEmbeddedBleProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
+  const [embeddedBleProbePhase, setEmbeddedBleProbePhase] = useState<'idle' | 'connect' | 'subscribe' | 'record'>('idle');
   const [embeddedBleProbeMessage, setEmbeddedBleProbeMessage] = useState('');
   const [embeddedBleProbeResult, setEmbeddedBleProbeResult] = useState<EmbeddedAudioSubmissionResult | null>(null);
   // Wayland 下 rdev 监听不可用（issue #420）。改用 pull 模型：mount 时 invoke 拉状态。
@@ -377,15 +385,46 @@ function RecordingSection() {
     : t('settings.recording.microphoneDefault');
   const selectedInputSource = prefs.dictationInputSource ?? 'microphone';
   const embeddedBleSupported = detectOS() === 'win';
+  const embeddedBleWizardSteps: EmbeddedBleWizardStep[] = buildEmbeddedBleWizardSteps(
+    selectedInputSource,
+    embeddedBleProbeStatus,
+    embeddedBleProbePhase,
+    Boolean(embeddedBleProbeResult),
+  );
+  const openBluetoothSettings = () => {
+    void openSystemSettings('bluetooth').catch(err => {
+      console.warn('[settings] open bluetooth settings failed', err);
+    });
+  };
   const runEmbeddedBleProbe = async () => {
     if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
     setEmbeddedBleProbeStatus('checking');
-    setEmbeddedBleProbeMessage('');
+    setEmbeddedBleProbePhase('connect');
+    setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectChecking'));
+    setEmbeddedBleProbeResult(null);
+    try {
+      await probeEmbeddedAudioBleSubscription(10_000);
+      setEmbeddedBleProbeStatus('ok');
+      setEmbeddedBleProbePhase('idle');
+      setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleProbeReady'));
+    } catch (err) {
+      setEmbeddedBleProbeResult(null);
+      setEmbeddedBleProbeStatus('error');
+      setEmbeddedBleProbePhase(embeddedBleProbeErrorPhase(err));
+      setEmbeddedBleProbeMessage(embeddedBleProbeErrorMessage(err, t));
+    }
+  };
+  const runEmbeddedBleRecordingTest = async () => {
+    if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
+    setEmbeddedBleProbeStatus('checking');
+    setEmbeddedBleProbePhase('record');
+    setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleRecordChecking'));
     setEmbeddedBleProbeResult(null);
     try {
       const result = await submitEmbeddedAudioBleOnce(30_000);
       setEmbeddedBleProbeResult(result);
       setEmbeddedBleProbeStatus('ok');
+      setEmbeddedBleProbePhase('idle');
       setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleProbeOk', {
         packets: result.stats.receivedPacketCount,
         missing: result.stats.missingPacketCount,
@@ -394,6 +433,7 @@ function RecordingSection() {
     } catch (err) {
       setEmbeddedBleProbeResult(null);
       setEmbeddedBleProbeStatus('error');
+      setEmbeddedBleProbePhase(embeddedBleProbeErrorPhase(err));
       setEmbeddedBleProbeMessage(embeddedBleProbeErrorMessage(err, t));
     }
   };
@@ -497,7 +537,10 @@ function RecordingSection() {
               status={embeddedBleProbeStatus}
               message={embeddedBleProbeMessage}
               result={embeddedBleProbeResult}
+              steps={embeddedBleWizardSteps}
+              onOpenBluetoothSettings={openBluetoothSettings}
               onProbe={() => void runEmbeddedBleProbe()}
+              onTestRecording={() => void runEmbeddedBleRecordingTest()}
               onUseMicrophone={() => void onDictationInputSourceChange('microphone')}
             />
           )}
@@ -1623,7 +1666,7 @@ const ASR_PRESETS: ReadonlyArray<{ id: AsrPresetId; nameKey: string; baseUrl: st
   { id: 'local-qwen3',  nameKey: 'asrLocalQwen3',   baseUrl: '',                                              model: ''                              },
 ];
 
-function ProvidersSection() {
+function ProvidersSection({ onOpenRecording }: { onOpenRecording: () => void }) {
   const { t } = useTranslation();
   const { prefs, updatePrefs } = useHotkeySettings();
   // `*Provider` 立即跟随 <select> 改动（受控组件必须实时反映用户输入）；
@@ -1815,7 +1858,13 @@ function ProvidersSection() {
           )}
         />
         <ProviderProxySettings kind="llm" providerId={committedLlmProvider} />
-        <ProviderTools key={committedLlmProvider} kind="llm" modelAccount="ark.model_id" onModelSelected={() => setLlmModelRevision(v => v + 1)} />
+        <ProviderTools
+          key={committedLlmProvider}
+          kind="llm"
+          modelAccount="ark.model_id"
+          onModelSelected={() => setLlmModelRevision(v => v + 1)}
+          onOpenRecording={onOpenRecording}
+        />
       </Card>
 
       <Card>
@@ -1929,7 +1978,12 @@ function ProvidersSection() {
             {!['bailian', 'volcengine'].includes(committedAsrProvider) && (
               <ProviderProxySettings kind="asr" providerId={committedAsrProvider} />
             )}
-            <ProviderTools kind="asr" modelAccount="asr.model" onModelSelected={() => setAsrModelRevision(v => v + 1)} />
+            <ProviderTools
+              kind="asr"
+              modelAccount="asr.model"
+              onModelSelected={() => setAsrModelRevision(v => v + 1)}
+              onOpenRecording={onOpenRecording}
+            />
           </>
         )}
       </Card>
@@ -2050,7 +2104,17 @@ function ProviderProxySettings({ kind, providerId }: { kind: 'llm' | 'asr'; prov
   );
 }
 
-function ProviderTools({ kind, modelAccount, onModelSelected }: { kind: 'llm' | 'asr'; modelAccount: string; onModelSelected: () => void }) {
+function ProviderTools({
+  kind,
+  modelAccount,
+  onModelSelected,
+  onOpenRecording,
+}: {
+  kind: 'llm' | 'asr';
+  modelAccount: string;
+  onModelSelected: () => void;
+  onOpenRecording: () => void;
+}) {
   const { t } = useTranslation();
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -2135,6 +2199,16 @@ function ProviderTools({ kind, modelAccount, onModelSelected }: { kind: 'llm' | 
             {message}
           </span>
         )}
+        {(status === 'error' || status === 'empty') && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button onClick={requestDemoMode} style={miniBtnStyle}>
+              {t('settings.providers.openDemo')}
+            </button>
+            <button onClick={onOpenRecording} style={miniBtnStyle}>
+              {t('settings.providers.testAudio')}
+            </button>
+          </div>
+        )}
       </div>
     </SettingRow>
   );
@@ -2194,6 +2268,42 @@ function embeddedBleProbeErrorMessage(error: unknown, t: ReturnType<typeof useTr
     default:
       return t('settings.recording.embeddedBleGenericError');
   }
+}
+
+function embeddedBleProbeErrorPhase(error: unknown): 'connect' | 'subscribe' | 'record' {
+  switch (classifyEmbeddedBleProbeError(error)) {
+    case 'noDevice':
+    case 'accessDenied':
+      return 'connect';
+    case 'notify':
+      return 'subscribe';
+    case 'timeout':
+    case 'generic':
+    default:
+      return 'record';
+  }
+}
+
+function buildEmbeddedBleWizardSteps(
+  selectedInputSource: DictationInputSource,
+  status: EmbeddedBleProbeStatus,
+  phase: 'idle' | 'connect' | 'subscribe' | 'record',
+  recordingVerified: boolean,
+): EmbeddedBleWizardStep[] {
+  const selected = selectedInputSource === 'embeddedBle';
+  const failureState = (step: 'connect' | 'subscribe' | 'record') =>
+    status === 'error' && phase === step ? 'error' : 'pending';
+  const activeState = (step: 'connect' | 'subscribe' | 'record') =>
+    status === 'checking' && phase === step ? 'active' : failureState(step);
+  const ready = status === 'ok';
+
+  return [
+    { id: 'select', state: selected ? 'ok' : 'active' },
+    { id: 'pair', state: selected ? (ready ? 'ok' : activeState('connect')) : 'pending' },
+    { id: 'connect', state: selected ? (ready ? 'ok' : activeState('connect')) : 'pending' },
+    { id: 'subscribe', state: selected ? (ready ? 'ok' : activeState('subscribe')) : 'pending' },
+    { id: 'record', state: selected ? (recordingVerified ? 'ok' : activeState('record')) : 'pending' },
+  ];
 }
 
 type CredentialFieldStatus = 'idle' | 'saving' | 'saved' | 'readError' | 'saveError' | 'copied' | 'copyError';

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
+import { consumePendingDemoMode, OPEN_DEMO_MODE_EVENT } from '../lib/demoMode';
 import { formatComboLabel } from '../lib/hotkey';
 import { getCredentials, listHistory, setActiveAsrProvider, startDictation } from '../lib/ipc';
 import type { CredentialsStatus, DictationSession, PolishMode } from '../lib/types';
@@ -55,6 +56,8 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewPro
   const [history, setHistory] = useState<DictationSession[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [credsError, setCredsError] = useState(false);
+  const [demoOpen, setDemoOpen] = useState(false);
+  const [demoVariant, setDemoVariant] = useState(0);
   const [creds, setCreds] = useState<CredentialsStatus>({
     activeAsrProvider: 'volcengine',
     activeLlmProvider: 'ark',
@@ -87,6 +90,19 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewPro
         setCredsError(true);
       });
   }, [refreshHistory]);
+
+  useEffect(() => {
+    const openDemo = () => {
+      consumePendingDemoMode();
+      setDemoOpen(true);
+      setDemoVariant(value => value + 1);
+    };
+    window.addEventListener(OPEN_DEMO_MODE_EVENT, openDemo);
+    if (consumePendingDemoMode()) {
+      openDemo();
+    }
+    return () => window.removeEventListener(OPEN_DEMO_MODE_EVENT, openDemo);
+  }, []);
 
   const metrics = useMemo(() => {
     const today = new Date();
@@ -150,6 +166,10 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewPro
           asrConfigured={creds.asrConfigured}
           llmConfigured={creds.llmConfigured}
           onConfigure={onOpenProvidersSettings}
+          onTryDemo={() => {
+            setDemoOpen(true);
+            setDemoVariant(value => value + 1);
+          }}
           onUseLocal={async () => {
             try {
               await setActiveAsrProvider('foundry-local-whisper');
@@ -158,6 +178,14 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewPro
             } catch { /* ignore */ }
           }}
           onTestRecord={() => { startDictation().catch(() => {}); }}
+        />
+      )}
+
+      {demoOpen && (
+        <DemoModeCard
+          variant={demoVariant}
+          onRegenerate={() => setDemoVariant(value => value + 1)}
+          onClose={() => setDemoOpen(false)}
         />
       )}
 
@@ -365,11 +393,12 @@ interface QuickStartCardProps {
   asrConfigured: boolean;
   llmConfigured: boolean;
   onConfigure?: () => void;
+  onTryDemo?: () => void;
   onUseLocal?: () => void;
   onTestRecord?: () => void;
 }
 
-function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onUseLocal, onTestRecord }: QuickStartCardProps) {
+function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onTryDemo, onUseLocal, onTestRecord }: QuickStartCardProps) {
   const { t } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
@@ -393,6 +422,9 @@ function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onUseLocal,
           {onConfigure && (
             <Btn size="sm" variant="blue" icon="settings" onClick={onConfigure}>{t('overview.quickStartConfigure')}</Btn>
           )}
+          {onTryDemo && (
+            <Btn size="sm" variant="soft" icon="sparkle" onClick={onTryDemo}>{t('overview.quickStartDemo')}</Btn>
+          )}
           {!asrConfigured && onUseLocal && (
             <Btn size="sm" variant="ghost" icon="bolt" onClick={onUseLocal}>{t('overview.quickStartLocal')}</Btn>
           )}
@@ -402,5 +434,64 @@ function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onUseLocal,
         </div>
       </div>
     </Card>
+  );
+}
+
+function DemoModeCard({ variant, onRegenerate, onClose }: { variant: number; onRegenerate: () => void; onClose: () => void }) {
+  const { t } = useTranslation();
+  const sampleIndex = Math.abs(variant) % 3;
+  const outputKey = `overview.demoOutput${sampleIndex + 1}`;
+
+  return (
+    <Card padding={0} style={{ marginBottom: 18, overflow: 'hidden', borderColor: 'rgba(101,123,112,0.28)' }}>
+      <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, borderBottom: '0.5px solid var(--ol-line)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ol-blue-soft)', color: 'var(--ol-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Icon name="sparkle" size={15} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ol-ink)' }}>{t('overview.demoTitle')}</span>
+              <Pill tone="blue" size="sm">{t('overview.demoBadge')}</Pill>
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 2 }}>
+              {t('overview.demoDesc')}
+            </div>
+          </div>
+        </div>
+        <Btn size="sm" variant="ghost" onClick={onClose}>{t('common.close')}</Btn>
+      </div>
+      <div style={{ padding: '14px 18px 16px', display: 'grid', gridTemplateColumns: 'minmax(0, 0.9fr) minmax(0, 1.1fr)', gap: 12 }}>
+        <DemoPane label={t('overview.demoInputLabel')} text={t('overview.demoInput')} />
+        <DemoPane label={t('overview.demoOutputLabel')} text={t(outputKey)} accent />
+      </div>
+      <div style={{ padding: '0 18px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
+          {t('overview.demoConfigNote')}
+        </div>
+        <Btn size="sm" variant="blue" icon="refresh" onClick={onRegenerate}>{t('overview.demoRegenerate')}</Btn>
+      </div>
+    </Card>
+  );
+}
+
+function DemoPane({ label, text, accent = false }: { label: string; text: string; accent?: boolean }) {
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        padding: '12px 14px',
+        borderRadius: 8,
+        background: accent ? 'var(--ol-blue-soft)' : 'var(--ol-surface-2)',
+        border: accent ? '0.5px solid rgba(101,123,112,0.20)' : '0.5px solid var(--ol-line-soft)',
+      }}
+    >
+      <div style={{ fontSize: 10.5, color: accent ? 'var(--ol-blue)' : 'var(--ol-ink-4)', fontWeight: 600, letterSpacing: 0, textTransform: 'uppercase', marginBottom: 7 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--ol-ink-2)', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+        {text}
+      </div>
+    </div>
   );
 }

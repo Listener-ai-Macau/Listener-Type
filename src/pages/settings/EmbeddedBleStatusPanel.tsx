@@ -1,22 +1,36 @@
 import { useTranslation } from 'react-i18next';
 import { Btn, Pill } from '../_atoms';
+import { requestDemoMode } from '../../lib/demoMode';
 import type { EmbeddedAudioSubmissionResult } from '../../lib/types';
 
 export type EmbeddedBleProbeStatus = 'idle' | 'checking' | 'ok' | 'error';
+export type EmbeddedBleWizardStepId = 'select' | 'pair' | 'connect' | 'subscribe' | 'record';
+export type EmbeddedBleWizardStepState = 'pending' | 'active' | 'ok' | 'error';
+
+export interface EmbeddedBleWizardStep {
+  id: EmbeddedBleWizardStepId;
+  state: EmbeddedBleWizardStepState;
+}
 
 export function EmbeddedBleStatusPanel({
   supported,
   status,
   message,
   result,
+  steps,
+  onOpenBluetoothSettings,
   onProbe,
+  onTestRecording,
   onUseMicrophone,
 }: {
   supported: boolean;
   status: EmbeddedBleProbeStatus;
   message: string;
   result: EmbeddedAudioSubmissionResult | null;
+  steps: EmbeddedBleWizardStep[];
+  onOpenBluetoothSettings: () => void;
   onProbe: () => void;
+  onTestRecording?: () => void;
   onUseMicrophone?: () => void;
 }) {
   const { t } = useTranslation();
@@ -55,11 +69,27 @@ export function EmbeddedBleStatusPanel({
         >
           {status === 'checking'
             ? t('settings.recording.embeddedBleTesting')
-            : t('settings.recording.embeddedBleTestOnce')}
+            : t('settings.recording.embeddedBleCheck')}
         </Btn>
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
-        {supported ? t('settings.recording.embeddedBleStatusDesc') : t('settings.recording.embeddedBleUnsupportedDesc')}
+        {supported ? t('settings.recording.embeddedBleWizardDesc') : t('settings.recording.embeddedBleUnsupportedDesc')}
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+          gap: 6,
+        }}
+      >
+        {steps.map((step, index) => (
+          <WizardStepPill
+            key={step.id}
+            index={index + 1}
+            label={t(`settings.recording.embeddedBleWizard.${step.id}`)}
+            state={!supported ? 'pending' : step.state}
+          />
+        ))}
       </div>
       {message && (
         <div
@@ -74,6 +104,24 @@ export function EmbeddedBleStatusPanel({
           {message}
         </div>
       )}
+      {supported && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <Btn variant="ghost" size="sm" icon="settings" onClick={onOpenBluetoothSettings}>
+            {t('settings.recording.embeddedBleOpenBluetooth')}
+          </Btn>
+          {onTestRecording && (
+            <Btn
+              variant={status === 'ok' ? 'blue' : 'soft'}
+              size="sm"
+              icon="mic"
+              disabled={status === 'checking'}
+              onClick={onTestRecording}
+            >
+              {t('settings.recording.embeddedBleTestOnce')}
+            </Btn>
+          )}
+        </div>
+      )}
       {supported && status === 'error' && onUseMicrophone && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <Btn variant="ghost" size="sm" icon="refresh" onClick={onProbe}>
@@ -81,6 +129,9 @@ export function EmbeddedBleStatusPanel({
           </Btn>
           <Btn variant="soft" size="sm" icon="mic" onClick={onUseMicrophone}>
             {t('settings.recording.embeddedBleUseMicrophone')}
+          </Btn>
+          <Btn variant="soft" size="sm" icon="sparkle" onClick={requestDemoMode}>
+            {t('settings.recording.embeddedBleOpenDemo')}
           </Btn>
         </div>
       )}
@@ -100,6 +151,73 @@ export function EmbeddedBleStatusPanel({
           </Pill>
         </div>
       )}
+    </div>
+  );
+}
+
+function WizardStepPill({
+  index,
+  label,
+  state,
+}: {
+  index: number;
+  label: string;
+  state: EmbeddedBleWizardStepState;
+}) {
+  const color =
+    state === 'ok'
+      ? 'var(--ol-ok)'
+      : state === 'error'
+        ? 'var(--ol-err)'
+        : state === 'active'
+          ? 'var(--ol-blue)'
+          : 'var(--ol-ink-4)';
+  const background =
+    state === 'ok'
+      ? 'var(--ol-ok-soft)'
+      : state === 'active'
+        ? 'var(--ol-blue-soft)'
+        : state === 'error'
+          ? 'rgba(190,18,60,0.08)'
+          : 'rgba(0,0,0,0.035)';
+  const marker = state === 'ok' ? '✓' : state === 'error' ? '!' : index;
+
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        height: 26,
+        padding: '0 7px',
+        borderRadius: 7,
+        background,
+        color,
+        fontSize: 10.5,
+        fontWeight: 500,
+      }}
+      title={label}
+    >
+      <span
+        style={{
+          width: 14,
+          height: 14,
+          borderRadius: 999,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          background: 'rgba(255,255,255,0.68)',
+          fontSize: 9,
+          fontWeight: 700,
+        }}
+      >
+        {marker}
+      </span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
     </div>
   );
 }

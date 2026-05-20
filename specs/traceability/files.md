@@ -64,6 +64,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/asr/local/test_run.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/mod.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_transcript.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/wav.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/whisper.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/audio_mute.rs` | Core app | Build and targeted tests |
@@ -98,16 +99,6 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/windows_ime_protocol.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_session.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/tauri.conf.json` | Build and release config | Build, updater and audit scripts |
-| `tools/embedded_audio_replay/Cargo.lock` | Embedded BLE audio | VKA1 replay smoke and seeded ASR accuracy |
-| `tools/embedded_audio_replay/Cargo.toml` | Embedded BLE audio | VKA1 replay smoke and seeded ASR accuracy |
-| `tools/embedded_audio_replay/generate_tts_fixtures.ps1` | Embedded BLE audio | Seeded TTS fixture generation |
-| `tools/embedded_audio_replay/measure_asr_accuracy.ps1` | Embedded BLE audio | Seeded ASR accuracy / CER report |
-| `tools/embedded_audio_replay/run_ble_stream_smoke.ps1` | Embedded BLE audio | Serial-triggered BLE streaming smoke |
-| `tools/embedded_audio_replay/src/main.rs` | Embedded BLE audio | VKA1 replay smoke |
-| `tools/volcengine_asr_probe/Cargo.lock` | ASR providers | Volcengine ASR smoke and cargo check |
-| `tools/volcengine_asr_probe/Cargo.toml` | ASR providers | Volcengine ASR smoke and cargo check |
-| `tools/volcengine_asr_probe/src/asr/mod.rs` | ASR providers | Volcengine ASR smoke and cargo check |
-| `tools/volcengine_asr_probe/src/main.rs` | ASR providers | Volcengine ASR smoke and cargo check |
 | `src-tauri/vendor/qwen-asr/Makefile` | Vendored local ASR engine | Cargo check and local ASR smoke |
 | `src-tauri/vendor/qwen-asr/asr_regression.py` | Vendored local ASR engine | Cargo check and local ASR smoke |
 | `src-tauri/vendor/qwen-asr/download_model.sh` | Vendored local ASR engine | Cargo check and local ASR smoke |
@@ -155,6 +146,9 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/appVersion.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleLayout.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleLayout.ts` | Core app | Build and targeted tests |
+| `src/lib/capsulePreviewRules.test.ts` | Core app | Build and targeted tests |
+| `src/lib/capsulePreviewRules.ts` | Core app | Build and targeted tests |
+| `src/lib/demoMode.ts` | Core app | Build and targeted tests |
 | `src/lib/fontScale.ts` | Core app | Build and targeted tests |
 | `src/lib/hotkey.ts` | Global hotkeys | Hotkey tests and manual smoke |
 | `src/lib/hotkeyMigration.ts` | Global hotkeys | Hotkey tests and manual smoke |
