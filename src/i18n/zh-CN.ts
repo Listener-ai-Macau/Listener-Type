@@ -172,6 +172,12 @@ export const zhCN = {
     recentLoadFailed: '无法读取最近识别，请重试。',
     historyRetry: '重试',
     weekDays: ['日', '一', '二', '三', '四', '五', '六'],
+    quickStartTitle: '快速开始',
+    quickStartDesc: '还没有配置服务提供商。选择一个方式开始使用：',
+    quickStartConfigure: '配置 API Key',
+    quickStartLocal: '使用本地识别（无需 Key）',
+    quickStartTest: '用麦克风试录',
+    quickStartDismiss: '关闭',
   },
   history: {
     kicker: 'HISTORY',

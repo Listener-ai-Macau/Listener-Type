@@ -147,6 +147,12 @@ export const ja: typeof zhCN = {
     recentLoadFailed: '最近の認識を読み込めません。再試行してください。',
     historyRetry: '再試行',
     weekDays: ['日', '月', '火', '水', '木', '金', '土'],
+    quickStartTitle: 'クイックスタート',
+    quickStartDesc: 'プロバイダーがまだ設定されていません。以下の方法でお試しください：',
+    quickStartConfigure: 'API Key を設定',
+    quickStartLocal: 'ローカル認識を使う（Key 不要）',
+    quickStartTest: 'マイク録音を試す',
+    quickStartDismiss: '閉じる',
   },
   history: {
     kicker: 'HISTORY',

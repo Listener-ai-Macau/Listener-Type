@@ -147,6 +147,12 @@ export const ko: typeof zhCN = {
     recentLoadFailed: '최근 인식 기록을 불러올 수 없습니다. 다시 시도해 주세요.',
     historyRetry: '다시 시도',
     weekDays: ['일', '월', '화', '수', '목', '금', '토'],
+    quickStartTitle: '빠른 시작',
+    quickStartDesc: '아직 프로바이더가 설정되지 않았습니다. 시작할 방법을 선택하세요:',
+    quickStartConfigure: 'API Key 설정',
+    quickStartLocal: '로컬 인식 사용 (Key 불필요)',
+    quickStartTest: '마이크 녹음 시도',
+    quickStartDismiss: '닫기',
   },
   history: {
     kicker: 'HISTORY',

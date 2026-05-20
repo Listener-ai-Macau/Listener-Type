@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
 import { formatComboLabel } from '../lib/hotkey';
-import { getCredentials, listHistory } from '../lib/ipc';
+import { getCredentials, listHistory, setActiveAsrProvider, startDictation } from '../lib/ipc';
 import type { CredentialsStatus, DictationSession, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
@@ -21,6 +21,7 @@ function useModeLabels(): Record<PolishMode, string> {
 
 interface OverviewProps {
   onOpenHistory?: () => void;
+  onOpenProvidersSettings?: () => void;
 }
 
 const ASR_NAME_KEY_BY_ID: Record<string, string> = {
@@ -48,7 +49,7 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-export function Overview({ onOpenHistory }: OverviewProps) {
+export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewProps) {
   const { t } = useTranslation();
   const modeLabel = useModeLabels();
   const [history, setHistory] = useState<DictationSession[]>([]);
@@ -142,6 +143,23 @@ export function Overview({ onOpenHistory }: OverviewProps) {
           status={credsError ? 'error' : creds.llmConfigured ? 'configured' : 'notConfigured'}
         />
       </div>
+
+      {/* Quick start guidance when providers aren't configured */}
+      {(!creds.asrConfigured || !creds.llmConfigured) && (
+        <QuickStartCard
+          asrConfigured={creds.asrConfigured}
+          llmConfigured={creds.llmConfigured}
+          onConfigure={onOpenProvidersSettings}
+          onUseLocal={async () => {
+            try {
+              await setActiveAsrProvider('foundry-local-whisper');
+              const status = await getCredentials();
+              setCreds(status);
+            } catch { /* ignore */ }
+          }}
+          onTestRecord={() => { startDictation().catch(() => {}); }}
+        />
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18 }}>
         <Metric icon="hash" label={t('overview.metricChars')} value={historyError ? '—' : metrics.charsToday.toLocaleString()} trend={historyError ? t('overview.historyLoadError') : t('overview.metricSegments', { count: metrics.segmentsToday })} />
@@ -341,4 +359,48 @@ function weekDayLabels(names: string[]): string[] {
     out.push(names[(today - i + 7) % 7]);
   }
   return out;
+}
+
+interface QuickStartCardProps {
+  asrConfigured: boolean;
+  llmConfigured: boolean;
+  onConfigure?: () => void;
+  onUseLocal?: () => void;
+  onTestRecord?: () => void;
+}
+
+function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onUseLocal, onTestRecord }: QuickStartCardProps) {
+  const { t } = useTranslation();
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+  return (
+    <Card padding={0} style={{ marginBottom: 18, overflow: 'hidden' }}>
+      <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '0.5px solid var(--ol-line)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--ol-blue-soft)', color: 'var(--ol-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="sparkle" size={14} />
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ol-ink)' }}>{t('overview.quickStartTitle')}</span>
+        </div>
+        <Btn size="sm" variant="ghost" onClick={() => setDismissed(true)}>{t('overview.quickStartDismiss')}</Btn>
+      </div>
+      <div style={{ padding: '12px 18px 16px' }}>
+        <div style={{ fontSize: 12, color: 'var(--ol-ink-3)', marginBottom: 12, lineHeight: 1.5 }}>
+          {t('overview.quickStartDesc')}
+          {!asrConfigured && !llmConfigured ? '' : !asrConfigured ? ` ASR ${t('overview.statusNotConfigured')}。` : ` LLM ${t('overview.statusNotConfigured')}。`}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {onConfigure && (
+            <Btn size="sm" variant="blue" icon="settings" onClick={onConfigure}>{t('overview.quickStartConfigure')}</Btn>
+          )}
+          {!asrConfigured && onUseLocal && (
+            <Btn size="sm" variant="ghost" icon="bolt" onClick={onUseLocal}>{t('overview.quickStartLocal')}</Btn>
+          )}
+          {onTestRecord && (
+            <Btn size="sm" variant="ghost" icon="mic" onClick={onTestRecord}>{t('overview.quickStartTest')}</Btn>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
 }

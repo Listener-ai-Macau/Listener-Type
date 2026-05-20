@@ -174,6 +174,12 @@ export const zhTW: typeof zhCN = {
     recentLoadFailed: '無法讀取最近識別，請重試。',
     historyRetry: '重試',
     weekDays: ['日', '一', '二', '三', '四', '五', '六'],
+    quickStartTitle: '快速開始',
+    quickStartDesc: '還沒有配置服務提供商。選擇一個方式開始使用：',
+    quickStartConfigure: '配置 API Key',
+    quickStartLocal: '使用本地識別（無需 Key）',
+    quickStartTest: '用麥克風試錄',
+    quickStartDismiss: '關閉',
   },
   history: {
     kicker: 'HISTORY',

@@ -318,7 +318,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
               }}
             >
               {displayTab === 'overview' ? (
-                <Overview onOpenHistory={() => setCurrentTab('history')} />
+                <Overview onOpenHistory={() => setCurrentTab('history')} onOpenProvidersSettings={() => { setSettingsOpen(true); }} />
               ) : (
                 <Page />
               )}

@@ -161,13 +161,16 @@ interface PillProps {
   stopAcknowledged?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  onDismiss: () => void;
+  onRetry: () => void;
 }
 
-function Pill({ os, state, level, insertedChars, message, stopAcknowledged = false, onCancel, onConfirm }: PillProps) {
+function Pill({ os, state, level, insertedChars, message, stopAcknowledged = false, onCancel, onConfirm, onDismiss, onRetry }: PillProps) {
   const { t } = useTranslation();
   const metrics = getCapsulePillMetrics(os);
   const processingLayout = getCapsuleMessageLayout(os, 'processing');
   const enabled = state === 'recording';
+  const errorActive = state === 'error';
   const showStopAck = state === 'transcribing' && stopAcknowledged;
 
   // "thinking" 扫光速度：进入 transcribing/polishing 的头 2 秒走快速（0.9s/cycle，提示
@@ -296,11 +299,11 @@ function Pill({ os, state, level, insertedChars, message, stopAcknowledged = fal
         willChange: 'transform, box-shadow',
       }}
     >
-      <CircleButton variant="cancel" enabled={enabled} onClick={onCancel} />
+      <CircleButton variant="cancel" enabled={enabled || errorActive} onClick={errorActive ? onDismiss : onCancel} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {center}
       </div>
-      <CircleButton variant="confirm" enabled={enabled} onClick={onConfirm} />
+      <CircleButton variant="confirm" enabled={enabled || errorActive} onClick={errorActive ? onRetry : onConfirm} />
     </div>
   );
 }
@@ -412,6 +415,17 @@ export function Capsule() {
     void invokeOrMock<void>('stop_dictation', undefined, () => undefined);
   };
 
+  const onDismiss = () => {
+    setState('idle');
+    setMessage(undefined);
+  };
+
+  const onRetry = () => {
+    setState('idle');
+    setMessage(undefined);
+    void invokeOrMock<void>('start_dictation', undefined, () => undefined);
+  };
+
   // 真正卸载：state 已是 idle，且不在离场动画中。
   if (state === 'idle' && !leaving) {
     return <div style={{ width: 0, height: 0 }} />;
@@ -504,6 +518,8 @@ export function Capsule() {
         stopAcknowledged={!leaving && renderedState === 'transcribing' && stopAcknowledged}
         onCancel={onCancel}
         onConfirm={onConfirm}
+        onDismiss={onDismiss}
+        onRetry={onRetry}
       />
       <style>{`
         /* 入场：从中央很窄的一小条（scaleX 0.18）+ 略压扁（scaleY 0.95）+ 透明，

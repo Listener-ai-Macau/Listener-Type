@@ -174,6 +174,12 @@ export const en: typeof zhCN = {
     recentLoadFailed: 'Could not load recent transcripts. Please retry.',
     historyRetry: 'Retry',
     weekDays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    quickStartTitle: 'Quick start',
+    quickStartDesc: 'No providers configured yet. Choose a way to get started:',
+    quickStartConfigure: 'Configure API Key',
+    quickStartLocal: 'Use local recognition (no key needed)',
+    quickStartTest: 'Try microphone recording',
+    quickStartDismiss: 'Dismiss',
   },
   history: {
     kicker: 'HISTORY',
