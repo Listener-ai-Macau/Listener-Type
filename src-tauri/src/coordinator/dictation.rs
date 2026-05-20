@@ -47,6 +47,30 @@ fn embedded_audio_stop_feedback_latched(inner: &Arc<Inner>) -> bool {
         .load(Ordering::SeqCst)
 }
 
+fn register_embedded_ble_cancel_flag(inner: &Arc<Inner>, flag: &Arc<AtomicBool>) {
+    *inner.embedded_ble_cancel_flag.lock() = Some(Arc::clone(flag));
+}
+
+fn clear_embedded_ble_cancel_flag(inner: &Arc<Inner>, flag: &Arc<AtomicBool>) {
+    let mut slot = inner.embedded_ble_cancel_flag.lock();
+    if slot
+        .as_ref()
+        .is_some_and(|current| Arc::ptr_eq(current, flag))
+    {
+        *slot = None;
+    }
+}
+
+fn request_embedded_ble_capture_cancel(inner: &Arc<Inner>) -> bool {
+    let flag = inner.embedded_ble_cancel_flag.lock().clone();
+    if let Some(flag) = flag {
+        flag.store(true, Ordering::SeqCst);
+        true
+    } else {
+        false
+    }
+}
+
 fn current_embedded_audio_partial_preview(inner: &Arc<Inner>) -> Option<String> {
     inner.embedded_audio_partial_preview.lock().clone()
 }
@@ -1341,6 +1365,7 @@ async fn submit_embedded_audio_ble_stream_impl(
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    register_embedded_ble_cancel_flag(inner, &cancel_capture);
     let cancel_capture_for_task = Arc::clone(&cancel_capture);
     let capture_task = tauri::async_runtime::spawn_blocking(move || {
         crate::embedded_ble::capture_notification_events_until_cancelled(
@@ -1364,6 +1389,7 @@ async fn submit_embedded_audio_ble_stream_impl(
             Err(err) => {
                 streaming.abort_active_session(inner, &err);
                 cancel_capture.store(true, Ordering::SeqCst);
+                clear_embedded_ble_cancel_flag(inner, &cancel_capture);
                 return Err(err);
             }
         }
@@ -1374,6 +1400,14 @@ async fn submit_embedded_audio_ble_stream_impl(
         .await
         .map_err(|err| format!("嵌入式 BLE 流式抓音任务失败: {err}"))
         .and_then(|result| result);
+    clear_embedded_ble_cancel_flag(inner, &cancel_capture);
+    let cancelled_by_caller = !streaming.terminal_received
+        && (streaming.session.is_some() || streaming.embedded_session_id.is_some())
+        && inner.state.lock().cancelled;
+    if capture_result.is_ok() && cancelled_by_caller {
+        log::info!("[embedded-ble] streaming capture stopped after dictation cancel");
+        return Ok(streaming.into_cancelled_submission_result());
+    }
     if let Err(err) = capture_result {
         if !streaming.terminal_received {
             let message = format!("嵌入式 BLE 流式抓音中断: {err}");
@@ -1664,6 +1698,18 @@ impl EmbeddedStreamingDictation {
             reconstructed_pcm_bytes: stats.reconstructed_pcm_bytes,
             stats,
         })
+    }
+
+    fn into_cancelled_submission_result(
+        self,
+    ) -> crate::embedded_audio::EmbeddedAudioSubmissionResult {
+        let collector = self.collector.into_inner();
+        let mut stats = collector.stats();
+        stats.end_reason = Some(crate::embedded_audio::SessionEndReason::Cancel);
+        crate::embedded_audio::EmbeddedAudioSubmissionResult {
+            reconstructed_pcm_bytes: stats.reconstructed_pcm_bytes,
+            stats,
+        }
     }
 }
 
@@ -2782,6 +2828,9 @@ pub(super) fn cancel_session(inner: &Arc<Inner>) {
     stop_recorder_for_session(inner, decision.session_id);
     cancel_asr_for_session(inner, decision.session_id);
     restore_prepared_windows_ime_session(inner, decision.session_id);
+    if request_embedded_ble_capture_cancel(inner) {
+        log::info!("[coord] embedded BLE capture cancel requested");
+    }
     // Processing 阶段保持 phase=Processing 让 end_session 自己走完检查 + 收尾；
     // 其他阶段直接转 Idle。
     if decision.phase != SessionPhase::Processing {
@@ -2807,13 +2856,18 @@ fn append_typed_prefix(target: &mut String, delta: &str, typed_chars: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        append_typed_prefix, default_done_message, dictation_error_code, embedded_pcm_rms_and_peak,
-        finalize_polished_text, normalize_embedded_pcm_for_asr,
-        prepare_embedded_streaming_pcm_for_asr, streaming_insert_eligible, wayland_done_message,
-        EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
-        EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
+        append_typed_prefix, cancel_session, clear_embedded_ble_cancel_flag, default_done_message,
+        dictation_error_code, embedded_pcm_rms_and_peak, finalize_polished_text,
+        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
+        register_embedded_ble_cancel_flag, streaming_insert_eligible, wayland_done_message,
+        EmbeddedStreamingDictation, EMBEDDED_AUDIO_ASR_PREROLL_BYTES,
+        EMBEDDED_AUDIO_ASR_PREROLL_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
+    use crate::coordinator::Coordinator;
+    use crate::coordinator_state::SessionPhase;
     use crate::types::{ChineseScriptPreference, CorrectionRule, InsertStatus, PolishMode};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     fn correction_rule(pattern: &str, replacement: &str) -> CorrectionRule {
         CorrectionRule {
@@ -2830,6 +2884,56 @@ mod tests {
             .iter()
             .flat_map(|sample| sample.to_le_bytes())
             .collect()
+    }
+
+    #[test]
+    fn cancel_session_requests_registered_embedded_ble_capture_cancel() {
+        let coordinator = Coordinator::new();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        register_embedded_ble_cancel_flag(&coordinator.inner, &cancel_flag);
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+
+        cancel_session(&coordinator.inner);
+
+        assert!(cancel_flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn embedded_ble_cancel_registration_only_clears_matching_flag() {
+        let coordinator = Coordinator::new();
+        let first = Arc::new(AtomicBool::new(false));
+        let second = Arc::new(AtomicBool::new(false));
+
+        register_embedded_ble_cancel_flag(&coordinator.inner, &first);
+        register_embedded_ble_cancel_flag(&coordinator.inner, &second);
+        clear_embedded_ble_cancel_flag(&coordinator.inner, &first);
+        assert!(Arc::ptr_eq(
+            coordinator
+                .inner
+                .embedded_ble_cancel_flag
+                .lock()
+                .as_ref()
+                .expect("second flag remains registered"),
+            &second
+        ));
+
+        clear_embedded_ble_cancel_flag(&coordinator.inner, &second);
+        assert!(coordinator.inner.embedded_ble_cancel_flag.lock().is_none());
+    }
+
+    #[test]
+    fn caller_cancelled_embedded_ble_stream_returns_cancel_result() {
+        let result = EmbeddedStreamingDictation::default().into_cancelled_submission_result();
+
+        assert_eq!(
+            result.stats.end_reason,
+            Some(crate::embedded_audio::SessionEndReason::Cancel)
+        );
+        assert_eq!(result.reconstructed_pcm_bytes, 0);
     }
 
     #[test]
