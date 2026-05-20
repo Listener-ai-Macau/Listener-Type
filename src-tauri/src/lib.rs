@@ -389,6 +389,7 @@ pub fn run() {
             commands::foundry_local_asr_cancel_prepare,
             commands::foundry_local_asr_release,
             commands::export_error_log,
+            commands::export_diagnostic_package,
             restart_app,
         ])
         .build(tauri::generate_context!())

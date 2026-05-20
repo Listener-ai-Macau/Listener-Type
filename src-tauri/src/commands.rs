@@ -2409,6 +2409,463 @@ pub fn export_error_log(target_path: String) -> Result<(), String> {
         .map_err(|e| format!("复制日志失败：{}", e))
 }
 
+/// Export the minimal first-start/OOBE diagnostic package used by the Windows installer path.
+///
+/// The package is intentionally metadata-only: it excludes audio bytes, raw transcripts,
+/// final inserted text and credential values. Credentials are represented only as
+/// configured/unconfigured booleans.
+#[tauri::command]
+pub fn export_diagnostic_package(
+    coord: CoordinatorState<'_>,
+    target_path: String,
+) -> Result<(), String> {
+    let package = build_diagnostic_package(coord.inner())?;
+    let bytes = serde_json::to_vec_pretty(&package).map_err(|e| format!("生成诊断包失败：{e}"))?;
+    let target = std::path::Path::new(&target_path);
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败：{e}"))?;
+        }
+    }
+    std::fs::write(target, bytes).map_err(|e| format!("写入诊断包失败：{e}"))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticPackage {
+    schema_version: u32,
+    generated_at: String,
+    app: DiagnosticApp,
+    platform: DiagnosticPlatform,
+    firmware: DiagnosticFirmware,
+    ble: DiagnosticBle,
+    config: DiagnosticConfig,
+    credentials: DiagnosticCredentials,
+    recent_errors: Vec<String>,
+    timeline: Vec<String>,
+    recent_sessions: Vec<DiagnosticRecentSession>,
+    privacy: DiagnosticPrivacy,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticApp {
+    product_name: &'static str,
+    identifier: &'static str,
+    version: &'static str,
+    log_path: String,
+    executable_path: Option<String>,
+    windows_ime_status: WindowsImeStatus,
+    hotkey_status: HotkeyStatus,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticPlatform {
+    os: &'static str,
+    family: &'static str,
+    arch: &'static str,
+    debug_build: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticFirmware {
+    device_model: &'static str,
+    version: Option<String>,
+    protocol: &'static str,
+    protocol_version: Option<u32>,
+    readiness: Option<Value>,
+    source: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticBle {
+    input_source: Value,
+    enabled_by_input_source: bool,
+    background_listener_disabled_by_env: bool,
+    service_uuid: &'static str,
+    recent_embedded_session_count: usize,
+    latest_session_id: Option<String>,
+    last_error_code: Option<String>,
+    last_embedded_audio_end_reason: Option<Value>,
+    last_embedded_audio_stats: Option<crate::embedded_audio::SessionStats>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticConfig {
+    dictation_input_source: Value,
+    active_asr_provider: String,
+    active_llm_provider: String,
+    asr_configured: bool,
+    llm_configured: bool,
+    default_mode: Value,
+    active_style_pack_id: String,
+    enabled_modes: Value,
+    show_capsule: bool,
+    start_minimized: bool,
+    launch_at_login: bool,
+    auto_update_check: bool,
+    update_channel: Value,
+    history_retention_days: u32,
+    history_max_entries: Option<u32>,
+    record_audio_for_debug: bool,
+    audio_recording_max_entries: Option<u32>,
+    local_asr_active_model: String,
+    local_asr_keep_loaded_secs: u32,
+    foundry_local_asr_model: String,
+    foundry_local_runtime_source: String,
+    foundry_local_asr_language_hint_configured: bool,
+    foundry_local_asr_keep_loaded_secs: u32,
+    microphone_device_configured: bool,
+    marketplace_backend_configured: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticCredentials {
+    active_asr_provider: String,
+    active_llm_provider: String,
+    asr_configured: bool,
+    llm_configured: bool,
+    volcengine_configured: bool,
+    asr_api_key_configured: bool,
+    asr_endpoint_configured: bool,
+    asr_model_configured: bool,
+    llm_api_key_configured: bool,
+    llm_endpoint_configured: bool,
+    llm_model_configured: bool,
+    codex_oauth_configured: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticRecentSession {
+    id: String,
+    created_at: String,
+    mode: Value,
+    insert_status: Value,
+    error_code: Option<String>,
+    duration_ms: Option<u64>,
+    dictionary_entry_count: Option<u32>,
+    has_audio_recording: Option<bool>,
+    embedded_audio_stats: Option<crate::embedded_audio::SessionStats>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticPrivacy {
+    excludes_audio_contents: bool,
+    excludes_audio_recordings: bool,
+    excludes_raw_transcripts: bool,
+    excludes_final_text: bool,
+    excludes_api_key_values: bool,
+    credential_values_exported: bool,
+    notes: Vec<&'static str>,
+}
+
+fn build_diagnostic_package(coord: &Arc<Coordinator>) -> Result<DiagnosticPackage, String> {
+    let prefs = coord.prefs().get();
+    let snap = CredentialsVault::snapshot();
+    let active_asr_provider = CredentialsVault::get_active_asr();
+    let active_llm_provider = CredentialsVault::get_active_llm();
+    let asr_configured = asr_configured_for_provider(&active_asr_provider, &snap);
+    let llm_configured = llm_configured_for_provider(&active_llm_provider, &snap);
+    let history = coord.history().list().map_err(|e| e.to_string())?;
+    let recent_sessions: Vec<DiagnosticRecentSession> = history
+        .iter()
+        .take(8)
+        .map(diagnostic_recent_session)
+        .collect();
+    let embedded_sessions: Vec<&DiagnosticRecentSession> = recent_sessions
+        .iter()
+        .filter(|session| session.embedded_audio_stats.is_some())
+        .collect();
+    let latest_embedded = embedded_sessions.first().copied();
+    let log_lines = read_diagnostic_log_tail(600);
+    let timeline = diagnostic_timeline(&log_lines, 80);
+    let recent_errors = diagnostic_recent_errors(&log_lines, 40);
+
+    Ok(DiagnosticPackage {
+        schema_version: 1,
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        app: DiagnosticApp {
+            product_name: "Listener Type",
+            identifier: "com.listener.type",
+            version: env!("CARGO_PKG_VERSION"),
+            log_path: crate::log_dir_path()
+                .join("listener-type.log")
+                .display()
+                .to_string(),
+            executable_path: std::env::current_exe()
+                .ok()
+                .map(|path| path.display().to_string()),
+            windows_ime_status: crate::windows_ime_profile::get_windows_ime_status(),
+            hotkey_status: coord.hotkey_status(),
+        },
+        platform: DiagnosticPlatform {
+            os: std::env::consts::OS,
+            family: std::env::consts::FAMILY,
+            arch: std::env::consts::ARCH,
+            debug_build: cfg!(debug_assertions),
+        },
+        firmware: DiagnosticFirmware {
+            device_model: "VKA1",
+            version: None,
+            protocol: "VKA1 BLE audio",
+            protocol_version: Some(1),
+            readiness: None,
+            source: "Desktop exporter has no firmware DIS/readiness query yet; 3.2 adds factory firmware identity and 4.2 expands BLE diagnostics.",
+        },
+        ble: DiagnosticBle {
+            input_source: diagnostic_value(&prefs.dictation_input_source),
+            enabled_by_input_source: matches!(
+                prefs.dictation_input_source,
+                crate::types::DictationInputSource::EmbeddedBle
+            ),
+            background_listener_disabled_by_env: std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
+                .ok()
+                .is_some_and(|value| value == "1"),
+            service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
+            recent_embedded_session_count: embedded_sessions.len(),
+            latest_session_id: latest_embedded.map(|session| session.id.clone()),
+            last_error_code: recent_sessions
+                .iter()
+                .find_map(|session| session.error_code.clone()),
+            last_embedded_audio_end_reason: latest_embedded
+                .and_then(|session| session.embedded_audio_stats.as_ref())
+                .and_then(|stats| stats.end_reason.as_ref())
+                .map(diagnostic_value),
+            last_embedded_audio_stats: latest_embedded
+                .and_then(|session| session.embedded_audio_stats.clone()),
+        },
+        config: DiagnosticConfig {
+            dictation_input_source: diagnostic_value(&prefs.dictation_input_source),
+            active_asr_provider: prefs.active_asr_provider.clone(),
+            active_llm_provider: prefs.active_llm_provider.clone(),
+            asr_configured,
+            llm_configured,
+            default_mode: diagnostic_value(&prefs.default_mode),
+            active_style_pack_id: prefs.active_style_pack_id.clone(),
+            enabled_modes: diagnostic_value(&prefs.enabled_modes),
+            show_capsule: prefs.show_capsule,
+            start_minimized: prefs.start_minimized,
+            launch_at_login: prefs.launch_at_login,
+            auto_update_check: prefs.auto_update_check,
+            update_channel: diagnostic_value(&prefs.update_channel),
+            history_retention_days: prefs.history_retention_days,
+            history_max_entries: prefs.history_max_entries,
+            record_audio_for_debug: prefs.record_audio_for_debug,
+            audio_recording_max_entries: prefs.audio_recording_max_entries,
+            local_asr_active_model: prefs.local_asr_active_model.clone(),
+            local_asr_keep_loaded_secs: prefs.local_asr_keep_loaded_secs,
+            foundry_local_asr_model: prefs.foundry_local_asr_model.clone(),
+            foundry_local_runtime_source: prefs.foundry_local_runtime_source.clone(),
+            foundry_local_asr_language_hint_configured: !prefs
+                .foundry_local_asr_language_hint
+                .trim()
+                .is_empty(),
+            foundry_local_asr_keep_loaded_secs: prefs.foundry_local_asr_keep_loaded_secs,
+            microphone_device_configured: !prefs.microphone_device_name.trim().is_empty(),
+            marketplace_backend_configured: !prefs.marketplace_base_url.trim().is_empty(),
+        },
+        credentials: DiagnosticCredentials {
+            active_asr_provider: active_asr_provider.clone(),
+            active_llm_provider: active_llm_provider.clone(),
+            asr_configured,
+            llm_configured,
+            volcengine_configured: volcengine_configured(&snap),
+            asr_api_key_configured: configured(&snap.asr_api_key),
+            asr_endpoint_configured: configured(&snap.asr_endpoint),
+            asr_model_configured: configured(&snap.asr_model),
+            llm_api_key_configured: configured(&snap.ark_api_key),
+            llm_endpoint_configured: configured(&snap.ark_endpoint),
+            llm_model_configured: configured(&snap.ark_model_id),
+            codex_oauth_configured: CodexOAuthCredentials::load_default().is_ok(),
+        },
+        recent_errors,
+        timeline,
+        recent_sessions,
+        privacy: DiagnosticPrivacy {
+            excludes_audio_contents: true,
+            excludes_audio_recordings: true,
+            excludes_raw_transcripts: true,
+            excludes_final_text: true,
+            excludes_api_key_values: true,
+            credential_values_exported: false,
+            notes: vec![
+                "History rawTranscript/finalText fields are not exported.",
+                "WAV/audio recording files are not exported.",
+                "Credential values, API keys, access tokens and OAuth tokens are not exported.",
+            ],
+        },
+    })
+}
+
+fn diagnostic_recent_session(session: &DictationSession) -> DiagnosticRecentSession {
+    DiagnosticRecentSession {
+        id: session.id.clone(),
+        created_at: session.created_at.clone(),
+        mode: diagnostic_value(&session.mode),
+        insert_status: diagnostic_value(&session.insert_status),
+        error_code: session.error_code.clone(),
+        duration_ms: session.duration_ms,
+        dictionary_entry_count: session.dictionary_entry_count,
+        has_audio_recording: session.has_audio_recording,
+        embedded_audio_stats: session.embedded_audio_stats.clone(),
+    }
+}
+
+fn diagnostic_value<T: Serialize>(value: &T) -> Value {
+    serde_json::to_value(value).unwrap_or(Value::Null)
+}
+
+fn read_diagnostic_log_tail(max_lines: usize) -> Vec<String> {
+    let path = crate::log_dir_path().join("listener-type.log");
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut lines: Vec<String> = content
+        .lines()
+        .rev()
+        .take(max_lines)
+        .map(|line| line.to_string())
+        .collect();
+    lines.reverse();
+    lines
+}
+
+fn diagnostic_timeline(lines: &[String], max_lines: usize) -> Vec<String> {
+    let mut selected: Vec<String> = lines
+        .iter()
+        .filter(|line| is_diagnostic_timeline_line(line))
+        .filter_map(|line| sanitize_diagnostic_log_line(line))
+        .collect();
+    if selected.len() > max_lines {
+        selected = selected.split_off(selected.len() - max_lines);
+    }
+    selected
+}
+
+fn diagnostic_recent_errors(lines: &[String], max_lines: usize) -> Vec<String> {
+    let mut selected: Vec<String> = lines
+        .iter()
+        .filter(|line| is_diagnostic_error_line(line))
+        .filter_map(|line| sanitize_diagnostic_log_line(line))
+        .collect();
+    if selected.len() > max_lines {
+        selected = selected.split_off(selected.len() - max_lines);
+    }
+    selected
+}
+
+fn is_diagnostic_timeline_line(line: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "[startup]",
+        "[embedded-ble]",
+        "[coord]",
+        "[asr]",
+        "[foundry-asr]",
+        "[local-asr]",
+        "[windows-ime]",
+        "[capsule]",
+        "[qa]",
+        "ERROR",
+        "WARN",
+    ];
+    MARKERS.iter().any(|marker| line.contains(marker))
+}
+
+fn is_diagnostic_error_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("error")
+        || lower.contains("warn")
+        || lower.contains("failed")
+        || lower.contains("timeout")
+        || lower.contains("panic")
+}
+
+fn sanitize_diagnostic_log_line(line: &str) -> Option<String> {
+    if diagnostic_line_may_contain_user_text(line) {
+        return None;
+    }
+    let redacted = redact_diagnostic_log_line(line);
+    let trimmed: String = redacted.chars().take(480).collect();
+    Some(trimmed)
+}
+
+fn diagnostic_line_may_contain_user_text(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    const TEXT_MARKERS: &[&str] = &[
+        "rawtranscript",
+        "raw_transcript",
+        "raw transcript",
+        "finaltext",
+        "final_text",
+        "final text",
+        "transcript=",
+        "transcript:",
+    ];
+    TEXT_MARKERS.iter().any(|marker| lower.contains(marker))
+}
+
+fn redact_diagnostic_log_line(line: &str) -> String {
+    let mut redact_next = false;
+    line.split_whitespace()
+        .map(|token| {
+            if redact_next {
+                redact_next = false;
+                return "[redacted]".to_string();
+            }
+            let lower = token.to_ascii_lowercase();
+            if lower == "bearer" || lower == "authorization:" || lower == "authorization" {
+                redact_next = true;
+                return "[redacted]".to_string();
+            }
+            if diagnostic_token_contains_secret(&lower) {
+                if !(token.contains('=') || token.contains(':')) {
+                    redact_next = true;
+                }
+                return "[redacted]".to_string();
+            }
+            if looks_like_secret_token(token) {
+                return "[redacted]".to_string();
+            }
+            token.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn diagnostic_token_contains_secret(lower: &str) -> bool {
+    const SECRET_MARKERS: &[&str] = &[
+        "api_key",
+        "apikey",
+        "x-goog-api-key",
+        "access_key",
+        "accesskey",
+        "secret_key",
+        "secretkey",
+        "access_token",
+        "accesstoken",
+        "refresh_token",
+        "refreshtoken",
+    ];
+    SECRET_MARKERS.iter().any(|marker| lower.contains(marker))
+}
+
+fn looks_like_secret_token(token: &str) -> bool {
+    token.starts_with("sk-")
+        || token.starts_with("eyJ")
+        || token.starts_with("ya29.")
+        || token.len() > 72
+            && token
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || "-_.".contains(ch))
+}
+
 // ─────────────────────────── unused but exported (silences dead_code) ───────────────────────────
 
 #[allow(dead_code)]
@@ -2986,17 +3443,19 @@ mod tests {
     use super::release_foundry_runtime_if_inactive;
     use super::{
         active_asr_is_keyless_for_validation, active_foundry_model_from_prefs,
-        asr_configured_for_provider, asr_transcriptions_url, fetch_provider_models,
-        is_gemini_base_url, is_valid_local_pack_id, is_valid_session_id,
-        llm_configured_for_provider, local_asr_release_plan_for_provider, models_url,
-        normalize_foundry_language_hint, parse_gemini_model_ids, parse_latest_beta_from_atom,
-        parse_model_ids, persist_settings, validate_foundry_model_alias, ProviderConfig,
-        SettingsWriter,
+        asr_configured_for_provider, asr_transcriptions_url, diagnostic_recent_errors,
+        fetch_provider_models, is_diagnostic_error_line, is_gemini_base_url,
+        is_valid_local_pack_id, is_valid_session_id, llm_configured_for_provider,
+        local_asr_release_plan_for_provider, models_url, normalize_foundry_language_hint,
+        parse_gemini_model_ids, parse_latest_beta_from_atom, parse_model_ids, persist_settings,
+        sanitize_diagnostic_log_line, validate_foundry_model_alias, ProviderConfig, SettingsWriter,
     };
+    use crate::embedded_audio::{SessionEndReason, SessionErrorCode, SessionStats};
     use crate::persistence::CredentialsSnapshot;
     use crate::polish::ProviderProxyConfig;
     use crate::types::{
-        ComboBinding, HotkeyBinding, HotkeyMode, HotkeyTrigger, ShortcutBinding, UserPreferences,
+        ComboBinding, DictationSession, HotkeyBinding, HotkeyMode, HotkeyTrigger, InsertStatus,
+        PolishMode, ShortcutBinding, UserPreferences,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -3013,6 +3472,98 @@ mod tests {
 
     fn snapshot() -> CredentialsSnapshot {
         CredentialsSnapshot::default()
+    }
+
+    #[test]
+    fn diagnostic_redaction_masks_common_secret_tokens() {
+        let line = "Authorization: Bearer sk-test api_key=abc access_token=def ok";
+        let redacted = sanitize_diagnostic_log_line(line).expect("line retained");
+
+        assert!(!redacted.contains("sk-test"));
+        assert!(!redacted.contains("api_key=abc"));
+        assert!(!redacted.contains("access_token=def"));
+        assert!(redacted.contains("[redacted] [redacted]"));
+        assert!(redacted.ends_with("ok"));
+    }
+
+    #[test]
+    fn diagnostic_recent_errors_filters_tail_without_transcript_fields() {
+        let lines = vec![
+            "INFO startup ok".to_string(),
+            "WARN BLE timed out".to_string(),
+            "INFO rawTranscript should not be selected by keyword alone".to_string(),
+            "ERROR polish failed".to_string(),
+        ];
+
+        let errors = diagnostic_recent_errors(&lines, 10);
+
+        assert_eq!(
+            errors,
+            vec![
+                "WARN BLE timed out".to_string(),
+                "ERROR polish failed".to_string()
+            ]
+        );
+        assert!(is_diagnostic_error_line("BLE notify timeout"));
+    }
+
+    #[test]
+    fn diagnostic_recent_session_excludes_transcript_text_but_keeps_stats() {
+        let stats = SessionStats {
+            session_id: Some(7),
+            explicit_start_received: true,
+            start_inferred_from_audio: false,
+            terminal_received: true,
+            end_reason: Some(SessionEndReason::Error(SessionErrorCode::QueueFull)),
+            expected_packet_count: Some(4),
+            received_packet_count: 3,
+            missing_packet_count: 1,
+            missing_packet_indices: vec![2],
+            received_pcm_bytes: 1440,
+            reconstructed_pcm_bytes: 1920,
+            silence_filled_bytes: 480,
+            duplicate_packet_count: 0,
+            replaced_packet_count: 0,
+            ignored_foreign_packet_count: 0,
+            duration_seconds: 0.06,
+        };
+        let session = DictationSession {
+            id: "session-1".into(),
+            created_at: "2026-05-20T12:00:00Z".into(),
+            raw_transcript: "do not export raw".into(),
+            final_text: "do not export final".into(),
+            mode: PolishMode::Light,
+            app_bundle_id: Some("secret.app".into()),
+            app_name: Some("Secret App".into()),
+            insert_status: InsertStatus::Failed,
+            error_code: Some("bleTimeout".into()),
+            duration_ms: Some(60),
+            dictionary_entry_count: Some(2),
+            has_audio_recording: Some(true),
+            embedded_audio_stats: Some(stats),
+        };
+
+        let diagnostic = super::diagnostic_recent_session(&session);
+        let value = serde_json::to_value(&diagnostic).expect("serialize diagnostic session");
+
+        assert_eq!(diagnostic.id, "session-1");
+        assert_eq!(
+            diagnostic
+                .embedded_audio_stats
+                .as_ref()
+                .and_then(|stats| stats.session_id),
+            Some(7)
+        );
+        assert_eq!(
+            diagnostic
+                .embedded_audio_stats
+                .as_ref()
+                .map(|stats| stats.missing_packet_count),
+            Some(1)
+        );
+        assert!(value.get("rawTranscript").is_none());
+        assert!(value.get("finalText").is_none());
+        assert!(!value.to_string().contains("do not export"));
     }
 
     #[test]

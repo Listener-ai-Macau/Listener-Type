@@ -1054,6 +1054,20 @@ export async function exportErrorLog(suggestedFileName: string): Promise<string 
   return target;
 }
 
+export async function exportDiagnosticPackage(suggestedFileName: string): Promise<string | null> {
+  if (!isTauri) {
+    return `~/Downloads/${suggestedFileName}`;
+  }
+  const { save } = await import('@tauri-apps/plugin-dialog');
+  const target = await save({
+    defaultPath: suggestedFileName,
+    filters: [{ name: 'Diagnostic package', extensions: ['json'] }],
+  });
+  if (!target) return null;
+  await invokeOrMock<void>('export_diagnostic_package', { targetPath: target }, () => undefined);
+  return target;
+}
+
 export { isTauri };
 
 // ── Marketplace (Phase A) ─────────────────────────────────────────────
