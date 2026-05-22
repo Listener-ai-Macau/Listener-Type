@@ -18,7 +18,20 @@ xattr -cr "/Applications/Listener Type.app"
 2. Run the installer. The production installer is per-machine so Windows may ask for administrator approval.
 3. Launch Listener Type from the Start menu.
 4. On first launch, grant microphone/hotkey permissions, then follow the Listener BLE pairing prompt. Use **Start pairing** to switch into the OOBE pairing flow; you should not need Node.js, Rust, ESP-IDF, a serial port, or UUID entry.
-5. If first launch or pairing fails, open **Settings -> About -> Export diagnostic package** and save the JSON file. The package includes app version, BLE/config status, recent errors and a timeline; it does not include audio recordings, transcripts, or API keys.
+5. If pairing gets stuck, open **Settings -> About -> Device recovery**. Listener Type stops the current recording/BLE session and opens Windows Bluetooth; remove `listener`, then return to Recording -> Listener BLE and pair again.
+6. If first launch or pairing still fails, open **Settings -> About -> Export diagnostic package** and save the JSON file. The package includes app version, BLE/config status, recent errors and a timeline; it does not include audio recordings, transcripts, or API keys.
+
+## Status Language
+
+Listener Type uses five user-facing states during the Voice Keyboard OOBE:
+
+| State | Meaning | User action |
+|---|---|---|
+| Ready | Device and desktop app are ready | Press the EC11 knob to record |
+| Recording | The device is listening | Press the EC11 knob again when done |
+| Transferring | Audio is being sent to the desktop | Wait for text |
+| Error | Connection, subscription, recording, or transcription failed | Retry or export diagnostics |
+| Recovery | Reconnect or re-pair is needed | Remove `listener` in Windows Bluetooth and pair again |
 
 The Windows installer bundles `ListenerTypeIme.dll` for x64 and x86 and registers the TSF profile used by the insertion bridge.
 

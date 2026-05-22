@@ -59,7 +59,27 @@ KEY1-KEY4 不触发语音录音。语音录音键是 EC11 旋钮的按压动作�
 | 软件卡住 | 退出 Listener Type 后重新启动 |
 | 仍无法恢复 | 设置 -> 关于 -> 导出诊断包，并附上安装包哈希和复现步骤 |
 
-当前内部测试恢复路径只覆盖桌面端/Windows 侧忘记配对和重新配对；不要把它描述成已实现的设备端硬件恢复出厂。
+桌面端无工具恢复路径：
+
+1. 打开 Listener Type 的设置 -> 关于 -> 设备恢复。
+2. Listener Type 停止当前录音/BLE 会话，并打开 Windows 蓝牙设置。
+3. 删除 `listener` 设备记录。
+4. 回到设置 -> 录音 -> Listener BLE，点击检查连接或重新配对。
+5. 如果仍失败，导出诊断包并记录当前状态词、安装包哈希和复现步骤。
+
+这条路径只清理 Windows/桌面端的配对和当前会话状态，不承诺已经实现设备端硬件恢复出厂。固件端长按恢复由 firmware 步骤单独验收。
+
+## 状态语言
+
+| 状态 | 用户含义 | 恢复口径 |
+|---|---|---|
+| Ready | 可以开始录音 | 按 EC11 旋钮开始 |
+| Recording | 正在听你说话 | 说完再按 EC11 旋钮停止 |
+| Transferring | 音频正在传到电脑 | 等待文字出现 |
+| Error | 当前连接、订阅、录音或转写失败 | 按提示重试，必要时导出诊断包 |
+| Recovery | 正在重连，或需要用户重新配对 | 删除 Windows 里的 `listener` 后重新配对 |
+
+用户不需要阅读串口日志来判断能不能继续；桌面端应优先显示上述状态和下一步动作。
 
 ## 隐私与安全
 
@@ -74,4 +94,4 @@ KEY1-KEY4 不触发语音录音。语音录音键是 EC11 旋钮的按压动作�
 - 下载入口：`docs/quickstart/voice-keyboard-download.md`
 - 安装说明：`docs/quickstart/installation.md`
 - 使用指南：`docs/USAGE.md`
-- 设备手册：`!docs/product/voice_keyboard_user_manual.md`
+- 设备手册：`voice-keyboard-firmware/!docs/product/voice_keyboard_user_manual.md`
