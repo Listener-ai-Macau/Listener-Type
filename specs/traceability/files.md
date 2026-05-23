@@ -10,12 +10,14 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/build-mac.sh` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-brand-residue.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-cloud-services.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-dark-mode.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-doc-inheritance.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-hotkey-injection.mjs` | Global hotkeys | Hotkey tests and manual smoke |
 | `scripts/check-hotkey-recorder.mjs` | Global hotkeys | Hotkey tests and manual smoke |
 | `scripts/check-tauri-info.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-traceability.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-window-hotkey-fallback.mjs` | Global hotkeys | Hotkey tests and manual smoke |
+| `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-build-gnu.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-capsule-lifecycle-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-capsule-watch.ps1` | Automation and audits | Node/PowerShell script tests |
@@ -125,6 +127,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/components/AutoUpdate.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/AutoUpdateGate.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/Capsule.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/ErrorBoundary.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/FloatingShell.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/Icon.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/MarketplaceModal.tsx` | React UI | TypeScript build and visual smoke |
@@ -186,6 +189,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/pages/settings/EmbeddedBleStatusPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/LanguageSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/PermissionsSection.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/settings/ProvidersSection.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/settings/RecordingSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/ShortcutsSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/shared.tsx` | React UI | TypeScript build and visual smoke |
 | `src/state/HotkeySettingsContext.tsx` | Core app | Build and targeted tests |
