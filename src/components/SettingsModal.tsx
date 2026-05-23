@@ -13,10 +13,12 @@ import { SavedToast } from './SavedToast';
 import { useSavedToastListener } from '../lib/savedEvent';
 import { readFontScale, setFontScale, type FontScaleId } from '../lib/fontScale';
 import {
+  cancelDictation,
   exportDiagnosticPackage,
   fetchLatestBetaRelease,
   getUpdateChannel,
   openExternal,
+  openSystemSettings,
   setUpdateChannel,
   type LatestBetaRelease,
   type UpdateChannel,
@@ -408,6 +410,27 @@ function AboutMini() {
             </span>
           )}
         </div>
+      </Row>
+      <Row label={t('modal.about.deviceRecovery')} desc={t('modal.about.deviceRecoveryDesc')}>
+        <button
+          style={btnGhost}
+          onClick={() => {
+            void (async () => {
+              try {
+                await cancelDictation();
+              } catch (err) {
+                console.warn('[about] cancel active session before recovery failed', err);
+              }
+              try {
+                await openSystemSettings('bluetooth');
+              } catch (err) {
+                console.warn('[about] open bluetooth settings failed', err);
+              }
+            })();
+          }}
+        >
+          {t('modal.about.openBluetoothSettings')}
+        </button>
       </Row>
       <Row label={t('modal.about.privacy')} desc={t('modal.about.privacyDesc')}>
         <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 999, background: 'var(--ol-blue-soft)', color: 'var(--ol-blue)', fontWeight: 500 }}>{t('modal.about.localFirst')}</span>

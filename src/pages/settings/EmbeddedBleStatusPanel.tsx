@@ -45,6 +45,13 @@ export function EmbeddedBleStatusPanel({
           ? t('settings.recording.embeddedBleError')
           : t('settings.recording.embeddedBleIdle');
   const stats = result?.stats;
+  const stateGuideItems = [
+    ['ready', t('settings.recording.embeddedBleStateReady')],
+    ['recording', t('settings.recording.embeddedBleStateRecording')],
+    ['transferring', t('settings.recording.embeddedBleStateTransferring')],
+    ['recovery', t('settings.recording.embeddedBleStateRecovery')],
+    ['error', t('settings.recording.embeddedBleStateError')],
+  ] as const;
 
   return (
     <div
@@ -90,6 +97,18 @@ export function EmbeddedBleStatusPanel({
             state={!supported ? 'pending' : step.state}
           />
         ))}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ol-ink-3)' }}>
+          {t('settings.recording.embeddedBleStateGuideTitle')}
+        </div>
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+          {stateGuideItems.map(([id, label]) => (
+            <Pill key={id} tone={id === 'error' ? 'outline' : id === 'ready' ? 'ok' : 'blue'} size="sm">
+              {label}
+            </Pill>
+          ))}
+        </div>
       </div>
       {message && (
         <div
