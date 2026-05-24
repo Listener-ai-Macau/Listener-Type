@@ -31,6 +31,16 @@ fn is_terminal_notification(notification: &[u8]) -> bool {
 // not a hard cap from STOP, so tail packets can still arrive without UI linger.
 const STOP_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
+fn stop_drain_timeout_reason(stats: &crate::embedded_audio::SessionStats) -> String {
+    format!(
+        "BLE embedded audio stop drain idle timed out after {} ms (expected={:?}, received={}, missing={:?})",
+        STOP_DRAIN_TIMEOUT.as_millis(),
+        stats.expected_packet_count,
+        stats.received_packet_count,
+        stats.missing_packet_indices
+    )
+}
+
 #[cfg(target_os = "windows")]
 mod windows_ble {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -199,16 +209,14 @@ mod windows_ble {
             }
             if stop_drain_deadline.is_some_and(|drain_deadline| now >= drain_deadline) {
                 let stats = collector.stats();
-                let reason = format!(
-                    "BLE embedded audio stop drain idle timed out after {} ms (expected={:?}, received={}, missing={:?})",
-                    super::STOP_DRAIN_TIMEOUT.as_millis(),
-                    stats.expected_packet_count,
-                    stats.received_packet_count,
-                    stats.missing_packet_indices
-                );
+                let reason = super::stop_drain_timeout_reason(&stats);
                 log::warn!("[embedded-ble] {reason}");
                 cleanup.disable_notify();
-                return Err(reason);
+                return if collector.has_stopped_with_audio() {
+                    Ok(())
+                } else {
+                    Err(reason)
+                };
             }
             let remaining = deadline.saturating_duration_since(now);
             let receive_timeout = stop_drain_deadline
@@ -228,16 +236,14 @@ mod windows_ble {
                     }
                     if stop_drain_deadline.is_some_and(|drain_deadline| now >= drain_deadline) {
                         let stats = collector.stats();
-                        let reason = format!(
-                            "BLE embedded audio stop drain idle timed out after {} ms (expected={:?}, received={}, missing={:?})",
-                            super::STOP_DRAIN_TIMEOUT.as_millis(),
-                            stats.expected_packet_count,
-                            stats.received_packet_count,
-                            stats.missing_packet_indices
-                        );
+                        let reason = super::stop_drain_timeout_reason(&stats);
                         log::warn!("[embedded-ble] {reason}");
                         cleanup.disable_notify();
-                        return Err(reason);
+                        return if collector.has_stopped_with_audio() {
+                            Ok(())
+                        } else {
+                            Err(reason)
+                        };
                     }
                     continue;
                 }
