@@ -764,6 +764,14 @@ export function probeEmbeddedAudioBleSubscription(timeoutMs?: number): Promise<v
   );
 }
 
+export function probeEmbeddedAudioBleDeviceHealth(): Promise<void> {
+  return invokeOrMock(
+    'probe_embedded_audio_ble_device_health',
+    undefined,
+    () => undefined,
+  );
+}
+
 export function cancelDictation(): Promise<void> {
   return invokeOrMock('cancel_dictation', undefined, () => undefined);
 }

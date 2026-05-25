@@ -19,7 +19,7 @@ import {
   isWaylandCliMode,
   listMicrophoneDevices,
   openSystemSettings,
-  probeEmbeddedAudioBleSubscription,
+  probeEmbeddedAudioBleDeviceHealth,
   setDictationHotkey,
   startMicrophoneLevelMonitor,
   stopMicrophoneLevelMonitor,
@@ -1026,7 +1026,7 @@ export function RecordingSection() {
     setEmbeddedBleProbeStatus('checking');
     setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionMessageChecking'));
     try {
-      await probeEmbeddedAudioBleSubscription(10_000);
+      await probeEmbeddedAudioBleDeviceHealth();
       setEmbeddedBleProbeStatus('ok');
       setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionReady'));
     } catch (err) {

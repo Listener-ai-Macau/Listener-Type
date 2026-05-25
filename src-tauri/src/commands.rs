@@ -1393,6 +1393,13 @@ pub async fn probe_embedded_audio_ble_subscription(timeout_ms: Option<u64>) -> R
 }
 
 #[tauri::command]
+pub async fn probe_embedded_audio_ble_device_health() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(crate::embedded_ble::probe_device_health)
+        .await
+        .map_err(|err| format!("嵌入式 BLE 设备状态探测任务失败: {err}"))?
+}
+
+#[tauri::command]
 pub async fn submit_embedded_audio_ble_stream(
     coord: CoordinatorState<'_>,
     timeout_ms: Option<u64>,
