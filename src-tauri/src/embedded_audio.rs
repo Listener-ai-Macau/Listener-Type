@@ -601,6 +601,16 @@ pub struct SessionStats {
     pub replaced_packet_count: usize,
     pub ignored_foreign_packet_count: usize,
     pub duration_seconds: f64,
+    #[serde(default)]
+    pub asr_boundary_pcm_bytes: usize,
+    #[serde(default)]
+    pub asr_boundary_duration_seconds: f64,
+    #[serde(default)]
+    pub post_stop_packet_count: usize,
+    #[serde(default)]
+    pub post_stop_pcm_bytes: usize,
+    #[serde(default)]
+    pub post_stop_duration_seconds: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -615,6 +625,7 @@ pub struct StreamingPcmChunk {
     pub session_id: u32,
     pub packet_sequence: u16,
     pub pcm: Vec<u8>,
+    pub after_stop_boundary: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -659,6 +670,8 @@ impl StreamingSessionCollector {
 
     pub fn handle_packet(&mut self, packet: Packet<'_>) -> StreamingSessionEvent {
         let header = packet.header;
+        let after_stop_boundary =
+            header.packet_type == PacketType::AudioData && self.inner.after_stop_boundary();
         let pcm = (header.packet_type == PacketType::AudioData)
             .then(|| packet.payload_pcm().to_vec())
             .unwrap_or_default();
@@ -673,6 +686,7 @@ impl StreamingSessionCollector {
                 session_id,
                 packet_sequence,
                 pcm,
+                after_stop_boundary,
             }),
             SessionEvent::Stopped {
                 session_id,
@@ -720,6 +734,9 @@ pub struct SessionCollector {
     end_reason: Option<SessionEndReason>,
     audio_packets: BTreeMap<u16, Vec<u8>>,
     packet_pcm_bytes: BTreeMap<u16, usize>,
+    asr_boundary_audio_packets: BTreeMap<u16, Vec<u8>>,
+    asr_boundary_packet_pcm_bytes: BTreeMap<u16, usize>,
+    post_stop_packet_pcm_bytes: BTreeMap<u16, usize>,
     duplicate_packet_count: usize,
     replaced_packet_count: usize,
     ignored_foreign_packet_count: usize,
@@ -837,24 +854,19 @@ impl SessionCollector {
     }
 
     pub fn reconstructed_pcm(&self) -> Vec<u8> {
-        let Some(expected_packet_count) = self.expected_packet_count else {
-            return self
-                .audio_packets
-                .values()
-                .flat_map(|payload| payload.iter().copied())
-                .collect();
-        };
+        Self::reconstructed_pcm_from(
+            &self.audio_packets,
+            &self.packet_pcm_bytes,
+            self.expected_packet_count,
+        )
+    }
 
-        let mut pcm = Vec::new();
-        for sequence in 0..expected_packet_count {
-            if let Some(payload) = self.audio_packets.get(&sequence) {
-                pcm.extend_from_slice(payload);
-            } else {
-                let silence_bytes = self.inferred_packet_pcm_bytes(sequence);
-                pcm.resize(pcm.len() + silence_bytes, 0);
-            }
-        }
-        pcm
+    pub fn reconstructed_asr_boundary_pcm(&self) -> Vec<u8> {
+        Self::reconstructed_pcm_from(
+            &self.asr_boundary_audio_packets,
+            &self.asr_boundary_packet_pcm_bytes,
+            self.asr_boundary_expected_packet_count(),
+        )
     }
 
     pub fn stats(&self) -> SessionStats {
@@ -864,6 +876,8 @@ impl SessionCollector {
             .map(|sequence| self.inferred_packet_pcm_bytes(*sequence))
             .sum();
         let reconstructed_pcm_bytes = self.reconstructed_pcm_len();
+        let asr_boundary_pcm_bytes = self.reconstructed_asr_boundary_pcm_len();
+        let post_stop_pcm_bytes: usize = self.post_stop_packet_pcm_bytes.values().sum();
 
         SessionStats {
             session_id: self.session_id,
@@ -882,6 +896,12 @@ impl SessionCollector {
             replaced_packet_count: self.replaced_packet_count,
             ignored_foreign_packet_count: self.ignored_foreign_packet_count,
             duration_seconds: reconstructed_pcm_bytes as f64 / PCM_BYTES_PER_SECOND as f64,
+            asr_boundary_pcm_bytes,
+            asr_boundary_duration_seconds: asr_boundary_pcm_bytes as f64
+                / PCM_BYTES_PER_SECOND as f64,
+            post_stop_packet_count: self.post_stop_packet_pcm_bytes.len(),
+            post_stop_pcm_bytes,
+            post_stop_duration_seconds: post_stop_pcm_bytes as f64 / PCM_BYTES_PER_SECOND as f64,
         }
     }
 
@@ -901,6 +921,7 @@ impl SessionCollector {
         }
 
         let packet_sequence = header.packet_sequence;
+        let after_stop_boundary = self.after_stop_boundary();
         if self
             .audio_packets
             .get(&packet_sequence)
@@ -916,6 +937,15 @@ impl SessionCollector {
 
         self.audio_packets.insert(packet_sequence, payload.to_vec());
         self.packet_pcm_bytes.insert(packet_sequence, payload.len());
+        if after_stop_boundary {
+            self.post_stop_packet_pcm_bytes
+                .insert(packet_sequence, payload.len());
+        } else {
+            self.asr_boundary_audio_packets
+                .insert(packet_sequence, payload.to_vec());
+            self.asr_boundary_packet_pcm_bytes
+                .insert(packet_sequence, payload.len());
+        }
 
         SessionEvent::AudioData {
             session_id: header.session_id,
@@ -951,42 +981,97 @@ impl SessionCollector {
         }
     }
 
+    fn after_stop_boundary(&self) -> bool {
+        self.terminal_received && self.end_reason == Some(SessionEndReason::Stop)
+    }
+
+    fn asr_boundary_expected_packet_count(&self) -> Option<u16> {
+        self.asr_boundary_audio_packets
+            .keys()
+            .next_back()
+            .map(|sequence| sequence.saturating_add(1))
+    }
+
     fn reconstructed_pcm_len(&self) -> usize {
-        let Some(expected_packet_count) = self.expected_packet_count else {
-            return self.received_pcm_bytes();
+        Self::reconstructed_pcm_len_from(&self.packet_pcm_bytes, self.expected_packet_count)
+    }
+
+    fn reconstructed_asr_boundary_pcm_len(&self) -> usize {
+        Self::reconstructed_pcm_len_from(
+            &self.asr_boundary_packet_pcm_bytes,
+            self.asr_boundary_expected_packet_count(),
+        )
+    }
+
+    fn reconstructed_pcm_from(
+        audio_packets: &BTreeMap<u16, Vec<u8>>,
+        packet_pcm_bytes: &BTreeMap<u16, usize>,
+        expected_packet_count: Option<u16>,
+    ) -> Vec<u8> {
+        let Some(expected_packet_count) = expected_packet_count else {
+            return audio_packets
+                .values()
+                .flat_map(|payload| payload.iter().copied())
+                .collect();
+        };
+
+        let mut pcm = Vec::new();
+        for sequence in 0..expected_packet_count {
+            if let Some(payload) = audio_packets.get(&sequence) {
+                pcm.extend_from_slice(payload);
+            } else {
+                let silence_bytes =
+                    Self::inferred_packet_pcm_bytes_from(packet_pcm_bytes, sequence);
+                pcm.resize(pcm.len() + silence_bytes, 0);
+            }
+        }
+        pcm
+    }
+
+    fn reconstructed_pcm_len_from(
+        packet_pcm_bytes: &BTreeMap<u16, usize>,
+        expected_packet_count: Option<u16>,
+    ) -> usize {
+        let Some(expected_packet_count) = expected_packet_count else {
+            return packet_pcm_bytes.values().sum();
         };
 
         (0..expected_packet_count)
             .map(|sequence| {
-                self.packet_pcm_bytes
-                    .get(&sequence)
-                    .copied()
-                    .unwrap_or_else(|| self.inferred_packet_pcm_bytes(sequence))
+                packet_pcm_bytes.get(&sequence).copied().unwrap_or_else(|| {
+                    Self::inferred_packet_pcm_bytes_from(packet_pcm_bytes, sequence)
+                })
             })
             .sum()
     }
 
     fn inferred_packet_pcm_bytes(&self, packet_sequence: u16) -> usize {
-        if let Some(actual) = self.packet_pcm_bytes.get(&packet_sequence) {
+        Self::inferred_packet_pcm_bytes_from(&self.packet_pcm_bytes, packet_sequence)
+    }
+
+    fn inferred_packet_pcm_bytes_from(
+        packet_pcm_bytes: &BTreeMap<u16, usize>,
+        packet_sequence: u16,
+    ) -> usize {
+        if let Some(actual) = packet_pcm_bytes.get(&packet_sequence) {
             return *actual;
         }
-        if self.packet_pcm_bytes.is_empty() {
+        if packet_pcm_bytes.is_empty() {
             return 0;
         }
 
-        let cycle_length = self.inferred_cycle_length();
-        if let Some(size) = self
-            .build_cycle_size_map(cycle_length)
+        let cycle_length = Self::inferred_cycle_length_from(packet_pcm_bytes);
+        if let Some(size) = Self::build_cycle_size_map_from(packet_pcm_bytes, cycle_length)
             .get(&(usize::from(packet_sequence) % cycle_length))
         {
             return *size;
         }
 
-        most_common_size(self.packet_size_counts()).unwrap_or(0)
+        most_common_size(Self::packet_size_counts_from(packet_pcm_bytes)).unwrap_or(0)
     }
 
-    fn inferred_cycle_length(&self) -> usize {
-        if self.packet_pcm_bytes.len() < 6 {
+    fn inferred_cycle_length_from(packet_pcm_bytes: &BTreeMap<u16, usize>) -> usize {
+        if packet_pcm_bytes.len() < 6 {
             return 1;
         }
 
@@ -994,9 +1079,8 @@ impl SessionCollector {
         let mut best_match_count = 0;
         let mut best_score = -1.0f64;
         for cycle_length in 1..=16 {
-            let buckets = self.build_cycle_size_map(cycle_length);
-            let match_count = self
-                .packet_pcm_bytes
+            let buckets = Self::build_cycle_size_map_from(packet_pcm_bytes, cycle_length);
+            let match_count = packet_pcm_bytes
                 .iter()
                 .filter(|(sequence, size)| {
                     buckets
@@ -1004,7 +1088,7 @@ impl SessionCollector {
                         .is_some_and(|predicted| predicted == *size)
                 })
                 .count();
-            let score = match_count as f64 / self.packet_pcm_bytes.len() as f64;
+            let score = match_count as f64 / packet_pcm_bytes.len() as f64;
             if score > best_score
                 || ((score - best_score).abs() < f64::EPSILON && match_count > best_match_count)
             {
@@ -1016,13 +1100,16 @@ impl SessionCollector {
         best_cycle_length
     }
 
-    fn build_cycle_size_map(&self, cycle_length: usize) -> BTreeMap<usize, usize> {
+    fn build_cycle_size_map_from(
+        packet_pcm_bytes: &BTreeMap<u16, usize>,
+        cycle_length: usize,
+    ) -> BTreeMap<usize, usize> {
         if cycle_length == 0 {
             return BTreeMap::new();
         }
 
         let mut buckets: BTreeMap<usize, BTreeMap<usize, usize>> = BTreeMap::new();
-        for (sequence, size) in &self.packet_pcm_bytes {
+        for (sequence, size) in packet_pcm_bytes {
             *buckets
                 .entry(usize::from(*sequence) % cycle_length)
                 .or_default()
@@ -1036,9 +1123,9 @@ impl SessionCollector {
             .collect()
     }
 
-    fn packet_size_counts(&self) -> BTreeMap<usize, usize> {
+    fn packet_size_counts_from(packet_pcm_bytes: &BTreeMap<u16, usize>) -> BTreeMap<usize, usize> {
         let mut counts = BTreeMap::new();
-        for size in self.packet_pcm_bytes.values() {
+        for size in packet_pcm_bytes.values() {
             *counts.entry(*size).or_default() += 1;
         }
         counts
@@ -1287,6 +1374,7 @@ mod tests {
                 session_id: 205,
                 packet_sequence: 0,
                 pcm: vec![1, 2],
+                after_stop_boundary: false,
             })
         );
         assert_eq!(
@@ -1295,6 +1383,7 @@ mod tests {
                 session_id: 205,
                 packet_sequence: 1,
                 pcm: vec![3, 4],
+                after_stop_boundary: false,
             })
         );
         assert_eq!(
@@ -1342,10 +1431,49 @@ mod tests {
                 session_id: 209,
                 packet_sequence: 1,
                 pcm: vec![3, 4],
+                after_stop_boundary: true,
             })
         );
         assert!(collector.inner().has_successful_complete_session());
         assert_eq!(collector.inner().reconstructed_pcm(), vec![1, 2, 3, 4]);
+        assert_eq!(
+            collector.inner().reconstructed_asr_boundary_pcm(),
+            vec![1, 2]
+        );
+
+        let stats = collector.inner().stats();
+        assert_eq!(stats.received_packet_count, 2);
+        assert_eq!(stats.reconstructed_pcm_bytes, 4);
+        assert_eq!(stats.asr_boundary_pcm_bytes, 2);
+        assert_eq!(stats.post_stop_packet_count, 1);
+        assert_eq!(stats.post_stop_pcm_bytes, 2);
+        assert_eq!(
+            stats.post_stop_duration_seconds,
+            2.0 / PCM_BYTES_PER_SECOND as f64
+        );
+    }
+
+    #[test]
+    fn collector_records_zero_tail_after_stop() {
+        let mut collector = SessionCollector::default();
+
+        collector
+            .handle_notification(&packet(PacketType::SessionStart, 210, 0, &[], Some(0)))
+            .expect("start");
+        collector
+            .handle_notification(&packet(PacketType::AudioData, 210, 0, &[1, 2], None))
+            .expect("audio");
+        collector
+            .handle_notification(&packet(PacketType::SessionStop, 210, 1, &[], Some(0)))
+            .expect("stop");
+
+        assert_eq!(collector.reconstructed_pcm(), vec![1, 2]);
+        assert_eq!(collector.reconstructed_asr_boundary_pcm(), vec![1, 2]);
+        let stats = collector.stats();
+        assert_eq!(stats.post_stop_packet_count, 0);
+        assert_eq!(stats.post_stop_pcm_bytes, 0);
+        assert_eq!(stats.post_stop_duration_seconds, 0.0);
+        assert_eq!(stats.asr_boundary_pcm_bytes, stats.reconstructed_pcm_bytes);
     }
 
     #[test]
@@ -1368,6 +1496,7 @@ mod tests {
                 session_id: 206,
                 packet_sequence: 0,
                 pcm: vec![1, 2, 3, 4],
+                after_stop_boundary: false,
             })
         );
         assert_eq!(
