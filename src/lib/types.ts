@@ -66,6 +66,10 @@ export interface EmbeddedAudioSubmissionResult {
   reconstructedPcmBytes: number;
 }
 
+export interface EmbeddedBleRuntimeStatus {
+  backgroundListenerDisabledByEnv: boolean;
+}
+
 export type EmbeddedAudioInputFormat = 'wav' | 'pcm16le';
 
 export interface DictionaryEntry {

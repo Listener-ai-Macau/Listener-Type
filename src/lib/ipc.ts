@@ -8,6 +8,7 @@ import type {
   CredentialsStatus,
   DictationSession,
   EmbeddedAudioInputFormat,
+  EmbeddedBleRuntimeStatus,
   DictionaryEntry,
   EmbeddedAudioSubmissionResult,
   HotkeyCapability,
@@ -761,6 +762,14 @@ export function probeEmbeddedAudioBleSubscription(timeoutMs?: number): Promise<v
     'probe_embedded_audio_ble_subscription',
     { timeoutMs: timeoutMs ?? null },
     () => undefined,
+  );
+}
+
+export function getEmbeddedBleRuntimeStatus(): Promise<EmbeddedBleRuntimeStatus> {
+  return invokeOrMock(
+    'get_embedded_ble_runtime_status',
+    undefined,
+    () => ({ backgroundListenerDisabledByEnv: false }),
   );
 }
 
