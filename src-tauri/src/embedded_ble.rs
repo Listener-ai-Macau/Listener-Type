@@ -64,6 +64,12 @@ mod windows_ble {
     const SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091a);
     const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b);
     const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
+    const CCCD_ENABLE_TIMEOUT: Duration = Duration::from_secs(5);
+    const CCCD_ENABLE_RETRY_DELAYS: [Duration; 3] = [
+        Duration::from_millis(250),
+        Duration::from_millis(750),
+        Duration::from_millis(1500),
+    ];
 
     pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
         let mut notifications = Vec::new();
@@ -108,11 +114,8 @@ mod windows_ble {
 
         let notify_timeout = timeout.clamp(Duration::from_secs(1), Duration::from_secs(10));
         log::info!("[embedded-ble] probe #{capture_id}: enabling notify CCCD");
-        let status = write_cccd_with_timeout(
-            &characteristic,
-            GattClientCharacteristicConfigurationDescriptorValue::Notify,
-            notify_timeout,
-        )?;
+        let status =
+            write_cccd_notify_with_retry(capture_id, "probe", &characteristic, notify_timeout)?;
         if status != GattCommunicationStatus::Success {
             return Err(format!("BLE CCCD notify write returned status={status:?}"));
         }
@@ -179,10 +182,11 @@ mod windows_ble {
         }
         std::thread::sleep(Duration::from_millis(150));
         log::info!("[embedded-ble] capture #{capture_id}: enabling notify CCCD");
-        let status = write_cccd_with_timeout(
+        let status = write_cccd_notify_with_retry(
+            capture_id,
+            "capture",
             &characteristic,
-            GattClientCharacteristicConfigurationDescriptorValue::Notify,
-            Duration::from_secs(5),
+            CCCD_ENABLE_TIMEOUT,
         )?;
         if status != GattCommunicationStatus::Success {
             return Err(format!("BLE CCCD notify write returned status={status:?}"));
@@ -570,6 +574,64 @@ mod windows_ble {
             log::warn!("[embedded-ble] CCCD write protocol_error={protocol_error}");
         }
         Ok(status)
+    }
+
+    fn write_cccd_notify_with_retry(
+        capture_id: u64,
+        label: &str,
+        characteristic: &GattCharacteristic,
+        timeout: Duration,
+    ) -> Result<GattCommunicationStatus, String> {
+        let mut last_error: Option<String> = None;
+        let mut last_status: Option<GattCommunicationStatus> = None;
+        for attempt in 1..=CCCD_ENABLE_RETRY_DELAYS.len() + 1 {
+            match write_cccd_with_timeout(
+                characteristic,
+                GattClientCharacteristicConfigurationDescriptorValue::Notify,
+                timeout,
+            ) {
+                Ok(GattCommunicationStatus::Success) => {
+                    return Ok(GattCommunicationStatus::Success);
+                }
+                Ok(status) => {
+                    if attempt > CCCD_ENABLE_RETRY_DELAYS.len() {
+                        return Ok(status);
+                    }
+                    last_status = Some(status);
+                    let delay = cccd_enable_retry_delay(attempt);
+                    log::warn!(
+                        "[embedded-ble] {label} #{capture_id}: notify CCCD enable attempt {attempt} returned status={status:?}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    std::thread::sleep(delay);
+                }
+                Err(err) => {
+                    if attempt > CCCD_ENABLE_RETRY_DELAYS.len() {
+                        return Err(err);
+                    }
+                    let delay = cccd_enable_retry_delay(attempt);
+                    log::warn!(
+                        "[embedded-ble] {label} #{capture_id}: notify CCCD enable attempt {attempt} failed: {err}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    last_error = Some(err);
+                    std::thread::sleep(delay);
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            format!(
+                "BLE CCCD notify write returned status={:?}",
+                last_status.unwrap_or(GattCommunicationStatus::Unreachable)
+            )
+        }))
+    }
+
+    fn cccd_enable_retry_delay(attempt: usize) -> Duration {
+        CCCD_ENABLE_RETRY_DELAYS
+            .get(attempt.saturating_sub(1))
+            .copied()
+            .unwrap_or_else(|| *CCCD_ENABLE_RETRY_DELAYS.last().expect("retry delays"))
     }
 
     fn wait_gatt_write_result(
