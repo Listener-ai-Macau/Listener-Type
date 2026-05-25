@@ -1227,7 +1227,7 @@ pub(super) async fn submit_embedded_audio_notifications(
         return Err(format!("嵌入式音频会话未正常结束: {:?}", stats.end_reason));
     }
 
-    let pcm = collector.reconstructed_pcm();
+    let pcm = collector.reconstructed_asr_boundary_pcm();
     if pcm.is_empty() {
         return Err("嵌入式音频会话没有可识别的 PCM 数据".to_string());
     }
@@ -1235,8 +1235,17 @@ pub(super) async fn submit_embedded_audio_notifications(
         return Err("嵌入式音频 PCM 长度不是 16-bit 对齐".to_string());
     }
 
-    let reconstructed_pcm_bytes = pcm.len();
-    submit_embedded_pcm_for_dictation(inner, &pcm).await?;
+    let reconstructed_pcm_bytes = stats.reconstructed_pcm_bytes;
+    if stats.post_stop_packet_count > 0 {
+        log::info!(
+            "[coord] embedded audio batch excluded post-stop tail from ASR (tail_packets={}, tail_pcm_bytes={}, asr_pcm_bytes={}, reconstructed_pcm_bytes={})",
+            stats.post_stop_packet_count,
+            stats.post_stop_pcm_bytes,
+            stats.asr_boundary_pcm_bytes,
+            stats.reconstructed_pcm_bytes
+        );
+    }
+    submit_embedded_pcm_for_dictation_with_stats(inner, &pcm, Some(stats.clone())).await?;
     Ok(crate::embedded_audio::EmbeddedAudioSubmissionResult {
         stats,
         reconstructed_pcm_bytes,
@@ -1474,13 +1483,23 @@ impl EmbeddedStreamingDictation {
             }
             crate::embedded_audio::StreamingSessionEvent::PcmChunk(chunk) => {
                 let chunk_session_id = chunk.session_id;
-                self.begin_session_if_needed(inner, chunk.session_id)
-                    .await?;
-                let session = self
-                    .session
-                    .as_mut()
-                    .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
-                session.consume_streaming_pcm(inner, &chunk.pcm)?;
+                if embedded_streaming_chunk_is_asr_input(&chunk) {
+                    self.begin_session_if_needed(inner, chunk.session_id)
+                        .await?;
+                    let session = self
+                        .session
+                        .as_mut()
+                        .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
+                    session.consume_streaming_pcm(inner, &chunk.pcm)?;
+                } else {
+                    log::info!(
+                        "[coord] embedded audio streaming tail packet excluded from ASR after STOP (session_id={}, packet_sequence={}, pcm_bytes={})",
+                        chunk.session_id,
+                        chunk.packet_sequence,
+                        chunk.pcm.len()
+                    );
+                    self.show_transcribing_after_stop(inner);
+                }
                 if let Some(expected_packet_count) = self.pending_stop_expected_packet_count {
                     if self.collector.inner().has_successful_complete_session() {
                         self.finish_streaming_session(
@@ -1592,6 +1611,15 @@ impl EmbeddedStreamingDictation {
                 "[coord] embedded audio streaming stop with missing packets (expected={}, missing={:?})",
                 expected_packet_count,
                 stats.missing_packet_indices
+            );
+        }
+        if stats.post_stop_packet_count > 0 {
+            log::info!(
+                "[coord] embedded audio streaming collected post-stop tail for diagnostics (tail_packets={}, tail_pcm_bytes={}, tail_duration={:.3}s, asr_pcm_bytes={})",
+                stats.post_stop_packet_count,
+                stats.post_stop_pcm_bytes,
+                stats.post_stop_duration_seconds,
+                stats.asr_boundary_pcm_bytes
             );
         }
         store_embedded_audio_stats(inner, stats.clone());
@@ -1826,7 +1854,11 @@ fn activate_embedded_audio_dictation_session(
     true
 }
 
-async fn submit_embedded_pcm_for_dictation(inner: &Arc<Inner>, pcm: &[u8]) -> Result<(), String> {
+async fn submit_embedded_pcm_for_dictation_with_stats(
+    inner: &Arc<Inner>,
+    pcm: &[u8],
+    stats: Option<crate::embedded_audio::SessionStats>,
+) -> Result<(), String> {
     let mut session = begin_embedded_audio_dictation_session(inner).await?;
     let current_session_id = session.session_id;
     let active_asr = session.active_asr.clone();
@@ -1864,8 +1896,15 @@ async fn submit_embedded_pcm_for_dictation(inner: &Arc<Inner>, pcm: &[u8]) -> Re
         asr_pcm.len(),
         gain_stats.gain
     );
+    if let Some(stats) = stats {
+        store_embedded_audio_stats(inner, stats);
+    }
 
     end_session(inner).await
+}
+
+fn embedded_streaming_chunk_is_asr_input(chunk: &crate::embedded_audio::StreamingPcmChunk) -> bool {
+    !chunk.after_stop_boundary
 }
 
 async fn build_embedded_audio_asr_consumer(
@@ -2874,14 +2913,15 @@ mod tests {
     use super::{
         append_typed_prefix, cancel_session, clear_embedded_ble_cancel_flag, default_done_message,
         dictation_error_code, embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak,
-        finalize_polished_text, normalize_embedded_pcm_for_asr,
-        prepare_embedded_streaming_pcm_for_asr, register_embedded_ble_cancel_flag,
-        streaming_insert_eligible, wayland_done_message, EmbeddedStreamingDictation,
-        EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
-        EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
+        embedded_streaming_chunk_is_asr_input, finalize_polished_text,
+        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
+        register_embedded_ble_cancel_flag, streaming_insert_eligible, wayland_done_message,
+        EmbeddedStreamingDictation, EMBEDDED_AUDIO_ASR_PREROLL_BYTES,
+        EMBEDDED_AUDIO_ASR_PREROLL_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
     use crate::coordinator::Coordinator;
     use crate::coordinator_state::SessionPhase;
+    use crate::embedded_audio::StreamingPcmChunk;
     use crate::types::{ChineseScriptPreference, CorrectionRule, InsertStatus, PolishMode};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -2962,6 +3002,25 @@ mod tests {
             Some(timeout)
         );
         assert_eq!(embedded_ble_stream_idle_timeout(timeout, false), None);
+    }
+
+    #[test]
+    fn embedded_streaming_tail_chunk_is_not_asr_input() {
+        let before_stop = StreamingPcmChunk {
+            session_id: 1,
+            packet_sequence: 0,
+            pcm: vec![1, 2],
+            after_stop_boundary: false,
+        };
+        let after_stop = StreamingPcmChunk {
+            session_id: 1,
+            packet_sequence: 1,
+            pcm: vec![3, 4],
+            after_stop_boundary: true,
+        };
+
+        assert!(embedded_streaming_chunk_is_asr_input(&before_stop));
+        assert!(!embedded_streaming_chunk_is_asr_input(&after_stop));
     }
 
     #[test]
