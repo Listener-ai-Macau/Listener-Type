@@ -84,18 +84,6 @@ export function EmbeddedBleStatusPanel({
       <div style={{ fontSize: 11.5, color: status === 'error' ? 'var(--ol-err)' : 'var(--ol-ink-4)', lineHeight: 1.55 }}>
         {bodyMessage}
       </div>
-      <StatusTile
-        label={t('settings.recording.embeddedBleConnectionLabel', '设备状态')}
-        state={connectionState}
-        idleText={t('settings.recording.embeddedBleConnectionIdle', '未检查')}
-        okText={t('settings.recording.embeddedBleDeviceNormal', '设备健康能用')}
-        checkingText={t('settings.recording.embeddedBleConnectionChecking', '检查中')}
-        errorText={t('settings.recording.embeddedBleConnectionError', '连接异常')}
-        unsupportedText={t('settings.recording.embeddedBleUnsupported')}
-        actionLabel={t('common.refresh')}
-        disabled={!supported || checking}
-        onAction={onProbe}
-      />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <Btn variant="ghost" size="sm" icon="settings" onClick={onOpenBluetoothSettings}>
           {t('settings.recording.embeddedBleOpenBluetooth')}
@@ -106,80 +94,6 @@ export function EmbeddedBleStatusPanel({
           </Btn>
         )}
       </div>
-    </div>
-  );
-}
-
-function StatusTile({
-  label,
-  state,
-  idleText,
-  okText,
-  checkingText,
-  errorText,
-  unsupportedText,
-  actionLabel,
-  disabled,
-  onAction,
-}: {
-  label: string;
-  state: ConnectionState;
-  idleText: string;
-  okText: string;
-  checkingText: string;
-  errorText: string;
-  unsupportedText: string;
-  actionLabel: string;
-  disabled: boolean;
-  onAction?: () => void;
-}) {
-  const value = state === 'ok'
-    ? okText
-    : state === 'checking'
-      ? checkingText
-      : state === 'error'
-        ? errorText
-        : state === 'unsupported'
-          ? unsupportedText
-          : idleText;
-  const color = state === 'ok'
-    ? 'var(--ol-ok)'
-    : state === 'error'
-      ? 'var(--ol-err)'
-      : state === 'checking'
-        ? 'var(--ol-blue)'
-        : 'var(--ol-ink-3)';
-
-  return (
-    <div
-      style={{
-        minWidth: 0,
-        minHeight: 74,
-        padding: '10px 12px',
-        borderRadius: 8,
-        border: '0.5px solid var(--ol-line-soft)',
-        background: 'var(--ol-surface)',
-        display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) auto',
-        alignItems: 'center',
-        gap: 10,
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginBottom: 5 }}>{label}</div>
-        <div style={{ fontSize: 15, fontWeight: 600, color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {value}
-        </div>
-      </div>
-      <Btn
-        variant="ghost"
-        size="sm"
-        icon="refresh"
-        disabled={disabled}
-        onClick={onAction}
-      >
-        {actionLabel}
-      </Btn>
     </div>
   );
 }
