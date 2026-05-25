@@ -111,18 +111,6 @@ mod windows_ble {
         Ok(())
     }
 
-    pub fn probe_device_health() -> Result<(), String> {
-        let target = open_notify_target()?;
-        log::info!("[embedded-ble] device health probe: notify target available");
-        if let Some(service) = target.service {
-            let _ = service.Close();
-        }
-        if let Some(device) = target.device {
-            let _ = device.Close();
-        }
-        Ok(())
-    }
-
     pub fn capture_notification_events(
         timeout: Duration,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
@@ -789,11 +777,6 @@ pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-pub fn probe_device_health() -> Result<(), String> {
-    windows_ble::probe_device_health()
-}
-
-#[cfg(target_os = "windows")]
 pub fn capture_notification_events(
     timeout: Duration,
     on_event: &mut BleNotificationHandler<'_>,
@@ -817,11 +800,6 @@ pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, St
 
 #[cfg(not(target_os = "windows"))]
 pub fn probe_notify_subscription(_timeout: Duration) -> Result<(), String> {
-    Err("Embedded BLE audio input is only supported on Windows".to_string())
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn probe_device_health() -> Result<(), String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
 }
 

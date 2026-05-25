@@ -756,18 +756,40 @@ export function submitEmbeddedAudioBleOnce(
   );
 }
 
+export function submitEmbeddedAudioBleStream(
+  timeoutMs?: number,
+): Promise<EmbeddedAudioSubmissionResult> {
+  return invokeOrMock(
+    'submit_embedded_audio_ble_stream',
+    { timeoutMs: timeoutMs ?? null },
+    () => ({
+      reconstructedPcmBytes: 0,
+      stats: {
+        sessionId: null,
+        explicitStartReceived: false,
+        startInferredFromAudio: false,
+        terminalReceived: false,
+        endReason: null,
+        expectedPacketCount: null,
+        receivedPacketCount: 0,
+        missingPacketCount: 0,
+        missingPacketIndices: [],
+        receivedPcmBytes: 0,
+        reconstructedPcmBytes: 0,
+        silenceFilledBytes: 0,
+        duplicatePacketCount: 0,
+        replacedPacketCount: 0,
+        ignoredForeignPacketCount: 0,
+        durationSeconds: 0,
+      },
+    }),
+  );
+}
+
 export function probeEmbeddedAudioBleSubscription(timeoutMs?: number): Promise<void> {
   return invokeOrMock(
     'probe_embedded_audio_ble_subscription',
     { timeoutMs: timeoutMs ?? null },
-    () => undefined,
-  );
-}
-
-export function probeEmbeddedAudioBleDeviceHealth(): Promise<void> {
-  return invokeOrMock(
-    'probe_embedded_audio_ble_device_health',
-    undefined,
     () => undefined,
   );
 }

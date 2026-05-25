@@ -837,16 +837,20 @@ impl Coordinator {
         &self,
         timeout_ms: Option<u64>,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-        cancel_embedded_ble_listener_capture(&self.inner, "foreground once-shot capture");
-        submit_embedded_audio_ble_once(&self.inner, timeout_ms).await
+        pause_embedded_ble_listener_capture(&self.inner, "foreground once-shot capture");
+        let result = submit_embedded_audio_ble_once(&self.inner, timeout_ms).await;
+        self.refresh_embedded_ble_listener();
+        result
     }
 
     pub async fn submit_embedded_audio_ble_stream(
         &self,
         timeout_ms: Option<u64>,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-        cancel_embedded_ble_listener_capture(&self.inner, "foreground streaming capture");
-        submit_embedded_audio_ble_stream(&self.inner, timeout_ms).await
+        pause_embedded_ble_listener_capture(&self.inner, "foreground streaming capture");
+        let result = submit_embedded_audio_ble_stream(&self.inner, timeout_ms).await;
+        self.refresh_embedded_ble_listener();
+        result
     }
 
     pub fn cancel_dictation(&self) {
@@ -1771,6 +1775,15 @@ fn cancel_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
         cancel.store(true, Ordering::SeqCst);
         log::info!("[embedded-ble] requested active background capture stop ({reason})");
     }
+}
+
+fn pause_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
+    let generation = inner
+        .embedded_ble_listener_generation
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+    log::info!("[embedded-ble] paused background listener generation={generation} ({reason})");
+    cancel_embedded_ble_listener_capture(inner, reason);
 }
 
 fn hotkey_bridge_loop(inner: Arc<Inner>, rx: mpsc::Receiver<HotkeyEvent>) {

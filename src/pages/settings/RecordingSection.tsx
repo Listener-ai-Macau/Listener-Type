@@ -19,10 +19,10 @@ import {
   isWaylandCliMode,
   listMicrophoneDevices,
   openSystemSettings,
-  probeEmbeddedAudioBleDeviceHealth,
   setDictationHotkey,
   startMicrophoneLevelMonitor,
   stopMicrophoneLevelMonitor,
+  submitEmbeddedAudioBleStream,
 } from '../../lib/ipc';
 import { classifyEmbeddedBleProbeError } from '../../lib/providerSetup';
 import type {
@@ -1026,7 +1026,10 @@ export function RecordingSection() {
     setEmbeddedBleProbeStatus('checking');
     setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionMessageChecking'));
     try {
-      await probeEmbeddedAudioBleDeviceHealth();
+      const result = await submitEmbeddedAudioBleStream(120_000);
+      if (result.stats.endReason !== 'stop' || result.reconstructedPcmBytes <= 0) {
+        throw new Error('embeddedBleWorkflowIncomplete');
+      }
       setEmbeddedBleProbeStatus('ok');
       setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionReady'));
     } catch (err) {
