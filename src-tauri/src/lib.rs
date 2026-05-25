@@ -527,7 +527,12 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
         builder = builder.item(&style_menu.submenu);
     }
     let menu = builder
-        .items(&[&dark_mode, &input_source_menu.submenu, &microphone_menu.submenu, &quit])
+        .items(&[
+            &dark_mode,
+            &input_source_menu.submenu,
+            &microphone_menu.submenu,
+            &quit,
+        ])
         .build()?;
     Ok(TrayMenu {
         menu,

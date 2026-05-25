@@ -62,6 +62,9 @@ mod qa;
 mod resources;
 
 const EMBEDDED_BLE_BACKGROUND_LISTEN_TIMEOUT_MS: u64 = 60_000;
+const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
+const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(12);
+const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(8);
 
 #[cfg(test)]
 use dictation::dictation_error_code;
@@ -1709,6 +1712,7 @@ fn mark_translation_modifier_seen(inner: &Arc<Inner>) {
 
 async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u64) {
     log::info!("[embedded-ble] background listener started generation={generation}");
+    let mut retry_delay = EMBEDDED_BLE_RETRY_BASE_DELAY;
     loop {
         if inner.shutdown.load(Ordering::SeqCst)
             || inner
@@ -1736,6 +1740,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     result.reconstructed_pcm_bytes,
                     result.stats.missing_packet_count
                 );
+                retry_delay = EMBEDDED_BLE_RETRY_BASE_DELAY;
             }
             Err(err) => {
                 clear_embedded_ble_listener_cancel(&inner, &cancel_capture);
@@ -1748,14 +1753,43 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 {
                     break;
                 }
-                log::warn!("[embedded-ble] background listen retrying after: {err}");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                retry_delay = next_embedded_ble_background_retry_delay(&err, retry_delay);
+                log::warn!(
+                    "[embedded-ble] background listen retrying in {} ms after: {err}",
+                    retry_delay.as_millis()
+                );
+                tokio::time::sleep(retry_delay).await;
                 continue;
             }
         }
         clear_embedded_ble_listener_cancel(&inner, &cancel_capture);
     }
     log::info!("[embedded-ble] background listener stopped generation={generation}");
+}
+
+fn next_embedded_ble_background_retry_delay(err: &str, current: Duration) -> Duration {
+    if is_embedded_ble_idle_timeout_error(err) {
+        return EMBEDDED_BLE_RETRY_BASE_DELAY;
+    }
+
+    if is_embedded_ble_transient_reopen_error(err) {
+        return EMBEDDED_BLE_RETRY_LONG_DELAY.max(current);
+    }
+
+    current
+        .saturating_mul(2)
+        .clamp(EMBEDDED_BLE_RETRY_BASE_DELAY, EMBEDDED_BLE_RETRY_MAX_DELAY)
+}
+
+fn is_embedded_ble_transient_reopen_error(err: &str) -> bool {
+    err.contains("GattCommunicationStatus(3)")
+        || err.contains("HRESULT(0x800706BA)")
+        || err.contains("BLE characteristic discovery returned status")
+        || err.contains("BLE service open wait failed")
+}
+
+fn is_embedded_ble_idle_timeout_error(err: &str) -> bool {
+    err.contains("BLE embedded audio capture timed out")
 }
 
 fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> Arc<AtomicBool> {
@@ -3391,6 +3425,53 @@ mod tests {
             .embedded_ble_listener_cancel
             .lock()
             .is_none());
+    }
+
+    #[test]
+    fn embedded_ble_background_retry_backs_off_for_transient_reopen_errors() {
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(
+                "listener: BLE characteristic discovery returned status=GattCommunicationStatus(3)",
+                EMBEDDED_BLE_RETRY_BASE_DELAY,
+            ),
+            EMBEDDED_BLE_RETRY_LONG_DELAY
+        );
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(
+                "BLE CCCD write async error: Some(HRESULT(0x800706BA))",
+                Duration::from_secs(10),
+            ),
+            Duration::from_secs(10)
+        );
+    }
+
+    #[test]
+    fn embedded_ble_background_retry_caps_generic_errors() {
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(
+                "BLE embedded audio notification wait failed: disconnected",
+                EMBEDDED_BLE_RETRY_BASE_DELAY,
+            ),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(
+                "BLE embedded audio notification wait failed: disconnected",
+                Duration::from_secs(10),
+            ),
+            EMBEDDED_BLE_RETRY_MAX_DELAY
+        );
+    }
+
+    #[test]
+    fn embedded_ble_background_retry_keeps_idle_timeout_responsive() {
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(
+                "BLE embedded audio capture timed out after 60000 ms",
+                Duration::from_secs(10),
+            ),
+            EMBEDDED_BLE_RETRY_BASE_DELAY
+        );
     }
 
     #[tokio::test]
