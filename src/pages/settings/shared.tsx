@@ -28,7 +28,7 @@ export function Toggle({ on, onToggle }: { on: boolean; onToggle?: (next: boolea
       onClick={() => onToggle?.(!on)}
       style={{
         position: 'relative', width: 32, height: 18, borderRadius: 999, border: 0,
-        background: on ? 'var(--ol-blue)' : 'rgba(0,0,0,0.15)',
+        background: on ? 'var(--ol-blue)' : 'var(--ol-switch-off)',
         cursor: 'default',
         transition: 'background 0.16s var(--ol-motion-quick)',
       }}
@@ -36,7 +36,7 @@ export function Toggle({ on, onToggle }: { on: boolean; onToggle?: (next: boolea
       <span
         style={{
           position: 'absolute', top: 2, left: on ? 16 : 2,
-          width: 14, height: 14, borderRadius: 999, background: 'var(--ol-white)',
+          width: 14, height: 14, borderRadius: 999, background: 'var(--ol-control-active)',
           boxShadow: '0 1px 2px rgba(0,0,0,.25)', transition: 'left .16s var(--ol-motion-spring)',
         }}
       />

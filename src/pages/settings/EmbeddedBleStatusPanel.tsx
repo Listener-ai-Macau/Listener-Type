@@ -1,242 +1,185 @@
 import { useTranslation } from 'react-i18next';
 import { Btn, Pill } from '../_atoms';
-import { requestDemoMode } from '../../lib/demoMode';
-import type { EmbeddedAudioSubmissionResult } from '../../lib/types';
 
 export type EmbeddedBleProbeStatus = 'idle' | 'checking' | 'ok' | 'error';
-export type EmbeddedBleWizardStepId = 'select' | 'pair' | 'connect' | 'subscribe' | 'record';
-export type EmbeddedBleWizardStepState = 'pending' | 'active' | 'ok' | 'error';
 
-export interface EmbeddedBleWizardStep {
-  id: EmbeddedBleWizardStepId;
-  state: EmbeddedBleWizardStepState;
-}
+type ConnectionState = 'idle' | 'checking' | 'ok' | 'error' | 'unsupported';
 
 export function EmbeddedBleStatusPanel({
   supported,
   status,
   message,
-  result,
-  steps,
   onOpenBluetoothSettings,
   onProbe,
-  onTestRecording,
   onUseMicrophone,
 }: {
   supported: boolean;
   status: EmbeddedBleProbeStatus;
   message: string;
-  result: EmbeddedAudioSubmissionResult | null;
-  steps: EmbeddedBleWizardStep[];
   onOpenBluetoothSettings: () => void;
   onProbe: () => void;
-  onTestRecording?: () => void;
   onUseMicrophone?: () => void;
 }) {
   const { t } = useTranslation();
-  const pillTone: 'outline' | 'ok' | 'blue' = !supported ? 'outline' : status === 'ok' ? 'ok' : status === 'checking' ? 'blue' : 'outline';
-  const statusLabel = !supported
-    ? t('settings.recording.embeddedBleUnsupported')
-    : status === 'checking'
-      ? t('settings.recording.embeddedBleChecking')
+  const checking = status === 'checking';
+  const connectionState: ConnectionState = !supported
+    ? 'unsupported'
+    : checking
+      ? 'checking'
       : status === 'ok'
-        ? t('settings.recording.embeddedBleReady')
+        ? 'ok'
         : status === 'error'
-          ? t('settings.recording.embeddedBleError')
+          ? 'error'
+          : 'idle';
+  const overallTone: 'outline' | 'ok' | 'blue' =
+    connectionState === 'ok'
+      ? 'ok'
+      : connectionState === 'checking'
+        ? 'blue'
+        : 'outline';
+  const overallLabel = connectionState === 'ok'
+    ? t('settings.recording.embeddedBleDeviceNormal', '设备健康能用')
+    : connectionState === 'checking'
+      ? t('settings.recording.embeddedBleChecking')
+      : connectionState === 'error'
+        ? t('settings.recording.embeddedBleConnectionError', '连接异常')
+        : connectionState === 'unsupported'
+          ? t('settings.recording.embeddedBleUnsupported')
           : t('settings.recording.embeddedBleIdle');
-  const stats = result?.stats;
-  const stateGuideItems = [
-    ['ready', t('settings.recording.embeddedBleStateReady')],
-    ['recording', t('settings.recording.embeddedBleStateRecording')],
-    ['transferring', t('settings.recording.embeddedBleStateTransferring')],
-    ['recovery', t('settings.recording.embeddedBleStateRecovery')],
-    ['error', t('settings.recording.embeddedBleStateError')],
-  ] as const;
+  const bodyMessage = message
+    || (supported
+      ? t('settings.recording.embeddedBleSimpleDesc', '刷新设备状态，确认设备健康能用。')
+      : t('settings.recording.embeddedBleUnsupportedDesc'));
 
   return (
     <div
       style={{
-        padding: '10px 12px',
+        marginTop: 8,
+        padding: '14px 16px',
         borderRadius: 8,
-        border: '0.5px solid var(--ol-line-soft)',
-        background: 'rgba(0,0,0,0.025)',
+        border: '0.5px solid var(--ol-line)',
+        background: 'var(--ol-control-track)',
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
+        gap: 12,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <Pill tone={pillTone} size="sm">{statusLabel}</Pill>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ol-ink)' }}>
+            {t('settings.recording.embeddedBleStatusTitle', 'Listener BLE')}
+          </div>
+          <Pill tone={overallTone} size="sm">{overallLabel}</Pill>
+        </div>
         <Btn
           variant="ghost"
           size="sm"
           icon="refresh"
-          disabled={!supported || status === 'checking'}
+          disabled={!supported || checking}
           onClick={onProbe}
         >
-          {status === 'checking'
-            ? t('settings.recording.embeddedBleTesting')
-            : t('settings.recording.embeddedBleCheck')}
+          {t('common.refresh')}
         </Btn>
       </div>
-      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
-        {supported ? t('settings.recording.embeddedBleWizardDesc') : t('settings.recording.embeddedBleUnsupportedDesc')}
+      <div style={{ fontSize: 11.5, color: status === 'error' ? 'var(--ol-err)' : 'var(--ol-ink-4)', lineHeight: 1.55 }}>
+        {bodyMessage}
       </div>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
-          gap: 6,
-        }}
-      >
-        {steps.map((step, index) => (
-          <WizardStepPill
-            key={step.id}
-            index={index + 1}
-            label={t(`settings.recording.embeddedBleWizard.${step.id}`)}
-            state={!supported ? 'pending' : step.state}
-          />
-        ))}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ol-ink-3)' }}>
-          {t('settings.recording.embeddedBleStateGuideTitle')}
-        </div>
-        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-          {stateGuideItems.map(([id, label]) => (
-            <Pill key={id} tone={id === 'error' ? 'outline' : id === 'ready' ? 'ok' : 'blue'} size="sm">
-              {label}
-            </Pill>
-          ))}
-        </div>
-      </div>
-      {message && (
-        <div
-          style={{
-            fontSize: 11.5,
-            color: status === 'error' ? 'var(--ol-err)' : 'var(--ol-ok)',
-            lineHeight: 1.5,
-            overflowWrap: 'anywhere',
-          }}
-          title={message}
-        >
-          {message}
-        </div>
-      )}
-      {supported && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <Btn variant="ghost" size="sm" icon="settings" onClick={onOpenBluetoothSettings}>
-            {t('settings.recording.embeddedBleOpenBluetooth')}
-          </Btn>
-          {onTestRecording && (
-            <Btn
-              variant={status === 'ok' ? 'blue' : 'soft'}
-              size="sm"
-              icon="mic"
-              disabled={status === 'checking'}
-              onClick={onTestRecording}
-            >
-              {t('settings.recording.embeddedBleTestOnce')}
-            </Btn>
-          )}
-        </div>
-      )}
-      {supported && status === 'error' && onUseMicrophone && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <Btn variant="ghost" size="sm" icon="refresh" onClick={onProbe}>
-            {t('settings.recording.embeddedBleRetry')}
-          </Btn>
+      <StatusTile
+        label={t('settings.recording.embeddedBleConnectionLabel', '设备状态')}
+        state={connectionState}
+        idleText={t('settings.recording.embeddedBleConnectionIdle', '未检查')}
+        okText={t('settings.recording.embeddedBleDeviceNormal', '设备健康能用')}
+        checkingText={t('settings.recording.embeddedBleConnectionChecking', '检查中')}
+        errorText={t('settings.recording.embeddedBleConnectionError', '连接异常')}
+        unsupportedText={t('settings.recording.embeddedBleUnsupported')}
+        actionLabel={t('common.refresh')}
+        disabled={!supported || checking}
+        onAction={onProbe}
+      />
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Btn variant="ghost" size="sm" icon="settings" onClick={onOpenBluetoothSettings}>
+          {t('settings.recording.embeddedBleOpenBluetooth')}
+        </Btn>
+        {supported && status === 'error' && onUseMicrophone && (
           <Btn variant="soft" size="sm" icon="mic" onClick={onUseMicrophone}>
             {t('settings.recording.embeddedBleUseMicrophone')}
           </Btn>
-          <Btn variant="soft" size="sm" icon="sparkle" onClick={requestDemoMode}>
-            {t('settings.recording.embeddedBleOpenDemo')}
-          </Btn>
-        </div>
-      )}
-      {stats && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <Pill tone="outline" size="sm">
-            {t('settings.recording.embeddedBlePackets', {
-              received: stats.receivedPacketCount,
-              expected: stats.expectedPacketCount ?? stats.receivedPacketCount,
-            })}
-          </Pill>
-          <Pill tone={stats.missingPacketCount === 0 ? 'ok' : 'outline'} size="sm">
-            {t('settings.recording.embeddedBleMissing', { count: stats.missingPacketCount })}
-          </Pill>
-          <Pill tone="outline" size="sm">
-            {t('settings.recording.embeddedBleDuration', { seconds: stats.durationSeconds.toFixed(1) })}
-          </Pill>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
 
-function WizardStepPill({
-  index,
+function StatusTile({
   label,
   state,
+  idleText,
+  okText,
+  checkingText,
+  errorText,
+  unsupportedText,
+  actionLabel,
+  disabled,
+  onAction,
 }: {
-  index: number;
   label: string;
-  state: EmbeddedBleWizardStepState;
+  state: ConnectionState;
+  idleText: string;
+  okText: string;
+  checkingText: string;
+  errorText: string;
+  unsupportedText: string;
+  actionLabel: string;
+  disabled: boolean;
+  onAction?: () => void;
 }) {
-  const color =
-    state === 'ok'
-      ? 'var(--ol-ok)'
+  const value = state === 'ok'
+    ? okText
+    : state === 'checking'
+      ? checkingText
       : state === 'error'
-        ? 'var(--ol-err)'
-        : state === 'active'
-          ? 'var(--ol-blue)'
-          : 'var(--ol-ink-4)';
-  const background =
-    state === 'ok'
-      ? 'var(--ol-ok-soft)'
-      : state === 'active'
-        ? 'var(--ol-blue-soft)'
-        : state === 'error'
-          ? 'rgba(190,18,60,0.08)'
-          : 'rgba(0,0,0,0.035)';
-  const marker = state === 'ok' ? '✓' : state === 'error' ? '!' : index;
+        ? errorText
+        : state === 'unsupported'
+          ? unsupportedText
+          : idleText;
+  const color = state === 'ok'
+    ? 'var(--ol-ok)'
+    : state === 'error'
+      ? 'var(--ol-err)'
+      : state === 'checking'
+        ? 'var(--ol-blue)'
+        : 'var(--ol-ink-3)';
 
   return (
     <div
       style={{
         minWidth: 0,
-        display: 'flex',
+        minHeight: 74,
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '0.5px solid var(--ol-line-soft)',
+        background: 'var(--ol-surface)',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) auto',
         alignItems: 'center',
-        gap: 5,
-        height: 26,
-        padding: '0 7px',
-        borderRadius: 7,
-        background,
-        color,
-        fontSize: 10.5,
-        fontWeight: 500,
+        gap: 10,
       }}
-      title={label}
     >
-      <span
-        style={{
-          width: 14,
-          height: 14,
-          borderRadius: 999,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          background: 'rgba(255,255,255,0.68)',
-          fontSize: 9,
-          fontWeight: 700,
-        }}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginBottom: 5 }}>{label}</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {value}
+        </div>
+      </div>
+      <Btn
+        variant="ghost"
+        size="sm"
+        icon="refresh"
+        disabled={disabled}
+        onClick={onAction}
       >
-        {marker}
-      </span>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {label}
-      </span>
+        {actionLabel}
+      </Btn>
     </div>
   );
 }

@@ -1945,6 +1945,7 @@ fn reject_bare_shift_dictation_shortcut(binding: &ShortcutBinding) -> Result<(),
 }
 
 fn sync_dictation_hotkey_legacy_fields(prefs: &mut UserPreferences) {
+    prefs.hotkey.mode = crate::types::HotkeyMode::Toggle;
     if let Some(trigger) = crate::shortcut_binding::legacy_modifier_trigger(&prefs.dictation_hotkey)
     {
         prefs.hotkey.trigger = trigger;
@@ -3950,6 +3951,26 @@ mod tests {
 
         assert_eq!(prefs.hotkey.trigger, HotkeyTrigger::RightControl);
         assert!(prefs.custom_combo_hotkey.is_none());
+    }
+
+    #[test]
+    fn sync_dictation_hotkey_normalizes_legacy_hold_mode() {
+        let mut prefs = UserPreferences {
+            hotkey: HotkeyBinding {
+                trigger: HotkeyTrigger::RightControl,
+                mode: HotkeyMode::Hold,
+                keys: None,
+            },
+            dictation_hotkey: ShortcutBinding {
+                primary: "RightControl".into(),
+                modifiers: vec![],
+            },
+            ..Default::default()
+        };
+
+        super::sync_dictation_hotkey_legacy_fields(&mut prefs);
+
+        assert_eq!(prefs.hotkey.mode, HotkeyMode::Toggle);
     }
 
     #[test]

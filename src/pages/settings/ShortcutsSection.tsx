@@ -48,7 +48,7 @@ export function ShortcutsSection() {
             }}
           />
           <div style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>
-            {hotkey.mode === 'hold' ? t('hotkey.modeHoldSuffix') : t('hotkey.modeToggleSuffix')}
+            {t('hotkey.modeToggleSuffix')}
           </div>
         </div>
       </SettingRow>

@@ -556,7 +556,7 @@ pub struct UserPreferences {
     #[serde(default)]
     pub qa_save_history: bool,
     /// 自定义录音组合键。当 `hotkey.trigger == Custom` 时，coordinator 用
-    /// `global-hotkey` crate 注册此组合键（支持 Toggle + Hold 模式）。
+    /// `global-hotkey` crate 注册此组合键。录音生命周期统一使用 Toggle 模式。
     /// `None` 且 trigger == Custom 表示用户选了自定义但还没录制。
     #[serde(default)]
     pub custom_combo_hotkey: Option<ComboBinding>,
@@ -854,9 +854,11 @@ impl<'de> Deserialize<'de> for UserPreferences {
         D: serde::Deserializer<'de>,
     {
         let wire = UserPreferencesWire::deserialize(deserializer)?;
+        let mut hotkey = wire.hotkey;
+        hotkey.mode = HotkeyMode::Toggle;
         let dictation_hotkey = match wire.dictation_hotkey {
             Some(binding) => binding,
-            None => default_dictation_hotkey_from_legacy(&wire.hotkey, &wire.custom_combo_hotkey)
+            None => default_dictation_hotkey_from_legacy(&hotkey, &wire.custom_combo_hotkey)
                 .map_err(serde::de::Error::custom)?,
         };
         let streaming_insert_default_migrated = wire.streaming_insert_default_migrated;
@@ -867,7 +869,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
         };
 
         Ok(Self {
-            hotkey: wire.hotkey,
+            hotkey,
             dictation_hotkey,
             default_mode: wire.default_mode,
             enabled_modes: wire.enabled_modes,
@@ -1730,7 +1732,7 @@ impl HotkeyCapability {
                 supports_side_specific_modifiers: true,
                 explicit_fallback_available: false,
                 status_hint: Some(
-                    "默认建议使用“右Ctrl + 单击”；若更习惯按住说话，可在录音设置里切回“按住”。若无响应，可在权限页查看 hook 安装状态。"
+                    "默认建议使用“右Ctrl + 单击”。若无响应，可在权限页查看 hook 安装状态。"
                         .into(),
                 ),
             };
@@ -2071,6 +2073,18 @@ mod tests {
             let prefs: UserPreferences = serde_json::from_str(&json).unwrap();
             assert_eq!(prefs.paste_shortcut, expected, "raw={raw}");
         }
+    }
+
+    #[test]
+    fn legacy_hold_hotkey_mode_is_normalized_to_toggle() {
+        let prefs: UserPreferences = serde_json::from_str(
+            r#"{
+                "hotkey": { "trigger": "rightControl", "mode": "hold" }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(prefs.hotkey.mode, HotkeyMode::Toggle);
     }
 
     #[test]

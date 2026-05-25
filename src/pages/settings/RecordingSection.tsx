@@ -8,7 +8,6 @@ import { useTranslation } from 'react-i18next';
 import { Icon } from '../../components/Icon';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
 import { detectOS } from '../../components/WindowChrome';
-import { isHotkeyModeMigrationNoticeActive } from '../../lib/hotkeyMigration';
 import {
   getHotkeyBindingCodes,
   getHotkeyBindingLabel,
@@ -24,14 +23,11 @@ import {
   setDictationHotkey,
   startMicrophoneLevelMonitor,
   stopMicrophoneLevelMonitor,
-  submitEmbeddedAudioBleOnce,
 } from '../../lib/ipc';
 import { classifyEmbeddedBleProbeError } from '../../lib/providerSetup';
 import type {
   DictationInputSource,
-  EmbeddedAudioSubmissionResult,
   HotkeyBinding,
-  HotkeyMode,
   HotkeyTrigger,
   MicrophoneDevice,
   PasteShortcut,
@@ -43,7 +39,6 @@ import { SettingRow, Toggle, inputStyle } from './shared';
 import {
   EmbeddedBleStatusPanel,
   type EmbeddedBleProbeStatus,
-  type EmbeddedBleWizardStep,
 } from './EmbeddedBleStatusPanel';
 
 // ─── autostart helpers（OS 持有状态，不存 prefs）──────────────────────
@@ -242,9 +237,9 @@ function WaylandHotkeyCallout() {
                   padding: '4px 10px',
                   fontSize: 11,
                   fontWeight: 500,
-                  border: '0.5px solid rgba(0,0,0,0.12)',
+                  border: '0.5px solid var(--ol-line-strong)',
                   borderRadius: 6,
-                  background: 'var(--ol-white)',
+                  background: 'var(--ol-control-active)',
                   color: 'var(--ol-ink-2)',
                   cursor: 'pointer',
                   fontFamily: 'inherit',
@@ -623,7 +618,7 @@ function MicrophonePickerDialog({
                 transition: 'background 0.16s var(--ol-motion-quick), opacity 0.16s var(--ol-motion-quick)',
               }}
               onMouseEnter={e => {
-                if (!loading) e.currentTarget.style.background = 'rgba(0,0,0,0.05)';
+                if (!loading) e.currentTarget.style.background = 'var(--ol-hover-bg)';
               }}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               title={t('common.refresh')}
@@ -650,7 +645,7 @@ function MicrophonePickerDialog({
                 height: 28,
                 transition: 'background 0.16s var(--ol-motion-quick)',
               }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.05)')}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--ol-hover-bg)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               title={t('common.close')}
             >
@@ -702,17 +697,17 @@ function MicrophonePickerDialog({
                   width: '100%',
                   padding: '14px 16px',
                   borderRadius: 10,
-                  border: active ? '1px solid rgba(101,123,112,0.7)' : '0.5px solid rgba(0,0,0,0.12)',
+                  border: active ? '1px solid rgba(101,123,112,0.7)' : '0.5px solid var(--ol-line-strong)',
                   background: active
                     ? 'rgba(101,123,112,0.08)'
                     : hovered
-                      ? 'rgba(0,0,0,0.035)'
-                      : 'var(--ol-white)',
+                      ? 'var(--ol-hover-bg)'
+                      : 'var(--ol-control-active)',
                   boxShadow: active
                     ? '0 0 0 3px rgba(101,123,112,0.08)'
                     : hovered
-                      ? '0 8px 18px rgba(0,0,0,0.06)'
-                      : '0 1px 2px rgba(0,0,0,0.03)',
+                      ? 'var(--ol-control-active-shadow)'
+                      : 'none',
                   color: 'var(--ol-ink)',
                   cursor: 'default',
                   textAlign: 'left',
@@ -860,9 +855,7 @@ export function RecordingSection() {
   const [microphoneDevicesError, setMicrophoneDevicesError] = useState<string | null>(null);
   const [microphonePickerOpen, setMicrophonePickerOpen] = useState(false);
   const [embeddedBleProbeStatus, setEmbeddedBleProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
-  const [embeddedBleProbePhase, setEmbeddedBleProbePhase] = useState<'idle' | 'connect' | 'subscribe' | 'record'>('idle');
   const [embeddedBleProbeMessage, setEmbeddedBleProbeMessage] = useState('');
-  const [embeddedBleProbeResult, setEmbeddedBleProbeResult] = useState<EmbeddedAudioSubmissionResult | null>(null);
   // Wayland 下 rdev 监听不可用（issue #420）。改用 pull 模型：mount 时 invoke 拉状态。
   // 不能依赖一次性 event — Settings 模态是按需 mount，emit 早在 setup 阶段发完了。
   // XDG_SESSION_TYPE 在进程生命周期内不会变，拉一次即可，无需 polling 或 listener。
@@ -949,8 +942,6 @@ export function RecordingSection() {
     );
   }
 
-  const onModeChange = (mode: HotkeyMode) =>
-    savePrefs({ ...prefs, hotkey: { ...prefs.hotkey, mode } });
   const onShowCapsuleChange = (showCapsule: boolean) =>
     savePrefs({ ...prefs, showCapsule });
   const onMuteDuringRecordingChange = (muteDuringRecording: boolean) =>
@@ -1009,10 +1000,6 @@ export function RecordingSection() {
     void savePrefs({ ...prefs, audioRecordingMaxEntries: clamp(parsed, 1, 200) });
   };
 
-  const choices: Array<[HotkeyMode, string]> = [
-    ['toggle', t('settings.recording.modeToggle')],
-    ['hold', t('settings.recording.modeHold')],
-  ];
   const hotkeyDesc = capability.requiresAccessibilityPermission
     ? t('settings.recording.hotkeyDescAcc')
     : t('settings.recording.hotkeyDescNoAcc');
@@ -1029,12 +1016,6 @@ export function RecordingSection() {
     : t('settings.recording.microphoneDefault');
   const selectedInputSource = prefs.dictationInputSource ?? 'microphone';
   const embeddedBleSupported = detectOS() === 'win';
-  const embeddedBleWizardSteps: EmbeddedBleWizardStep[] = buildEmbeddedBleWizardSteps(
-    selectedInputSource,
-    embeddedBleProbeStatus,
-    embeddedBleProbePhase,
-    Boolean(embeddedBleProbeResult),
-  );
   const openBluetoothSettings = () => {
     void openSystemSettings('bluetooth').catch(err => {
       console.warn('[settings] open bluetooth settings failed', err);
@@ -1043,41 +1024,13 @@ export function RecordingSection() {
   const runEmbeddedBleProbe = async () => {
     if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
     setEmbeddedBleProbeStatus('checking');
-    setEmbeddedBleProbePhase('connect');
-    setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectChecking'));
-    setEmbeddedBleProbeResult(null);
+    setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionMessageChecking'));
     try {
       await probeEmbeddedAudioBleSubscription(10_000);
       setEmbeddedBleProbeStatus('ok');
-      setEmbeddedBleProbePhase('idle');
-      setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleProbeReady'));
+      setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionReady'));
     } catch (err) {
-      setEmbeddedBleProbeResult(null);
       setEmbeddedBleProbeStatus('error');
-      setEmbeddedBleProbePhase(embeddedBleProbeErrorPhase(err));
-      setEmbeddedBleProbeMessage(embeddedBleProbeErrorMessage(err, t));
-    }
-  };
-  const runEmbeddedBleRecordingTest = async () => {
-    if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
-    setEmbeddedBleProbeStatus('checking');
-    setEmbeddedBleProbePhase('record');
-    setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleRecordChecking'));
-    setEmbeddedBleProbeResult(null);
-    try {
-      const result = await submitEmbeddedAudioBleOnce(30_000);
-      setEmbeddedBleProbeResult(result);
-      setEmbeddedBleProbeStatus('ok');
-      setEmbeddedBleProbePhase('idle');
-      setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleProbeOk', {
-        packets: result.stats.receivedPacketCount,
-        missing: result.stats.missingPacketCount,
-        seconds: result.stats.durationSeconds.toFixed(1),
-      }));
-    } catch (err) {
-      setEmbeddedBleProbeResult(null);
-      setEmbeddedBleProbeStatus('error');
-      setEmbeddedBleProbePhase(embeddedBleProbeErrorPhase(err));
       setEmbeddedBleProbeMessage(embeddedBleProbeErrorMessage(err, t));
     }
   };
@@ -1087,25 +1040,6 @@ export function RecordingSection() {
     <Card>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{t('settings.recording.title')}</div>
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginBottom: 6 }}>{t('settings.recording.desc')}</div>
-      {isHotkeyModeMigrationNoticeActive() && (
-        <div
-          style={{
-            marginTop: 10,
-            marginBottom: 8,
-            padding: '12px 14px',
-            borderRadius: 10,
-            background: 'rgba(101,123,112,0.08)',
-            border: '0.5px solid rgba(101,123,112,0.18)',
-          }}
-        >
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-blue)', marginBottom: 4 }}>
-            {t('settings.recording.migrationNoticeTitle')}
-          </div>
-          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-3)', lineHeight: 1.55 }}>
-            {t('settings.recording.migrationNoticeDesc')}
-          </div>
-        </div>
-      )}
       {waylandCliMode && <WaylandHotkeyCallout />}
       <SettingRow label={t('settings.recording.hotkeyLabel')} desc={hotkeyDesc}>
         <ShortcutRecorder
@@ -1116,30 +1050,9 @@ export function RecordingSection() {
           }}
         />
       </SettingRow>
-      <SettingRow label={t('settings.recording.modeLabel')} desc={t('settings.recording.modeDesc')}>
-        <div style={{ display: 'inline-flex', padding: 2, borderRadius: 8, background: 'rgba(0,0,0,0.05)' }}>
-          {choices.map(([v, l]) => (
-            <button
-              key={v}
-              onClick={() => onModeChange(v)}
-              style={{
-                padding: '5px 14px', fontSize: 12, fontWeight: 500,
-                border: 0, borderRadius: 6, fontFamily: 'inherit',
-                background: prefs.hotkey.mode === v ? 'var(--ol-white)' : 'transparent',
-                color: prefs.hotkey.mode === v ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
-                boxShadow: prefs.hotkey.mode === v ? '0 1px 2px rgba(0,0,0,.08)' : 'none',
-                cursor: 'default',
-                transition: 'background 0.16s var(--ol-motion-quick), color 0.16s var(--ol-motion-quick), box-shadow 0.18s var(--ol-motion-soft)',
-              }}
-            >
-              {l}
-            </button>
-          ))}
-        </div>
-      </SettingRow>
       <SettingRow label={t('settings.recording.inputSourceLabel')} desc={t('settings.recording.inputSourceDesc')}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 430 }}>
-          <div style={{ display: 'inline-flex', alignSelf: 'flex-start', padding: 2, borderRadius: 8, background: 'rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'inline-flex', alignSelf: 'flex-start', padding: 2, borderRadius: 8, background: 'var(--ol-control-track)' }}>
             {([
               ['microphone', t('settings.recording.inputSourceMicrophone'), 'mic'],
               ['embeddedBle', t('settings.recording.inputSourceEmbeddedBle'), 'bolt'],
@@ -1158,9 +1071,9 @@ export function RecordingSection() {
                     border: 0,
                     borderRadius: 6,
                     fontFamily: 'inherit',
-                    background: active ? 'var(--ol-white)' : 'transparent',
+                    background: active ? 'var(--ol-control-active)' : 'transparent',
                     color: active ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
-                    boxShadow: active ? '0 1px 2px rgba(0,0,0,.08)' : 'none',
+                    boxShadow: active ? 'var(--ol-control-active-shadow)' : 'none',
                     cursor: 'default',
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -1175,23 +1088,20 @@ export function RecordingSection() {
               );
             })}
           </div>
-          {selectedInputSource === 'embeddedBle' && (
-            <EmbeddedBleStatusPanel
-              supported={embeddedBleSupported}
-              status={embeddedBleProbeStatus}
-              message={embeddedBleProbeMessage}
-              result={embeddedBleProbeResult}
-              steps={embeddedBleWizardSteps}
-              onOpenBluetoothSettings={openBluetoothSettings}
-              onProbe={() => void runEmbeddedBleProbe()}
-              onTestRecording={() => void runEmbeddedBleRecordingTest()}
-              onUseMicrophone={() => {
-                void savePrefs({ ...prefs, dictationInputSource: 'microphone' }).catch(() => {});
-              }}
-            />
-          )}
         </div>
       </SettingRow>
+      {selectedInputSource === 'embeddedBle' && (
+        <EmbeddedBleStatusPanel
+          supported={embeddedBleSupported}
+          status={embeddedBleProbeStatus}
+          message={embeddedBleProbeMessage}
+          onOpenBluetoothSettings={openBluetoothSettings}
+          onProbe={() => void runEmbeddedBleProbe()}
+          onUseMicrophone={() => {
+            void savePrefs({ ...prefs, dictationInputSource: 'microphone' }).catch(() => {});
+          }}
+        />
+      )}
       <SettingRow label={t('settings.recording.microphoneLabel')} desc={t('settings.recording.microphoneDesc')}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <button
@@ -1410,43 +1320,7 @@ export function RecordingSection() {
   );
 }
 
-// ─── Embedded BLE wizard helpers ────────────────────────────────────
-
-function buildEmbeddedBleWizardSteps(
-  selectedInputSource: DictationInputSource,
-  status: EmbeddedBleProbeStatus,
-  phase: 'idle' | 'connect' | 'subscribe' | 'record',
-  recordingVerified: boolean,
-): EmbeddedBleWizardStep[] {
-  const selected = selectedInputSource === 'embeddedBle';
-  const failureState = (step: 'connect' | 'subscribe' | 'record') =>
-    status === 'error' && phase === step ? 'error' : 'pending';
-  const activeState = (step: 'connect' | 'subscribe' | 'record') =>
-    status === 'checking' && phase === step ? 'active' : failureState(step);
-  const ready = status === 'ok';
-
-  return [
-    { id: 'select', state: selected ? 'ok' : 'active' },
-    { id: 'pair', state: selected ? (ready ? 'ok' : activeState('connect')) : 'pending' },
-    { id: 'connect', state: selected ? (ready ? 'ok' : activeState('connect')) : 'pending' },
-    { id: 'subscribe', state: selected ? (ready ? 'ok' : activeState('subscribe')) : 'pending' },
-    { id: 'record', state: selected ? (recordingVerified ? 'ok' : activeState('record')) : 'pending' },
-  ];
-}
-
-function embeddedBleProbeErrorPhase(error: unknown): 'connect' | 'subscribe' | 'record' {
-  switch (classifyEmbeddedBleProbeError(error)) {
-    case 'noDevice':
-    case 'accessDenied':
-      return 'connect';
-    case 'notify':
-      return 'subscribe';
-    case 'timeout':
-    case 'generic':
-    default:
-      return 'record';
-  }
-}
+// ─── Embedded BLE error copy ─────────────────────────────────────────
 
 function embeddedBleProbeErrorMessage(error: unknown, t: ReturnType<typeof useTranslation>['t']): string {
   switch (classifyEmbeddedBleProbeError(error)) {

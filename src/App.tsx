@@ -7,6 +7,7 @@ import { detectOS } from './components/WindowChrome';
 import {
   checkAccessibilityPermission,
   checkMicrophonePermission,
+  getSettings,
   getHotkeyStatus,
   handleWindowHotkeyEvent,
   isMainWindowStartHidden,
@@ -28,23 +29,38 @@ type Gate = 'checking' | 'onboarding' | 'ready';
 
 function useDarkMode() {
   useEffect(() => {
+    const applyTheme = (enabled: boolean) => {
+      document.documentElement.setAttribute('data-theme', enabled ? 'dark' : 'light');
+      localStorage.setItem('ol-dark-mode', String(enabled));
+    };
+
     // Fast path: restore from last session
     if (localStorage.getItem('ol-dark-mode') === 'true') {
       document.documentElement.setAttribute('data-theme', 'dark');
     }
     if (!isTauri) return;
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     void (async () => {
+      try {
+        const prefs = await getSettings();
+        if (!cancelled) {
+          applyTheme(prefs.darkMode);
+        }
+      } catch (error) {
+        console.warn('[theme] initial dark mode sync failed', error);
+      }
       try {
         const { listen } = await import('@tauri-apps/api/event');
         unlisten = await listen<boolean>('dark-mode-changed', event => {
-          const theme = event.payload ? 'dark' : 'light';
-          document.documentElement.setAttribute('data-theme', theme);
-          localStorage.setItem('ol-dark-mode', String(event.payload));
+          applyTheme(event.payload);
         });
       } catch { /* non-tauri */ }
     })();
-    return () => { unlisten?.(); };
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 }
 

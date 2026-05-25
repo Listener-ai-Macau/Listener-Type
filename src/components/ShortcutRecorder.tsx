@@ -129,7 +129,7 @@ export function ShortcutRecorder({
   return (
     <div style={rootStyle}>
       <div style={recorderRowStyle}>
-        <span style={{ padding: '4px 10px', borderRadius: 6, background: 'rgba(0,0,0,0.06)', fontSize: 13, fontFamily: 'var(--ol-font-mono)', fontWeight: 500, color: 'var(--ol-ink)' }}>
+        <span style={{ padding: '4px 10px', borderRadius: 6, background: 'var(--ol-control-track)', fontSize: 13, fontFamily: 'var(--ol-font-mono)', fontWeight: 500, color: 'var(--ol-ink)' }}>
           {formatComboLabel(value)}
         </span>
         <button

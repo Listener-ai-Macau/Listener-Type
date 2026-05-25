@@ -24,25 +24,14 @@ export function getHotkeyStartStopLabel(
   shortcutBinding?: ShortcutBinding | null,
 ): string {
   if (shortcutBinding) {
-    const suffix = binding?.mode === 'hold'
-      ? i18n.t('hotkey.modeHoldSuffix')
-      : i18n.t('hotkey.modeToggleSuffix');
-    return `${formatComboLabel(shortcutBinding)}${suffix}`;
+    return `${formatComboLabel(shortcutBinding)}${i18n.t('hotkey.modeToggleSuffix')}`;
   }
   if (binding?.trigger === 'custom' && comboBinding) {
     const combo = formatComboLabel(comboBinding);
-    const suffix = binding.mode === 'hold'
-      ? i18n.t('hotkey.modeHoldSuffix')
-      : i18n.t('hotkey.modeToggleSuffix');
-    return `${combo}${suffix}`;
+    return `${combo}${i18n.t('hotkey.modeToggleSuffix')}`;
   }
   const trigger = getHotkeyTriggerLabel(binding?.trigger);
-  const suffix = binding?.mode === 'hold'
-    ? i18n.t('hotkey.modeHoldSuffix')
-    : binding?.mode === 'doubleClick'
-      ? i18n.t('hotkey.modeDoubleClickSuffix')
-      : i18n.t('hotkey.modeToggleSuffix');
-  return `${trigger}${suffix}`;
+  return `${trigger}${i18n.t('hotkey.modeToggleSuffix')}`;
 }
 
 export function getHotkeyUsageHint(
@@ -52,22 +41,14 @@ export function getHotkeyUsageHint(
 ): string {
   if (shortcutBinding) {
     const combo = formatComboLabel(shortcutBinding);
-    return binding?.mode === 'hold'
-      ? i18n.t('hotkey.usageHold', { trigger: combo })
-      : i18n.t('hotkey.usageToggle', { trigger: combo });
+    return i18n.t('hotkey.usageToggle', { trigger: combo });
   }
   if (binding?.trigger === 'custom' && comboBinding) {
     const combo = formatComboLabel(comboBinding);
-    return binding.mode === 'hold'
-      ? i18n.t('hotkey.usageHold', { trigger: combo })
-      : i18n.t('hotkey.usageToggle', { trigger: combo });
+    return i18n.t('hotkey.usageToggle', { trigger: combo });
   }
   const trigger = getHotkeyTriggerLabel(binding?.trigger);
-  return binding?.mode === 'hold'
-    ? i18n.t('hotkey.usageHold', { trigger })
-    : binding?.mode === 'doubleClick'
-      ? i18n.t('hotkey.usageDoubleClick', { trigger })
-    : i18n.t('hotkey.usageToggle', { trigger });
+  return i18n.t('hotkey.usageToggle', { trigger });
 }
 
 export function getHotkeyBindingCodes(binding: HotkeyBinding | null | undefined): string[] {

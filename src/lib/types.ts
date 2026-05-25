@@ -107,6 +107,8 @@ export type HotkeyTrigger =
   | 'rightAlt'
   | 'custom';
 
+// `hold` / `doubleClick` are accepted only for legacy preference files.
+// Current UI and IPC normalize recording to `toggle`.
 export type HotkeyMode = 'toggle' | 'hold' | 'doubleClick';
 
 export interface HotkeyKey {

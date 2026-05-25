@@ -98,8 +98,8 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
           width: '100%', maxWidth: 880, height: '100%', maxHeight: 600,
           background: 'var(--ol-surface)',
           borderRadius: 14,
-          border: '0.5px solid rgba(0,0,0,.08)',
-          boxShadow: '0 30px 80px -20px rgba(15,17,22,.35), 0 0 0 0.5px rgba(0,0,0,.06)',
+          border: '0.5px solid var(--ol-line)',
+          boxShadow: 'var(--ol-shadow-lg)',
           display: 'flex', overflow: 'hidden',
           animation: 'ol-modal-pop .28s var(--ol-motion-spring)',
           position: 'relative',
@@ -109,7 +109,7 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
         <aside
           style={{
             width: 200, flexShrink: 0,
-            background: 'rgba(247,247,250,0.7)',
+            background: 'var(--ol-sidebar-bg)',
             borderRight: '0.5px solid var(--ol-line-soft)',
             padding: '18px 12px',
             display: 'flex', flexDirection: 'column', gap: 14,
@@ -126,9 +126,9 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
                     right: 0,
                     top: pillRect.top,
                     height: pillRect.height,
-                    background: 'var(--ol-white)',
+                    background: 'var(--ol-control-active)',
                     borderRadius: 8,
-                    boxShadow: '0 1px 2px rgba(0,0,0,.05), 0 0 0 0.5px rgba(0,0,0,.06)',
+                    boxShadow: 'var(--ol-control-active-shadow)',
                     transition: 'top 0.36s var(--ol-motion-spring), height 0.36s var(--ol-motion-spring)',
                     pointerEvents: 'none',
                     zIndex: 0,
@@ -192,7 +192,7 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
               cursor: 'default',
               transition: 'background 0.16s var(--ol-motion-quick)',
             }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.05)')}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--ol-hover-bg)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             title={t('common.close')}>
 
@@ -259,7 +259,7 @@ function PersonalizeSection() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Row label={t('modal.personalize.font')} desc={t('modal.personalize.fontDesc')}>
-        <div style={{ display: 'flex', gap: 4, padding: 2, background: 'rgba(0,0,0,0.04)', borderRadius: 8 }}>
+        <div style={{ display: 'flex', gap: 4, padding: 2, background: 'var(--ol-control-track)', borderRadius: 8 }}>
           {fontOptions.map(([id, label]) => {
             const selected = fontScale === id;
             return (
@@ -271,13 +271,13 @@ function PersonalizeSection() {
                   height: 28,
                   border: 0,
                   borderRadius: 6,
-                  background: selected ? 'var(--ol-white)' : 'transparent',
+                  background: selected ? 'var(--ol-control-active)' : 'transparent',
                   color: selected ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
                   fontFamily: 'inherit',
                   fontSize: 12,
                   fontWeight: selected ? 600 : 500,
                   cursor: 'default',
-                  boxShadow: selected ? '0 1px 2px rgba(0,0,0,.06), 0 0 0 0.5px rgba(0,0,0,.06)' : 'none',
+                  boxShadow: selected ? 'var(--ol-control-active-shadow)' : 'none',
                   transition: 'background 0.16s var(--ol-motion-quick), color 0.16s var(--ol-motion-quick), box-shadow 0.18s var(--ol-motion-soft)',
                   padding: '0 12px',
                 }}
@@ -540,7 +540,7 @@ function BetaChannelControl() {
 const btnGhost: CSSProperties = {
   padding: '5px 10px', fontSize: 12, borderRadius: 6,
   border: '0.5px solid var(--ol-line-strong)',
-  background: 'var(--ol-white)', color: 'var(--ol-ink-2)',
+  background: 'var(--ol-control-active)', color: 'var(--ol-ink-2)',
   cursor: 'default', fontFamily: 'inherit',
   transition: 'background 0.16s var(--ol-motion-quick), border-color 0.16s var(--ol-motion-quick)',
 };

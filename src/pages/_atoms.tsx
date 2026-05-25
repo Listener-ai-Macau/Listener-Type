@@ -71,7 +71,7 @@ interface PillProps {
 
 export function Pill({ children, tone = 'default', size = 'md', style }: PillProps) {
   const tones: Record<PillTone, { bg: string; color: string; bd: string }> = {
-    default: { bg: 'rgba(0,0,0,0.05)',   color: 'var(--ol-ink-2)',  bd: 'transparent' },
+    default: { bg: 'var(--ol-control-track)', color: 'var(--ol-ink-2)', bd: 'transparent' },
     blue:    { bg: 'var(--ol-blue-soft)',color: 'var(--ol-blue)',   bd: 'transparent' },
     ok:      { bg: 'var(--ol-ok-soft)',  color: 'var(--ol-ok)',     bd: 'transparent' },
     outline: { bg: 'transparent',        color: 'var(--ol-ink-3)',  bd: 'var(--ol-line-strong)' },
@@ -117,7 +117,7 @@ export function Btn({ children, variant = 'ghost', size = 'md', icon, style, onC
     primary: { bg: 'var(--ol-ink)',     color: '#fff',                bd: 'transparent', sh: '0 1px 2px rgba(0,0,0,.08)' },
     blue:    { bg: 'var(--ol-blue)',    color: '#fff',                bd: 'transparent', sh: '0 1px 2px rgba(101,123,112,.18)' },
     ghost:   { bg: 'transparent',       color: 'var(--ol-ink-2)',     bd: 'var(--ol-line-strong)', sh: 'none' },
-    soft:    { bg: 'rgba(0,0,0,0.04)',  color: 'var(--ol-ink-2)',     bd: 'transparent', sh: 'none' },
+    soft:    { bg: 'var(--ol-control-track)', color: 'var(--ol-ink-2)', bd: 'transparent', sh: 'none' },
   };
   const v = variants[variant];
   const sizes: Record<BtnSize, { padding: string; fontSize: number }> = {

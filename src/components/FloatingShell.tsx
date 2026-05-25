@@ -247,6 +247,16 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
 
   return (
     <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, paddingTop: os === 'mac' ? 28 : 0 }}>
+      <div
+        style={{
+          position: 'absolute',
+          top: os === 'mac' ? 34 : 8,
+          right: 16,
+          zIndex: 5,
+        }}
+      >
+        <FooterIcon name="settings" tip={t('shell.footer.settings')} active={settingsOpen} onClick={() => openSettings()} />
+      </div>
 
       {/* Main shell — flush with the frosted backplate (no separate float). */}
       <div
@@ -425,9 +435,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         )}
 
         <span style={{ fontFamily: 'var(--ol-font-sans)', marginRight: 12 }}>{t('shell.footer.version', { version: APP_VERSION_LABEL })}</span>
-        <div style={{ marginRight: 12 }}>
-          <FooterIcon name="settings" tip={t('shell.footer.settings')} active={settingsOpen} onClick={() => openSettings()} />
-        </div>
       </div>
 
       {/* Settings modal — rendered inside this window */}

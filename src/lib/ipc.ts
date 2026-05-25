@@ -113,6 +113,16 @@ let mockSettings: UserPreferences = {
   marketplaceDevLogin: '',
 };
 
+function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
+  return {
+    ...prefs,
+    hotkey: {
+      ...prefs.hotkey,
+      mode: 'toggle',
+    },
+  };
+}
+
 const mockFullStylePrompts: StyleSystemPrompts = {
   raw: `# 角色
 语音输入整理器。先理解用户意图，再贴近原话做最小整理。
@@ -379,7 +389,7 @@ const mockHotkeyCapability: HotkeyCapability = {
   supportsModifierOnlyTrigger: true,
   supportsSideSpecificModifiers: true,
   explicitFallbackAvailable: false,
-  statusHint: '默认建议使用“右Ctrl + 单击”；若更习惯按住说话，可在录音设置里切回“按住”。若无响应，可在权限页查看 hook 安装状态。',
+  statusHint: '默认建议使用“右Ctrl + 单击”。若无响应，可在权限页查看 hook 安装状态。',
 };
 
 const mockCredentialsStatus: CredentialsStatus = {
@@ -453,8 +463,8 @@ const mockCorrectionRules: CorrectionRule[] = [
 ];
 
 // ── Settings ───────────────────────────────────────────────────────────
-export function getSettings(): Promise<UserPreferences> {
-  return invokeOrMock('get_settings', undefined, () => ({ ...mockSettings }));
+export async function getSettings(): Promise<UserPreferences> {
+  return normalizeUserPreferences(await invokeOrMock('get_settings', undefined, () => ({ ...mockSettings })));
 }
 
 export function isMainWindowStartHidden(): Promise<boolean> {
@@ -466,14 +476,15 @@ export function getDefaultStyleSystemPrompts(): Promise<StyleSystemPrompts> {
 }
 
 export function setSettings(prefs: UserPreferences): Promise<void> {
-  return invokeOrMock('set_settings', { prefs }, () => {
-    mockSettings = { ...prefs };
+  const nextPrefs = normalizeUserPreferences(prefs);
+  return invokeOrMock('set_settings', { prefs: nextPrefs }, () => {
+    mockSettings = { ...nextPrefs };
     mockStylePacks = mockStylePacks.map(pack => {
       if (pack.kind === 'builtin') {
         return {
           ...pack,
-          enabled: prefs.enabledModes.includes(pack.baseMode),
-          prompt: prefs.styleSystemPrompts[pack.baseMode],
+          enabled: nextPrefs.enabledModes.includes(pack.baseMode),
+          prompt: nextPrefs.styleSystemPrompts[pack.baseMode],
         };
       }
       return { ...pack };

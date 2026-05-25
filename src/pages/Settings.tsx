@@ -81,7 +81,7 @@ export function Settings({ embedded = false, initialSection = 'recording' }: Set
                 right: 0,
                 top: pillRect.top,
                 height: pillRect.height,
-                background: 'rgba(0,0,0,0.04)',
+                background: 'var(--ol-control-track)',
                 borderRadius: 8,
                 transition: 'top 0.36s var(--ol-motion-spring), height 0.36s var(--ol-motion-spring)',
                 pointerEvents: 'none',
