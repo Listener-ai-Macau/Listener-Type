@@ -1665,7 +1665,7 @@ try {
     while ((Get-Date) -lt $readyDeadline) {
         Start-Sleep -Milliseconds 250
         $capturedLog += Read-NewLogText -Path $logPath -Offset $logOffset
-        if ($capturedLog -match "\[embedded-ble\] ValueChanged handler registered") {
+        if ($capturedLog -match "\[embedded-ble\].*notify CCCD enabled") {
             $notifyReady = $true
             break
         }

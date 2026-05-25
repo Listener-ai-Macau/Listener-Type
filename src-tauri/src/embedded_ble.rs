@@ -52,7 +52,8 @@ mod windows_ble {
     use windows::Devices::Bluetooth::GenericAttributeProfile::{
         GattCharacteristic, GattCharacteristicProperties,
         GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
-        GattDeviceService, GattValueChangedEventArgs, GattWriteResult,
+        GattDeviceService, GattSession, GattSessionStatus, GattValueChangedEventArgs,
+        GattWriteResult,
     };
     use windows::Devices::Bluetooth::{BluetoothCacheMode, BluetoothLEDevice};
     use windows::Devices::Enumeration::{DeviceAccessStatus, DeviceInformation};
@@ -64,7 +65,10 @@ mod windows_ble {
     const SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091a);
     const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b);
     const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
-    const CCCD_ENABLE_TIMEOUT: Duration = Duration::from_secs(5);
+    const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+    const GATT_READY_TIMEOUT: Duration = Duration::from_secs(8);
+    const GATT_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
+    const CCCD_ENABLE_TIMEOUT: Duration = Duration::from_secs(8);
     const CCCD_ENABLE_RETRY_DELAYS: [Duration; 3] = [
         Duration::from_millis(250),
         Duration::from_millis(750),
@@ -81,7 +85,7 @@ mod windows_ble {
     }
 
     pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
-        let capture_guard = BleCaptureGuard::enter(timeout)?;
+        let capture_guard = BleCaptureGuard::enter(Some(timeout))?;
         let capture_id = capture_guard.session_id();
         let target = open_notify_target()?;
         let characteristic = target.characteristic.clone();
@@ -129,18 +133,18 @@ mod windows_ble {
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
     ) -> Result<(), String> {
         capture_notification_events_until_cancelled(
-            timeout,
+            Some(timeout),
             Arc::new(AtomicBool::new(false)),
             on_event,
         )
     }
 
     pub fn capture_notification_events_until_cancelled(
-        timeout: Duration,
+        idle_timeout: Option<Duration>,
         cancel_requested: Arc<AtomicBool>,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
     ) -> Result<(), String> {
-        let capture_guard = BleCaptureGuard::enter(timeout)?;
+        let capture_guard = BleCaptureGuard::enter(idle_timeout)?;
         let capture_id = capture_guard.session_id();
         let target = open_notify_target()?;
         let characteristic = target.characteristic.clone();
@@ -193,7 +197,7 @@ mod windows_ble {
         }
         log::info!("[embedded-ble] capture #{capture_id}: notify CCCD enabled");
 
-        let deadline = Instant::now() + timeout;
+        let deadline = idle_timeout.map(|timeout| Instant::now() + timeout);
         let mut collector = crate::embedded_audio::SessionCollector::default();
         let mut stop_drain_deadline: Option<Instant> = None;
         loop {
@@ -205,10 +209,12 @@ mod windows_ble {
                 cleanup.disable_notify();
                 return Ok(());
             }
-            if now >= deadline {
+            if deadline.is_some_and(|deadline| now >= deadline) {
                 return Err(format!(
                     "BLE embedded audio capture timed out after {} ms",
-                    timeout.as_millis()
+                    idle_timeout
+                        .expect("deadline exists when timeout is reported")
+                        .as_millis()
                 ));
             }
             if stop_drain_deadline.is_some_and(|drain_deadline| now >= drain_deadline) {
@@ -222,11 +228,11 @@ mod windows_ble {
                     Err(reason)
                 };
             }
-            let remaining = deadline.saturating_duration_since(now);
             let receive_timeout = stop_drain_deadline
-                .map(|drain_deadline| drain_deadline.saturating_duration_since(now).min(remaining))
-                .unwrap_or(remaining);
-            let receive_timeout = receive_timeout.min(Duration::from_millis(100));
+                .map(|drain_deadline| drain_deadline.saturating_duration_since(now))
+                .or_else(|| deadline.map(|deadline| deadline.saturating_duration_since(now)))
+                .unwrap_or(RECEIVE_POLL_INTERVAL)
+                .min(RECEIVE_POLL_INTERVAL);
             let notification = match rx.recv_timeout(receive_timeout) {
                 Ok(notification) => notification,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -375,52 +381,66 @@ mod windows_ble {
             }
         }
 
-        let services_result = device
-            .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, BluetoothCacheMode::Cached)
-            .map_err(|err| format!("BLE cached service discovery failed: {err}"))?
-            .get()
-            .map_err(|err| format!("BLE cached service discovery wait failed: {err}"))?;
-        let status = services_result
-            .Status()
-            .map_err(|err| format!("BLE cached service status read failed: {err}"))?;
-        if status != GattCommunicationStatus::Success {
-            return Err(format!(
-                "BLE cached service discovery returned status={status:?}"
-            ));
-        }
-
-        let services = services_result
-            .Services()
-            .map_err(|err| format!("BLE cached service list read failed: {err}"))?;
-        let count = services
-            .Size()
-            .map_err(|err| format!("BLE cached service list size failed: {err}"))?;
-        if count == 0 {
-            return Err(format!(
-                "service {SERVICE_UUID:?} not found from BLE device"
-            ));
-        }
-
         let mut last_error = None;
-        for index in 0..count {
-            let service = match services.GetAt(index) {
-                Ok(service) => service,
+        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+            let services_result = match device
+                .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, cache_mode)
+                .map_err(|err| format!("BLE {cache_mode:?} service discovery failed: {err}"))
+                .and_then(|operation| {
+                    operation.get().map_err(|err| {
+                        format!("BLE {cache_mode:?} service discovery wait failed: {err}")
+                    })
+                }) {
+                Ok(result) => result,
                 Err(err) => {
-                    last_error = Some(format!("read BLE cached service failed: {err}"));
+                    last_error = Some(err);
                     continue;
                 }
             };
-            match open_notify_characteristic_from_service(&service, BluetoothCacheMode::Cached) {
-                Ok(characteristic) => {
-                    return Ok(OpenNotifyTarget {
-                        characteristic,
-                        service: Some(service),
-                        device: Some(device),
-                    });
-                }
-                Err(err) => {
-                    last_error = Some(err);
-                    let _ = service.Close();
+            let status = services_result
+                .Status()
+                .map_err(|err| format!("BLE {cache_mode:?} service status read failed: {err}"))?;
+            if status != GattCommunicationStatus::Success {
+                last_error = Some(format!(
+                    "BLE {cache_mode:?} service discovery returned status={status:?}"
+                ));
+                continue;
+            }
+
+            let services = services_result
+                .Services()
+                .map_err(|err| format!("BLE {cache_mode:?} service list read failed: {err}"))?;
+            let count = services
+                .Size()
+                .map_err(|err| format!("BLE {cache_mode:?} service list size failed: {err}"))?;
+            if count == 0 {
+                last_error = Some(format!(
+                    "service {SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
+                ));
+                continue;
+            }
+
+            for index in 0..count {
+                let service = match services.GetAt(index) {
+                    Ok(service) => service,
+                    Err(err) => {
+                        last_error = Some(format!("read BLE {cache_mode:?} service failed: {err}"));
+                        continue;
+                    }
+                };
+                match open_notify_characteristic_from_service(&service, cache_mode) {
+                    Ok(prepared) => {
+                        return Ok(OpenNotifyTarget {
+                            characteristic: prepared.characteristic,
+                            service: Some(service),
+                            session: prepared.session,
+                            device: Some(device),
+                        });
+                    }
+                    Err(err) => {
+                        last_error = Some(format!("{cache_mode:?}: {err}"));
+                        let _ = service.Close();
+                    }
                 }
             }
         }
@@ -466,11 +486,12 @@ mod windows_ble {
             .get()
             .map_err(|err| format!("BLE service open wait failed: {err}"))?;
 
-        let characteristic =
+        let prepared =
             open_notify_characteristic_from_service(&service, BluetoothCacheMode::Uncached)?;
         Ok(OpenNotifyTarget {
-            characteristic,
+            characteristic: prepared.characteristic,
             service: Some(service),
+            session: prepared.session,
             device: None,
         })
     }
@@ -478,7 +499,7 @@ mod windows_ble {
     fn open_notify_characteristic_from_service(
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
-    ) -> Result<GattCharacteristic, String> {
+    ) -> Result<PreparedNotifyCharacteristic, String> {
         if let Ok(access) = service
             .RequestAccessAsync()
             .and_then(|operation| operation.get())
@@ -487,11 +508,7 @@ mod windows_ble {
                 return Err(format!("BLE service access denied status={access:?}"));
             }
         }
-        if let Ok(session) = service.Session() {
-            if session.CanMaintainConnection().unwrap_or(false) {
-                let _ = session.SetMaintainConnection(true);
-            }
-        }
+        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT);
 
         let result = service
             .GetCharacteristicsForUuidWithCacheModeAsync(NOTIFY_UUID, cache_mode)
@@ -526,7 +543,61 @@ mod windows_ble {
         if !properties.contains(GattCharacteristicProperties::Notify) {
             return Err("BLE notify characteristic does not advertise NOTIFY".to_string());
         }
-        Ok(characteristic)
+        Ok(PreparedNotifyCharacteristic {
+            characteristic,
+            session,
+        })
+    }
+
+    fn prepare_gatt_session(service: &GattDeviceService, timeout: Duration) -> Option<GattSession> {
+        let session = match service.Session() {
+            Ok(session) => session,
+            Err(err) => {
+                log::warn!("[embedded-ble] GATT session unavailable: {err}");
+                return None;
+            }
+        };
+        match session.CanMaintainConnection() {
+            Ok(true) => {
+                if let Err(err) = session.SetMaintainConnection(true) {
+                    log::warn!("[embedded-ble] GATT maintain connection failed: {err}");
+                }
+            }
+            Ok(false) => {}
+            Err(err) => log::warn!("[embedded-ble] GATT maintain capability read failed: {err}"),
+        }
+        let initial_status = session.SessionStatus().ok();
+        if wait_gatt_session_ready(&session, timeout) {
+            log::info!(
+                "[embedded-ble] GATT session ready initial={:?} current={:?}",
+                initial_status,
+                session.SessionStatus().ok()
+            );
+        } else {
+            log::warn!(
+                "[embedded-ble] GATT session still not active after {} ms initial={:?} current={:?}; continuing",
+                timeout.as_millis(),
+                initial_status,
+                session.SessionStatus().ok()
+            );
+        }
+        Some(session)
+    }
+
+    fn wait_gatt_session_ready(session: &GattSession, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if session
+                .SessionStatus()
+                .is_ok_and(|status| status == GattSessionStatus::Active)
+            {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(GATT_READY_POLL_INTERVAL);
+        }
     }
 
     pub(super) fn parse_bluetooth_address_from_device_id(device_id: &str) -> Option<u64> {
@@ -695,7 +766,7 @@ mod windows_ble {
     }
 
     impl BleCaptureGuard {
-        fn enter(timeout: Duration) -> Result<Self, String> {
+        fn enter(idle_timeout: Option<Duration>) -> Result<Self, String> {
             let mut guard = capture_gate()
                 .lock()
                 .map_err(|_| "BLE capture gate is poisoned".to_string())?;
@@ -715,10 +786,15 @@ mod windows_ble {
                 guard.next_session_id = 1;
             }
             let session_id = guard.next_session_id;
-            log::info!(
-                "[embedded-ble] capture #{session_id}: opening serialized BLE notify session timeout_ms={}",
-                timeout.as_millis()
-            );
+            match idle_timeout {
+                Some(timeout) => log::info!(
+                    "[embedded-ble] capture #{session_id}: opening serialized BLE notify session timeout_ms={}",
+                    timeout.as_millis()
+                ),
+                None => log::info!(
+                    "[embedded-ble] capture #{session_id}: opening serialized BLE notify session timeout_ms=none"
+                ),
+            }
             Ok(Self {
                 guard,
                 session_id,
@@ -746,7 +822,13 @@ mod windows_ble {
     struct OpenNotifyTarget {
         characteristic: GattCharacteristic,
         service: Option<GattDeviceService>,
+        session: Option<GattSession>,
         device: Option<BluetoothLEDevice>,
+    }
+
+    struct PreparedNotifyCharacteristic {
+        characteristic: GattCharacteristic,
+        session: Option<GattSession>,
     }
 
     struct NotifyCleanup {
@@ -824,6 +906,9 @@ mod windows_ble {
     impl Drop for NotifyCleanup {
         fn drop(&mut self) {
             self.disable_notify();
+            if let Some(session) = self.target.session.take() {
+                let _ = session.Close();
+            }
             if let Some(service) = self.target.service.take() {
                 let _ = service.Close();
             }
@@ -854,11 +939,15 @@ pub fn capture_notification_events(
 
 #[cfg(target_os = "windows")]
 pub fn capture_notification_events_until_cancelled(
-    timeout: Duration,
+    idle_timeout: Option<Duration>,
     cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
     on_event: &mut BleNotificationHandler<'_>,
 ) -> Result<(), String> {
-    windows_ble::capture_notification_events_until_cancelled(timeout, cancel_requested, on_event)
+    windows_ble::capture_notification_events_until_cancelled(
+        idle_timeout,
+        cancel_requested,
+        on_event,
+    )
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -881,7 +970,7 @@ pub fn capture_notification_events(
 
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notification_events_until_cancelled(
-    _timeout: Duration,
+    _idle_timeout: Option<Duration>,
     _cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
     _on_event: &mut BleNotificationHandler<'_>,
 ) -> Result<(), String> {

@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 
-use crate::asr::wav::encode_wav_16k_mono;
+use crate::asr::wav::{append_tail_silence_16k_mono, encode_wav_16k_mono};
 use crate::asr::RawTranscript;
 
 /// Whisper の `prompt` パラメータの安全側上限（文字数）。
@@ -84,11 +84,7 @@ impl WhisperBatchASR {
             anyhow::bail!("Whisper API key missing");
         }
 
-        let samples: Vec<i16> = pcm
-            .chunks_exact(2)
-            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect();
-        let wav = encode_wav_16k_mono(&samples);
+        let wav = pcm_to_wav_with_tail_silence(pcm);
         let base_url = self.base_url.trim_end_matches('/');
         let url = format!("{}/audio/transcriptions", base_url);
 
@@ -140,6 +136,15 @@ impl crate::recorder::AudioConsumer for WhisperBatchASR {
     fn consume_pcm_chunk(&self, pcm: &[u8]) {
         self.buffer.lock().extend_from_slice(pcm);
     }
+}
+
+fn pcm_to_wav_with_tail_silence(pcm: &[u8]) -> Vec<u8> {
+    let mut samples: Vec<i16> = pcm
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+    append_tail_silence_16k_mono(&mut samples);
+    encode_wav_16k_mono(&samples)
 }
 
 /// 用户辞書の有効フレーズから Whisper の `prompt` パラメータを組み立てる。
@@ -290,5 +295,17 @@ mod tests {
         assert!(prompt.contains("entry001"));
         // 100 件 × 8 文字以上は確実に予算超過 → 末尾は入らない
         assert!(!prompt.contains("entry099"));
+    }
+
+    #[test]
+    fn whisper_wav_includes_tail_silence_padding() {
+        let wav = pcm_to_wav_with_tail_silence(&[1, 0, 254, 255, 0xee]);
+
+        assert_eq!(
+            u32::from_le_bytes(wav[40..44].try_into().unwrap()),
+            (2 + crate::asr::wav::WAV_TAIL_SILENCE_PADDING_SAMPLES as u32) * 2
+        );
+        assert_eq!(&wav[44..48], &[1, 0, 254, 255]);
+        assert!(wav[48..].iter().all(|byte| *byte == 0));
     }
 }

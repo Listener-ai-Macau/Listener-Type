@@ -1351,10 +1351,16 @@ pub(super) async fn submit_embedded_audio_ble_stream(
 
 pub(super) async fn submit_embedded_audio_ble_stream_background(
     inner: &Arc<Inner>,
-    timeout_ms: Option<u64>,
     cancel_capture: Arc<AtomicBool>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-    submit_embedded_audio_ble_stream_impl(inner, timeout_ms, false, cancel_capture).await
+    submit_embedded_audio_ble_stream_impl(inner, None, false, cancel_capture).await
+}
+
+fn embedded_ble_stream_idle_timeout(
+    timeout: Duration,
+    emit_idle_capture_errors: bool,
+) -> Option<Duration> {
+    emit_idle_capture_errors.then_some(timeout)
 }
 
 async fn submit_embedded_audio_ble_stream_impl(
@@ -1369,7 +1375,7 @@ async fn submit_embedded_audio_ble_stream_impl(
     let cancel_capture_for_task = Arc::clone(&cancel_capture);
     let capture_task = tauri::async_runtime::spawn_blocking(move || {
         crate::embedded_ble::capture_notification_events_until_cancelled(
-            timeout,
+            embedded_ble_stream_idle_timeout(timeout, emit_idle_capture_errors),
             cancel_capture_for_task,
             &mut |event| {
                 tx.send(event.notification)
@@ -1394,6 +1400,7 @@ async fn submit_embedded_audio_ble_stream_impl(
             }
         }
     }
+    let capture_cancel_requested = cancel_capture.load(Ordering::SeqCst);
     cancel_capture.store(true, Ordering::SeqCst);
 
     let capture_result = capture_task
@@ -1407,6 +1414,15 @@ async fn submit_embedded_audio_ble_stream_impl(
     if capture_result.is_ok() && cancelled_by_caller {
         log::info!("[embedded-ble] streaming capture stopped after dictation cancel");
         return Ok(streaming.into_cancelled_submission_result());
+    }
+    if capture_result.is_ok()
+        && !emit_idle_capture_errors
+        && capture_cancel_requested
+        && !streaming.terminal_received
+        && streaming.session.is_none()
+        && streaming.embedded_session_id.is_none()
+    {
+        return Err("嵌入式 BLE 后台监听已取消，尚未开始录音会话".to_string());
     }
     if let Err(err) = capture_result {
         if !streaming.terminal_received {
@@ -2857,11 +2873,12 @@ fn append_typed_prefix(target: &mut String, delta: &str, typed_chars: usize) -> 
 mod tests {
     use super::{
         append_typed_prefix, cancel_session, clear_embedded_ble_cancel_flag, default_done_message,
-        dictation_error_code, embedded_pcm_rms_and_peak, finalize_polished_text,
-        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
-        register_embedded_ble_cancel_flag, streaming_insert_eligible, wayland_done_message,
-        EmbeddedStreamingDictation, EMBEDDED_AUDIO_ASR_PREROLL_BYTES,
-        EMBEDDED_AUDIO_ASR_PREROLL_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
+        dictation_error_code, embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak,
+        finalize_polished_text, normalize_embedded_pcm_for_asr,
+        prepare_embedded_streaming_pcm_for_asr, register_embedded_ble_cancel_flag,
+        streaming_insert_eligible, wayland_done_message, EmbeddedStreamingDictation,
+        EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
+        EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
     use crate::coordinator::Coordinator;
     use crate::coordinator_state::SessionPhase;
@@ -2934,6 +2951,17 @@ mod tests {
             Some(crate::embedded_audio::SessionEndReason::Cancel)
         );
         assert_eq!(result.reconstructed_pcm_bytes, 0);
+    }
+
+    #[test]
+    fn embedded_ble_background_stream_has_no_idle_timeout() {
+        let timeout = std::time::Duration::from_secs(120);
+
+        assert_eq!(
+            embedded_ble_stream_idle_timeout(timeout, true),
+            Some(timeout)
+        );
+        assert_eq!(embedded_ble_stream_idle_timeout(timeout, false), None);
     }
 
     #[test]
