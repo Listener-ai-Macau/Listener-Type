@@ -1732,8 +1732,7 @@ impl HotkeyCapability {
                 supports_side_specific_modifiers: true,
                 explicit_fallback_available: false,
                 status_hint: Some(
-                    "默认建议使用“右Ctrl + 单击”。若无响应，可在权限页查看 hook 安装状态。"
-                        .into(),
+                    "默认建议使用“右Ctrl + 单击”。若无响应，可在权限页查看 hook 安装状态。".into(),
                 ),
             };
         }

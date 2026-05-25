@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 #[cfg(target_os = "windows")]
 use uuid::Uuid;
 
-use crate::asr::wav::encode_wav_16k_mono;
+use crate::asr::wav::{append_tail_silence_16k_mono, encode_wav_16k_mono};
 use crate::asr::RawTranscript;
 
 #[cfg(target_os = "windows")]
@@ -153,11 +153,12 @@ fn pcm_duration_ms(pcm: &[u8]) -> u64 {
     (pcm.len() as u64 / 2) * 1000 / 16_000
 }
 
-fn pcm_to_wav(pcm: &[u8]) -> Vec<u8> {
-    let samples: Vec<i16> = pcm
+fn pcm_to_wav_with_tail_silence(pcm: &[u8]) -> Vec<u8> {
+    let mut samples: Vec<i16> = pcm
         .chunks_exact(2)
         .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
         .collect();
+    append_tail_silence_16k_mono(&mut samples);
     encode_wav_16k_mono(&samples)
 }
 
@@ -172,7 +173,7 @@ impl TempWavFile {
         let dir = foundry_temp_dir();
         fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
         let path = dir.join(format!("foundry-whisper-{}.wav", Uuid::new_v4()));
-        let wav = pcm_to_wav(pcm);
+        let wav = pcm_to_wav_with_tail_silence(pcm);
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -288,11 +289,15 @@ mod tests {
     #[test]
     fn foundry_provider_wav_ignores_odd_trailing_byte() {
         let pcm = [0x01, 0x00, 0xff, 0x7f, 0xee];
-        let wav = super::pcm_to_wav(&pcm);
+        let wav = super::pcm_to_wav_with_tail_silence(&pcm);
 
         assert_eq!(&wav[0..4], b"RIFF");
-        assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()), 4);
-        assert_eq!(&wav[44..], &[0x01, 0x00, 0xff, 0x7f]);
+        assert_eq!(
+            u32::from_le_bytes(wav[40..44].try_into().unwrap()),
+            (2 + crate::asr::wav::WAV_TAIL_SILENCE_PADDING_SAMPLES as u32) * 2
+        );
+        assert_eq!(&wav[44..48], &[0x01, 0x00, 0xff, 0x7f]);
+        assert!(wav[48..].iter().all(|byte| *byte == 0));
     }
 
     #[cfg(target_os = "windows")]

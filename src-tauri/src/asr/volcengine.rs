@@ -26,12 +26,14 @@ use super::{AudioConsumer, DictionaryHotword, RawTranscript};
 const ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
 /// 200 ms of 16 kHz / 16-bit / mono PCM.
 const TARGET_AUDIO_CHUNK_BYTES: usize = 6_400;
+const TARGET_AUDIO_CHUNK_MS: usize = 200;
 /// 16 kHz · 16-bit · mono = 32 000 bytes/sec → 32 bytes/ms.
 const BYTES_PER_MS: f64 = 32.0;
 const HOTWORD_CAP: usize = 80;
 const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);
 const AUDIO_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(3);
-const FINAL_SILENCE_FRAMES: usize = 3; // 600 ms, using 200 ms TARGET_AUDIO_CHUNK_BYTES frames.
+const FINAL_SILENCE_FRAMES: usize = 5; // 1000 ms, using 200 ms TARGET_AUDIO_CHUNK_BYTES frames.
+const FINAL_SILENCE_PADDING_MS: usize = FINAL_SILENCE_FRAMES * TARGET_AUDIO_CHUNK_MS;
 const SECOND_PASS_END_WINDOW_MS: u32 = 500;
 const SECOND_PASS_FORCE_TO_SPEECH_MS: u32 = 1_000;
 
@@ -431,10 +433,11 @@ impl VolcengineStreamingASR {
         };
         let duration_ms = (total_bytes as f64 / BYTES_PER_MS) as u64;
         log::info!(
-            "[asr] 发送总结：{} audio frames, {} bytes (~{} ms)",
+            "[asr] 发送总结：{} audio frames, {} bytes (~{} ms, final_silence_ms={})",
             total_frames,
             total_bytes,
-            duration_ms
+            duration_ms,
+            FINAL_SILENCE_PADDING_MS
         );
         Ok(())
     }
@@ -866,6 +869,16 @@ mod tests {
             SECOND_PASS_FORCE_TO_SPEECH_MS
         );
     }
+
+    #[test]
+    fn final_silence_padding_covers_second_pass_tail_window() {
+        assert_eq!(TARGET_AUDIO_CHUNK_MS, 200);
+        assert_eq!(FINAL_SILENCE_FRAMES, 5);
+        assert_eq!(FINAL_SILENCE_PADDING_MS, 1_000);
+        assert!(FINAL_SILENCE_PADDING_MS as u32 >= SECOND_PASS_FORCE_TO_SPEECH_MS);
+        assert!(FINAL_SILENCE_PADDING_MS as u32 >= SECOND_PASS_END_WINDOW_MS);
+    }
+
     #[tokio::test]
     async fn await_final_result_returns_error_when_final_frame_never_arrives() {
         let asr = VolcengineStreamingASR::new(

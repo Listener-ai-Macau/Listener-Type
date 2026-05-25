@@ -1,5 +1,8 @@
 //! WAV helpers for ASR providers that accept complete audio files.
 
+pub const WAV_TAIL_SILENCE_PADDING_MS: usize = 1_000;
+pub const WAV_TAIL_SILENCE_PADDING_SAMPLES: usize = 16_000 * WAV_TAIL_SILENCE_PADDING_MS / 1_000;
+
 /// Encode 16 kHz / mono / 16-bit little-endian PCM samples as a RIFF WAV file.
 pub fn encode_wav_16k_mono(samples: &[i16]) -> Vec<u8> {
     let sample_rate: u32 = 16_000;
@@ -31,9 +34,16 @@ pub fn encode_wav_16k_mono(samples: &[i16]) -> Vec<u8> {
     wav
 }
 
+pub fn append_tail_silence_16k_mono(samples: &mut Vec<i16>) {
+    samples.extend(std::iter::repeat(0).take(WAV_TAIL_SILENCE_PADDING_SAMPLES));
+}
+
 #[cfg(test)]
 mod tests {
-    use super::encode_wav_16k_mono;
+    use super::{
+        append_tail_silence_16k_mono, encode_wav_16k_mono, WAV_TAIL_SILENCE_PADDING_MS,
+        WAV_TAIL_SILENCE_PADDING_SAMPLES,
+    };
 
     #[test]
     fn wav_header_matches_16k_mono_pcm() {
@@ -57,5 +67,18 @@ mod tests {
             &wav[44..],
             &[0x01, 0x00, 0xff, 0x7f, 0x00, 0x80, 0xfe, 0xff]
         );
+    }
+
+    #[test]
+    fn tail_silence_padding_is_one_second_at_16k() {
+        let mut samples = vec![123i16, -456i16];
+
+        append_tail_silence_16k_mono(&mut samples);
+
+        assert_eq!(WAV_TAIL_SILENCE_PADDING_MS, 1_000);
+        assert_eq!(WAV_TAIL_SILENCE_PADDING_SAMPLES, 16_000);
+        assert_eq!(samples.len(), 16_002);
+        assert_eq!(&samples[..2], &[123, -456]);
+        assert!(samples[2..].iter().all(|sample| *sample == 0));
     }
 }

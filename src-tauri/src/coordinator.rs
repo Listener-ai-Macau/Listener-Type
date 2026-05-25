@@ -61,7 +61,6 @@ mod dictation;
 mod qa;
 mod resources;
 
-const EMBEDDED_BLE_BACKGROUND_LISTEN_TIMEOUT_MS: u64 = 60_000;
 const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
 const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(12);
 const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(8);
@@ -1727,12 +1726,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
         }
 
         let cancel_capture = install_embedded_ble_listener_cancel(&inner, generation);
-        match submit_embedded_audio_ble_stream_background(
-            &inner,
-            Some(EMBEDDED_BLE_BACKGROUND_LISTEN_TIMEOUT_MS),
-            Arc::clone(&cancel_capture),
-        )
-        .await
+        match submit_embedded_audio_ble_stream_background(&inner, Arc::clone(&cancel_capture)).await
         {
             Ok(result) => {
                 log::info!(
