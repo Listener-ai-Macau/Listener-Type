@@ -1418,7 +1418,7 @@ async fn submit_embedded_audio_ble_stream_impl(
         }
     }
     if !streaming.terminal_received {
-        if streaming.collector.inner().terminal_received() {
+        if streaming.collector.inner().has_stopped_with_audio() {
             streaming.finish_pending_stop_after_capture(inner).await?;
         } else {
             if emit_idle_capture_errors || streaming.session.is_some() {

@@ -801,6 +801,13 @@ impl SessionCollector {
             && self.missing_packet_indices().is_empty()
     }
 
+    pub fn has_stopped_with_audio(&self) -> bool {
+        self.session_id.is_some()
+            && self.terminal_received
+            && self.end_reason == Some(SessionEndReason::Stop)
+            && self.received_pcm_bytes() > 0
+    }
+
     pub fn terminal_received(&self) -> bool {
         self.terminal_received
     }
@@ -1148,6 +1155,7 @@ mod tests {
             .expect("stop");
 
         assert!(!collector.has_successful_complete_session());
+        assert!(collector.has_stopped_with_audio());
         assert_eq!(collector.missing_packet_indices(), vec![1]);
         assert_eq!(
             collector.reconstructed_pcm(),
@@ -1158,6 +1166,21 @@ mod tests {
         assert_eq!(stats.missing_packet_count, 1);
         assert_eq!(stats.silence_filled_bytes, 4);
         assert_eq!(stats.reconstructed_pcm_bytes, 12);
+    }
+
+    #[test]
+    fn collector_does_not_treat_empty_stop_as_partial_audio_success() {
+        let mut collector = SessionCollector::default();
+
+        collector
+            .handle_notification(&packet(PacketType::SessionStart, 102, 0, &[], Some(0)))
+            .expect("start");
+        collector
+            .handle_notification(&packet(PacketType::SessionStop, 102, 3, &[], Some(0)))
+            .expect("stop");
+
+        assert!(!collector.has_successful_complete_session());
+        assert!(!collector.has_stopped_with_audio());
     }
 
     #[test]
