@@ -59,7 +59,7 @@ export function Card({ children, style, padding = 18, glassy = false, className 
   );
 }
 
-export type PillTone = 'default' | 'blue' | 'ok' | 'outline' | 'dark';
+export type PillTone = 'default' | 'blue' | 'ok' | 'err' | 'outline' | 'dark';
 export type PillSize = 'sm' | 'md';
 
 interface PillProps {
@@ -74,6 +74,7 @@ export function Pill({ children, tone = 'default', size = 'md', style }: PillPro
     default: { bg: 'var(--ol-control-track)', color: 'var(--ol-ink-2)', bd: 'transparent' },
     blue:    { bg: 'var(--ol-blue-soft)',color: 'var(--ol-blue)',   bd: 'transparent' },
     ok:      { bg: 'var(--ol-ok-soft)',  color: 'var(--ol-ok)',     bd: 'transparent' },
+    err:     { bg: 'rgba(189, 98, 89, 0.14)', color: 'var(--ol-err)', bd: 'transparent' },
     outline: { bg: 'transparent',        color: 'var(--ol-ink-3)',  bd: 'var(--ol-line-strong)' },
     dark:    { bg: 'var(--ol-ink)',      color: '#fff',             bd: 'transparent' },
   };
