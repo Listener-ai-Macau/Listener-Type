@@ -8,7 +8,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use ferrous_opencc::{config::BuiltinConfig, OpenCC};
@@ -849,6 +849,22 @@ impl Coordinator {
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
         pause_embedded_ble_listener_capture(&self.inner, "foreground streaming capture");
         let result = submit_embedded_audio_ble_stream(&self.inner, timeout_ms).await;
+        self.refresh_embedded_ble_listener();
+        result
+    }
+
+    pub async fn probe_embedded_audio_ble_subscription(
+        &self,
+        timeout_ms: Option<u64>,
+    ) -> Result<(), String> {
+        let timeout = Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
+        pause_embedded_ble_listener_capture(&self.inner, "foreground BLE path probe");
+        let result = async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::probe_notify_subscription(timeout)
+        })
+        .await
+        .map_err(|err| format!("嵌入式 BLE 通路探测任务失败: {err}"))
+        .and_then(|result| result);
         self.refresh_embedded_ble_listener();
         result
     }

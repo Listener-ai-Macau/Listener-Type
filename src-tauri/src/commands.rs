@@ -1382,14 +1382,13 @@ pub async fn submit_embedded_audio_ble_once(
 }
 
 #[tauri::command]
-pub async fn probe_embedded_audio_ble_subscription(timeout_ms: Option<u64>) -> Result<(), String> {
-    let timeout =
-        std::time::Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::probe_notify_subscription(timeout)
-    })
-    .await
-    .map_err(|err| format!("嵌入式 BLE 订阅探测任务失败: {err}"))?
+pub async fn probe_embedded_audio_ble_subscription(
+    coord: CoordinatorState<'_>,
+    timeout_ms: Option<u64>,
+) -> Result<(), String> {
+    coord
+        .probe_embedded_audio_ble_subscription(timeout_ms)
+        .await
 }
 
 #[tauri::command]
