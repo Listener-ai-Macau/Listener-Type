@@ -1068,7 +1068,7 @@ function Convert-SerialReportForJson {
     if (-not $Report) {
         return $null
     }
-    return [pscustomobject]@{
+    return [ordered]@{
         serial_log_path = [string]$Report.serial_log_path
         serial_line_count = [int]$Report.serial_line_count
         notify_enabled = [bool]$Report.notify_enabled

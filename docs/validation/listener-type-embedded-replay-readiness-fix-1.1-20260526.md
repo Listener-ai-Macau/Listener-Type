@@ -111,3 +111,8 @@ Codex follow-up: propagated `stream_ready_confirmed_line_index` and
 `transport_not_ready_rejection_line_index` through the outer JSON report.
 Validation PASS: PowerShell parse, embedded Python compile, and `git diff --check`
 (CRLF warning only).
+
+Reviewer follow-up: changed `serial_report` serialization to emit a JSON object
+instead of a PowerShell object string, so the line-index fields remain
+machine-readable in future smoke reports. Validation PASS: PowerShell parse and
+targeted `git diff --check`.
