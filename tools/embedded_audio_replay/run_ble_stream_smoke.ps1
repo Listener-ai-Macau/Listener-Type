@@ -1941,6 +1941,7 @@ try {
 
     for ($index = 1; $index -le $PlaybackCount; $index++) {
         if ($index -eq $RecordPlaybackIndex) {
+            $capsuleVisibleAlreadyValidated = $false
             if ($VerifyInsertion -and $insertionTarget) {
                 [void](Focus-ProcessWindow -Process $insertionTarget.Process)
                 Start-Sleep -Milliseconds 150
@@ -1967,11 +1968,12 @@ try {
                     }
                     $timeline["manual_start_capsule_visible_at_utc"] = Get-SmokeUtcNow
                     Write-SmokeTrace "manual_start_capsule_visible"
+                    $capsuleVisibleAlreadyValidated = $true
                 } else {
                     Start-Sleep -Milliseconds $ManualTriggerReadyDelayMs
                 }
             }
-            if (-not $SkipCapsuleVisibleGate) {
+            if ((-not $SkipCapsuleVisibleGate) -and (-not $capsuleVisibleAlreadyValidated)) {
                 if (-not (Wait-CapsuleWindowVisible -TimeoutMs 1800 -ProcessId $process.Id)) {
                     $timeline["capsule_visible_failed_at_utc"] = Get-SmokeUtcNow
                     throw "Recording capsule did not become visible before playback; aborting before audio playback"
@@ -1988,6 +1990,9 @@ try {
                     $timeline["capsule_focus_stolen_at_utc"] = Get-SmokeUtcNow
                     throw "Recording capsule stole foreground focus before playback; aborting before audio playback"
                 }
+            } elseif ($capsuleVisibleAlreadyValidated) {
+                $timeline["capsule_visible_at_utc"] = $timeline["manual_start_capsule_visible_at_utc"]
+                Write-SmokeTrace "capsule_visible_reused"
             }
             Start-Sleep -Milliseconds $PreRecordDelayMs
         }
