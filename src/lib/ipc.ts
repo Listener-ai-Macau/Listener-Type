@@ -31,6 +31,7 @@ import type {
   VocabPresetStore,
   WindowsImeStatus,
 } from './types';
+import type { FirmwareOtaManifest, FirmwareOtaPreflightSnapshot } from './firmwareOta';
 export type { UpdateChannel } from './types';
 import { OL_DATA } from './mockData';
 import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from './hotkey';
@@ -770,6 +771,56 @@ export function getEmbeddedBleRuntimeStatus(): Promise<EmbeddedBleRuntimeStatus>
     'get_embedded_ble_runtime_status',
     undefined,
     () => ({ backgroundListenerDisabledByEnv: false, backgroundListenerLastError: null }),
+  );
+}
+
+export function getFirmwareOtaPreflightSnapshot(): Promise<FirmwareOtaPreflightSnapshot> {
+  return invokeOrMock(
+    'get_firmware_ota_preflight_snapshot',
+    undefined,
+    () => ({
+      recordingActive: false,
+      dictationPhase: 'Idle',
+      device: {
+        connected: false,
+        hardwareRevision: null,
+        firmwareVersion: null,
+        capabilities: [],
+        batteryPercent: null,
+        usbPowered: null,
+        detail: 'Tauri backend unavailable in browser preview.',
+      },
+    }),
+  );
+}
+
+export interface FirmwareOtaBleTransferRequest {
+  manifest: FirmwareOtaManifest;
+  firmwareBytes: Uint8Array;
+  expectedSha256: string;
+}
+
+export interface FirmwareOtaBleTransferResult {
+  bytesTransferred: number;
+  confirmedVersion: string | null;
+  transport: 'listener_ble_ota';
+}
+
+export function transferFirmwareOtaBle(
+  request: FirmwareOtaBleTransferRequest,
+): Promise<FirmwareOtaBleTransferResult> {
+  return invokeOrMock(
+    'transfer_firmware_ota_ble',
+    {
+      manifest: request.manifest,
+      firmwareBytes: Array.from(request.firmwareBytes),
+      expectedSha256: request.expectedSha256,
+    },
+    () => ({
+      bytesTransferred: request.firmwareBytes.byteLength,
+      confirmedVersion: request.manifest.version,
+      transport: 'listener_ble_ota' as const,
+    }),
   );
 }
 

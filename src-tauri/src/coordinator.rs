@@ -868,6 +868,13 @@ impl Coordinator {
         &self,
         timeout_ms: Option<u64>,
     ) -> Result<(), String> {
+        if embedded_ble_listener_capture_active(&self.inner) {
+            log::info!(
+                "[embedded-ble] foreground BLE path probe skipped; background listener already owns notify"
+            );
+            return Ok(());
+        }
+
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
         pause_embedded_ble_listener_capture(&self.inner, "foreground BLE path probe");
         let result = async_runtime::spawn_blocking(move || {
@@ -882,6 +889,10 @@ impl Coordinator {
 
     pub fn cancel_dictation(&self) {
         cancel_session(&self.inner);
+    }
+
+    pub fn pause_embedded_ble_listener_for_ota(&self) {
+        pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
     }
 
     pub fn refresh_embedded_ble_listener(&self) {
@@ -1813,6 +1824,14 @@ fn is_embedded_ble_transient_reopen_error(err: &str) -> bool {
 
 fn is_embedded_ble_idle_timeout_error(err: &str) -> bool {
     err.contains("BLE embedded audio capture timed out")
+}
+
+fn embedded_ble_listener_capture_active(inner: &Arc<Inner>) -> bool {
+    inner
+        .embedded_ble_listener_cancel
+        .lock()
+        .as_ref()
+        .is_some_and(|cancel| !cancel.load(Ordering::SeqCst))
 }
 
 fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> Arc<AtomicBool> {
@@ -3429,9 +3448,11 @@ mod tests {
         let coordinator = Coordinator::new();
         let first = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
         assert!(!first.load(Ordering::SeqCst));
+        assert!(embedded_ble_listener_capture_active(&coordinator.inner));
 
         let second = install_embedded_ble_listener_cancel(&coordinator.inner, 2);
         assert!(first.load(Ordering::SeqCst));
+        assert!(embedded_ble_listener_capture_active(&coordinator.inner));
 
         clear_embedded_ble_listener_cancel(&coordinator.inner, &first);
         assert!(coordinator
@@ -3448,6 +3469,26 @@ mod tests {
             .embedded_ble_listener_cancel
             .lock()
             .is_none());
+        assert!(!embedded_ble_listener_capture_active(&coordinator.inner));
+    }
+
+    #[tokio::test]
+    async fn embedded_ble_foreground_probe_preserves_active_background_capture() {
+        let coordinator = Coordinator::new();
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+
+        coordinator
+            .probe_embedded_audio_ble_subscription(Some(1_000))
+            .await
+            .expect("active background listener should satisfy foreground probe");
+
+        assert!(!active.load(Ordering::SeqCst));
+        assert!(coordinator
+            .inner
+            .embedded_ble_listener_cancel
+            .lock()
+            .as_ref()
+            .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -14,6 +15,7 @@ use crate::asr::local::foundry::{
 };
 use crate::asr::local::FoundryLocalRuntime;
 use crate::coordinator::Coordinator;
+use crate::coordinator_state::SessionPhase;
 use crate::permissions::{self, PermissionStatus};
 use crate::persistence::{
     sync_style_pack_preferences, CredentialAccount, CredentialsSnapshot, CredentialsVault,
@@ -1406,6 +1408,162 @@ pub fn get_embedded_ble_runtime_status(coord: CoordinatorState<'_>) -> EmbeddedB
             .is_some_and(|value| value == "1"),
         background_listener_last_error: coord.embedded_ble_listener_last_error(),
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareOtaPreflightSnapshot {
+    recording_active: bool,
+    dictation_phase: String,
+    device: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+}
+
+#[tauri::command]
+pub async fn get_firmware_ota_preflight_snapshot(
+    coord: CoordinatorState<'_>,
+) -> Result<FirmwareOtaPreflightSnapshot, String> {
+    let phase = coord.dictation_phase_for_cli();
+    let device =
+        tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
+            .await
+            .map_err(|err| format!("Listener BLE OTA preflight task failed: {err}"))?;
+    Ok(FirmwareOtaPreflightSnapshot {
+        recording_active: phase != SessionPhase::Idle,
+        dictation_phase: format!("{phase:?}"),
+        device,
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareOtaBleTransferResult {
+    bytes_transferred: usize,
+    confirmed_version: Option<String>,
+    transport: &'static str,
+}
+
+const FIRMWARE_OTA_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
+const FIRMWARE_OTA_CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
+
+fn normalize_firmware_ota_version(value: &str) -> String {
+    value.trim().trim_start_matches('v').to_ascii_lowercase()
+}
+
+fn firmware_ota_versions_match(confirmed: &str, expected: &str) -> bool {
+    let confirmed = normalize_firmware_ota_version(confirmed);
+    let expected = normalize_firmware_ota_version(expected);
+    !confirmed.is_empty() && !expected.is_empty() && confirmed == expected
+}
+
+fn firmware_ota_snapshot_version(
+    snapshot: &crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+) -> Option<String> {
+    snapshot
+        .firmware_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+async fn confirm_firmware_ota_version(expected_version: &str) -> Option<String> {
+    if normalize_firmware_ota_version(expected_version).is_empty() || expected_version == "unknown"
+    {
+        return None;
+    }
+
+    let deadline = Instant::now() + FIRMWARE_OTA_CONFIRM_TIMEOUT;
+    let mut last_seen_version = None;
+
+    loop {
+        let snapshot =
+            tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
+                .await
+                .ok();
+        if let Some(snapshot) = snapshot {
+            if let Some(version) = firmware_ota_snapshot_version(&snapshot) {
+                if firmware_ota_versions_match(&version, expected_version) {
+                    return Some(version);
+                }
+                last_seen_version = Some(version);
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return last_seen_version;
+        }
+        tokio::time::sleep(FIRMWARE_OTA_CONFIRM_INTERVAL).await;
+    }
+}
+
+#[tauri::command]
+pub async fn transfer_firmware_ota_ble(
+    coord: CoordinatorState<'_>,
+    manifest: Value,
+    firmware_bytes: Vec<u8>,
+    expected_sha256: String,
+) -> Result<FirmwareOtaBleTransferResult, String> {
+    let phase = coord.dictation_phase_for_cli();
+    if phase != SessionPhase::Idle {
+        return Err(format!(
+            "Recording or dictation is still active ({phase:?}). Stop it before updating firmware."
+        ));
+    }
+    let version = manifest
+        .get("version")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let size = manifest
+        .get("fileSizeBytes")
+        .or_else(|| manifest.pointer("/file/size_bytes"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "OTA manifest is missing file size.".to_string())?;
+    let sha256 = manifest
+        .get("fileSha256")
+        .or_else(|| manifest.pointer("/file/sha256"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "OTA manifest is missing firmware SHA256.".to_string())?;
+
+    if firmware_bytes.is_empty() {
+        return Err("firmware_ota.bin is empty.".to_string());
+    }
+    if firmware_bytes.len() as u64 != size {
+        return Err(format!(
+            "firmware_ota.bin size changed before transfer: manifest={size} actual={}",
+            firmware_bytes.len()
+        ));
+    }
+    if !expected_sha256.eq_ignore_ascii_case(sha256) {
+        return Err("OTA package hash changed before transfer.".to_string());
+    }
+
+    coord.pause_embedded_ble_listener_for_ota();
+    let transfer_version = version.clone();
+    let transfer_sha256 = expected_sha256.clone();
+    let transfer = tauri::async_runtime::spawn_blocking(move || {
+        crate::embedded_ble::transfer_firmware_ota(
+            &transfer_version,
+            &transfer_sha256,
+            &firmware_bytes,
+        )
+    })
+    .await
+    .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
+    .and_then(|result| result);
+    let confirmed_version = if transfer.is_ok() {
+        confirm_firmware_ota_version(&version).await
+    } else {
+        None
+    };
+    coord.refresh_embedded_ble_listener();
+
+    let stats = transfer?;
+    Ok(FirmwareOtaBleTransferResult {
+        bytes_transferred: stats.bytes_transferred,
+        confirmed_version,
+        transport: stats.transport,
+    })
 }
 
 #[tauri::command]
@@ -3461,13 +3619,15 @@ mod tests {
     use super::{
         active_asr_is_keyless_for_validation, active_foundry_model_from_prefs,
         asr_configured_for_provider, asr_transcriptions_url, diagnostic_recent_errors,
-        fetch_provider_models, is_diagnostic_error_line, is_gemini_base_url,
-        is_valid_local_pack_id, is_valid_session_id, llm_configured_for_provider,
-        local_asr_release_plan_for_provider, models_url, normalize_foundry_language_hint,
-        parse_gemini_model_ids, parse_latest_beta_from_atom, parse_model_ids, persist_settings,
-        sanitize_diagnostic_log_line, validate_foundry_model_alias, ProviderConfig, SettingsWriter,
+        fetch_provider_models, firmware_ota_snapshot_version, firmware_ota_versions_match,
+        is_diagnostic_error_line, is_gemini_base_url, is_valid_local_pack_id, is_valid_session_id,
+        llm_configured_for_provider, local_asr_release_plan_for_provider, models_url,
+        normalize_foundry_language_hint, parse_gemini_model_ids, parse_latest_beta_from_atom,
+        parse_model_ids, persist_settings, sanitize_diagnostic_log_line,
+        validate_foundry_model_alias, ProviderConfig, SettingsWriter,
     };
     use crate::embedded_audio::{SessionEndReason, SessionErrorCode, SessionStats};
+    use crate::embedded_ble::FirmwareOtaDeviceSnapshot;
     use crate::persistence::CredentialsSnapshot;
     use crate::polish::ProviderProxyConfig;
     use crate::types::{
@@ -3478,6 +3638,42 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::Mutex;
     use std::thread;
+
+    fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
+        FirmwareOtaDeviceSnapshot {
+            connected: true,
+            hardware_revision: Some("keyboard-v1".to_string()),
+            firmware_version: version.map(str::to_string),
+            capabilities: vec!["firmware_ota_v1".to_string()],
+            battery_percent: Some(80),
+            usb_powered: Some(true),
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn firmware_ota_version_match_accepts_dis_v_prefix() {
+        assert!(firmware_ota_versions_match(" v1.2.0 ", "1.2.0"));
+        assert!(firmware_ota_versions_match("1.2.0", "v1.2.0"));
+        assert!(!firmware_ota_versions_match("1.2.0-dev", "1.2.0"));
+        assert!(!firmware_ota_versions_match("", "1.2.0"));
+    }
+
+    #[test]
+    fn firmware_ota_snapshot_version_reads_dis_firmware_revision() {
+        assert_eq!(
+            firmware_ota_snapshot_version(&ota_snapshot_with_version(Some(" v1.2.0 "))),
+            Some("v1.2.0".to_string())
+        );
+        assert_eq!(
+            firmware_ota_snapshot_version(&ota_snapshot_with_version(Some("   "))),
+            None
+        );
+        assert_eq!(
+            firmware_ota_snapshot_version(&ota_snapshot_with_version(None)),
+            None
+        );
+    }
 
     #[derive(Default)]
     struct FakeSettingsWriter {

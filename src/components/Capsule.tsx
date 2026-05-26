@@ -7,7 +7,11 @@ import {
   getCapsulePillMetrics,
 } from '../lib/capsuleLayout';
 import { invokeOrMock, isTauri } from '../lib/ipc';
-import { truncatePreview, PREVIEW_FINAL_TRANSITION } from '../lib/capsulePreviewRules';
+import {
+  truncatePreview,
+  PREVIEW_FINAL_TRANSITION,
+  shouldShowStopAcknowledgement,
+} from '../lib/capsulePreviewRules';
 import type { CapsulePayload, CapsuleState } from '../lib/types';
 
 interface AudioBarsProps {
@@ -158,6 +162,7 @@ interface PillProps {
   level: number;
   insertedChars: number;
   message?: string;
+  stopRequested?: boolean;
   stopAcknowledged?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -165,79 +170,97 @@ interface PillProps {
   onRetry: () => void;
 }
 
-function Pill({ os, state, level, insertedChars, message, stopAcknowledged = false, onCancel, onConfirm, onDismiss, onRetry }: PillProps) {
+function Pill({
+  os,
+  state,
+  level,
+  insertedChars,
+  message,
+  stopRequested = false,
+  stopAcknowledged = false,
+  onCancel,
+  onConfirm,
+  onDismiss,
+  onRetry,
+}: PillProps) {
   const { t } = useTranslation();
   const metrics = getCapsulePillMetrics(os);
   const processingLayout = getCapsuleMessageLayout(os, 'processing');
-  const enabled = state === 'recording';
+  const stopPending = state === 'recording' && stopRequested;
+  const showStopAck = shouldShowStopAcknowledgement(state, stopPending || stopAcknowledged);
+  const enabled = state === 'recording' && !stopPending;
   const errorActive = state === 'error';
-  const showStopAck = state === 'transcribing' && stopAcknowledged;
 
   // Apple-style: during transcribing/polishing the partial text preview stays
   // visible with a subtle pulse, plus a small spinner on the right — no overlay.
 
   let center: JSX.Element;
+  const renderProcessingCenter = (displayText: string): JSX.Element => {
+    const compactText = compactCapsuleText(displayText, os, 'processing');
+    return (
+      <div
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          width: '100%',
+          maxWidth: metrics.textWidth,
+          minWidth: 0,
+          justifyContent: 'center',
+          animation: showStopAck
+            ? 'cap-stop-ack-center 420ms var(--ol-motion-soft) both'
+            : 'cap-state-enter 220ms var(--ol-motion-soft) both',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 500,
+            color: '#171714',
+            minWidth: 0,
+            textAlign: 'center',
+            lineHeight: processingLayout.allowWrap ? 1.2 : 1,
+            whiteSpace: processingLayout.allowWrap ? 'normal' : 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            display: '-webkit-box',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: processingLayout.lineClamp,
+            // Apple-style: text stays static, only the spinner conveys "processing".
+          }}
+        >
+          {compactText}
+        </span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          style={{ flexShrink: 0, animation: 'cap-spin 0.8s linear infinite' }}
+        >
+          <circle
+            cx="6" cy="6" r="4.5"
+            fill="none"
+            stroke="var(--ol-blue)"
+            strokeWidth="1.5"
+            strokeDasharray="8 4"
+            strokeLinecap="round"
+          />
+        </svg>
+      </div>
+    );
+  };
   switch (state) {
     case 'recording':
-      center = message
-        ? <CenterText os={os} kind="processing" text={message} color="#171714" />
-        : <AudioBars level={level} />;
+      center = stopPending
+        ? renderProcessingCenter(message || t('capsule.thinking'))
+        : message
+          ? <CenterText os={os} kind="processing" text={message} color="#171714" />
+          : <AudioBars level={level} />;
       break;
     case 'transcribing':
     case 'polishing': {
       const displayText = message || t('capsule.thinking');
-      const compactText = compactCapsuleText(displayText, os, 'processing');
-      center = (
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            width: '100%',
-            maxWidth: metrics.textWidth,
-            minWidth: 0,
-            justifyContent: 'center',
-            animation: showStopAck
-              ? 'cap-stop-ack-center 420ms var(--ol-motion-soft) both'
-              : 'cap-state-enter 220ms var(--ol-motion-soft) both',
-          }}
-        >
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              color: '#171714',
-              minWidth: 0,
-              textAlign: 'center',
-              lineHeight: processingLayout.allowWrap ? 1.2 : 1,
-              whiteSpace: processingLayout.allowWrap ? 'normal' : 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              display: '-webkit-box',
-              WebkitBoxOrient: 'vertical',
-              WebkitLineClamp: processingLayout.lineClamp,
-              // Apple-style: text stays static, only the spinner conveys "processing".
-            }}
-          >
-            {compactText}
-          </span>
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 12 12"
-            style={{ flexShrink: 0, animation: 'cap-spin 0.8s linear infinite' }}
-          >
-            <circle
-              cx="6" cy="6" r="4.5"
-              fill="none"
-              stroke="var(--ol-blue)"
-              strokeWidth="1.5"
-              strokeDasharray="8 4"
-              strokeLinecap="round"
-            />
-          </svg>
-        </div>
-      );
+      center = renderProcessingCenter(displayText);
       break;
     }
     case 'done':
@@ -322,9 +345,30 @@ export function Capsule() {
   const [leaving, setLeaving] = useState<boolean>(false);
   const [lastVisibleState, setLastVisibleState] = useState<CapsuleState>(INITIAL_VISIBLE_STATE);
   const previousStateRef = useRef<CapsuleState>(INITIAL_VISIBLE_STATE);
+  const stopAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [stopRequested, setStopRequested] = useState<boolean>(false);
   const [stopAcknowledged, setStopAcknowledged] = useState<boolean>(false);
   // Windows 端 host 在翻译模式从 84 长到 118；macOS / Linux 上 capsuleLayout 已固定 42 忽略此参数。
   const hostMetrics = getCapsuleHostMetrics(os, translation);
+
+  const clearStopAcknowledgement = () => {
+    if (stopAckTimerRef.current !== null) {
+      clearTimeout(stopAckTimerRef.current);
+      stopAckTimerRef.current = null;
+    }
+    setStopAcknowledged(false);
+  };
+
+  const armStopAcknowledgement = () => {
+    if (stopAckTimerRef.current !== null) {
+      clearTimeout(stopAckTimerRef.current);
+    }
+    setStopAcknowledged(true);
+    stopAckTimerRef.current = setTimeout(() => {
+      stopAckTimerRef.current = null;
+      setStopAcknowledged(false);
+    }, STOP_ACK_MS);
+  };
 
   useEffect(() => {
     if (!isTauri) return;
@@ -359,16 +403,25 @@ export function Capsule() {
   useEffect(() => {
     const previous = previousStateRef.current;
     previousStateRef.current = state;
-    if (previous === 'recording' && state === 'transcribing') {
-      setStopAcknowledged(true);
-      const timer = setTimeout(() => setStopAcknowledged(false), STOP_ACK_MS);
-      return () => clearTimeout(timer);
+    if (previous === 'recording' && (state === 'transcribing' || state === 'polishing')) {
+      armStopAcknowledgement();
     }
-    if (state !== 'transcribing') {
-      setStopAcknowledged(false);
+    if (state !== 'recording') {
+      setStopRequested(false);
+    }
+    if (!shouldShowStopAcknowledgement(state, true)) {
+      clearStopAcknowledgement();
     }
     return undefined;
   }, [state]);
+
+  useEffect(() => {
+    return () => {
+      if (stopAckTimerRef.current !== null) {
+        clearTimeout(stopAckTimerRef.current);
+      }
+    };
+  }, []);
 
   // 退出动画调度：在 state 真正进入 idle 时，先用 capsule-out 播放 EXIT_ANIM_MS，再卸载。
   // 设计要点：
@@ -397,19 +450,32 @@ export function Capsule() {
   }, [state]);
 
   const onCancel = () => {
+    setStopRequested(false);
+    clearStopAcknowledgement();
     void invokeOrMock<void>('cancel_dictation', undefined, () => undefined);
   };
 
   const onConfirm = () => {
-    void invokeOrMock<void>('stop_dictation', undefined, () => undefined);
+    if (state === 'recording') {
+      setStopRequested(true);
+      armStopAcknowledgement();
+    }
+    void invokeOrMock<void>('stop_dictation', undefined, () => undefined).catch(() => {
+      setStopRequested(false);
+      clearStopAcknowledgement();
+    });
   };
 
   const onDismiss = () => {
+    setStopRequested(false);
+    clearStopAcknowledgement();
     setState('idle');
     setMessage(undefined);
   };
 
   const onRetry = () => {
+    setStopRequested(false);
+    clearStopAcknowledgement();
     setState('idle');
     setMessage(undefined);
     void invokeOrMock<void>('start_dictation', undefined, () => undefined);
@@ -504,7 +570,8 @@ export function Capsule() {
         level={leaving ? 0 : level}
         insertedChars={insertedChars}
         message={message}
-        stopAcknowledged={!leaving && renderedState === 'transcribing' && stopAcknowledged}
+        stopRequested={!leaving && renderedState === 'recording' && stopRequested}
+        stopAcknowledged={!leaving && shouldShowStopAcknowledgement(renderedState, stopAcknowledged)}
         onCancel={onCancel}
         onConfirm={onConfirm}
         onDismiss={onDismiss}
