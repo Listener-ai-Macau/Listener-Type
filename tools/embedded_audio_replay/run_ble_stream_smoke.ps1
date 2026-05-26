@@ -24,6 +24,7 @@ param(
     [string]$VoiceName = "Microsoft Huihui Desktop",
     [int]$TtsRate = 0,
     [double]$TtsGain = 4.0,
+    [int]$PlaybackVolumePercent = 70,
     [string]$ListenerExe,
     [string]$FirmwareRepo,
     [string]$OutDir = "artifacts\embedded_stream_smoke",
@@ -34,6 +35,7 @@ param(
     [switch]$NoResetBeforeCapture,
     [switch]$SkipEnsureBle,
     [switch]$SkipCapsuleVisibleGate,
+    [switch]$KeepPlaybackVolume,
     [switch]$VerifyInsertion,
     [switch]$VerifyHistory
 )
@@ -91,6 +93,159 @@ function Write-SmokeTrace {
 
 function Get-SmokeUtcNow {
     return (Get-Date).ToUniversalTime().ToString("o")
+}
+
+function Initialize-SmokeAudioEndpointApi {
+    if ("SmokeAudioEndpoint" -as [type]) {
+        return
+    }
+
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+[ComImport]
+[Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+internal class MMDeviceEnumerator
+{
+}
+
+internal enum EDataFlow
+{
+    eRender = 0,
+    eCapture = 1,
+    eAll = 2
+}
+
+internal enum ERole
+{
+    eConsole = 0,
+    eMultimedia = 1,
+    eCommunications = 2
+}
+
+[ComImport]
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMMDeviceEnumerator
+{
+    int EnumAudioEndpoints();
+
+    [PreserveSig]
+    int GetDefaultAudioEndpoint(EDataFlow dataFlow, ERole role, out IMMDevice ppDevice);
+}
+
+[ComImport]
+[Guid("D666063F-1587-4E43-81F1-B948E807363F")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMMDevice
+{
+    [PreserveSig]
+    int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, out IAudioEndpointVolume ppInterface);
+}
+
+[ComImport]
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioEndpointVolume
+{
+    int RegisterControlChangeNotify(IntPtr pNotify);
+    int UnregisterControlChangeNotify(IntPtr pNotify);
+    int GetChannelCount(out uint pnChannelCount);
+    int SetMasterVolumeLevel(float fLevelDB, Guid pguidEventContext);
+    int SetMasterVolumeLevelScalar(float fLevel, Guid pguidEventContext);
+    int GetMasterVolumeLevel(out float pfLevelDB);
+    int GetMasterVolumeLevelScalar(out float pfLevel);
+    int SetChannelVolumeLevel(uint nChannel, float fLevelDB, Guid pguidEventContext);
+    int SetChannelVolumeLevelScalar(uint nChannel, float fLevel, Guid pguidEventContext);
+    int GetChannelVolumeLevel(uint nChannel, out float pfLevelDB);
+    int GetChannelVolumeLevelScalar(uint nChannel, out float pfLevel);
+    int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, Guid pguidEventContext);
+    int GetMute(out bool pbMute);
+}
+
+public sealed class SmokeAudioEndpoint
+{
+    public float Volume;
+    public bool Muted;
+
+    private static IAudioEndpointVolume GetEndpoint()
+    {
+        var enumerator = (IMMDeviceEnumerator)(new MMDeviceEnumerator());
+        IMMDevice device;
+        int hr = enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eMultimedia, out device);
+        if (hr != 0)
+        {
+            Marshal.ThrowExceptionForHR(hr);
+        }
+
+        Guid iid = typeof(IAudioEndpointVolume).GUID;
+        IAudioEndpointVolume endpoint;
+        hr = device.Activate(ref iid, 23, IntPtr.Zero, out endpoint);
+        if (hr != 0)
+        {
+            Marshal.ThrowExceptionForHR(hr);
+        }
+        return endpoint;
+    }
+
+    public static SmokeAudioEndpoint Snapshot()
+    {
+        var endpoint = GetEndpoint();
+        float volume;
+        bool muted;
+        endpoint.GetMasterVolumeLevelScalar(out volume);
+        endpoint.GetMute(out muted);
+        return new SmokeAudioEndpoint { Volume = volume, Muted = muted };
+    }
+
+    public static void Set(float volume, bool muted)
+    {
+        var endpoint = GetEndpoint();
+        var context = Guid.Empty;
+        endpoint.SetMute(muted, context);
+        endpoint.SetMasterVolumeLevelScalar(volume, context);
+    }
+}
+'@
+}
+
+function Set-SmokePlaybackVolume {
+    param([int]$Percent)
+
+    if ($Percent -lt 0) {
+        Write-SmokeTrace "playback_volume_setup_skipped percent=$Percent"
+        return $null
+    }
+
+    try {
+        Initialize-SmokeAudioEndpointApi
+        $snapshot = [SmokeAudioEndpoint]::Snapshot()
+        $target = [Math]::Max(0.01, [Math]::Min(1.0, [double]$Percent / 100.0))
+        [SmokeAudioEndpoint]::Set([single]$target, $false)
+        Write-SmokeTrace ("playback_volume_set target={0} previous={1:0.###} muted={2}" -f $Percent, [double]$snapshot.Volume, [bool]$snapshot.Muted)
+        return $snapshot
+    } catch {
+        Write-Warning "Failed to set playback volume before smoke audio: $($_.Exception.Message)"
+        Write-SmokeTrace "playback_volume_set_failed error=$($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Restore-SmokePlaybackVolume {
+    param($Snapshot)
+
+    if ($KeepPlaybackVolume -or $null -eq $Snapshot) {
+        return
+    }
+
+    try {
+        [SmokeAudioEndpoint]::Set([single]$Snapshot.Volume, [bool]$Snapshot.Muted)
+        Write-SmokeTrace ("playback_volume_restored volume={0:0.###} muted={1}" -f [double]$Snapshot.Volume, [bool]$Snapshot.Muted)
+    } catch {
+        Write-Warning "Failed to restore playback volume after smoke audio: $($_.Exception.Message)"
+        Write-SmokeTrace "playback_volume_restore_failed error=$($_.Exception.Message)"
+    }
 }
 
 function Get-SmokeReportSchema {
@@ -1693,6 +1848,7 @@ $scriptExitCode = 0
 $usesSerialSignal = @("serial-toggle", "serial-cancel") -contains $TriggerMode
 $serialEndCommand = if ($TriggerMode -eq "serial-cancel") { "cancel" } else { "toggle" }
 $expectedStreamFailure = $null
+$playbackVolumeSnapshot = $null
 try {
     if ($VerifyInsertion) {
         $insertionTargetPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.target.txt"
@@ -1781,6 +1937,7 @@ try {
     Add-Type -AssemblyName System.Windows.Forms
     $player = [System.Media.SoundPlayer]::new($WavPath)
     $player.Load()
+    $playbackVolumeSnapshot = Set-SmokePlaybackVolume -Percent $PlaybackVolumePercent
 
     for ($index = 1; $index -le $PlaybackCount; $index++) {
         if ($index -eq $RecordPlaybackIndex) {
@@ -2121,6 +2278,8 @@ try {
         post_playback_record_ms = $PostPlaybackRecordMs
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
         manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
+        playback_volume_percent = $PlaybackVolumePercent
+        keep_playback_volume = [bool]$KeepPlaybackVolume
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReportJson
         pcm_bytes = $pcmBytes
@@ -2223,6 +2382,8 @@ try {
         post_playback_record_ms = $PostPlaybackRecordMs
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
         manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
+        playback_volume_percent = $PlaybackVolumePercent
+        keep_playback_volume = [bool]$KeepPlaybackVolume
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReportJson
         verify_insertion = [bool]$VerifyInsertion
@@ -2251,6 +2412,7 @@ try {
     $scriptExitCode = 1
 } finally {
     Write-SmokeTrace "finally_start"
+    Restore-SmokePlaybackVolume -Snapshot $playbackVolumeSnapshot
     Stop-SerialRecordingWindow -Window $serialWindow
     Stop-InsertionTarget -Target $insertionTarget
     if ($process -and -not $process.HasExited) {
