@@ -487,6 +487,15 @@ export function compareVersionish(left: string, right: string): number {
   return 0;
 }
 
+export function firmwareOtaConfirmedVersionMatches(confirmedVersion: string | null | undefined, expectedVersion: string): boolean {
+  if (!confirmedVersion?.trim() || !expectedVersion.trim()) return false;
+  return normalizeFirmwareOtaVersion(confirmedVersion) === normalizeFirmwareOtaVersion(expectedVersion);
+}
+
+function normalizeFirmwareOtaVersion(value: string): string {
+  return value.trim().replace(/^v/i, '').toLowerCase();
+}
+
 function versionParts(value: string): number[] {
   const match = value.trim().replace(/^v/i, '').match(/\d+(?:\.\d+)*/);
   if (!match) return [0];

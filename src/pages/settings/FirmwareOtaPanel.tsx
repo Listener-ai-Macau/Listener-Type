@@ -8,6 +8,7 @@ import {
 } from '../../lib/ipc';
 import {
   evaluateFirmwareOtaPreflight,
+  firmwareOtaConfirmedVersionMatches,
   firmwareOtaFailureNextStep,
   firmwareOtaReducer,
   initialFirmwareOtaState,
@@ -176,13 +177,16 @@ export function FirmwareOtaPanel({
       await delay(450);
       dispatch({ type: 'deviceReconnected' });
       await delay(450);
-      if (transferResult?.confirmedVersion === selectedPackage.manifest.version) {
+      if (firmwareOtaConfirmedVersionMatches(transferResult?.confirmedVersion, selectedPackage.manifest.version)) {
         dispatch({ type: 'verified' });
       } else {
+        const confirmedVersion = transferResult?.confirmedVersion?.trim();
         dispatch({
           type: 'failed',
           failureCode: 'versionNotConfirmed',
-          message: 'Device rebooted but the new firmware version was not confirmed.',
+          message: confirmedVersion
+            ? `Device reported firmware ${confirmedVersion}, not ${selectedPackage.manifest.version}.`
+            : 'Device firmware version was not confirmed after the OTA reboot window.',
         });
       }
     } catch (error) {

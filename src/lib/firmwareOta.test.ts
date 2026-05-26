@@ -4,6 +4,7 @@ import {
   FIRMWARE_OTA_TRANSPORT_BOUNDARY,
   compareVersionish,
   evaluateFirmwareOtaPreflight,
+  firmwareOtaConfirmedVersionMatches,
   firmwareOtaFailureNextStep,
   firmwareOtaReducer,
   initialFirmwareOtaState,
@@ -205,6 +206,9 @@ assert.ok(badGatt.errors.some(error => error.includes('GATT boundary')));
 assert.equal(compareVersionish('v1.3.3', '1.3.2'), 1);
 assert.equal(compareVersionish('1.3.3', '1.3.3'), 0);
 assert.equal(compareVersionish('1.3.3', '1.4.0'), -1);
+assert.equal(firmwareOtaConfirmedVersionMatches('v1.2.0', '1.2.0'), true);
+assert.equal(firmwareOtaConfirmedVersionMatches('1.2.0-dev', '1.2.0'), false);
+assert.equal(firmwareOtaConfirmedVersionMatches(null, '1.2.0'), false);
 
 const parsedManifest = valid.manifest as FirmwareOtaManifest;
 const parsedV2Manifest = validV2.manifest as FirmwareOtaManifest;

@@ -18,6 +18,9 @@ Branch: `ai/oai-voice-keyboard-ota-update-1.2`
 - `npm run verify`: PASS.
   - `tsc --noEmit`, brand check, dark-mode check, unit tests, and Vite build.
 - `cargo check` in `src-tauri`: PASS.
+- `cargo test firmware_ota` in `src-tauri`: PASS.
+  - Covers DIS firmware revision normalization and empty-version handling used
+    by the Tauri OTA confirmation path.
 - `git diff --check`: PASS.
   - Git printed line-ending normalization warnings only.
 - `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`: PASS.
@@ -39,6 +42,13 @@ Branch: `ai/oai-voice-keyboard-ota-update-1.2`
 - `test:firmware-ota` includes a schema v2 sample package and negative cases for
   missing `ble_identity`, incomplete rollback metadata, incomplete recovery
   metadata, plus the unknown-device-status OTA blocker.
+- Real Tauri success path was reworked after review:
+  - `transfer_firmware_ota_ble` now polls the Listener BLE/DIS firmware
+    revision after a successful transfer and returns `confirmedVersion`.
+  - The desktop UI only emits `versionNotConfirmed` after the backend
+    confirmation window returns no firmware version or a different version.
+  - Version matching accepts a DIS `v` prefix but does not accept dirty/dev
+    suffixes as the release version.
 
 ## Acceptance Self-Review
 
@@ -65,6 +75,8 @@ Branch: `ai/oai-voice-keyboard-ota-update-1.2`
 - Failure recovery:
   - Manifest/hash mismatch, preflight/device rejection, BLE disconnect, and
     version-not-confirmed paths show retry/export diagnostics actions.
+  - The real Tauri transfer path can now reach `success` when the backend
+    confirms the device firmware version after reboot.
 
 ## Manual UI Copy Review
 
