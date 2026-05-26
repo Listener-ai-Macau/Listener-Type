@@ -90,3 +90,8 @@ OAI rework validation:
 - Report: `artifacts\embedded_stream_smoke\ble-stream-smoke.20260526-190514.json`.
 - Serial log: `artifacts\embedded_stream_smoke\ble-stream-smoke-20260526-190458.serial.log`.
 - Key results: `stream_ready=True`, `streaming_queued=True`, `transport_not_ready=False`, `record_start_rejected=False`, `recording_start_seen=True`, `recording_stop_seen=True`, `missing_packets=0`, `accuracy=1`, `history_session.id=c33d2aed-ac56-4a36-a796-db272a38bc47`.
+
+Codex follow-up: propagated `stream_ready_confirmed_line_index` and
+`transport_not_ready_rejection_line_index` through the outer JSON report.
+Validation PASS: PowerShell parse, embedded Python compile, and `git diff --check`
+(CRLF warning only).
