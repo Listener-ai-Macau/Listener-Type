@@ -91,6 +91,22 @@ OAI rework validation:
 - Serial log: `artifacts\embedded_stream_smoke\ble-stream-smoke-20260526-190458.serial.log`.
 - Key results: `stream_ready=True`, `streaming_queued=True`, `transport_not_ready=False`, `record_start_rejected=False`, `recording_start_seen=True`, `recording_stop_seen=True`, `missing_packets=0`, `accuracy=1`, `history_session.id=c33d2aed-ac56-4a36-a796-db272a38bc47`.
 
+Tai rework validation after review feedback:
+
+- PASS: PowerShell parse for `tools\embedded_audio_replay\run_ble_stream_smoke.ps1`.
+- PASS: embedded serial-window Python block compile.
+- PASS: `git diff --check` (CRLF warnings only).
+- PASS: `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`.
+- PASS: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\embedded_audio_replay\run_ble_stream_smoke.ps1 -TriggerMode serial-toggle -Port COM5 -DeviceName listener -BluetoothAddress 14C19F48FE72 -TimeoutMs 90000 -VerifyHistory`.
+- Report: `artifacts\embedded_stream_smoke\ble-stream-smoke.20260526-191053.json`.
+- Serial log: `artifacts\embedded_stream_smoke\ble-stream-smoke-20260526-191038.serial.log`.
+- Key results: `stream_ready=True`, `stream_ready_confirmed_line_index=6`, `transport_not_ready=False`, `transport_not_ready_rejection_line_index=null`, `record_start_rejected=False`, `recording_start_seen=True`, `recording_stop_seen=True`, `missing_packets=0`, `accuracy=1`, `history_session.id=dc413a1b-1c24-4d49-acfb-270b93454433`.
+- Follow-up serialization fix: `Convert-SerialReportForJson` now includes
+  `stream_ready_confirmed_line_index` and
+  `transport_not_ready_rejection_line_index` in the report JSON. PASS:
+  PowerShell parse and targeted `git diff --check`; hardware was not rerun for
+  this report-only mapping because Tai held the COM5/BLE device locks.
+
 Codex follow-up: propagated `stream_ready_confirmed_line_index` and
 `transport_not_ready_rejection_line_index` through the outer JSON report.
 Validation PASS: PowerShell parse, embedded Python compile, and `git diff --check`
