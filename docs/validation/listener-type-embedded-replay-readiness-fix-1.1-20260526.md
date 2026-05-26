@@ -64,6 +64,10 @@ Fix:
 - Foreground `probe_embedded_audio_ble_subscription` now waits for the active background listener to be notify-ready instead of treating a merely armed cancel flag as ready.
 - After a foreground probe that temporarily owns CCCD, the coordinator refreshes the background listener and waits for notify-ready before returning success. If CCCD is not restored, the probe returns an error instead of allowing the UI to show healthy while firmware is still `mtu_ready notify=0`.
 - The serial replay helper now refuses to send `~VREC:TOGGLE` if `stream_ready` was not confirmed. After a transport-not-ready rejection, it waits for a fresh `stream_ready` line after the rejection before retrying once. `serial_report.stream_ready` now uses the target-state parser instead of a substring match.
+- The serial replay summary records the line index used to confirm `stream_ready`
+  and the line index of any transport-not-ready rejection, so review can verify
+  that retry evidence came after the rejection rather than from a stale earlier
+  state.
 
 Validation:
 
