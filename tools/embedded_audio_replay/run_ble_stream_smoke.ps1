@@ -131,6 +131,8 @@ function Get-SmokeReportSchema {
             "accuracy",
             "accuracy_threshold",
             "accuracy_warning_only",
+            "accuracy_warning",
+            "accuracy_warning_message",
             "wav_path",
             "tts_rate",
             "tts_gain",
@@ -918,6 +920,8 @@ function Convert-SerialReportForJson {
         stream_ready = [bool]$Report.stream_ready
         streaming_queued = [bool]$Report.streaming_queued
         transport_not_ready = [bool]$Report.transport_not_ready
+        stream_ready_wait_count = [int]$Report.stream_ready_wait_count
+        transport_ready_retry_count = [int]$Report.transport_ready_retry_count
         record_start_rejected = [bool]$Report.record_start_rejected
         recording_start_seen = [bool]$Report.recording_start_seen
         recording_stop_seen = [bool]$Report.recording_stop_seen
@@ -1081,6 +1085,14 @@ end_command = sys.argv[8]
 max_wait_seconds = int(sys.argv[9])
 lines = []
 buffer = bytearray()
+stream_ready_wait_count = 0
+transport_ready_retry_count = 0
+
+AUDIO_TRANSPORT_STATE_MARKER = "audio transport state:"
+AUDIO_TRANSPORT_STREAM_READY_MARKER = "stream_ready"
+AUDIO_NOTIFY_ENABLED_MARKER = "notify=1"
+AUDIO_TRANSPORT_NOT_READY_REJECTION_MARKER = "record session start rejected: BLE audio transport not ready"
+STREAM_READY_START_WAIT_SECONDS = 12.0
 
 def poll_lines(ser):
     waiting = ser.in_waiting
@@ -1124,15 +1136,76 @@ def wait_for_start_signal(ser):
 def contains(text):
     return any(text in line for line in lines)
 
-def wait_for_recording_start(ser):
+def latest_audio_transport_state_line():
+    for line in reversed(lines):
+        if AUDIO_TRANSPORT_STATE_MARKER in line:
+            return line
+    return ""
+
+def line_indicates_stream_ready(line):
+    return (
+        AUDIO_TRANSPORT_STATE_MARKER in line
+        and AUDIO_TRANSPORT_STREAM_READY_MARKER in line
+        and AUDIO_NOTIFY_ENABLED_MARKER in line
+    )
+
+def transport_not_ready_rejection_count():
+    return sum(1 for line in lines if AUDIO_TRANSPORT_NOT_READY_REJECTION_MARKER in line)
+
+def wait_for_stream_ready_before_toggle(ser, context, include_latest=True):
+    global stream_ready_wait_count
+    poll_lines(ser)
+    latest_state = latest_audio_transport_state_line()
+    if include_latest and line_indicates_stream_ready(latest_state):
+        print(f"{context}_stream_ready=already_ready", flush=True)
+        return True
+
+    start_index = len(lines)
+    deadline = time.monotonic() + STREAM_READY_START_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        poll_lines(ser)
+        for line in lines[start_index:]:
+            if line_indicates_stream_ready(line):
+                stream_ready_wait_count += 1
+                print(f"{context}_stream_ready=observed", flush=True)
+                return True
+        time.sleep(0.05)
+    print(
+        f"{context}_stream_ready=timeout latest_transport_state={latest_state or '<none>'}",
+        flush=True,
+    )
+    return False
+
+def wait_for_recording_start(ser, rejection_count_before):
     deadline = time.monotonic() + (recording_start_timeout_ms / 1000.0)
     while time.monotonic() < deadline:
         poll_lines(ser)
         if contains("recording start source="):
             recording_started_signal_path.write_text("recording_start_seen", encoding="ascii")
-            return
+            return True
+        if transport_not_ready_rejection_count() > rejection_count_before:
+            return False
         time.sleep(0.02)
     raise RuntimeError("timed out waiting for firmware recording start log")
+
+def start_recording_with_retry(ser):
+    global transport_ready_retry_count
+    for attempt in range(1, 3):
+        wait_for_stream_ready_before_toggle(
+            ser,
+            f"serial_toggle_attempt_{attempt}",
+            include_latest=(attempt == 1),
+        )
+        rejection_count_before = transport_not_ready_rejection_count()
+        send_command(ser, "~VREC:TOGGLE")
+        if wait_for_recording_start(ser, rejection_count_before):
+            return
+        if attempt == 1:
+            transport_ready_retry_count += 1
+            print("serial_toggle_transport_not_ready_retry=1", flush=True)
+            continue
+        break
+    raise RuntimeError("firmware rejected recording start because BLE audio transport was not ready")
 
 def wait_for_stop_signal(ser):
     deadline = time.monotonic() + (max_record_ms / 1000.0)
@@ -1163,8 +1236,7 @@ try:
     ser.setRTS(False)
     ser.reset_input_buffer()
     wait_for_start_signal(ser)
-    send_command(ser, "~VREC:TOGGLE")
-    wait_for_recording_start(ser)
+    start_recording_with_retry(ser)
     wait_for_stop_signal(ser)
     if end_command == "cancel":
         send_command(ser, "~VREC:CANCEL")
@@ -1194,6 +1266,8 @@ summary = {
     "stream_ready": any("stream_ready" in line for line in lines),
     "streaming_queued": contains("session_start_queued") or contains("stream session start queued"),
     "transport_not_ready": contains("BLE audio transport not ready"),
+    "stream_ready_wait_count": stream_ready_wait_count,
+    "transport_ready_retry_count": transport_ready_retry_count,
     "record_start_rejected": contains("record session start rejected"),
     "recording_start_seen": contains("recording start source="),
     "recording_stop_seen": contains("recording stop source="),
@@ -1549,8 +1623,15 @@ Remove-Item -LiteralPath $serialStartSignalPath -Force -ErrorAction SilentlyCont
 Remove-Item -LiteralPath $serialStopSignalPath -Force -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $ListenerExe)) {
+    $frontendDist = Join-Path $RepoRoot "dist"
+    if (-not (Test-Path $frontendDist)) {
+        throw "Listener executable not found at $ListenerExe and Tauri frontend dist is missing at $frontendDist. Build the frontend first or pass -ListenerExe <existing listener-type.exe>."
+    }
     $env:PATH = "C:\Users\Billy\.cargo\bin;$env:PATH"
     cargo build --manifest-path (Join-Path $RepoRoot "src-tauri\Cargo.toml")
+}
+if (-not (Test-Path $ListenerExe)) {
+    throw "Listener executable not found after cargo build: $ListenerExe"
 }
 
 if (-not $NoResetBeforeCapture) {
@@ -1968,6 +2049,24 @@ try {
             }
         }
     }
+    $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
+    $accuracyReport = Measure-TranscriptAccuracy -Expected $ExpectedText -Transcript $finalText
+    $accuracyWarning = $false
+    $accuracyWarningMessage = $null
+    if (-not $ExpectNoText -and -not [string]::IsNullOrWhiteSpace($ExpectedText)) {
+        $accuracyThreshold = [double]$AudioProfileConfig.minimum_accuracy
+        if ([double]$accuracyReport.accuracy -lt $accuracyThreshold) {
+            $accuracyWarningMessage = "transcript accuracy below threshold: accuracy={0:0.######} threshold={1:0.######}" -f ([double]$accuracyReport.accuracy), $accuracyThreshold
+            if ([bool]$AudioProfileConfig.warning_only) {
+                $accuracyWarning = $true
+                if ($status -ne "FAIL") {
+                    $status = "WARNING"
+                }
+            } else {
+                $verificationErrors += $accuracyWarningMessage
+            }
+        }
+    }
     if ($verificationErrors.Count -gt 0) {
         $status = "FAIL"
     }
@@ -1975,8 +2074,6 @@ try {
     Write-SmokeTrace "report_object_start"
     $serialReportJson = Convert-SerialReportForJson -Report $serialReport
     $historySessionJson = Convert-HistorySessionForJson -Session $historySession
-    $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
-    $accuracyReport = Measure-TranscriptAccuracy -Expected $ExpectedText -Transcript $finalText
     $insertStatus = if ($historySessionJson -and -not [string]::IsNullOrWhiteSpace([string]$historySessionJson.insertStatus)) {
         [string]$historySessionJson.insertStatus
     } elseif ($insertionVerified) {
@@ -2004,6 +2101,8 @@ try {
         accuracy = $accuracyReport.accuracy
         accuracy_threshold = [double]$AudioProfileConfig.minimum_accuracy
         accuracy_warning_only = [bool]$AudioProfileConfig.warning_only
+        accuracy_warning = [bool]$accuracyWarning
+        accuracy_warning_message = $accuracyWarningMessage
         wav_path = $WavPath
         tts_rate = $TtsRate
         tts_gain = $TtsGain

@@ -112,7 +112,7 @@ Required fields are stable across PASS, WARNING, and FAIL reports:
 
 Optional fields are present when the corresponding subsystem participates: `history_session.embeddedAudioStats`, `history_session.insertStatus`, `serial_report`, `serial_log_path`, `insertion_target_path`, `expected_stream_failure`, and `error`.
 
-Diagnostic fields are for quality gates and debugging, not control flow: `normalized_expected`, `normalized_transcript`, `cer`, `accuracy`, `accuracy_threshold`, `accuracy_warning_only`, `wav_path`, `tts_rate`, `tts_gain`, `random_sentence_count`, `pcm_bytes`, `missing_packets`, and `verification_errors`.
+Diagnostic fields support quality gates and debugging: `normalized_expected`, `normalized_transcript`, `cer`, `accuracy`, `accuracy_threshold`, `accuracy_warning_only`, `accuracy_warning`, `accuracy_warning_message`, `wav_path`, `tts_rate`, `tts_gain`, `random_sentence_count`, `pcm_bytes`, `missing_packets`, and `verification_errors`. Non-warning profiles fail the smoke when `accuracy` falls below `accuracy_threshold`; warning-only profiles report `WARNING`.
 
 ## 生成随机 TTS fixture
 
