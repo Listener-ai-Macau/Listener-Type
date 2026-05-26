@@ -1,9 +1,9 @@
-import { useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { APP_VERSION } from '../../lib/appVersion';
 import {
-  cancelDictation,
   exportDiagnosticPackage,
+  getFirmwareOtaPreflightSnapshot,
   transferFirmwareOtaBle,
 } from '../../lib/ipc';
 import {
@@ -13,13 +13,15 @@ import {
   initialFirmwareOtaState,
   validateFirmwareOtaPackage,
   type FirmwareOtaBlocker,
+  type FirmwareOtaDeviceSnapshot,
   type FirmwareOtaManifest,
+  type FirmwareOtaPreflightSnapshot,
   type FirmwareOtaUserState,
 } from '../../lib/firmwareOta';
 import { Btn, Pill, type PillTone } from '../_atoms';
 import type { EmbeddedBleProbeStatus } from './EmbeddedBleStatusPanel';
 
-const EXPECTED_HARDWARE_REVISION = 'esp32s3-devkit';
+const EXPECTED_HARDWARE_REVISION = 'keyboard-v1';
 
 interface SelectedPackage {
   manifest: FirmwareOtaManifest;
@@ -44,29 +46,50 @@ export function FirmwareOtaPanel({
   const [selectedPackage, setSelectedPackage] = useState<SelectedPackage | null>(null);
   const [blockers, setBlockers] = useState<FirmwareOtaBlocker[]>([]);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [otaSnapshot, setOtaSnapshot] = useState<FirmwareOtaPreflightSnapshot | null>(null);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [diagnosticStatus, setDiagnosticStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
 
-  const connected = supported && bleStatus === 'ok';
   const transferActive = state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying';
   const statusTone = userStateTone(state.userState);
   const statusLabel = userStateLabel(state.userState, t);
+  const refreshOtaSnapshot = useCallback(async () => {
+    if (!supported) {
+      const unsupported = makeDisconnectedSnapshot('Firmware OTA is only supported on Windows Listener BLE.');
+      setOtaSnapshot(unsupported);
+      setSnapshotError(null);
+      return unsupported;
+    }
+    try {
+      const snapshot = await getFirmwareOtaPreflightSnapshot();
+      setOtaSnapshot(snapshot);
+      setSnapshotError(null);
+      return snapshot;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failed = makeDisconnectedSnapshot(message);
+      setOtaSnapshot(failed);
+      setSnapshotError(message);
+      return failed;
+    }
+  }, [supported]);
+
+  useEffect(() => {
+    if (!selectedPackage || bleStatus === 'checking') return;
+    void refreshOtaSnapshot();
+  }, [bleStatus, refreshOtaSnapshot, selectedPackage]);
+
   const preflight = useMemo(() => {
     if (!selectedPackage) return null;
+    const snapshot = otaSnapshot ?? makeDisconnectedSnapshot('Refresh Listener BLE status before starting OTA.');
     return evaluateFirmwareOtaPreflight({
       manifest: selectedPackage.manifest,
       desktopVersion: APP_VERSION,
-      recordingActive: false,
+      recordingActive: snapshot.recordingActive,
       transferActive,
-      device: {
-        connected,
-        hardwareRevision: EXPECTED_HARDWARE_REVISION,
-        firmwareVersion: null,
-        capabilities: connected ? ['firmware_ota_v1'] : [],
-        batteryPercent: null,
-        usbPowered: connected ? true : null,
-      },
+      device: snapshot.device,
     });
-  }, [connected, selectedPackage, transferActive]);
+  }, [otaSnapshot, selectedPackage, transferActive]);
   const effectiveBlockers = blockers.length > 0 ? blockers : preflight?.blockers ?? [];
   const canStart = !!selectedPackage && state.userState === 'ready' && effectiveBlockers.length === 0 && !transferActive;
 
@@ -104,6 +127,7 @@ export function FirmwareOtaPanel({
         firmwareSha256: result.firmwareSha256,
         warnings: result.warnings,
       });
+      void refreshOtaSnapshot();
       dispatch({ type: 'ready' });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -116,19 +140,13 @@ export function FirmwareOtaPanel({
 
   const startUpdate = async () => {
     if (!selectedPackage) return;
+    const snapshot = await refreshOtaSnapshot();
     const check = evaluateFirmwareOtaPreflight({
       manifest: selectedPackage.manifest,
       desktopVersion: APP_VERSION,
-      recordingActive: false,
-      transferActive: false,
-      device: {
-        connected,
-        hardwareRevision: EXPECTED_HARDWARE_REVISION,
-        firmwareVersion: null,
-        capabilities: connected ? ['firmware_ota_v1'] : [],
-        batteryPercent: null,
-        usbPowered: connected ? true : null,
-      },
+      recordingActive: snapshot.recordingActive,
+      transferActive,
+      device: snapshot.device,
     });
     if (!check.ok) {
       setBlockers(check.blockers);
@@ -138,7 +156,6 @@ export function FirmwareOtaPanel({
 
     setBlockers([]);
     try {
-      await cancelDictation();
       dispatch({ type: 'startTransfer' });
       let progress = 1;
       const progressTimer = window.setInterval(() => {
@@ -231,6 +248,9 @@ export function FirmwareOtaPanel({
           <Btn variant="ghost" size="sm" icon="refresh" onClick={onProbe} disabled={!supported || transferActive}>
             {t('common.refresh')}
           </Btn>
+          <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refreshOtaSnapshot()} disabled={!supported || transferActive}>
+            {t('settings.recording.firmwareOtaRefreshReadiness', '刷新升级条件')}
+          </Btn>
           <Btn variant="ghost" size="sm" icon="doc" onClick={() => inputRef.current?.click()} disabled={transferActive}>
             {t('settings.recording.firmwareOtaChoosePackage', '选择包')}
           </Btn>
@@ -253,6 +273,10 @@ export function FirmwareOtaPanel({
           <FirmwareOtaFact label={t('settings.recording.firmwareOtaChannel', '渠道')} value={selectedPackage.manifest.channel} />
           <FirmwareOtaFact label={t('settings.recording.firmwareOtaSize', '大小')} value={`${selectedPackage.manifest.fileSizeBytes} bytes`} />
         </div>
+      )}
+
+      {selectedPackage && (
+        <FirmwareOtaReadinessSummary snapshot={otaSnapshot} snapshotError={snapshotError} t={t} />
       )}
 
       {state.userState === 'transferring' && (
@@ -329,6 +353,61 @@ function FirmwareOtaFact({ label, value }: { label: string; value: string }) {
       </div>
     </div>
   );
+}
+
+function FirmwareOtaReadinessSummary({
+  snapshot,
+  snapshotError,
+  t,
+}: {
+  snapshot: FirmwareOtaPreflightSnapshot | null;
+  snapshotError: string | null;
+  t: ReturnType<typeof useTranslation>['t'];
+}) {
+  const device = snapshot?.device;
+  const rows: Array<[string, string]> = [
+    [t('settings.recording.firmwareOtaDeviceConnected', '连接'), device?.connected ? 'connected' : 'not ready'],
+    [t('settings.recording.firmwareOtaDeviceHardware', '硬件'), device?.hardwareRevision ?? 'unknown'],
+    [t('settings.recording.firmwareOtaDeviceFirmware', '固件'), device?.firmwareVersion ?? 'unknown'],
+    [t('settings.recording.firmwareOtaDevicePower', '供电'), formatPower(device)],
+    [t('settings.recording.firmwareOtaDictationPhase', '录音'), snapshot?.recordingActive ? snapshot.dictationPhase : 'idle'],
+  ];
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(108px, 1fr))', gap: 8 }}>
+      {rows.map(([label, value]) => <FirmwareOtaFact key={label} label={label} value={value} />)}
+      {snapshotError && (
+        <div style={{ gridColumn: '1 / -1', fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
+          {snapshotError}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatPower(device: FirmwareOtaDeviceSnapshot | null | undefined): string {
+  if (!device) return 'unknown';
+  if (device.usbPowered === true) return 'USB';
+  if (device.usbPowered === false && typeof device.batteryPercent === 'number') {
+    return `${device.batteryPercent}%`;
+  }
+  return 'unknown';
+}
+
+function makeDisconnectedSnapshot(detail: string): FirmwareOtaPreflightSnapshot {
+  return {
+    recordingActive: false,
+    dictationPhase: 'unknown',
+    device: {
+      connected: false,
+      hardwareRevision: null,
+      firmwareVersion: null,
+      capabilities: [],
+      batteryPercent: null,
+      usbPowered: null,
+      detail,
+    },
+  };
 }
 
 function userStateTone(state: FirmwareOtaUserState): PillTone {

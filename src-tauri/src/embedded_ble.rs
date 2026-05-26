@@ -5,6 +5,8 @@
 
 use std::time::Duration;
 
+use serde::Serialize;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BleNotificationEvent {
     pub notification: Vec<u8>,
@@ -18,6 +20,18 @@ pub struct FirmwareOtaTransferStats {
     pub bytes_transferred: usize,
     pub chunks_sent: usize,
     pub transport: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareOtaDeviceSnapshot {
+    pub connected: bool,
+    pub hardware_revision: Option<String>,
+    pub firmware_version: Option<String>,
+    pub capabilities: Vec<String>,
+    pub battery_percent: Option<u8>,
+    pub usb_powered: Option<bool>,
+    pub detail: Option<String>,
 }
 
 fn is_terminal_notification(notification: &[u8]) -> bool {
@@ -74,6 +88,14 @@ mod windows_ble {
     const OTA_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092a);
     const OTA_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092b);
     const OTA_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092c);
+    const DIS_SERVICE_UUID: GUID = GUID::from_u128(0x0000180a_0000_1000_8000_00805f9b34fb);
+    const DIS_MODEL_NUMBER_UUID: GUID = GUID::from_u128(0x00002a24_0000_1000_8000_00805f9b34fb);
+    const DIS_FIRMWARE_REVISION_UUID: GUID =
+        GUID::from_u128(0x00002a26_0000_1000_8000_00805f9b34fb);
+    const DIS_HARDWARE_REVISION_UUID: GUID =
+        GUID::from_u128(0x00002a27_0000_1000_8000_00805f9b34fb);
+    const BATTERY_SERVICE_UUID: GUID = GUID::from_u128(0x0000180f_0000_1000_8000_00805f9b34fb);
+    const BATTERY_LEVEL_UUID: GUID = GUID::from_u128(0x00002a19_0000_1000_8000_00805f9b34fb);
     const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
     const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
     const GATT_READY_TIMEOUT: Duration = Duration::from_secs(8);
@@ -366,6 +388,55 @@ mod windows_ble {
         })
     }
 
+    pub fn firmware_ota_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        match open_ota_target() {
+            Ok(target) => {
+                let mut snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+                    connected: true,
+                    hardware_revision: None,
+                    firmware_version: None,
+                    capabilities: vec!["firmware_ota_v1".to_string()],
+                    battery_percent: None,
+                    usb_powered: None,
+                    detail: None,
+                };
+                if let Some(device) = target.device.as_ref() {
+                    let model = read_optional_string_characteristic(
+                        device,
+                        DIS_SERVICE_UUID,
+                        DIS_MODEL_NUMBER_UUID,
+                    );
+                    let hardware = read_optional_string_characteristic(
+                        device,
+                        DIS_SERVICE_UUID,
+                        DIS_HARDWARE_REVISION_UUID,
+                    );
+                    snapshot.hardware_revision = model.or(hardware);
+                    snapshot.firmware_version = read_optional_string_characteristic(
+                        device,
+                        DIS_SERVICE_UUID,
+                        DIS_FIRMWARE_REVISION_UUID,
+                    );
+                    snapshot.battery_percent = read_optional_u8_characteristic(
+                        device,
+                        BATTERY_SERVICE_UUID,
+                        BATTERY_LEVEL_UUID,
+                    );
+                }
+                snapshot
+            }
+            Err(err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+                connected: false,
+                hardware_revision: None,
+                firmware_version: None,
+                capabilities: Vec::new(),
+                battery_percent: None,
+                usb_powered: None,
+                detail: Some(err),
+            },
+        }
+    }
+
     fn open_notify_target() -> Result<OpenNotifyTarget, String> {
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(SERVICE_UUID)
             .map_err(|err| format!("BLE service selector failed: {err}"))?;
@@ -441,6 +512,86 @@ mod windows_ble {
         Err(last_error.unwrap_or_else(|| {
             "No subscribable embedded audio BLE notify characteristic found".to_string()
         }))
+    }
+
+    fn read_optional_string_characteristic(
+        device: &BluetoothLEDevice,
+        service_uuid: GUID,
+        characteristic_uuid: GUID,
+    ) -> Option<String> {
+        read_optional_characteristic_bytes(device, service_uuid, characteristic_uuid)
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .map(|value| value.trim_matches(char::from(0)).trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
+    fn read_optional_u8_characteristic(
+        device: &BluetoothLEDevice,
+        service_uuid: GUID,
+        characteristic_uuid: GUID,
+    ) -> Option<u8> {
+        read_optional_characteristic_bytes(device, service_uuid, characteristic_uuid)
+            .and_then(|bytes| bytes.first().copied())
+    }
+
+    fn read_optional_characteristic_bytes(
+        device: &BluetoothLEDevice,
+        service_uuid: GUID,
+        characteristic_uuid: GUID,
+    ) -> Option<Vec<u8>> {
+        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+            let services_result = device
+                .GetGattServicesForUuidWithCacheModeAsync(service_uuid, cache_mode)
+                .ok()?
+                .get()
+                .ok()?;
+            if services_result.Status().ok()? != GattCommunicationStatus::Success {
+                continue;
+            }
+            let services = services_result.Services().ok()?;
+            for index in 0..services.Size().ok()? {
+                let service = services.GetAt(index).ok()?;
+                let read_result = read_optional_characteristic_from_service(
+                    &service,
+                    characteristic_uuid,
+                    cache_mode,
+                );
+                let _ = service.Close();
+                if read_result.is_some() {
+                    return read_result;
+                }
+            }
+        }
+        None
+    }
+
+    fn read_optional_characteristic_from_service(
+        service: &GattDeviceService,
+        characteristic_uuid: GUID,
+        cache_mode: BluetoothCacheMode,
+    ) -> Option<Vec<u8>> {
+        let result = service
+            .GetCharacteristicsForUuidWithCacheModeAsync(characteristic_uuid, cache_mode)
+            .ok()?
+            .get()
+            .ok()?;
+        if result.Status().ok()? != GattCommunicationStatus::Success {
+            return None;
+        }
+        let characteristics = result.Characteristics().ok()?;
+        if characteristics.Size().ok()? == 0 {
+            return None;
+        }
+        let characteristic = characteristics.GetAt(0).ok()?;
+        let read = characteristic
+            .ReadValueWithCacheModeAsync(cache_mode)
+            .ok()?
+            .get()
+            .ok()?;
+        if read.Status().ok()? != GattCommunicationStatus::Success {
+            return None;
+        }
+        buffer_to_vec(&read.Value().ok()?).ok()
     }
 
     fn open_ota_target() -> Result<OpenOtaTarget, String> {
@@ -1369,6 +1520,11 @@ pub fn transfer_firmware_ota(
     windows_ble::transfer_firmware_ota(version, firmware_sha256, firmware_bytes)
 }
 
+#[cfg(target_os = "windows")]
+pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+    windows_ble::firmware_ota_device_snapshot()
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
@@ -1403,6 +1559,19 @@ pub fn transfer_firmware_ota(
     _firmware_bytes: &[u8],
 ) -> Result<FirmwareOtaTransferStats, String> {
     Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+    FirmwareOtaDeviceSnapshot {
+        connected: false,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: Vec::new(),
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some("Firmware OTA over Listener BLE is only supported on Windows".to_string()),
+    }
 }
 
 #[cfg(test)]

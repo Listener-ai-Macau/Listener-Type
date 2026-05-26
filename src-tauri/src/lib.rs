@@ -341,6 +341,7 @@ pub fn run() {
             commands::submit_embedded_audio_ble_once,
             commands::probe_embedded_audio_ble_subscription,
             commands::get_embedded_ble_runtime_status,
+            commands::get_firmware_ota_preflight_snapshot,
             commands::transfer_firmware_ota_ble,
             commands::submit_embedded_audio_ble_stream,
             commands::cancel_dictation,

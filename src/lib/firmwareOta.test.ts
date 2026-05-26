@@ -51,15 +51,103 @@ function manifest(overrides: Record<string, unknown> = {}): string {
   });
 }
 
+function manifestV2(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    schema_version: 2,
+    created_at_utc: '2026-05-26T00:00:00Z',
+    channel: 'internal-test',
+    firmware: {
+      project: 'voice-keyboard-firmware',
+      version: '1.2.0',
+      git_commit: 'a'.repeat(40),
+      git_dirty: false,
+      target: 'esp32s3',
+      file: 'firmware_ota.bin',
+      size_bytes: firmwareBytes.byteLength,
+      sha256: firmwareSha256,
+    },
+    requirements: {
+      hardware_revision: 'keyboard-v1',
+      protocol_version: 1,
+      min_desktop_version: '1.3.3',
+    },
+    ble_identity: {
+      name: 'Listener Voice Keyboard',
+      appearance: '0x03C1',
+      hid_service_uuid: '1812',
+      audio_service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3091a',
+      audio_notify_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3091c',
+      readiness_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3091d',
+      capabilities_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3091e',
+      dis: {
+        manufacturer: 'Listener',
+        model: 'keyboard-v1',
+        hardware_revision: 'esp32s3-devkit',
+        firmware_revision: '1.2.0',
+        software_revision_protocol: '1',
+      },
+    },
+    rollback: {
+      supported: true,
+      method: 'esp_idf_bootloader_rollback',
+      instructions: 'The bootloader returns to the previous slot if pending verify fails.',
+    },
+    recovery: {
+      factory_reflash: 'Use the USB factory package from the same firmware release.',
+      serial_commands: 'Open the serial monitor and run the recovery commands from the firmware bundle.',
+    },
+    ...overrides,
+  });
+}
+
 const context = {
   desktopVersion: '1.3.3',
   expectedHardwareRevision: 'esp32s3-devkit',
+};
+
+const contextV2 = {
+  desktopVersion: '1.3.3',
+  expectedHardwareRevision: 'keyboard-v1',
 };
 
 const valid = await validateFirmwareOtaPackage(manifest(), firmwareBytes, context);
 assert.equal(valid.ok, true);
 assert.equal(valid.firmwareSha256, firmwareSha256);
 assert.equal(valid.manifest?.version, '1.2.0');
+
+const validV2 = await validateFirmwareOtaPackage(manifestV2(), firmwareBytes, contextV2);
+assert.equal(validV2.ok, true);
+assert.equal(validV2.firmwareSha256, firmwareSha256);
+assert.equal(validV2.manifest?.schemaVersion, 2);
+assert.equal(validV2.manifest?.hardwareRevision, 'keyboard-v1');
+assert.equal(validV2.manifest?.fileName, 'firmware_ota.bin');
+assert.equal(validV2.manifest?.recoveryInstructions.length, 2);
+
+const missingV2BleIdentity = JSON.parse(manifestV2()) as Record<string, unknown>;
+delete missingV2BleIdentity.ble_identity;
+const badV2BleIdentity = await validateFirmwareOtaPackage(
+  JSON.stringify(missingV2BleIdentity),
+  firmwareBytes,
+  contextV2,
+);
+assert.equal(badV2BleIdentity.ok, false);
+assert.ok(badV2BleIdentity.errors.some(error => error.includes('ble_identity')));
+
+const badV2Rollback = await validateFirmwareOtaPackage(
+  manifestV2({ rollback: { supported: true, method: 'esp_idf_bootloader_rollback' } }),
+  firmwareBytes,
+  contextV2,
+);
+assert.equal(badV2Rollback.ok, false);
+assert.ok(badV2Rollback.errors.some(error => error.includes('rollback.instructions')));
+
+const badV2Recovery = await validateFirmwareOtaPackage(
+  manifestV2({ recovery: { factory_reflash: 'Use USB factory reflash.' } }),
+  firmwareBytes,
+  contextV2,
+);
+assert.equal(badV2Recovery.ok, false);
+assert.ok(badV2Recovery.errors.some(error => error.includes('recovery.serial_commands')));
 
 const badHash = await validateFirmwareOtaPackage(
   manifest({ file: { name: 'firmware_ota.bin', size_bytes: firmwareBytes.byteLength, sha256: '0'.repeat(64) } }),
@@ -119,6 +207,7 @@ assert.equal(compareVersionish('1.3.3', '1.3.3'), 0);
 assert.equal(compareVersionish('1.3.3', '1.4.0'), -1);
 
 const parsedManifest = valid.manifest as FirmwareOtaManifest;
+const parsedV2Manifest = validV2.manifest as FirmwareOtaManifest;
 const readyPreflight = evaluateFirmwareOtaPreflight({
   manifest: parsedManifest,
   desktopVersion: '1.3.3',
@@ -134,6 +223,23 @@ const readyPreflight = evaluateFirmwareOtaPreflight({
   },
 });
 assert.equal(readyPreflight.ok, true);
+
+const unknownDeviceStatus = evaluateFirmwareOtaPreflight({
+  manifest: parsedV2Manifest,
+  desktopVersion: '1.3.3',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: true,
+    hardwareRevision: null,
+    firmwareVersion: '1.1.0',
+    capabilities: ['firmware_ota_v1'],
+    batteryPercent: 80,
+    usbPowered: true,
+  },
+});
+assert.equal(unknownDeviceStatus.ok, false);
+assert.ok(unknownDeviceStatus.blockers.some(item => item.code === 'deviceStatusUnknown'));
 
 const blockedPreflight = evaluateFirmwareOtaPreflight({
   manifest: parsedManifest,

@@ -15,6 +15,7 @@ export type FirmwareOtaBlockerCode =
   | 'deviceDisconnected'
   | 'recordingActive'
   | 'transferActive'
+  | 'deviceStatusUnknown'
   | 'batteryLow'
   | 'powerUnknown'
   | 'hardwareMismatch'
@@ -73,6 +74,13 @@ export interface FirmwareOtaDeviceSnapshot {
   capabilities: string[];
   batteryPercent?: number | null;
   usbPowered?: boolean | null;
+  detail?: string | null;
+}
+
+export interface FirmwareOtaPreflightSnapshot {
+  recordingActive: boolean;
+  dictationPhase: string;
+  device: FirmwareOtaDeviceSnapshot;
 }
 
 export interface FirmwareOtaPreflightInput {
@@ -190,6 +198,13 @@ export function parseFirmwareOtaManifest(value: unknown): FirmwareOtaManifest {
   if (!isRecord(value)) {
     throw new Error('ota_manifest.json must be a JSON object.');
   }
+  const schemaVersion = requireNumber(value.schema_version ?? value.schemaVersion, 'schema_version');
+  if (schemaVersion === 1) return parseFirmwareOtaManifestV1(value, schemaVersion);
+  if (schemaVersion === 2) return parseFirmwareOtaManifestV2(value, schemaVersion);
+  throw new Error(`Unsupported OTA manifest schema_version ${schemaVersion}.`);
+}
+
+function parseFirmwareOtaManifestV1(value: Record<string, unknown>, schemaVersion: number): FirmwareOtaManifest {
   const file = requireRecord(value.file, 'file');
   const protocol = requireRecord(value.protocol, 'protocol');
   const rollback = requireRecord(value.rollback, 'rollback');
@@ -197,7 +212,7 @@ export function parseFirmwareOtaManifest(value: unknown): FirmwareOtaManifest {
   const gatt = isRecord(protocol.gatt) ? protocol.gatt : null;
 
   const manifest: FirmwareOtaManifest = {
-    schemaVersion: requireNumber(value.schema_version ?? value.schemaVersion, 'schema_version'),
+    schemaVersion,
     packageType: requireString(value.package_type ?? value.packageType, 'package_type') as 'listener-firmware-ota',
     project: requireString(value.project, 'project'),
     version: requireString(value.version, 'version'),
@@ -222,13 +237,70 @@ export function parseFirmwareOtaManifest(value: unknown): FirmwareOtaManifest {
     gattChunkBytes: gatt
       ? requireNumber(gatt.chunk_bytes ?? gatt.chunkBytes, 'protocol.gatt.chunk_bytes')
       : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.chunkBytes,
-    rollbackInstructions: requireStringArray(rollback.instructions, 'rollback.instructions'),
-    recoveryInstructions: requireStringArray(recovery.instructions, 'recovery.instructions'),
+    rollbackInstructions: requireInstructions(rollback.instructions, 'rollback.instructions'),
+    recoveryInstructions: requireInstructions(recovery.instructions, 'recovery.instructions'),
   };
 
-  if (manifest.schemaVersion !== 1) {
-    throw new Error(`Unsupported OTA manifest schema_version ${manifest.schemaVersion}.`);
+  validateNormalizedFirmwareOtaManifest(manifest);
+  return manifest;
+}
+
+function parseFirmwareOtaManifestV2(value: Record<string, unknown>, schemaVersion: number): FirmwareOtaManifest {
+  const firmware = requireRecord(value.firmware, 'firmware');
+  const requirements = requireRecord(value.requirements, 'requirements');
+  const bleIdentity = requireRecord(value.ble_identity ?? value.bleIdentity, 'ble_identity');
+  const dis = requireRecord(bleIdentity.dis, 'ble_identity.dis');
+  const rollback = requireRecord(value.rollback, 'rollback');
+  const recovery = requireRecord(value.recovery, 'recovery');
+  const rollbackSupported = requireBool(rollback.supported, 'rollback.supported');
+  if (!rollbackSupported) {
+    throw new Error('rollback.supported must be true.');
   }
+
+  requireString(value.created_at_utc ?? value.createdAtUtc, 'created_at_utc');
+  requireString(firmware.git_commit ?? firmware.gitCommit, 'firmware.git_commit');
+  requireBool(firmware.git_dirty ?? firmware.gitDirty, 'firmware.git_dirty');
+  requireString(firmware.target, 'firmware.target');
+  requireString(bleIdentity.name, 'ble_identity.name');
+  requireString(bleIdentity.appearance, 'ble_identity.appearance');
+  requireString(dis.model, 'ble_identity.dis.model');
+  requireString(dis.hardware_revision ?? dis.hardwareRevision, 'ble_identity.dis.hardware_revision');
+  requireString(dis.firmware_revision ?? dis.firmwareRevision, 'ble_identity.dis.firmware_revision');
+
+  const rollbackMethod = requireString(rollback.method, 'rollback.method');
+  if (rollbackMethod !== 'esp_idf_bootloader_rollback') {
+    throw new Error(`Unsupported rollback.method ${rollbackMethod}.`);
+  }
+  const factoryReflash = requireString(recovery.factory_reflash ?? recovery.factoryReflash, 'recovery.factory_reflash');
+  const serialCommands = requireString(recovery.serial_commands ?? recovery.serialCommands, 'recovery.serial_commands');
+
+  const manifest: FirmwareOtaManifest = {
+    schemaVersion,
+    packageType: 'listener-firmware-ota',
+    project: requireString(firmware.project, 'firmware.project'),
+    version: requireString(firmware.version, 'firmware.version'),
+    protocolName: FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName,
+    protocolVersion: requireNumber(requirements.protocol_version ?? requirements.protocolVersion, 'requirements.protocol_version'),
+    hardwareRevision: requireString(requirements.hardware_revision ?? requirements.hardwareRevision, 'requirements.hardware_revision'),
+    minDesktopVersion: requireString(requirements.min_desktop_version ?? requirements.minDesktopVersion, 'requirements.min_desktop_version'),
+    channel: requireChannel(value.channel),
+    fileName: requireString(firmware.file, 'firmware.file'),
+    fileSizeBytes: requireNumber(firmware.size_bytes ?? firmware.sizeBytes, 'firmware.size_bytes'),
+    fileSha256: requireString(firmware.sha256, 'firmware.sha256').toLowerCase(),
+    firmwareCapability: FIRMWARE_OTA_TRANSPORT_BOUNDARY.firmwareCapability,
+    gattServiceUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
+    gattControlUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
+    gattDataUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
+    gattChunkBytes: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.chunkBytes,
+    rollbackInstructions: requireInstructions(rollback.instructions, 'rollback.instructions'),
+    recoveryInstructions: [factoryReflash, serialCommands],
+  };
+
+  validateNormalizedFirmwareOtaManifest(manifest);
+  return manifest;
+}
+
+function validateNormalizedFirmwareOtaManifest(manifest: FirmwareOtaManifest): void {
   if (manifest.packageType !== 'listener-firmware-ota') {
     throw new Error('ota_manifest.json package_type must be listener-firmware-ota.');
   }
@@ -255,8 +327,6 @@ export function parseFirmwareOtaManifest(value: unknown): FirmwareOtaManifest {
   if (!SHA256_RE.test(manifest.fileSha256)) {
     throw new Error('file.sha256 must be lowercase SHA256 hex.');
   }
-
-  return manifest;
 }
 
 export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): FirmwareOtaPreflightResult {
@@ -266,7 +336,7 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
   if (!device.connected) {
     blockers.push(blocker(
       'deviceDisconnected',
-      'Device is not connected.',
+      device.detail ? `Device is not ready for OTA: ${device.detail}` : 'Device is not connected.',
       'Connect Listener in Windows Bluetooth, then refresh Listener BLE status.',
     ));
   }
@@ -291,7 +361,13 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       `Update Listener Type to ${manifest.minDesktopVersion} or newer first.`,
     ));
   }
-  if (device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {
+  if (device.connected && !device.hardwareRevision) {
+    blockers.push(blocker(
+      'deviceStatusUnknown',
+      'Device hardware revision is unknown.',
+      'Refresh Listener BLE status; if it remains unknown, use the USB factory package.',
+    ));
+  } else if (device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {
     blockers.push(blocker(
       'hardwareMismatch',
       'Firmware package is for a different hardware revision.',
@@ -438,6 +514,13 @@ function requireNumber(value: unknown, field: string): number {
   return value;
 }
 
+function requireBool(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new Error(`${field} must be a boolean.`);
+  }
+  return value;
+}
+
 function requireChannel(value: unknown): FirmwareOtaChannel {
   if (value === 'stable' || value === 'beta' || value === 'internal-test') {
     return value;
@@ -445,7 +528,10 @@ function requireChannel(value: unknown): FirmwareOtaChannel {
   throw new Error('channel must be stable, beta, or internal-test.');
 }
 
-function requireStringArray(value: unknown, field: string): string[] {
+function requireInstructions(value: unknown, field: string): string[] {
+  if (typeof value === 'string' && value.trim() !== '') {
+    return [value.trim()];
+  }
   if (!Array.isArray(value)) {
     throw new Error(`${field} must be an array.`);
   }

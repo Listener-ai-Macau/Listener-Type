@@ -1411,6 +1411,30 @@ pub fn get_embedded_ble_runtime_status(coord: CoordinatorState<'_>) -> EmbeddedB
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FirmwareOtaPreflightSnapshot {
+    recording_active: bool,
+    dictation_phase: String,
+    device: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+}
+
+#[tauri::command]
+pub async fn get_firmware_ota_preflight_snapshot(
+    coord: CoordinatorState<'_>,
+) -> Result<FirmwareOtaPreflightSnapshot, String> {
+    let phase = coord.dictation_phase_for_cli();
+    let device =
+        tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
+            .await
+            .map_err(|err| format!("Listener BLE OTA preflight task failed: {err}"))?;
+    Ok(FirmwareOtaPreflightSnapshot {
+        recording_active: phase != SessionPhase::Idle,
+        dictation_phase: format!("{phase:?}"),
+        device,
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FirmwareOtaBleTransferResult {
     bytes_transferred: usize,
     confirmed_version: Option<String>,

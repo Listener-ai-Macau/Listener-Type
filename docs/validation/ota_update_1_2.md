@@ -20,21 +20,42 @@ Branch: `ai/oai-voice-keyboard-ota-update-1.2`
 - `cargo check` in `src-tauri`: PASS.
 - `git diff --check`: PASS.
   - Git printed line-ending normalization warnings only.
+- `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`: PASS.
+
+## Rework Evidence
+
+- Rejected hardcoded preflight state was removed.
+  - `FirmwareOtaPanel` now calls `get_firmware_ota_preflight_snapshot` before
+    showing readiness and again immediately before transfer.
+  - The UI no longer calls `cancelDictation()` before OTA. Active recording
+    stays active and blocks the update through preflight and the Rust transfer
+    command.
+  - Device readiness comes from the Tauri BLE/DIS snapshot instead of fixed
+    hardware/capability/power values.
+- Firmware manifest parsing now supports both the original desktop schema v1
+  and the firmware package schema v2 emitted by `tools/package_ota_firmware.ps1`.
+  Schema v2 normalizes `firmware`, `requirements`, `ble_identity`, `rollback`,
+  and `recovery` into the desktop transfer contract.
+- `test:firmware-ota` includes a schema v2 sample package and negative cases for
+  missing `ble_identity`, incomplete rollback metadata, incomplete recovery
+  metadata, plus the unknown-device-status OTA blocker.
 
 ## Acceptance Self-Review
 
 - Package input:
   - UI selects `ota_manifest.json` and `firmware_ota.bin`.
-  - `src/lib/firmwareOta.ts` validates schema v1, package type, protocol,
-    firmware capability, hardware revision, min desktop version, file size,
-    and SHA256.
+  - `src/lib/firmwareOta.ts` validates schema v1 and firmware tooling schema v2,
+    package type, protocol, firmware capability, hardware revision, min desktop
+    version, file size, and SHA256.
 - User-visible state:
   - UI exposes idle/checking/ready/transferring/rebooting/verifying/success/
     failed/rolledBack labels.
 - Preflight:
   - Library checks connected, recording active, transfer active, min desktop
-    version, hardware mismatch, missing capability, same/non-newer version,
-    low battery, and unknown power.
+    version, unknown hardware status, hardware mismatch, missing capability,
+    same/non-newer version, low battery, and unknown power.
+  - Frontend reads the Tauri preflight snapshot and blocks active recording
+    instead of silently cancelling it.
   - Rust transfer command also rejects non-idle dictation phase before BLE I/O.
 - BLE boundary:
   - OTA uses a dedicated `listener_ble_ota` GATT service and does not reuse BLE
