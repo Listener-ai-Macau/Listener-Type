@@ -20,11 +20,18 @@ Branch: ai/oai-listener-type-ai-diagnostic-bundle-1.1
 - `$env:AI_AGENT_ID='oai'; pwsh -NoProfile -File .\tools\collect_ai_diagnostics.ps1 -OutputDir .\tests\artifacts\ai_diagnostics_firmware_smoke -FirmwareBundle .\tests\fixtures\ai_diagnostics\sample_firmware_bundle.json` - PASS
 - `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check` - PASS
 - `git diff --check` - PASS, Git reported only existing LF-to-CRLF working-copy warnings for `.gitignore` and `tools/ai/repo_features.ps1`
+- `git diff --check origin/main...HEAD` - PASS after rework commit; verifies the committed branch diff has no EOF whitespace issue.
+
+## Rework Evidence
+
+- Removed the trailing blank line at EOF from `tools/ai_diagnostics/__init__.py`.
+- Re-ran the collector smoke and firmware-bundle ingest smoke after the whitespace fix.
+- Added committed-diff whitespace validation with `git diff --check origin/main...HEAD` so the review check matches the branch diff, not only the clean working tree.
 
 ## Evidence
 
-- Offline smoke bundle: `tests\artifacts\ai_diagnostics_smoke\20260526T063355Z`
-- Firmware ingest smoke bundle: `tests\artifacts\ai_diagnostics_firmware_smoke\20260526T063355Z`
+- Offline smoke bundle: `tests\artifacts\ai_diagnostics_smoke\20260526T074626Z`
+- Firmware ingest smoke bundle: `tests\artifacts\ai_diagnostics_firmware_smoke\20260526T074627Z`
 - Offline smoke summary: 6 source files, 2 logs, 2 BLE/audio artifacts, 14 warning/error refs, workflow env/branch/assignee all `oai`.
 - Firmware smoke summary: 6 source files, firmware decoder status `ingested_firmware_bundle`, firmware bundle parse status `ok`, 14 warning/error refs.
 
