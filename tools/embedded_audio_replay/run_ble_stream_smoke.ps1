@@ -24,6 +24,7 @@ param(
     [string]$VoiceName = "Microsoft Huihui Desktop",
     [int]$TtsRate = 0,
     [double]$TtsGain = 4.0,
+    [int]$PlaybackVolumePercent = 70,
     [string]$ListenerExe,
     [string]$FirmwareRepo,
     [string]$OutDir = "artifacts\embedded_stream_smoke",
@@ -34,6 +35,7 @@ param(
     [switch]$NoResetBeforeCapture,
     [switch]$SkipEnsureBle,
     [switch]$SkipCapsuleVisibleGate,
+    [switch]$KeepPlaybackVolume,
     [switch]$VerifyInsertion,
     [switch]$VerifyHistory
 )
@@ -93,6 +95,159 @@ function Get-SmokeUtcNow {
     return (Get-Date).ToUniversalTime().ToString("o")
 }
 
+function Initialize-SmokeAudioEndpointApi {
+    if ("SmokeAudioEndpoint" -as [type]) {
+        return
+    }
+
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+[ComImport]
+[Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+internal class MMDeviceEnumerator
+{
+}
+
+internal enum EDataFlow
+{
+    eRender = 0,
+    eCapture = 1,
+    eAll = 2
+}
+
+internal enum ERole
+{
+    eConsole = 0,
+    eMultimedia = 1,
+    eCommunications = 2
+}
+
+[ComImport]
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMMDeviceEnumerator
+{
+    int EnumAudioEndpoints();
+
+    [PreserveSig]
+    int GetDefaultAudioEndpoint(EDataFlow dataFlow, ERole role, out IMMDevice ppDevice);
+}
+
+[ComImport]
+[Guid("D666063F-1587-4E43-81F1-B948E807363F")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMMDevice
+{
+    [PreserveSig]
+    int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, out IAudioEndpointVolume ppInterface);
+}
+
+[ComImport]
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioEndpointVolume
+{
+    int RegisterControlChangeNotify(IntPtr pNotify);
+    int UnregisterControlChangeNotify(IntPtr pNotify);
+    int GetChannelCount(out uint pnChannelCount);
+    int SetMasterVolumeLevel(float fLevelDB, Guid pguidEventContext);
+    int SetMasterVolumeLevelScalar(float fLevel, Guid pguidEventContext);
+    int GetMasterVolumeLevel(out float pfLevelDB);
+    int GetMasterVolumeLevelScalar(out float pfLevel);
+    int SetChannelVolumeLevel(uint nChannel, float fLevelDB, Guid pguidEventContext);
+    int SetChannelVolumeLevelScalar(uint nChannel, float fLevel, Guid pguidEventContext);
+    int GetChannelVolumeLevel(uint nChannel, out float pfLevelDB);
+    int GetChannelVolumeLevelScalar(uint nChannel, out float pfLevel);
+    int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, Guid pguidEventContext);
+    int GetMute(out bool pbMute);
+}
+
+public sealed class SmokeAudioEndpoint
+{
+    public float Volume;
+    public bool Muted;
+
+    private static IAudioEndpointVolume GetEndpoint()
+    {
+        var enumerator = (IMMDeviceEnumerator)(new MMDeviceEnumerator());
+        IMMDevice device;
+        int hr = enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eMultimedia, out device);
+        if (hr != 0)
+        {
+            Marshal.ThrowExceptionForHR(hr);
+        }
+
+        Guid iid = typeof(IAudioEndpointVolume).GUID;
+        IAudioEndpointVolume endpoint;
+        hr = device.Activate(ref iid, 23, IntPtr.Zero, out endpoint);
+        if (hr != 0)
+        {
+            Marshal.ThrowExceptionForHR(hr);
+        }
+        return endpoint;
+    }
+
+    public static SmokeAudioEndpoint Snapshot()
+    {
+        var endpoint = GetEndpoint();
+        float volume;
+        bool muted;
+        endpoint.GetMasterVolumeLevelScalar(out volume);
+        endpoint.GetMute(out muted);
+        return new SmokeAudioEndpoint { Volume = volume, Muted = muted };
+    }
+
+    public static void Set(float volume, bool muted)
+    {
+        var endpoint = GetEndpoint();
+        var context = Guid.Empty;
+        endpoint.SetMute(muted, context);
+        endpoint.SetMasterVolumeLevelScalar(volume, context);
+    }
+}
+'@
+}
+
+function Set-SmokePlaybackVolume {
+    param([int]$Percent)
+
+    if ($Percent -lt 0) {
+        Write-SmokeTrace "playback_volume_setup_skipped percent=$Percent"
+        return $null
+    }
+
+    try {
+        Initialize-SmokeAudioEndpointApi
+        $snapshot = [SmokeAudioEndpoint]::Snapshot()
+        $target = [Math]::Max(0.01, [Math]::Min(1.0, [double]$Percent / 100.0))
+        [SmokeAudioEndpoint]::Set([single]$target, $false)
+        Write-SmokeTrace ("playback_volume_set target={0} previous={1:0.###} muted={2}" -f $Percent, [double]$snapshot.Volume, [bool]$snapshot.Muted)
+        return $snapshot
+    } catch {
+        Write-Warning "Failed to set playback volume before smoke audio: $($_.Exception.Message)"
+        Write-SmokeTrace "playback_volume_set_failed error=$($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Restore-SmokePlaybackVolume {
+    param($Snapshot)
+
+    if ($KeepPlaybackVolume -or $null -eq $Snapshot) {
+        return
+    }
+
+    try {
+        [SmokeAudioEndpoint]::Set([single]$Snapshot.Volume, [bool]$Snapshot.Muted)
+        Write-SmokeTrace ("playback_volume_restored volume={0:0.###} muted={1}" -f [double]$Snapshot.Volume, [bool]$Snapshot.Muted)
+    } catch {
+        Write-Warning "Failed to restore playback volume after smoke audio: $($_.Exception.Message)"
+        Write-SmokeTrace "playback_volume_restore_failed error=$($_.Exception.Message)"
+    }
+}
+
 function Get-SmokeReportSchema {
     return [ordered]@{
         name = "ble_stream_smoke_report"
@@ -131,6 +286,8 @@ function Get-SmokeReportSchema {
             "accuracy",
             "accuracy_threshold",
             "accuracy_warning_only",
+            "accuracy_warning",
+            "accuracy_warning_message",
             "wav_path",
             "tts_rate",
             "tts_gain",
@@ -911,13 +1068,17 @@ function Convert-SerialReportForJson {
     if (-not $Report) {
         return $null
     }
-    return [pscustomobject]@{
+    return [ordered]@{
         serial_log_path = [string]$Report.serial_log_path
         serial_line_count = [int]$Report.serial_line_count
         notify_enabled = [bool]$Report.notify_enabled
         stream_ready = [bool]$Report.stream_ready
+        stream_ready_confirmed_line_index = if ($null -ne $Report.stream_ready_confirmed_line_index) { [int]$Report.stream_ready_confirmed_line_index } else { $null }
         streaming_queued = [bool]$Report.streaming_queued
         transport_not_ready = [bool]$Report.transport_not_ready
+        transport_not_ready_rejection_line_index = if ($null -ne $Report.transport_not_ready_rejection_line_index) { [int]$Report.transport_not_ready_rejection_line_index } else { $null }
+        stream_ready_wait_count = [int]$Report.stream_ready_wait_count
+        transport_ready_retry_count = [int]$Report.transport_ready_retry_count
         record_start_rejected = [bool]$Report.record_start_rejected
         recording_start_seen = [bool]$Report.recording_start_seen
         recording_stop_seen = [bool]$Report.recording_stop_seen
@@ -1081,6 +1242,17 @@ end_command = sys.argv[8]
 max_wait_seconds = int(sys.argv[9])
 lines = []
 buffer = bytearray()
+stream_ready_wait_count = 0
+transport_ready_retry_count = 0
+stream_ready_confirmed_before_toggle = False
+stream_ready_confirmed_line_index = None
+transport_not_ready_rejection_line_index = None
+
+AUDIO_TRANSPORT_STATE_MARKER = "audio transport state:"
+AUDIO_TRANSPORT_STREAM_READY_MARKER = "stream_ready"
+AUDIO_NOTIFY_ENABLED_MARKER = "notify=1"
+AUDIO_TRANSPORT_NOT_READY_REJECTION_MARKER = "record session start rejected: BLE audio transport not ready"
+STREAM_READY_START_WAIT_SECONDS = 12.0
 
 def poll_lines(ser):
     waiting = ser.in_waiting
@@ -1124,15 +1296,113 @@ def wait_for_start_signal(ser):
 def contains(text):
     return any(text in line for line in lines)
 
-def wait_for_recording_start(ser):
+def latest_audio_transport_state_entry():
+    for index in range(len(lines) - 1, -1, -1):
+        line = lines[index]
+        if AUDIO_TRANSPORT_STATE_MARKER in line:
+            return index, line
+    return None, ""
+
+def latest_audio_transport_state_line():
+    return latest_audio_transport_state_entry()[1]
+
+def line_indicates_stream_ready(line):
+    if AUDIO_TRANSPORT_STATE_MARKER not in line:
+        return False
+    # Log format: "audio transport state: OLD -> NEW reason=... mtu_ready=1 notify=1"
+    # Must match the TARGET state (after "->"), not the source.
+    state_part = line.split(AUDIO_TRANSPORT_STATE_MARKER, 1)[1]
+    arrow_idx = state_part.find("->")
+    if arrow_idx < 0:
+        return False
+    after_arrow = state_part[arrow_idx + 2:]
+    # Target state is the first word before " reason="
+    target_state = after_arrow.split()[0] if after_arrow.split() else ""
+    return (
+        target_state == AUDIO_TRANSPORT_STREAM_READY_MARKER
+        and AUDIO_NOTIFY_ENABLED_MARKER in line
+    )
+
+def transport_not_ready_rejection_count():
+    return sum(1 for line in lines if AUDIO_TRANSPORT_NOT_READY_REJECTION_MARKER in line)
+
+def latest_transport_not_ready_rejection_index(start_index=0):
+    for index in range(len(lines) - 1, max(start_index, 0) - 1, -1):
+        if AUDIO_TRANSPORT_NOT_READY_REJECTION_MARKER in lines[index]:
+            return index
+    return None
+
+def wait_for_stream_ready_before_toggle(ser, context, include_latest=True, min_line_index=None):
+    global stream_ready_wait_count
+    poll_lines(ser)
+    latest_index, latest_state = latest_audio_transport_state_entry()
+    if include_latest and min_line_index is None and line_indicates_stream_ready(latest_state):
+        print(f"{context}_stream_ready=already_ready", flush=True)
+        return latest_index
+
+    start_index = min_line_index if min_line_index is not None else len(lines)
+    deadline = time.monotonic() + STREAM_READY_START_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        poll_lines(ser)
+        for index, line in enumerate(lines[start_index:], start_index):
+            if line_indicates_stream_ready(line):
+                stream_ready_wait_count += 1
+                print(f"{context}_stream_ready=observed", flush=True)
+                return index
+        time.sleep(0.05)
+    latest_state = latest_audio_transport_state_line()
+    print(
+        f"{context}_stream_ready=timeout latest_transport_state={latest_state or '<none>'}",
+        flush=True,
+    )
+    return None
+
+def wait_for_recording_start(ser, rejection_start_index):
     deadline = time.monotonic() + (recording_start_timeout_ms / 1000.0)
     while time.monotonic() < deadline:
         poll_lines(ser)
         if contains("recording start source="):
-            recording_started_signal_path.write_text("recording_start_seen", encoding="ascii")
-            return
+            recording_started_signal_path.write_text(
+                "recording_start_seen",
+                encoding="ascii",
+            )
+            return True, None
+        rejection_index = latest_transport_not_ready_rejection_index(rejection_start_index)
+        if rejection_index is not None:
+            return False, rejection_index
         time.sleep(0.02)
     raise RuntimeError("timed out waiting for firmware recording start log")
+
+def start_recording_with_retry(ser):
+    global stream_ready_confirmed_before_toggle
+    global stream_ready_confirmed_line_index
+    global transport_not_ready_rejection_line_index
+    global transport_ready_retry_count
+    retry_min_line_index = None
+    for attempt in range(1, 3):
+        ready_index = wait_for_stream_ready_before_toggle(
+            ser,
+            f"serial_toggle_attempt_{attempt}",
+            include_latest=(attempt == 1),
+            min_line_index=retry_min_line_index,
+        )
+        if ready_index is None:
+            raise RuntimeError("timed out waiting for firmware BLE audio stream_ready before recording start")
+        stream_ready_confirmed_before_toggle = True
+        stream_ready_confirmed_line_index = ready_index
+        rejection_start_index = len(lines)
+        send_command(ser, "~VREC:TOGGLE")
+        recording_started, rejection_index = wait_for_recording_start(ser, rejection_start_index)
+        if recording_started:
+            return
+        if attempt == 1:
+            transport_not_ready_rejection_line_index = rejection_index
+            transport_ready_retry_count += 1
+            print("serial_toggle_transport_not_ready_retry=1", flush=True)
+            retry_min_line_index = rejection_index + 1
+            continue
+        break
+    raise RuntimeError("firmware rejected recording start because BLE audio transport was not ready")
 
 def wait_for_stop_signal(ser):
     deadline = time.monotonic() + (max_record_ms / 1000.0)
@@ -1163,8 +1433,7 @@ try:
     ser.setRTS(False)
     ser.reset_input_buffer()
     wait_for_start_signal(ser)
-    send_command(ser, "~VREC:TOGGLE")
-    wait_for_recording_start(ser)
+    start_recording_with_retry(ser)
     wait_for_stop_signal(ser)
     if end_command == "cancel":
         send_command(ser, "~VREC:CANCEL")
@@ -1191,9 +1460,13 @@ summary = {
     "serial_log_path": str(log_path),
     "serial_line_count": len(lines),
     "notify_enabled": notify_enabled,
-    "stream_ready": any("stream_ready" in line for line in lines),
+    "stream_ready": stream_ready_confirmed_before_toggle,
+    "stream_ready_confirmed_line_index": stream_ready_confirmed_line_index,
     "streaming_queued": contains("session_start_queued") or contains("stream session start queued"),
     "transport_not_ready": contains("BLE audio transport not ready"),
+    "transport_not_ready_rejection_line_index": transport_not_ready_rejection_line_index,
+    "stream_ready_wait_count": stream_ready_wait_count,
+    "transport_ready_retry_count": transport_ready_retry_count,
     "record_start_rejected": contains("record session start rejected"),
     "recording_start_seen": contains("recording start source="),
     "recording_stop_seen": contains("recording stop source="),
@@ -1549,8 +1822,15 @@ Remove-Item -LiteralPath $serialStartSignalPath -Force -ErrorAction SilentlyCont
 Remove-Item -LiteralPath $serialStopSignalPath -Force -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $ListenerExe)) {
+    $frontendDist = Join-Path $RepoRoot "dist"
+    if (-not (Test-Path $frontendDist)) {
+        throw "Listener executable not found at $ListenerExe and Tauri frontend dist is missing at $frontendDist. Build the frontend first or pass -ListenerExe <existing listener-type.exe>."
+    }
     $env:PATH = "C:\Users\Billy\.cargo\bin;$env:PATH"
     cargo build --manifest-path (Join-Path $RepoRoot "src-tauri\Cargo.toml")
+}
+if (-not (Test-Path $ListenerExe)) {
+    throw "Listener executable not found after cargo build: $ListenerExe"
 }
 
 if (-not $NoResetBeforeCapture) {
@@ -1612,6 +1892,7 @@ $scriptExitCode = 0
 $usesSerialSignal = @("serial-toggle", "serial-cancel") -contains $TriggerMode
 $serialEndCommand = if ($TriggerMode -eq "serial-cancel") { "cancel" } else { "toggle" }
 $expectedStreamFailure = $null
+$playbackVolumeSnapshot = $null
 try {
     if ($VerifyInsertion) {
         $insertionTargetPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.target.txt"
@@ -1700,9 +1981,11 @@ try {
     Add-Type -AssemblyName System.Windows.Forms
     $player = [System.Media.SoundPlayer]::new($WavPath)
     $player.Load()
+    $playbackVolumeSnapshot = Set-SmokePlaybackVolume -Percent $PlaybackVolumePercent
 
     for ($index = 1; $index -le $PlaybackCount; $index++) {
         if ($index -eq $RecordPlaybackIndex) {
+            $capsuleVisibleAlreadyValidated = $false
             if ($VerifyInsertion -and $insertionTarget) {
                 [void](Focus-ProcessWindow -Process $insertionTarget.Process)
                 Start-Sleep -Milliseconds 150
@@ -1729,11 +2012,12 @@ try {
                     }
                     $timeline["manual_start_capsule_visible_at_utc"] = Get-SmokeUtcNow
                     Write-SmokeTrace "manual_start_capsule_visible"
+                    $capsuleVisibleAlreadyValidated = $true
                 } else {
                     Start-Sleep -Milliseconds $ManualTriggerReadyDelayMs
                 }
             }
-            if (-not $SkipCapsuleVisibleGate) {
+            if ((-not $SkipCapsuleVisibleGate) -and (-not $capsuleVisibleAlreadyValidated)) {
                 if (-not (Wait-CapsuleWindowVisible -TimeoutMs 1800 -ProcessId $process.Id)) {
                     $timeline["capsule_visible_failed_at_utc"] = Get-SmokeUtcNow
                     throw "Recording capsule did not become visible before playback; aborting before audio playback"
@@ -1750,6 +2034,9 @@ try {
                     $timeline["capsule_focus_stolen_at_utc"] = Get-SmokeUtcNow
                     throw "Recording capsule stole foreground focus before playback; aborting before audio playback"
                 }
+            } elseif ($capsuleVisibleAlreadyValidated) {
+                $timeline["capsule_visible_at_utc"] = $timeline["manual_start_capsule_visible_at_utc"]
+                Write-SmokeTrace "capsule_visible_reused"
             }
             Start-Sleep -Milliseconds $PreRecordDelayMs
         }
@@ -1968,6 +2255,24 @@ try {
             }
         }
     }
+    $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
+    $accuracyReport = Measure-TranscriptAccuracy -Expected $ExpectedText -Transcript $finalText
+    $accuracyWarning = $false
+    $accuracyWarningMessage = $null
+    if (-not $ExpectNoText -and -not [string]::IsNullOrWhiteSpace($ExpectedText)) {
+        $accuracyThreshold = [double]$AudioProfileConfig.minimum_accuracy
+        if ([double]$accuracyReport.accuracy -lt $accuracyThreshold) {
+            $accuracyWarningMessage = "transcript accuracy below threshold: accuracy={0:0.######} threshold={1:0.######}" -f ([double]$accuracyReport.accuracy), $accuracyThreshold
+            if ([bool]$AudioProfileConfig.warning_only) {
+                $accuracyWarning = $true
+                if ($status -ne "FAIL") {
+                    $status = "WARNING"
+                }
+            } else {
+                $verificationErrors += $accuracyWarningMessage
+            }
+        }
+    }
     if ($verificationErrors.Count -gt 0) {
         $status = "FAIL"
     }
@@ -1975,8 +2280,6 @@ try {
     Write-SmokeTrace "report_object_start"
     $serialReportJson = Convert-SerialReportForJson -Report $serialReport
     $historySessionJson = Convert-HistorySessionForJson -Session $historySession
-    $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
-    $accuracyReport = Measure-TranscriptAccuracy -Expected $ExpectedText -Transcript $finalText
     $insertStatus = if ($historySessionJson -and -not [string]::IsNullOrWhiteSpace([string]$historySessionJson.insertStatus)) {
         [string]$historySessionJson.insertStatus
     } elseif ($insertionVerified) {
@@ -2004,6 +2307,8 @@ try {
         accuracy = $accuracyReport.accuracy
         accuracy_threshold = [double]$AudioProfileConfig.minimum_accuracy
         accuracy_warning_only = [bool]$AudioProfileConfig.warning_only
+        accuracy_warning = [bool]$accuracyWarning
+        accuracy_warning_message = $accuracyWarningMessage
         wav_path = $WavPath
         tts_rate = $TtsRate
         tts_gain = $TtsGain
@@ -2022,6 +2327,8 @@ try {
         post_playback_record_ms = $PostPlaybackRecordMs
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
         manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
+        playback_volume_percent = $PlaybackVolumePercent
+        keep_playback_volume = [bool]$KeepPlaybackVolume
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReportJson
         pcm_bytes = $pcmBytes
@@ -2124,6 +2431,8 @@ try {
         post_playback_record_ms = $PostPlaybackRecordMs
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
         manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
+        playback_volume_percent = $PlaybackVolumePercent
+        keep_playback_volume = [bool]$KeepPlaybackVolume
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReportJson
         verify_insertion = [bool]$VerifyInsertion
@@ -2152,6 +2461,7 @@ try {
     $scriptExitCode = 1
 } finally {
     Write-SmokeTrace "finally_start"
+    Restore-SmokePlaybackVolume -Snapshot $playbackVolumeSnapshot
     Stop-SerialRecordingWindow -Window $serialWindow
     Stop-InsertionTarget -Target $insertionTarget
     if ($process -and -not $process.HasExited) {

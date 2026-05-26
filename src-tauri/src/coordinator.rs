@@ -64,6 +64,8 @@ mod resources;
 const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
 const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(12);
 const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(8);
+const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
+const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);
 
 #[cfg(test)]
 use dictation::dictation_error_code;
@@ -144,6 +146,8 @@ struct Inner {
     /// 当前 Listener BLE 后台订阅的取消旗标。刷新输入源或退出时主动置位，
     /// 避免旧 WinRT notify 订阅等待 60s 超时后才释放设备。
     embedded_ble_listener_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// 当前 Listener BLE 后台订阅已完成 CCCD notify 写入，可以接收设备音频。
+    embedded_ble_listener_ready: AtomicBool,
     /// 最近一次非空闲的 Listener BLE 后台订阅错误。Overview 读取它来区分
     /// 启动阶段的 CCCD/notify/subscription 失败，这类失败不会生成历史会话。
     embedded_ble_listener_last_error: Mutex<Option<String>>,
@@ -246,6 +250,7 @@ impl Coordinator {
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     embedded_ble_listener_cancel: Mutex::new(None),
+                    embedded_ble_listener_ready: AtomicBool::new(false),
                     embedded_ble_listener_last_error: Mutex::new(None),
                     embedded_ble_cancel_flag: Mutex::new(None),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
@@ -304,6 +309,7 @@ impl Coordinator {
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 embedded_ble_listener_cancel: Mutex::new(None),
+                embedded_ble_listener_ready: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
                 embedded_ble_cancel_flag: Mutex::new(None),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
@@ -868,14 +874,13 @@ impl Coordinator {
         &self,
         timeout_ms: Option<u64>,
     ) -> Result<(), String> {
+        let timeout = Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
         if embedded_ble_listener_capture_active(&self.inner) {
-            log::info!(
-                "[embedded-ble] foreground BLE path probe skipped; background listener already owns notify"
-            );
+            wait_for_embedded_ble_listener_ready(&self.inner, timeout).await?;
+            log::info!("[embedded-ble] foreground BLE path probe skipped; background listener notify is ready");
             return Ok(());
         }
 
-        let timeout = Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
         pause_embedded_ble_listener_capture(&self.inner, "foreground BLE path probe");
         let result = async_runtime::spawn_blocking(move || {
             crate::embedded_ble::probe_notify_subscription(timeout)
@@ -884,6 +889,13 @@ impl Coordinator {
         .map_err(|err| format!("嵌入式 BLE 通路探测任务失败: {err}"))
         .and_then(|result| result);
         self.refresh_embedded_ble_listener();
+        if result.is_ok() {
+            wait_for_embedded_ble_listener_ready(
+                &self.inner,
+                timeout.min(EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT),
+            )
+            .await?;
+        }
         result
     }
 
@@ -1834,8 +1846,61 @@ fn embedded_ble_listener_capture_active(inner: &Arc<Inner>) -> bool {
         .is_some_and(|cancel| !cancel.load(Ordering::SeqCst))
 }
 
+fn embedded_ble_listener_capture_ready(inner: &Arc<Inner>) -> bool {
+    embedded_ble_listener_capture_active(inner)
+        && inner.embedded_ble_listener_ready.load(Ordering::SeqCst)
+}
+
+fn embedded_ble_background_listener_expected(inner: &Arc<Inner>) -> bool {
+    std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
+        .ok()
+        .as_deref()
+        != Some("1")
+        && inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle
+}
+
+async fn wait_for_embedded_ble_listener_ready(
+    inner: &Arc<Inner>,
+    timeout: Duration,
+) -> Result<(), String> {
+    if !embedded_ble_background_listener_expected(inner) {
+        return Ok(());
+    }
+    let deadline = Instant::now() + timeout;
+    loop {
+        if embedded_ble_listener_capture_ready(inner) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "Listener BLE notify subscription did not recover within {} ms after foreground probe",
+                timeout.as_millis()
+            ));
+        }
+        tokio::time::sleep(EMBEDDED_BLE_PROBE_RECOVERY_POLL).await;
+    }
+}
+
+fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>) {
+    if inner
+        .embedded_ble_listener_cancel
+        .lock()
+        .as_ref()
+        .is_some_and(|active| Arc::ptr_eq(active, cancel))
+        && !cancel.load(Ordering::SeqCst)
+    {
+        inner
+            .embedded_ble_listener_ready
+            .store(true, Ordering::SeqCst);
+        log::info!("[embedded-ble] background listener notify ready");
+    }
+}
+
 fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> Arc<AtomicBool> {
     let cancel = Arc::new(AtomicBool::new(false));
+    inner
+        .embedded_ble_listener_ready
+        .store(false, Ordering::SeqCst);
     let previous = {
         let mut slot = inner.embedded_ble_listener_cancel.lock();
         slot.replace(Arc::clone(&cancel))
@@ -1857,11 +1922,17 @@ fn clear_embedded_ble_listener_cancel(inner: &Arc<Inner>, cancel: &Arc<AtomicBoo
         .is_some_and(|active| Arc::ptr_eq(active, cancel))
     {
         *slot = None;
+        inner
+            .embedded_ble_listener_ready
+            .store(false, Ordering::SeqCst);
         log::info!("[embedded-ble] background capture cancel flag cleared");
     }
 }
 
 fn cancel_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
+    inner
+        .embedded_ble_listener_ready
+        .store(false, Ordering::SeqCst);
     let previous = inner.embedded_ble_listener_cancel.lock().take();
     if let Some(cancel) = previous {
         cancel.store(true, Ordering::SeqCst);
@@ -3449,10 +3520,14 @@ mod tests {
         let first = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
         assert!(!first.load(Ordering::SeqCst));
         assert!(embedded_ble_listener_capture_active(&coordinator.inner));
+        assert!(!embedded_ble_listener_capture_ready(&coordinator.inner));
+        mark_embedded_ble_listener_ready(&coordinator.inner, &first);
+        assert!(embedded_ble_listener_capture_ready(&coordinator.inner));
 
         let second = install_embedded_ble_listener_cancel(&coordinator.inner, 2);
         assert!(first.load(Ordering::SeqCst));
         assert!(embedded_ble_listener_capture_active(&coordinator.inner));
+        assert!(!embedded_ble_listener_capture_ready(&coordinator.inner));
 
         clear_embedded_ble_listener_cancel(&coordinator.inner, &first);
         assert!(coordinator
@@ -3470,12 +3545,14 @@ mod tests {
             .lock()
             .is_none());
         assert!(!embedded_ble_listener_capture_active(&coordinator.inner));
+        assert!(!embedded_ble_listener_capture_ready(&coordinator.inner));
     }
 
     #[tokio::test]
-    async fn embedded_ble_foreground_probe_preserves_active_background_capture() {
+    async fn embedded_ble_foreground_probe_preserves_ready_background_capture() {
         let coordinator = Coordinator::new();
         let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        mark_embedded_ble_listener_ready(&coordinator.inner, &active);
 
         coordinator
             .probe_embedded_audio_ble_subscription(Some(1_000))
@@ -3489,6 +3566,32 @@ mod tests {
             .lock()
             .as_ref()
             .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
+        assert!(embedded_ble_listener_capture_ready(&coordinator.inner));
+    }
+
+    #[tokio::test]
+    async fn embedded_ble_foreground_probe_waits_for_active_background_ready() {
+        let coordinator = Coordinator::new();
+        let mut prefs = coordinator.inner.prefs.get();
+        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+        coordinator.inner.prefs.replace_for_tests(prefs);
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+
+        let result = coordinator
+            .probe_embedded_audio_ble_subscription(Some(1))
+            .await;
+
+        assert!(result
+            .expect_err("active but unready background listener should not satisfy probe")
+            .contains("notify subscription did not recover"));
+        assert!(!active.load(Ordering::SeqCst));
+        assert!(coordinator
+            .inner
+            .embedded_ble_listener_cancel
+            .lock()
+            .as_ref()
+            .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
+        assert!(!embedded_ble_listener_capture_ready(&coordinator.inner));
     }
 
     #[test]

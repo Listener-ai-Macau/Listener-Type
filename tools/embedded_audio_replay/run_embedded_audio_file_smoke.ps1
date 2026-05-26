@@ -3,8 +3,13 @@ param(
     [string]$WavPath,
     [int]$TimeoutMs = 30000,
     [string]$Sentence,
+    [string]$ExpectedText,
     [string]$ListenerExe,
     [string]$OutDir = "artifacts\embedded_file_smoke",
+    [int]$MaxMissingPackets = 0,
+    [double]$MinimumAccuracy = 0.85,
+    [switch]$AccuracyWarningOnly,
+    [switch]$FailOnMissingPackets,
     [switch]$VerifyInsertion,
     [switch]$VerifyHistory
 )
@@ -59,6 +64,73 @@ function Get-LatestAsrTranscriptFromLog {
         }
     }
     return $latest
+}
+
+function Normalize-AccuracyText {
+    param([string]$Text)
+    if ($null -eq $Text) {
+        return ""
+    }
+    $normalized = $Text.Normalize([System.Text.NormalizationForm]::FormKC).ToLowerInvariant()
+    $builder = [System.Text.StringBuilder]::new()
+    foreach ($ch in $normalized.ToCharArray()) {
+        if ([char]::IsLetterOrDigit($ch)) {
+            [void]$builder.Append($ch)
+        }
+    }
+    return $builder.ToString()
+}
+
+function Get-EditDistance {
+    param(
+        [string]$Expected,
+        [string]$Actual
+    )
+    if ($Expected -eq $Actual) {
+        return 0
+    }
+    $previous = New-Object int[] ($Actual.Length + 1)
+    for ($i = 0; $i -le $Actual.Length; $i++) {
+        $previous[$i] = $i
+    }
+    for ($i = 1; $i -le $Expected.Length; $i++) {
+        $current = New-Object int[] ($Actual.Length + 1)
+        $current[0] = $i
+        for ($j = 1; $j -le $Actual.Length; $j++) {
+            $cost = if ($Expected[$i - 1] -eq $Actual[$j - 1]) { 0 } else { 1 }
+            $insertCost = $current[$j - 1] + 1
+            $deleteCost = $previous[$j] + 1
+            $replaceCost = $previous[$j - 1] + $cost
+            $current[$j] = [Math]::Min([Math]::Min($insertCost, $deleteCost), $replaceCost)
+        }
+        $previous = $current
+    }
+    return $previous[$Actual.Length]
+}
+
+function Measure-TranscriptAccuracy {
+    param(
+        [string]$Expected,
+        [string]$Transcript
+    )
+    $expectedNormalized = Normalize-AccuracyText -Text $Expected
+    $transcriptNormalized = Normalize-AccuracyText -Text $Transcript
+    $distance = Get-EditDistance -Expected $expectedNormalized -Actual $transcriptNormalized
+    if ($expectedNormalized.Length -eq 0) {
+        $cer = if ($transcriptNormalized.Length -eq 0) { 0.0 } else { 1.0 }
+    } else {
+        $cer = $distance / [double]$expectedNormalized.Length
+    }
+    $accuracy = [Math]::Max(0.0, 1.0 - $cer)
+    return [ordered]@{
+        expected_text = $Expected
+        normalized_expected = $expectedNormalized
+        normalized_transcript = $transcriptNormalized
+        edit_distance = $distance
+        reference_length = $expectedNormalized.Length
+        cer = [Math]::Round($cer, 6)
+        accuracy = [Math]::Round($accuracy, 6)
+    }
 }
 
 function Ensure-WindowInterop {
@@ -230,8 +302,15 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $WavPath = Resolve-RepoPath $WavPath
 if (-not (Test-Path $WavPath)) { throw "WAV not found: $WavPath" }
 if (-not (Test-Path $ListenerExe)) {
+    $frontendDist = Join-Path $RepoRoot "dist"
+    if (-not (Test-Path $frontendDist)) {
+        throw "Listener executable not found at $ListenerExe and Tauri frontend dist is missing at $frontendDist. Build the frontend first or pass -ListenerExe <existing listener-type.exe>."
+    }
     $env:PATH = "C:\Users\Billy\.cargo\bin;$env:PATH"
     cargo build --manifest-path (Join-Path $RepoRoot "src-tauri\Cargo.toml")
+}
+if (-not (Test-Path $ListenerExe)) {
+    throw "Listener executable not found after cargo build: $ListenerExe"
 }
 
 $RunStamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -299,6 +378,10 @@ try {
     $missingPackets = [int]$doneMatch.Groups[2].Value
     $pcmBytes = [int]$doneMatch.Groups[1].Value
     $verificationErrors = @()
+    $status = if ($missingPackets -gt $MaxMissingPackets) { "WARNING" } else { "PASS" }
+    if ($FailOnMissingPackets -and $missingPackets -gt $MaxMissingPackets) {
+        $verificationErrors += "missing packets exceeded threshold: missing=$missingPackets threshold=$MaxMissingPackets"
+    }
     if ($VerifyHistory -or $VerifyInsertion) {
         $historySession = Wait-SmokeHistorySession -StartedAt $smokeStartedAt -Transcript $transcript -ExpectedPcmBytes $pcmBytes -TimeoutSeconds 15
     }
@@ -319,15 +402,46 @@ try {
         if ([string]::IsNullOrWhiteSpace($expectedText)) { $verificationErrors += "no transcript/final text available for insertion verification" }
         elseif (-not ([string]$insertedText).Contains($expectedText)) { $verificationErrors += "target editor does not contain final text" }
     }
-    $status = if ($verificationErrors.Count -gt 0) { "FAIL" } else { "PASS" }
+    $expectedTextForAccuracy = if (-not [string]::IsNullOrWhiteSpace($ExpectedText)) { $ExpectedText } else { $Sentence }
+    $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
+    $accuracyReport = Measure-TranscriptAccuracy -Expected $expectedTextForAccuracy -Transcript $finalText
+    $accuracyWarning = $false
+    $accuracyWarningMessage = $null
+    if (-not [string]::IsNullOrWhiteSpace($expectedTextForAccuracy)) {
+        if ([double]$accuracyReport.accuracy -lt $MinimumAccuracy) {
+            $accuracyWarningMessage = "transcript accuracy below threshold: accuracy={0:0.######} threshold={1:0.######}" -f ([double]$accuracyReport.accuracy), $MinimumAccuracy
+            if ($AccuracyWarningOnly) {
+                $accuracyWarning = $true
+                if ($status -ne "FAIL") {
+                    $status = "WARNING"
+                }
+            } else {
+                $verificationErrors += $accuracyWarningMessage
+            }
+        }
+    }
+    if ($verificationErrors.Count -gt 0) {
+        $status = "FAIL"
+    }
     $report = [pscustomobject]@{
         status = $status
         trigger = "existing-wav"
         sentence = $Sentence
+        expected_text = $expectedTextForAccuracy
         wav_path = $WavPath
         transcript = $transcript
+        final_text = $finalText
+        normalized_expected = $accuracyReport.normalized_expected
+        normalized_transcript = $accuracyReport.normalized_transcript
+        cer = $accuracyReport.cer
+        accuracy = $accuracyReport.accuracy
+        accuracy_threshold = $MinimumAccuracy
+        accuracy_warning_only = [bool]$AccuracyWarningOnly
+        accuracy_warning = [bool]$accuracyWarning
+        accuracy_warning_message = $accuracyWarningMessage
         pcm_bytes = $pcmBytes
         missing_packets = $missingPackets
+        max_missing_packets = $MaxMissingPackets
         verify_insertion = [bool]$VerifyInsertion
         verify_history = [bool]$VerifyHistory
         insertion_target_path = if ($insertionTarget) { $insertionTarget.Path } else { $null }

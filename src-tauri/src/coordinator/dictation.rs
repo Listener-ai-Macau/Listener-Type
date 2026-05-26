@@ -1382,10 +1382,19 @@ async fn submit_embedded_audio_ble_stream_impl(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     register_embedded_ble_cancel_flag(inner, &cancel_capture);
     let cancel_capture_for_task = Arc::clone(&cancel_capture);
+    let ready_inner = (!emit_idle_capture_errors).then(|| Arc::clone(inner));
+    let ready_cancel = Arc::clone(&cancel_capture);
     let capture_task = tauri::async_runtime::spawn_blocking(move || {
+        let mut on_ready = || {
+            if let Some(inner) = ready_inner.as_ref() {
+                mark_embedded_ble_listener_ready(inner, &ready_cancel);
+            }
+            Ok(())
+        };
         crate::embedded_ble::capture_notification_events_until_cancelled(
             embedded_ble_stream_idle_timeout(timeout, emit_idle_capture_errors),
             cancel_capture_for_task,
+            &mut on_ready,
             &mut |event| {
                 tx.send(event.notification)
                     .map_err(|_| "嵌入式音频流式处理已结束".to_string())
