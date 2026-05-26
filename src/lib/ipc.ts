@@ -770,7 +770,7 @@ export function getEmbeddedBleRuntimeStatus(): Promise<EmbeddedBleRuntimeStatus>
   return invokeOrMock(
     'get_embedded_ble_runtime_status',
     undefined,
-    () => ({ backgroundListenerDisabledByEnv: false, backgroundListenerLastError: null }),
+    () => ({ backgroundListenerDisabledByEnv: false, backgroundListenerActive: true, backgroundListenerLastError: null }),
   );
 }
 

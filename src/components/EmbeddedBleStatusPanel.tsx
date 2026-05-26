@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
-import { Btn, Pill } from '../_atoms';
+import type { EmbeddedBleProbeStatus } from '../lib/embeddedBleProbe';
+import { Btn, Pill } from '../pages/_atoms';
 
-export type EmbeddedBleProbeStatus = 'idle' | 'checking' | 'ok' | 'error';
+export type { EmbeddedBleProbeStatus };
 
 type ConnectionState = 'idle' | 'checking' | 'ok' | 'error' | 'unsupported';
 
@@ -11,6 +12,7 @@ export function EmbeddedBleStatusPanel({
   message,
   onOpenBluetoothSettings,
   onProbe,
+  onOpenRecordingSettings,
   onUseMicrophone,
 }: {
   supported: boolean;
@@ -18,6 +20,7 @@ export function EmbeddedBleStatusPanel({
   message: string;
   onOpenBluetoothSettings: () => void;
   onProbe: () => void;
+  onOpenRecordingSettings?: () => void;
   onUseMicrophone?: () => void;
 }) {
   const { t } = useTranslation();
@@ -93,6 +96,11 @@ export function EmbeddedBleStatusPanel({
             <Btn variant="ghost" size="sm" icon="settings" onClick={onOpenBluetoothSettings}>
               {t('settings.recording.embeddedBleOpenBluetooth')}
             </Btn>
+            {onOpenRecordingSettings && (
+              <Btn variant="ghost" size="sm" icon="mic" onClick={onOpenRecordingSettings}>
+                {t('overview.deviceHealth.openRecording')}
+              </Btn>
+            )}
             {supported && status === 'error' && onUseMicrophone && (
               <Btn variant="soft" size="sm" icon="mic" onClick={onUseMicrophone}>
                 {t('settings.recording.embeddedBleUseMicrophone')}

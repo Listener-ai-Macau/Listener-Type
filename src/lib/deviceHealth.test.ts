@@ -84,6 +84,12 @@ expectHealth(
 );
 
 expectHealth(
+  { dictationInputSource: 'embeddedBle', os: 'win', history: [], backgroundListenerActive: true },
+  'healthy',
+  'completeAudio',
+);
+
+expectHealth(
   {
     dictationInputSource: 'embeddedBle',
     os: 'win',

@@ -68,6 +68,7 @@ export interface EmbeddedAudioSubmissionResult {
 
 export interface EmbeddedBleRuntimeStatus {
   backgroundListenerDisabledByEnv: boolean;
+  backgroundListenerActive: boolean;
   backgroundListenerLastError: string | null;
 }
 

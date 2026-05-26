@@ -18,13 +18,14 @@ import {
   isTauri,
   isWaylandCliMode,
   listMicrophoneDevices,
-  openSystemSettings,
-  probeEmbeddedAudioBleSubscription,
   setDictationHotkey,
   startMicrophoneLevelMonitor,
   stopMicrophoneLevelMonitor,
 } from '../../lib/ipc';
-import { classifyEmbeddedBleProbeError } from '../../lib/providerSetup';
+import {
+  runEmbeddedBleProbeWithTimeout,
+  type EmbeddedBleProbeStatus,
+} from '../../lib/embeddedBleProbe';
 import type {
   DictationInputSource,
   HotkeyBinding,
@@ -36,10 +37,6 @@ import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { SelectLite } from '../../components/ui/SelectLite';
 import { Card, Collapsible } from '../_atoms';
 import { SettingRow, Toggle, inputStyle } from './shared';
-import {
-  EmbeddedBleStatusPanel,
-  type EmbeddedBleProbeStatus,
-} from './EmbeddedBleStatusPanel';
 import { FirmwareOtaPanel } from './FirmwareOtaPanel';
 
 // ─── autostart helpers（OS 持有状态，不存 prefs）──────────────────────
@@ -48,12 +45,10 @@ async function autostartIsEnabled(): Promise<boolean> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<boolean>('plugin:autostart|is_enabled');
 }
-
 async function autostartEnable(): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('plugin:autostart|enable');
 }
-
 async function autostartDisable(): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('plugin:autostart|disable');
@@ -306,7 +301,6 @@ function WaylandHotkeyCallout() {
     </div>
   );
 }
-
 // ─── HotkeyRecorder ──────────────────────────────────────────────────
 
 function HotkeyRecorder({
@@ -856,7 +850,6 @@ export function RecordingSection() {
   const [microphoneDevicesError, setMicrophoneDevicesError] = useState<string | null>(null);
   const [microphonePickerOpen, setMicrophonePickerOpen] = useState(false);
   const [embeddedBleProbeStatus, setEmbeddedBleProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
-  const [embeddedBleProbeMessage, setEmbeddedBleProbeMessage] = useState('');
   // Wayland 下 rdev 监听不可用（issue #420）。改用 pull 模型：mount 时 invoke 拉状态。
   // 不能依赖一次性 event — Settings 模态是按需 mount，emit 早在 setup 阶段发完了。
   // XDG_SESSION_TYPE 在进程生命周期内不会变，拉一次即可，无需 polling 或 listener。
@@ -1017,22 +1010,14 @@ export function RecordingSection() {
     : t('settings.recording.microphoneDefault');
   const selectedInputSource = prefs.dictationInputSource ?? 'microphone';
   const embeddedBleSupported = detectOS() === 'win';
-  const openBluetoothSettings = () => {
-    void openSystemSettings('bluetooth').catch(err => {
-      console.warn('[settings] open bluetooth settings failed', err);
-    });
-  };
   const runEmbeddedBleProbe = async () => {
     if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
     setEmbeddedBleProbeStatus('checking');
-    setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionMessageChecking'));
     try {
-      await probeEmbeddedAudioBleSubscription(10_000);
+      await runEmbeddedBleProbeWithTimeout();
       setEmbeddedBleProbeStatus('ok');
-      setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionReady'));
-    } catch (err) {
+    } catch {
       setEmbeddedBleProbeStatus('error');
-      setEmbeddedBleProbeMessage(embeddedBleProbeErrorMessage(err, t));
     }
   };
 
@@ -1092,23 +1077,11 @@ export function RecordingSection() {
         </div>
       </SettingRow>
       {selectedInputSource === 'embeddedBle' && (
-        <>
-          <EmbeddedBleStatusPanel
-            supported={embeddedBleSupported}
-            status={embeddedBleProbeStatus}
-            message={embeddedBleProbeMessage}
-            onOpenBluetoothSettings={openBluetoothSettings}
-            onProbe={() => void runEmbeddedBleProbe()}
-            onUseMicrophone={() => {
-              void savePrefs({ ...prefs, dictationInputSource: 'microphone' }).catch(() => {});
-            }}
-          />
-          <FirmwareOtaPanel
-            supported={embeddedBleSupported}
-            bleStatus={embeddedBleProbeStatus}
-            onProbe={() => void runEmbeddedBleProbe()}
-          />
-        </>
+        <FirmwareOtaPanel
+          supported={embeddedBleSupported}
+          bleStatus={embeddedBleProbeStatus}
+          onProbe={() => void runEmbeddedBleProbe()}
+        />
       )}
       <SettingRow label={t('settings.recording.microphoneLabel')} desc={t('settings.recording.microphoneDesc')}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1326,22 +1299,4 @@ export function RecordingSection() {
     </Collapsible>
     </>
   );
-}
-
-// ─── Embedded BLE error copy ─────────────────────────────────────────
-
-function embeddedBleProbeErrorMessage(error: unknown, t: ReturnType<typeof useTranslation>['t']): string {
-  switch (classifyEmbeddedBleProbeError(error)) {
-    case 'noDevice':
-      return t('settings.recording.embeddedBleNoDevice');
-    case 'accessDenied':
-      return t('settings.recording.embeddedBleAccessDenied');
-    case 'timeout':
-      return t('settings.recording.embeddedBleTimeout');
-    case 'notify':
-      return t('settings.recording.embeddedBleNotifyFailed');
-    case 'generic':
-    default:
-      return t('settings.recording.embeddedBleGenericError');
-  }
 }

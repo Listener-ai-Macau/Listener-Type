@@ -20,7 +20,7 @@ import {
   type FirmwareOtaUserState,
 } from '../../lib/firmwareOta';
 import { Btn, Pill, type PillTone } from '../_atoms';
-import type { EmbeddedBleProbeStatus } from './EmbeddedBleStatusPanel';
+import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusPanel';
 
 const EXPECTED_HARDWARE_REVISION = 'keyboard-v1';
 

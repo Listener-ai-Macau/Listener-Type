@@ -799,6 +799,10 @@ impl Coordinator {
         embedded_ble_listener_last_error(&self.inner)
     }
 
+    pub fn embedded_ble_listener_active(&self) -> bool {
+        embedded_ble_listener_capture_active(&self.inner)
+    }
+
     pub fn hotkey_capability(&self) -> HotkeyCapability {
         HotkeyMonitor::capability()
     }
@@ -878,16 +882,33 @@ impl Coordinator {
         if embedded_ble_listener_capture_active(&self.inner) {
             wait_for_embedded_ble_listener_ready(&self.inner, timeout).await?;
             log::info!("[embedded-ble] foreground BLE path probe skipped; background listener notify is ready");
+            clear_embedded_ble_listener_last_error(&self.inner);
             return Ok(());
         }
 
         pause_embedded_ble_listener_capture(&self.inner, "foreground BLE path probe");
-        let result = async_runtime::spawn_blocking(move || {
+        // Note: tokio::time::timeout only abandons the JoinHandle on expiry;
+        // the underlying blocking thread continues until probe_notify_subscription
+        // returns (bounded by its own inner timeout). This is acceptable because
+        // the inner timeout is always strictly less than probe_budget.
+        let probe_budget = timeout + Duration::from_secs(4);
+        let probe_task = async_runtime::spawn_blocking(move || {
             crate::embedded_ble::probe_notify_subscription(timeout)
-        })
-        .await
-        .map_err(|err| format!("嵌入式 BLE 通路探测任务失败: {err}"))
-        .and_then(|result| result);
+        });
+        let result = match tokio::time::timeout(probe_budget, probe_task).await {
+            Ok(joined) => joined
+                .map_err(|err| format!("嵌入式 BLE 通路探测任务失败: {err}"))
+                .and_then(|result| result),
+            Err(_) => Err(format!(
+                "BLE subscription check timed out after {} ms",
+                probe_budget.as_millis()
+            )),
+        };
+        if result.is_ok() {
+            clear_embedded_ble_listener_last_error(&self.inner);
+        } else if let Err(err) = &result {
+            record_embedded_ble_listener_last_error(&self.inner, err);
+        }
         self.refresh_embedded_ble_listener();
         if result.is_ok() {
             wait_for_embedded_ble_listener_ready(
@@ -3553,12 +3574,17 @@ mod tests {
         let coordinator = Coordinator::new();
         let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
         mark_embedded_ble_listener_ready(&coordinator.inner, &active);
+        record_embedded_ble_listener_last_error(
+            &coordinator.inner,
+            "BLE CCCD write async error: Some(HRESULT(0x800706BA))",
+        );
 
         coordinator
             .probe_embedded_audio_ble_subscription(Some(1_000))
             .await
             .expect("active background listener should satisfy foreground probe");
 
+        assert_eq!(coordinator.embedded_ble_listener_last_error(), None);
         assert!(!active.load(Ordering::SeqCst));
         assert!(coordinator
             .inner
