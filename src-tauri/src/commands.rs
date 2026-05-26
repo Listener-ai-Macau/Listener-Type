@@ -1395,14 +1395,16 @@ pub async fn probe_embedded_audio_ble_subscription(
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddedBleRuntimeStatus {
     pub background_listener_disabled_by_env: bool,
+    pub background_listener_last_error: Option<String>,
 }
 
 #[tauri::command]
-pub fn get_embedded_ble_runtime_status() -> EmbeddedBleRuntimeStatus {
+pub fn get_embedded_ble_runtime_status(coord: CoordinatorState<'_>) -> EmbeddedBleRuntimeStatus {
     EmbeddedBleRuntimeStatus {
         background_listener_disabled_by_env: std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
             .ok()
             .is_some_and(|value| value == "1"),
+        background_listener_last_error: coord.embedded_ble_listener_last_error(),
     }
 }
 

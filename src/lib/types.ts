@@ -68,6 +68,7 @@ export interface EmbeddedAudioSubmissionResult {
 
 export interface EmbeddedBleRuntimeStatus {
   backgroundListenerDisabledByEnv: boolean;
+  backgroundListenerLastError: string | null;
 }
 
 export type EmbeddedAudioInputFormat = 'wav' | 'pcm16le';

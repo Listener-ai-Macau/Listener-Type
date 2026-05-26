@@ -84,6 +84,28 @@ expectHealth(
 );
 
 expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerError: 'BLE CCCD write async error: Some(HRESULT(0x800706BA))',
+  },
+  'error',
+  'bleCccdTimeout',
+);
+
+expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerError: 'BLE subscription check timed out after 10000 ms',
+  },
+  'error',
+  'bleSubscriptionTimeout',
+);
+
+expectHealth(
   { dictationInputSource: 'embeddedBle', os: 'win', history: [session()] },
   'healthy',
   'completeAudio',

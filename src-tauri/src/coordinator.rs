@@ -144,6 +144,9 @@ struct Inner {
     /// 当前 Listener BLE 后台订阅的取消旗标。刷新输入源或退出时主动置位，
     /// 避免旧 WinRT notify 订阅等待 60s 超时后才释放设备。
     embedded_ble_listener_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// 最近一次非空闲的 Listener BLE 后台订阅错误。Overview 读取它来区分
+    /// 启动阶段的 CCCD/notify/subscription 失败，这类失败不会生成历史会话。
+    embedded_ble_listener_last_error: Mutex<Option<String>>,
     /// 当前嵌入式 BLE 抓音循环的取消标志。胶囊取消走 cancel_session 时会置位，
     /// 让 blocking BLE notify loop 及时退出。
     embedded_ble_cancel_flag: Mutex<Option<Arc<AtomicBool>>>,
@@ -243,6 +246,7 @@ impl Coordinator {
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     embedded_ble_listener_cancel: Mutex::new(None),
+                    embedded_ble_listener_last_error: Mutex::new(None),
                     embedded_ble_cancel_flag: Mutex::new(None),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
@@ -300,6 +304,7 @@ impl Coordinator {
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 embedded_ble_listener_cancel: Mutex::new(None),
+                embedded_ble_listener_last_error: Mutex::new(None),
                 embedded_ble_cancel_flag: Mutex::new(None),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
@@ -784,6 +789,10 @@ impl Coordinator {
         self.inner.hotkey_status.lock().clone()
     }
 
+    pub fn embedded_ble_listener_last_error(&self) -> Option<String> {
+        embedded_ble_listener_last_error(&self.inner)
+    }
+
     pub fn hotkey_capability(&self) -> HotkeyCapability {
         HotkeyMonitor::capability()
     }
@@ -890,11 +899,13 @@ impl Coordinator {
             log::info!(
                 "[embedded-ble] background listener disabled by LISTENER_TYPE_DISABLE_BACKGROUND_BLE"
             );
+            clear_embedded_ble_listener_last_error(&self.inner);
             return;
         }
         let source = self.inner.prefs.get().dictation_input_source;
         if source != DictationInputSource::EmbeddedBle {
             log::info!("[embedded-ble] background listener disabled (source={source:?})");
+            clear_embedded_ble_listener_last_error(&self.inner);
             return;
         }
 
@@ -1699,6 +1710,18 @@ fn modifier_shortcut_triggers(
     (qa_trigger, translation_trigger)
 }
 
+fn embedded_ble_listener_last_error(inner: &Arc<Inner>) -> Option<String> {
+    inner.embedded_ble_listener_last_error.lock().clone()
+}
+
+fn record_embedded_ble_listener_last_error(inner: &Arc<Inner>, err: &str) {
+    *inner.embedded_ble_listener_last_error.lock() = Some(err.to_string());
+}
+
+fn clear_embedded_ble_listener_last_error(inner: &Arc<Inner>) {
+    *inner.embedded_ble_listener_last_error.lock() = None;
+}
+
 fn mark_translation_modifier_seen(inner: &Arc<Inner>) {
     let phase = inner.state.lock().phase;
     if matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
@@ -1734,6 +1757,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     result.reconstructed_pcm_bytes,
                     result.stats.missing_packet_count
                 );
+                clear_embedded_ble_listener_last_error(&inner);
                 retry_delay = EMBEDDED_BLE_RETRY_BASE_DELAY;
             }
             Err(err) => {
@@ -1746,6 +1770,11 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
                 {
                     break;
+                }
+                if is_embedded_ble_idle_timeout_error(&err) {
+                    clear_embedded_ble_listener_last_error(&inner);
+                } else {
+                    record_embedded_ble_listener_last_error(&inner, &err);
                 }
                 retry_delay = next_embedded_ble_background_retry_delay(&err, retry_delay);
                 log::warn!(
@@ -3466,6 +3495,24 @@ mod tests {
             ),
             EMBEDDED_BLE_RETRY_BASE_DELAY
         );
+    }
+
+    #[test]
+    fn embedded_ble_listener_error_snapshot_records_and_clears_setup_failures() {
+        let coordinator = Coordinator::new();
+        assert_eq!(coordinator.embedded_ble_listener_last_error(), None);
+
+        record_embedded_ble_listener_last_error(
+            &coordinator.inner,
+            "BLE CCCD write async error: Some(HRESULT(0x800706BA))",
+        );
+        assert_eq!(
+            coordinator.embedded_ble_listener_last_error(),
+            Some("BLE CCCD write async error: Some(HRESULT(0x800706BA))".to_string())
+        );
+
+        clear_embedded_ble_listener_last_error(&coordinator.inner);
+        assert_eq!(coordinator.embedded_ble_listener_last_error(), None);
     }
 
     #[tokio::test]

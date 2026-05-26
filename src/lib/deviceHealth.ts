@@ -37,6 +37,7 @@ export interface ListenerDeviceHealthInput {
   os: 'mac' | 'win' | 'linux' | 'unknown';
   history: DictationSession[];
   backgroundListenerDisabled?: boolean;
+  backgroundListenerError?: string | null;
   historyError?: boolean;
   now?: Date;
 }
@@ -48,6 +49,7 @@ export function summarizeListenerDeviceHealth({
   os,
   history,
   backgroundListenerDisabled = false,
+  backgroundListenerError = null,
   historyError = false,
   now = new Date(),
 }: ListenerDeviceHealthInput): ListenerDeviceHealthSnapshot {
@@ -65,6 +67,11 @@ export function summarizeListenerDeviceHealth({
 
   if (backgroundListenerDisabled) {
     return snapshot('disconnected', 'backgroundBleDisabled');
+  }
+
+  const listenerFailureReason = classifyBleSetupFailure(backgroundListenerError);
+  if (listenerFailureReason) {
+    return snapshot('error', listenerFailureReason);
   }
 
   const latestSession = history.find(session => session.embeddedAudioStats);

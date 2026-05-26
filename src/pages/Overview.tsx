@@ -165,9 +165,16 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
       os: detectOS(),
       history,
       backgroundListenerDisabled: bleRuntimeStatus?.backgroundListenerDisabledByEnv ?? false,
+      backgroundListenerError: bleRuntimeStatus?.backgroundListenerLastError ?? null,
       historyError,
     }),
-    [bleRuntimeStatus?.backgroundListenerDisabledByEnv, history, historyError, prefs?.dictationInputSource],
+    [
+      bleRuntimeStatus?.backgroundListenerDisabledByEnv,
+      bleRuntimeStatus?.backgroundListenerLastError,
+      history,
+      historyError,
+      prefs?.dictationInputSource,
+    ],
   );
 
   return (
