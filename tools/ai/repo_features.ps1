@@ -49,6 +49,7 @@ function New-FeatureSnapshot {
             [ordered]@{ path = "src-tauri/src/embedded_ble.rs"; purpose = "Windows BLE discovery, connection, and subscription handling." },
             [ordered]@{ path = "src-tauri/src/embedded_audio.rs"; purpose = "Embedded audio framing and receive path." },
             [ordered]@{ path = "src-tauri/src/asr/"; purpose = "ASR provider implementations and local ASR engines." },
+            [ordered]@{ path = "tools/collect_ai_diagnostics.ps1"; purpose = "One-command AI diagnostic bundle collector for logs, artifacts, BLE/audio summaries, workflow metadata, and optional firmware diagnostic input." },
             [ordered]@{ path = "tools/embedded_audio_replay/"; purpose = "BLE/audio replay and smoke tools for desktop-device integration." }
         )
         platform_assumptions = @(
@@ -63,6 +64,7 @@ function New-FeatureSnapshot {
         )
         validation_commands = @(
             "pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check",
+            "pwsh -NoProfile -File .\tools\collect_ai_diagnostics.ps1 -OutputDir .\tests\artifacts\ai_diagnostics_smoke",
             "npm run test",
             "npm run build",
             "npm run verify",

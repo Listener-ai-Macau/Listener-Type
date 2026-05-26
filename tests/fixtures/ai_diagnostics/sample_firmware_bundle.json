@@ -1,0 +1,14 @@
+{
+  "artifacts": [
+    {
+      "path": "artifacts/firmware/diag_log.sample.jsonl",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "size_bytes": 128
+    }
+  ],
+  "decoder_status": "firmware_tool_decoded",
+  "generated_at_utc": "2026-05-26T00:00:00Z",
+  "schema_id": "voice_keyboard_firmware.ai_diagnostic_bundle",
+  "schema_version": 1,
+  "status": "sample"
+}
