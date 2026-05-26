@@ -1,4 +1,10 @@
-import { truncatePreview, PREVIEW_MAX_CHARS, PREVIEW_FINAL_TRANSITION, LAYOUT_RULES } from './capsulePreviewRules.ts';
+import {
+  truncatePreview,
+  PREVIEW_MAX_CHARS,
+  PREVIEW_FINAL_TRANSITION,
+  LAYOUT_RULES,
+  shouldShowStopAcknowledgement,
+} from './capsulePreviewRules.ts';
 
 function assertEqual(actual: unknown, expected: unknown, name: string) {
   if (actual !== expected) {
@@ -57,6 +63,26 @@ assertEqual(
 assertOk(
   PREVIEW_FINAL_TRANSITION.stopAckMs >= 400 && PREVIEW_FINAL_TRANSITION.stopAckMs <= 900,
   'stop acknowledgement should be perceptible but brief',
+);
+assertOk(
+  shouldShowStopAcknowledgement('recording', true),
+  'stop acknowledgement should appear immediately while recording after stop is requested',
+);
+assertOk(
+  shouldShowStopAcknowledgement('transcribing', true),
+  'stop acknowledgement should remain visible through transcribing',
+);
+assertOk(
+  shouldShowStopAcknowledgement('polishing', true),
+  'stop acknowledgement should remain visible through polishing',
+);
+assertOk(
+  !shouldShowStopAcknowledgement('done', true),
+  'stop acknowledgement should clear once final feedback is shown',
+);
+assertOk(
+  !shouldShowStopAcknowledgement('recording', false),
+  'inactive stop acknowledgement should stay hidden',
 );
 assertOk(
   PREVIEW_FINAL_TRANSITION.exitAnimMs < 200,

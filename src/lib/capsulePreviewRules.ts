@@ -65,6 +65,24 @@ export const PREVIEW_FINAL_TRANSITION = {
   exitAnimMs: 140,
 };
 
+export type StopFeedbackCapsuleState =
+  | 'idle'
+  | 'recording'
+  | 'transcribing'
+  | 'polishing'
+  | 'done'
+  | 'cancelled'
+  | 'error';
+
+export function shouldShowStopAcknowledgement(
+  state: StopFeedbackCapsuleState,
+  stopFeedbackActive: boolean,
+): boolean {
+  return stopFeedbackActive && PREVIEW_FINAL_TRANSITION.previewStates.includes(
+    state as (typeof PREVIEW_FINAL_TRANSITION.previewStates)[number],
+  );
+}
+
 // ── Layout stability ────────────────────────────────────────
 
 /**
