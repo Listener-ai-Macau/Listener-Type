@@ -40,6 +40,7 @@ import {
   EmbeddedBleStatusPanel,
   type EmbeddedBleProbeStatus,
 } from './EmbeddedBleStatusPanel';
+import { FirmwareOtaPanel } from './FirmwareOtaPanel';
 
 // ─── autostart helpers（OS 持有状态，不存 prefs）──────────────────────
 
@@ -1091,16 +1092,23 @@ export function RecordingSection() {
         </div>
       </SettingRow>
       {selectedInputSource === 'embeddedBle' && (
-        <EmbeddedBleStatusPanel
-          supported={embeddedBleSupported}
-          status={embeddedBleProbeStatus}
-          message={embeddedBleProbeMessage}
-          onOpenBluetoothSettings={openBluetoothSettings}
-          onProbe={() => void runEmbeddedBleProbe()}
-          onUseMicrophone={() => {
-            void savePrefs({ ...prefs, dictationInputSource: 'microphone' }).catch(() => {});
-          }}
-        />
+        <>
+          <EmbeddedBleStatusPanel
+            supported={embeddedBleSupported}
+            status={embeddedBleProbeStatus}
+            message={embeddedBleProbeMessage}
+            onOpenBluetoothSettings={openBluetoothSettings}
+            onProbe={() => void runEmbeddedBleProbe()}
+            onUseMicrophone={() => {
+              void savePrefs({ ...prefs, dictationInputSource: 'microphone' }).catch(() => {});
+            }}
+          />
+          <FirmwareOtaPanel
+            supported={embeddedBleSupported}
+            bleStatus={embeddedBleProbeStatus}
+            onProbe={() => void runEmbeddedBleProbe()}
+          />
+        </>
       )}
       <SettingRow label={t('settings.recording.microphoneLabel')} desc={t('settings.recording.microphoneDesc')}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

@@ -14,6 +14,7 @@ use crate::asr::local::foundry::{
 };
 use crate::asr::local::FoundryLocalRuntime;
 use crate::coordinator::Coordinator;
+use crate::coordinator_state::SessionPhase;
 use crate::permissions::{self, PermissionStatus};
 use crate::persistence::{
     sync_style_pack_preferences, CredentialAccount, CredentialsSnapshot, CredentialsVault,
@@ -1406,6 +1407,79 @@ pub fn get_embedded_ble_runtime_status(coord: CoordinatorState<'_>) -> EmbeddedB
             .is_some_and(|value| value == "1"),
         background_listener_last_error: coord.embedded_ble_listener_last_error(),
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareOtaBleTransferResult {
+    bytes_transferred: usize,
+    confirmed_version: Option<String>,
+    transport: &'static str,
+}
+
+#[tauri::command]
+pub async fn transfer_firmware_ota_ble(
+    coord: CoordinatorState<'_>,
+    manifest: Value,
+    firmware_bytes: Vec<u8>,
+    expected_sha256: String,
+) -> Result<FirmwareOtaBleTransferResult, String> {
+    let phase = coord.dictation_phase_for_cli();
+    if phase != SessionPhase::Idle {
+        return Err(format!(
+            "Recording or dictation is still active ({phase:?}). Stop it before updating firmware."
+        ));
+    }
+    let version = manifest
+        .get("version")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let size = manifest
+        .get("fileSizeBytes")
+        .or_else(|| manifest.pointer("/file/size_bytes"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "OTA manifest is missing file size.".to_string())?;
+    let sha256 = manifest
+        .get("fileSha256")
+        .or_else(|| manifest.pointer("/file/sha256"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "OTA manifest is missing firmware SHA256.".to_string())?;
+
+    if firmware_bytes.is_empty() {
+        return Err("firmware_ota.bin is empty.".to_string());
+    }
+    if firmware_bytes.len() as u64 != size {
+        return Err(format!(
+            "firmware_ota.bin size changed before transfer: manifest={size} actual={}",
+            firmware_bytes.len()
+        ));
+    }
+    if !expected_sha256.eq_ignore_ascii_case(sha256) {
+        return Err("OTA package hash changed before transfer.".to_string());
+    }
+
+    coord.pause_embedded_ble_listener_for_ota();
+    let transfer_version = version.clone();
+    let transfer_sha256 = expected_sha256.clone();
+    let transfer = tauri::async_runtime::spawn_blocking(move || {
+        crate::embedded_ble::transfer_firmware_ota(
+            &transfer_version,
+            &transfer_sha256,
+            &firmware_bytes,
+        )
+    })
+    .await
+    .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
+    .and_then(|result| result);
+    coord.refresh_embedded_ble_listener();
+
+    let stats = transfer?;
+    Ok(FirmwareOtaBleTransferResult {
+        bytes_transferred: stats.bytes_transferred,
+        confirmed_version: None,
+        transport: stats.transport,
+    })
 }
 
 #[tauri::command]
