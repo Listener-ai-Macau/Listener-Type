@@ -29,28 +29,43 @@ function New-FeatureSnapshot {
         responsibilities = @(
             "Record one-tap dictation sessions from the built-in microphone or Listener BLE device audio.",
             "Stream or batch audio to ASR providers, polish text with configured LLM providers, then insert text at the cursor.",
-            "Own onboarding, settings, diagnostics, device health display, update UX, history, vocabulary, and style controls.",
-            "Provide desktop-side BLE pairing/subscription, embedded audio receive/replay tooling, and user-facing recovery guidance."
+            "Own onboarding, settings, credential vault, diagnostics, device health display, update UX, history, vocabulary, and style controls.",
+            "Provide desktop-side BLE pairing/subscription, embedded audio receive/replay tooling, CLI diagnostics, and user-facing recovery guidance."
         )
         major_features = @(
             "Recording workflow: press once to start and press once to stop; no hold-to-talk product mode.",
             "Input sources: microphone and Listener BLE, including embedded BLE audio from VKA1-style devices.",
-            "ASR providers: Volcengine streaming, OpenAI batch, Apple Speech, Bailian realtime, Qwen local, and Foundry local paths.",
+            "ASR providers: Volcengine streaming, OpenAI batch, Apple Speech, Bailian realtime, macOS Qwen local, and Windows Foundry Local Whisper.",
             "Text pipeline: coordinator-driven dictation, correction, polish, vocabulary hotwords, translation, QA selection ask, and insertion.",
-            "Settings and diagnostics: shortcuts, provider credentials, language, permissions, advanced logs, dark mode, and device health."
+            "Windows insertion: native TSF IME bridge with IPC/session/profile handling plus clipboard/direct fallback paths.",
+            "Release shell: Tauri updater, background update gate, tray menu, autostart, single-instance behavior, and package metadata.",
+            "Settings and diagnostics: shortcuts, provider credentials in OS keyring/local storage, language, permissions, advanced logs, diagnostic export, dark mode, and device health.",
+            "Developer/product tools: embedded audio file/BLE CLI replay, BLE stream smoke, Foundry runtime probes, and updater manifest checks."
         )
         key_paths = @(
             [ordered]@{ path = "src/App.tsx"; purpose = "Top-level React app state, shell, settings modal, capsule wiring." },
             [ordered]@{ path = "src/components/Capsule.tsx"; purpose = "Recording capsule and user-visible dictation state." },
+            [ordered]@{ path = "src/components/AutoUpdate*.tsx"; purpose = "Manual/background update UI and gate." },
             [ordered]@{ path = "src/pages/settings/RecordingSection.tsx"; purpose = "Recording mode and input-source settings." },
-            [ordered]@{ path = "src/pages/settings/EmbeddedBleStatusPanel.tsx"; purpose = "Listener BLE connection and device health UI." },
+            [ordered]@{ path = "src/components/EmbeddedBleStatusPanel.tsx"; purpose = "Listener BLE connection and device health UI." },
+            [ordered]@{ path = "src/pages/settings/ProvidersSection.tsx"; purpose = "Cloud and local provider selection, credential setup, and model settings." },
             [ordered]@{ path = "src-tauri/src/coordinator.rs"; purpose = "Backend dictation orchestration and state transitions." },
             [ordered]@{ path = "src-tauri/src/recorder.rs"; purpose = "Local microphone capture." },
+            [ordered]@{ path = "src-tauri/src/audio_mute.rs"; purpose = "Optional system audio mute behavior while recording." },
             [ordered]@{ path = "src-tauri/src/embedded_ble.rs"; purpose = "Windows BLE discovery, connection, and subscription handling." },
             [ordered]@{ path = "src-tauri/src/embedded_audio.rs"; purpose = "Embedded audio framing and receive path." },
             [ordered]@{ path = "src-tauri/src/asr/"; purpose = "ASR provider implementations and local ASR engines." },
+            [ordered]@{ path = "src-tauri/src/commands.rs"; purpose = "Tauri command surface for settings, credentials, diagnostics, provider state, BLE, local ASR, and update helpers." },
+            [ordered]@{ path = "src-tauri/src/persistence.rs"; purpose = "Settings, history, dictionaries, provider credentials, and OS credential-vault persistence." },
+            [ordered]@{ path = "src-tauri/src/windows_ime_*.rs"; purpose = "Windows IME IPC, profile, protocol, and session bridge." },
+            [ordered]@{ path = "windows-ime/"; purpose = "Native TSF text service built and registered by the Windows package." },
+            [ordered]@{ path = "src-tauri/nsis/listener-type-ime-hooks.nsh"; purpose = "Installer hooks for TSF IME register/unregister and upgrade cleanup." },
+            [ordered]@{ path = "src-tauri/src/cli.rs"; purpose = "Headless embedded audio file/BLE replay and diagnostic entry points." },
+            [ordered]@{ path = "src/lib/localAsr.ts"; purpose = "Frontend wrappers for Qwen3-ASR and Foundry Local runtime/model commands." },
             [ordered]@{ path = "tools/collect_ai_diagnostics.ps1"; purpose = "One-command AI diagnostic bundle collector for logs, artifacts, BLE/audio summaries, workflow metadata, and optional firmware diagnostic input." },
-            [ordered]@{ path = "tools/embedded_audio_replay/"; purpose = "BLE/audio replay and smoke tools for desktop-device integration." }
+            [ordered]@{ path = "tools/embedded_audio_replay/"; purpose = "BLE/audio replay and smoke tools for desktop-device integration." },
+            [ordered]@{ path = "tools/foundry_asr_probe/"; purpose = "Foundry Local Whisper diagnostic probe outside the full Tauri app." },
+            [ordered]@{ path = "docs/features/"; purpose = "Human-readable feature index and per-feature source maps." }
         )
         platform_assumptions = @(
             "Windows is the primary product path for BLE device audio and TSF IME insertion.",
@@ -69,6 +84,10 @@ function New-FeatureSnapshot {
             "npm run build",
             "npm run verify",
             "npm run check:dark-mode",
+            "cargo test --manifest-path src-tauri\Cargo.toml --lib --no-run",
+            "cargo test --manifest-path tools\embedded_audio_replay\Cargo.toml",
+            "node scripts\write-updater-manifest.test.mjs",
+            "powershell -ExecutionPolicy Bypass -File scripts\windows-ime-build.ps1",
             "git diff --check"
         )
         update_policy = "Record accepted changes only when they alter important desktop responsibilities, user-visible workflows, provider/device support, or validation entry points."

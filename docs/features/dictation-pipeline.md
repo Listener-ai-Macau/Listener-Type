@@ -20,11 +20,11 @@ flowchart LR
 | --- | --- |
 | Hotkey runtime | `src-tauri/src/global_hotkey_runtime.rs`, `src-tauri/src/hotkey.rs`, `src-tauri/src/combo_hotkey.rs`, `src-tauri/src/qa_hotkey.rs`, `src-tauri/src/shortcut_binding.rs` |
 | Recording | `src-tauri/src/recorder.rs`, `src-tauri/src/audio_mute.rs`, `src/components/Capsule.tsx` |
-| Embedded BLE audio | `src-tauri/src/embedded_audio.rs`, `src-tauri/src/embedded_ble.rs`, `src-tauri/src/coordinator/dictation.rs`, `tools/embedded_audio_replay/**` |
-| ASR | `src-tauri/src/asr/mod.rs`, `src-tauri/src/asr/*`, `src/pages/LocalAsr.tsx` |
+| Embedded BLE audio | `src-tauri/src/embedded_audio.rs`, `src-tauri/src/embedded_ble.rs`, `src-tauri/src/coordinator/dictation.rs`, `src-tauri/src/commands.rs`, `src-tauri/src/cli.rs`, `tools/embedded_audio_replay/**` |
+| ASR | `src-tauri/src/asr/mod.rs`, `src-tauri/src/asr/*`, `src-tauri/src/asr/local/**`, `src/pages/LocalAsr.tsx`, `src/lib/localAsr.ts` |
 | Polish | `src-tauri/src/polish.rs`, `src-tauri/src/llm_*.rs`, `src/pages/Style.tsx` |
 | Insertion | `src-tauri/src/insertion.rs`, `src-tauri/src/unicode_keystroke.rs`, `src-tauri/src/windows_ime_*`, `windows-ime/**` |
-| State/history | `src-tauri/src/coordinator.rs`, `src-tauri/src/persistence.rs`, `src/pages/History.tsx` |
+| State/history/diagnostics | `src-tauri/src/coordinator.rs`, `src-tauri/src/persistence.rs`, `src-tauri/src/commands.rs`, `src/pages/History.tsx` |
 
 ## Behavioral Rules
 
@@ -34,6 +34,8 @@ flowchart LR
 - Debug audio recording is opt-in and bounded by retention settings.
 - Embedded audio keeps the firmware VKA1 packet model intact. Batch debug paths reconstruct a complete PCM session before ASR; streaming paths create the normal ASR consumer on `session_start`, feed each `audio_data` PCM chunk immediately, and finalize through the same `end_session` path on `session_stop`.
 - Embedded streaming cancel/error/link-loss paths must cancel ASR, restore prepared IME state, return coordinator state to Idle, and show an error capsule.
+- Local ASR providers use the same coordinator path as cloud providers after the provider is selected and prepared.
+- Windows insertion may use the TSF IME bridge; clipboard/direct insertion fallback remains required so text is not lost.
 
 ## Embedded Debug Entrypoints
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-05-20",
+  "updated_at": "2026-05-26",
   "features": [
     {
       "id": "demo_content_package",
@@ -23,7 +23,7 @@
     {
       "id": "dictation_pipeline",
       "status": "implemented",
-      "summary": "Global hotkey or embedded BLE audio feeds ASR, polish/style, cursor insertion, clipboard fallback, and history.",
+      "summary": "Global hotkey, microphone recording, or embedded BLE audio feeds ASR, polish/style, cursor insertion, clipboard fallback, and history.",
       "doc": "dictation-pipeline.md",
       "primary_paths": [
         "src-tauri/src/coordinator/dictation.rs",
@@ -31,6 +31,8 @@
         "src-tauri/src/asr/",
         "src-tauri/src/polish.rs",
         "src-tauri/src/insertion.rs",
+        "src-tauri/src/audio_mute.rs",
+        "src-tauri/src/cli.rs",
         "src-tauri/src/persistence.rs",
         "src/components/Capsule.tsx"
       ],
@@ -52,6 +54,8 @@
         "src-tauri/src/embedded_audio.rs",
         "src-tauri/src/embedded_ble.rs",
         "src-tauri/src/coordinator/dictation.rs",
+        "src-tauri/src/cli.rs",
+        "src-tauri/src/commands.rs",
         "tools/embedded_audio_replay/"
       ],
       "validation": [
@@ -86,12 +90,15 @@
     {
       "id": "local_asr_management",
       "status": "implemented",
-      "summary": "Local ASR UI and command layer manage Qwen3-ASR and Windows Foundry Local Whisper model/runtime lifecycle.",
+      "summary": "Local ASR UI and command layer manage macOS Qwen3-ASR and Windows Foundry Local Whisper model/runtime lifecycle.",
       "doc": "local-asr-management.md",
       "primary_paths": [
         "src/pages/LocalAsr.tsx",
         "src/pages/settings/AdvancedSection.tsx",
+        "src/lib/localAsr.ts",
         "src-tauri/src/asr/local/",
+        "src-tauri/vendor/qwen-asr/",
+        "src-tauri/build.rs",
         "src-tauri/src/commands.rs",
         "tools/foundry_asr_probe/",
         "tools/foundry_runtime_prepare/"
@@ -103,6 +110,29 @@
       "known_limits": [
         "Foundry Local is Windows-only",
         "Qwen3-ASR runtime support is platform-specific and may be model/download constrained"
+      ]
+    },
+    {
+      "id": "provider_credentials_diagnostics",
+      "status": "implemented",
+      "summary": "Provider settings use OS credential-vault storage, active provider selection, provider validation/model listing, and privacy-safe diagnostic export.",
+      "doc": "provider-credentials-diagnostics.md",
+      "primary_paths": [
+        "src/pages/settings/ProvidersSection.tsx",
+        "src/pages/settings/AdvancedSection.tsx",
+        "src/lib/ipc.ts",
+        "src-tauri/src/commands.rs",
+        "src-tauri/src/persistence.rs",
+        "scripts/windows-real-asr-insertion-smoke.ps1",
+        "tools/volcengine_asr_probe/"
+      ],
+      "validation": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run",
+        "npm run build"
+      ],
+      "known_limits": [
+        "Real provider validation depends on external credentials, network access, and model availability",
+        "Diagnostic export intentionally redacts credential values, audio, transcripts, and inserted text"
       ]
     },
     {
@@ -175,9 +205,11 @@
         "src-tauri/src/windows_ime_profile.rs",
         "src-tauri/src/windows_ime_protocol.rs",
         "src-tauri/src/windows_ime_session.rs",
+        "src-tauri/nsis/listener-type-ime-hooks.nsh",
         "src-tauri/src/insertion.rs"
       ],
       "validation": [
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib windows_ime_profile",
         "powershell -ExecutionPolicy Bypass -File scripts/windows-ime-build.ps1",
         "powershell -ExecutionPolicy Bypass -File scripts/windows-ime-install-smoke.ps1"
       ],
@@ -209,21 +241,27 @@
     {
       "id": "updater_release",
       "status": "implemented",
-      "summary": "Tauri updater integration and release scripts support manual and background update checks.",
+      "summary": "Tauri updater, background update gate, tray, autostart, single-instance shell behavior, and release scripts support desktop packaging.",
       "doc": "updater-release.md",
       "primary_paths": [
         "src/components/AutoUpdate.tsx",
         "src/components/AutoUpdateGate.tsx",
+        "src/pages/settings/AboutUpdateControl.tsx",
+        "src/pages/settings/RecordingSection.tsx",
         "src-tauri/src/lib.rs",
+        "src-tauri/tauri.conf.json",
+        "src-tauri/capabilities/default.json",
         "docs/release/",
         "scripts/write-updater-manifest.mjs"
       ],
       "validation": [
         "node scripts/write-updater-manifest.test.mjs",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run",
         "npm run build"
       ],
       "known_limits": [
-        "Actual delivery depends on signed release artifacts and configured updater endpoints"
+        "Actual delivery depends on signed release artifacts and configured updater endpoints",
+        "Tray and autostart behavior depends on platform support"
       ]
     }
   ]

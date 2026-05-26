@@ -127,6 +127,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/components/AutoUpdate.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/AutoUpdateGate.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/Capsule.tsx` | React UI | TypeScript build and visual smoke |
+| `src/components/EmbeddedBleStatusPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/ErrorBoundary.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/FloatingShell.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/Icon.tsx` | React UI | TypeScript build and visual smoke |
@@ -152,6 +153,11 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/capsulePreviewRules.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsulePreviewRules.ts` | Core app | Build and targeted tests |
 | `src/lib/demoMode.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceHealth.test.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceHealth.ts` | Core app | Build and targeted tests |
+| `src/lib/embeddedBleProbe.ts` | Core app | Build and targeted tests |
+| `src/lib/firmwareOta.test.ts` | Core app | Build and targeted tests |
+| `src/lib/firmwareOta.ts` | Core app | Build and targeted tests |
 | `src/lib/fontScale.ts` | Core app | Build and targeted tests |
 | `src/lib/hotkey.ts` | Global hotkeys | Hotkey tests and manual smoke |
 | `src/lib/hotkeyMigration.ts` | Global hotkeys | Hotkey tests and manual smoke |
@@ -186,7 +192,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/pages/_atoms.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AboutUpdateControl.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AdvancedSection.tsx` | React UI | TypeScript build and visual smoke |
-| `src/pages/settings/EmbeddedBleStatusPanel.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/settings/FirmwareOtaPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/LanguageSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/PermissionsSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/ProvidersSection.tsx` | React UI | TypeScript build and visual smoke |

@@ -11,7 +11,13 @@ This documentation set is organized so product behavior, implementation files an
 
 ## Feature Docs
 
+- [Feature map](features/README.md)
 - [Dictation pipeline](features/dictation-pipeline.md)
+- [Embedded BLE audio integration](features/p13_embedded_audio_software_integration.md)
+- [Provider credentials and diagnostics](features/provider-credentials-diagnostics.md)
+- [Local ASR management](features/local-asr-management.md)
+- [Windows IME insertion](features/windows-ime-insertion.md)
+- [Updater and desktop shell](features/updater-release.md)
 - [Style pack marketplace](features/style-pack-marketplace.md)
 
 ## Platform Docs
