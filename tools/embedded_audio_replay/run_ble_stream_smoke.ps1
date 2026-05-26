@@ -1073,8 +1073,10 @@ function Convert-SerialReportForJson {
         serial_line_count = [int]$Report.serial_line_count
         notify_enabled = [bool]$Report.notify_enabled
         stream_ready = [bool]$Report.stream_ready
+        stream_ready_confirmed_line_index = if ($null -ne $Report.stream_ready_confirmed_line_index) { [int]$Report.stream_ready_confirmed_line_index } else { $null }
         streaming_queued = [bool]$Report.streaming_queued
         transport_not_ready = [bool]$Report.transport_not_ready
+        transport_not_ready_rejection_line_index = if ($null -ne $Report.transport_not_ready_rejection_line_index) { [int]$Report.transport_not_ready_rejection_line_index } else { $null }
         stream_ready_wait_count = [int]$Report.stream_ready_wait_count
         transport_ready_retry_count = [int]$Report.transport_ready_retry_count
         record_start_rejected = [bool]$Report.record_start_rejected
