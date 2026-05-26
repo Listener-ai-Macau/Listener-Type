@@ -3541,6 +3541,11 @@ mod tests {
             replaced_packet_count: 0,
             ignored_foreign_packet_count: 0,
             duration_seconds: 0.06,
+            asr_boundary_pcm_bytes: 1440,
+            asr_boundary_duration_seconds: 0.045,
+            post_stop_packet_count: 1,
+            post_stop_pcm_bytes: 480,
+            post_stop_duration_seconds: 0.015,
         };
         let session = DictationSession {
             id: "session-1".into(),
