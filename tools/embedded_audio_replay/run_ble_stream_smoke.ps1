@@ -1298,9 +1298,19 @@ def latest_audio_transport_state_line():
     return ""
 
 def line_indicates_stream_ready(line):
+    if AUDIO_TRANSPORT_STATE_MARKER not in line:
+        return False
+    # Log format: "audio transport state: OLD -> NEW reason=... mtu_ready=1 notify=1"
+    # Must match the TARGET state (after "->"), not the source.
+    state_part = line.split(AUDIO_TRANSPORT_STATE_MARKER, 1)[1]
+    arrow_idx = state_part.find("->")
+    if arrow_idx < 0:
+        return False
+    after_arrow = state_part[arrow_idx + 2:]
+    # Target state is the first word before " reason="
+    target_state = after_arrow.split()[0] if after_arrow.split() else ""
     return (
-        AUDIO_TRANSPORT_STATE_MARKER in line
-        and AUDIO_TRANSPORT_STREAM_READY_MARKER in line
+        target_state == AUDIO_TRANSPORT_STREAM_READY_MARKER
         and AUDIO_NOTIFY_ENABLED_MARKER in line
     )
 
@@ -1346,10 +1356,12 @@ def wait_for_recording_start(ser, rejection_count_before):
 def start_recording_with_retry(ser):
     global transport_ready_retry_count
     for attempt in range(1, 3):
+        # On retry (attempt 2), include_latest=True because the firmware
+        # may have already logged a fresh stream_ready after the rejection.
         wait_for_stream_ready_before_toggle(
             ser,
             f"serial_toggle_attempt_{attempt}",
-            include_latest=(attempt == 1),
+            include_latest=True,
         )
         rejection_count_before = transport_not_ready_rejection_count()
         send_command(ser, "~VREC:TOGGLE")
