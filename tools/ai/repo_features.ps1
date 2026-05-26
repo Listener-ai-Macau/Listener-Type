@@ -40,7 +40,7 @@ function New-FeatureSnapshot {
             "Windows insertion: native TSF IME bridge with IPC/session/profile handling plus clipboard/direct fallback paths.",
             "Release shell: Tauri updater, background update gate, tray menu, autostart, single-instance behavior, and package metadata.",
             "Settings and diagnostics: shortcuts, provider credentials in OS keyring/local storage, language, permissions, advanced logs, diagnostic export, dark mode, and device health.",
-            "Developer/product tools: embedded audio file/BLE CLI replay, BLE stream smoke, Foundry runtime probes, and updater manifest checks."
+            "Developer/product tools: embedded audio file/BLE CLI replay, firmware OTA package/preflight validation, BLE stream smoke, Foundry runtime probes, and updater manifest checks."
         )
         key_paths = @(
             [ordered]@{ path = "src/App.tsx"; purpose = "Top-level React app state, shell, settings modal, capsule wiring." },
@@ -60,9 +60,11 @@ function New-FeatureSnapshot {
             [ordered]@{ path = "src-tauri/src/windows_ime_*.rs"; purpose = "Windows IME IPC, profile, protocol, and session bridge." },
             [ordered]@{ path = "windows-ime/"; purpose = "Native TSF text service built and registered by the Windows package." },
             [ordered]@{ path = "src-tauri/nsis/listener-type-ime-hooks.nsh"; purpose = "Installer hooks for TSF IME register/unregister and upgrade cleanup." },
-            [ordered]@{ path = "src-tauri/src/cli.rs"; purpose = "Headless embedded audio file/BLE replay and diagnostic entry points." },
+            [ordered]@{ path = "src-tauri/src/cli.rs"; purpose = "Headless embedded audio file/BLE replay, firmware OTA, and diagnostic entry points." },
+            [ordered]@{ path = "src-tauri/src/firmware_ota.rs"; purpose = "Shared firmware OTA package validation and headless release-gate runner." },
             [ordered]@{ path = "src/lib/localAsr.ts"; purpose = "Frontend wrappers for Qwen3-ASR and Foundry Local runtime/model commands." },
             [ordered]@{ path = "tools/collect_ai_diagnostics.ps1"; purpose = "One-command AI diagnostic bundle collector for logs, artifacts, BLE/audio summaries, workflow metadata, and optional firmware diagnostic input." },
+            [ordered]@{ path = "tools/firmware_ota_headless/"; purpose = "Standalone firmware OTA package/preflight validation helper for release-gate artifacts." },
             [ordered]@{ path = "tools/embedded_audio_replay/"; purpose = "BLE/audio replay and smoke tools for desktop-device integration." },
             [ordered]@{ path = "tools/foundry_asr_probe/"; purpose = "Foundry Local Whisper diagnostic probe outside the full Tauri app." },
             [ordered]@{ path = "docs/features/"; purpose = "Human-readable feature index and per-feature source maps." }
@@ -86,6 +88,7 @@ function New-FeatureSnapshot {
             "npm run check:dark-mode",
             "cargo test --manifest-path src-tauri\Cargo.toml --lib --no-run",
             "cargo test --manifest-path tools\embedded_audio_replay\Cargo.toml",
+            "cargo test --manifest-path tools\firmware_ota_headless\Cargo.toml",
             "node scripts\write-updater-manifest.test.mjs",
             "powershell -ExecutionPolicy Bypass -File scripts\windows-ime-build.ps1",
             "git diff --check"

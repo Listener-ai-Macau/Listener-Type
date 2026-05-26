@@ -1511,36 +1511,29 @@ pub async fn transfer_firmware_ota_ble(
             "Recording or dictation is still active ({phase:?}). Stop it before updating firmware."
         ));
     }
-    let version = manifest
-        .get("version")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown")
-        .to_string();
-    let size = manifest
-        .get("fileSizeBytes")
-        .or_else(|| manifest.pointer("/file/size_bytes"))
-        .and_then(Value::as_u64)
-        .ok_or_else(|| "OTA manifest is missing file size.".to_string())?;
-    let sha256 = manifest
-        .get("fileSha256")
-        .or_else(|| manifest.pointer("/file/sha256"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| "OTA manifest is missing firmware SHA256.".to_string())?;
-
+    let manifest = serde_json::from_value::<crate::firmware_ota::FirmwareOtaManifest>(manifest)
+        .map_err(|err| format!("OTA manifest payload is invalid: {err}"))
+        .and_then(crate::firmware_ota::validate_normalized_manifest)?;
     if firmware_bytes.is_empty() {
         return Err("firmware_ota.bin is empty.".to_string());
     }
-    if firmware_bytes.len() as u64 != size {
+    if firmware_bytes.len() as u64 != manifest.file_size_bytes {
         return Err(format!(
-            "firmware_ota.bin size changed before transfer: manifest={size} actual={}",
+            "firmware_ota.bin size changed before transfer: manifest={} actual={}",
+            manifest.file_size_bytes,
             firmware_bytes.len()
         ));
     }
-    if !expected_sha256.eq_ignore_ascii_case(sha256) {
+    if !expected_sha256.eq_ignore_ascii_case(&manifest.file_sha256) {
         return Err("OTA package hash changed before transfer.".to_string());
+    }
+    let actual_sha256 = crate::firmware_ota::sha256_hex(&firmware_bytes);
+    if actual_sha256 != manifest.file_sha256 {
+        return Err("firmware_ota.bin SHA256 does not match ota_manifest.json.".to_string());
     }
 
     coord.pause_embedded_ble_listener_for_ota();
+    let version = manifest.version;
     let transfer_version = version.clone();
     let transfer_sha256 = expected_sha256.clone();
     let transfer = tauri::async_runtime::spawn_blocking(move || {
