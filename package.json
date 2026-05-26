@@ -16,7 +16,8 @@
     "check:tauri-info": "node scripts/check-tauri-info.mjs",
     "test:rules": "node --experimental-strip-types src/lib/capsulePreviewRules.test.ts",
     "test:layout": "node --experimental-strip-types src/lib/capsuleLayout.test.ts",
-    "test": "npm run test:rules && npm run test:layout",
+    "test:device-health": "node --experimental-strip-types src/lib/deviceHealth.test.ts",
+    "test": "npm run test:rules && npm run test:layout && npm run test:device-health",
     "check:dark-mode": "node scripts/check-dark-mode.mjs",
     "verify": "node scripts/verify-frontend.mjs"
   },

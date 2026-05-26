@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
+import { detectOS } from '../components/WindowChrome';
 import { consumePendingDemoMode, OPEN_DEMO_MODE_EVENT } from '../lib/demoMode';
+import { listenerDeviceHealthTone, summarizeListenerDeviceHealth, type ListenerDeviceHealthSnapshot } from '../lib/deviceHealth';
 import { formatComboLabel } from '../lib/hotkey';
-import { getCredentials, listHistory, setActiveAsrProvider, startDictation } from '../lib/ipc';
-import type { CredentialsStatus, DictationSession, PolishMode } from '../lib/types';
+import { getCredentials, getEmbeddedBleRuntimeStatus, listHistory, setActiveAsrProvider, startDictation } from '../lib/ipc';
+import type { CredentialsStatus, DictationSession, EmbeddedBleRuntimeStatus, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
 
@@ -23,6 +25,7 @@ function useModeLabels(): Record<PolishMode, string> {
 interface OverviewProps {
   onOpenHistory?: () => void;
   onOpenProvidersSettings?: () => void;
+  onOpenRecordingSettings?: () => void;
 }
 
 const ASR_NAME_KEY_BY_ID: Record<string, string> = {
@@ -59,7 +62,7 @@ const DEMO_PLAY_ICONS: Record<DemoPlayId, string> = {
   polish: 'doc',
 };
 
-export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewProps) {
+export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordingSettings }: OverviewProps) {
   const { t } = useTranslation();
   const modeLabel = useModeLabels();
   const [history, setHistory] = useState<DictationSession[]>([]);
@@ -67,6 +70,7 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewPro
   const [credsError, setCredsError] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
   const [demoVariant, setDemoVariant] = useState(0);
+  const [bleRuntimeStatus, setBleRuntimeStatus] = useState<EmbeddedBleRuntimeStatus | null>(null);
   const [creds, setCreds] = useState<CredentialsStatus>({
     activeAsrProvider: 'volcengine',
     activeLlmProvider: 'ark',
@@ -89,6 +93,12 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewPro
 
   useEffect(() => {
     refreshHistory();
+    getEmbeddedBleRuntimeStatus()
+      .then(setBleRuntimeStatus)
+      .catch(error => {
+        console.warn('[overview] failed to load embedded BLE runtime status', error);
+        setBleRuntimeStatus(null);
+      });
     getCredentials()
       .then(status => {
         setCreds(status);
@@ -149,12 +159,29 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewPro
   const llmProviderName = llmNameKey
     ? t(`settings.providers.presets.${llmNameKey}`)
     : llmProviderId;
+  const deviceHealth = useMemo(
+    () => summarizeListenerDeviceHealth({
+      dictationInputSource: prefs?.dictationInputSource,
+      os: detectOS(),
+      history,
+      backgroundListenerDisabled: bleRuntimeStatus?.backgroundListenerDisabledByEnv ?? false,
+      backgroundListenerError: bleRuntimeStatus?.backgroundListenerLastError ?? null,
+      historyError,
+    }),
+    [
+      bleRuntimeStatus?.backgroundListenerDisabledByEnv,
+      bleRuntimeStatus?.backgroundListenerLastError,
+      history,
+      historyError,
+      prefs?.dictationInputSource,
+    ],
+  );
 
   return (
     <>
       <PageHeader title={t('overview.title')} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 18 }}>
         <ProviderCard
           kind={t('overview.asrKind')}
           name={asrProviderName}
@@ -166,6 +193,10 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewPro
           name={llmProviderName}
           subname={llmProviderId}
           status={credsError ? 'error' : creds.llmConfigured ? 'configured' : 'notConfigured'}
+        />
+        <DeviceHealthCard
+          snapshot={deviceHealth}
+          onOpenRecordingSettings={onOpenRecordingSettings}
         />
       </div>
 
@@ -254,6 +285,57 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings }: OverviewPro
         </Card>
       </div>
     </>
+  );
+}
+
+function DeviceHealthCard({
+  snapshot,
+  onOpenRecordingSettings,
+}: {
+  snapshot: ListenerDeviceHealthSnapshot;
+  onOpenRecordingSettings?: () => void;
+}) {
+  const { t } = useTranslation();
+  const isBad = snapshot.state === 'error' || snapshot.state === 'degraded';
+  const detail = snapshot.state === 'healthy'
+    ? null
+    : t(`overview.deviceHealth.reason.${snapshot.reason}`);
+
+  return (
+    <Card padding={16} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div
+        style={{
+          width: 38, height: 38, borderRadius: 10,
+          background: isBad ? 'rgba(189,98,89,0.12)' : 'var(--ol-blue-soft)',
+          color: isBad ? 'var(--ol-err)' : 'var(--ol-blue)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <Icon name="bolt" size={18} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', fontWeight: 600, letterSpacing: 0, textTransform: 'uppercase' }}>{t('overview.deviceHealth.kind')}</span>
+          <Pill tone={listenerDeviceHealthTone(snapshot.state)} size="sm">
+            {t(`overview.deviceHealth.status.${snapshot.state}`)}
+          </Pill>
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ol-ink)' }}>{t('overview.deviceHealth.title')}</div>
+        {detail && (
+          <div style={{ fontSize: 11.5, color: isBad ? 'var(--ol-err)' : 'var(--ol-ink-3)', marginTop: 1, lineHeight: 1.45 }}>
+            {detail}
+          </div>
+        )}
+        {snapshot.state !== 'healthy' && onOpenRecordingSettings && (
+          <div style={{ marginTop: 8 }}>
+            <Btn size="sm" variant="ghost" icon="settings" onClick={onOpenRecordingSettings}>
+              {t('overview.deviceHealth.openRecording')}
+            </Btn>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
