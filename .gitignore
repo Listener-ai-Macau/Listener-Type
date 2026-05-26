@@ -4,8 +4,11 @@ dist/
 *.local
 .env
 .vite/
+__pycache__/
+*.pyc
 artifacts/
 .artifacts/
+tests/artifacts/
 .omx/
 .task/
 ref/
