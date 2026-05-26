@@ -14,6 +14,7 @@ pub struct BleNotificationEvent {
 }
 
 pub type BleNotificationHandler<'a> = dyn FnMut(BleNotificationEvent) -> Result<(), String> + 'a;
+pub type BleReadyHandler<'a> = dyn FnMut() -> Result<(), String> + 'a;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FirmwareOtaTransferStats {
@@ -166,9 +167,11 @@ mod windows_ble {
         timeout: Duration,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
     ) -> Result<(), String> {
+        let mut on_ready = || Ok(());
         capture_notification_events_until_cancelled(
             Some(timeout),
             Arc::new(AtomicBool::new(false)),
+            &mut on_ready,
             on_event,
         )
     }
@@ -176,6 +179,7 @@ mod windows_ble {
     pub fn capture_notification_events_until_cancelled(
         idle_timeout: Option<Duration>,
         cancel_requested: Arc<AtomicBool>,
+        on_ready: &mut crate::embedded_ble::BleReadyHandler<'_>,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
     ) -> Result<(), String> {
         let capture_guard = BleCaptureGuard::enter(idle_timeout)?;
@@ -230,6 +234,7 @@ mod windows_ble {
             return Err(format!("BLE CCCD notify write returned status={status:?}"));
         }
         log::info!("[embedded-ble] capture #{capture_id}: notify CCCD enabled");
+        on_ready()?;
 
         let deadline = idle_timeout.map(|timeout| Instant::now() + timeout);
         let mut collector = crate::embedded_audio::SessionCollector::default();
@@ -1502,11 +1507,13 @@ pub fn capture_notification_events(
 pub fn capture_notification_events_until_cancelled(
     idle_timeout: Option<Duration>,
     cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_ready: &mut BleReadyHandler<'_>,
     on_event: &mut BleNotificationHandler<'_>,
 ) -> Result<(), String> {
     windows_ble::capture_notification_events_until_cancelled(
         idle_timeout,
         cancel_requested,
+        on_ready,
         on_event,
     )
 }
@@ -1547,6 +1554,7 @@ pub fn capture_notification_events(
 pub fn capture_notification_events_until_cancelled(
     _idle_timeout: Option<Duration>,
     _cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    _on_ready: &mut BleReadyHandler<'_>,
     _on_event: &mut BleNotificationHandler<'_>,
 ) -> Result<(), String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())

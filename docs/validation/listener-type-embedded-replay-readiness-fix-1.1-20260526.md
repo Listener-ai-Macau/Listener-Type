@@ -49,3 +49,33 @@ available in the worktree or explicitly supplied with `-ListenerExe`.
 - Serial log: `artifacts\embedded_stream_smoke\ble-stream-smoke-20260526-182137.serial.log`.
 - Recording archive: `C:\Users\Billy\AppData\Roaming\Listener Type\recordings\87f2a0df-fe8a-45f7-9fde-444cf7a28340.wav`.
 - Key results: `stream_ready=True`, `streaming_queued=True`, `transport_not_ready=False`, `record_start_rejected=False`, `recording_start_seen=True`, `recording_stop_seen=True`, `missing_packets=0`, `accuracy=1`, `history_session.id=87f2a0df-fe8a-45f7-9fde-444cf7a28340`.
+
+## Rework: Foreground BLE Probe Recovery
+
+User log diagnosis showed the remaining failure was not only a stale app build:
+
+- Running app at the time of diagnosis was `C:\Users\Billy\Desktop\listener\Listener-Type\src-tauri\target\release\listener-type.exe`, so it did not contain this worktree's new fix.
+- `422aa9d` on `main` skips a foreground BLE path probe only when a background listener cancel flag is present. That protects an active background capture, but it can still report success before the background listener has actually re-enabled CCCD notify after a foreground probe.
+- Firmware/serial evidence from current matrix artifacts showed the failure shape: after capture cleanup the host disables CCCD, and firmware logs `notify=0` / `mtu_ready`; without a later `attr_handle=3 notify=1` subscription event, the next recording can be rejected as transport-not-ready.
+
+Fix:
+
+- Added a background Listener BLE `notify ready` state that flips only after the WinRT capture path successfully writes CCCD notify.
+- Foreground `probe_embedded_audio_ble_subscription` now waits for the active background listener to be notify-ready instead of treating a merely armed cancel flag as ready.
+- After a foreground probe that temporarily owns CCCD, the coordinator refreshes the background listener and waits for notify-ready before returning success. If CCCD is not restored, the probe returns an error instead of allowing the UI to show healthy while firmware is still `mtu_ready notify=0`.
+- The serial replay helper now refuses to send `~VREC:TOGGLE` if `stream_ready` was not confirmed. After a transport-not-ready rejection, it waits for a fresh `stream_ready` line after the rejection before retrying once. `serial_report.stream_ready` now uses the target-state parser instead of a substring match.
+
+Validation:
+
+- PASS: `npm ci --prefer-offline --no-audit --no-fund`
+- PASS: `npm run build`
+- PASS: `cargo fmt --manifest-path src-tauri\Cargo.toml -- --check`
+- PASS: `cargo test --manifest-path src-tauri\Cargo.toml embedded_ble` (18 passed)
+- PASS: `cargo check --manifest-path src-tauri\Cargo.toml`
+- PASS: `npm run test -- --run`
+- PASS: `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`
+- PASS: PowerShell parse for `tools\embedded_audio_replay\run_ble_stream_smoke.ps1`
+- PASS: embedded Python block compile for `tools\embedded_audio_replay\run_ble_stream_smoke.ps1`
+- PASS: `git diff --check` (CRLF warnings only)
+
+Hardware note: no fresh hardware smoke was run after this rework because a release Listener-Type process from the main checkout was running. That process is useful evidence for the "old app build" question, but it is not the patched worktree binary.

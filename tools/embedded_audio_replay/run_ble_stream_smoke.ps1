@@ -1317,15 +1317,15 @@ def line_indicates_stream_ready(line):
 def transport_not_ready_rejection_count():
     return sum(1 for line in lines if AUDIO_TRANSPORT_NOT_READY_REJECTION_MARKER in line)
 
-def wait_for_stream_ready_before_toggle(ser, context, include_latest=True):
+def wait_for_stream_ready_before_toggle(ser, context, include_latest=True, min_line_index=None):
     global stream_ready_wait_count
     poll_lines(ser)
     latest_state = latest_audio_transport_state_line()
-    if include_latest and line_indicates_stream_ready(latest_state):
+    if include_latest and min_line_index is None and line_indicates_stream_ready(latest_state):
         print(f"{context}_stream_ready=already_ready", flush=True)
         return True
 
-    start_index = len(lines)
+    start_index = min_line_index if min_line_index is not None else len(lines)
     deadline = time.monotonic() + STREAM_READY_START_WAIT_SECONDS
     while time.monotonic() < deadline:
         poll_lines(ser)
@@ -1355,14 +1355,16 @@ def wait_for_recording_start(ser, rejection_count_before):
 
 def start_recording_with_retry(ser):
     global transport_ready_retry_count
+    retry_min_line_index = None
     for attempt in range(1, 3):
-        # On retry (attempt 2), include_latest=True because the firmware
-        # may have already logged a fresh stream_ready after the rejection.
-        wait_for_stream_ready_before_toggle(
+        ready = wait_for_stream_ready_before_toggle(
             ser,
             f"serial_toggle_attempt_{attempt}",
-            include_latest=True,
+            include_latest=(attempt == 1),
+            min_line_index=retry_min_line_index,
         )
+        if not ready:
+            raise RuntimeError("timed out waiting for firmware BLE audio stream_ready before recording start")
         rejection_count_before = transport_not_ready_rejection_count()
         send_command(ser, "~VREC:TOGGLE")
         if wait_for_recording_start(ser, rejection_count_before):
@@ -1370,6 +1372,7 @@ def start_recording_with_retry(ser):
         if attempt == 1:
             transport_ready_retry_count += 1
             print("serial_toggle_transport_not_ready_retry=1", flush=True)
+            retry_min_line_index = len(lines)
             continue
         break
     raise RuntimeError("firmware rejected recording start because BLE audio transport was not ready")
@@ -1430,7 +1433,7 @@ summary = {
     "serial_log_path": str(log_path),
     "serial_line_count": len(lines),
     "notify_enabled": notify_enabled,
-    "stream_ready": any("stream_ready" in line for line in lines),
+    "stream_ready": any(line_indicates_stream_ready(line) for line in lines),
     "streaming_queued": contains("session_start_queued") or contains("stream session start queued"),
     "transport_not_ready": contains("BLE audio transport not ready"),
     "stream_ready_wait_count": stream_ready_wait_count,
