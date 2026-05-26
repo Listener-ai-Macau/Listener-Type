@@ -1242,6 +1242,9 @@ lines = []
 buffer = bytearray()
 stream_ready_wait_count = 0
 transport_ready_retry_count = 0
+stream_ready_confirmed_before_toggle = False
+stream_ready_confirmed_line_index = None
+transport_not_ready_rejection_line_index = None
 
 AUDIO_TRANSPORT_STATE_MARKER = "audio transport state:"
 AUDIO_TRANSPORT_STREAM_READY_MARKER = "stream_ready"
@@ -1291,11 +1294,15 @@ def wait_for_start_signal(ser):
 def contains(text):
     return any(text in line for line in lines)
 
-def latest_audio_transport_state_line():
-    for line in reversed(lines):
+def latest_audio_transport_state_entry():
+    for index in range(len(lines) - 1, -1, -1):
+        line = lines[index]
         if AUDIO_TRANSPORT_STATE_MARKER in line:
-            return line
-    return ""
+            return index, line
+    return None, ""
+
+def latest_audio_transport_state_line():
+    return latest_audio_transport_state_entry()[1]
 
 def line_indicates_stream_ready(line):
     if AUDIO_TRANSPORT_STATE_MARKER not in line:
@@ -1317,62 +1324,80 @@ def line_indicates_stream_ready(line):
 def transport_not_ready_rejection_count():
     return sum(1 for line in lines if AUDIO_TRANSPORT_NOT_READY_REJECTION_MARKER in line)
 
+def latest_transport_not_ready_rejection_index(start_index=0):
+    for index in range(len(lines) - 1, max(start_index, 0) - 1, -1):
+        if AUDIO_TRANSPORT_NOT_READY_REJECTION_MARKER in lines[index]:
+            return index
+    return None
+
 def wait_for_stream_ready_before_toggle(ser, context, include_latest=True, min_line_index=None):
     global stream_ready_wait_count
     poll_lines(ser)
-    latest_state = latest_audio_transport_state_line()
+    latest_index, latest_state = latest_audio_transport_state_entry()
     if include_latest and min_line_index is None and line_indicates_stream_ready(latest_state):
         print(f"{context}_stream_ready=already_ready", flush=True)
-        return True
+        return latest_index
 
     start_index = min_line_index if min_line_index is not None else len(lines)
     deadline = time.monotonic() + STREAM_READY_START_WAIT_SECONDS
     while time.monotonic() < deadline:
         poll_lines(ser)
-        for line in lines[start_index:]:
+        for index, line in enumerate(lines[start_index:], start_index):
             if line_indicates_stream_ready(line):
                 stream_ready_wait_count += 1
                 print(f"{context}_stream_ready=observed", flush=True)
-                return True
+                return index
         time.sleep(0.05)
+    latest_state = latest_audio_transport_state_line()
     print(
         f"{context}_stream_ready=timeout latest_transport_state={latest_state or '<none>'}",
         flush=True,
     )
-    return False
+    return None
 
-def wait_for_recording_start(ser, rejection_count_before):
+def wait_for_recording_start(ser, rejection_start_index):
     deadline = time.monotonic() + (recording_start_timeout_ms / 1000.0)
     while time.monotonic() < deadline:
         poll_lines(ser)
         if contains("recording start source="):
-            recording_started_signal_path.write_text("recording_start_seen", encoding="ascii")
-            return True
-        if transport_not_ready_rejection_count() > rejection_count_before:
-            return False
+            recording_started_signal_path.write_text(
+                "recording_start_seen",
+                encoding="ascii",
+            )
+            return True, None
+        rejection_index = latest_transport_not_ready_rejection_index(rejection_start_index)
+        if rejection_index is not None:
+            return False, rejection_index
         time.sleep(0.02)
     raise RuntimeError("timed out waiting for firmware recording start log")
 
 def start_recording_with_retry(ser):
+    global stream_ready_confirmed_before_toggle
+    global stream_ready_confirmed_line_index
+    global transport_not_ready_rejection_line_index
     global transport_ready_retry_count
     retry_min_line_index = None
     for attempt in range(1, 3):
-        ready = wait_for_stream_ready_before_toggle(
+        ready_index = wait_for_stream_ready_before_toggle(
             ser,
             f"serial_toggle_attempt_{attempt}",
             include_latest=(attempt == 1),
             min_line_index=retry_min_line_index,
         )
-        if not ready:
+        if ready_index is None:
             raise RuntimeError("timed out waiting for firmware BLE audio stream_ready before recording start")
-        rejection_count_before = transport_not_ready_rejection_count()
+        stream_ready_confirmed_before_toggle = True
+        stream_ready_confirmed_line_index = ready_index
+        rejection_start_index = len(lines)
         send_command(ser, "~VREC:TOGGLE")
-        if wait_for_recording_start(ser, rejection_count_before):
+        recording_started, rejection_index = wait_for_recording_start(ser, rejection_start_index)
+        if recording_started:
             return
         if attempt == 1:
+            transport_not_ready_rejection_line_index = rejection_index
             transport_ready_retry_count += 1
             print("serial_toggle_transport_not_ready_retry=1", flush=True)
-            retry_min_line_index = len(lines)
+            retry_min_line_index = rejection_index + 1
             continue
         break
     raise RuntimeError("firmware rejected recording start because BLE audio transport was not ready")
@@ -1433,9 +1458,11 @@ summary = {
     "serial_log_path": str(log_path),
     "serial_line_count": len(lines),
     "notify_enabled": notify_enabled,
-    "stream_ready": any(line_indicates_stream_ready(line) for line in lines),
+    "stream_ready": stream_ready_confirmed_before_toggle,
+    "stream_ready_confirmed_line_index": stream_ready_confirmed_line_index,
     "streaming_queued": contains("session_start_queued") or contains("stream session start queued"),
     "transport_not_ready": contains("BLE audio transport not ready"),
+    "transport_not_ready_rejection_line_index": transport_not_ready_rejection_line_index,
     "stream_ready_wait_count": stream_ready_wait_count,
     "transport_ready_retry_count": transport_ready_retry_count,
     "record_start_rejected": contains("record session start rejected"),
