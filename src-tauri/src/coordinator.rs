@@ -884,6 +884,10 @@ impl Coordinator {
         cancel_session(&self.inner);
     }
 
+    pub fn pause_embedded_ble_listener_for_ota(&self) {
+        pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
+    }
+
     pub fn refresh_embedded_ble_listener(&self) {
         let generation = self
             .inner
