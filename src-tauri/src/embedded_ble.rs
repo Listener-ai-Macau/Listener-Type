@@ -108,7 +108,6 @@ mod windows_ble {
         Duration::from_millis(1500),
     ];
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
-    const OTA_CHUNK_BYTES: usize = 180;
     const ATT_WRITE_HEADER_BYTES: usize = 3;
     const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
 
@@ -334,6 +333,7 @@ mod windows_ble {
             version: &str,
             firmware_sha256: &str,
             firmware_bytes: &[u8],
+            manifest_chunk_bytes: usize,
         ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
             transfer_firmware_ota_to_target(
                 &self.target,
@@ -341,6 +341,7 @@ mod windows_ble {
                 version,
                 firmware_sha256,
                 firmware_bytes,
+                manifest_chunk_bytes,
             )
         }
     }
@@ -391,13 +392,19 @@ mod windows_ble {
         version: &str,
         firmware_sha256: &str,
         firmware_bytes: &[u8],
+        manifest_chunk_bytes: usize,
     ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
         if firmware_bytes.is_empty() {
             return Err("firmware_ota.bin is empty.".to_string());
         }
 
         let prepared = prepare_firmware_ota_transfer()?;
-        prepared.transfer(version, firmware_sha256, firmware_bytes)
+        prepared.transfer(
+            version,
+            firmware_sha256,
+            firmware_bytes,
+            manifest_chunk_bytes,
+        )
     }
 
     fn transfer_firmware_ota_to_target(
@@ -406,6 +413,7 @@ mod windows_ble {
         version: &str,
         firmware_sha256: &str,
         firmware_bytes: &[u8],
+        manifest_chunk_bytes: usize,
     ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
         if firmware_bytes.is_empty() {
             return Err("firmware_ota.bin is empty.".to_string());
@@ -425,8 +433,10 @@ mod windows_ble {
             "OTA control begin",
         )?;
 
+        let data_chunk_bytes =
+            ota_transfer_chunk_bytes(target.data_chunk_bytes, manifest_chunk_bytes);
         let mut chunks_sent = 0usize;
-        for chunk in firmware_bytes.chunks(target.data_chunk_bytes) {
+        for chunk in firmware_bytes.chunks(data_chunk_bytes) {
             write_gatt_value_with_timeout(
                 &target.data,
                 chunk,
@@ -450,8 +460,10 @@ mod windows_ble {
             "OTA control finish",
         )?;
         log::info!(
-            "[embedded-ble] ota #{transfer_id}: transferred {} bytes in {chunks_sent} chunks",
-            firmware_bytes.len()
+            "[embedded-ble] ota #{transfer_id}: transferred {} bytes in {chunks_sent} chunks (chunk_bytes={data_chunk_bytes}, transport_limit={}, manifest_limit={})",
+            firmware_bytes.len(),
+            target.data_chunk_bytes,
+            manifest_chunk_bytes
         );
         Ok(crate::embedded_ble::FirmwareOtaTransferStats {
             bytes_transferred: firmware_bytes.len(),
@@ -1026,7 +1038,16 @@ mod windows_ble {
         if write_option == GattWriteOption::WriteWithoutResponse {
             return payload_bytes.min(ATT_DEFAULT_PAYLOAD_BYTES).max(1);
         }
-        payload_bytes.min(OTA_CHUNK_BYTES).max(1)
+        payload_bytes.max(1)
+    }
+
+    pub(super) fn ota_transfer_chunk_bytes(
+        transport_limit_bytes: usize,
+        manifest_chunk_bytes: usize,
+    ) -> usize {
+        transport_limit_bytes
+            .min(manifest_chunk_bytes.max(1))
+            .max(1)
     }
 
     fn open_write_characteristic_from_service(
@@ -1714,8 +1735,14 @@ pub fn transfer_firmware_ota(
     version: &str,
     firmware_sha256: &str,
     firmware_bytes: &[u8],
+    manifest_chunk_bytes: usize,
 ) -> Result<FirmwareOtaTransferStats, String> {
-    windows_ble::transfer_firmware_ota(version, firmware_sha256, firmware_bytes)
+    windows_ble::transfer_firmware_ota(
+        version,
+        firmware_sha256,
+        firmware_bytes,
+        manifest_chunk_bytes,
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -1732,8 +1759,14 @@ impl FirmwareOtaPreparedTransfer {
         version: &str,
         firmware_sha256: &str,
         firmware_bytes: &[u8],
+        manifest_chunk_bytes: usize,
     ) -> Result<FirmwareOtaTransferStats, String> {
-        self.0.transfer(version, firmware_sha256, firmware_bytes)
+        self.0.transfer(
+            version,
+            firmware_sha256,
+            firmware_bytes,
+            manifest_chunk_bytes,
+        )
     }
 }
 
@@ -1780,6 +1813,7 @@ pub fn transfer_firmware_ota(
     _version: &str,
     _firmware_sha256: &str,
     _firmware_bytes: &[u8],
+    _manifest_chunk_bytes: usize,
 ) -> Result<FirmwareOtaTransferStats, String> {
     Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
 }
@@ -1798,6 +1832,7 @@ impl FirmwareOtaPreparedTransfer {
         _version: &str,
         _firmware_sha256: &str,
         _firmware_bytes: &[u8],
+        _manifest_chunk_bytes: usize,
     ) -> Result<FirmwareOtaTransferStats, String> {
         Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
     }
@@ -1876,5 +1911,15 @@ mod tests {
             ),
             Some(0xDCB4_D911_12CE)
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn ota_chunk_selection_uses_manifest_and_transport_limits() {
+        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(244, 244), 244);
+        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(244, 180), 180);
+        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(120, 244), 120);
+        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(0, 244), 1);
+        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(244, 0), 1);
     }
 }

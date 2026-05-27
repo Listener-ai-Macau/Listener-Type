@@ -11,7 +11,9 @@ pub const OTA_FILE_NAME: &str = "firmware_ota.bin";
 pub const OTA_SERVICE_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
 pub const OTA_CONTROL_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092b";
 pub const OTA_DATA_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092c";
-pub const OTA_CHUNK_BYTES: u64 = 180;
+pub const OTA_LEGACY_CHUNK_BYTES: u64 = 180;
+pub const OTA_MAX_CHUNK_BYTES: u64 = 244;
+pub const OTA_CHUNK_BYTES: u64 = OTA_LEGACY_CHUNK_BYTES;
 pub const DEFAULT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 pub const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -256,6 +258,7 @@ fn run_transfer_preflight_and_write(
         &package.manifest.version,
         &package.firmware_sha256,
         &package.firmware_bytes,
+        package.manifest.gatt_chunk_bytes as usize,
     ) {
         Ok(stats) => HeadlessTransferAttempt {
             preflight,
@@ -834,7 +837,12 @@ fn parse_manifest_v2(value: &Value, schema_version: u64) -> Result<FirmwareOtaMa
         gatt_service_uuid: OTA_SERVICE_UUID.to_string(),
         gatt_control_uuid: OTA_CONTROL_UUID.to_string(),
         gatt_data_uuid: OTA_DATA_UUID.to_string(),
-        gatt_chunk_bytes: OTA_CHUNK_BYTES,
+        gatt_chunk_bytes: optional_u64(
+            requirements
+                .get("gatt_chunk_bytes")
+                .or_else(|| requirements.get("gattChunkBytes")),
+            OTA_LEGACY_CHUNK_BYTES,
+        )?,
         rollback_instructions: require_instructions(
             rollback.get("instructions"),
             "rollback.instructions",
@@ -865,9 +873,14 @@ pub fn validate_normalized_manifest(
     if manifest.gatt_service_uuid != OTA_SERVICE_UUID
         || manifest.gatt_control_uuid != OTA_CONTROL_UUID
         || manifest.gatt_data_uuid != OTA_DATA_UUID
-        || manifest.gatt_chunk_bytes != OTA_CHUNK_BYTES
     {
         return Err("OTA package uses an unsupported BLE OTA GATT boundary.".to_string());
+    }
+    if manifest.gatt_chunk_bytes == 0 || manifest.gatt_chunk_bytes > OTA_MAX_CHUNK_BYTES {
+        return Err(format!(
+            "OTA package uses unsupported BLE OTA chunk size {}; supported range is 1..={OTA_MAX_CHUNK_BYTES}.",
+            manifest.gatt_chunk_bytes
+        ));
     }
     if manifest.file_size_bytes == 0 {
         return Err("file.size_bytes must be greater than zero.".to_string());
@@ -900,6 +913,15 @@ fn require_u64(value: Option<&Value>, field: &str) -> Result<u64, String> {
     value
         .and_then(Value::as_u64)
         .ok_or_else(|| format!("{field} must be a number."))
+}
+
+fn optional_u64(value: Option<&Value>, default_value: u64) -> Result<u64, String> {
+    match value {
+        Some(value) => value
+            .as_u64()
+            .ok_or_else(|| "optional numeric field must be a number.".to_string()),
+        None => Ok(default_value),
+    }
 }
 
 fn require_bool(value: Option<&Value>, field: &str) -> Result<bool, String> {
@@ -1073,6 +1095,37 @@ mod tests {
         assert!(result.ok, "{:?}", result.errors);
         assert_eq!(result.firmware_sha256.as_deref(), Some(FIRMWARE_SHA256));
         assert_eq!(result.manifest.unwrap().version, "1.2.0");
+    }
+
+    #[test]
+    fn schema_v2_accepts_conservative_gatt_chunk_limit() {
+        let result = validate_package(
+            &manifest_v2(
+                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.3.3","gatt_chunk_bytes":244}"#,
+            ),
+            FIRMWARE_BYTES,
+            &context(),
+        );
+
+        assert!(result.ok, "{:?}", result.errors);
+        assert_eq!(
+            result.manifest.unwrap().gatt_chunk_bytes,
+            OTA_MAX_CHUNK_BYTES
+        );
+    }
+
+    #[test]
+    fn rejects_gatt_chunk_above_safe_limit() {
+        let result = validate_package(
+            &manifest_v2(
+                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.3.3","gatt_chunk_bytes":245}"#,
+            ),
+            FIRMWARE_BYTES,
+            &context(),
+        );
+
+        assert!(!result.ok);
+        assert!(result.errors.iter().any(|item| item.contains("chunk size")));
     }
 
     #[test]
