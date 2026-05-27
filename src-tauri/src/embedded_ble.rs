@@ -108,6 +108,7 @@ mod windows_ble {
         Duration::from_millis(1500),
     ];
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
+    const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const OTA_CHUNK_BYTES: usize = 180;
     const ATT_WRITE_HEADER_BYTES: usize = 3;
     const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
@@ -334,6 +335,7 @@ mod windows_ble {
             version: &str,
             firmware_sha256: &str,
             firmware_bytes: &[u8],
+            on_progress: Option<&dyn Fn(usize, usize)>,
         ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
             transfer_firmware_ota_to_target(
                 &self.target,
@@ -341,15 +343,21 @@ mod windows_ble {
                 version,
                 firmware_sha256,
                 firmware_bytes,
+                on_progress,
             )
         }
     }
 
     pub(super) fn prepare_firmware_ota_transfer() -> Result<PreparedFirmwareOtaTransfer, String> {
+        log::info!("[embedded-ble] OTA prepare: acquiring BLE capture guard");
         let transfer_guard = BleCaptureGuard::enter(None)?;
+        log::info!("[embedded-ble] OTA prepare: opening audio keepalive");
         let keepalive = open_ota_ble_keepalive(transfer_guard.session_id())?;
+        log::info!("[embedded-ble] OTA prepare: discovering OTA service");
         let target = open_ota_target()?;
+        log::info!("[embedded-ble] OTA prepare: reading device snapshot");
         let snapshot = firmware_ota_device_snapshot_from_target(&target);
+        log::info!("[embedded-ble] OTA prepare: ready (firmware={})", snapshot.firmware_version.as_deref().unwrap_or("unknown"));
         Ok(PreparedFirmwareOtaTransfer {
             target,
             snapshot,
@@ -391,13 +399,14 @@ mod windows_ble {
         version: &str,
         firmware_sha256: &str,
         firmware_bytes: &[u8],
+        on_progress: Option<&dyn Fn(usize, usize)>,
     ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
         if firmware_bytes.is_empty() {
             return Err("firmware_ota.bin is empty.".to_string());
         }
 
         let prepared = prepare_firmware_ota_transfer()?;
-        prepared.transfer(version, firmware_sha256, firmware_bytes)
+        prepared.transfer(version, firmware_sha256, firmware_bytes, on_progress)
     }
 
     fn transfer_firmware_ota_to_target(
@@ -406,11 +415,17 @@ mod windows_ble {
         version: &str,
         firmware_sha256: &str,
         firmware_bytes: &[u8],
+        on_progress: Option<&dyn Fn(usize, usize)>,
     ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
         if firmware_bytes.is_empty() {
             return Err("firmware_ota.bin is empty.".to_string());
         }
 
+        let total_chunks = (firmware_bytes.len() + target.data_chunk_bytes - 1) / target.data_chunk_bytes;
+        log::info!(
+            "[embedded-ble] ota #{transfer_id}: writing begin version={version} size={} chunks={total_chunks}",
+            firmware_bytes.len()
+        );
         let begin = format!(
             "{{\"op\":\"begin\",\"version\":\"{}\",\"size\":{},\"sha256\":\"{}\"}}\n",
             json_escape(version),
@@ -435,8 +450,17 @@ mod windows_ble {
                 "OTA data",
             )?;
             chunks_sent += 1;
+            if chunks_sent % 100 == 0 {
+                log::info!(
+                    "[embedded-ble] ota #{transfer_id}: progress {chunks_sent}/{total_chunks} chunks"
+                );
+                if let Some(cb) = &on_progress {
+                    cb(chunks_sent, total_chunks);
+                }
+            }
         }
 
+        log::info!("[embedded-ble] ota #{transfer_id}: writing finish");
         let finish = format!(
             "{{\"op\":\"finish\",\"size\":{},\"sha256\":\"{}\"}}\n",
             firmware_bytes.len(),
@@ -514,9 +538,8 @@ mod windows_ble {
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(SERVICE_UUID)
             .map_err(|err| format!("BLE service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
-            .map_err(|err| format!("BLE service discovery failed: {err}"))?
-            .get()
-            .map_err(|err| format!("BLE service discovery wait failed: {err}"))?;
+            .map_err(|err| format!("BLE service discovery failed: {err}"))
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "service discovery"))?;
         let count = devices
             .Size()
             .map_err(|err| format!("BLE service collection size failed: {err}"))?;
@@ -671,9 +694,8 @@ mod windows_ble {
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(OTA_SERVICE_UUID)
             .map_err(|err| format!("BLE OTA service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
-            .map_err(|err| format!("BLE OTA service discovery failed: {err}"))?
-            .get()
-            .map_err(|err| format!("BLE OTA service discovery wait failed: {err}"))?;
+            .map_err(|err| format!("BLE OTA service discovery failed: {err}"))
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA service discovery"))?;
         let count = devices
             .Size()
             .map_err(|err| format!("BLE OTA service collection size failed: {err}"))?;
@@ -744,9 +766,10 @@ mod windows_ble {
 
     fn open_ota_target_for_device(address: u64) -> Result<OpenOtaTarget, String> {
         let device = open_ble_device(address)?;
-        if let Ok(access) = device
+        if let Some(access) = device
             .RequestAccessAsync()
-            .and_then(|operation| operation.get())
+            .ok()
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA device access").ok())
         {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!("BLE OTA device access denied status={access:?}"));
@@ -758,10 +781,9 @@ mod windows_ble {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(OTA_SERVICE_UUID, cache_mode)
                 .map_err(|err| format!("BLE OTA {cache_mode:?} service discovery failed: {err}"))
-                .and_then(|operation| {
-                    operation.get().map_err(|err| {
-                        format!("BLE OTA {cache_mode:?} service discovery wait failed: {err}")
-                    })
+                .and_then(|op| {
+                    wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, &format!("OTA {cache_mode:?} service"))
+                        .map_err(|err| format!("BLE OTA {cache_mode:?} service discovery wait failed: {err}"))
                 }) {
                 Ok(result) => result,
                 Err(err) => {
@@ -828,9 +850,10 @@ mod windows_ble {
 
     fn open_notify_target_for_device(address: u64) -> Result<OpenNotifyTarget, String> {
         let device = open_ble_device(address)?;
-        if let Ok(access) = device
+        if let Some(access) = device
             .RequestAccessAsync()
-            .and_then(|operation| operation.get())
+            .ok()
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "device access").ok())
         {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!("BLE device access denied status={access:?}"));
@@ -842,10 +865,9 @@ mod windows_ble {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, cache_mode)
                 .map_err(|err| format!("BLE {cache_mode:?} service discovery failed: {err}"))
-                .and_then(|operation| {
-                    operation.get().map_err(|err| {
-                        format!("BLE {cache_mode:?} service discovery wait failed: {err}")
-                    })
+                .and_then(|op| {
+                    wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, &format!("{cache_mode:?} service"))
+                        .map_err(|err| format!("BLE {cache_mode:?} service discovery wait failed: {err}"))
                 }) {
                 Ok(result) => result,
                 Err(err) => {
@@ -908,9 +930,8 @@ mod windows_ble {
 
     fn open_ble_device(address: u64) -> Result<BluetoothLEDevice, String> {
         let device = BluetoothLEDevice::FromBluetoothAddressAsync(address)
-            .map_err(|err| format!("BLE device open by address failed: {err}"))?
-            .get()
-            .map_err(|err| format!("BLE device open by address wait failed: {err}"))?;
+            .map_err(|err| format!("BLE device open by address failed: {err}"))
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "device open by address"))?;
 
         let device_id = device
             .DeviceId()
@@ -921,15 +942,16 @@ mod windows_ble {
         }
 
         match BluetoothLEDevice::FromIdAsync(&HSTRING::from(device_id.as_str()))
-            .and_then(|operation| operation.get())
+            .ok()
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "device open by id").ok())
         {
-            Ok(device_by_id) => {
+            Some(device_by_id) => {
                 let _ = device.Close();
                 Ok(device_by_id)
             }
-            Err(err) => {
+            None => {
                 log::warn!(
-                    "[embedded-ble] BLE device reopen by id failed, using address handle: {err}"
+                    "[embedded-ble] BLE device reopen by id failed, using address handle"
                 );
                 Ok(device)
             }
@@ -938,13 +960,16 @@ mod windows_ble {
 
     fn open_ota_target_for_service(service_id: &HSTRING) -> Result<OpenOtaTarget, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
-            .map_err(|err| format!("BLE OTA service open failed: {err}"))?
-            .get()
-            .map_err(|err| format!("BLE OTA service open wait failed: {err}"))?;
+            .map_err(|err| format!("BLE OTA service open failed: {err}"))
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA service open"))?;
         let device = service
             .DeviceId()
             .ok()
-            .and_then(|device_id| BluetoothLEDevice::FromIdAsync(&device_id).ok()?.get().ok());
+            .and_then(|device_id| {
+                BluetoothLEDevice::FromIdAsync(&device_id)
+                    .ok()
+                    .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA service device").ok())
+            });
 
         let prepared =
             open_ota_characteristics_from_service(&service, BluetoothCacheMode::Uncached)?;
@@ -961,9 +986,8 @@ mod windows_ble {
 
     fn open_notify_target_for_service(service_id: &HSTRING) -> Result<OpenNotifyTarget, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
-            .map_err(|err| format!("BLE service open failed: {err}"))?
-            .get()
-            .map_err(|err| format!("BLE service open wait failed: {err}"))?;
+            .map_err(|err| format!("BLE service open failed: {err}"))
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "service open"))?;
 
         let prepared =
             open_notify_characteristic_from_service(&service, BluetoothCacheMode::Uncached)?;
@@ -979,9 +1003,10 @@ mod windows_ble {
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
     ) -> Result<PreparedOtaCharacteristics, String> {
-        if let Ok(access) = service
+        if let Some(access) = service
             .RequestAccessAsync()
-            .and_then(|operation| operation.get())
+            .ok()
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA service access").ok())
         {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!("BLE OTA service access denied status={access:?}"));
@@ -1077,9 +1102,10 @@ mod windows_ble {
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
     ) -> Result<PreparedNotifyCharacteristic, String> {
-        if let Ok(access) = service
+        if let Some(access) = service
             .RequestAccessAsync()
-            .and_then(|operation| operation.get())
+            .ok()
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "service access").ok())
         {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!("BLE service access denied status={access:?}"));
@@ -1329,6 +1355,50 @@ mod windows_ble {
         writer
             .DetachBuffer()
             .map_err(|err| format!("BLE buffer detach failed: {err}"))
+    }
+
+    fn wait_async_operation<T: windows::core::RuntimeType>(
+        operation: IAsyncOperation<T>,
+        timeout: Duration,
+        label: &str,
+    ) -> Result<T, String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match operation
+                .Status()
+                .map_err(|err| format!("BLE {label} async status failed: {err}"))?
+            {
+                AsyncStatus::Completed => {
+                    return operation
+                        .GetResults()
+                        .map_err(|err| format!("BLE {label} async result failed: {err}"));
+                }
+                AsyncStatus::Error => {
+                    let code = operation.ErrorCode().ok();
+                    let _ = operation.Close();
+                    return Err(format!("BLE {label} async error: {code:?}"));
+                }
+                AsyncStatus::Canceled => {
+                    let _ = operation.Close();
+                    return Err(format!("BLE {label} async canceled"));
+                }
+                AsyncStatus::Started => {
+                    if Instant::now() >= deadline {
+                        let _ = operation.Cancel();
+                        let _ = operation.Close();
+                        return Err(format!(
+                            "BLE {label} timed out after {} ms",
+                            timeout.as_millis()
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                status => {
+                    let _ = operation.Close();
+                    return Err(format!("BLE {label} unknown async status={status:?}"));
+                }
+            }
+        }
     }
 
     fn wait_gatt_write_result(
@@ -1714,8 +1784,9 @@ pub fn transfer_firmware_ota(
     version: &str,
     firmware_sha256: &str,
     firmware_bytes: &[u8],
+    on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<FirmwareOtaTransferStats, String> {
-    windows_ble::transfer_firmware_ota(version, firmware_sha256, firmware_bytes)
+    windows_ble::transfer_firmware_ota(version, firmware_sha256, firmware_bytes, on_progress)
 }
 
 #[cfg(target_os = "windows")]
@@ -1732,8 +1803,9 @@ impl FirmwareOtaPreparedTransfer {
         version: &str,
         firmware_sha256: &str,
         firmware_bytes: &[u8],
+        on_progress: Option<&dyn Fn(usize, usize)>,
     ) -> Result<FirmwareOtaTransferStats, String> {
-        self.0.transfer(version, firmware_sha256, firmware_bytes)
+        self.0.transfer(version, firmware_sha256, firmware_bytes, on_progress)
     }
 }
 
@@ -1780,6 +1852,7 @@ pub fn transfer_firmware_ota(
     _version: &str,
     _firmware_sha256: &str,
     _firmware_bytes: &[u8],
+    _on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<FirmwareOtaTransferStats, String> {
     Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
 }

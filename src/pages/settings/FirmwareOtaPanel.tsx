@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { listen } from '@tauri-apps/api/event';
 import { APP_VERSION } from '../../lib/appVersion';
 import {
   exportDiagnosticPackage,
@@ -35,11 +36,9 @@ interface SelectedPackage {
 export function FirmwareOtaPanel({
   supported,
   bleStatus,
-  onProbe,
 }: {
   supported: boolean;
   bleStatus: EmbeddedBleProbeStatus;
-  onProbe: () => void;
 }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -101,11 +100,11 @@ export function FirmwareOtaPanel({
     if (!files || files.length === 0) return;
     dispatch({ type: 'check' });
     const selected = Array.from(files);
-    const manifestFile = selected.find(file => file.name === 'ota_manifest.json' || file.name.endsWith('.json'));
-    const firmwareFile = selected.find(file => file.name === 'firmware_ota.bin' || file.name.endsWith('.bin'));
+    const manifestFile = selected.find(file => file.name === 'ota_manifest.json' || (file.name.endsWith('.json') && file.webkitRelativePath.includes('ota_manifest')));
+    const firmwareFile = selected.find(file => file.name === 'firmware_ota.bin' || (file.name.endsWith('.bin') && !file.name.startsWith('.')));
     if (!manifestFile || !firmwareFile) {
       dispatch({ type: 'failed', failureCode: 'manifestMismatch', message: 'Missing ota_manifest.json or firmware_ota.bin.' });
-      setValidationErrors([t('settings.recording.firmwareOtaMissingFiles', '请选择同一目录里的 ota_manifest.json 和 firmware_ota.bin。')]);
+      setValidationErrors([t('settings.recording.firmwareOtaMissingFiles', 'OTA 包目录里需要包含 ota_manifest.json 和 firmware_ota.bin。')]);
       return;
     }
 
@@ -158,12 +157,11 @@ export function FirmwareOtaPanel({
     setBlockers([]);
     try {
       dispatch({ type: 'startTransfer' });
-      let progress = 1;
-      const progressTimer = window.setInterval(() => {
-        progress = Math.min(95, progress + 18);
-        dispatch({ type: 'transferProgress', progress });
-      }, 260);
       let transferResult: Awaited<ReturnType<typeof transferFirmwareOtaBle>> | null = null;
+      const unlisten = await listen<{ chunksSent: number; chunksTotal: number }>('firmware-ota:progress', event => {
+        const pct = Math.round((event.payload.chunksSent / event.payload.chunksTotal) * 100);
+        dispatch({ type: 'transferProgress', progress: Math.min(pct, 99) });
+      });
       try {
         transferResult = await transferFirmwareOtaBle({
           manifest: selectedPackage.manifest,
@@ -171,7 +169,7 @@ export function FirmwareOtaPanel({
           expectedSha256: selectedPackage.firmwareSha256,
         });
       } finally {
-        window.clearInterval(progressTimer);
+        unlisten();
       }
       dispatch({ type: 'transferComplete' });
       await delay(450);
@@ -236,8 +234,7 @@ export function FirmwareOtaPanel({
       <input
         ref={inputRef}
         type="file"
-        multiple
-        accept=".json,.bin,application/json,application/octet-stream"
+        {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
         onChange={event => void onFilesSelected(event.target.files)}
         style={{ display: 'none' }}
       />
@@ -249,14 +246,8 @@ export function FirmwareOtaPanel({
           <Pill tone={statusTone} size="sm">{statusLabel}</Pill>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Btn variant="ghost" size="sm" icon="refresh" onClick={onProbe} disabled={!supported || transferActive}>
-            {t('common.refresh')}
-          </Btn>
-          <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refreshOtaSnapshot()} disabled={!supported || transferActive}>
-            {t('settings.recording.firmwareOtaRefreshReadiness', '刷新升级条件')}
-          </Btn>
           <Btn variant="ghost" size="sm" icon="doc" onClick={() => inputRef.current?.click()} disabled={transferActive}>
-            {t('settings.recording.firmwareOtaChoosePackage', '选择包')}
+            {t('settings.recording.firmwareOtaChoosePackage', '选择 OTA 包目录')}
           </Btn>
           <Btn variant="blue" size="sm" icon="download" onClick={() => void startUpdate()} disabled={!canStart}>
             {t('settings.recording.firmwareOtaStart', '更新')}
@@ -283,16 +274,21 @@ export function FirmwareOtaPanel({
         <FirmwareOtaReadinessSummary snapshot={otaSnapshot} snapshotError={snapshotError} t={t} />
       )}
 
-      {state.userState === 'transferring' && (
-        <div style={{ height: 6, borderRadius: 999, overflow: 'hidden', background: 'var(--ol-control-track)' }}>
-          <div
-            style={{
-              width: `${Math.max(2, state.progress)}%`,
-              height: '100%',
-              background: 'var(--ol-blue)',
-              transition: 'width 0.18s var(--ol-motion-quick)',
-            }}
-          />
+      {(state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying') && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ flex: 1, height: 6, borderRadius: 999, overflow: 'hidden', background: 'var(--ol-control-track)' }}>
+            <div
+              style={{
+                width: `${Math.max(2, state.progress)}%`,
+                height: '100%',
+                background: 'var(--ol-blue)',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+          <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', minWidth: 32, textAlign: 'right' }}>
+            {state.userState === 'transferring' ? `${state.progress}%` : ''}
+          </span>
         </div>
       )}
 

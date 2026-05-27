@@ -1506,6 +1506,7 @@ async fn confirm_firmware_ota_version(expected_version: &str) -> Option<String> 
 
 #[tauri::command]
 pub async fn transfer_firmware_ota_ble(
+    app: AppHandle,
     coord: CoordinatorState<'_>,
     manifest: Value,
     firmware_bytes: Vec<u8>,
@@ -1542,15 +1543,28 @@ pub async fn transfer_firmware_ota_ble(
     let version = manifest.version;
     let transfer_version = version.clone();
     let transfer_sha256 = expected_sha256.clone();
-    let transfer = tauri::async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::transfer_firmware_ota(
-            &transfer_version,
-            &transfer_sha256,
-            &firmware_bytes,
-        )
-    })
+    let app_for_progress = app;
+    let transfer = tokio::time::timeout(
+        Duration::from_secs(180),
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::transfer_firmware_ota(
+                &transfer_version,
+                &transfer_sha256,
+                &firmware_bytes,
+                Some(&|sent, total| {
+                    let _ = app_for_progress.emit("firmware-ota:progress", serde_json::json!({
+                        "chunksSent": sent,
+                        "chunksTotal": total,
+                    }));
+                }),
+            )
+        }),
+    )
     .await
-    .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
+    .map_err(|_| "Listener BLE OTA transfer timed out after 180 seconds".to_string())
+    .and_then(|join_result| {
+        join_result.map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
+    })
     .and_then(|result| result);
     let confirmed_version = if transfer.is_ok() {
         confirm_firmware_ota_version(&version).await

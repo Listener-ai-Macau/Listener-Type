@@ -7,7 +7,6 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../components/Icon';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
-import { detectOS } from '../../components/WindowChrome';
 import {
   getHotkeyBindingCodes,
   getHotkeyBindingLabel,
@@ -22,10 +21,6 @@ import {
   startMicrophoneLevelMonitor,
   stopMicrophoneLevelMonitor,
 } from '../../lib/ipc';
-import {
-  runEmbeddedBleProbeWithTimeout,
-  type EmbeddedBleProbeStatus,
-} from '../../lib/embeddedBleProbe';
 import type {
   DictationInputSource,
   HotkeyBinding,
@@ -37,7 +32,6 @@ import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { SelectLite } from '../../components/ui/SelectLite';
 import { Card, Collapsible } from '../_atoms';
 import { SettingRow, Toggle, inputStyle } from './shared';
-import { FirmwareOtaPanel } from './FirmwareOtaPanel';
 
 // ─── autostart helpers（OS 持有状态，不存 prefs）──────────────────────
 
@@ -849,7 +843,6 @@ export function RecordingSection() {
   const [microphoneDevicesLoaded, setMicrophoneDevicesLoaded] = useState(false);
   const [microphoneDevicesError, setMicrophoneDevicesError] = useState<string | null>(null);
   const [microphonePickerOpen, setMicrophonePickerOpen] = useState(false);
-  const [embeddedBleProbeStatus, setEmbeddedBleProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
   // Wayland 下 rdev 监听不可用（issue #420）。改用 pull 模型：mount 时 invoke 拉状态。
   // 不能依赖一次性 event — Settings 模态是按需 mount，emit 早在 setup 阶段发完了。
   // XDG_SESSION_TYPE 在进程生命周期内不会变，拉一次即可，无需 polling 或 listener。
@@ -1009,17 +1002,6 @@ export function RecordingSection() {
     ? effectiveMicrophoneDeviceName
     : t('settings.recording.microphoneDefault');
   const selectedInputSource = prefs.dictationInputSource ?? 'microphone';
-  const embeddedBleSupported = detectOS() === 'win';
-  const runEmbeddedBleProbe = async () => {
-    if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
-    setEmbeddedBleProbeStatus('checking');
-    try {
-      await runEmbeddedBleProbeWithTimeout();
-      setEmbeddedBleProbeStatus('ok');
-    } catch {
-      setEmbeddedBleProbeStatus('error');
-    }
-  };
 
   return (
     <>
@@ -1076,13 +1058,6 @@ export function RecordingSection() {
           </div>
         </div>
       </SettingRow>
-      {selectedInputSource === 'embeddedBle' && (
-        <FirmwareOtaPanel
-          supported={embeddedBleSupported}
-          bleStatus={embeddedBleProbeStatus}
-          onProbe={() => void runEmbeddedBleProbe()}
-        />
-      )}
       <SettingRow label={t('settings.recording.microphoneLabel')} desc={t('settings.recording.microphoneDesc')}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <button

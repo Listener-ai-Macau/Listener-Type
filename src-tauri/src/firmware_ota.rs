@@ -256,6 +256,7 @@ fn run_transfer_preflight_and_write(
         &package.manifest.version,
         &package.firmware_sha256,
         &package.firmware_bytes,
+        None,
     ) {
         Ok(stats) => HeadlessTransferAttempt {
             preflight,

@@ -24,6 +24,9 @@ import {
   type UpdateChannel,
 } from '../lib/ipc';
 import type { OS } from './WindowChrome';
+import { FirmwareOtaPanel } from '../pages/settings/FirmwareOtaPanel';
+import { runEmbeddedBleProbeWithTimeout, type EmbeddedBleProbeStatus } from '../lib/embeddedBleProbe';
+import { detectOS } from './WindowChrome';
 
 interface SettingsModalProps {
   os: OS;
@@ -313,6 +316,18 @@ function AboutMini() {
   const qqCopiedRef = useRef<number | null>(null);
   const [exportStatus, setExportStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
   const [exportMessage, setExportMessage] = useState<string>('');
+  const [bleProbeStatus, setBleProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
+  const bleSupported = detectOS() === 'win';
+  const runBleProbe = async () => {
+    if (!bleSupported || bleProbeStatus === 'checking') return;
+    setBleProbeStatus('checking');
+    try {
+      await runEmbeddedBleProbeWithTimeout();
+      setBleProbeStatus('ok');
+    } catch {
+      setBleProbeStatus('error');
+    }
+  };
 
   useEffect(() => () => {
     if (qqCopiedRef.current) clearTimeout(qqCopiedRef.current);
@@ -436,6 +451,13 @@ function AboutMini() {
         <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 999, background: 'var(--ol-blue-soft)', color: 'var(--ol-blue)', fontWeight: 500 }}>{t('modal.about.localFirst')}</span>
       </Row>
       <BetaChannelControl />
+      <div style={{ marginTop: 16 }}>
+        <FirmwareOtaPanel
+          supported={bleSupported}
+          bleStatus={bleProbeStatus}
+          onProbe={() => void runBleProbe()}
+        />
+      </div>
     </div>
   );
 }
