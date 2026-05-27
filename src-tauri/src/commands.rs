@@ -14,7 +14,9 @@ use crate::asr::local::foundry::{
     DEFAULT_MODEL_ALIAS, PROVIDER_ID as FOUNDRY_LOCAL_PROVIDER_ID,
 };
 use crate::asr::local::FoundryLocalRuntime;
-use crate::coordinator::Coordinator;
+use crate::coordinator::{
+    Coordinator, EmbeddedBleWakeRecoverySnapshot, FirmwareWakePolicySnapshot,
+};
 use crate::coordinator_state::SessionPhase;
 use crate::permissions::{self, PermissionStatus};
 use crate::persistence::{
@@ -1398,7 +1400,9 @@ pub async fn probe_embedded_audio_ble_subscription(
 pub struct EmbeddedBleRuntimeStatus {
     pub background_listener_disabled_by_env: bool,
     pub background_listener_active: bool,
+    pub background_listener_ready: bool,
     pub background_listener_last_error: Option<String>,
+    pub wake_recovery: EmbeddedBleWakeRecoverySnapshot,
 }
 
 #[tauri::command]
@@ -1408,7 +1412,9 @@ pub fn get_embedded_ble_runtime_status(coord: CoordinatorState<'_>) -> EmbeddedB
             .ok()
             .is_some_and(|value| value == "1"),
         background_listener_active: coord.embedded_ble_listener_active(),
+        background_listener_ready: coord.embedded_ble_listener_ready(),
         background_listener_last_error: coord.embedded_ble_listener_last_error(),
+        wake_recovery: coord.embedded_ble_wake_recovery_snapshot(),
     }
 }
 
@@ -2646,6 +2652,7 @@ struct DiagnosticFirmware {
     protocol: &'static str,
     protocol_version: Option<u32>,
     readiness: Option<Value>,
+    wake_policy: FirmwareWakePolicySnapshot,
     source: &'static str,
 }
 
@@ -2655,7 +2662,13 @@ struct DiagnosticBle {
     input_source: Value,
     enabled_by_input_source: bool,
     background_listener_disabled_by_env: bool,
+    background_listener_active: bool,
+    background_listener_ready: bool,
     service_uuid: &'static str,
+    recent_disconnect_reason: Option<String>,
+    reconnect_attempts: u32,
+    notify_subscription_state: String,
+    wake_recovery: EmbeddedBleWakeRecoverySnapshot,
     recent_embedded_session_count: usize,
     latest_session_id: Option<String>,
     last_error_code: Option<String>,
@@ -2757,9 +2770,10 @@ fn build_diagnostic_package(coord: &Arc<Coordinator>) -> Result<DiagnosticPackag
     let log_lines = read_diagnostic_log_tail(600);
     let timeline = diagnostic_timeline(&log_lines, 80);
     let recent_errors = diagnostic_recent_errors(&log_lines, 40);
+    let wake_recovery = coord.embedded_ble_wake_recovery_snapshot();
 
     Ok(DiagnosticPackage {
-        schema_version: 1,
+        schema_version: 2,
         generated_at: chrono::Utc::now().to_rfc3339(),
         app: DiagnosticApp {
             product_name: "Listener Type",
@@ -2786,8 +2800,9 @@ fn build_diagnostic_package(coord: &Arc<Coordinator>) -> Result<DiagnosticPackag
             version: None,
             protocol: "VKA1 BLE audio",
             protocol_version: Some(1),
-            readiness: None,
-            source: "Desktop exporter has no firmware DIS/readiness query yet; 3.2 adds factory firmware identity and 4.2 expands BLE diagnostics.",
+            readiness: Some(diagnostic_value(&wake_recovery.firmware_wake_policy)),
+            wake_policy: wake_recovery.firmware_wake_policy.clone(),
+            source: "Desktop readiness includes the accepted firmware 1.1 wake-policy contract; live DIS/readiness is populated by OTA preflight when available.",
         },
         ble: DiagnosticBle {
             input_source: diagnostic_value(&prefs.dictation_input_source),
@@ -2798,7 +2813,13 @@ fn build_diagnostic_package(coord: &Arc<Coordinator>) -> Result<DiagnosticPackag
             background_listener_disabled_by_env: std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
                 .ok()
                 .is_some_and(|value| value == "1"),
+            background_listener_active: coord.embedded_ble_listener_active(),
+            background_listener_ready: coord.embedded_ble_listener_ready(),
             service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
+            recent_disconnect_reason: wake_recovery.recent_disconnect_reason.clone(),
+            reconnect_attempts: wake_recovery.reconnect_attempts,
+            notify_subscription_state: format!("{:?}", wake_recovery.notify_subscription_state),
+            wake_recovery,
             recent_embedded_session_count: embedded_sessions.len(),
             latest_session_id: latest_embedded.map(|session| session.id.clone()),
             last_error_code: recent_sessions
@@ -3621,6 +3642,7 @@ mod tests {
         parse_model_ids, persist_settings, sanitize_diagnostic_log_line,
         validate_foundry_model_alias, ProviderConfig, SettingsWriter,
     };
+    use crate::coordinator::Coordinator;
     use crate::embedded_audio::{SessionEndReason, SessionErrorCode, SessionStats};
     use crate::embedded_ble::FirmwareOtaDeviceSnapshot;
     use crate::persistence::CredentialsSnapshot;
@@ -3631,7 +3653,7 @@ mod tests {
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
     use std::thread;
 
     fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
@@ -3777,6 +3799,31 @@ mod tests {
         assert!(value.get("rawTranscript").is_none());
         assert!(value.get("finalText").is_none());
         assert!(!value.to_string().contains("do not export"));
+    }
+
+    #[test]
+    fn diagnostic_package_includes_ble_wake_recovery_without_sensitive_text() {
+        let coordinator = Arc::new(Coordinator::new());
+        let package = super::build_diagnostic_package(&coordinator).expect("diagnostic package");
+        let value = serde_json::to_value(&package).expect("serialize diagnostic package");
+
+        assert_eq!(value["schemaVersion"], 2);
+        assert_eq!(value["firmware"]["wakePolicy"]["policy"], "key4_only");
+        assert_eq!(
+            value["firmware"]["wakePolicy"]["voiceKeyDeepSleepWake"],
+            false
+        );
+        assert!(value["ble"]["reconnectAttempts"].is_number());
+        assert!(value["ble"]["notifySubscriptionState"].is_string());
+        assert!(
+            value["ble"]["wakeRecovery"]["firmwareWakePolicy"]["readiness"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("voice_key_cannot_wake")
+        );
+        assert_eq!(value["privacy"]["excludesRawTranscripts"], true);
+        assert_eq!(value["privacy"]["excludesApiKeyValues"], true);
+        assert!(!value.to_string().to_lowercase().contains("api_key\":\""));
     }
 
     #[test]

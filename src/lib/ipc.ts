@@ -770,7 +770,29 @@ export function getEmbeddedBleRuntimeStatus(): Promise<EmbeddedBleRuntimeStatus>
   return invokeOrMock(
     'get_embedded_ble_runtime_status',
     undefined,
-    () => ({ backgroundListenerDisabledByEnv: false, backgroundListenerActive: true, backgroundListenerLastError: null }),
+    () => ({
+      backgroundListenerDisabledByEnv: false,
+      backgroundListenerActive: true,
+      backgroundListenerReady: true,
+      backgroundListenerLastError: null,
+      wakeRecovery: {
+        status: 'ready',
+        userGuidance: 'Listener BLE 已连接，音频 notify 已订阅。',
+        recentDisconnectReason: null,
+        reconnectAttempts: 1,
+        notifySubscriptionState: 'subscribed',
+        firmwareWakePolicy: {
+          policy: 'key4_only',
+          wakeCapableKeys: 'KEY4/GPIO21',
+          voiceKey: 'GPIO35',
+          voiceKeyDeepSleepWake: false,
+          readiness: 'voice_key_cannot_wake_from_deep_sleep_on_current_v1_board',
+          source: 'Mock firmware wake-policy contract',
+        },
+        lastAttemptAt: null,
+        lastReadyAt: new Date().toISOString(),
+      },
+    }),
   );
 }
 

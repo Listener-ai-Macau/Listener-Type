@@ -14,6 +14,7 @@ export function EmbeddedBleStatusPanel({
   onProbe,
   onOpenRecordingSettings,
   onUseMicrophone,
+  onExportDiagnostics,
 }: {
   supported: boolean;
   status: EmbeddedBleProbeStatus;
@@ -22,6 +23,7 @@ export function EmbeddedBleStatusPanel({
   onProbe: () => void;
   onOpenRecordingSettings?: () => void;
   onUseMicrophone?: () => void;
+  onExportDiagnostics?: () => void;
 }) {
   const { t } = useTranslation();
   const checking = status === 'checking';
@@ -104,6 +106,11 @@ export function EmbeddedBleStatusPanel({
             {supported && status === 'error' && onUseMicrophone && (
               <Btn variant="soft" size="sm" icon="mic" onClick={onUseMicrophone}>
                 {t('settings.recording.embeddedBleUseMicrophone')}
+              </Btn>
+            )}
+            {supported && status === 'error' && onExportDiagnostics && (
+              <Btn variant="soft" size="sm" icon="doc" onClick={onExportDiagnostics}>
+                {t('modal.about.exportDiagnosticPackageBtn')}
               </Btn>
             )}
           </div>

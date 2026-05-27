@@ -69,7 +69,44 @@ export interface EmbeddedAudioSubmissionResult {
 export interface EmbeddedBleRuntimeStatus {
   backgroundListenerDisabledByEnv: boolean;
   backgroundListenerActive: boolean;
+  backgroundListenerReady: boolean;
   backgroundListenerLastError: string | null;
+  wakeRecovery: EmbeddedBleWakeRecoverySnapshot;
+}
+
+export type EmbeddedBleWakeRecoveryStatus =
+  | 'idle'
+  | 'reconnecting'
+  | 'ready'
+  | 'needsWakeKey'
+  | 'failed';
+
+export type EmbeddedBleNotifySubscriptionState =
+  | 'unknown'
+  | 'opening'
+  | 'subscribed'
+  | 'lost'
+  | 'failed'
+  | 'cancelled';
+
+export interface FirmwareWakePolicySnapshot {
+  policy: string;
+  wakeCapableKeys: string;
+  voiceKey: string;
+  voiceKeyDeepSleepWake: boolean;
+  readiness: string;
+  source: string;
+}
+
+export interface EmbeddedBleWakeRecoverySnapshot {
+  status: EmbeddedBleWakeRecoveryStatus;
+  userGuidance: string;
+  recentDisconnectReason: string | null;
+  reconnectAttempts: number;
+  notifySubscriptionState: EmbeddedBleNotifySubscriptionState;
+  firmwareWakePolicy: FirmwareWakePolicySnapshot;
+  lastAttemptAt: string | null;
+  lastReadyAt: string | null;
 }
 
 export type EmbeddedAudioInputFormat = 'wav' | 'pcm16le';
