@@ -16,6 +16,20 @@ Implemented a shared Rust firmware OTA package validator and headless release-ga
 
 The firmware OTA CLI path runs before Tauri UI initialization and exits with a process status code, so `listener-type --firmware-ota-*` can be used as a headless release-gate command without opening the app UI.
 
+## OAI Rework
+
+Date: 2026-05-27T10:30+08:00
+
+Worktree: `C:\Users\Billy\Desktop\listener\Listener-Type-wt-oai-listener-type-ota-headless-validation-1.1`
+
+Branch: `ai/oai-listener-type-ota-headless-validation-1.1`
+
+Reviewer-requested test gaps were closed in `tools\firmware_ota_headless\src\main.rs`:
+
+- Added `load_package_reports_missing_manifest_path` for missing `ota_manifest.json`.
+- Added `load_package_reports_missing_firmware_binary_path` for missing `firmware_ota.bin`.
+- Added `preflight_only_reports_no_hardware_fail_without_transfer` for standalone preflight-only/no-hardware behavior, asserting a clear `FAIL`, package validity, populated preflight blockers, and no transfer result.
+
 ## Package Evidence
 
 Validated OTA package:
@@ -33,7 +47,7 @@ Validated OTA package:
 | `npm ci` | PASS, installed local worktree dependencies. |
 | `npm run build` | PASS, `tsc && vite build`; generated ignored `dist/` needed by Tauri macros. |
 | `npm run test:firmware-ota` | PASS. |
-| `cargo test --manifest-path tools\firmware_ota_headless\Cargo.toml` | PASS, 7 tests. |
+| `cargo test --manifest-path tools\firmware_ota_headless\Cargo.toml` | PASS, 10 tests after OAI rework. |
 | `cargo test --manifest-path src-tauri\Cargo.toml firmware_ota --lib` | PASS, 11 tests. |
 | `cargo check --manifest-path src-tauri\Cargo.toml` | PASS. |
 | `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check` | PASS. |

@@ -172,6 +172,87 @@ fn next_value(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    const FIRMWARE_BYTES: &[u8] = &[0xe9, 1, 2, 3, 4, 5];
+    const FIRMWARE_SHA256: &str =
+        "6d3841935f58db1c3efa67022f2d770184be6fdef93c087bca10c30e70157e84";
+
+    fn validation_context() -> firmware_ota::FirmwareOtaValidationContext {
+        firmware_ota::FirmwareOtaValidationContext {
+            desktop_version: "1.3.3".to_string(),
+            expected_hardware_revision: "keyboard-v1".to_string(),
+            current_firmware_version: None,
+        }
+    }
+
+    fn manifest_v2() -> String {
+        format!(
+            r#"{{
+  "schema_version": 2,
+  "created_at_utc": "2026-05-26T00:00:00Z",
+  "channel": "internal-test",
+  "firmware": {{
+    "project": "voice-keyboard-firmware",
+    "version": "1.2.0",
+    "git_commit": "{git_commit}",
+    "git_dirty": false,
+    "target": "esp32s3",
+    "file": "firmware_ota.bin",
+    "size_bytes": 6,
+    "sha256": "{FIRMWARE_SHA256}"
+  }},
+  "requirements": {{
+    "hardware_revision": "keyboard-v1",
+    "protocol_version": 1,
+    "min_desktop_version": "1.3.3"
+  }},
+  "ble_identity": {{
+    "name": "listener",
+    "appearance": "0x03C1",
+    "dis": {{
+      "model": "keyboard-v1",
+      "hardware_revision": "esp32s3-devkit",
+      "firmware_revision": "1.2.0"
+    }}
+  }},
+  "rollback": {{
+    "supported": true,
+    "method": "esp_idf_bootloader_rollback",
+    "instructions": "Rollback on failed pending verify."
+  }},
+  "recovery": {{
+    "factory_reflash": "Use USB factory package.",
+    "serial_commands": "~OTA:STATUS"
+  }}
+}}"#,
+            git_commit = "a".repeat(40)
+        )
+    }
+
+    fn temp_package_dir(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after unix epoch")
+            .as_nanos();
+        let path = env::temp_dir().join(format!(
+            "listener_firmware_ota_headless_{test_name}_{}_{}",
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir_all(&path).expect("create temp package dir");
+        path
+    }
+
+    fn write_valid_package(test_name: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let dir = temp_package_dir(test_name);
+        let manifest_path = dir.join("ota_manifest.json");
+        let firmware_path = dir.join("firmware_ota.bin");
+        fs::write(&manifest_path, manifest_v2()).expect("write manifest");
+        fs::write(&firmware_path, FIRMWARE_BYTES).expect("write firmware");
+        (dir, manifest_path, firmware_path)
+    }
 
     #[test]
     fn parse_requires_manifest_and_firmware() {
@@ -203,5 +284,88 @@ mod tests {
         assert_eq!(args.expected_hardware_revision, "keyboard-v1");
         assert_eq!(args.current_firmware_version.as_deref(), Some("1.2.0"));
         assert!(args.preflight);
+    }
+
+    #[test]
+    fn load_package_reports_missing_manifest_path() {
+        let dir = temp_package_dir("missing_manifest");
+        let manifest_path = dir.join("ota_manifest.json");
+        let firmware_path = dir.join("firmware_ota.bin");
+        fs::write(&firmware_path, FIRMWARE_BYTES).expect("write firmware");
+
+        let result =
+            firmware_ota::load_package(&manifest_path, &firmware_path, &validation_context());
+
+        let validation = result.expect_err("missing manifest should fail package loading");
+        assert!(!validation.ok);
+        assert!(validation.manifest.is_none());
+        assert!(validation.firmware_sha256.is_none());
+        assert!(validation
+            .errors
+            .iter()
+            .any(|item| item.contains("Failed to read ota_manifest.json")));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_package_reports_missing_firmware_binary_path() {
+        let dir = temp_package_dir("missing_firmware");
+        let manifest_path = dir.join("ota_manifest.json");
+        let firmware_path = dir.join("firmware_ota.bin");
+        fs::write(&manifest_path, manifest_v2()).expect("write manifest");
+
+        let result =
+            firmware_ota::load_package(&manifest_path, &firmware_path, &validation_context());
+
+        let validation = result.expect_err("missing firmware should fail package loading");
+        assert!(!validation.ok);
+        assert!(validation.manifest.is_none());
+        assert!(validation.firmware_sha256.is_none());
+        assert!(validation
+            .errors
+            .iter()
+            .any(|item| item.contains("Failed to read firmware_ota.bin")));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn preflight_only_reports_no_hardware_fail_without_transfer() {
+        let (dir, manifest_path, firmware_path) = write_valid_package("preflight_no_hardware");
+
+        let report = firmware_ota::run_headless(FirmwareOtaHeadlessOptions {
+            manifest_path,
+            firmware_path,
+            preflight_only: true,
+            transfer: false,
+            desktop_version: "1.3.3".to_string(),
+            expected_hardware_revision: "keyboard-v1".to_string(),
+            current_firmware_version: None,
+            recording_active: false,
+            dictation_phase: Some("HeadlessTest".to_string()),
+        })
+        .await;
+
+        assert_eq!(report.status, "FAIL");
+        assert_eq!(report.mode, "preflight");
+        assert!(report.package_valid);
+        assert!(report.transfer.is_none());
+        assert_eq!(report.firmware_sha256.as_deref(), Some(FIRMWARE_SHA256));
+        assert!(report
+            .errors
+            .iter()
+            .any(|item| item.contains("Device is not ready for OTA")));
+
+        let preflight = report.preflight.expect("preflight report");
+        assert!(!preflight.connected);
+        assert_eq!(preflight.dictation_phase.as_deref(), Some("HeadlessTest"));
+        assert!(preflight
+            .detail
+            .as_deref()
+            .is_some_and(|item| item.contains("Standalone headless helper")));
+        assert!(preflight
+            .blockers
+            .iter()
+            .any(|item| item.contains("Device is not ready for OTA")));
+        let _ = fs::remove_dir_all(dir);
     }
 }
