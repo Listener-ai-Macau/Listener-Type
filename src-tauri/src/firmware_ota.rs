@@ -123,9 +123,9 @@ pub struct FirmwareOtaHeadlessOptions {
 pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHeadlessReport {
     let mode = mode_name(&options).to_string();
     let context = FirmwareOtaValidationContext {
-        desktop_version: options.desktop_version,
-        expected_hardware_revision: options.expected_hardware_revision,
-        current_firmware_version: options.current_firmware_version,
+        desktop_version: options.desktop_version.clone(),
+        expected_hardware_revision: options.expected_hardware_revision.clone(),
+        current_firmware_version: options.current_firmware_version.clone(),
     };
     let package = match load_package(&options.manifest_path, &options.firmware_path, &context) {
         Ok(package) => package,
@@ -151,70 +151,55 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
     let mut preflight = None;
     let mut transfer = None;
 
-    if options.preflight_only || options.transfer {
+    if options.transfer {
+        let attempt = run_transfer_preflight_and_write(&package, &options);
+        preflight = Some(attempt.preflight);
+        errors.extend(attempt.errors);
+        if let Some(stats) = attempt.stats {
+            let expected_version = package.manifest.version.clone();
+            let confirmed_version = confirm_firmware_ota_version_with(
+                &expected_version,
+                DEFAULT_CONFIRM_TIMEOUT,
+                || async {
+                    let snapshot = crate::embedded_ble::firmware_ota_device_snapshot();
+                    firmware_ota_snapshot_version(snapshot.firmware_version.as_deref())
+                },
+            )
+            .await;
+            let version_confirmed = confirmed_version
+                .as_deref()
+                .is_some_and(|version| firmware_ota_versions_match(version, &expected_version));
+            if !version_confirmed {
+                errors.push(
+                    confirmed_version
+                        .as_ref()
+                        .map(|version| {
+                            format!(
+                                "Device reported firmware {version}, not {expected_version} after OTA reboot window."
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            "Device firmware version was not confirmed after the OTA reboot window."
+                                .to_string()
+                        }),
+                );
+            }
+            transfer = Some(FirmwareOtaHeadlessTransfer {
+                bytes_transferred: stats.bytes_transferred,
+                transport: stats.transport.to_string(),
+                confirmed_version,
+                version_confirmed,
+            });
+        }
+    } else if options.preflight_only {
         let snapshot = crate::embedded_ble::firmware_ota_device_snapshot();
         let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
-        if (options.preflight_only || options.transfer) && !blockers.is_empty() {
+        if !blockers.is_empty() {
             errors.extend(blockers.iter().cloned());
         }
-        preflight = Some(FirmwareOtaHeadlessPreflight {
-            recording_active: options.recording_active,
-            dictation_phase: options.dictation_phase.clone(),
-            connected: snapshot.connected,
-            hardware_revision: snapshot.hardware_revision,
-            firmware_version: snapshot.firmware_version,
-            capabilities: snapshot.capabilities,
-            battery_percent: snapshot.battery_percent,
-            usb_powered: snapshot.usb_powered,
-            detail: snapshot.detail,
-            blockers,
-        });
-    }
-
-    if options.transfer && errors.is_empty() {
-        match crate::embedded_ble::transfer_firmware_ota(
-            &package.manifest.version,
-            &package.firmware_sha256,
-            &package.firmware_bytes,
-        ) {
-            Ok(stats) => {
-                let expected_version = package.manifest.version.clone();
-                let confirmed_version = confirm_firmware_ota_version_with(
-                    &expected_version,
-                    DEFAULT_CONFIRM_TIMEOUT,
-                    || async {
-                        let snapshot = crate::embedded_ble::firmware_ota_device_snapshot();
-                        firmware_ota_snapshot_version(snapshot.firmware_version.as_deref())
-                    },
-                )
-                .await;
-                let version_confirmed = confirmed_version
-                    .as_deref()
-                    .is_some_and(|version| firmware_ota_versions_match(version, &expected_version));
-                if !version_confirmed {
-                    errors.push(
-                        confirmed_version
-                            .as_ref()
-                            .map(|version| {
-                                format!(
-                                    "Device reported firmware {version}, not {expected_version} after OTA reboot window."
-                                )
-                            })
-                            .unwrap_or_else(|| {
-                                "Device firmware version was not confirmed after the OTA reboot window."
-                                    .to_string()
-                            }),
-                    );
-                }
-                transfer = Some(FirmwareOtaHeadlessTransfer {
-                    bytes_transferred: stats.bytes_transferred,
-                    transport: stats.transport.to_string(),
-                    confirmed_version,
-                    version_confirmed,
-                });
-            }
-            Err(err) => errors.push(err),
-        }
+        preflight = Some(headless_preflight_from_snapshot(
+            &options, snapshot, blockers,
+        ));
     }
 
     FirmwareOtaHeadlessReport {
@@ -229,6 +214,90 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
         transfer,
         errors,
         warnings,
+    }
+}
+
+struct HeadlessTransferAttempt {
+    preflight: FirmwareOtaHeadlessPreflight,
+    stats: Option<crate::embedded_ble::FirmwareOtaTransferStats>,
+    errors: Vec<String>,
+}
+
+fn run_transfer_preflight_and_write(
+    package: &FirmwareOtaPackage,
+    options: &FirmwareOtaHeadlessOptions,
+) -> HeadlessTransferAttempt {
+    let prepared = match crate::embedded_ble::prepare_firmware_ota_transfer() {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            let snapshot = disconnected_ota_snapshot(err);
+            let blockers =
+                preflight_blockers(&package.manifest, &snapshot, options.recording_active);
+            return HeadlessTransferAttempt {
+                preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
+                stats: None,
+                errors: blockers,
+            };
+        }
+    };
+
+    let snapshot = prepared.snapshot().clone();
+    let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
+    let preflight = headless_preflight_from_snapshot(options, snapshot, blockers.clone());
+    if !blockers.is_empty() {
+        return HeadlessTransferAttempt {
+            preflight,
+            stats: None,
+            errors: blockers,
+        };
+    }
+
+    match prepared.transfer(
+        &package.manifest.version,
+        &package.firmware_sha256,
+        &package.firmware_bytes,
+    ) {
+        Ok(stats) => HeadlessTransferAttempt {
+            preflight,
+            stats: Some(stats),
+            errors: Vec::new(),
+        },
+        Err(err) => HeadlessTransferAttempt {
+            preflight,
+            stats: None,
+            errors: vec![err],
+        },
+    }
+}
+
+fn disconnected_ota_snapshot(detail: String) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+    crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        connected: false,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: Vec::new(),
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some(detail),
+    }
+}
+
+fn headless_preflight_from_snapshot(
+    options: &FirmwareOtaHeadlessOptions,
+    snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+    blockers: Vec<String>,
+) -> FirmwareOtaHeadlessPreflight {
+    FirmwareOtaHeadlessPreflight {
+        recording_active: options.recording_active,
+        dictation_phase: options.dictation_phase.clone(),
+        connected: snapshot.connected,
+        hardware_revision: snapshot.hardware_revision,
+        firmware_version: snapshot.firmware_version,
+        capabilities: snapshot.capabilities,
+        battery_percent: snapshot.battery_percent,
+        usb_powered: snapshot.usb_powered,
+        detail: snapshot.detail,
+        blockers,
     }
 }
 

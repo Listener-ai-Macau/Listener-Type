@@ -109,6 +109,8 @@ mod windows_ble {
     ];
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
     const OTA_CHUNK_BYTES: usize = 180;
+    const ATT_WRITE_HEADER_BYTES: usize = 3;
+    const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
 
     pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
         let mut notifications = Vec::new();
@@ -315,6 +317,76 @@ mod windows_ble {
         }
     }
 
+    pub(super) struct PreparedFirmwareOtaTransfer {
+        target: OpenOtaTarget,
+        snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+        transfer_guard: BleCaptureGuard,
+        _keepalive: OtaBleKeepalive,
+    }
+
+    impl PreparedFirmwareOtaTransfer {
+        pub(super) fn snapshot(&self) -> &crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+            &self.snapshot
+        }
+
+        pub(super) fn transfer(
+            self,
+            version: &str,
+            firmware_sha256: &str,
+            firmware_bytes: &[u8],
+        ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
+            transfer_firmware_ota_to_target(
+                &self.target,
+                self.transfer_guard.session_id(),
+                version,
+                firmware_sha256,
+                firmware_bytes,
+            )
+        }
+    }
+
+    pub(super) fn prepare_firmware_ota_transfer() -> Result<PreparedFirmwareOtaTransfer, String> {
+        let transfer_guard = BleCaptureGuard::enter(None)?;
+        let keepalive = open_ota_ble_keepalive(transfer_guard.session_id())?;
+        let target = open_ota_target()?;
+        let snapshot = firmware_ota_device_snapshot_from_target(&target);
+        Ok(PreparedFirmwareOtaTransfer {
+            target,
+            snapshot,
+            transfer_guard,
+            _keepalive: keepalive,
+        })
+    }
+
+    fn open_ota_ble_keepalive(capture_id: u64) -> Result<OtaBleKeepalive, String> {
+        log::info!("[embedded-ble] ota #{capture_id}: opening notify keepalive");
+        let target = open_notify_target()?;
+        let characteristic = target.characteristic.clone();
+        let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
+            |_sender, _args| Ok(()),
+        );
+        let mut cleanup = NotifyCleanup::new(capture_id, target);
+        let token = characteristic.ValueChanged(&handler).map_err(|err| {
+            format!("BLE OTA keepalive ValueChanged handler registration failed: {err}")
+        })?;
+        cleanup.set_token(token);
+        log::info!("[embedded-ble] ota #{capture_id}: notify keepalive handler registered");
+
+        let status = write_cccd_notify_with_retry(
+            capture_id,
+            "ota keepalive",
+            &characteristic,
+            CCCD_ENABLE_TIMEOUT,
+        )?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!(
+                "BLE OTA keepalive CCCD notify write returned status={status:?}"
+            ));
+        }
+        log::info!("[embedded-ble] ota #{capture_id}: notify keepalive enabled");
+        Ok(OtaBleKeepalive { _cleanup: cleanup })
+    }
+
     pub fn transfer_firmware_ota(
         version: &str,
         firmware_sha256: &str,
@@ -324,9 +396,21 @@ mod windows_ble {
             return Err("firmware_ota.bin is empty.".to_string());
         }
 
-        let transfer_guard = BleCaptureGuard::enter(None)?;
-        let transfer_id = transfer_guard.session_id();
-        let target = open_ota_target()?;
+        let prepared = prepare_firmware_ota_transfer()?;
+        prepared.transfer(version, firmware_sha256, firmware_bytes)
+    }
+
+    fn transfer_firmware_ota_to_target(
+        target: &OpenOtaTarget,
+        transfer_id: u64,
+        version: &str,
+        firmware_sha256: &str,
+        firmware_bytes: &[u8],
+    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
+        if firmware_bytes.is_empty() {
+            return Err("firmware_ota.bin is empty.".to_string());
+        }
+
         let begin = format!(
             "{{\"op\":\"begin\",\"version\":\"{}\",\"size\":{},\"sha256\":\"{}\"}}\n",
             json_escape(version),
@@ -342,7 +426,7 @@ mod windows_ble {
         )?;
 
         let mut chunks_sent = 0usize;
-        for chunk in firmware_bytes.chunks(OTA_CHUNK_BYTES) {
+        for chunk in firmware_bytes.chunks(target.data_chunk_bytes) {
             write_gatt_value_with_timeout(
                 &target.data,
                 chunk,
@@ -378,41 +462,7 @@ mod windows_ble {
 
     pub fn firmware_ota_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         match open_ota_target() {
-            Ok(target) => {
-                let mut snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-                    connected: true,
-                    hardware_revision: None,
-                    firmware_version: None,
-                    capabilities: vec!["firmware_ota_v1".to_string()],
-                    battery_percent: None,
-                    usb_powered: None,
-                    detail: None,
-                };
-                if let Some(device) = target.device.as_ref() {
-                    let model = read_optional_string_characteristic(
-                        device,
-                        DIS_SERVICE_UUID,
-                        DIS_MODEL_NUMBER_UUID,
-                    );
-                    let hardware = read_optional_string_characteristic(
-                        device,
-                        DIS_SERVICE_UUID,
-                        DIS_HARDWARE_REVISION_UUID,
-                    );
-                    snapshot.hardware_revision = model.or(hardware);
-                    snapshot.firmware_version = read_optional_string_characteristic(
-                        device,
-                        DIS_SERVICE_UUID,
-                        DIS_FIRMWARE_REVISION_UUID,
-                    );
-                    snapshot.battery_percent = read_optional_u8_characteristic(
-                        device,
-                        BATTERY_SERVICE_UUID,
-                        BATTERY_LEVEL_UUID,
-                    );
-                }
-                snapshot
-            }
+            Ok(target) => firmware_ota_device_snapshot_from_target(&target),
             Err(err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
                 connected: false,
                 hardware_revision: None,
@@ -423,6 +473,41 @@ mod windows_ble {
                 detail: Some(err),
             },
         }
+    }
+
+    fn firmware_ota_device_snapshot_from_target(
+        target: &OpenOtaTarget,
+    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        let mut snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+            connected: true,
+            hardware_revision: None,
+            firmware_version: None,
+            capabilities: vec!["firmware_ota_v1".to_string()],
+            battery_percent: None,
+            usb_powered: None,
+            detail: None,
+        };
+        if let Some(device) = target.device.as_ref() {
+            let model = read_optional_string_characteristic(
+                device,
+                DIS_SERVICE_UUID,
+                DIS_MODEL_NUMBER_UUID,
+            );
+            let hardware = read_optional_string_characteristic(
+                device,
+                DIS_SERVICE_UUID,
+                DIS_HARDWARE_REVISION_UUID,
+            );
+            snapshot.hardware_revision = model.or(hardware);
+            snapshot.firmware_version = read_optional_string_characteristic(
+                device,
+                DIS_SERVICE_UUID,
+                DIS_FIRMWARE_REVISION_UUID,
+            );
+            snapshot.battery_percent =
+                read_optional_u8_characteristic(device, BATTERY_SERVICE_UUID, BATTERY_LEVEL_UUID);
+        }
+        snapshot
     }
 
     fn open_notify_target() -> Result<OpenNotifyTarget, String> {
@@ -722,6 +807,7 @@ mod windows_ble {
                             control: prepared.control,
                             data: prepared.data,
                             data_write_option: prepared.data_write_option,
+                            data_chunk_bytes: prepared.data_chunk_bytes,
                             service: Some(service),
                             session: prepared.session,
                             device: Some(device),
@@ -866,6 +952,7 @@ mod windows_ble {
             control: prepared.control,
             data: prepared.data,
             data_write_option: prepared.data_write_option,
+            data_chunk_bytes: prepared.data_chunk_bytes,
             service: Some(service),
             session: prepared.session,
             device,
@@ -912,18 +999,34 @@ mod windows_ble {
         let data_properties = data
             .CharacteristicProperties()
             .map_err(|err| format!("BLE OTA data characteristic properties read failed: {err}"))?;
-        let data_write_option =
-            if data_properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
-                GattWriteOption::WriteWithoutResponse
-            } else {
-                GattWriteOption::WriteWithResponse
-            };
+        let data_write_option = if data_properties.contains(GattCharacteristicProperties::Write) {
+            GattWriteOption::WriteWithResponse
+        } else {
+            GattWriteOption::WriteWithoutResponse
+        };
+        let data_chunk_bytes = ota_data_chunk_bytes(session.as_ref(), data_write_option);
+        log::info!(
+            "[embedded-ble] OTA data write option={data_write_option:?} chunk_bytes={data_chunk_bytes}"
+        );
         Ok(PreparedOtaCharacteristics {
             control,
             data,
             data_write_option,
+            data_chunk_bytes,
             session,
         })
+    }
+
+    fn ota_data_chunk_bytes(session: Option<&GattSession>, write_option: GattWriteOption) -> usize {
+        let payload_bytes = session
+            .and_then(|session| session.MaxPduSize().ok())
+            .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
+            .filter(|payload_bytes| *payload_bytes > 0)
+            .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
+        if write_option == GattWriteOption::WriteWithoutResponse {
+            return payload_bytes.min(ATT_DEFAULT_PAYLOAD_BYTES).max(1);
+        }
+        payload_bytes.min(OTA_CHUNK_BYTES).max(1)
     }
 
     fn open_write_characteristic_from_service(
@@ -1187,6 +1290,17 @@ mod windows_ble {
         label: &str,
     ) -> Result<GattCommunicationStatus, String> {
         let buffer = bytes_to_buffer(bytes)?;
+        if write_option == GattWriteOption::WriteWithoutResponse {
+            let operation = characteristic
+                .WriteValueWithOptionAsync(&buffer, write_option)
+                .map_err(|err| format!("BLE {label} write failed: {err}"))?;
+            let status = wait_gatt_communication_status(operation, timeout, label)?;
+            if status != GattCommunicationStatus::Success {
+                return Err(format!("BLE {label} write returned status={status:?}"));
+            }
+            return Ok(status);
+        }
+
         let operation = characteristic
             .WriteValueWithResultAndOptionAsync(&buffer, write_option)
             .map_err(|err| format!("BLE {label} write failed: {err}"))?;
@@ -1222,6 +1336,50 @@ mod windows_ble {
         timeout: Duration,
         label: &str,
     ) -> Result<GattWriteResult, String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match operation
+                .Status()
+                .map_err(|err| format!("BLE {label} write async status failed: {err}"))?
+            {
+                AsyncStatus::Completed => {
+                    return operation
+                        .GetResults()
+                        .map_err(|err| format!("BLE {label} write result failed: {err}"));
+                }
+                AsyncStatus::Error => {
+                    let code = operation.ErrorCode().ok();
+                    let _ = operation.Close();
+                    return Err(format!("BLE {label} write async error: {code:?}"));
+                }
+                AsyncStatus::Canceled => {
+                    let _ = operation.Close();
+                    return Err(format!("BLE {label} write async canceled"));
+                }
+                AsyncStatus::Started => {
+                    if Instant::now() >= deadline {
+                        let _ = operation.Cancel();
+                        let _ = operation.Close();
+                        return Err(format!(
+                            "BLE {label} write timed out after {} ms",
+                            timeout.as_millis()
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                status => {
+                    let _ = operation.Close();
+                    return Err(format!("BLE {label} write unknown async status={status:?}"));
+                }
+            }
+        }
+    }
+
+    fn wait_gatt_communication_status(
+        operation: IAsyncOperation<GattCommunicationStatus>,
+        timeout: Duration,
+        label: &str,
+    ) -> Result<GattCommunicationStatus, String> {
         let deadline = Instant::now() + timeout;
         loop {
             match operation
@@ -1356,6 +1514,7 @@ mod windows_ble {
         control: GattCharacteristic,
         data: GattCharacteristic,
         data_write_option: GattWriteOption,
+        data_chunk_bytes: usize,
         service: Option<GattDeviceService>,
         session: Option<GattSession>,
         device: Option<BluetoothLEDevice>,
@@ -1365,7 +1524,12 @@ mod windows_ble {
         control: GattCharacteristic,
         data: GattCharacteristic,
         data_write_option: GattWriteOption,
+        data_chunk_bytes: usize,
         session: Option<GattSession>,
+    }
+
+    struct OtaBleKeepalive {
+        _cleanup: NotifyCleanup,
     }
 
     impl Drop for OpenOtaTarget {
@@ -1555,6 +1719,30 @@ pub fn transfer_firmware_ota(
 }
 
 #[cfg(target_os = "windows")]
+pub struct FirmwareOtaPreparedTransfer(windows_ble::PreparedFirmwareOtaTransfer);
+
+#[cfg(target_os = "windows")]
+impl FirmwareOtaPreparedTransfer {
+    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+        self.0.snapshot()
+    }
+
+    pub fn transfer(
+        self,
+        version: &str,
+        firmware_sha256: &str,
+        firmware_bytes: &[u8],
+    ) -> Result<FirmwareOtaTransferStats, String> {
+        self.0.transfer(version, firmware_sha256, firmware_bytes)
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn prepare_firmware_ota_transfer() -> Result<FirmwareOtaPreparedTransfer, String> {
+    windows_ble::prepare_firmware_ota_transfer().map(FirmwareOtaPreparedTransfer)
+}
+
+#[cfg(target_os = "windows")]
 pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     windows_ble::firmware_ota_device_snapshot()
 }
@@ -1593,6 +1781,30 @@ pub fn transfer_firmware_ota(
     _firmware_sha256: &str,
     _firmware_bytes: &[u8],
 ) -> Result<FirmwareOtaTransferStats, String> {
+    Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub struct FirmwareOtaPreparedTransfer;
+
+#[cfg(not(target_os = "windows"))]
+impl FirmwareOtaPreparedTransfer {
+    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+        unreachable!("prepare_firmware_ota_transfer is unsupported on this platform")
+    }
+
+    pub fn transfer(
+        self,
+        _version: &str,
+        _firmware_sha256: &str,
+        _firmware_bytes: &[u8],
+    ) -> Result<FirmwareOtaTransferStats, String> {
+        Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn prepare_firmware_ota_transfer() -> Result<FirmwareOtaPreparedTransfer, String> {
     Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
 }
 
