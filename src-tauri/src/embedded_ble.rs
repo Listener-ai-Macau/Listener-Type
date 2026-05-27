@@ -134,32 +134,15 @@ mod windows_ble {
         cleanup.set_token(token);
         log::info!("[embedded-ble] probe #{capture_id}: ValueChanged handler registered");
 
-        log::info!("[embedded-ble] probe #{capture_id}: resetting notify CCCD before enable");
-        match write_cccd_with_timeout(
-            &characteristic,
-            GattClientCharacteristicConfigurationDescriptorValue::None,
-            Duration::from_secs(2),
-        ) {
-            Ok(status) => {
-                log::info!(
-                    "[embedded-ble] probe #{capture_id}: notify CCCD reset status={status:?}"
-                )
-            }
-            Err(err) => {
-                log::warn!("[embedded-ble] probe #{capture_id}: notify CCCD reset skipped: {err}")
-            }
-        }
-        std::thread::sleep(Duration::from_millis(150));
-
         let notify_timeout = timeout.clamp(Duration::from_secs(1), Duration::from_secs(10));
-        log::info!("[embedded-ble] probe #{capture_id}: enabling notify CCCD");
+        log::info!("[embedded-ble] probe #{capture_id}: enabling notify CCCD without pre-reset");
         let status =
             write_cccd_notify_with_retry(capture_id, "probe", &characteristic, notify_timeout)?;
         if status != GattCommunicationStatus::Success {
             return Err(format!("BLE CCCD notify write returned status={status:?}"));
         }
         log::info!("[embedded-ble] probe #{capture_id}: notify CCCD enabled");
-        cleanup.disable_notify();
+        cleanup.finish(NotifyCccdTeardown::for_probe_success());
         Ok(())
     }
 
@@ -1417,35 +1400,50 @@ mod windows_ble {
         }
 
         fn disable_notify(&mut self) {
+            self.finish(NotifyCccdTeardown::Disable);
+        }
+
+        fn finish(&mut self, teardown: NotifyCccdTeardown) {
             if self.notify_disabled {
                 return;
             }
             self.remove_handler();
-            log::info!(
-                "[embedded-ble] capture #{}: disabling notify CCCD",
-                self.capture_id
-            );
-            match self
-                .target
-                .characteristic
-                .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
-                    GattClientCharacteristicConfigurationDescriptorValue::None,
-                ) {
-                Ok(operation) => {
-                    match wait_gatt_write_result(operation, Duration::from_secs(2), "CCCD") {
-                        Ok(status) => log::info!(
-                            "[embedded-ble] capture #{}: notify CCCD disabled status={status:?}",
-                            self.capture_id
-                        ),
-                        Err(err) => log::warn!(
-                            "[embedded-ble] capture #{}: notify CCCD disable skipped: {err}",
-                            self.capture_id
-                        ),
+            match teardown {
+                NotifyCccdTeardown::Disable => {
+                    log::info!(
+                        "[embedded-ble] capture #{}: disabling notify CCCD",
+                        self.capture_id
+                    );
+                    match self
+                        .target
+                        .characteristic
+                        .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
+                            GattClientCharacteristicConfigurationDescriptorValue::None,
+                        ) {
+                        Ok(operation) => {
+                            match wait_gatt_write_result(operation, Duration::from_secs(2), "CCCD")
+                            {
+                                Ok(status) => log::info!(
+                                    "[embedded-ble] capture #{}: notify CCCD disabled status={status:?}",
+                                    self.capture_id
+                                ),
+                                Err(err) => log::warn!(
+                                    "[embedded-ble] capture #{}: notify CCCD disable skipped: {err}",
+                                    self.capture_id
+                                ),
+                            }
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "[embedded-ble] capture #{}: notify CCCD disable operation could not start: {err}",
+                                self.capture_id
+                            );
+                        }
                     }
                 }
-                Err(err) => {
-                    log::warn!(
-                        "[embedded-ble] capture #{}: notify CCCD disable operation could not start: {err}",
+                NotifyCccdTeardown::LeaveEnabled => {
+                    log::info!(
+                        "[embedded-ble] capture #{}: leaving notify CCCD enabled after readiness probe",
                         self.capture_id
                     );
                 }
@@ -1469,6 +1467,18 @@ mod windows_ble {
         }
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum NotifyCccdTeardown {
+        Disable,
+        LeaveEnabled,
+    }
+
+    impl NotifyCccdTeardown {
+        fn for_probe_success() -> Self {
+            Self::LeaveEnabled
+        }
+    }
+
     impl Drop for NotifyCleanup {
         fn drop(&mut self) {
             self.disable_notify();
@@ -1481,6 +1491,19 @@ mod windows_ble {
             if let Some(device) = self.target.device.take() {
                 let _ = device.Close();
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn foreground_probe_success_leaves_notify_cccd_enabled() {
+            assert_eq!(
+                NotifyCccdTeardown::for_probe_success(),
+                NotifyCccdTeardown::LeaveEnabled
+            );
         }
     }
 }

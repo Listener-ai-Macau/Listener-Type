@@ -879,11 +879,25 @@ impl Coordinator {
         timeout_ms: Option<u64>,
     ) -> Result<(), String> {
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
-        if embedded_ble_listener_capture_active(&self.inner) {
-            wait_for_embedded_ble_listener_ready(&self.inner, timeout).await?;
-            log::info!("[embedded-ble] foreground BLE path probe skipped; background listener notify is ready");
-            clear_embedded_ble_listener_last_error(&self.inner);
-            return Ok(());
+        match embedded_ble_foreground_probe_mode(&self.inner) {
+            EmbeddedBleForegroundProbeMode::WaitForActiveBackground => {
+                wait_for_embedded_ble_listener_ready(&self.inner, timeout).await?;
+                log::info!("[embedded-ble] foreground BLE path probe skipped; background listener notify is ready");
+                clear_embedded_ble_listener_last_error(&self.inner);
+                return Ok(());
+            }
+            EmbeddedBleForegroundProbeMode::StartBackgroundListener => {
+                log::info!("[embedded-ble] foreground BLE path probe delegated to background listener recovery");
+                self.refresh_embedded_ble_listener();
+                let result = wait_for_embedded_ble_listener_ready(&self.inner, timeout).await;
+                if result.is_ok() {
+                    clear_embedded_ble_listener_last_error(&self.inner);
+                } else if let Err(err) = &result {
+                    record_embedded_ble_listener_last_error(&self.inner, err);
+                }
+                return result;
+            }
+            EmbeddedBleForegroundProbeMode::ForegroundProbe => {}
         }
 
         pause_embedded_ble_listener_capture(&self.inner, "foreground BLE path probe");
@@ -1872,6 +1886,23 @@ fn embedded_ble_listener_capture_ready(inner: &Arc<Inner>) -> bool {
         && inner.embedded_ble_listener_ready.load(Ordering::SeqCst)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EmbeddedBleForegroundProbeMode {
+    WaitForActiveBackground,
+    StartBackgroundListener,
+    ForegroundProbe,
+}
+
+fn embedded_ble_foreground_probe_mode(inner: &Arc<Inner>) -> EmbeddedBleForegroundProbeMode {
+    if embedded_ble_listener_capture_active(inner) {
+        EmbeddedBleForegroundProbeMode::WaitForActiveBackground
+    } else if embedded_ble_background_listener_expected(inner) {
+        EmbeddedBleForegroundProbeMode::StartBackgroundListener
+    } else {
+        EmbeddedBleForegroundProbeMode::ForegroundProbe
+    }
+}
+
 fn embedded_ble_background_listener_expected(inner: &Arc<Inner>) -> bool {
     std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
         .ok()
@@ -1884,7 +1915,9 @@ async fn wait_for_embedded_ble_listener_ready(
     inner: &Arc<Inner>,
     timeout: Duration,
 ) -> Result<(), String> {
-    if !embedded_ble_background_listener_expected(inner) {
+    if !embedded_ble_background_listener_expected(inner)
+        && !embedded_ble_listener_capture_active(inner)
+    {
         return Ok(());
     }
     let deadline = Instant::now() + timeout;
@@ -1893,8 +1926,13 @@ async fn wait_for_embedded_ble_listener_ready(
             return Ok(());
         }
         if Instant::now() >= deadline {
+            let last_error = inner.embedded_ble_listener_last_error.lock().clone();
+            let suffix = last_error
+                .as_deref()
+                .map(|err| format!("; last error: {err}"))
+                .unwrap_or_default();
             return Err(format!(
-                "Listener BLE notify subscription did not recover within {} ms after foreground probe",
+                "Listener BLE notify subscription did not recover within {} ms after foreground probe{suffix}",
                 timeout.as_millis()
             ));
         }
@@ -3618,6 +3656,42 @@ mod tests {
             .as_ref()
             .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
         assert!(!embedded_ble_listener_capture_ready(&coordinator.inner));
+    }
+
+    #[tokio::test]
+    async fn embedded_ble_foreground_probe_routes_selected_source_to_background_listener() {
+        let _guard = ENV_LOCK.lock().await;
+        std::env::remove_var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE");
+
+        let coordinator = Coordinator::new();
+        force_microphone_input_for_test(&coordinator);
+        assert_eq!(
+            embedded_ble_foreground_probe_mode(&coordinator.inner),
+            EmbeddedBleForegroundProbeMode::ForegroundProbe
+        );
+
+        let mut prefs = coordinator.inner.prefs.get();
+        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+        coordinator.inner.prefs.replace_for_tests(prefs);
+        assert_eq!(
+            embedded_ble_foreground_probe_mode(&coordinator.inner),
+            EmbeddedBleForegroundProbeMode::StartBackgroundListener
+        );
+
+        std::env::set_var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE", "1");
+        assert_eq!(
+            embedded_ble_foreground_probe_mode(&coordinator.inner),
+            EmbeddedBleForegroundProbeMode::ForegroundProbe
+        );
+
+        std::env::remove_var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE");
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        assert_eq!(
+            embedded_ble_foreground_probe_mode(&coordinator.inner),
+            EmbeddedBleForegroundProbeMode::WaitForActiveBackground
+        );
+        cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup");
+        assert!(active.load(Ordering::SeqCst));
     }
 
     #[test]
