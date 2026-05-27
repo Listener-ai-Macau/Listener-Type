@@ -22,6 +22,7 @@ mod coordinator_state;
 mod correction;
 mod embedded_audio;
 mod embedded_ble;
+mod firmware_ota;
 mod global_hotkey_runtime;
 mod hotkey;
 mod insertion;
@@ -62,6 +63,13 @@ use crate::types::{DictationInputSource, PolishMode};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let first_run_args: Vec<String> = std::env::args().collect();
+    if let Some(intent @ cli::CliIntent::FirmwareOta { .. }) =
+        cli::parse_cli_intent(&first_run_args)
+    {
+        std::process::exit(run_firmware_ota_headless_cli(intent));
+    }
+
     let foundry_local_runtime = Arc::new(asr::local::FoundryLocalRuntime::new());
     #[cfg(target_os = "windows")]
     let coordinator = Arc::new(coordinator::Coordinator::new_with_foundry_runtime(
@@ -282,7 +290,6 @@ pub fn run() {
 
             // 首次启动也可能带 CLI flag（用户双击 .desktop 之前先用 CLI 起一遍）。
             // 等 coordinator 准备好后再 dispatch；GUI 仍然照常起来。
-            let first_run_args: Vec<String> = std::env::args().collect();
             if let Some(intent) = cli::parse_cli_intent(&first_run_args) {
                 log::info!("[startup] first-run CLI intent={intent:?}, dispatching");
                 dispatch_cli_intent(app.handle(), intent);
@@ -1057,6 +1064,92 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
                 }
             });
         }
+        cli::CliIntent::FirmwareOta {
+            manifest_path,
+            firmware_path,
+            preflight_only,
+            transfer,
+        } => {
+            let phase = coordinator.dictation_phase_for_cli();
+            tauri::async_runtime::spawn(async move {
+                let options = firmware_ota::FirmwareOtaHeadlessOptions {
+                    manifest_path,
+                    firmware_path,
+                    preflight_only,
+                    transfer,
+                    desktop_version: env!("CARGO_PKG_VERSION").to_string(),
+                    expected_hardware_revision: "keyboard-v1".to_string(),
+                    current_firmware_version: None,
+                    recording_active: phase != coordinator_state::SessionPhase::Idle,
+                    dictation_phase: Some(format!("{phase:?}")),
+                };
+                let report = firmware_ota::run_headless(options).await;
+                match serde_json::to_string(&report) {
+                    Ok(json) => {
+                        println!("firmware_ota_result_json={json}");
+                        if report.status == "PASS" {
+                            log::info!("[cli] firmware OTA {} PASS", report.mode);
+                        } else {
+                            log::warn!(
+                                "[cli] firmware OTA {} FAIL: {}",
+                                report.mode,
+                                report.errors.join("; ")
+                            );
+                        }
+                    }
+                    Err(err) => log::warn!("[cli] firmware OTA report serialization failed: {err}"),
+                }
+            });
+        }
+    }
+}
+
+fn run_firmware_ota_headless_cli(intent: cli::CliIntent) -> i32 {
+    let cli::CliIntent::FirmwareOta {
+        manifest_path,
+        firmware_path,
+        preflight_only,
+        transfer,
+    } = intent
+    else {
+        return 2;
+    };
+
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("firmware_ota_error=failed to create runtime: {err}");
+            return 2;
+        }
+    };
+
+    let report = runtime.block_on(firmware_ota::run_headless(
+        firmware_ota::FirmwareOtaHeadlessOptions {
+            manifest_path,
+            firmware_path,
+            preflight_only,
+            transfer,
+            desktop_version: env!("CARGO_PKG_VERSION").to_string(),
+            expected_hardware_revision: "keyboard-v1".to_string(),
+            current_firmware_version: None,
+            recording_active: false,
+            dictation_phase: Some("Headless".to_string()),
+        },
+    ));
+    match serde_json::to_string(&report) {
+        Ok(json) => println!("firmware_ota_result_json={json}"),
+        Err(err) => {
+            eprintln!("firmware_ota_error=report serialization failed: {err}");
+            return 2;
+        }
+    }
+    if report.status == "PASS" {
+        0
+    } else {
+        1
     }
 }
 

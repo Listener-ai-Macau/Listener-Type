@@ -8,7 +8,7 @@
 //! macOS / Windows 上仍走原生 hotkey 监听器，CLI 是补充而非替代。
 //!
 //! 解析约束：
-//! - **不依赖 clap**。CLI surface 极小（4 个 flag、无子命令），引入 clap 既增加二进制体积
+//! - **不依赖 clap**。CLI surface 仍是少量 flag、无子命令，引入 clap 既增加二进制体积
 //!   也带来「未知参数即 panic exit」的风险——GUI app 必须吃下未知参数照常起来，否则
 //!   .desktop launcher 或发行版包装传 dragged-in 文件路径就直接崩。
 //! - **未知参数静默忽略**。第一个能识别的 flag 即返回；其他参数（路径 / 自动注入的
@@ -43,6 +43,13 @@ pub enum CliIntent {
     SubmitEmbeddedAudioBleOnce { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：订阅嵌入式 BLE notify，收到 audio_data 立刻送入 ASR。
     SubmitEmbeddedAudioBleStream { timeout_ms: Option<u64> },
+    /// 调试 / 自动化入口：校验固件 OTA 包，可选做 BLE preflight 或真实传输。
+    FirmwareOta {
+        manifest_path: PathBuf,
+        firmware_path: PathBuf,
+        preflight_only: bool,
+        transfer: bool,
+    },
 }
 
 /// 扫描 argv 找第一个能识别的 intent。未知参数静默忽略，绝不 panic。
@@ -113,6 +120,17 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
                     timeout_ms: next_u64_arg(&mut args),
                 });
             }
+            "--firmware-ota-check" | "--firmware-ota-preflight" | "--firmware-ota-transfer" => {
+                let mode = arg.as_ref();
+                if let Some((manifest_path, firmware_path)) = next_ota_paths(&mut args) {
+                    return Some(CliIntent::FirmwareOta {
+                        manifest_path,
+                        firmware_path,
+                        preflight_only: mode == "--firmware-ota-preflight",
+                        transfer: mode == "--firmware-ota-transfer",
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -143,6 +161,16 @@ where
     let parsed = next.parse().ok()?;
     let _ = args.next();
     Some(parsed)
+}
+
+fn next_ota_paths<'a, S, I>(args: &mut std::iter::Peekable<I>) -> Option<(PathBuf, PathBuf)>
+where
+    S: AsRef<str> + 'a,
+    I: Iterator<Item = &'a S>,
+{
+    let manifest_path = next_path_arg(args)?;
+    let firmware_path = next_path_arg(args)?;
+    Some((manifest_path, firmware_path))
 }
 
 #[cfg(test)]
@@ -275,6 +303,69 @@ mod tests {
                 timeout_ms: Some(90_000),
             })
         );
+    }
+
+    #[test]
+    fn parse_recognizes_firmware_ota_check() {
+        let args = vec![
+            "listener-type",
+            "--firmware-ota-check",
+            "ota_manifest.json",
+            "firmware_ota.bin",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::FirmwareOta {
+                manifest_path: PathBuf::from("ota_manifest.json"),
+                firmware_path: PathBuf::from("firmware_ota.bin"),
+                preflight_only: false,
+                transfer: false,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_firmware_ota_preflight() {
+        let args = vec![
+            "listener-type",
+            "--firmware-ota-preflight",
+            "ota_manifest.json",
+            "firmware_ota.bin",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::FirmwareOta {
+                manifest_path: PathBuf::from("ota_manifest.json"),
+                firmware_path: PathBuf::from("firmware_ota.bin"),
+                preflight_only: true,
+                transfer: false,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_firmware_ota_transfer() {
+        let args = vec![
+            "listener-type",
+            "--firmware-ota-transfer",
+            "ota_manifest.json",
+            "firmware_ota.bin",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::FirmwareOta {
+                manifest_path: PathBuf::from("ota_manifest.json"),
+                firmware_path: PathBuf::from("firmware_ota.bin"),
+                preflight_only: false,
+                transfer: true,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_ignores_firmware_ota_without_two_paths() {
+        let args = vec!["listener-type", "--firmware-ota-check", "ota_manifest.json"];
+        assert_eq!(parse_cli_intent(&args), None);
     }
 
     #[test]
