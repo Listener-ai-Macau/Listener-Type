@@ -1444,7 +1444,11 @@ async fn submit_embedded_audio_ble_stream_impl(
     }
     if let Err(err) = capture_result {
         if !streaming.terminal_received {
-            let message = format!("嵌入式 BLE 流式抓音中断: {err}");
+            record_embedded_ble_recovery_failure(inner, &err);
+            let message = format!(
+                "嵌入式 BLE 流式抓音中断: {}",
+                embedded_ble_wake_guidance_for_error(&err)
+            );
             if emit_idle_capture_errors || streaming.session.is_some() {
                 streaming.abort_active_session(inner, &message);
             }

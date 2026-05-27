@@ -26,16 +26,22 @@ export function runEmbeddedBleProbeWithTimeout(
 export function embeddedBleProbeErrorMessage(error: unknown, t: TFunction): string {
   switch (classifyEmbeddedBleProbeError(error)) {
     case 'noDevice':
-      return t('settings.recording.embeddedBleNoDevice');
+      return t('settings.recording.embeddedBleWakeGuidance', {
+        defaultValue: '没找到 Listener 设备。若设备已深度睡眠，请按 KEY4/唤醒键后重试；仍失败时重新连接或导出诊断包。',
+      });
     case 'accessDenied':
       return t('settings.recording.embeddedBleAccessDenied');
     case 'timeout':
-      return t('settings.recording.embeddedBleTimeout');
+      return t('settings.recording.embeddedBleWakeGuidance', {
+        defaultValue: 'BLE 音频通路检查超时。若设备睡着，请按 KEY4/唤醒键后重试；仍失败时导出诊断包。',
+      });
     case 'notify':
       return t('settings.recording.embeddedBleNotifyFailed');
     case 'generic':
     default:
-      return t('settings.recording.embeddedBleGenericError');
+      return t('settings.recording.embeddedBleWakeGuidance', {
+        defaultValue: 'BLE 音频通路检查失败。请按 KEY4/唤醒键、重新连接设备，或导出诊断包。',
+      });
   }
 }
 

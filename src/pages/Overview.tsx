@@ -12,7 +12,15 @@ import {
   type EmbeddedBleProbeStatus,
 } from '../lib/embeddedBleProbe';
 import { formatComboLabel } from '../lib/hotkey';
-import { getCredentials, getEmbeddedBleRuntimeStatus, listHistory, openSystemSettings, setActiveAsrProvider, startDictation } from '../lib/ipc';
+import {
+  exportDiagnosticPackage,
+  getCredentials,
+  getEmbeddedBleRuntimeStatus,
+  listHistory,
+  openSystemSettings,
+  setActiveAsrProvider,
+  startDictation,
+} from '../lib/ipc';
 import type { CredentialsStatus, DictationSession, EmbeddedBleRuntimeStatus, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
@@ -179,13 +187,17 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
       history,
       backgroundListenerDisabled: bleRuntimeStatus?.backgroundListenerDisabledByEnv ?? false,
       backgroundListenerActive: bleRuntimeStatus?.backgroundListenerActive ?? false,
+      backgroundListenerReady: bleRuntimeStatus?.backgroundListenerReady ?? false,
       backgroundListenerError: bleRuntimeStatus?.backgroundListenerLastError ?? null,
+      wakeRecoveryStatus: bleRuntimeStatus?.wakeRecovery?.status ?? null,
       historyError,
     }),
     [
       bleRuntimeStatus?.backgroundListenerActive,
       bleRuntimeStatus?.backgroundListenerDisabledByEnv,
       bleRuntimeStatus?.backgroundListenerLastError,
+      bleRuntimeStatus?.backgroundListenerReady,
+      bleRuntimeStatus?.wakeRecovery?.status,
       history,
       historyError,
       prefs?.dictationInputSource,
@@ -204,7 +216,9 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
         : embeddedBleProbeStatus === 'ok'
           ? 'ok'
           : 'idle';
-  const overviewBleMessage = embeddedBleProbeMessage || deviceHealthDetail;
+  const overviewBleMessage = embeddedBleProbeMessage
+    || bleRuntimeStatus?.wakeRecovery?.userGuidance
+    || deviceHealthDetail;
   const openBluetoothSettings = useCallback(() => {
     void openSystemSettings('bluetooth').catch(err => {
       console.warn('[overview] open bluetooth settings failed', err);
@@ -230,6 +244,12 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
       refreshBleRuntimeStatus();
     }
   }, [embeddedBleProbeStatus, embeddedBleSupported, refreshBleRuntimeStatus, refreshHistory, t]);
+  const exportBleDiagnostics = useCallback(() => {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    void exportDiagnosticPackage(`listener-type-ble-wake-diagnostics-${ts}.json`).catch(err => {
+      console.warn('[overview] export diagnostic package failed', err);
+    });
+  }, []);
 
   return (
     <>
@@ -258,6 +278,7 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
           onOpenBluetoothSettings={openBluetoothSettings}
           onProbe={() => void runEmbeddedBleProbe()}
           onOpenRecordingSettings={onOpenRecordingSettings}
+          onExportDiagnostics={exportBleDiagnostics}
         />
       </div>
 

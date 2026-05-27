@@ -12,6 +12,9 @@ export type ListenerDeviceHealthReason =
   | 'microphoneFallback'
   | 'unsupportedPlatform'
   | 'backgroundBleDisabled'
+  | 'wakeRecovery'
+  | 'needsWakeKey'
+  | 'notifyRecovering'
   | 'historyUnavailable'
   | 'noBleEvidence'
   | 'staleBleEvidence'
@@ -38,7 +41,9 @@ export interface ListenerDeviceHealthInput {
   history: DictationSession[];
   backgroundListenerDisabled?: boolean;
   backgroundListenerActive?: boolean;
+  backgroundListenerReady?: boolean;
   backgroundListenerError?: string | null;
+  wakeRecoveryStatus?: 'idle' | 'reconnecting' | 'ready' | 'needsWakeKey' | 'failed' | null;
   historyError?: boolean;
   now?: Date;
 }
@@ -51,7 +56,9 @@ export function summarizeListenerDeviceHealth({
   history,
   backgroundListenerDisabled = false,
   backgroundListenerActive = false,
+  backgroundListenerReady = false,
   backgroundListenerError = null,
+  wakeRecoveryStatus = null,
   historyError = false,
   now = new Date(),
 }: ListenerDeviceHealthInput): ListenerDeviceHealthSnapshot {
@@ -71,12 +78,22 @@ export function summarizeListenerDeviceHealth({
     return snapshot('disconnected', 'backgroundBleDisabled');
   }
 
+  if (wakeRecoveryStatus === 'reconnecting') {
+    return snapshot('degraded', 'notifyRecovering');
+  }
+  if (wakeRecoveryStatus === 'needsWakeKey') {
+    return snapshot('error', 'needsWakeKey');
+  }
+  if (wakeRecoveryStatus === 'failed') {
+    return snapshot('error', 'wakeRecovery');
+  }
+
   const listenerFailureReason = classifyBleSetupFailure(backgroundListenerError);
   if (listenerFailureReason) {
     return snapshot('error', listenerFailureReason);
   }
 
-  if (backgroundListenerActive) {
+  if (backgroundListenerActive && backgroundListenerReady) {
     return snapshot('healthy', 'completeAudio');
   }
 

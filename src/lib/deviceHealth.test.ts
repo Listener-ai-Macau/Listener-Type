@@ -84,9 +84,39 @@ expectHealth(
 );
 
 expectHealth(
-  { dictationInputSource: 'embeddedBle', os: 'win', history: [], backgroundListenerActive: true },
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerActive: true,
+    backgroundListenerReady: true,
+  },
   'healthy',
   'completeAudio',
+);
+
+expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerActive: true,
+    backgroundListenerReady: false,
+    wakeRecoveryStatus: 'reconnecting',
+  },
+  'degraded',
+  'notifyRecovering',
+);
+
+expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [session()],
+    wakeRecoveryStatus: 'needsWakeKey',
+  },
+  'error',
+  'needsWakeKey',
 );
 
 expectHealth(

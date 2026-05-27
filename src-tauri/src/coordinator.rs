@@ -10,9 +10,10 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use ferrous_opencc::{config::BuiltinConfig, OpenCC};
 use parking_lot::Mutex;
+use serde::Serialize;
 use tauri::{async_runtime, AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
@@ -66,6 +67,9 @@ const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(12);
 const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);
+const EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(12);
+const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
+    "Listener BLE 正在重连。若设备已深度睡眠，请按 KEY4/唤醒键，再重试；仍失败可导出诊断。";
 
 #[cfg(test)]
 use dictation::dictation_error_code;
@@ -151,6 +155,9 @@ struct Inner {
     /// 最近一次非空闲的 Listener BLE 后台订阅错误。Overview 读取它来区分
     /// 启动阶段的 CCCD/notify/subscription 失败，这类失败不会生成历史会话。
     embedded_ble_listener_last_error: Mutex<Option<String>>,
+    /// 用户动作触发 BLE 恢复时的结构化快照。用于 Overview、胶囊错误文案和诊断导出，
+    /// 避免把底层 transport/notify 错误直接暴露给用户。
+    embedded_ble_wake_recovery: Mutex<EmbeddedBleWakeRecoverySnapshot>,
     /// 当前嵌入式 BLE 抓音循环的取消标志。胶囊取消走 cancel_session 时会置位，
     /// 让 blocking BLE notify loop 及时退出。
     embedded_ble_cancel_flag: Mutex<Option<Arc<AtomicBool>>>,
@@ -199,6 +206,81 @@ struct Inner {
     /// supervisor 线程，但 integration test 和未来 RunEvent::Exit 钩子需要这条
     /// 显式退出路径。审计 3.1.2。
     shutdown: AtomicBool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedBleWakeRecoverySnapshot {
+    pub status: EmbeddedBleWakeRecoveryStatus,
+    pub user_guidance: String,
+    pub recent_disconnect_reason: Option<String>,
+    pub reconnect_attempts: u32,
+    pub notify_subscription_state: EmbeddedBleNotifySubscriptionState,
+    pub firmware_wake_policy: FirmwareWakePolicySnapshot,
+    pub last_attempt_at: Option<String>,
+    pub last_ready_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EmbeddedBleWakeRecoveryStatus {
+    Idle,
+    Reconnecting,
+    Ready,
+    NeedsWakeKey,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EmbeddedBleNotifySubscriptionState {
+    Unknown,
+    Opening,
+    Subscribed,
+    Lost,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareWakePolicySnapshot {
+    pub policy: &'static str,
+    pub wake_capable_keys: &'static str,
+    pub voice_key: &'static str,
+    pub voice_key_deep_sleep_wake: bool,
+    pub readiness: &'static str,
+    pub source: &'static str,
+}
+
+impl Default for EmbeddedBleWakeRecoverySnapshot {
+    fn default() -> Self {
+        Self {
+            status: EmbeddedBleWakeRecoveryStatus::Idle,
+            user_guidance:
+                "Listener BLE 空闲。按设备语音键开始录音；若设备睡眠，请先按 KEY4/唤醒键。"
+                    .to_string(),
+            recent_disconnect_reason: None,
+            reconnect_attempts: 0,
+            notify_subscription_state: EmbeddedBleNotifySubscriptionState::Unknown,
+            firmware_wake_policy: FirmwareWakePolicySnapshot::current_v1(),
+            last_attempt_at: None,
+            last_ready_at: None,
+        }
+    }
+}
+
+impl FirmwareWakePolicySnapshot {
+    fn current_v1() -> Self {
+        Self {
+            policy: "key4_only",
+            wake_capable_keys: "KEY4/GPIO21",
+            voice_key: "GPIO35",
+            voice_key_deep_sleep_wake: false,
+            readiness: "voice_key_cannot_wake_from_deep_sleep_on_current_v1_board",
+            source: "Firmware 1.1 ~POWER:STATUS wake-policy contract",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,6 +334,9 @@ impl Coordinator {
                     embedded_ble_listener_cancel: Mutex::new(None),
                     embedded_ble_listener_ready: AtomicBool::new(false),
                     embedded_ble_listener_last_error: Mutex::new(None),
+                    embedded_ble_wake_recovery: Mutex::new(
+                        EmbeddedBleWakeRecoverySnapshot::default(),
+                    ),
                     embedded_ble_cancel_flag: Mutex::new(None),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
@@ -311,6 +396,7 @@ impl Coordinator {
                 embedded_ble_listener_cancel: Mutex::new(None),
                 embedded_ble_listener_ready: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
+                embedded_ble_wake_recovery: Mutex::new(EmbeddedBleWakeRecoverySnapshot::default()),
                 embedded_ble_cancel_flag: Mutex::new(None),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
@@ -803,6 +889,14 @@ impl Coordinator {
         embedded_ble_listener_capture_active(&self.inner)
     }
 
+    pub fn embedded_ble_listener_ready(&self) -> bool {
+        embedded_ble_listener_capture_ready(&self.inner)
+    }
+
+    pub fn embedded_ble_wake_recovery_snapshot(&self) -> EmbeddedBleWakeRecoverySnapshot {
+        embedded_ble_wake_recovery_snapshot(&self.inner)
+    }
+
     pub fn hotkey_capability(&self) -> HotkeyCapability {
         HotkeyMonitor::capability()
     }
@@ -810,6 +904,49 @@ impl Coordinator {
     pub async fn start_dictation(&self) -> Result<(), String> {
         if self.inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle {
             self.refresh_embedded_ble_listener();
+            record_embedded_ble_reconnect_attempt(&self.inner, "start_dictation");
+            emit_capsule(
+                &self.inner,
+                CapsuleState::Recording,
+                0.0,
+                0,
+                Some("正在重连 Listener BLE；若设备睡眠，请按 KEY4/唤醒键。".to_string()),
+                None,
+            );
+            match wait_for_embedded_ble_listener_ready(
+                &self.inner,
+                EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT,
+            )
+            .await
+            {
+                Ok(()) => {
+                    record_embedded_ble_notify_ready(&self.inner);
+                    emit_capsule(
+                        &self.inner,
+                        CapsuleState::Recording,
+                        0.0,
+                        0,
+                        Some("Listener BLE 已连接，按设备语音键开始录音。".to_string()),
+                        None,
+                    );
+                    schedule_capsule_idle(&self.inner, 1400);
+                }
+                Err(err) => {
+                    record_embedded_ble_listener_last_error(&self.inner, &err);
+                    record_embedded_ble_recovery_failure(&self.inner, &err);
+                    let message = embedded_ble_wake_guidance_for_error(&err);
+                    emit_capsule(
+                        &self.inner,
+                        CapsuleState::Error,
+                        0.0,
+                        0,
+                        Some(message.clone()),
+                        None,
+                    );
+                    schedule_capsule_idle(&self.inner, 5000);
+                    return Err(message);
+                }
+            }
             log::info!("[coord] start_dictation routed to Listener BLE background listener");
             return Ok(());
         }
@@ -884,16 +1021,20 @@ impl Coordinator {
                 wait_for_embedded_ble_listener_ready(&self.inner, timeout).await?;
                 log::info!("[embedded-ble] foreground BLE path probe skipped; background listener notify is ready");
                 clear_embedded_ble_listener_last_error(&self.inner);
+                record_embedded_ble_notify_ready(&self.inner);
                 return Ok(());
             }
             EmbeddedBleForegroundProbeMode::StartBackgroundListener => {
                 log::info!("[embedded-ble] foreground BLE path probe delegated to background listener recovery");
                 self.refresh_embedded_ble_listener();
+                record_embedded_ble_reconnect_attempt(&self.inner, "foreground_probe");
                 let result = wait_for_embedded_ble_listener_ready(&self.inner, timeout).await;
                 if result.is_ok() {
                     clear_embedded_ble_listener_last_error(&self.inner);
+                    record_embedded_ble_notify_ready(&self.inner);
                 } else if let Err(err) = &result {
                     record_embedded_ble_listener_last_error(&self.inner, err);
+                    record_embedded_ble_recovery_failure(&self.inner, err);
                 }
                 return result;
             }
@@ -920,8 +1061,10 @@ impl Coordinator {
         };
         if result.is_ok() {
             clear_embedded_ble_listener_last_error(&self.inner);
+            record_embedded_ble_notify_ready(&self.inner);
         } else if let Err(err) = &result {
             record_embedded_ble_listener_last_error(&self.inner, err);
+            record_embedded_ble_recovery_failure(&self.inner, err);
         }
         self.refresh_embedded_ble_listener();
         if result.is_ok() {
@@ -1780,6 +1923,92 @@ fn clear_embedded_ble_listener_last_error(inner: &Arc<Inner>) {
     *inner.embedded_ble_listener_last_error.lock() = None;
 }
 
+fn embedded_ble_wake_recovery_snapshot(inner: &Arc<Inner>) -> EmbeddedBleWakeRecoverySnapshot {
+    inner.embedded_ble_wake_recovery.lock().clone()
+}
+
+fn record_embedded_ble_reconnect_attempt(inner: &Arc<Inner>, reason: &str) {
+    let mut snapshot = inner.embedded_ble_wake_recovery.lock();
+    snapshot.status = EmbeddedBleWakeRecoveryStatus::Reconnecting;
+    snapshot.user_guidance =
+        "正在重连 Listener BLE 并恢复音频 notify；如果设备睡着，请按 KEY4/唤醒键。".to_string();
+    snapshot.reconnect_attempts = snapshot.reconnect_attempts.saturating_add(1);
+    snapshot.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Opening;
+    snapshot.last_attempt_at = Some(now_rfc3339());
+    log::info!(
+        "[embedded-ble] wake recovery attempt #{} reason={reason}",
+        snapshot.reconnect_attempts
+    );
+}
+
+fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) {
+    let mut snapshot = inner.embedded_ble_wake_recovery.lock();
+    snapshot.status = EmbeddedBleWakeRecoveryStatus::Ready;
+    snapshot.user_guidance = "Listener BLE 已连接，音频 notify 已订阅。".to_string();
+    snapshot.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Subscribed;
+    snapshot.last_ready_at = Some(now_rfc3339());
+}
+
+fn record_embedded_ble_listener_cancelled(inner: &Arc<Inner>, reason: &str) {
+    let mut snapshot = inner.embedded_ble_wake_recovery.lock();
+    snapshot.status = EmbeddedBleWakeRecoveryStatus::Idle;
+    snapshot.user_guidance = "Listener BLE 后台监听已暂停。".to_string();
+    snapshot.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Cancelled;
+    snapshot.recent_disconnect_reason = Some(reason.to_string());
+}
+
+fn record_embedded_ble_recovery_failure(inner: &Arc<Inner>, err: &str) {
+    let mut snapshot = inner.embedded_ble_wake_recovery.lock();
+    snapshot.status = if is_embedded_ble_wake_or_sleep_error(err) {
+        EmbeddedBleWakeRecoveryStatus::NeedsWakeKey
+    } else {
+        EmbeddedBleWakeRecoveryStatus::Failed
+    };
+    snapshot.user_guidance = embedded_ble_wake_guidance_for_error(err);
+    snapshot.recent_disconnect_reason = Some(err.to_string());
+    snapshot.notify_subscription_state = if is_embedded_ble_cancelled_error(err) {
+        EmbeddedBleNotifySubscriptionState::Cancelled
+    } else if err.to_ascii_lowercase().contains("notify")
+        || err.to_ascii_lowercase().contains("cccd")
+        || err.to_ascii_lowercase().contains("subscription")
+    {
+        EmbeddedBleNotifySubscriptionState::Failed
+    } else {
+        EmbeddedBleNotifySubscriptionState::Lost
+    };
+}
+
+fn embedded_ble_wake_guidance_for_error(err: &str) -> String {
+    if is_embedded_ble_cancelled_error(err) {
+        return "Listener BLE 连接已暂停；请稍后重试。".to_string();
+    }
+    if is_embedded_ble_wake_or_sleep_error(err) {
+        return EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE.to_string();
+    }
+    "Listener BLE 暂时不可用。请重新连接设备，或按 KEY4/唤醒键后重试；仍失败可导出诊断。"
+        .to_string()
+}
+
+fn is_embedded_ble_wake_or_sleep_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("not found")
+        || lower.contains("no subscribable")
+        || lower.contains("not recover")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("unreachable")
+        || lower.contains("device is unreachable")
+        || lower.contains("disconnected")
+}
+
+fn is_embedded_ble_cancelled_error(err: &str) -> bool {
+    err.contains("后台监听已取消") || err.to_ascii_lowercase().contains("cancel")
+}
+
+fn now_rfc3339() -> String {
+    DateTime::<Utc>::from(std::time::SystemTime::now()).to_rfc3339()
+}
+
 fn mark_translation_modifier_seen(inner: &Arc<Inner>) {
     let phase = inner.state.lock().phase;
     if matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
@@ -1807,6 +2036,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
         }
 
         let cancel_capture = install_embedded_ble_listener_cancel(&inner, generation);
+        record_embedded_ble_reconnect_attempt(&inner, "background_listener_loop");
         match submit_embedded_audio_ble_stream_background(&inner, Arc::clone(&cancel_capture)).await
         {
             Ok(result) => {
@@ -1833,6 +2063,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     clear_embedded_ble_listener_last_error(&inner);
                 } else {
                     record_embedded_ble_listener_last_error(&inner, &err);
+                    record_embedded_ble_recovery_failure(&inner, &err);
                 }
                 retry_delay = next_embedded_ble_background_retry_delay(&err, retry_delay);
                 log::warn!(
@@ -1951,6 +2182,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         inner
             .embedded_ble_listener_ready
             .store(true, Ordering::SeqCst);
+        record_embedded_ble_notify_ready(inner);
         log::info!("[embedded-ble] background listener notify ready");
     }
 }
@@ -1995,6 +2227,7 @@ fn cancel_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
     let previous = inner.embedded_ble_listener_cancel.lock().take();
     if let Some(cancel) = previous {
         cancel.store(true, Ordering::SeqCst);
+        record_embedded_ble_listener_cancelled(inner, reason);
         log::info!("[embedded-ble] requested active background capture stop ({reason})");
     }
 }
@@ -3757,6 +3990,42 @@ mod tests {
 
         clear_embedded_ble_listener_last_error(&coordinator.inner);
         assert_eq!(coordinator.embedded_ble_listener_last_error(), None);
+    }
+
+    #[test]
+    fn embedded_ble_wake_recovery_snapshot_guides_deep_sleep_recovery() {
+        let coordinator = Coordinator::new();
+
+        record_embedded_ble_reconnect_attempt(&coordinator.inner, "test");
+        let reconnecting = coordinator.embedded_ble_wake_recovery_snapshot();
+        assert_eq!(
+            reconnecting.status,
+            EmbeddedBleWakeRecoveryStatus::Reconnecting
+        );
+        assert_eq!(reconnecting.reconnect_attempts, 1);
+        assert_eq!(
+            reconnecting.notify_subscription_state,
+            EmbeddedBleNotifySubscriptionState::Opening
+        );
+
+        record_embedded_ble_recovery_failure(
+            &coordinator.inner,
+            "Listener BLE notify subscription did not recover within 1000 ms after foreground probe; last error: service not found",
+        );
+        let failed = coordinator.embedded_ble_wake_recovery_snapshot();
+        assert_eq!(failed.status, EmbeddedBleWakeRecoveryStatus::NeedsWakeKey);
+        assert!(failed.user_guidance.contains("KEY4"));
+        assert_eq!(failed.firmware_wake_policy.policy, "key4_only");
+        assert!(!failed.firmware_wake_policy.voice_key_deep_sleep_wake);
+
+        record_embedded_ble_notify_ready(&coordinator.inner);
+        let ready = coordinator.embedded_ble_wake_recovery_snapshot();
+        assert_eq!(ready.status, EmbeddedBleWakeRecoveryStatus::Ready);
+        assert_eq!(
+            ready.notify_subscription_state,
+            EmbeddedBleNotifySubscriptionState::Subscribed
+        );
+        assert!(ready.last_ready_at.is_some());
     }
 
     #[tokio::test]
