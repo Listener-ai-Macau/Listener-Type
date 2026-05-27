@@ -30,7 +30,7 @@ function manifest(overrides: Record<string, unknown> = {}): string {
         service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
         control_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
         data_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
-        chunk_bytes: 180,
+        chunk_bytes: 244,
       },
     },
     hardware_revision: 'esp32s3-devkit',
@@ -122,7 +122,7 @@ assert.equal(validV2.firmwareSha256, firmwareSha256);
 assert.equal(validV2.manifest?.schemaVersion, 2);
 assert.equal(validV2.manifest?.hardwareRevision, 'keyboard-v1');
 assert.equal(validV2.manifest?.fileName, 'firmware_ota.bin');
-assert.equal(validV2.manifest?.gattChunkBytes, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.legacyChunkBytes);
+assert.equal(validV2.manifest?.gattChunkBytes, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes);
 assert.equal(validV2.manifest?.recoveryInstructions.length, 2);
 
 const validV2FastChunk = await validateFirmwareOtaPackage(
@@ -209,7 +209,7 @@ const badGatt = await validateFirmwareOtaPackage(
         service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc309ff',
         control_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
         data_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
-        chunk_bytes: 180,
+        chunk_bytes: 244,
       },
     },
   }),
@@ -341,6 +341,6 @@ assert.deepEqual(
   ['checking', 'ready', 'transferring', 'rebooting', 'verifying', 'success', 'failed', 'rolledBack'],
 );
 assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName, 'listener_ble_ota');
-assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.legacyChunkBytes, 180);
+assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes, 244);
 assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 244);
 assert.ok(FIRMWARE_OTA_TRANSPORT_BOUNDARY.notDataPlane.every(item => item.includes('BLE')));

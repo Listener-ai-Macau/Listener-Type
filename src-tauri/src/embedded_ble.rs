@@ -437,6 +437,18 @@ mod windows_ble {
             ota_transfer_chunk_bytes(target.data_chunk_bytes, manifest_chunk_bytes);
         let total_chunks = firmware_bytes.len().div_ceil(data_chunk_bytes);
         log::info!(
+            "[embedded-ble] ota #{transfer_id}: aborting previous OTA (if any) before begin"
+        );
+        let abort_cmd = "{\"op\":\"abort\"}\n".to_string();
+        let _ = write_gatt_value_with_timeout(
+            &target.control,
+            abort_cmd.as_bytes(),
+            GattWriteOption::WriteWithResponse,
+            OTA_WRITE_TIMEOUT,
+            "OTA control abort",
+        );
+
+        log::info!(
             "[embedded-ble] ota #{transfer_id}: writing begin version={version} size={} chunks={total_chunks}",
             firmware_bytes.len()
         );
