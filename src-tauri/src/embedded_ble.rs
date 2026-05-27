@@ -855,6 +855,10 @@ mod windows_ble {
             .map_err(|err| format!("BLE OTA service open failed: {err}"))?
             .get()
             .map_err(|err| format!("BLE OTA service open wait failed: {err}"))?;
+        let device = service
+            .DeviceId()
+            .ok()
+            .and_then(|device_id| BluetoothLEDevice::FromIdAsync(&device_id).ok()?.get().ok());
 
         let prepared =
             open_ota_characteristics_from_service(&service, BluetoothCacheMode::Uncached)?;
@@ -864,7 +868,7 @@ mod windows_ble {
             data_write_option: prepared.data_write_option,
             service: Some(service),
             session: prepared.session,
-            device: None,
+            device,
         })
     }
 
