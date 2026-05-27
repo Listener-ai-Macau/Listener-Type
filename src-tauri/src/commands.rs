@@ -1541,6 +1541,7 @@ pub async fn transfer_firmware_ota_ble(
 
     coord.pause_embedded_ble_listener_for_ota();
     let version = manifest.version;
+    let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_version = version.clone();
     let transfer_sha256 = expected_sha256.clone();
     let app_for_progress = app;
@@ -1551,11 +1552,15 @@ pub async fn transfer_firmware_ota_ble(
                 &transfer_version,
                 &transfer_sha256,
                 &firmware_bytes,
+                manifest_chunk_bytes,
                 Some(&|sent, total| {
-                    let _ = app_for_progress.emit("firmware-ota:progress", serde_json::json!({
-                        "chunksSent": sent,
-                        "chunksTotal": total,
-                    }));
+                    let _ = app_for_progress.emit(
+                        "firmware-ota:progress",
+                        serde_json::json!({
+                            "chunksSent": sent,
+                            "chunksTotal": total,
+                        }),
+                    );
                 }),
             )
         }),

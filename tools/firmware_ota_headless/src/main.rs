@@ -27,6 +27,8 @@ mod embedded_ble {
         _version: &str,
         _firmware_sha256: &str,
         _firmware_bytes: &[u8],
+        _manifest_chunk_bytes: usize,
+        _on_progress: Option<&dyn Fn(usize, usize)>,
     ) -> Result<FirmwareOtaTransferStats, String> {
         Err(
             "Firmware OTA over Listener BLE is only available from the Tauri app on Windows."

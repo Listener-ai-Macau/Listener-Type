@@ -139,7 +139,8 @@ export const FIRMWARE_OTA_TRANSPORT_BOUNDARY = {
     serviceUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
     controlUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
     dataUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
-    chunkBytes: 180,
+    legacyChunkBytes: 180,
+    maxChunkBytes: 244,
   },
   dataPlane: 'dedicated OTA GATT service',
   notDataPlane: ['BLE audio VKA1 notifications', 'BLE HID keyboard reports'],
@@ -236,7 +237,7 @@ function parseFirmwareOtaManifestV1(value: Record<string, unknown>, schemaVersio
       : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
     gattChunkBytes: gatt
       ? requireNumber(gatt.chunk_bytes ?? gatt.chunkBytes, 'protocol.gatt.chunk_bytes')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.chunkBytes,
+      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.legacyChunkBytes,
     rollbackInstructions: requireInstructions(rollback.instructions, 'rollback.instructions'),
     recoveryInstructions: requireInstructions(recovery.instructions, 'recovery.instructions'),
   };
@@ -291,7 +292,10 @@ function parseFirmwareOtaManifestV2(value: Record<string, unknown>, schemaVersio
     gattServiceUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
     gattControlUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
     gattDataUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
-    gattChunkBytes: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.chunkBytes,
+    gattChunkBytes: optionalNumber(
+      requirements.gatt_chunk_bytes ?? requirements.gattChunkBytes,
+      FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.legacyChunkBytes,
+    ),
     rollbackInstructions: requireInstructions(rollback.instructions, 'rollback.instructions'),
     recoveryInstructions: [factoryReflash, serialCommands],
   };
@@ -316,10 +320,14 @@ function validateNormalizedFirmwareOtaManifest(manifest: FirmwareOtaManifest): v
   if (
     manifest.gattServiceUuid !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid ||
     manifest.gattControlUuid !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid ||
-    manifest.gattDataUuid !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid ||
-    manifest.gattChunkBytes !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.chunkBytes
+    manifest.gattDataUuid !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid
   ) {
     throw new Error('OTA package uses an unsupported BLE OTA GATT boundary.');
+  }
+  if (manifest.gattChunkBytes <= 0 || manifest.gattChunkBytes > FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes) {
+    throw new Error(
+      `OTA package uses unsupported BLE OTA chunk size ${manifest.gattChunkBytes}; supported range is 1..=${FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes}.`,
+    );
   }
   if (manifest.fileSizeBytes <= 0) {
     throw new Error('file.size_bytes must be greater than zero.');
@@ -521,6 +529,10 @@ function requireNumber(value: unknown, field: string): number {
     throw new Error(`${field} must be a number.`);
   }
   return value;
+}
+
+function optionalNumber(value: unknown, defaultValue: number): number {
+  return value === undefined ? defaultValue : requireNumber(value, 'optional numeric field');
 }
 
 function requireBool(value: unknown, field: string): boolean {

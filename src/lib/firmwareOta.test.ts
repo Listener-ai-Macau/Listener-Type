@@ -122,7 +122,23 @@ assert.equal(validV2.firmwareSha256, firmwareSha256);
 assert.equal(validV2.manifest?.schemaVersion, 2);
 assert.equal(validV2.manifest?.hardwareRevision, 'keyboard-v1');
 assert.equal(validV2.manifest?.fileName, 'firmware_ota.bin');
+assert.equal(validV2.manifest?.gattChunkBytes, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.legacyChunkBytes);
 assert.equal(validV2.manifest?.recoveryInstructions.length, 2);
+
+const validV2FastChunk = await validateFirmwareOtaPackage(
+  manifestV2({
+    requirements: {
+      hardware_revision: 'keyboard-v1',
+      protocol_version: 1,
+      min_desktop_version: '1.3.3',
+      gatt_chunk_bytes: 244,
+    },
+  }),
+  firmwareBytes,
+  contextV2,
+);
+assert.equal(validV2FastChunk.ok, true);
+assert.equal(validV2FastChunk.manifest?.gattChunkBytes, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes);
 
 const missingV2BleIdentity = JSON.parse(manifestV2()) as Record<string, unknown>;
 delete missingV2BleIdentity.ble_identity;
@@ -202,6 +218,27 @@ const badGatt = await validateFirmwareOtaPackage(
 );
 assert.equal(badGatt.ok, false);
 assert.ok(badGatt.errors.some(error => error.includes('GATT boundary')));
+
+const badGattChunk = await validateFirmwareOtaPackage(
+  manifest({
+    protocol: {
+      name: 'listener_ble_ota',
+      version: 1,
+      firmware_capability: 'firmware_ota_v1',
+      data_plane: 'dedicated OTA GATT service; never BLE audio or HID',
+      gatt: {
+        service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
+        control_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
+        data_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
+        chunk_bytes: 245,
+      },
+    },
+  }),
+  firmwareBytes,
+  context,
+);
+assert.equal(badGattChunk.ok, false);
+assert.ok(badGattChunk.errors.some(error => error.includes('chunk size')));
 
 assert.equal(compareVersionish('v1.3.3', '1.3.2'), 1);
 assert.equal(compareVersionish('1.3.3', '1.3.3'), 0);
@@ -304,5 +341,6 @@ assert.deepEqual(
   ['checking', 'ready', 'transferring', 'rebooting', 'verifying', 'success', 'failed', 'rolledBack'],
 );
 assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName, 'listener_ble_ota');
-assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.chunkBytes, 180);
+assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.legacyChunkBytes, 180);
+assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 244);
 assert.ok(FIRMWARE_OTA_TRANSPORT_BOUNDARY.notDataPlane.every(item => item.includes('BLE')));
