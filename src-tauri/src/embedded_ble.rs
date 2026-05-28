@@ -282,6 +282,8 @@ mod windows_ble {
     const OTA_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092a);
     const OTA_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092b);
     const OTA_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092c);
+    const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092d);
+    const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092e);
     const DIS_SERVICE_UUID: GUID = GUID::from_u128(0x0000180a_0000_1000_8000_00805f9b34fb);
     const DIS_MODEL_NUMBER_UUID: GUID = GUID::from_u128(0x00002a24_0000_1000_8000_00805f9b34fb);
     const DIS_FIRMWARE_REVISION_UUID: GUID =
@@ -792,10 +794,36 @@ mod windows_ble {
             usb_powered: None,
             detail: None,
         };
+        if let Some(service) = target.service.as_ref() {
+            if let Some(readiness) = read_optional_string_characteristic_from_service(
+                service,
+                OTA_READINESS_UUID,
+                BluetoothCacheMode::Uncached,
+            ) {
+                snapshot.hardware_revision =
+                    readiness_field(&readiness, "model").or(snapshot.hardware_revision);
+                snapshot.firmware_version =
+                    readiness_field(&readiness, "fw_version").or(snapshot.firmware_version);
+            }
+            if let Some(capabilities) = read_optional_string_characteristic_from_service(
+                service,
+                OTA_CAPABILITIES_UUID,
+                BluetoothCacheMode::Uncached,
+            ) {
+                let parsed = split_capability_tokens(&capabilities);
+                if parsed.iter().any(|item| item == "firmware_ota_v1") {
+                    snapshot.capabilities = parsed;
+                }
+            }
+        }
         let (dis_model, dis_hardware, dis_firmware, dis_battery) =
-            read_dis_metadata_from_discovered_services();
-        snapshot.hardware_revision = dis_model.or(dis_hardware);
-        snapshot.firmware_version = dis_firmware;
+            read_dis_metadata_from_discovered_services(target.bluetooth_address);
+        if snapshot.hardware_revision.is_none() {
+            snapshot.hardware_revision = dis_model.or(dis_hardware);
+        }
+        if snapshot.firmware_version.is_none() {
+            snapshot.firmware_version = dis_firmware;
+        }
         snapshot.battery_percent = dis_battery;
 
         if let Some(device) = target.device.as_ref() {
@@ -849,22 +877,27 @@ mod windows_ble {
     }
 
     fn read_dis_metadata_from_discovered_services(
+        bluetooth_address: Option<u64>,
     ) -> (Option<String>, Option<String>, Option<String>, Option<u8>) {
         let model = read_optional_string_characteristic_from_discovered_service(
             DIS_SERVICE_UUID,
             DIS_MODEL_NUMBER_UUID,
+            bluetooth_address,
         );
         let hardware = read_optional_string_characteristic_from_discovered_service(
             DIS_SERVICE_UUID,
             DIS_HARDWARE_REVISION_UUID,
+            bluetooth_address,
         );
         let firmware = read_optional_string_characteristic_from_discovered_service(
             DIS_SERVICE_UUID,
             DIS_FIRMWARE_REVISION_UUID,
+            bluetooth_address,
         );
         let battery = read_optional_u8_characteristic_from_discovered_service(
             BATTERY_SERVICE_UUID,
             BATTERY_LEVEL_UUID,
+            bluetooth_address,
         );
         (model, hardware, firmware, battery)
     }
@@ -956,6 +989,36 @@ mod windows_ble {
             .filter(|value| !value.is_empty())
     }
 
+    fn read_optional_string_characteristic_from_service(
+        service: &GattDeviceService,
+        characteristic_uuid: GUID,
+        cache_mode: BluetoothCacheMode,
+    ) -> Option<String> {
+        read_optional_characteristic_from_service(service, characteristic_uuid, cache_mode)
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .map(|value| value.trim_matches(char::from(0)).trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
+    fn readiness_field(readiness: &str, key: &str) -> Option<String> {
+        let prefix = format!("{key}=");
+        readiness
+            .split(';')
+            .find_map(|token| token.strip_prefix(&prefix))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    }
+
+    fn split_capability_tokens(capabilities: &str) -> Vec<String> {
+        capabilities
+            .split(';')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+
     fn read_optional_u8_characteristic(
         device: &BluetoothLEDevice,
         service_uuid: GUID,
@@ -968,10 +1031,12 @@ mod windows_ble {
     fn read_optional_string_characteristic_from_discovered_service(
         service_uuid: GUID,
         characteristic_uuid: GUID,
+        bluetooth_address: Option<u64>,
     ) -> Option<String> {
         read_optional_characteristic_bytes_from_discovered_service(
             service_uuid,
             characteristic_uuid,
+            bluetooth_address,
         )
         .and_then(|bytes| String::from_utf8(bytes).ok())
         .map(|value| value.trim_matches(char::from(0)).trim().to_string())
@@ -981,10 +1046,12 @@ mod windows_ble {
     fn read_optional_u8_characteristic_from_discovered_service(
         service_uuid: GUID,
         characteristic_uuid: GUID,
+        bluetooth_address: Option<u64>,
     ) -> Option<u8> {
         read_optional_characteristic_bytes_from_discovered_service(
             service_uuid,
             characteristic_uuid,
+            bluetooth_address,
         )
         .and_then(|bytes| bytes.first().copied())
     }
@@ -992,6 +1059,7 @@ mod windows_ble {
     fn read_optional_characteristic_bytes_from_discovered_service(
         service_uuid: GUID,
         characteristic_uuid: GUID,
+        bluetooth_address: Option<u64>,
     ) -> Option<Vec<u8>> {
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(service_uuid).ok()?;
         let services = DeviceInformation::FindAllAsyncAqsFilter(&selector)
@@ -1008,19 +1076,29 @@ mod windows_ble {
                 continue;
             }
             let id = info.Id().ok()?;
+            if let Some(expected_address) = bluetooth_address {
+                match parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
+                    Some(address) if address == expected_address => {}
+                    Some(address) => {
+                        log::debug!(
+                            "[embedded-ble] skipping DIS service for address={address:012X}; target={expected_address:012X}"
+                        );
+                        continue;
+                    }
+                    None => {
+                        log::debug!(
+                            "[embedded-ble] skipping DIS service without parseable address for target={expected_address:012X}"
+                        );
+                        continue;
+                    }
+                }
+            }
             let service = GattDeviceService::FromIdAsync(&id).ok()?.get().ok()?;
             let result = read_optional_characteristic_from_service(
                 &service,
                 characteristic_uuid,
                 BluetoothCacheMode::Uncached,
-            )
-            .or_else(|| {
-                read_optional_characteristic_from_service(
-                    &service,
-                    characteristic_uuid,
-                    BluetoothCacheMode::Cached,
-                )
-            });
+            );
             let _ = service.Close();
             if result.is_some() {
                 return result;
@@ -1034,7 +1112,7 @@ mod windows_ble {
         service_uuid: GUID,
         characteristic_uuid: GUID,
     ) -> Option<Vec<u8>> {
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        for cache_mode in [BluetoothCacheMode::Uncached] {
             let services_result = device
                 .GetGattServicesForUuidWithCacheModeAsync(service_uuid, cache_mode)
                 .ok()?
@@ -1238,6 +1316,7 @@ mod windows_ble {
                             service: Some(service),
                             session: prepared.session,
                             device: Some(device),
+                            bluetooth_address: Some(address),
                         });
                     }
                     Err(err) => {
@@ -1392,6 +1471,9 @@ mod windows_ble {
             service: Some(service),
             session: prepared.session,
             device,
+            bluetooth_address: parse_bluetooth_address_from_device_id(
+                &service_id.to_string_lossy(),
+            ),
         })
     }
 
@@ -2040,6 +2122,7 @@ mod windows_ble {
         service: Option<GattDeviceService>,
         session: Option<GattSession>,
         device: Option<BluetoothLEDevice>,
+        bluetooth_address: Option<u64>,
     }
 
     struct PreparedOtaCharacteristics {
