@@ -35,6 +35,199 @@ pub struct FirmwareOtaDeviceSnapshot {
     pub detail: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BleFailureKind {
+    DeviceMissing,
+    PairedButDisconnected,
+    StaleGattService,
+    CccdProtocolError,
+    MissingDisFirmwareRevision,
+    BackgroundListenerContention,
+    OtaRebootWindow,
+    WindowsBluetoothServiceResetNeeded,
+    AccessDenied,
+    UnsupportedPlatform,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BleFailureClassification {
+    pub kind: BleFailureKind,
+    pub retryable: bool,
+    pub automatic_recovery: bool,
+    pub user_action: &'static str,
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BleDiagnosticServiceEntry {
+    pub selector: &'static str,
+    pub service_uuid: &'static str,
+    pub index: u32,
+    pub name: String,
+    pub id: String,
+    pub bluetooth_address: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BleDiagnosticSnapshot {
+    pub captured_at: String,
+    pub platform: &'static str,
+    pub audio_service_uuid: &'static str,
+    pub ota_service_uuid: &'static str,
+    pub dis_service_uuid: &'static str,
+    pub configured_device_address: Option<String>,
+    pub audio_services: Vec<BleDiagnosticServiceEntry>,
+    pub ota_services: Vec<BleDiagnosticServiceEntry>,
+    pub firmware_snapshot: FirmwareOtaDeviceSnapshot,
+    pub errors: Vec<String>,
+}
+
+pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
+    let lower = error.to_ascii_lowercase();
+    let kind = if lower.contains("only supported on windows") {
+        BleFailureKind::UnsupportedPlatform
+    } else if lower.contains("ota reboot")
+        || lower.contains("after ota")
+        || lower.contains("confirm")
+        || lower.contains("reboot window")
+    {
+        BleFailureKind::OtaRebootWindow
+    } else if lower.contains("background listener")
+        || lower.contains("background capture")
+        || lower.contains("already active")
+        || lower.contains("foreground probe skipped")
+        || lower.contains("cancelled")
+        || lower.contains("canceled")
+    {
+        BleFailureKind::BackgroundListenerContention
+    } else if lower.contains("firmware revision")
+        || lower.contains("dis firmware")
+        || lower.contains("firmware version")
+    {
+        BleFailureKind::MissingDisFirmwareRevision
+    } else if lower.contains("cccd")
+        || lower.contains("protocol_error")
+        || lower.contains("protocol error")
+        || lower.contains("notify write")
+        || lower.contains("notify characteristic")
+    {
+        BleFailureKind::CccdProtocolError
+    } else if lower.contains("bluetooth service")
+        || lower.contains("radio")
+        || lower.contains("adapter")
+        || lower.contains("0x8007048f")
+        || lower.contains("0x800710df")
+        || lower.contains("service reset")
+    {
+        BleFailureKind::WindowsBluetoothServiceResetNeeded
+    } else if lower.contains("stale")
+        || lower.contains("unknown gatt")
+        || (lower.contains("cached") && !lower.contains("uncached"))
+        || lower.contains("gatt cache")
+        || lower.contains("service changed")
+    {
+        BleFailureKind::StaleGattService
+    } else if lower.contains("access denied") || lower.contains("denied") {
+        BleFailureKind::AccessDenied
+    } else if lower.contains("unreachable")
+        || lower.contains("disconnected")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+    {
+        BleFailureKind::PairedButDisconnected
+    } else if lower.contains("not found")
+        || lower.contains("no subscribable")
+        || lower.contains("no writable listener ble ota")
+        || lower.contains("selector returned no")
+        || lower.contains("returned no devices")
+        || lower.contains("no devices")
+        || lower.contains("no paired ble device")
+    {
+        BleFailureKind::DeviceMissing
+    } else {
+        BleFailureKind::Unknown
+    };
+
+    let (retryable, automatic_recovery, user_action) = match kind {
+        BleFailureKind::DeviceMissing => (
+            true,
+            false,
+            "Wake the Listener device, confirm it is paired, then retry or re-pair.",
+        ),
+        BleFailureKind::PairedButDisconnected => (
+            true,
+            true,
+            "Wait for automatic reconnect; press the wake key if it stays disconnected.",
+        ),
+        BleFailureKind::StaleGattService => (
+            true,
+            true,
+            "Retry after Listener Type refreshes the GATT path; re-pair if stale services persist.",
+        ),
+        BleFailureKind::CccdProtocolError => (
+            true,
+            true,
+            "Retry after the notify subscription is reopened; reboot Type if repeated.",
+        ),
+        BleFailureKind::MissingDisFirmwareRevision => (
+            false,
+            false,
+            "Collect diagnostics and update firmware readiness/DIS exposure before release.",
+        ),
+        BleFailureKind::BackgroundListenerContention => (
+            true,
+            true,
+            "Pause the competing BLE operation and retry through the shared listener path.",
+        ),
+        BleFailureKind::OtaRebootWindow => (
+            true,
+            true,
+            "Wait for the OTA reboot window to finish, then refresh device status.",
+        ),
+        BleFailureKind::WindowsBluetoothServiceResetNeeded => (
+            true,
+            false,
+            "Toggle Windows Bluetooth or restart the Bluetooth Support Service, then retry.",
+        ),
+        BleFailureKind::AccessDenied => (
+            false,
+            false,
+            "Allow Bluetooth/device access in Windows settings or re-pair the device.",
+        ),
+        BleFailureKind::UnsupportedPlatform => (
+            false,
+            false,
+            "Use the supported Windows BLE path for this diagnostic.",
+        ),
+        BleFailureKind::Unknown => (
+            true,
+            false,
+            "Export diagnostics and retry after restarting Listener Type.",
+        ),
+    };
+
+    BleFailureClassification {
+        kind,
+        retryable,
+        automatic_recovery,
+        user_action,
+        evidence: error.chars().take(480).collect(),
+    }
+}
+
+fn utc_now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+fn format_bluetooth_address(address: u64) -> String {
+    format!("{address:012X}")
+}
+
 fn is_terminal_notification(notification: &[u8]) -> bool {
     crate::embedded_audio::parse_packet(notification)
         .map(|packet| {
@@ -111,6 +304,9 @@ mod windows_ble {
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const ATT_WRITE_HEADER_BYTES: usize = 3;
     const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
+    const SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091a";
+    const OTA_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
+    const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
 
     pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
         let mut notifications = Vec::new();
@@ -119,6 +315,92 @@ mod windows_ble {
             Ok(())
         })?;
         Ok(notifications)
+    }
+
+    pub(super) fn diagnostic_snapshot() -> crate::embedded_ble::BleDiagnosticSnapshot {
+        let mut errors = Vec::new();
+        let audio_services = match diagnostic_service_entries(
+            "audio",
+            SERVICE_UUID_TEXT,
+            SERVICE_UUID,
+            "audio service discovery",
+        ) {
+            Ok(entries) => entries,
+            Err(err) => {
+                errors.push(err);
+                Vec::new()
+            }
+        };
+        let ota_services = match diagnostic_service_entries(
+            "ota",
+            OTA_SERVICE_UUID_TEXT,
+            OTA_SERVICE_UUID,
+            "OTA service discovery",
+        ) {
+            Ok(entries) => entries,
+            Err(err) => {
+                errors.push(err);
+                Vec::new()
+            }
+        };
+        let firmware_snapshot = firmware_ota_device_snapshot();
+        if let Some(detail) = firmware_snapshot.detail.as_ref() {
+            errors.push(detail.clone());
+        }
+
+        crate::embedded_ble::BleDiagnosticSnapshot {
+            captured_at: crate::embedded_ble::utc_now_rfc3339(),
+            platform: "windows",
+            audio_service_uuid: SERVICE_UUID_TEXT,
+            ota_service_uuid: OTA_SERVICE_UUID_TEXT,
+            dis_service_uuid: DIS_SERVICE_UUID_TEXT,
+            configured_device_address: configured_bluetooth_address()
+                .map(crate::embedded_ble::format_bluetooth_address),
+            audio_services,
+            ota_services,
+            firmware_snapshot,
+            errors,
+        }
+    }
+
+    fn diagnostic_service_entries(
+        selector_name: &'static str,
+        service_uuid_text: &'static str,
+        service_uuid: GUID,
+        label: &str,
+    ) -> Result<Vec<crate::embedded_ble::BleDiagnosticServiceEntry>, String> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(service_uuid)
+            .map_err(|err| format!("BLE diagnostic {label} selector failed: {err}"))?;
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .map_err(|err| format!("BLE diagnostic {label} query failed: {err}"))
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, label))?;
+        let count = devices
+            .Size()
+            .map_err(|err| format!("BLE diagnostic {label} collection size failed: {err}"))?;
+        let mut entries = Vec::new();
+        for index in 0..count {
+            let info = devices.GetAt(index).map_err(|err| {
+                format!("BLE diagnostic {label} entry {index} read failed: {err}")
+            })?;
+            let name = info
+                .Name()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let id = info
+                .Id()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            entries.push(crate::embedded_ble::BleDiagnosticServiceEntry {
+                selector: selector_name,
+                service_uuid: service_uuid_text,
+                index,
+                name,
+                bluetooth_address: parse_bluetooth_address_from_device_id(&id)
+                    .map(crate::embedded_ble::format_bluetooth_address),
+                id,
+            });
+        }
+        Ok(entries)
     }
 
     pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
@@ -1252,11 +1534,39 @@ mod windows_ble {
 
     pub(super) fn parse_bluetooth_address_from_device_id(device_id: &str) -> Option<u64> {
         let upper = device_id.to_ascii_uppercase();
-        let suffix = upper
-            .rsplit_once("DEV_")
-            .map(|(_, suffix)| suffix)
-            .or_else(|| upper.rsplit_once('_').map(|(_, suffix)| suffix))?;
-        let hex: String = suffix
+        for marker in ["DEV_", "_"] {
+            let Some((_, suffix)) = upper.rsplit_once(marker) else {
+                continue;
+            };
+            let hex: String = suffix
+                .chars()
+                .take_while(|ch| ch.is_ascii_hexdigit())
+                .collect();
+            if hex.len() == 12 {
+                return u64::from_str_radix(&hex, 16).ok();
+            }
+        }
+        None
+    }
+
+    fn configured_bluetooth_address() -> Option<u64> {
+        for key in [
+            "LISTENER_TYPE_BLE_ADDRESS",
+            "LISTENER_TYPE_BLUETOOTH_ADDRESS",
+        ] {
+            let Ok(value) = std::env::var(key) else {
+                continue;
+            };
+            if let Some(address) = parse_bluetooth_address_hex(&value) {
+                return Some(address);
+            }
+            log::warn!("[embedded-ble] ignoring invalid {key}={value}");
+        }
+        None
+    }
+
+    fn parse_bluetooth_address_hex(value: &str) -> Option<u64> {
+        let hex: String = value
             .chars()
             .filter(|ch| ch.is_ascii_hexdigit())
             .take(12)
@@ -1880,6 +2190,11 @@ pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     windows_ble::firmware_ota_device_snapshot()
 }
 
+#[cfg(target_os = "windows")]
+pub fn ble_diagnostic_snapshot() -> BleDiagnosticSnapshot {
+    windows_ble::diagnostic_snapshot()
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
@@ -1957,6 +2272,23 @@ pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn ble_diagnostic_snapshot() -> BleDiagnosticSnapshot {
+    let detail = "Listener BLE diagnostics are only supported on Windows".to_string();
+    BleDiagnosticSnapshot {
+        captured_at: utc_now_rfc3339(),
+        platform: std::env::consts::OS,
+        audio_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
+        ota_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3092a",
+        dis_service_uuid: "0000180a-0000-1000-8000-00805f9b34fb",
+        configured_device_address: None,
+        audio_services: Vec::new(),
+        ota_services: Vec::new(),
+        firmware_snapshot: firmware_ota_device_snapshot(),
+        errors: vec![detail],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1992,6 +2324,62 @@ mod tests {
         assert!(!is_terminal_notification(b"not-vka1"));
     }
 
+    #[test]
+    fn ble_failure_taxonomy_covers_customer_recovery_cases() {
+        let cases = [
+            (
+                "Embedded audio BLE service not found; ensure device is paired and online",
+                BleFailureKind::DeviceMissing,
+                false,
+            ),
+            (
+                "BLE Uncached service discovery returned status=Unreachable after timeout",
+                BleFailureKind::PairedButDisconnected,
+                true,
+            ),
+            (
+                "Unknown GATT service from stale cached service table",
+                BleFailureKind::StaleGattService,
+                true,
+            ),
+            (
+                "BLE CCCD notify write returned status=ProtocolError protocol_error=3",
+                BleFailureKind::CccdProtocolError,
+                true,
+            ),
+            (
+                "DIS firmware revision missing from preflight snapshot",
+                BleFailureKind::MissingDisFirmwareRevision,
+                false,
+            ),
+            (
+                "background listener already active; foreground probe skipped",
+                BleFailureKind::BackgroundListenerContention,
+                true,
+            ),
+            (
+                "OTA reboot window: version confirm failed after OTA",
+                BleFailureKind::OtaRebootWindow,
+                true,
+            ),
+            (
+                "Windows Bluetooth service reset needed after adapter radio error",
+                BleFailureKind::WindowsBluetoothServiceResetNeeded,
+                false,
+            ),
+        ];
+
+        for (message, expected_kind, expected_auto) in cases {
+            let classification = classify_ble_failure(message);
+            assert_eq!(classification.kind, expected_kind, "{message}");
+            assert_eq!(
+                classification.automatic_recovery, expected_auto,
+                "{message}"
+            );
+            assert!(!classification.user_action.is_empty());
+        }
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn parses_bluetooth_address_from_service_instance_id() {
@@ -2011,6 +2399,17 @@ mod tests {
                 r"BTHLE\DEV_DCB4D91112CE\7&29C9821A&0&0000"
             ),
             Some(0xDCB4_D911_12CE)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_bluetooth_address_from_vid_pid_service_instance_id() {
+        assert_eq!(
+            super::windows_ble::parse_bluetooth_address_from_device_id(
+                r"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3092A}_DEV_VID&0216C0_PID&05DF_REV&0001_14C19F48FE72\A&B5FDFC&D&0009"
+            ),
+            Some(0x14C1_9F48_FE72)
         );
     }
 

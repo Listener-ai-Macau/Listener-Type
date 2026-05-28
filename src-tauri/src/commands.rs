@@ -1401,6 +1401,7 @@ pub struct EmbeddedBleRuntimeStatus {
     pub background_listener_disabled_by_env: bool,
     pub background_listener_active: bool,
     pub background_listener_ready: bool,
+    pub background_listener_generation: u64,
     pub background_listener_last_error: Option<String>,
     pub wake_recovery: EmbeddedBleWakeRecoverySnapshot,
 }
@@ -1413,6 +1414,7 @@ pub fn get_embedded_ble_runtime_status(coord: CoordinatorState<'_>) -> EmbeddedB
             .is_some_and(|value| value == "1"),
         background_listener_active: coord.embedded_ble_listener_active(),
         background_listener_ready: coord.embedded_ble_listener_ready(),
+        background_listener_generation: coord.embedded_ble_listener_generation(),
         background_listener_last_error: coord.embedded_ble_listener_last_error(),
         wake_recovery: coord.embedded_ble_wake_recovery_snapshot(),
     }
@@ -2683,7 +2685,14 @@ struct DiagnosticBle {
     background_listener_disabled_by_env: bool,
     background_listener_active: bool,
     background_listener_ready: bool,
+    background_listener_generation: u64,
     service_uuid: &'static str,
+    diagnostic_snapshot: crate::embedded_ble::BleDiagnosticSnapshot,
+    failure_taxonomy: Vec<crate::embedded_ble::BleFailureClassification>,
+    device_address: Option<String>,
+    firmware_version: Option<String>,
+    battery_percent: Option<u8>,
+    capabilities: Vec<String>,
     recent_disconnect_reason: Option<String>,
     reconnect_attempts: u32,
     notify_subscription_state: String,
@@ -2769,6 +2778,16 @@ struct DiagnosticPrivacy {
 }
 
 fn build_diagnostic_package(coord: &Arc<Coordinator>) -> Result<DiagnosticPackage, String> {
+    build_diagnostic_package_with_ble_snapshot(
+        coord,
+        crate::embedded_ble::ble_diagnostic_snapshot(),
+    )
+}
+
+fn build_diagnostic_package_with_ble_snapshot(
+    coord: &Arc<Coordinator>,
+    ble_snapshot: crate::embedded_ble::BleDiagnosticSnapshot,
+) -> Result<DiagnosticPackage, String> {
     let prefs = coord.prefs().get();
     let snap = CredentialsVault::snapshot();
     let active_asr_provider = CredentialsVault::get_active_asr();
@@ -2790,9 +2809,15 @@ fn build_diagnostic_package(coord: &Arc<Coordinator>) -> Result<DiagnosticPackag
     let timeline = diagnostic_timeline(&log_lines, 80);
     let recent_errors = diagnostic_recent_errors(&log_lines, 40);
     let wake_recovery = coord.embedded_ble_wake_recovery_snapshot();
+    let failure_taxonomy = diagnostic_ble_failure_taxonomy(
+        coord.embedded_ble_listener_last_error(),
+        wake_recovery.recent_disconnect_reason.clone(),
+        &recent_errors,
+        &ble_snapshot,
+    );
 
     Ok(DiagnosticPackage {
-        schema_version: 2,
+        schema_version: 3,
         generated_at: chrono::Utc::now().to_rfc3339(),
         app: DiagnosticApp {
             product_name: "Listener Type",
@@ -2834,7 +2859,20 @@ fn build_diagnostic_package(coord: &Arc<Coordinator>) -> Result<DiagnosticPackag
                 .is_some_and(|value| value == "1"),
             background_listener_active: coord.embedded_ble_listener_active(),
             background_listener_ready: coord.embedded_ble_listener_ready(),
+            background_listener_generation: coord.embedded_ble_listener_generation(),
             service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
+            device_address: ble_snapshot.configured_device_address.clone().or_else(|| {
+                ble_snapshot
+                    .audio_services
+                    .iter()
+                    .chain(ble_snapshot.ota_services.iter())
+                    .find_map(|entry| entry.bluetooth_address.clone())
+            }),
+            firmware_version: ble_snapshot.firmware_snapshot.firmware_version.clone(),
+            battery_percent: ble_snapshot.firmware_snapshot.battery_percent,
+            capabilities: ble_snapshot.firmware_snapshot.capabilities.clone(),
+            diagnostic_snapshot: ble_snapshot,
+            failure_taxonomy,
             recent_disconnect_reason: wake_recovery.recent_disconnect_reason.clone(),
             reconnect_attempts: wake_recovery.reconnect_attempts,
             notify_subscription_state: format!("{:?}", wake_recovery.notify_subscription_state),
@@ -2930,6 +2968,44 @@ fn diagnostic_recent_session(session: &DictationSession) -> DiagnosticRecentSess
 
 fn diagnostic_value<T: Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
+}
+
+fn diagnostic_ble_failure_taxonomy(
+    listener_last_error: Option<String>,
+    recent_disconnect_reason: Option<String>,
+    recent_errors: &[String],
+    snapshot: &crate::embedded_ble::BleDiagnosticSnapshot,
+) -> Vec<crate::embedded_ble::BleFailureClassification> {
+    let mut messages = Vec::new();
+    if let Some(value) = listener_last_error {
+        messages.push(value);
+    }
+    if let Some(value) = recent_disconnect_reason {
+        messages.push(value);
+    }
+    messages.extend(recent_errors.iter().cloned());
+    messages.extend(snapshot.errors.iter().cloned());
+    if snapshot.firmware_snapshot.connected && snapshot.firmware_snapshot.firmware_version.is_none()
+    {
+        messages.push("DIS firmware revision missing from live firmware snapshot".to_string());
+    }
+    if snapshot.audio_services.is_empty() && snapshot.ota_services.is_empty() {
+        messages.push("Listener BLE service selectors returned no devices".to_string());
+    }
+
+    let mut classifications = Vec::new();
+    for message in messages {
+        let classification = crate::embedded_ble::classify_ble_failure(&message);
+        if !classifications.iter().any(
+            |existing: &crate::embedded_ble::BleFailureClassification| {
+                existing.kind == classification.kind && existing.evidence == classification.evidence
+            },
+        ) {
+            classifications.push(classification);
+        }
+    }
+
+    classifications
 }
 
 fn read_diagnostic_log_tail(max_lines: usize) -> Vec<String> {
@@ -3823,10 +3899,41 @@ mod tests {
     #[test]
     fn diagnostic_package_includes_ble_wake_recovery_without_sensitive_text() {
         let coordinator = Arc::new(Coordinator::new());
-        let package = super::build_diagnostic_package(&coordinator).expect("diagnostic package");
+        let package = super::build_diagnostic_package_with_ble_snapshot(
+            &coordinator,
+            crate::embedded_ble::BleDiagnosticSnapshot {
+                captured_at: "2026-05-28T00:00:00Z".to_string(),
+                platform: "windows",
+                audio_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
+                ota_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3092a",
+                dis_service_uuid: "0000180a-0000-1000-8000-00805f9b34fb",
+                configured_device_address: Some("14C19F48FE72".to_string()),
+                audio_services: vec![crate::embedded_ble::BleDiagnosticServiceEntry {
+                    selector: "audio",
+                    service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
+                    index: 0,
+                    name: "listener".to_string(),
+                    id: r"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3091A}_14C19F48FE72"
+                        .to_string(),
+                    bluetooth_address: Some("14C19F48FE72".to_string()),
+                }],
+                ota_services: Vec::new(),
+                firmware_snapshot: FirmwareOtaDeviceSnapshot {
+                    connected: true,
+                    hardware_revision: Some("keyboard-v1".to_string()),
+                    firmware_version: Some("v1.2.3".to_string()),
+                    capabilities: vec!["firmware_ota_v1".to_string()],
+                    battery_percent: Some(88),
+                    usb_powered: Some(true),
+                    detail: None,
+                },
+                errors: Vec::new(),
+            },
+        )
+        .expect("diagnostic package");
         let value = serde_json::to_value(&package).expect("serialize diagnostic package");
 
-        assert_eq!(value["schemaVersion"], 2);
+        assert_eq!(value["schemaVersion"], 3);
         assert_eq!(value["firmware"]["wakePolicy"]["policy"], "key4_only");
         assert_eq!(
             value["firmware"]["wakePolicy"]["voiceKeyDeepSleepWake"],
@@ -3834,6 +3941,18 @@ mod tests {
         );
         assert!(value["ble"]["reconnectAttempts"].is_number());
         assert!(value["ble"]["notifySubscriptionState"].is_string());
+        assert!(value["ble"]["backgroundListenerGeneration"].is_number());
+        assert!(value["ble"]["diagnosticSnapshot"]["audioServices"].is_array());
+        assert!(value["ble"]["diagnosticSnapshot"]["otaServices"].is_array());
+        assert_eq!(
+            value["ble"]["diagnosticSnapshot"]["audioServiceUuid"],
+            "710af845-6d9f-6583-0c4d-9e5b3bc3091a"
+        );
+        assert!(value["ble"]["failureTaxonomy"].is_array());
+        assert!(value["ble"].get("deviceAddress").is_some());
+        assert!(value["ble"].get("firmwareVersion").is_some());
+        assert!(value["ble"].get("batteryPercent").is_some());
+        assert!(value["ble"]["capabilities"].is_array());
         assert!(
             value["ble"]["wakeRecovery"]["firmwareWakePolicy"]["readiness"]
                 .as_str()
@@ -3843,6 +3962,61 @@ mod tests {
         assert_eq!(value["privacy"]["excludesRawTranscripts"], true);
         assert_eq!(value["privacy"]["excludesApiKeyValues"], true);
         assert!(!value.to_string().to_lowercase().contains("api_key\":\""));
+    }
+
+    #[test]
+    fn diagnostic_ble_failure_taxonomy_deduplicates_sources() {
+        let snapshot = crate::embedded_ble::BleDiagnosticSnapshot {
+            captured_at: "2026-05-28T00:00:00Z".to_string(),
+            platform: "windows",
+            audio_service_uuid: "audio",
+            ota_service_uuid: "ota",
+            dis_service_uuid: "dis",
+            configured_device_address: Some("14C19F48FE72".to_string()),
+            audio_services: Vec::new(),
+            ota_services: Vec::new(),
+            firmware_snapshot: FirmwareOtaDeviceSnapshot {
+                connected: true,
+                hardware_revision: Some("keyboard-v1".to_string()),
+                firmware_version: None,
+                capabilities: vec!["firmware_ota_v1".to_string()],
+                battery_percent: Some(70),
+                usb_powered: Some(true),
+                detail: None,
+            },
+            errors: vec!["Unknown GATT service from stale cached table".to_string()],
+        };
+
+        let taxonomy = super::diagnostic_ble_failure_taxonomy(
+            Some("BLE CCCD notify write returned status=ProtocolError".to_string()),
+            Some("BLE CCCD notify write returned status=ProtocolError".to_string()),
+            &[
+                "background listener already active; foreground probe skipped".to_string(),
+                "OTA reboot window still confirming version".to_string(),
+                "Windows Bluetooth service reset needed after radio error".to_string(),
+            ],
+            &snapshot,
+        );
+        let kinds: Vec<_> = taxonomy
+            .iter()
+            .map(|classification| classification.kind)
+            .collect();
+
+        assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::CccdProtocolError));
+        assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::BackgroundListenerContention));
+        assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::OtaRebootWindow));
+        assert!(kinds
+            .contains(&crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded));
+        assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::StaleGattService));
+        assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::MissingDisFirmwareRevision));
+        assert_eq!(
+            taxonomy
+                .iter()
+                .filter(|classification| classification.kind
+                    == crate::embedded_ble::BleFailureKind::CccdProtocolError)
+                .count(),
+            1
+        );
     }
 
     #[test]
