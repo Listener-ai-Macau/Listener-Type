@@ -791,64 +791,45 @@ mod windows_ble {
             usb_powered: None,
             detail: None,
         };
+        let (dis_model, dis_hardware, dis_firmware, dis_battery) =
+            read_dis_metadata_from_discovered_services();
+        snapshot.hardware_revision = dis_model.or(dis_hardware);
+        snapshot.firmware_version = dis_firmware;
+        snapshot.battery_percent = dis_battery;
+
         if let Some(device) = target.device.as_ref() {
-            let model =
-                read_optional_string_characteristic(device, DIS_SERVICE_UUID, DIS_MODEL_NUMBER_UUID)
-                    .or_else(|| {
-                        read_optional_string_characteristic_from_discovered_service(
-                            DIS_SERVICE_UUID,
-                            DIS_MODEL_NUMBER_UUID,
-                        )
-                    });
-            let hardware = read_optional_string_characteristic(
-                device,
-                DIS_SERVICE_UUID,
-                DIS_HARDWARE_REVISION_UUID,
-            )
-            .or_else(|| {
-                read_optional_string_characteristic_from_discovered_service(
+            if snapshot.hardware_revision.is_none() {
+                let model = read_optional_string_characteristic(
+                    device,
+                    DIS_SERVICE_UUID,
+                    DIS_MODEL_NUMBER_UUID,
+                );
+                let hardware = read_optional_string_characteristic(
+                    device,
                     DIS_SERVICE_UUID,
                     DIS_HARDWARE_REVISION_UUID,
-                )
-            });
-            snapshot.hardware_revision = model.or(hardware);
-            snapshot.firmware_version = read_optional_string_characteristic(
-                device,
-                DIS_SERVICE_UUID,
-                DIS_FIRMWARE_REVISION_UUID,
-            )
-            .or_else(|| {
-                read_optional_string_characteristic_from_discovered_service(
+                );
+                snapshot.hardware_revision = model.or(hardware);
+            }
+            if snapshot.firmware_version.is_none() {
+                snapshot.firmware_version = read_optional_string_characteristic(
+                    device,
                     DIS_SERVICE_UUID,
                     DIS_FIRMWARE_REVISION_UUID,
-                )
-            });
-            snapshot.battery_percent =
-                read_optional_u8_characteristic(device, BATTERY_SERVICE_UUID, BATTERY_LEVEL_UUID)
-                    .or_else(|| {
-                        read_optional_u8_characteristic_from_discovered_service(
-                            BATTERY_SERVICE_UUID,
-                            BATTERY_LEVEL_UUID,
-                        )
-                    });
-        } else {
-            let model = read_optional_string_characteristic_from_discovered_service(
-                DIS_SERVICE_UUID,
-                DIS_MODEL_NUMBER_UUID,
-            );
-            let hardware = read_optional_string_characteristic_from_discovered_service(
-                DIS_SERVICE_UUID,
-                DIS_HARDWARE_REVISION_UUID,
-            );
-            snapshot.hardware_revision = model.or(hardware);
-            snapshot.firmware_version = read_optional_string_characteristic_from_discovered_service(
-                DIS_SERVICE_UUID,
-                DIS_FIRMWARE_REVISION_UUID,
-            );
-            snapshot.battery_percent = read_optional_u8_characteristic_from_discovered_service(
-                BATTERY_SERVICE_UUID,
-                BATTERY_LEVEL_UUID,
-            );
+                );
+            }
+            if snapshot.battery_percent.is_none() {
+                snapshot.battery_percent = read_optional_u8_characteristic(
+                    device,
+                    BATTERY_SERVICE_UUID,
+                    BATTERY_LEVEL_UUID,
+                );
+            }
+        }
+        if snapshot.hardware_revision.is_none()
+            && snapshot.firmware_version.is_none()
+            && snapshot.battery_percent.is_none()
+        {
             snapshot.detail = Some(
                 "OTA service is reachable, but Windows did not expose DIS metadata for this BLE session."
                     .to_string(),
@@ -864,6 +845,27 @@ mod windows_ble {
             snapshot.detail
         );
         snapshot
+    }
+
+    fn read_dis_metadata_from_discovered_services(
+    ) -> (Option<String>, Option<String>, Option<String>, Option<u8>) {
+        let model = read_optional_string_characteristic_from_discovered_service(
+            DIS_SERVICE_UUID,
+            DIS_MODEL_NUMBER_UUID,
+        );
+        let hardware = read_optional_string_characteristic_from_discovered_service(
+            DIS_SERVICE_UUID,
+            DIS_HARDWARE_REVISION_UUID,
+        );
+        let firmware = read_optional_string_characteristic_from_discovered_service(
+            DIS_SERVICE_UUID,
+            DIS_FIRMWARE_REVISION_UUID,
+        );
+        let battery = read_optional_u8_characteristic_from_discovered_service(
+            BATTERY_SERVICE_UUID,
+            BATTERY_LEVEL_UUID,
+        );
+        (model, hardware, firmware, battery)
     }
 
     fn open_notify_target() -> Result<OpenNotifyTarget, String> {
@@ -966,18 +968,24 @@ mod windows_ble {
         service_uuid: GUID,
         characteristic_uuid: GUID,
     ) -> Option<String> {
-        read_optional_characteristic_bytes_from_discovered_service(service_uuid, characteristic_uuid)
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-            .map(|value| value.trim_matches(char::from(0)).trim().to_string())
-            .filter(|value| !value.is_empty())
+        read_optional_characteristic_bytes_from_discovered_service(
+            service_uuid,
+            characteristic_uuid,
+        )
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .map(|value| value.trim_matches(char::from(0)).trim().to_string())
+        .filter(|value| !value.is_empty())
     }
 
     fn read_optional_u8_characteristic_from_discovered_service(
         service_uuid: GUID,
         characteristic_uuid: GUID,
     ) -> Option<u8> {
-        read_optional_characteristic_bytes_from_discovered_service(service_uuid, characteristic_uuid)
-            .and_then(|bytes| bytes.first().copied())
+        read_optional_characteristic_bytes_from_discovered_service(
+            service_uuid,
+            characteristic_uuid,
+        )
+        .and_then(|bytes| bytes.first().copied())
     }
 
     fn read_optional_characteristic_bytes_from_discovered_service(
@@ -985,7 +993,10 @@ mod windows_ble {
         characteristic_uuid: GUID,
     ) -> Option<Vec<u8>> {
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(service_uuid).ok()?;
-        let services = DeviceInformation::FindAllAsyncAqsFilter(&selector).ok()?.get().ok()?;
+        let services = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .ok()?
+            .get()
+            .ok()?;
         for index in 0..services.Size().ok()? {
             let info = services.GetAt(index).ok()?;
             let name = info
@@ -2495,7 +2506,10 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn ota_chunk_selection_uses_manifest_and_transport_limits() {
-        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(514, 500), Ok(500));
+        assert_eq!(
+            super::windows_ble::ota_transfer_chunk_bytes(514, 500),
+            Ok(500)
+        );
         assert!(super::windows_ble::ota_transfer_chunk_bytes(499, 500).is_err());
         assert!(super::windows_ble::ota_transfer_chunk_bytes(514, 499).is_err());
     }
