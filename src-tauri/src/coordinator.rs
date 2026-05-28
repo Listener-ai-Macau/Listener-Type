@@ -147,6 +147,9 @@ struct Inner {
     embedded_audio_stop_feedback_latched: AtomicBool,
     /// Listener BLE 输入源的后台订阅代次。设置变化时递增，旧监听循环会自然退出。
     embedded_ble_listener_generation: AtomicU64,
+    /// Firmware OTA 正在独占 BLE data plane。期间不要自动重启后台音频监听，避免抢占
+    /// 同一个 Windows GATT device/session。
+    embedded_ble_ota_active: AtomicBool,
     /// 当前 Listener BLE 后台订阅的取消旗标。刷新输入源或退出时主动置位，
     /// 避免旧 WinRT notify 订阅等待 60s 超时后才释放设备。
     embedded_ble_listener_cancel: Mutex<Option<Arc<AtomicBool>>>,
@@ -331,6 +334,7 @@ impl Coordinator {
                     embedded_audio_partial_preview: Mutex::new(None),
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
+                    embedded_ble_ota_active: AtomicBool::new(false),
                     embedded_ble_listener_cancel: Mutex::new(None),
                     embedded_ble_listener_ready: AtomicBool::new(false),
                     embedded_ble_listener_last_error: Mutex::new(None),
@@ -393,6 +397,7 @@ impl Coordinator {
                 embedded_audio_partial_preview: Mutex::new(None),
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),
+                embedded_ble_ota_active: AtomicBool::new(false),
                 embedded_ble_listener_cancel: Mutex::new(None),
                 embedded_ble_listener_ready: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
@@ -1091,7 +1096,24 @@ impl Coordinator {
         pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
     }
 
+    pub fn begin_firmware_ota_transfer(&self) {
+        self.inner
+            .embedded_ble_ota_active
+            .store(true, Ordering::SeqCst);
+        pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
+    }
+
+    pub fn end_firmware_ota_transfer(&self) {
+        self.inner
+            .embedded_ble_ota_active
+            .store(false, Ordering::SeqCst);
+    }
+
     pub fn refresh_embedded_ble_listener(&self) {
+        if self.inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+            log::info!("[embedded-ble] background listener refresh skipped during firmware OTA");
+            return;
+        }
         let generation = self
             .inner
             .embedded_ble_listener_generation
@@ -2034,6 +2056,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 .embedded_ble_listener_generation
                 .load(Ordering::SeqCst)
                 != generation
+            || inner.embedded_ble_ota_active.load(Ordering::SeqCst)
         {
             break;
         }
@@ -2061,6 +2084,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                         .embedded_ble_listener_generation
                         .load(Ordering::SeqCst)
                         != generation
+                    || inner.embedded_ble_ota_active.load(Ordering::SeqCst)
                     || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
                 {
                     break;

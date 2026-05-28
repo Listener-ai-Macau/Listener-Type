@@ -139,8 +139,8 @@ export const FIRMWARE_OTA_TRANSPORT_BOUNDARY = {
     serviceUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
     controlUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
     dataUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
-    defaultChunkBytes: 244,
-    maxChunkBytes: 244,
+    defaultChunkBytes: 500,
+    maxChunkBytes: 500,
   },
   dataPlane: 'dedicated OTA GATT service',
   notDataPlane: ['BLE audio VKA1 notifications', 'BLE HID keyboard reports'],
@@ -324,9 +324,9 @@ function validateNormalizedFirmwareOtaManifest(manifest: FirmwareOtaManifest): v
   ) {
     throw new Error('OTA package uses an unsupported BLE OTA GATT boundary.');
   }
-  if (manifest.gattChunkBytes <= 0 || manifest.gattChunkBytes > FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes) {
+  if (manifest.gattChunkBytes !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes) {
     throw new Error(
-      `OTA package uses unsupported BLE OTA chunk size ${manifest.gattChunkBytes}; supported range is 1..=${FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes}.`,
+      `OTA package uses unsupported BLE OTA chunk size ${manifest.gattChunkBytes}; supported value is ${FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes}.`,
     );
   }
   if (manifest.fileSizeBytes <= 0) {
@@ -369,13 +369,7 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       `Update Listener Type to ${manifest.minDesktopVersion} or newer first.`,
     ));
   }
-  if (device.connected && !device.hardwareRevision) {
-    blockers.push(blocker(
-      'deviceStatusUnknown',
-      'Device hardware revision is unknown.',
-      'Refresh Listener BLE status; if it remains unknown, use the USB factory package.',
-    ));
-  } else if (device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {
+  if (device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {
     blockers.push(blocker(
       'hardwareMismatch',
       'Firmware package is for a different hardware revision.',
@@ -389,14 +383,6 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       'Use the USB factory package once, then retry OTA from Listener Type.',
     ));
   }
-  if (device.firmwareVersion && compareVersionish(manifest.version, device.firmwareVersion) <= 0) {
-    blockers.push(blocker(
-      'sameVersion',
-      'This package is not newer than the device firmware.',
-      'Choose a newer firmware package.',
-    ));
-  }
-
   const battery = device.batteryPercent;
   if (device.usbPowered === false && typeof battery === 'number' && battery < MIN_BATTERY_PERCENT) {
     blockers.push(blocker(
@@ -404,7 +390,7 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       'Battery is too low for firmware update.',
       'Connect USB power or charge the device above 20%.',
     ));
-  } else if (device.usbPowered !== true && battery == null) {
+  } else if (device.usbPowered === false && battery == null) {
     blockers.push(blocker(
       'powerUnknown',
       'Power state is unknown.',

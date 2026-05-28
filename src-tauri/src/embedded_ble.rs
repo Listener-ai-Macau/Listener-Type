@@ -307,6 +307,7 @@ mod windows_ble {
     const SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091a";
     const OTA_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
+    const OTA_REQUIRED_DATA_CHUNK_BYTES: usize = 500;
 
     pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
         let mut notifications = Vec::new();
@@ -716,7 +717,7 @@ mod windows_ble {
         }
 
         let data_chunk_bytes =
-            ota_transfer_chunk_bytes(target.data_chunk_bytes, manifest_chunk_bytes);
+            ota_transfer_chunk_bytes(target.data_chunk_bytes, manifest_chunk_bytes)?;
         let total_chunks = firmware_bytes.len().div_ceil(data_chunk_bytes);
         log::info!(
             "[embedded-ble] ota #{transfer_id}: aborting previous OTA (if any) before begin"
@@ -758,12 +759,14 @@ mod windows_ble {
                 "OTA data",
             )?;
             chunks_sent += 1;
-            if chunks_sent % 100 == 0 {
+            let bytes_sent = (chunks_sent * data_chunk_bytes).min(firmware_bytes.len());
+            if chunks_sent % 10 == 0 || bytes_sent == firmware_bytes.len() {
                 log::info!(
-                    "[embedded-ble] ota #{transfer_id}: progress {chunks_sent}/{total_chunks} chunks"
+                    "[embedded-ble] ota #{transfer_id}: progress {bytes_sent}/{} bytes ({chunks_sent}/{total_chunks} chunks)",
+                    firmware_bytes.len()
                 );
                 if let Some(cb) = &on_progress {
-                    cb(chunks_sent, total_chunks);
+                    cb(bytes_sent, firmware_bytes.len());
                 }
             }
         }
@@ -840,6 +843,28 @@ mod windows_ble {
             );
             snapshot.battery_percent =
                 read_optional_u8_characteristic(device, BATTERY_SERVICE_UUID, BATTERY_LEVEL_UUID);
+        } else {
+            let model = read_optional_string_characteristic_from_discovered_service(
+                DIS_SERVICE_UUID,
+                DIS_MODEL_NUMBER_UUID,
+            );
+            let hardware = read_optional_string_characteristic_from_discovered_service(
+                DIS_SERVICE_UUID,
+                DIS_HARDWARE_REVISION_UUID,
+            );
+            snapshot.hardware_revision = model.or(hardware);
+            snapshot.firmware_version = read_optional_string_characteristic_from_discovered_service(
+                DIS_SERVICE_UUID,
+                DIS_FIRMWARE_REVISION_UUID,
+            );
+            snapshot.battery_percent = read_optional_u8_characteristic_from_discovered_service(
+                BATTERY_SERVICE_UUID,
+                BATTERY_LEVEL_UUID,
+            );
+            snapshot.detail = Some(
+                "OTA service is reachable, but Windows did not expose DIS metadata for this BLE session."
+                    .to_string(),
+            );
         }
         snapshot
     }
@@ -938,6 +963,61 @@ mod windows_ble {
     ) -> Option<u8> {
         read_optional_characteristic_bytes(device, service_uuid, characteristic_uuid)
             .and_then(|bytes| bytes.first().copied())
+    }
+
+    fn read_optional_string_characteristic_from_discovered_service(
+        service_uuid: GUID,
+        characteristic_uuid: GUID,
+    ) -> Option<String> {
+        read_optional_characteristic_bytes_from_discovered_service(service_uuid, characteristic_uuid)
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .map(|value| value.trim_matches(char::from(0)).trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
+    fn read_optional_u8_characteristic_from_discovered_service(
+        service_uuid: GUID,
+        characteristic_uuid: GUID,
+    ) -> Option<u8> {
+        read_optional_characteristic_bytes_from_discovered_service(service_uuid, characteristic_uuid)
+            .and_then(|bytes| bytes.first().copied())
+    }
+
+    fn read_optional_characteristic_bytes_from_discovered_service(
+        service_uuid: GUID,
+        characteristic_uuid: GUID,
+    ) -> Option<Vec<u8>> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(service_uuid).ok()?;
+        let services = DeviceInformation::FindAllAsyncAqsFilter(&selector).ok()?.get().ok()?;
+        for index in 0..services.Size().ok()? {
+            let info = services.GetAt(index).ok()?;
+            let name = info
+                .Name()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            if !name.eq_ignore_ascii_case("listener") {
+                continue;
+            }
+            let id = info.Id().ok()?;
+            let service = GattDeviceService::FromIdAsync(&id).ok()?.get().ok()?;
+            let result = read_optional_characteristic_from_service(
+                &service,
+                characteristic_uuid,
+                BluetoothCacheMode::Uncached,
+            )
+            .or_else(|| {
+                read_optional_characteristic_from_service(
+                    &service,
+                    characteristic_uuid,
+                    BluetoothCacheMode::Cached,
+                )
+            });
+            let _ = service.Close();
+            if result.is_some() {
+                return result;
+            }
+        }
+        None
     }
 
     fn read_optional_characteristic_bytes(
@@ -1344,12 +1424,13 @@ mod windows_ble {
         let data_properties = data
             .CharacteristicProperties()
             .map_err(|err| format!("BLE OTA data characteristic properties read failed: {err}"))?;
-        let data_write_option = if data_properties.contains(GattCharacteristicProperties::Write) {
-            GattWriteOption::WriteWithResponse
-        } else {
-            GattWriteOption::WriteWithoutResponse
-        };
-        let data_chunk_bytes = ota_data_chunk_bytes(session.as_ref(), data_write_option);
+        if !data_properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
+            return Err(
+                "BLE OTA data characteristic must support WriteWithoutResponse.".to_string(),
+            );
+        }
+        let data_write_option = GattWriteOption::WriteWithoutResponse;
+        let data_chunk_bytes = ota_data_chunk_bytes(session.as_ref());
         log::info!(
             "[embedded-ble] OTA data write option={data_write_option:?} chunk_bytes={data_chunk_bytes}"
         );
@@ -1362,25 +1443,30 @@ mod windows_ble {
         })
     }
 
-    fn ota_data_chunk_bytes(session: Option<&GattSession>, write_option: GattWriteOption) -> usize {
+    fn ota_data_chunk_bytes(session: Option<&GattSession>) -> usize {
         let payload_bytes = session
             .and_then(|session| session.MaxPduSize().ok())
             .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
             .filter(|payload_bytes| *payload_bytes > 0)
             .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
-        if write_option == GattWriteOption::WriteWithoutResponse {
-            return payload_bytes.min(ATT_DEFAULT_PAYLOAD_BYTES).max(1);
-        }
         payload_bytes.max(1)
     }
 
     pub(super) fn ota_transfer_chunk_bytes(
         transport_limit_bytes: usize,
         manifest_chunk_bytes: usize,
-    ) -> usize {
-        transport_limit_bytes
-            .min(manifest_chunk_bytes.max(1))
-            .max(1)
+    ) -> Result<usize, String> {
+        if manifest_chunk_bytes != OTA_REQUIRED_DATA_CHUNK_BYTES {
+            return Err(format!(
+                "OTA manifest chunk size must be {OTA_REQUIRED_DATA_CHUNK_BYTES} bytes, got {manifest_chunk_bytes}."
+            ));
+        }
+        if transport_limit_bytes < OTA_REQUIRED_DATA_CHUNK_BYTES {
+            return Err(format!(
+                "BLE transport payload limit is {transport_limit_bytes} bytes; OTA requires {OTA_REQUIRED_DATA_CHUNK_BYTES} bytes."
+            ));
+        }
+        Ok(OTA_REQUIRED_DATA_CHUNK_BYTES)
     }
 
     fn open_write_characteristic_from_service(
@@ -2416,10 +2502,8 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn ota_chunk_selection_uses_manifest_and_transport_limits() {
-        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(244, 244), 244);
-        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(244, 180), 180);
-        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(120, 244), 120);
-        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(0, 244), 1);
-        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(244, 0), 1);
+        assert_eq!(super::windows_ble::ota_transfer_chunk_bytes(514, 500), Ok(500));
+        assert!(super::windows_ble::ota_transfer_chunk_bytes(499, 500).is_err());
+        assert!(super::windows_ble::ota_transfer_chunk_bytes(514, 499).is_err());
     }
 }

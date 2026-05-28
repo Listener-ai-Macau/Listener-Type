@@ -823,6 +823,24 @@ export interface FirmwareOtaBleTransferRequest {
   expectedSha256: string;
 }
 
+export interface FirmwareOtaPackagePayload {
+  manifestText: string;
+  firmwareBytes: number[];
+  sourceLabel: string;
+}
+
+export function loadFirmwareOtaPackage(path: string): Promise<FirmwareOtaPackagePayload> {
+  return invokeOrMock(
+    'load_firmware_ota_package',
+    { path },
+    () => ({
+      manifestText: '',
+      firmwareBytes: [],
+      sourceLabel: path,
+    }),
+  );
+}
+
 export interface FirmwareOtaBleTransferResult {
   bytesTransferred: number;
   confirmedVersion: string | null;
@@ -841,7 +859,7 @@ export function transferFirmwareOtaBle(
     },
     () => ({
       bytesTransferred: request.firmwareBytes.byteLength,
-      confirmedVersion: request.manifest.version,
+      confirmedVersion: null,
       transport: 'listener_ble_ota' as const,
     }),
   );

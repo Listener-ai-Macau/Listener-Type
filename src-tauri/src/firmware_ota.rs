@@ -11,7 +11,7 @@ pub const OTA_FILE_NAME: &str = "firmware_ota.bin";
 pub const OTA_SERVICE_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
 pub const OTA_CONTROL_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092b";
 pub const OTA_DATA_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092c";
-pub const OTA_MAX_CHUNK_BYTES: u64 = 244;
+pub const OTA_MAX_CHUNK_BYTES: u64 = 500;
 pub const OTA_CHUNK_BYTES: u64 = OTA_MAX_CHUNK_BYTES;
 pub const DEFAULT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 pub const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
@@ -348,13 +348,6 @@ fn preflight_blockers(
         .any(|item| item == FIRMWARE_CAPABILITY)
     {
         blockers.push("Connected firmware does not advertise OTA support.".to_string());
-    }
-    if snapshot
-        .firmware_version
-        .as_deref()
-        .is_some_and(|version| compare_versionish(&manifest.version, version) <= 0)
-    {
-        blockers.push("This package is not newer than the device firmware.".to_string());
     }
     if snapshot.usb_powered != Some(true) && snapshot.battery_percent.is_none() {
         blockers.push("Power state is unknown; connect USB power before OTA.".to_string());
@@ -876,9 +869,9 @@ pub fn validate_normalized_manifest(
     {
         return Err("OTA package uses an unsupported BLE OTA GATT boundary.".to_string());
     }
-    if manifest.gatt_chunk_bytes == 0 || manifest.gatt_chunk_bytes > OTA_MAX_CHUNK_BYTES {
+    if manifest.gatt_chunk_bytes != OTA_MAX_CHUNK_BYTES {
         return Err(format!(
-            "OTA package uses unsupported BLE OTA chunk size {}; supported range is 1..={OTA_MAX_CHUNK_BYTES}.",
+            "OTA package uses unsupported BLE OTA chunk size {}; supported value is {OTA_MAX_CHUNK_BYTES}.",
             manifest.gatt_chunk_bytes
         ));
     }
@@ -1100,10 +1093,10 @@ mod tests {
     }
 
     #[test]
-    fn schema_v2_accepts_conservative_gatt_chunk_limit() {
+    fn schema_v2_accepts_required_gatt_chunk_size() {
         let result = validate_package(
             &manifest_v2(
-                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.3.3","gatt_chunk_bytes":244}"#,
+                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.3.3","gatt_chunk_bytes":500}"#,
             ),
             FIRMWARE_BYTES,
             &context(),
@@ -1120,7 +1113,7 @@ mod tests {
     fn rejects_gatt_chunk_above_safe_limit() {
         let result = validate_package(
             &manifest_v2(
-                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.3.3","gatt_chunk_bytes":245}"#,
+                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.3.3","gatt_chunk_bytes":499}"#,
             ),
             FIRMWARE_BYTES,
             &context(),

@@ -114,6 +114,7 @@ interface BtnProps {
 }
 
 export function Btn({ children, variant = 'ghost', size = 'md', icon, style, onClick, disabled = false }: BtnProps) {
+  const [pressed, setPressed] = useState(false);
   const variants: Record<BtnVariant, { bg: string; color: string; bd: string; sh: string }> = {
     primary: { bg: 'var(--ol-ink)',     color: '#fff',                bd: 'transparent', sh: '0 1px 2px rgba(0,0,0,.08)' },
     blue:    { bg: 'var(--ol-blue)',    color: '#fff',                bd: 'transparent', sh: '0 1px 2px rgba(101,123,112,.18)' },
@@ -128,6 +129,12 @@ export function Btn({ children, variant = 'ghost', size = 'md', icon, style, onC
   return (
     <button
       onClick={disabled ? undefined : onClick}
+      onMouseDown={() => {
+        if (!disabled) setPressed(true);
+      }}
+      onMouseUp={() => setPressed(false)}
+      onMouseLeave={() => setPressed(false)}
+      onBlur={() => setPressed(false)}
       disabled={disabled}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -138,6 +145,7 @@ export function Btn({ children, variant = 'ghost', size = 'md', icon, style, onC
         fontFamily: 'inherit', fontWeight: 500,
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.55 : 1,
+        transform: pressed ? 'translateY(1px) scale(0.985)' : 'translateY(0) scale(1)',
         transition: 'background 0.16s var(--ol-motion-quick), color 0.16s var(--ol-motion-quick), border-color 0.16s var(--ol-motion-quick), box-shadow 0.18s var(--ol-motion-soft), transform 0.12s var(--ol-motion-quick)',
         ...sizes[size],
         ...style,

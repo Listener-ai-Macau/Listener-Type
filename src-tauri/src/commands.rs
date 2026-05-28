@@ -1,6 +1,8 @@
 //! Tauri command surface — every IPC entry the React UI invokes lives here.
 
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -1452,8 +1454,17 @@ pub struct FirmwareOtaBleTransferResult {
     transport: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareOtaPackagePayload {
+    manifest_text: String,
+    firmware_bytes: Vec<u8>,
+    source_label: String,
+}
+
 const FIRMWARE_OTA_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 const FIRMWARE_OTA_CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
+const FIRMWARE_OTA_PACKAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 fn normalize_firmware_ota_version(value: &str) -> String {
     value.trim().trim_start_matches('v').to_ascii_lowercase()
@@ -1507,6 +1518,118 @@ async fn confirm_firmware_ota_version(expected_version: &str) -> Option<String> 
 }
 
 #[tauri::command]
+pub fn load_firmware_ota_package(path: String) -> Result<FirmwareOtaPackagePayload, String> {
+    let path = PathBuf::from(path);
+    if path.is_dir() {
+        return load_firmware_ota_package_dir(&path);
+    }
+    let is_zip = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("zip"))
+        .unwrap_or(false);
+    if is_zip {
+        return load_firmware_ota_package_zip(&path);
+    }
+    Err("OTA package must be a .zip file or a package directory.".to_string())
+}
+
+fn load_firmware_ota_package_dir(path: &Path) -> Result<FirmwareOtaPackagePayload, String> {
+    let manifest_path = path.join("ota_manifest.json");
+    let firmware_path = path.join("firmware_ota.bin");
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .map_err(|err| format!("Failed to read {}: {err}", manifest_path.display()))?;
+    let firmware_bytes = read_limited_file(&firmware_path)?;
+    Ok(FirmwareOtaPackagePayload {
+        manifest_text,
+        firmware_bytes,
+        source_label: path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("OTA package directory")
+            .to_string(),
+    })
+}
+
+fn load_firmware_ota_package_zip(path: &Path) -> Result<FirmwareOtaPackagePayload, String> {
+    let file =
+        File::open(path).map_err(|err| format!("Failed to open {}: {err}", path.display()))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|err| format!("Invalid OTA zip package: {err}"))?;
+    let manifest_text =
+        read_zip_entry_by_basename(&mut archive, "ota_manifest.json").and_then(|bytes| {
+            String::from_utf8(bytes)
+                .map_err(|err| format!("ota_manifest.json is not valid UTF-8: {err}"))
+        })?;
+    let firmware_bytes = read_zip_entry_by_basename(&mut archive, "firmware_ota.bin")?;
+    Ok(FirmwareOtaPackagePayload {
+        manifest_text,
+        firmware_bytes,
+        source_label: path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("OTA zip package")
+            .to_string(),
+    })
+}
+
+fn read_limited_file(path: &Path) -> Result<Vec<u8>, String> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|err| format!("Failed to stat {}: {err}", path.display()))?;
+    if metadata.len() > FIRMWARE_OTA_PACKAGE_MAX_BYTES {
+        return Err(format!(
+            "{} is too large for an OTA package ({} bytes > {} bytes).",
+            path.display(),
+            metadata.len(),
+            FIRMWARE_OTA_PACKAGE_MAX_BYTES
+        ));
+    }
+    std::fs::read(path).map_err(|err| format!("Failed to read {}: {err}", path.display()))
+}
+
+fn read_zip_entry_by_basename<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    basename: &str,
+) -> Result<Vec<u8>, String> {
+    let mut match_index = None;
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|err| format!("Failed to read OTA zip entry #{index}: {err}"))?;
+        if entry.is_dir() {
+            continue;
+        }
+        let normalized = entry.name().replace('\\', "/");
+        if normalized
+            .rsplit('/')
+            .next()
+            .map(|name| name == basename)
+            .unwrap_or(false)
+        {
+            match_index = Some(index);
+            break;
+        }
+    }
+
+    let index = match_index.ok_or_else(|| format!("OTA zip is missing {basename}."))?;
+    let mut entry = archive
+        .by_index(index)
+        .map_err(|err| format!("Failed to open OTA zip entry {basename}: {err}"))?;
+    if entry.size() > FIRMWARE_OTA_PACKAGE_MAX_BYTES {
+        return Err(format!(
+            "{basename} is too large for an OTA package ({} bytes > {} bytes).",
+            entry.size(),
+            FIRMWARE_OTA_PACKAGE_MAX_BYTES
+        ));
+    }
+    let mut bytes = Vec::with_capacity(entry.size().min(usize::MAX as u64) as usize);
+    entry
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("Failed to read OTA zip entry {basename}: {err}"))?;
+    Ok(bytes)
+}
+
+#[tauri::command]
 pub async fn transfer_firmware_ota_ble(
     app: AppHandle,
     coord: CoordinatorState<'_>,
@@ -1541,43 +1664,38 @@ pub async fn transfer_firmware_ota_ble(
         return Err("firmware_ota.bin SHA256 does not match ota_manifest.json.".to_string());
     }
 
-    coord.pause_embedded_ble_listener_for_ota();
+    coord.begin_firmware_ota_transfer();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_version = version.clone();
     let transfer_sha256 = expected_sha256.clone();
     let app_for_progress = app;
-    let transfer = tokio::time::timeout(
-        Duration::from_secs(180),
-        tauri::async_runtime::spawn_blocking(move || {
-            crate::embedded_ble::transfer_firmware_ota(
-                &transfer_version,
-                &transfer_sha256,
-                &firmware_bytes,
-                manifest_chunk_bytes,
-                Some(&|sent, total| {
-                    let _ = app_for_progress.emit(
-                        "firmware-ota:progress",
-                        serde_json::json!({
-                            "chunksSent": sent,
-                            "chunksTotal": total,
-                        }),
-                    );
-                }),
-            )
-        }),
-    )
-    .await
-    .map_err(|_| "Listener BLE OTA transfer timed out after 180 seconds".to_string())
-    .and_then(|join_result| {
-        join_result.map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
+    let transfer = tauri::async_runtime::spawn_blocking(move || {
+        crate::embedded_ble::transfer_firmware_ota(
+            &transfer_version,
+            &transfer_sha256,
+            &firmware_bytes,
+            manifest_chunk_bytes,
+            Some(&|bytes_sent, bytes_total| {
+                let _ = app_for_progress.emit(
+                    "firmware-ota:progress",
+                    serde_json::json!({
+                        "bytesSent": bytes_sent,
+                        "bytesTotal": bytes_total,
+                    }),
+                );
+            }),
+        )
     })
+    .await
+    .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
     .and_then(|result| result);
     let confirmed_version = if transfer.is_ok() {
         confirm_firmware_ota_version(&version).await
     } else {
         None
     };
+    coord.end_firmware_ota_transfer();
     coord.refresh_embedded_ble_listener();
 
     let stats = transfer?;
@@ -3732,10 +3850,10 @@ mod tests {
         asr_configured_for_provider, asr_transcriptions_url, diagnostic_recent_errors,
         fetch_provider_models, firmware_ota_snapshot_version, firmware_ota_versions_match,
         is_diagnostic_error_line, is_gemini_base_url, is_valid_local_pack_id, is_valid_session_id,
-        llm_configured_for_provider, local_asr_release_plan_for_provider, models_url,
-        normalize_foundry_language_hint, parse_gemini_model_ids, parse_latest_beta_from_atom,
-        parse_model_ids, persist_settings, sanitize_diagnostic_log_line,
-        validate_foundry_model_alias, ProviderConfig, SettingsWriter,
+        llm_configured_for_provider, load_firmware_ota_package,
+        local_asr_release_plan_for_provider, models_url, normalize_foundry_language_hint,
+        parse_gemini_model_ids, parse_latest_beta_from_atom, parse_model_ids, persist_settings,
+        sanitize_diagnostic_log_line, validate_foundry_model_alias, ProviderConfig, SettingsWriter,
     };
     use crate::coordinator::Coordinator;
     use crate::embedded_audio::{SessionEndReason, SessionErrorCode, SessionStats};
@@ -3785,6 +3903,50 @@ mod tests {
             firmware_ota_snapshot_version(&ota_snapshot_with_version(None)),
             None
         );
+    }
+
+    #[test]
+    fn load_firmware_ota_package_reads_directory() {
+        let root =
+            std::env::temp_dir().join(format!("listener-ota-dir-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create temp package dir");
+        std::fs::write(root.join("ota_manifest.json"), "{\"schema_version\":2}")
+            .expect("write manifest");
+        std::fs::write(root.join("firmware_ota.bin"), [1u8, 2, 3]).expect("write firmware");
+
+        let payload = load_firmware_ota_package(root.to_string_lossy().to_string())
+            .expect("load directory OTA package");
+        assert_eq!(payload.manifest_text, "{\"schema_version\":2}");
+        assert_eq!(payload.firmware_bytes, vec![1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn load_firmware_ota_package_reads_zip() {
+        let zip_path =
+            std::env::temp_dir().join(format!("listener-ota-zip-test-{}.zip", std::process::id()));
+        let _ = std::fs::remove_file(&zip_path);
+        {
+            let file = std::fs::File::create(&zip_path).expect("create temp zip");
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("listener-ota/ota_manifest.json", options)
+                .expect("start manifest");
+            zip.write_all(b"{\"schema_version\":2}")
+                .expect("write manifest");
+            zip.start_file("listener-ota/firmware_ota.bin", options)
+                .expect("start firmware");
+            zip.write_all(&[4u8, 5, 6]).expect("write firmware");
+            zip.finish().expect("finish zip");
+        }
+
+        let payload = load_firmware_ota_package(zip_path.to_string_lossy().to_string())
+            .expect("load zip OTA package");
+        assert_eq!(payload.manifest_text, "{\"schema_version\":2}");
+        assert_eq!(payload.firmware_bytes, vec![4, 5, 6]);
+        let _ = std::fs::remove_file(&zip_path);
     }
 
     #[derive(Default)]

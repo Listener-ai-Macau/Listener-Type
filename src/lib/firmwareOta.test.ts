@@ -30,7 +30,7 @@ function manifest(overrides: Record<string, unknown> = {}): string {
         service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
         control_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
         data_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
-        chunk_bytes: 244,
+        chunk_bytes: 500,
       },
     },
     hardware_revision: 'esp32s3-devkit',
@@ -131,7 +131,7 @@ const validV2FastChunk = await validateFirmwareOtaPackage(
       hardware_revision: 'keyboard-v1',
       protocol_version: 1,
       min_desktop_version: '1.3.3',
-      gatt_chunk_bytes: 244,
+      gatt_chunk_bytes: 500,
     },
   }),
   firmwareBytes,
@@ -209,7 +209,7 @@ const badGatt = await validateFirmwareOtaPackage(
         service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc309ff',
         control_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
         data_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
-        chunk_bytes: 244,
+        chunk_bytes: 500,
       },
     },
   }),
@@ -230,7 +230,7 @@ const badGattChunk = await validateFirmwareOtaPackage(
         service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
         control_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
         data_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
-        chunk_bytes: 245,
+        chunk_bytes: 501,
       },
     },
   }),
@@ -279,8 +279,23 @@ const unknownDeviceStatus = evaluateFirmwareOtaPreflight({
     usbPowered: true,
   },
 });
-assert.equal(unknownDeviceStatus.ok, false);
-assert.ok(unknownDeviceStatus.blockers.some(item => item.code === 'deviceStatusUnknown'));
+assert.equal(unknownDeviceStatus.ok, true);
+
+const unknownPowerStatus = evaluateFirmwareOtaPreflight({
+  manifest: parsedV2Manifest,
+  desktopVersion: '1.3.3',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: true,
+    hardwareRevision: null,
+    firmwareVersion: null,
+    capabilities: ['firmware_ota_v1'],
+    batteryPercent: null,
+    usbPowered: null,
+  },
+});
+assert.equal(unknownPowerStatus.ok, true);
 
 const blockedPreflight = evaluateFirmwareOtaPreflight({
   manifest: parsedManifest,
@@ -305,7 +320,6 @@ assert.deepEqual(
     'transferActive',
     'hardwareMismatch',
     'missingCapability',
-    'sameVersion',
     'batteryLow',
   ],
 );
@@ -341,6 +355,6 @@ assert.deepEqual(
   ['checking', 'ready', 'transferring', 'rebooting', 'verifying', 'success', 'failed', 'rolledBack'],
 );
 assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName, 'listener_ble_ota');
-assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes, 244);
-assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 244);
+assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes, 500);
+assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 500);
 assert.ok(FIRMWARE_OTA_TRANSPORT_BOUNDARY.notDataPlane.every(item => item.includes('BLE')));
