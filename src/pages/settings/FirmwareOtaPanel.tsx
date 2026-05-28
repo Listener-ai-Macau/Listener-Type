@@ -25,6 +25,8 @@ import { Btn, Pill, type PillTone } from '../_atoms';
 import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusPanel';
 
 const EXPECTED_HARDWARE_REVISION = 'keyboard-v1';
+const OTA_VERSION_QUERY_TIMEOUT_MS = 10_000;
+const OTA_VERSION_QUERY_POLL_MS = 700;
 
 interface SelectedPackage {
   manifest: FirmwareOtaManifest;
@@ -66,21 +68,39 @@ export function FirmwareOtaPanel({
       setSnapshotRefreshing(false);
       return unsupported;
     }
+    const deadline = Date.now() + OTA_VERSION_QUERY_TIMEOUT_MS;
+    let lastSnapshot: FirmwareOtaPreflightSnapshot | null = null;
+    let lastError: string | null = null;
     try {
-      const snapshot = await getFirmwareOtaPreflightSnapshot();
-      setOtaSnapshot(snapshot);
-      setSnapshotError(null);
-      return snapshot;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const failed = makeDisconnectedSnapshot(message);
+      while (Date.now() <= deadline) {
+        try {
+          const snapshot = await getFirmwareOtaPreflightSnapshot();
+          lastSnapshot = snapshot;
+          setOtaSnapshot(snapshot);
+          setSnapshotError(null);
+          if (snapshot.device.firmwareVersion) {
+            return snapshot;
+          }
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : String(error);
+        }
+        await delay(OTA_VERSION_QUERY_POLL_MS);
+      }
+
+      const timeoutMessage = t('settings.recording.firmwareOtaRefreshTimeout', '查询固件版本超时，请重试。');
+      if (lastSnapshot) {
+        setOtaSnapshot(lastSnapshot);
+        setSnapshotError(timeoutMessage);
+        return lastSnapshot;
+      }
+      const failed = makeDisconnectedSnapshot(lastError ?? timeoutMessage);
       setOtaSnapshot(failed);
-      setSnapshotError(message);
+      setSnapshotError(lastError ?? timeoutMessage);
       return failed;
     } finally {
       setSnapshotRefreshing(false);
     }
-  }, [supported]);
+  }, [supported, t]);
 
   useEffect(() => {
     if (!selectedPackage || bleStatus === 'checking') return;
@@ -574,7 +594,7 @@ function formatFirmwareOtaWarning(
   language: string,
 ): string {
   if (warning.includes('not newer than the connected firmware version')) {
-    return localizeOtaText(language, '升级包版本不高于当前设备固件；测试阶段允许重刷同版本。', 'The OTA package is not newer than the device firmware. Same-version reflashing is allowed during testing.');
+    return localizeOtaText(language, '升级包版本不高于当前设备固件。', 'The OTA package is not newer than the device firmware.');
   }
   return warning;
 }
