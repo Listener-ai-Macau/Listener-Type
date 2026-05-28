@@ -65,6 +65,11 @@ export function FirmwareOtaPanel({
   }, [otaSnapshot]);
 
   const refreshOtaSnapshot = useCallback(async (options: { waitForFirmwareVersion?: boolean; useCachedFirmwareVersion?: boolean } = {}) => {
+    const waitForFirmwareVersion = options.waitForFirmwareVersion ?? false;
+    if (waitForFirmwareVersion && options.useCachedFirmwareVersion && otaSnapshotRef.current?.device.firmwareVersion) {
+      setSnapshotError(null);
+      return otaSnapshotRef.current;
+    }
     setSnapshotRefreshing(true);
     if (!supported) {
       const unsupported = makeDisconnectedSnapshot('Firmware OTA is only supported on Windows Listener BLE.');
@@ -72,12 +77,6 @@ export function FirmwareOtaPanel({
       setSnapshotError(null);
       setSnapshotRefreshing(false);
       return unsupported;
-    }
-    const waitForFirmwareVersion = options.waitForFirmwareVersion ?? false;
-    if (waitForFirmwareVersion && options.useCachedFirmwareVersion && otaSnapshotRef.current?.device.firmwareVersion) {
-      setSnapshotError(null);
-      setSnapshotRefreshing(false);
-      return otaSnapshotRef.current;
     }
     const deadline = Date.now() + OTA_VERSION_QUERY_TIMEOUT_MS;
     let lastSnapshot: FirmwareOtaPreflightSnapshot | null = null;

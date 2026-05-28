@@ -792,24 +792,45 @@ mod windows_ble {
             detail: None,
         };
         if let Some(device) = target.device.as_ref() {
-            let model = read_optional_string_characteristic(
-                device,
-                DIS_SERVICE_UUID,
-                DIS_MODEL_NUMBER_UUID,
-            );
+            let model =
+                read_optional_string_characteristic(device, DIS_SERVICE_UUID, DIS_MODEL_NUMBER_UUID)
+                    .or_else(|| {
+                        read_optional_string_characteristic_from_discovered_service(
+                            DIS_SERVICE_UUID,
+                            DIS_MODEL_NUMBER_UUID,
+                        )
+                    });
             let hardware = read_optional_string_characteristic(
                 device,
                 DIS_SERVICE_UUID,
                 DIS_HARDWARE_REVISION_UUID,
-            );
+            )
+            .or_else(|| {
+                read_optional_string_characteristic_from_discovered_service(
+                    DIS_SERVICE_UUID,
+                    DIS_HARDWARE_REVISION_UUID,
+                )
+            });
             snapshot.hardware_revision = model.or(hardware);
             snapshot.firmware_version = read_optional_string_characteristic(
                 device,
                 DIS_SERVICE_UUID,
                 DIS_FIRMWARE_REVISION_UUID,
-            );
+            )
+            .or_else(|| {
+                read_optional_string_characteristic_from_discovered_service(
+                    DIS_SERVICE_UUID,
+                    DIS_FIRMWARE_REVISION_UUID,
+                )
+            });
             snapshot.battery_percent =
-                read_optional_u8_characteristic(device, BATTERY_SERVICE_UUID, BATTERY_LEVEL_UUID);
+                read_optional_u8_characteristic(device, BATTERY_SERVICE_UUID, BATTERY_LEVEL_UUID)
+                    .or_else(|| {
+                        read_optional_u8_characteristic_from_discovered_service(
+                            BATTERY_SERVICE_UUID,
+                            BATTERY_LEVEL_UUID,
+                        )
+                    });
         } else {
             let model = read_optional_string_characteristic_from_discovered_service(
                 DIS_SERVICE_UUID,
@@ -833,6 +854,15 @@ mod windows_ble {
                     .to_string(),
             );
         }
+        log::info!(
+            "[embedded-ble] OTA snapshot connected={} hardware={:?} firmware={:?} battery={:?} usb_powered={:?} detail={:?}",
+            snapshot.connected,
+            snapshot.hardware_revision,
+            snapshot.firmware_version,
+            snapshot.battery_percent,
+            snapshot.usb_powered,
+            snapshot.detail
+        );
         snapshot
     }
 
