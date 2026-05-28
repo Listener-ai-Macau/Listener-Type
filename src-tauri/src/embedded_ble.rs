@@ -301,6 +301,7 @@ mod windows_ble {
         Duration::from_millis(1500),
     ];
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
+    const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const ATT_WRITE_HEADER_BYTES: usize = 3;
     const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
@@ -748,7 +749,7 @@ mod windows_ble {
             &target.control,
             finish.as_bytes(),
             GattWriteOption::WriteWithResponse,
-            OTA_WRITE_TIMEOUT,
+            OTA_FINISH_WRITE_TIMEOUT,
             "OTA control finish",
         )?;
         log::info!(

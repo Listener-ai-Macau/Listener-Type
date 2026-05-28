@@ -246,7 +246,11 @@ export function FirmwareOtaPanel({
         const bytesSent = Math.min(event.payload.bytesSent, bytesTotal);
         setProgressBytes({ sent: bytesSent, total: bytesTotal });
         const pct = Math.round((bytesSent / bytesTotal) * 100);
-        dispatch({ type: 'transferProgress', progress: Math.min(pct, 99) });
+        if (bytesSent >= bytesTotal) {
+          dispatch({ type: 'transferComplete' });
+        } else {
+          dispatch({ type: 'transferProgress', progress: Math.min(pct, 99) });
+        }
       });
       try {
         transferResult = await transferFirmwareOtaBle({
@@ -362,7 +366,7 @@ export function FirmwareOtaPanel({
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
           <FirmwareOtaFact label={t('settings.recording.firmwareOtaPackageVersion', '升级包版本')} value={selectedPackage.manifest.version} />
           <FirmwareOtaFact label={t('settings.recording.firmwareOtaChannel', '渠道')} value={selectedPackage.manifest.channel} />
-          <FirmwareOtaFact label={t('settings.recording.firmwareOtaSize', '升级包大小')} value={formatKb(selectedPackage.manifest.fileSizeBytes)} />
+          <FirmwareOtaFact label={t('settings.recording.firmwareOtaSize', '升级包大小')} value={formatBytes(selectedPackage.manifest.fileSizeBytes)} />
         </div>
       )}
 
@@ -377,22 +381,31 @@ export function FirmwareOtaPanel({
       )}
 
       {(state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying') && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ flex: 1, height: 6, borderRadius: 999, overflow: 'hidden', background: 'var(--ol-control-track)' }}>
-            <div
-              style={{
-                width: `${Math.max(2, state.progress)}%`,
-                height: '100%',
-                background: 'var(--ol-blue)',
-                transition: 'width 0.3s ease',
-              }}
-            />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1, height: 6, borderRadius: 999, overflow: 'hidden', background: 'var(--ol-control-track)' }}>
+              <div
+                style={{
+                  width: `${Math.max(2, state.progress)}%`,
+                  height: '100%',
+                  background: 'var(--ol-blue)',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+            <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', minWidth: 92, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              {state.userState === 'transferring' && progressBytes
+                ? `${formatBytes(progressBytes.sent)} / ${formatBytes(progressBytes.total)}`
+                : state.userState === 'transferring' ? `${state.progress}%` : t('settings.recording.firmwareOtaFinalizingBytes', '已传完')}
+            </span>
           </div>
-          <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', minWidth: 92, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-            {state.userState === 'transferring' && progressBytes
-              ? `${formatKb(progressBytes.sent)} / ${formatKb(progressBytes.total)}`
-              : state.userState === 'transferring' ? `${state.progress}%` : ''}
-          </span>
+          <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', lineHeight: 1.4 }}>
+            {state.userState === 'transferring'
+              ? t('settings.recording.firmwareOtaTransferProgress', '正在发送固件...')
+              : state.userState === 'rebooting'
+                ? t('settings.recording.firmwareOtaFinalizeProgress', '固件已发送，正在校验并准备重启...')
+                : t('settings.recording.firmwareOtaVerifyProgress', '正在重新连接并确认固件版本...')}
+          </div>
         </div>
       )}
 
@@ -553,8 +566,13 @@ function snapshotWithFirmwareVersion(
   };
 }
 
-function formatKb(bytes: number): string {
-  return `${Math.max(0, bytes / 1024).toFixed(1)} KB`;
+function formatBytes(bytes: number): string {
+  const safeBytes = Math.max(0, bytes);
+  const kib = safeBytes / 1024;
+  if (kib < 1024) {
+    return `${kib.toFixed(1)} KB`;
+  }
+  return `${(kib / 1024).toFixed(2)} MB`;
 }
 
 function formatFirmwareOtaBlocker(
@@ -648,7 +666,7 @@ function userStateLabel(state: FirmwareOtaUserState, t: ReturnType<typeof useTra
     case 'transferring':
       return t('settings.recording.firmwareOtaTransferring', '传输中');
     case 'rebooting':
-      return t('settings.recording.firmwareOtaRebooting', '重启中');
+      return t('settings.recording.firmwareOtaRebooting', '校验中');
     case 'verifying':
       return t('settings.recording.firmwareOtaVerifying', '确认中');
     case 'success':
