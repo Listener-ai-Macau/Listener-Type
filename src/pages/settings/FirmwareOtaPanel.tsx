@@ -55,11 +55,16 @@ export function FirmwareOtaPanel({
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
   const [diagnosticStatus, setDiagnosticStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
   const [progressBytes, setProgressBytes] = useState<{ sent: number; total: number } | null>(null);
+  const otaSnapshotRef = useRef<FirmwareOtaPreflightSnapshot | null>(null);
 
   const transferActive = state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying';
   const statusTone = userStateTone(state.userState);
   const statusLabel = userStateLabel(state.userState, t);
-  const refreshOtaSnapshot = useCallback(async () => {
+  useEffect(() => {
+    otaSnapshotRef.current = otaSnapshot;
+  }, [otaSnapshot]);
+
+  const refreshOtaSnapshot = useCallback(async (options: { waitForFirmwareVersion?: boolean; useCachedFirmwareVersion?: boolean } = {}) => {
     setSnapshotRefreshing(true);
     if (!supported) {
       const unsupported = makeDisconnectedSnapshot('Firmware OTA is only supported on Windows Listener BLE.');
@@ -68,24 +73,36 @@ export function FirmwareOtaPanel({
       setSnapshotRefreshing(false);
       return unsupported;
     }
+    const waitForFirmwareVersion = options.waitForFirmwareVersion ?? false;
+    if (waitForFirmwareVersion && options.useCachedFirmwareVersion && otaSnapshotRef.current?.device.firmwareVersion) {
+      setSnapshotError(null);
+      setSnapshotRefreshing(false);
+      return otaSnapshotRef.current;
+    }
     const deadline = Date.now() + OTA_VERSION_QUERY_TIMEOUT_MS;
     let lastSnapshot: FirmwareOtaPreflightSnapshot | null = null;
     let lastError: string | null = null;
     try {
-      while (Date.now() <= deadline) {
+      do {
         try {
           const snapshot = await getFirmwareOtaPreflightSnapshot();
           lastSnapshot = snapshot;
           setOtaSnapshot(snapshot);
           setSnapshotError(null);
-          if (snapshot.device.firmwareVersion) {
+          if (!waitForFirmwareVersion || snapshot.device.firmwareVersion) {
             return snapshot;
           }
         } catch (error) {
           lastError = error instanceof Error ? error.message : String(error);
+          if (!waitForFirmwareVersion) {
+            const failed = makeDisconnectedSnapshot(lastError);
+            setOtaSnapshot(failed);
+            setSnapshotError(lastError);
+            return failed;
+          }
         }
         await delay(OTA_VERSION_QUERY_POLL_MS);
-      }
+      } while (Date.now() <= deadline);
 
       const timeoutMessage = t('settings.recording.firmwareOtaRefreshTimeout', '查询固件版本超时，请重试。');
       if (lastSnapshot) {
@@ -355,7 +372,7 @@ export function FirmwareOtaPanel({
           snapshot={otaSnapshot}
           snapshotError={snapshotError}
           refreshing={snapshotRefreshing}
-          onRefresh={() => void refreshOtaSnapshot()}
+          onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true, useCachedFirmwareVersion: true })}
           t={t}
         />
       )}
