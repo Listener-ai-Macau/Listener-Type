@@ -282,8 +282,8 @@ mod windows_ble {
     const OTA_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092a);
     const OTA_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092b);
     const OTA_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092c);
-    const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092d);
-    const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092e);
+    const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
+    const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
     const DIS_SERVICE_UUID: GUID = GUID::from_u128(0x0000180a_0000_1000_8000_00805f9b34fb);
     const DIS_MODEL_NUMBER_UUID: GUID = GUID::from_u128(0x00002a24_0000_1000_8000_00805f9b34fb);
     const DIS_FIRMWARE_REVISION_UUID: GUID =
@@ -795,21 +795,37 @@ mod windows_ble {
             detail: None,
         };
         if let Some(service) = target.service.as_ref() {
-            if let Some(readiness) = read_optional_string_characteristic_from_service(
+            let ota_readiness = read_optional_string_characteristic_from_service(
                 service,
                 OTA_READINESS_UUID,
                 BluetoothCacheMode::Uncached,
-            ) {
+            )
+            .or_else(|| {
+                read_optional_string_characteristic_from_discovered_service(
+                    OTA_SERVICE_UUID,
+                    OTA_READINESS_UUID,
+                    target.bluetooth_address,
+                )
+            });
+            if let Some(readiness) = ota_readiness {
                 snapshot.hardware_revision =
                     readiness_field(&readiness, "model").or(snapshot.hardware_revision);
                 snapshot.firmware_version =
                     readiness_field(&readiness, "fw_version").or(snapshot.firmware_version);
             }
-            if let Some(capabilities) = read_optional_string_characteristic_from_service(
+            let ota_capabilities = read_optional_string_characteristic_from_service(
                 service,
                 OTA_CAPABILITIES_UUID,
                 BluetoothCacheMode::Uncached,
-            ) {
+            )
+            .or_else(|| {
+                read_optional_string_characteristic_from_discovered_service(
+                    OTA_SERVICE_UUID,
+                    OTA_CAPABILITIES_UUID,
+                    target.bluetooth_address,
+                )
+            });
+            if let Some(capabilities) = ota_capabilities {
                 let parsed = split_capability_tokens(&capabilities);
                 if parsed.iter().any(|item| item == "firmware_ota_v1") {
                     snapshot.capabilities = parsed;
