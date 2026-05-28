@@ -25,7 +25,7 @@ import { Btn, Pill, type PillTone } from '../_atoms';
 import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusPanel';
 
 const EXPECTED_HARDWARE_REVISION = 'keyboard-v1';
-const OTA_VERSION_QUERY_TIMEOUT_MS = 10_000;
+const OTA_VERSION_QUERY_TIMEOUT_MS = 15_000;
 const OTA_VERSION_QUERY_POLL_MS = 700;
 
 interface SelectedPackage {
