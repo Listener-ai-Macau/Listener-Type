@@ -604,7 +604,6 @@ mod windows_ble {
         target: OpenOtaTarget,
         snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
         transfer_guard: BleCaptureGuard,
-        _keepalive: OtaBleKeepalive,
     }
 
     impl PreparedFirmwareOtaTransfer {
@@ -635,8 +634,6 @@ mod windows_ble {
     pub(super) fn prepare_firmware_ota_transfer() -> Result<PreparedFirmwareOtaTransfer, String> {
         log::info!("[embedded-ble] OTA prepare: acquiring BLE capture guard");
         let transfer_guard = BleCaptureGuard::enter(None)?;
-        log::info!("[embedded-ble] OTA prepare: opening audio keepalive");
-        let keepalive = open_ota_ble_keepalive(transfer_guard.session_id())?;
         log::info!("[embedded-ble] OTA prepare: discovering OTA service");
         let target = open_ota_target()?;
         log::info!("[embedded-ble] OTA prepare: reading device snapshot");
@@ -649,37 +646,7 @@ mod windows_ble {
             target,
             snapshot,
             transfer_guard,
-            _keepalive: keepalive,
         })
-    }
-
-    fn open_ota_ble_keepalive(capture_id: u64) -> Result<OtaBleKeepalive, String> {
-        log::info!("[embedded-ble] ota #{capture_id}: opening notify keepalive");
-        let target = open_notify_target()?;
-        let characteristic = target.characteristic.clone();
-        let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
-            |_sender, _args| Ok(()),
-        );
-        let mut cleanup = NotifyCleanup::new(capture_id, target);
-        let token = characteristic.ValueChanged(&handler).map_err(|err| {
-            format!("BLE OTA keepalive ValueChanged handler registration failed: {err}")
-        })?;
-        cleanup.set_token(token);
-        log::info!("[embedded-ble] ota #{capture_id}: notify keepalive handler registered");
-
-        let status = write_cccd_notify_with_retry(
-            capture_id,
-            "ota keepalive",
-            &characteristic,
-            CCCD_ENABLE_TIMEOUT,
-        )?;
-        if status != GattCommunicationStatus::Success {
-            return Err(format!(
-                "BLE OTA keepalive CCCD notify write returned status={status:?}"
-            ));
-        }
-        log::info!("[embedded-ble] ota #{capture_id}: notify keepalive enabled");
-        Ok(OtaBleKeepalive { _cleanup: cleanup })
     }
 
     pub fn transfer_firmware_ota(
@@ -2039,10 +2006,6 @@ mod windows_ble {
         data_write_option: GattWriteOption,
         data_chunk_bytes: usize,
         session: Option<GattSession>,
-    }
-
-    struct OtaBleKeepalive {
-        _cleanup: NotifyCleanup,
     }
 
     impl Drop for OpenOtaTarget {
