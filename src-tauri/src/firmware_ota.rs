@@ -11,9 +11,8 @@ pub const OTA_FILE_NAME: &str = "firmware_ota.bin";
 pub const OTA_SERVICE_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
 pub const OTA_CONTROL_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092b";
 pub const OTA_DATA_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092c";
-pub const OTA_LEGACY_CHUNK_BYTES: u64 = 180;
 pub const OTA_MAX_CHUNK_BYTES: u64 = 244;
-pub const OTA_CHUNK_BYTES: u64 = OTA_LEGACY_CHUNK_BYTES;
+pub const OTA_CHUNK_BYTES: u64 = OTA_MAX_CHUNK_BYTES;
 pub const DEFAULT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 pub const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -842,7 +841,7 @@ fn parse_manifest_v2(value: &Value, schema_version: u64) -> Result<FirmwareOtaMa
             requirements
                 .get("gatt_chunk_bytes")
                 .or_else(|| requirements.get("gattChunkBytes")),
-            OTA_LEGACY_CHUNK_BYTES,
+            OTA_CHUNK_BYTES,
         )?,
         rollback_instructions: require_instructions(
             rollback.get("instructions"),
@@ -1095,7 +1094,9 @@ mod tests {
 
         assert!(result.ok, "{:?}", result.errors);
         assert_eq!(result.firmware_sha256.as_deref(), Some(FIRMWARE_SHA256));
-        assert_eq!(result.manifest.unwrap().version, "1.2.0");
+        let manifest = result.manifest.unwrap();
+        assert_eq!(manifest.version, "1.2.0");
+        assert_eq!(manifest.gatt_chunk_bytes, OTA_MAX_CHUNK_BYTES);
     }
 
     #[test]

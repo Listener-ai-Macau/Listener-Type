@@ -774,6 +774,7 @@ export function getEmbeddedBleRuntimeStatus(): Promise<EmbeddedBleRuntimeStatus>
       backgroundListenerDisabledByEnv: false,
       backgroundListenerActive: true,
       backgroundListenerReady: true,
+      backgroundListenerGeneration: 1,
       backgroundListenerLastError: null,
       wakeRecovery: {
         status: 'ready',

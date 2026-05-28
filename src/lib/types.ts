@@ -70,6 +70,7 @@ export interface EmbeddedBleRuntimeStatus {
   backgroundListenerDisabledByEnv: boolean;
   backgroundListenerActive: boolean;
   backgroundListenerReady: boolean;
+  backgroundListenerGeneration: number;
   backgroundListenerLastError: string | null;
   wakeRecovery: EmbeddedBleWakeRecoverySnapshot;
 }

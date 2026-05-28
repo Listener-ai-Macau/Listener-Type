@@ -893,6 +893,12 @@ impl Coordinator {
         embedded_ble_listener_capture_ready(&self.inner)
     }
 
+    pub fn embedded_ble_listener_generation(&self) -> u64 {
+        self.inner
+            .embedded_ble_listener_generation
+            .load(Ordering::SeqCst)
+    }
+
     pub fn embedded_ble_wake_recovery_snapshot(&self) -> EmbeddedBleWakeRecoverySnapshot {
         embedded_ble_wake_recovery_snapshot(&self.inner)
     }

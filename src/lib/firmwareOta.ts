@@ -139,7 +139,7 @@ export const FIRMWARE_OTA_TRANSPORT_BOUNDARY = {
     serviceUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
     controlUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
     dataUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
-    legacyChunkBytes: 180,
+    defaultChunkBytes: 244,
     maxChunkBytes: 244,
   },
   dataPlane: 'dedicated OTA GATT service',
@@ -237,7 +237,7 @@ function parseFirmwareOtaManifestV1(value: Record<string, unknown>, schemaVersio
       : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
     gattChunkBytes: gatt
       ? requireNumber(gatt.chunk_bytes ?? gatt.chunkBytes, 'protocol.gatt.chunk_bytes')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.legacyChunkBytes,
+      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
     rollbackInstructions: requireInstructions(rollback.instructions, 'rollback.instructions'),
     recoveryInstructions: requireInstructions(recovery.instructions, 'recovery.instructions'),
   };
@@ -294,7 +294,7 @@ function parseFirmwareOtaManifestV2(value: Record<string, unknown>, schemaVersio
     gattDataUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
     gattChunkBytes: optionalNumber(
       requirements.gatt_chunk_bytes ?? requirements.gattChunkBytes,
-      FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.legacyChunkBytes,
+      FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
     ),
     rollbackInstructions: requireInstructions(rollback.instructions, 'rollback.instructions'),
     recoveryInstructions: [factoryReflash, serialCommands],
