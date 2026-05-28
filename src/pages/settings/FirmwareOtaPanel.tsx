@@ -9,6 +9,7 @@ import {
   transferFirmwareOtaBle,
 } from '../../lib/ipc';
 import {
+  compareVersionish,
   evaluateFirmwareOtaPreflight,
   firmwareOtaConfirmedVersionMatches,
   firmwareOtaReducer,
@@ -98,6 +99,15 @@ export function FirmwareOtaPanel({
     });
   }, [otaSnapshot, selectedPackage, transferActive]);
   const effectiveBlockers = blockers.length > 0 ? blockers : transferActive ? [] : preflight?.blockers ?? [];
+  const dynamicWarnings = useMemo(() => {
+    if (!selectedPackage) return [];
+    const warnings = [...selectedPackage.warnings];
+    const currentVersion = otaSnapshot?.device.firmwareVersion;
+    if (currentVersion && compareVersionish(selectedPackage.manifest.version, currentVersion) <= 0) {
+      warnings.push('Package version is not newer than the connected firmware version.');
+    }
+    return [...new Set(warnings)];
+  }, [otaSnapshot?.device.firmwareVersion, selectedPackage]);
   const canStart = !!selectedPackage && state.userState === 'ready' && effectiveBlockers.length === 0 && !transferActive;
 
   const onFilesSelected = async (files: FileList | null) => {
@@ -186,7 +196,7 @@ export function FirmwareOtaPanel({
     });
     if (!check.ok) {
       setBlockers(check.blockers);
-      dispatch({ type: 'failed', failureCode: 'deviceRejected', message: check.blockers[0]?.message ?? 'Preflight blocked.' });
+      dispatch({ type: 'failed', failureCode: 'deviceRejected', message: '' });
       return;
     }
 
@@ -377,7 +387,7 @@ export function FirmwareOtaPanel({
         </div>
       )}
 
-      {selectedPackage?.warnings.map(warning => (
+      {dynamicWarnings.map(warning => (
         <div key={warning} style={{ fontSize: 11.5, color: '#b45309', lineHeight: 1.5 }}>
           {formatFirmwareOtaWarning(warning, i18n.resolvedLanguage ?? i18n.language)}
         </div>
