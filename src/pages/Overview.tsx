@@ -6,6 +6,7 @@ import { Icon } from '../components/Icon';
 import { detectOS } from '../components/WindowChrome';
 import { consumePendingDemoMode, OPEN_DEMO_MODE_EVENT } from '../lib/demoMode';
 import { summarizeListenerDeviceHealth } from '../lib/deviceHealth';
+import { buildBleRecoveryUi } from '../lib/bleRecoveryUi';
 import {
   embeddedBleProbeErrorMessage,
   runEmbeddedBleProbeWithTimeout,
@@ -22,7 +23,7 @@ import {
   setActiveAsrProvider,
   startDictation,
 } from '../lib/ipc';
-import type { CredentialsStatus, DictationSession, EmbeddedBleRuntimeStatus, PolishMode } from '../lib/types';
+import type { CredentialsStatus, DictationSession, EmbeddedBleRepairResult, EmbeddedBleRuntimeStatus, PolishMode } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
 import { EmbeddedBleStatusPanel } from '../components/EmbeddedBleStatusPanel';
@@ -88,6 +89,8 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
   const [bleRuntimeStatus, setBleRuntimeStatus] = useState<EmbeddedBleRuntimeStatus | null>(null);
   const [embeddedBleProbeStatus, setEmbeddedBleProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
   const [embeddedBleProbeMessage, setEmbeddedBleProbeMessage] = useState('');
+  const [lastBleRepairResult, setLastBleRepairResult] = useState<EmbeddedBleRepairResult | null>(null);
+  const [bleDiagnosticStatus, setBleDiagnosticStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
   const embeddedBleProbeRunId = useRef(0);
   const [creds, setCreds] = useState<CredentialsStatus>({
     activeAsrProvider: 'volcengine',
@@ -97,7 +100,7 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
     volcengineConfigured: false,
     arkConfigured: false,
   });
-  const { prefs } = useHotkeySettings();
+  const { prefs, updatePrefs } = useHotkeySettings();
 
   const refreshHistory = useCallback(() => {
     setHistoryError(false);
@@ -205,32 +208,42 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
     ],
   );
   const embeddedBleSupported = detectOS() === 'win';
-  const deviceHealthDetail = deviceHealth.state === 'healthy'
-    ? t('settings.recording.embeddedBleConnectionReady')
-    : t(`overview.deviceHealth.reason.${deviceHealth.reason}`);
-  const overviewBleStatus: EmbeddedBleProbeStatus = embeddedBleProbeStatus === 'checking' || embeddedBleProbeStatus === 'error'
-    ? embeddedBleProbeStatus
-    : deviceHealth.state === 'healthy'
-      ? 'ok'
-      : deviceHealth.state === 'degraded' || deviceHealth.state === 'error'
-        ? 'error'
-        : embeddedBleProbeStatus === 'ok'
-          ? 'ok'
-          : 'idle';
-  const overviewBleMessage = embeddedBleProbeMessage
-    || bleRuntimeStatus?.wakeRecovery?.userGuidance
-    || deviceHealthDetail;
+  const bleRecoveryUi = useMemo(
+    () => buildBleRecoveryUi({
+      supported: embeddedBleSupported,
+      probeStatus: embeddedBleProbeStatus,
+      probeMessage: embeddedBleProbeMessage,
+      runtime: bleRuntimeStatus,
+      deviceHealth,
+      lastRepairResult: lastBleRepairResult,
+    }, t),
+    [
+      bleRuntimeStatus,
+      deviceHealth,
+      embeddedBleProbeMessage,
+      embeddedBleProbeStatus,
+      embeddedBleSupported,
+      lastBleRepairResult,
+      t,
+    ],
+  );
   const openBluetoothSettings = useCallback(() => {
     void openSystemSettings('bluetooth').catch(err => {
       console.warn('[overview] open bluetooth settings failed', err);
     });
   }, []);
+  const useMicrophoneInput = useCallback(() => {
+    void updatePrefs(current => ({ ...current, dictationInputSource: 'microphone' })).catch(err => {
+      console.warn('[overview] switch to microphone failed', err);
+    });
+  }, [updatePrefs]);
   const runEmbeddedBleProbe = useCallback(async () => {
     if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
     const runId = embeddedBleProbeRunId.current + 1;
     embeddedBleProbeRunId.current = runId;
     setEmbeddedBleProbeStatus('checking');
     setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionMessageChecking'));
+    setLastBleRepairResult(null);
     try {
       await runEmbeddedBleProbeWithTimeout();
       if (embeddedBleProbeRunId.current !== runId) return;
@@ -251,11 +264,13 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
     embeddedBleProbeRunId.current = runId;
     setEmbeddedBleProbeStatus('checking');
     setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionMessageChecking'));
+    setLastBleRepairResult(null);
     try {
       const result = await repairEmbeddedBleConnection(15_000);
       if (embeddedBleProbeRunId.current !== runId) return;
+      setLastBleRepairResult(result);
       setEmbeddedBleProbeStatus(result.recovered ? 'ok' : 'error');
-      setEmbeddedBleProbeMessage(result.message);
+      setEmbeddedBleProbeMessage('');
       if (result.openBluetoothSettings) {
         openBluetoothSettings();
       }
@@ -264,15 +279,21 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
     } catch (err) {
       if (embeddedBleProbeRunId.current !== runId) return;
       setEmbeddedBleProbeStatus('error');
+      setLastBleRepairResult(null);
       setEmbeddedBleProbeMessage(embeddedBleProbeErrorMessage(err, t));
       refreshBleRuntimeStatus();
     }
   }, [embeddedBleProbeStatus, embeddedBleSupported, openBluetoothSettings, refreshBleRuntimeStatus, refreshHistory, t]);
-  const exportBleDiagnostics = useCallback(() => {
+  const exportBleDiagnostics = useCallback(async () => {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    void exportDiagnosticPackage(`listener-type-ble-wake-diagnostics-${ts}.json`).catch(err => {
+    setBleDiagnosticStatus('busy');
+    try {
+      const target = await exportDiagnosticPackage(`listener-type-ble-wake-diagnostics-${ts}.json`);
+      setBleDiagnosticStatus(target ? 'ok' : 'idle');
+    } catch (err) {
       console.warn('[overview] export diagnostic package failed', err);
-    });
+      setBleDiagnosticStatus('err');
+    }
   }, []);
 
   return (
@@ -296,14 +317,14 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
 
       <div style={{ marginBottom: 18 }}>
         <EmbeddedBleStatusPanel
-          supported={embeddedBleSupported}
-          status={overviewBleStatus}
-          message={overviewBleMessage}
+          recovery={bleRecoveryUi}
           onOpenBluetoothSettings={openBluetoothSettings}
           onProbe={() => void runEmbeddedBleProbe()}
           onRepair={() => void repairEmbeddedBle()}
           onOpenRecordingSettings={onOpenRecordingSettings}
-          onExportDiagnostics={exportBleDiagnostics}
+          onUseMicrophone={useMicrophoneInput}
+          onExportDiagnostics={() => void exportBleDiagnostics()}
+          diagnosticStatus={bleDiagnosticStatus}
         />
       </div>
 

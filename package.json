@@ -17,8 +17,9 @@
     "test:rules": "node --experimental-strip-types src/lib/capsulePreviewRules.test.ts",
     "test:layout": "node --experimental-strip-types src/lib/capsuleLayout.test.ts",
     "test:device-health": "node --experimental-strip-types src/lib/deviceHealth.test.ts",
+    "test:ble-recovery-ui": "node --experimental-strip-types src/lib/bleRecoveryUi.test.ts",
     "test:firmware-ota": "node --experimental-strip-types src/lib/firmwareOta.test.ts",
-    "test": "npm run test:rules && npm run test:layout && npm run test:device-health && npm run test:firmware-ota",
+    "test": "npm run test:rules && npm run test:layout && npm run test:device-health && npm run test:ble-recovery-ui && npm run test:firmware-ota",
     "check:dark-mode": "node scripts/check-dark-mode.mjs",
     "verify": "node scripts/verify-frontend.mjs"
   },

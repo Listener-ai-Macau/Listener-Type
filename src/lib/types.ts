@@ -113,7 +113,18 @@ export interface EmbeddedBleWakeRecoverySnapshot {
 }
 
 export interface EmbeddedBleFailureClassification {
-  kind: string;
+  kind:
+    | 'deviceMissing'
+    | 'pairedButDisconnected'
+    | 'staleGattService'
+    | 'cccdProtocolError'
+    | 'missingDisFirmwareRevision'
+    | 'backgroundListenerContention'
+    | 'otaRebootWindow'
+    | 'windowsBluetoothServiceResetNeeded'
+    | 'accessDenied'
+    | 'unsupportedPlatform'
+    | 'unknown';
   retryable: boolean;
   automaticRecovery: boolean;
   userAction: string;

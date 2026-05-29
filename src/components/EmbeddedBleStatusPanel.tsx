@@ -1,65 +1,33 @@
 import { useTranslation } from 'react-i18next';
 import type { EmbeddedBleProbeStatus } from '../lib/embeddedBleProbe';
+import type { BleRecoveryUiModel } from '../lib/bleRecoveryUi';
 import { Btn, Pill } from '../pages/_atoms';
 
 export type { EmbeddedBleProbeStatus };
 
-type ConnectionState = 'idle' | 'checking' | 'ok' | 'error' | 'unsupported';
+type DiagnosticExportStatus = 'idle' | 'busy' | 'ok' | 'err';
 
 export function EmbeddedBleStatusPanel({
-  supported,
-  status,
-  message,
+  recovery,
   onOpenBluetoothSettings,
   onProbe,
   onRepair,
   onOpenRecordingSettings,
   onUseMicrophone,
   onExportDiagnostics,
+  diagnosticStatus = 'idle',
 }: {
-  supported: boolean;
-  status: EmbeddedBleProbeStatus;
-  message: string;
+  recovery: BleRecoveryUiModel;
   onOpenBluetoothSettings: () => void;
   onProbe: () => void;
   onRepair?: () => void;
   onOpenRecordingSettings?: () => void;
   onUseMicrophone?: () => void;
   onExportDiagnostics?: () => void;
+  diagnosticStatus?: DiagnosticExportStatus;
 }) {
   const { t } = useTranslation();
-  const checking = status === 'checking';
-  const connectionState: ConnectionState = !supported
-    ? 'unsupported'
-    : checking
-      ? 'checking'
-      : status === 'ok'
-        ? 'ok'
-        : status === 'error'
-          ? 'error'
-          : 'idle';
-  const overallTone: 'outline' | 'ok' | 'blue' | 'err' =
-    connectionState === 'ok'
-      ? 'ok'
-      : connectionState === 'checking'
-        ? 'blue'
-        : connectionState === 'error'
-          ? 'err'
-          : 'outline';
-  const overallLabel = connectionState === 'ok'
-    ? t('settings.recording.embeddedBleHealthShort', '健康')
-    : connectionState === 'checking'
-      ? t('settings.recording.embeddedBleChecking')
-    : connectionState === 'error'
-        ? t('settings.recording.embeddedBleErrorShort', '异常')
-        : connectionState === 'unsupported'
-          ? t('settings.recording.embeddedBleUnsupported')
-          : t('settings.recording.embeddedBleDisconnectedShort', '未连接');
-  const bodyMessage = message
-    || (supported
-      ? t('settings.recording.embeddedBleSimpleDesc', '刷新设备状态，确认设备健康能用。')
-      : t('settings.recording.embeddedBleUnsupportedDesc'));
-  const showDetails = connectionState !== 'ok';
+  const checking = recovery.state === 'checking';
 
   return (
     <div
@@ -79,46 +47,74 @@ export function EmbeddedBleStatusPanel({
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ol-ink)' }}>
             {t('settings.recording.embeddedBleStatusTitle', 'Listener BLE')}
           </div>
-          <Pill tone={overallTone} size="sm">{overallLabel}</Pill>
+          <Pill tone={recovery.tone} size="sm">{recovery.label}</Pill>
         </div>
         <Btn
           variant="ghost"
           size="sm"
           icon="refresh"
-          disabled={!supported || checking}
+          disabled={recovery.state === 'unsupported' || checking}
           onClick={onProbe}
         >
           {t('common.refresh')}
         </Btn>
       </div>
-      {showDetails && (
+      {recovery.showDetails && (
         <>
-          <div style={{ fontSize: 11.5, color: status === 'error' ? 'var(--ol-err)' : 'var(--ol-ink-4)', lineHeight: 1.55 }}>
-            {bodyMessage}
+          <div style={{ fontSize: 11.5, color: recovery.tone === 'err' ? 'var(--ol-err)' : 'var(--ol-ink-4)', lineHeight: 1.55 }}>
+            {recovery.message}
           </div>
+          {recovery.emphasizeRePair && (
+            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-3)', lineHeight: 1.5 }}>
+              {t(
+                'settings.recording.embeddedBleRecovery.rePairSteps',
+                'In Windows Bluetooth, remove the Listener device, pair it again, then return here and refresh.',
+              )}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Btn variant="ghost" size="sm" icon="settings" onClick={onOpenBluetoothSettings}>
-              {t('settings.recording.embeddedBleOpenBluetooth')}
-            </Btn>
+            {recovery.showOpenBluetoothSettings && (
+              <Btn variant="ghost" size="sm" icon="settings" onClick={onOpenBluetoothSettings}>
+                {t('settings.recording.embeddedBleOpenBluetooth')}
+              </Btn>
+            )}
             {onOpenRecordingSettings && (
               <Btn variant="ghost" size="sm" icon="mic" onClick={onOpenRecordingSettings}>
                 {t('overview.deviceHealth.openRecording')}
               </Btn>
             )}
-            {supported && status === 'error' && onUseMicrophone && (
+            {recovery.showUseMicrophone && onUseMicrophone && (
               <Btn variant="soft" size="sm" icon="mic" onClick={onUseMicrophone}>
                 {t('settings.recording.embeddedBleUseMicrophone')}
               </Btn>
             )}
-            {supported && status === 'error' && onRepair && (
+            {recovery.showRepair && onRepair && (
               <Btn variant="soft" size="sm" icon="refresh" disabled={checking} onClick={onRepair}>
                 {t('settings.recording.embeddedBleRepair')}
               </Btn>
             )}
-            {supported && status === 'error' && onExportDiagnostics && (
-              <Btn variant="soft" size="sm" icon="doc" onClick={onExportDiagnostics}>
-                {t('modal.about.exportDiagnosticPackageBtn')}
+            {recovery.showExportDiagnostics && onExportDiagnostics && (
+              <Btn
+                variant="soft"
+                size="sm"
+                icon="doc"
+                disabled={diagnosticStatus === 'busy'}
+                onClick={onExportDiagnostics}
+              >
+                {diagnosticStatus === 'busy'
+                  ? t('modal.about.exporting')
+                  : t('modal.about.exportDiagnosticPackageBtn')}
               </Btn>
+            )}
+            {diagnosticStatus === 'ok' && (
+              <span style={{ fontSize: 11, color: 'var(--ol-ok)' }}>
+                {t('modal.about.exportSuccess')}
+              </span>
+            )}
+            {diagnosticStatus === 'err' && (
+              <span style={{ fontSize: 11, color: 'var(--ol-err)' }}>
+                {t('modal.about.exportFailed')}
+              </span>
             )}
           </div>
         </>
