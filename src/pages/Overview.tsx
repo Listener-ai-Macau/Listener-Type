@@ -18,6 +18,7 @@ import {
   getEmbeddedBleRuntimeStatus,
   listHistory,
   openSystemSettings,
+  repairEmbeddedBleConnection,
   setActiveAsrProvider,
   startDictation,
 } from '../lib/ipc';
@@ -244,6 +245,29 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
       refreshBleRuntimeStatus();
     }
   }, [embeddedBleProbeStatus, embeddedBleSupported, refreshBleRuntimeStatus, refreshHistory, t]);
+  const repairEmbeddedBle = useCallback(async () => {
+    if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
+    const runId = embeddedBleProbeRunId.current + 1;
+    embeddedBleProbeRunId.current = runId;
+    setEmbeddedBleProbeStatus('checking');
+    setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionMessageChecking'));
+    try {
+      const result = await repairEmbeddedBleConnection(15_000);
+      if (embeddedBleProbeRunId.current !== runId) return;
+      setEmbeddedBleProbeStatus(result.recovered ? 'ok' : 'error');
+      setEmbeddedBleProbeMessage(result.message);
+      if (result.openBluetoothSettings) {
+        openBluetoothSettings();
+      }
+      refreshHistory();
+      refreshBleRuntimeStatus();
+    } catch (err) {
+      if (embeddedBleProbeRunId.current !== runId) return;
+      setEmbeddedBleProbeStatus('error');
+      setEmbeddedBleProbeMessage(embeddedBleProbeErrorMessage(err, t));
+      refreshBleRuntimeStatus();
+    }
+  }, [embeddedBleProbeStatus, embeddedBleSupported, openBluetoothSettings, refreshBleRuntimeStatus, refreshHistory, t]);
   const exportBleDiagnostics = useCallback(() => {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     void exportDiagnosticPackage(`listener-type-ble-wake-diagnostics-${ts}.json`).catch(err => {
@@ -277,6 +301,7 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
           message={overviewBleMessage}
           onOpenBluetoothSettings={openBluetoothSettings}
           onProbe={() => void runEmbeddedBleProbe()}
+          onRepair={() => void repairEmbeddedBle()}
           onOpenRecordingSettings={onOpenRecordingSettings}
           onExportDiagnostics={exportBleDiagnostics}
         />

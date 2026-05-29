@@ -1399,6 +1399,73 @@ pub async fn probe_embedded_audio_ble_subscription(
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct EmbeddedBleRepairResult {
+    pub recovered: bool,
+    pub user_action_required: bool,
+    pub open_bluetooth_settings: bool,
+    pub message: String,
+    pub failure: Option<crate::embedded_ble::BleFailureClassification>,
+    pub runtime: EmbeddedBleRuntimeStatus,
+    pub firmware: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+}
+
+#[tauri::command]
+pub async fn repair_embedded_ble_connection(
+    coord: CoordinatorState<'_>,
+    timeout_ms: Option<u64>,
+) -> Result<EmbeddedBleRepairResult, String> {
+    let repair = coord.repair_embedded_ble_connection(timeout_ms).await;
+    let runtime = EmbeddedBleRuntimeStatus {
+        background_listener_disabled_by_env: std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
+            .ok()
+            .is_some_and(|value| value == "1"),
+        background_listener_active: coord.embedded_ble_listener_active(),
+        background_listener_ready: coord.embedded_ble_listener_ready(),
+        background_listener_generation: coord.embedded_ble_listener_generation(),
+        background_listener_last_error: coord.embedded_ble_listener_last_error(),
+        wake_recovery: coord.embedded_ble_wake_recovery_snapshot(),
+    };
+    let firmware =
+        tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
+            .await
+            .map_err(|err| format!("Listener BLE repair snapshot task failed: {err}"))?;
+
+    match repair {
+        Ok(snapshot) => Ok(EmbeddedBleRepairResult {
+            recovered: true,
+            user_action_required: false,
+            open_bluetooth_settings: false,
+            message: snapshot.user_guidance,
+            failure: None,
+            runtime,
+            firmware,
+        }),
+        Err(err) => {
+            let failure = crate::embedded_ble::classify_ble_failure(&err);
+            let user_action_required = !failure.automatic_recovery;
+            let open_bluetooth_settings = user_action_required
+                && matches!(
+                    failure.kind,
+                    crate::embedded_ble::BleFailureKind::DeviceMissing
+                        | crate::embedded_ble::BleFailureKind::StaleGattService
+                        | crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded
+                        | crate::embedded_ble::BleFailureKind::AccessDenied
+                );
+            Ok(EmbeddedBleRepairResult {
+                recovered: false,
+                user_action_required,
+                open_bluetooth_settings,
+                message: failure.user_action.to_string(),
+                failure: Some(failure),
+                runtime,
+                firmware,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EmbeddedBleRuntimeStatus {
     pub background_listener_disabled_by_env: bool,
     pub background_listener_active: bool,

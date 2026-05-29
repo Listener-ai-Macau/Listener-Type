@@ -497,6 +497,7 @@ export const zhCN = {
       embeddedBleGenericError: 'BLE 音频通路检查失败。请重试，或先切到麦克风体验。',
       embeddedBleWakeGuidance: 'BLE 音频通路暂时不可用。若设备睡着，请按 KEY4/唤醒键、重新连接；仍失败时导出诊断包。',
       embeddedBleRetry: '重试',
+      embeddedBleRepair: '修复连接',
       embeddedBleUseMicrophone: '改用麦克风',
       embeddedBleOpenDemo: '打开 Demo',
       embeddedBlePackets: '{{received}} / {{expected}} 包',

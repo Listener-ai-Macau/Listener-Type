@@ -472,6 +472,7 @@ export const ko: typeof zhCN = {
       embeddedBleGenericError: 'BLE 오디오 경로 확인에 실패했습니다. 다시 시도하거나 우선 마이크를 사용하세요.',
       embeddedBleWakeGuidance: 'BLE 오디오 경로를 사용할 수 없습니다. 기기가 잠들어 있으면 KEY4/깨우기 키를 누르고 다시 연결한 뒤, 계속 실패하면 진단을 내보내세요.',
       embeddedBleRetry: '다시 시도',
+      embeddedBleRepair: '연결 복구',
       embeddedBleUseMicrophone: '마이크 사용',
       embeddedBleOpenDemo: '데모 열기',
       embeddedBlePackets: '{{received}} / {{expected}} 패킷',

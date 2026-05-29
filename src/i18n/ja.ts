@@ -472,6 +472,7 @@ export const ja: typeof zhCN = {
       embeddedBleGenericError: 'BLE 音声経路の確認に失敗しました。再試行するか、先にマイクを使ってください。',
       embeddedBleWakeGuidance: 'BLE 音声経路を使用できません。デバイスがスリープ中なら KEY4/ウェイクキーを押して再接続し、解決しない場合は診断をエクスポートしてください。',
       embeddedBleRetry: '再試行',
+      embeddedBleRepair: '接続を修復',
       embeddedBleUseMicrophone: 'マイクを使用',
       embeddedBleOpenDemo: 'デモを開く',
       embeddedBlePackets: '{{received}} / {{expected}} パケット',

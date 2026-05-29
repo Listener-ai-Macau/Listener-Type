@@ -8,6 +8,7 @@ import type {
   CredentialsStatus,
   DictationSession,
   EmbeddedAudioInputFormat,
+  EmbeddedBleRepairResult,
   EmbeddedBleRuntimeStatus,
   DictionaryEntry,
   EmbeddedAudioSubmissionResult,
@@ -763,6 +764,53 @@ export function probeEmbeddedAudioBleSubscription(timeoutMs?: number): Promise<v
     'probe_embedded_audio_ble_subscription',
     { timeoutMs: timeoutMs ?? null },
     () => undefined,
+  );
+}
+
+export function repairEmbeddedBleConnection(timeoutMs?: number): Promise<EmbeddedBleRepairResult> {
+  return invokeOrMock(
+    'repair_embedded_ble_connection',
+    { timeoutMs: timeoutMs ?? null },
+    () => ({
+      recovered: true,
+      userActionRequired: false,
+      openBluetoothSettings: false,
+      message: 'Listener BLE 已连接，音频 notify 已订阅。',
+      failure: null,
+      runtime: {
+        backgroundListenerDisabledByEnv: false,
+        backgroundListenerActive: true,
+        backgroundListenerReady: true,
+        backgroundListenerGeneration: 1,
+        backgroundListenerLastError: null,
+        wakeRecovery: {
+          status: 'ready',
+          userGuidance: 'Listener BLE 已连接，音频 notify 已订阅。',
+          recentDisconnectReason: null,
+          reconnectAttempts: 1,
+          notifySubscriptionState: 'subscribed',
+          firmwareWakePolicy: {
+            policy: 'key4_only',
+            wakeCapableKeys: 'KEY4/GPIO21',
+            voiceKey: 'GPIO35',
+            voiceKeyDeepSleepWake: false,
+            readiness: 'voice_key_cannot_wake_from_deep_sleep_on_current_v1_board',
+            source: 'Mock firmware wake-policy contract',
+          },
+          lastAttemptAt: new Date().toISOString(),
+          lastReadyAt: new Date().toISOString(),
+        },
+      },
+      firmware: {
+        connected: true,
+        hardwareRevision: null,
+        firmwareVersion: null,
+        capabilities: [],
+        batteryPercent: null,
+        usbPowered: null,
+        detail: null,
+      },
+    }),
   );
 }
 

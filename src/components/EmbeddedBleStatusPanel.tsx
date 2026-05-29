@@ -12,6 +12,7 @@ export function EmbeddedBleStatusPanel({
   message,
   onOpenBluetoothSettings,
   onProbe,
+  onRepair,
   onOpenRecordingSettings,
   onUseMicrophone,
   onExportDiagnostics,
@@ -21,6 +22,7 @@ export function EmbeddedBleStatusPanel({
   message: string;
   onOpenBluetoothSettings: () => void;
   onProbe: () => void;
+  onRepair?: () => void;
   onOpenRecordingSettings?: () => void;
   onUseMicrophone?: () => void;
   onExportDiagnostics?: () => void;
@@ -106,6 +108,11 @@ export function EmbeddedBleStatusPanel({
             {supported && status === 'error' && onUseMicrophone && (
               <Btn variant="soft" size="sm" icon="mic" onClick={onUseMicrophone}>
                 {t('settings.recording.embeddedBleUseMicrophone')}
+              </Btn>
+            )}
+            {supported && status === 'error' && onRepair && (
+              <Btn variant="soft" size="sm" icon="refresh" disabled={checking} onClick={onRepair}>
+                {t('settings.recording.embeddedBleRepair')}
               </Btn>
             )}
             {supported && status === 'error' && onExportDiagnostics && (
