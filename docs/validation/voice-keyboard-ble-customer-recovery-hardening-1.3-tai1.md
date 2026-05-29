@@ -1,6 +1,6 @@
 # voice-keyboard-ble-customer-recovery-hardening 1.3 validation
 
-Assignee: tai1
+Assignee: tai1; rework handoff: oai2
 Date: 2026-05-29
 Repo: Listener-Type
 Branch: ai/tai1-voice-keyboard-ble-customer-recovery-hardening-1.3
@@ -54,3 +54,25 @@ Notes:
 - `npm run build` completed with the existing Vite chunk-size warning for the main bundle.
 - `git diff --check` completed cleanly; Git printed only CRLF normalization warnings.
 - A `node_modules` junction was created in this worktree pointing to the main Listener-Type dependency directory for validation only.
+
+## OAI2 Rework After Review
+
+Reviewer feedback on 2026-05-29 found that stale runtime BLE errors could override a successful foreground probe or a recovered repair result, leaving the customer UI on `needsRePair` after recovery had already succeeded.
+
+Rework completed:
+
+- `selectBleRecoveryUiState` now treats `probeStatus === 'ok'` and `lastRepairResult.recovered` as authoritative ready states before considering stale runtime errors.
+- `Overview` updates local BLE runtime state from a repair result immediately, so the panel does not wait for an asynchronous refresh before clearing stale guidance.
+- Added regression coverage for probe-ok plus stale runtime and repair-recovered plus stale runtime.
+
+Rework validation:
+
+- PASS: `npm test`
+- PASS: `npm run build`
+- PASS: `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`
+- PASS: `git diff --check`
+
+Notes:
+
+- `npm run build` still reports the existing Vite chunk-size warning for the main bundle.
+- `git diff --check` completed cleanly; Git printed only CRLF normalization warnings.

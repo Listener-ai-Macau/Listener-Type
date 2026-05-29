@@ -269,6 +269,7 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
       const result = await repairEmbeddedBleConnection(15_000);
       if (embeddedBleProbeRunId.current !== runId) return;
       setLastBleRepairResult(result);
+      setBleRuntimeStatus(result.runtime);
       setEmbeddedBleProbeStatus(result.recovered ? 'ok' : 'error');
       setEmbeddedBleProbeMessage('');
       if (result.openBluetoothSettings) {

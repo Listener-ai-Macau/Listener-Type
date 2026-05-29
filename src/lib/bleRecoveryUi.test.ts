@@ -101,6 +101,25 @@ assert.equal(selectBleRecoveryUiState(input({ supported: false })), 'unsupported
 assert.equal(selectBleRecoveryUiState(input({ probeStatus: 'checking' })), 'checking');
 assert.equal(selectBleRecoveryUiState(input({ probeStatus: 'ok' })), 'ready');
 
+const staleRuntime: EmbeddedBleRuntimeStatus = {
+  ...baseRuntime,
+  backgroundListenerLastError: 'Unknown GATT service from stale cache',
+};
+assert.equal(selectBleRecoveryUiState(input({ probeStatus: 'ok', runtime: staleRuntime })), 'ready');
+assert.equal(
+  selectBleRecoveryUiState(input({
+    runtime: staleRuntime,
+    lastRepairResult: repair('staleGattService', {
+      recovered: true,
+      userActionRequired: false,
+      openBluetoothSettings: false,
+      failure: null,
+      runtime: baseRuntime,
+    }),
+  })),
+  'ready',
+);
+
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('staleGattService') })), 'needsRePair');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('windowsBluetoothServiceResetNeeded') })), 'needsBluetooth');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('accessDenied') })), 'needsBluetooth');

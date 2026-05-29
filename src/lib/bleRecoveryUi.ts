@@ -149,6 +149,7 @@ export function selectBleRecoveryUiState({
 }: BleRecoveryUiInput): BleRecoveryUiState {
   if (!supported) return 'unsupported';
   if (probeStatus === 'checking') return 'checking';
+  if (probeStatus === 'ok' || lastRepairResult?.recovered) return 'ready';
 
   const repairFailure = lastRepairResult?.failure ?? null;
   if (lastRepairResult && !lastRepairResult.recovered && repairFailure) {
@@ -157,8 +158,6 @@ export function selectBleRecoveryUiState({
 
   const runtimeFailure = classifyRuntimeFailure(runtime);
   if (runtimeFailure) return runtimeFailure;
-
-  if (probeStatus === 'ok' || lastRepairResult?.recovered) return 'ready';
 
   if (probeStatus === 'error') {
     return stateForDeviceHealth(deviceHealth) ?? 'needsRepair';
