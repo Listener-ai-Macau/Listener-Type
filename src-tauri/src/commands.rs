@@ -1409,6 +1409,20 @@ pub struct EmbeddedBleRepairResult {
     pub firmware: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
 }
 
+fn embedded_ble_repair_failure_action(
+    failure: &crate::embedded_ble::BleFailureClassification,
+) -> (bool, bool) {
+    let open_bluetooth_settings = matches!(
+        failure.kind,
+        crate::embedded_ble::BleFailureKind::DeviceMissing
+            | crate::embedded_ble::BleFailureKind::StaleGattService
+            | crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded
+            | crate::embedded_ble::BleFailureKind::AccessDenied
+    );
+    let user_action_required = open_bluetooth_settings || !failure.automatic_recovery;
+    (user_action_required, open_bluetooth_settings)
+}
+
 #[tauri::command]
 pub async fn repair_embedded_ble_connection(
     coord: CoordinatorState<'_>,
@@ -1442,15 +1456,8 @@ pub async fn repair_embedded_ble_connection(
         }),
         Err(err) => {
             let failure = crate::embedded_ble::classify_ble_failure(&err);
-            let user_action_required = !failure.automatic_recovery;
-            let open_bluetooth_settings = user_action_required
-                && matches!(
-                    failure.kind,
-                    crate::embedded_ble::BleFailureKind::DeviceMissing
-                        | crate::embedded_ble::BleFailureKind::StaleGattService
-                        | crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded
-                        | crate::embedded_ble::BleFailureKind::AccessDenied
-                );
+            let (user_action_required, open_bluetooth_settings) =
+                embedded_ble_repair_failure_action(&failure);
             Ok(EmbeddedBleRepairResult {
                 recovered: false,
                 user_action_required,
@@ -3970,6 +3977,40 @@ mod tests {
             firmware_ota_snapshot_version(&ota_snapshot_with_version(None)),
             None
         );
+    }
+
+    #[test]
+    fn repair_failure_maps_stale_gatt_to_repair_user_action() {
+        let stale = crate::embedded_ble::classify_ble_failure(
+            "Unknown GATT service from stale cached service table after customer repair",
+        );
+        assert_eq!(
+            stale.kind,
+            crate::embedded_ble::BleFailureKind::StaleGattService
+        );
+        assert!(stale.automatic_recovery);
+
+        let (user_action_required, open_bluetooth_settings) =
+            super::embedded_ble_repair_failure_action(&stale);
+        assert!(user_action_required);
+        assert!(open_bluetooth_settings);
+    }
+
+    #[test]
+    fn repair_failure_keeps_transient_disconnect_automatic() {
+        let transient = crate::embedded_ble::classify_ble_failure(
+            "BLE device disconnected while waiting for reconnect",
+        );
+        assert_eq!(
+            transient.kind,
+            crate::embedded_ble::BleFailureKind::PairedButDisconnected
+        );
+        assert!(transient.automatic_recovery);
+
+        let (user_action_required, open_bluetooth_settings) =
+            super::embedded_ble_repair_failure_action(&transient);
+        assert!(!user_action_required);
+        assert!(!open_bluetooth_settings);
     }
 
     #[test]
