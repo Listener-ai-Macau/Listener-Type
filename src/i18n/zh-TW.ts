@@ -499,6 +499,7 @@ export const zhTW: typeof zhCN = {
       embeddedBleGenericError: 'BLE 音訊通路檢查失敗。請重試，或先切到麥克風體驗。',
       embeddedBleWakeGuidance: 'BLE 音訊通路暫時不可用。若設備睡著，請按 KEY4/喚醒鍵、重新連接；仍失敗時匯出診斷包。',
       embeddedBleRetry: '重試',
+      embeddedBleRepair: '修復連接',
       embeddedBleUseMicrophone: '改用麥克風',
       embeddedBleOpenDemo: '打開 Demo',
       embeddedBlePackets: '{{received}} / {{expected}} 包',

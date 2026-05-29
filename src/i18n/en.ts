@@ -499,6 +499,7 @@ export const en: typeof zhCN = {
       embeddedBleGenericError: 'BLE audio path check failed. Retry, or use the microphone for now.',
       embeddedBleWakeGuidance: 'BLE audio path is not ready. If the device is asleep, press KEY4 or the wake key, reconnect, then export diagnostics if it still fails.',
       embeddedBleRetry: 'Retry',
+      embeddedBleRepair: 'Repair connection',
       embeddedBleUseMicrophone: 'Use microphone',
       embeddedBleOpenDemo: 'Open demo',
       embeddedBlePackets: '{{received}} / {{expected}} packets',

@@ -43,6 +43,8 @@ pub enum CliIntent {
     SubmitEmbeddedAudioBleOnce { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：订阅嵌入式 BLE notify，收到 audio_data 立刻送入 ASR。
     SubmitEmbeddedAudioBleStream { timeout_ms: Option<u64> },
+    /// 调试 / 自动化入口：触发前台 BLE 状态探测，验证它能复用或等待后台 listener。
+    ProbeEmbeddedAudioBleSubscription { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：校验固件 OTA 包，可选做 BLE preflight 或真实传输。
     FirmwareOta {
         manifest_path: PathBuf,
@@ -117,6 +119,11 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
             }
             "--submit-embedded-audio-ble-stream" => {
                 return Some(CliIntent::SubmitEmbeddedAudioBleStream {
+                    timeout_ms: next_u64_arg(&mut args),
+                });
+            }
+            "--probe-embedded-audio-ble-subscription" => {
+                return Some(CliIntent::ProbeEmbeddedAudioBleSubscription {
                     timeout_ms: next_u64_arg(&mut args),
                 });
             }
@@ -302,6 +309,30 @@ mod tests {
             Some(CliIntent::SubmitEmbeddedAudioBleStream {
                 timeout_ms: Some(90_000),
             })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_ble_probe_with_timeout() {
+        let args = vec![
+            "listener-type",
+            "--probe-embedded-audio-ble-subscription",
+            "15000",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::ProbeEmbeddedAudioBleSubscription {
+                timeout_ms: Some(15_000),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_ble_probe_without_timeout() {
+        let args = vec!["listener-type", "--probe-embedded-audio-ble-subscription"];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::ProbeEmbeddedAudioBleSubscription { timeout_ms: None })
         );
     }
 

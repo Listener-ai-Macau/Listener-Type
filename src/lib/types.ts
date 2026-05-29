@@ -2,6 +2,8 @@
 // All keys are camelCase (Rust serializes with #[serde(rename_all = "camelCase")]).
 // PolishMode is an exception — Rust uses lowercase serialization.
 
+import type { FirmwareOtaDeviceSnapshot } from './firmwareOta';
+
 export type PolishMode = 'raw' | 'light' | 'structured' | 'formal';
 
 export type InsertStatus = 'inserted' | 'pasteSent' | 'copiedFallback' | 'failed';
@@ -108,6 +110,24 @@ export interface EmbeddedBleWakeRecoverySnapshot {
   firmwareWakePolicy: FirmwareWakePolicySnapshot;
   lastAttemptAt: string | null;
   lastReadyAt: string | null;
+}
+
+export interface EmbeddedBleFailureClassification {
+  kind: string;
+  retryable: boolean;
+  automaticRecovery: boolean;
+  userAction: string;
+  evidence: string;
+}
+
+export interface EmbeddedBleRepairResult {
+  recovered: boolean;
+  userActionRequired: boolean;
+  openBluetoothSettings: boolean;
+  message: string;
+  failure: EmbeddedBleFailureClassification | null;
+  runtime: EmbeddedBleRuntimeStatus;
+  firmware: FirmwareOtaDeviceSnapshot;
 }
 
 export type EmbeddedAudioInputFormat = 'wav' | 'pcm16le';

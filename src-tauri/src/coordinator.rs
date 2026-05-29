@@ -1088,6 +1088,36 @@ impl Coordinator {
         result
     }
 
+    pub async fn repair_embedded_ble_connection(
+        &self,
+        timeout_ms: Option<u64>,
+    ) -> Result<EmbeddedBleWakeRecoverySnapshot, String> {
+        if embedded_ble_listener_capture_ready(&self.inner) {
+            clear_embedded_ble_listener_last_error(&self.inner);
+            record_embedded_ble_notify_ready(&self.inner);
+            return Ok(self.embedded_ble_wake_recovery_snapshot());
+        }
+
+        let timeout = Duration::from_millis(timeout_ms.unwrap_or(12_000).clamp(1_000, 45_000));
+        pause_embedded_ble_listener_capture(&self.inner, "customer repair action");
+        clear_embedded_ble_listener_last_error(&self.inner);
+        record_embedded_ble_reconnect_attempt(&self.inner, "customer_repair");
+        self.refresh_embedded_ble_listener();
+
+        match wait_for_embedded_ble_listener_ready(&self.inner, timeout).await {
+            Ok(()) => {
+                clear_embedded_ble_listener_last_error(&self.inner);
+                record_embedded_ble_notify_ready(&self.inner);
+                Ok(self.embedded_ble_wake_recovery_snapshot())
+            }
+            Err(err) => {
+                record_embedded_ble_listener_last_error(&self.inner, &err);
+                record_embedded_ble_recovery_failure(&self.inner, &err);
+                Err(err)
+            }
+        }
+    }
+
     pub fn cancel_dictation(&self) {
         cancel_session(&self.inner);
     }
@@ -3955,6 +3985,28 @@ mod tests {
         );
         cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup");
         assert!(active.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn embedded_ble_repair_reuses_ready_background_status() {
+        let coordinator = Coordinator::new();
+        let mut prefs = coordinator.inner.prefs.get();
+        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+        coordinator.inner.prefs.replace_for_tests(prefs);
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        mark_embedded_ble_listener_ready(&coordinator.inner, &active);
+
+        let snapshot = coordinator
+            .repair_embedded_ble_connection(Some(1_000))
+            .await
+            .expect("ready background listener should satisfy repair action");
+
+        assert_eq!(snapshot.status, EmbeddedBleWakeRecoveryStatus::Ready);
+        assert_eq!(
+            snapshot.notify_subscription_state,
+            EmbeddedBleNotifySubscriptionState::Subscribed
+        );
+        assert_eq!(coordinator.embedded_ble_listener_last_error(), None);
     }
 
     #[test]

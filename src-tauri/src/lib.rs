@@ -347,6 +347,7 @@ pub fn run() {
             commands::submit_embedded_audio_streaming_file,
             commands::submit_embedded_audio_ble_once,
             commands::probe_embedded_audio_ble_subscription,
+            commands::repair_embedded_ble_connection,
             commands::get_embedded_ble_runtime_status,
             commands::get_firmware_ota_preflight_snapshot,
             commands::load_firmware_ota_package,
@@ -1062,6 +1063,27 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
                         result.stats.missing_packet_count
                     ),
                     Err(err) => log::warn!("[cli] submit-embedded-audio-ble-stream failed: {err}"),
+                }
+            });
+        }
+        cli::CliIntent::ProbeEmbeddedAudioBleSubscription { timeout_ms } => {
+            let coord = Arc::clone(&coordinator);
+            tauri::async_runtime::spawn(async move {
+                log::info!(
+                    "[cli] probe-embedded-audio-ble-subscription: timeout_ms={timeout_ms:?}"
+                );
+                match coord
+                    .probe_embedded_audio_ble_subscription(timeout_ms)
+                    .await
+                {
+                    Ok(()) => {
+                        println!("embedded_ble_probe_result=PASS");
+                        log::info!("[cli] probe-embedded-audio-ble-subscription PASS");
+                    }
+                    Err(err) => {
+                        println!("embedded_ble_probe_result=FAIL error={err}");
+                        log::warn!("[cli] probe-embedded-audio-ble-subscription failed: {err}");
+                    }
                 }
             });
         }
