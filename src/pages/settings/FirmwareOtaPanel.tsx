@@ -12,7 +12,10 @@ import {
   compareVersionish,
   evaluateFirmwareOtaPreflight,
   firmwareOtaConfirmedVersionMatches,
+  firmwareOtaConfirmedVersionLooksRolledBack,
   firmwareOtaReducer,
+  firmwareOtaRollbackVersionFromText,
+  firmwareOtaVersionNotConfirmedAction,
   initialFirmwareOtaState,
   validateFirmwareOtaPackage,
   type FirmwareOtaBlocker,
@@ -237,6 +240,7 @@ export function FirmwareOtaPanel({
     }
 
     setBlockers([]);
+    let bytesSentForFailureCheck = 0;
     try {
       dispatch({ type: 'startTransfer' });
       setProgressBytes({ sent: 0, total: selectedPackage.firmwareBytes.byteLength });
@@ -244,6 +248,7 @@ export function FirmwareOtaPanel({
       const unlisten = await listen<{ bytesSent: number; bytesTotal: number }>('firmware-ota:progress', event => {
         const bytesTotal = Math.max(1, event.payload.bytesTotal);
         const bytesSent = Math.min(event.payload.bytesSent, bytesTotal);
+        bytesSentForFailureCheck = Math.max(bytesSentForFailureCheck, bytesSent);
         setProgressBytes({ sent: bytesSent, total: bytesTotal });
         const pct = Math.round((bytesSent / bytesTotal) * 100);
         if (bytesSent >= bytesTotal) {
@@ -274,16 +279,29 @@ export function FirmwareOtaPanel({
         void refreshOtaSnapshot();
       } else {
         const confirmedVersion = transferResult?.confirmedVersion?.trim();
-        dispatch({
-          type: 'failed',
-          failureCode: 'versionNotConfirmed',
-          message: confirmedVersion
-            ? `Device reported firmware ${confirmedVersion}, not ${selectedPackage.manifest.version}.`
-            : 'Device firmware version was not confirmed after the OTA reboot window.',
-        });
+        dispatch(firmwareOtaVersionNotConfirmedAction(confirmedVersion, selectedPackage.manifest.version));
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const expectedVersion = selectedPackage.manifest.version;
+      const rollbackVersionFromError = firmwareOtaRollbackVersionFromText(message, expectedVersion);
+      if (rollbackVersionFromError) {
+        setOtaSnapshot(previous => snapshotWithFirmwareVersion(previous, rollbackVersionFromError));
+        dispatch(firmwareOtaVersionNotConfirmedAction(rollbackVersionFromError, expectedVersion));
+        return;
+      }
+      const failedAfterFullTransfer = bytesSentForFailureCheck >= selectedPackage.firmwareBytes.byteLength;
+      if (failedAfterFullTransfer || looksLikePostRebootOtaError(message)) {
+        const snapshotAfterFailure = await refreshOtaSnapshot({ waitForFirmwareVersion: true });
+        const confirmedVersion = snapshotAfterFailure.device.firmwareVersion?.trim() ?? null;
+        if (firmwareOtaConfirmedVersionLooksRolledBack(confirmedVersion, expectedVersion)) {
+          if (confirmedVersion) {
+            setOtaSnapshot(previous => snapshotWithFirmwareVersion(previous, confirmedVersion));
+          }
+          dispatch(firmwareOtaVersionNotConfirmedAction(confirmedVersion, expectedVersion));
+          return;
+        }
+      }
       dispatch({
         type: 'failed',
         failureCode: message.toLowerCase().includes('disconnect') ? 'bleDisconnected' : 'deviceRejected',
@@ -564,6 +582,18 @@ function snapshotWithFirmwareVersion(
       detail: 'Firmware version confirmed from device after OTA.',
     },
   };
+}
+
+function looksLikePostRebootOtaError(message: string): boolean {
+  const text = message.toLowerCase();
+  return (
+    text.includes('finish') ||
+    text.includes('reboot') ||
+    text.includes('confirm') ||
+    text.includes('version') ||
+    text.includes('verify') ||
+    text.includes('rollback')
+  );
 }
 
 function formatBytes(bytes: number): string {

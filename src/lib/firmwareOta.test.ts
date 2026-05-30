@@ -5,8 +5,11 @@ import {
   compareVersionish,
   evaluateFirmwareOtaPreflight,
   firmwareOtaConfirmedVersionMatches,
+  firmwareOtaConfirmedVersionLooksRolledBack,
   firmwareOtaFailureNextStep,
   firmwareOtaReducer,
+  firmwareOtaRollbackVersionFromText,
+  firmwareOtaVersionNotConfirmedAction,
   initialFirmwareOtaState,
   validateFirmwareOtaPackage,
   type FirmwareOtaManifest,
@@ -246,6 +249,15 @@ assert.equal(compareVersionish('1.3.3', '1.4.0'), -1);
 assert.equal(firmwareOtaConfirmedVersionMatches('v1.2.0', '1.2.0'), true);
 assert.equal(firmwareOtaConfirmedVersionMatches('1.2.0-dev', '1.2.0'), false);
 assert.equal(firmwareOtaConfirmedVersionMatches(null, '1.2.0'), false);
+assert.equal(firmwareOtaConfirmedVersionLooksRolledBack('v1.1.0', 'v1.2.0'), true);
+assert.equal(firmwareOtaConfirmedVersionLooksRolledBack('v1.2.0', 'v1.2.0'), false);
+assert.equal(firmwareOtaConfirmedVersionLooksRolledBack('v1.3.0', 'v1.2.0'), false);
+assert.equal(firmwareOtaConfirmedVersionLooksRolledBack(null, 'v1.2.0'), false);
+assert.equal(firmwareOtaRollbackVersionFromText('finish failed; device reports firmware v1.1.0 after reboot', 'v1.2.0'), 'v1.1.0');
+assert.equal(firmwareOtaRollbackVersionFromText('device reports firmware v1.3.0 after reboot', 'v1.2.0'), null);
+assert.equal(firmwareOtaVersionNotConfirmedAction('v1.1.0', 'v1.2.0').type, 'rolledBack');
+assert.equal(firmwareOtaVersionNotConfirmedAction('v1.3.0', 'v1.2.0').type, 'failed');
+assert.equal(firmwareOtaVersionNotConfirmedAction(null, 'v1.2.0').type, 'failed');
 
 const parsedManifest = valid.manifest as FirmwareOtaManifest;
 const parsedV2Manifest = validV2.manifest as FirmwareOtaManifest;
