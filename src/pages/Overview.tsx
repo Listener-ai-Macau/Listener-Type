@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
 import { detectOS } from '../components/WindowChrome';
-import { consumePendingDemoMode, OPEN_DEMO_MODE_EVENT } from '../lib/demoMode';
 import { summarizeListenerDeviceHealth } from '../lib/deviceHealth';
 import { buildBleRecoveryUi } from '../lib/bleRecoveryUi';
 import {
@@ -69,23 +68,12 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-const DEMO_PLAY_IDS = ['anxiety', 'role', 'polish'] as const;
-type DemoPlayId = typeof DEMO_PLAY_IDS[number];
-
-const DEMO_PLAY_ICONS: Record<DemoPlayId, string> = {
-  anxiety: 'sparkle',
-  role: 'user',
-  polish: 'doc',
-};
-
 export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordingSettings }: OverviewProps) {
   const { t } = useTranslation();
   const modeLabel = useModeLabels();
   const [history, setHistory] = useState<DictationSession[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [credsError, setCredsError] = useState(false);
-  const [demoOpen, setDemoOpen] = useState(false);
-  const [demoVariant, setDemoVariant] = useState(0);
   const [bleRuntimeStatus, setBleRuntimeStatus] = useState<EmbeddedBleRuntimeStatus | null>(null);
   const [embeddedBleProbeStatus, setEmbeddedBleProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
   const [embeddedBleProbeMessage, setEmbeddedBleProbeMessage] = useState('');
@@ -134,19 +122,6 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
         setCredsError(true);
       });
   }, [refreshBleRuntimeStatus, refreshHistory]);
-
-  useEffect(() => {
-    const openDemo = () => {
-      consumePendingDemoMode();
-      setDemoOpen(true);
-      setDemoVariant(value => value + 1);
-    };
-    window.addEventListener(OPEN_DEMO_MODE_EVENT, openDemo);
-    if (consumePendingDemoMode()) {
-      openDemo();
-    }
-    return () => window.removeEventListener(OPEN_DEMO_MODE_EVENT, openDemo);
-  }, []);
 
   const metrics = useMemo(() => {
     const today = new Date();
@@ -335,10 +310,6 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
           asrConfigured={creds.asrConfigured}
           llmConfigured={creds.llmConfigured}
           onConfigure={onOpenProvidersSettings}
-          onTryDemo={() => {
-            setDemoOpen(true);
-            setDemoVariant(value => value + 1);
-          }}
           onUseLocal={async () => {
             try {
               await setActiveAsrProvider('foundry-local-whisper');
@@ -347,15 +318,6 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
             } catch { /* ignore */ }
           }}
           onTestRecord={() => { startDictation().catch(() => {}); }}
-        />
-      )}
-
-      {demoOpen && (
-        <DemoModeCard
-          variant={demoVariant}
-          onRegenerate={() => setDemoVariant(value => value + 1)}
-          onSelect={setDemoVariant}
-          onClose={() => setDemoOpen(false)}
         />
       )}
 
@@ -563,12 +525,11 @@ interface QuickStartCardProps {
   asrConfigured: boolean;
   llmConfigured: boolean;
   onConfigure?: () => void;
-  onTryDemo?: () => void;
   onUseLocal?: () => void;
   onTestRecord?: () => void;
 }
 
-function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onTryDemo, onUseLocal, onTestRecord }: QuickStartCardProps) {
+function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onUseLocal, onTestRecord }: QuickStartCardProps) {
   const { t } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
@@ -592,9 +553,6 @@ function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onTryDemo, 
           {onConfigure && (
             <Btn size="sm" variant="blue" icon="settings" onClick={onConfigure}>{t('overview.quickStartConfigure')}</Btn>
           )}
-          {onTryDemo && (
-            <Btn size="sm" variant="soft" icon="sparkle" onClick={onTryDemo}>{t('overview.quickStartDemo')}</Btn>
-          )}
           {!asrConfigured && onUseLocal && (
             <Btn size="sm" variant="ghost" icon="bolt" onClick={onUseLocal}>{t('overview.quickStartLocal')}</Btn>
           )}
@@ -604,96 +562,5 @@ function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onTryDemo, 
         </div>
       </div>
     </Card>
-  );
-}
-
-function DemoModeCard({
-  variant,
-  onRegenerate,
-  onSelect,
-  onClose,
-}: {
-  variant: number;
-  onRegenerate: () => void;
-  onSelect: (index: number) => void;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const sampleIndex = ((variant % DEMO_PLAY_IDS.length) + DEMO_PLAY_IDS.length) % DEMO_PLAY_IDS.length;
-  const playId = DEMO_PLAY_IDS[sampleIndex];
-  const baseKey = `overview.demoPlays.${playId}`;
-
-  return (
-    <Card padding={0} style={{ marginBottom: 18, overflow: 'hidden', borderColor: 'rgba(101,123,112,0.28)' }}>
-      <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, borderBottom: '0.5px solid var(--ol-line)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ol-blue-soft)', color: 'var(--ol-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Icon name="sparkle" size={15} />
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ol-ink)' }}>{t('overview.demoTitle')}</span>
-              <Pill tone="blue" size="sm">{t('overview.demoBadge')}</Pill>
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 2 }}>
-              {t('overview.demoDesc')}
-            </div>
-          </div>
-        </div>
-        <Btn size="sm" variant="ghost" onClick={onClose}>{t('common.close')}</Btn>
-      </div>
-      <div style={{ padding: '12px 18px 0', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {DEMO_PLAY_IDS.map((id, index) => {
-          const selected = id === playId;
-          return (
-            <Btn
-              key={id}
-              size="sm"
-              variant={selected ? 'blue' : 'ghost'}
-              icon={DEMO_PLAY_ICONS[id]}
-              onClick={() => onSelect(index)}
-              style={{ borderColor: selected ? 'transparent' : 'var(--ol-line)' }}
-            >
-              {t(`overview.demoPlays.${id}.title`)}
-            </Btn>
-          );
-        })}
-      </div>
-      <div style={{ padding: '14px 18px 12px', display: 'grid', gridTemplateColumns: 'minmax(0, 0.9fr) minmax(0, 1.1fr)', gap: 12 }}>
-        <DemoPane label={t('overview.demoInputLabel')} text={t(`${baseKey}.input`)} />
-        <DemoPane label={t('overview.demoOutputLabel')} text={t(`${baseKey}.output`)} accent />
-      </div>
-      <div style={{ padding: '0 18px 14px', display: 'grid', gridTemplateColumns: 'minmax(0, 0.9fr) minmax(0, 1.1fr)', gap: 12 }}>
-        <DemoPane label={t('overview.demoStyleLabel')} text={t(`${baseKey}.style`)} compact />
-        <DemoPane label={t('overview.demoFallbackLabel')} text={t(`${baseKey}.fallback`)} compact />
-      </div>
-      <div style={{ padding: '0 18px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
-          {t('overview.demoConfigNote')}
-        </div>
-        <Btn size="sm" variant="blue" icon="refresh" onClick={onRegenerate}>{t('overview.demoRegenerate')}</Btn>
-      </div>
-    </Card>
-  );
-}
-
-function DemoPane({ label, text, accent = false, compact = false }: { label: string; text: string; accent?: boolean; compact?: boolean }) {
-  return (
-    <div
-      style={{
-        minWidth: 0,
-        padding: compact ? '10px 12px' : '12px 14px',
-        borderRadius: 8,
-        background: accent ? 'var(--ol-blue-soft)' : 'var(--ol-surface-2)',
-        border: accent ? '0.5px solid rgba(101,123,112,0.20)' : '0.5px solid var(--ol-line-soft)',
-      }}
-    >
-      <div style={{ fontSize: 10.5, color: accent ? 'var(--ol-blue)' : 'var(--ol-ink-4)', fontWeight: 600, letterSpacing: 0, textTransform: 'uppercase', marginBottom: 7 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: compact ? 11.5 : 12.5, color: 'var(--ol-ink-2)', lineHeight: compact ? 1.5 : 1.6, whiteSpace: 'pre-line' }}>
-        {text}
-      </div>
-    </div>
   );
 }

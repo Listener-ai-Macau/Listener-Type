@@ -25,7 +25,6 @@ import {
   shouldShowHotkeyModeMigrationPrompt,
 } from '../lib/hotkeyMigration';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
-import { OPEN_DEMO_MODE_EVENT, requestDemoMode } from '../lib/demoMode';
 import { getCredentials, isMainWindowStartHidden } from '../lib/ipc';
 import {
   PROVIDER_SETUP_PROMPT_DEFERRED_KEY,
@@ -162,16 +161,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     }
   }, []);
 
-  useEffect(() => {
-    const showDemo = () => {
-      setCurrentTab('overview');
-      setSettingsOpen(false);
-      setProviderPromptOpen(false);
-    };
-    window.addEventListener(OPEN_DEMO_MODE_EVENT, showDemo);
-    return () => window.removeEventListener(OPEN_DEMO_MODE_EVENT, showDemo);
-  }, [setCurrentTab, setSettingsOpen]);
-
   // 之前监听的 NAVIGATE_LOCAL_ASR_EVENT 已无意义——「模型设置」独立 tab 已下线，
   // 模型管理 UI 现在通过 Settings → Advanced 的 <LocalAsr embedded /> 渲染，
   // 用户在 Settings 内即可一站式管理，无需跨页跳转。
@@ -221,11 +210,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const openRecordingSettingsFromProviderPrompt = () => {
     rememberProviderPrompt();
     openSettings('recording');
-  };
-
-  const openDemoFromProviderPrompt = () => {
-    rememberProviderPrompt();
-    requestDemoMode();
   };
 
   const openHotkeyRecordingSettings = () => {
@@ -456,7 +440,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           onLater={rememberProviderPrompt}
           onOpenSettings={openProviderSettings}
           onOpenRecording={openRecordingSettingsFromProviderPrompt}
-          onOpenDemo={openDemoFromProviderPrompt}
         />
       ) : hotkeyModePromptOpen ? (
         <HotkeyModeMigrationPrompt
@@ -599,12 +582,10 @@ function ProviderSetupPrompt({
   onLater,
   onOpenSettings,
   onOpenRecording,
-  onOpenDemo,
 }: {
   onLater: () => void;
   onOpenSettings: () => void;
   onOpenRecording: () => void;
-  onOpenDemo: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -709,24 +690,6 @@ function ProviderSetupPrompt({
             }}
           >
             {t('shell.providerPrompt.openSettings')}
-          </button>
-          <button
-            onClick={onOpenDemo}
-            style={{
-              height: 32,
-              padding: '0 14px',
-              borderRadius: 8,
-              border: '0.5px solid var(--ol-line-strong)',
-              background: 'rgba(101,123,112,0.08)',
-              color: 'var(--ol-ink)',
-              fontFamily: 'inherit',
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: 'default',
-              transition: 'background 0.16s var(--ol-motion-quick), transform 0.12s var(--ol-motion-quick)',
-            }}
-          >
-            {t('shell.providerPrompt.openDemo')}
           </button>
         </div>
       </div>

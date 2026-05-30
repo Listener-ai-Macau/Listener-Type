@@ -7,6 +7,7 @@ import {
   getCapsulePillMetrics,
 } from '../lib/capsuleLayout';
 import { invokeOrMock, isTauri } from '../lib/ipc';
+import { capsuleCancelEnabled, capsuleConfirmEnabled } from '../lib/capsuleActionRules';
 import {
   truncatePreview,
   PREVIEW_FINAL_TRANSITION,
@@ -188,8 +189,9 @@ function Pill({
   const processingLayout = getCapsuleMessageLayout(os, 'processing');
   const stopPending = state === 'recording' && stopRequested;
   const showStopAck = shouldShowStopAcknowledgement(state, stopPending || stopAcknowledged);
-  const enabled = state === 'recording' && !stopPending;
   const errorActive = state === 'error';
+  const cancelEnabled = capsuleCancelEnabled(state);
+  const confirmEnabled = capsuleConfirmEnabled(state, stopPending);
 
   // Apple-style: during transcribing/polishing the partial text preview stays
   // visible with a subtle pulse, plus a small spinner on the right — no overlay.
@@ -311,11 +313,11 @@ function Pill({
         willChange: 'transform, box-shadow',
       }}
     >
-      <CircleButton variant="cancel" enabled={enabled || errorActive} onClick={errorActive ? onDismiss : onCancel} />
+      <CircleButton variant="cancel" enabled={cancelEnabled} onClick={errorActive ? onDismiss : onCancel} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {center}
       </div>
-      <CircleButton variant="confirm" enabled={enabled || errorActive} onClick={errorActive ? onRetry : onConfirm} />
+      <CircleButton variant="confirm" enabled={confirmEnabled} onClick={errorActive ? onRetry : onConfirm} />
     </div>
   );
 }
