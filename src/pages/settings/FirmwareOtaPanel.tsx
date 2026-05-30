@@ -58,21 +58,13 @@ export function FirmwareOtaPanel({
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
   const [diagnosticStatus, setDiagnosticStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
   const [progressBytes, setProgressBytes] = useState<{ sent: number; total: number } | null>(null);
-  const otaSnapshotRef = useRef<FirmwareOtaPreflightSnapshot | null>(null);
 
   const transferActive = state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying';
   const statusTone = userStateTone(state.userState);
   const statusLabel = userStateLabel(state.userState, t);
-  useEffect(() => {
-    otaSnapshotRef.current = otaSnapshot;
-  }, [otaSnapshot]);
 
-  const refreshOtaSnapshot = useCallback(async (options: { waitForFirmwareVersion?: boolean; useCachedFirmwareVersion?: boolean } = {}) => {
+  const refreshOtaSnapshot = useCallback(async (options: { waitForFirmwareVersion?: boolean } = {}) => {
     const waitForFirmwareVersion = options.waitForFirmwareVersion ?? false;
-    if (waitForFirmwareVersion && options.useCachedFirmwareVersion && otaSnapshotRef.current?.device.firmwareVersion) {
-      setSnapshotError(null);
-      return otaSnapshotRef.current;
-    }
     setSnapshotRefreshing(true);
     if (!supported) {
       const unsupported = makeDisconnectedSnapshot('Firmware OTA is only supported on Windows Listener BLE.');
@@ -393,7 +385,7 @@ export function FirmwareOtaPanel({
           snapshot={otaSnapshot}
           snapshotError={snapshotError}
           refreshing={snapshotRefreshing}
-          onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true, useCachedFirmwareVersion: true })}
+          onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true })}
           t={t}
         />
       )}
