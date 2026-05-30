@@ -486,6 +486,40 @@ export function firmwareOtaConfirmedVersionMatches(confirmedVersion: string | nu
   return normalizeFirmwareOtaVersion(confirmedVersion) === normalizeFirmwareOtaVersion(expectedVersion);
 }
 
+export function firmwareOtaConfirmedVersionLooksRolledBack(
+  confirmedVersion: string | null | undefined,
+  expectedVersion: string,
+): boolean {
+  if (!confirmedVersion?.trim() || !expectedVersion.trim()) return false;
+  if (firmwareOtaConfirmedVersionMatches(confirmedVersion, expectedVersion)) return false;
+  return compareVersionish(confirmedVersion, expectedVersion) < 0;
+}
+
+export function firmwareOtaRollbackVersionFromText(message: string, expectedVersion: string): string | null {
+  const candidates = message.match(/\bv?\d+(?:\.\d+)+(?:[-+][a-z0-9][a-z0-9.-]*)?/gi) ?? [];
+  return candidates.find(candidate => firmwareOtaConfirmedVersionLooksRolledBack(candidate, expectedVersion)) ?? null;
+}
+
+export function firmwareOtaVersionNotConfirmedAction(
+  confirmedVersion: string | null | undefined,
+  expectedVersion: string,
+): FirmwareOtaAction {
+  const confirmed = confirmedVersion?.trim();
+  if (firmwareOtaConfirmedVersionLooksRolledBack(confirmed, expectedVersion)) {
+    return {
+      type: 'rolledBack',
+      message: `Device reported firmware ${confirmed}, so it rolled back from ${expectedVersion}.`,
+    };
+  }
+  return {
+    type: 'failed',
+    failureCode: 'versionNotConfirmed',
+    message: confirmed
+      ? `Device reported firmware ${confirmed}, not ${expectedVersion}.`
+      : 'Device firmware version was not confirmed after the OTA reboot window.',
+  };
+}
+
 function normalizeFirmwareOtaVersion(value: string): string {
   return value.trim().replace(/^v/i, '').toLowerCase();
 }
