@@ -124,6 +124,9 @@ assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('staleGat
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('windowsBluetoothServiceResetNeeded') })), 'needsBluetooth');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('accessDenied') })), 'needsBluetooth');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('deviceMissing') })), 'needsWakeKey');
+assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('deviceAsleep') })), 'needsWakeKey');
+assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('missingPairing') })), 'needsRePair');
+assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('lowPowerIdleDisconnect', { failure: failure('lowPowerIdleDisconnect', { automaticRecovery: true }) }) })), 'reconnecting');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('missingDisFirmwareRevision') })), 'diagnosticsAvailable');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('otaRebootWindow') })), 'otaReconnecting');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('cccdProtocolError', { failure: failure('cccdProtocolError', { automaticRecovery: true }) }) })), 'reconnecting');
@@ -154,6 +157,36 @@ assert.equal(
     runtime: {
       ...baseRuntime,
       backgroundListenerLastError: 'Unknown GATT service from stale cache',
+    },
+  })),
+  'needsRePair',
+);
+
+assert.equal(
+  selectBleRecoveryUiState(input({
+    runtime: {
+      ...baseRuntime,
+      backgroundListenerLastError: 'Windows GATT disconnect reason=546 after low-power idle; transport_not_ready',
+    },
+  })),
+  'reconnecting',
+);
+
+assert.equal(
+  selectBleRecoveryUiState(input({
+    runtime: {
+      ...baseRuntime,
+      backgroundListenerLastError: 'Stale cached GATT path after reason=546 returned transport_not_ready',
+    },
+  })),
+  'reconnecting',
+);
+
+assert.equal(
+  selectBleRecoveryUiState(input({
+    runtime: {
+      ...baseRuntime,
+      backgroundListenerLastError: 'No paired BLE device for Listener',
     },
   })),
   'needsRePair',

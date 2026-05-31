@@ -98,6 +98,23 @@ export function classifyEmbeddedBleProbeError(error: unknown): EmbeddedBleProbeE
   if (lower.includes('access denied') || lower.includes('denied') || message.includes('拒绝')) {
     return 'accessDenied';
   }
+  if (
+    lower.includes('reason=546') ||
+    lower.includes('reason: 546') ||
+    lower.includes('reason 546') ||
+    lower.includes('low-power idle') ||
+    lower.includes('low power idle') ||
+    lower.includes('idle disconnect') ||
+    lower.includes('transport_not_ready') ||
+    lower.includes('transport not ready') ||
+    lower.includes('asleep') ||
+    lower.includes('sleeping') ||
+    lower.includes('deep sleep') ||
+    lower.includes('wake key') ||
+    lower.includes('key4')
+  ) {
+    return 'timeout';
+  }
   if (lower.includes('timed out') || lower.includes('timeout') || message.includes('超时')) {
     return 'timeout';
   }

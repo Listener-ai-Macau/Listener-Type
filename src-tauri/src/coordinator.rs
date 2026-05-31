@@ -2017,10 +2017,19 @@ fn record_embedded_ble_listener_cancelled(inner: &Arc<Inner>, reason: &str) {
 
 fn record_embedded_ble_recovery_failure(inner: &Arc<Inner>, err: &str) {
     let mut snapshot = inner.embedded_ble_wake_recovery.lock();
-    snapshot.status = if is_embedded_ble_wake_or_sleep_error(err) {
-        EmbeddedBleWakeRecoveryStatus::NeedsWakeKey
-    } else {
-        EmbeddedBleWakeRecoveryStatus::Failed
+    let failure = crate::embedded_ble::classify_ble_failure(err);
+    snapshot.status = match failure.kind {
+        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect => {
+            EmbeddedBleWakeRecoveryStatus::Reconnecting
+        }
+        crate::embedded_ble::BleFailureKind::DeviceAsleep
+        | crate::embedded_ble::BleFailureKind::DeviceMissing => {
+            EmbeddedBleWakeRecoveryStatus::NeedsWakeKey
+        }
+        _ if is_embedded_ble_wake_or_sleep_error(err) => {
+            EmbeddedBleWakeRecoveryStatus::NeedsWakeKey
+        }
+        _ => EmbeddedBleWakeRecoveryStatus::Failed,
     };
     snapshot.user_guidance = embedded_ble_wake_guidance_for_error(err);
     snapshot.recent_disconnect_reason = Some(err.to_string());
@@ -2040,6 +2049,26 @@ fn embedded_ble_wake_guidance_for_error(err: &str) -> String {
     if is_embedded_ble_cancelled_error(err) {
         return "Listener BLE 连接已暂停；请稍后重试。".to_string();
     }
+    let failure = crate::embedded_ble::classify_ble_failure(err);
+    match failure.kind {
+        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect => {
+            return "Listener BLE 因低功耗空闲断开，正在重连音频 notify；若设备已睡眠，请按 KEY4/唤醒键。".to_string();
+        }
+        crate::embedded_ble::BleFailureKind::MissingPairing
+        | crate::embedded_ble::BleFailureKind::StaleGattService => {
+            return "Listener BLE 配对或 GATT 缓存需要恢复。请在 Windows 蓝牙中重新连接或重新配对后重试。".to_string();
+        }
+        crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded
+        | crate::embedded_ble::BleFailureKind::AccessDenied => {
+            return "Windows 蓝牙暂时不可用。请打开 Windows 蓝牙设置，确认 Listener 已连接后重试。"
+                .to_string();
+        }
+        crate::embedded_ble::BleFailureKind::DeviceAsleep
+        | crate::embedded_ble::BleFailureKind::DeviceMissing => {
+            return EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE.to_string();
+        }
+        _ => {}
+    }
     if is_embedded_ble_wake_or_sleep_error(err) {
         return EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE.to_string();
     }
@@ -2057,6 +2086,18 @@ fn is_embedded_ble_wake_or_sleep_error(err: &str) -> bool {
         || lower.contains("unreachable")
         || lower.contains("device is unreachable")
         || lower.contains("disconnected")
+        || lower.contains("asleep")
+        || lower.contains("deep sleep")
+        || lower.contains("wake key")
+        || lower.contains("key4")
+        || lower.contains("transport_not_ready")
+        || lower.contains("transport not ready")
+        || lower.contains("reason=546")
+        || lower.contains("reason: 546")
+        || lower.contains("reason 546")
+        || lower.contains("low-power idle")
+        || lower.contains("low power idle")
+        || lower.contains("idle disconnect")
 }
 
 fn is_embedded_ble_cancelled_error(err: &str) -> bool {
@@ -4108,6 +4149,29 @@ mod tests {
             EmbeddedBleNotifySubscriptionState::Subscribed
         );
         assert!(ready.last_ready_at.is_some());
+    }
+
+    #[test]
+    fn embedded_ble_wake_recovery_tracks_idle_disconnect_as_reconnecting() {
+        let coordinator = Coordinator::new();
+
+        record_embedded_ble_recovery_failure(
+            &coordinator.inner,
+            "Windows BLE disconnected; reason=546; audio path returned transport_not_ready",
+        );
+        let snapshot = coordinator.embedded_ble_wake_recovery_snapshot();
+
+        assert_eq!(snapshot.status, EmbeddedBleWakeRecoveryStatus::Reconnecting);
+        assert_eq!(
+            snapshot.notify_subscription_state,
+            EmbeddedBleNotifySubscriptionState::Lost
+        );
+        assert!(snapshot.user_guidance.contains("低功耗空闲断开"));
+        assert!(snapshot
+            .recent_disconnect_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("reason=546"));
     }
 
     #[tokio::test]

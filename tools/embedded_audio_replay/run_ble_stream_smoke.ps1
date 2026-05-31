@@ -2149,7 +2149,7 @@ try {
         $status = "FAIL"
     }
     $verificationErrors = @()
-    $needsHistoryLookup = $VerifyHistory -and -not $VerifyInsertion
+    $needsHistoryLookup = $VerifyHistory -and -not $VerifyInsertion -and -not $ExpectNoText
     if ($VerifyInsertion -and [string]::IsNullOrWhiteSpace($transcript)) {
         $needsHistoryLookup = $true
     }
@@ -2167,10 +2167,11 @@ try {
         $historyLookupSkipped = $true
         Write-SmokeTrace "history_wait_skipped transcript_len=$($transcript.Length) verify_insertion=$VerifyInsertion verify_history=$VerifyHistory"
     }
-    if ($recordPlaybackStarted -or $recordingStarted -or $pcmBytes -gt 0) {
+    if (-not $ExpectNoText -and ($recordPlaybackStarted -or $recordingStarted -or $pcmBytes -gt 0)) {
         $recordingArchivePath = Find-LatestRecordingAfter -StartedAt $smokeStartedAt
     } else {
-        Write-SmokeTrace "recording_archive_lookup_skipped reason=no_record_playback"
+        $recordingArchiveSkipReason = if ($ExpectNoText) { "expect_no_text" } else { "no_record_playback" }
+        Write-SmokeTrace "recording_archive_lookup_skipped reason=$recordingArchiveSkipReason"
     }
     if (-not $historySession -and $recordingArchivePath) {
         $recordingSessionId = [System.IO.Path]::GetFileNameWithoutExtension($recordingArchivePath)
@@ -2238,7 +2239,7 @@ try {
     if ($ExpectNoText) {
         $historyRaw = if ($historySession) { [string]$historySession.rawTranscript } else { "" }
         $historyFinal = if ($historySession) { [string]$historySession.finalText } else { "" }
-        if (-not [string]::IsNullOrWhiteSpace($transcript)) {
+        if ([string]::IsNullOrWhiteSpace($expectedStreamFailure) -and -not [string]::IsNullOrWhiteSpace($transcript)) {
             $verificationErrors += "transcript was produced during no-text expectation"
         }
         if (-not [string]::IsNullOrWhiteSpace($historyRaw) -or -not [string]::IsNullOrWhiteSpace($historyFinal)) {

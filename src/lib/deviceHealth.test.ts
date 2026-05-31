@@ -142,6 +142,61 @@ expectHealth(
 );
 
 expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerError: 'Windows GATT disconnect reason=546 after low-power idle; transport_not_ready',
+  },
+  'error',
+  'lowPowerIdleDisconnect',
+);
+
+expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerError: 'Stale cached GATT path after reason=546 returned transport_not_ready',
+  },
+  'error',
+  'lowPowerIdleDisconnect',
+);
+
+expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerError: 'Unknown GATT service from stale cached service table',
+  },
+  'error',
+  'staleGattCache',
+);
+
+expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerError: 'No paired BLE device for Listener',
+  },
+  'error',
+  'missingPairing',
+);
+
+expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerError: 'Listener BLE device asleep; press KEY4 wake key',
+  },
+  'error',
+  'needsWakeKey',
+);
+
+expectHealth(
   { dictationInputSource: 'embeddedBle', os: 'win', history: [session()] },
   'healthy',
   'completeAudio',

@@ -1415,6 +1415,7 @@ fn embedded_ble_repair_failure_action(
     let open_bluetooth_settings = matches!(
         failure.kind,
         crate::embedded_ble::BleFailureKind::DeviceMissing
+            | crate::embedded_ble::BleFailureKind::MissingPairing
             | crate::embedded_ble::BleFailureKind::StaleGattService
             | crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded
             | crate::embedded_ble::BleFailureKind::AccessDenied
@@ -4011,6 +4012,50 @@ mod tests {
             super::embedded_ble_repair_failure_action(&transient);
         assert!(!user_action_required);
         assert!(!open_bluetooth_settings);
+    }
+
+    #[test]
+    fn repair_failure_keeps_idle_disconnect_automatic_but_repairable() {
+        let idle = crate::embedded_ble::classify_ble_failure(
+            "Windows GATT disconnected reason=546 after low-power idle; transport_not_ready",
+        );
+        assert_eq!(
+            idle.kind,
+            crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
+        );
+        assert!(idle.automatic_recovery);
+
+        let (user_action_required, open_bluetooth_settings) =
+            super::embedded_ble_repair_failure_action(&idle);
+        assert!(!user_action_required);
+        assert!(!open_bluetooth_settings);
+    }
+
+    #[test]
+    fn repair_failure_distinguishes_pairing_from_sleep() {
+        let missing_pairing =
+            crate::embedded_ble::classify_ble_failure("No paired BLE device for Listener");
+        let asleep = crate::embedded_ble::classify_ble_failure(
+            "Listener BLE device asleep; press KEY4 wake key",
+        );
+
+        assert_eq!(
+            missing_pairing.kind,
+            crate::embedded_ble::BleFailureKind::MissingPairing
+        );
+        assert_eq!(
+            asleep.kind,
+            crate::embedded_ble::BleFailureKind::DeviceAsleep
+        );
+
+        assert_eq!(
+            super::embedded_ble_repair_failure_action(&missing_pairing),
+            (true, true)
+        );
+        assert_eq!(
+            super::embedded_ble_repair_failure_action(&asleep),
+            (true, false)
+        );
     }
 
     #[test]
