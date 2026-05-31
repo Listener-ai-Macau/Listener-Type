@@ -179,7 +179,7 @@
     {
       "id": "windows_ime_insertion",
       "status": "implemented",
-      "summary": "Windows insertion uses IME/TSF IPC where available and falls back through the normal insertion/clipboard paths.",
+      "summary": "Windows insertion defaults to direct/clipboard fallback paths; optional IME/TSF IPC remains available when explicitly registered.",
       "doc": "windows-ime-insertion.md",
       "primary_paths": [
         "windows-ime/",
@@ -187,16 +187,20 @@
         "src-tauri/src/windows_ime_profile.rs",
         "src-tauri/src/windows_ime_protocol.rs",
         "src-tauri/src/windows_ime_session.rs",
+        "src-tauri/nsis/listener-type-ime-cleanup-hooks.nsh",
         "src-tauri/nsis/listener-type-ime-hooks.nsh",
         "src-tauri/src/insertion.rs"
       ],
       "validation": [
         "cargo test --manifest-path src-tauri/Cargo.toml --lib windows_ime_profile",
+        "node scripts/windows-package-msvc.test.mjs",
         "powershell -ExecutionPolicy Bypass -File scripts/windows-ime-build.ps1",
+        "powershell -ExecutionPolicy Bypass -File scripts/windows-ime-register.ps1",
         "powershell -ExecutionPolicy Bypass -File scripts/windows-ime-install-smoke.ps1"
       ],
       "known_limits": [
-        "Windows-only and depends on TSF registration and target app behavior"
+        "Windows-only and depends on explicit TSF registration and target app behavior",
+        "Default product installers only clean up legacy Listener Type TSF registration; they do not install a system input method"
       ]
     },
     {

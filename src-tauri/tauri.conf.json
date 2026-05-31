@@ -104,15 +104,14 @@
       },
       "nsis": {
         "installMode": "perMachine",
-        "installerHooks": "nsis/listener-type-ime-hooks.nsh"
+        "installerHooks": "nsis/listener-type-ime-cleanup-hooks.nsh"
       },
       "wix": {
         "fragmentPaths": [
-          "wix/listener-type-ime.wxs"
+          "wix/listener-type-ime-cleanup.wxs"
         ],
         "componentRefs": [
-          "ListenerTypeImeDllX64Component",
-          "ListenerTypeImeDllX86Component"
+          "LegacyListenerTypeImeRegistryCleanupComponent"
         ]
       }
     }

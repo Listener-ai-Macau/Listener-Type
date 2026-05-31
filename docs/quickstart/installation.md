@@ -33,7 +33,7 @@ Listener Type uses five user-facing states during the Voice Keyboard OOBE:
 | Error | Connection, subscription, recording, or transcription failed | Retry or export diagnostics |
 | Recovery | Reconnect or re-pair is needed | Remove `listener` in Windows Bluetooth and pair again |
 
-The Windows installer bundles `ListenerTypeIme.dll` for x64 and x86 and registers the TSF profile used by the insertion bridge.
+The Windows installer should not install a system input method. Listener Type uses the normal Windows insertion/fallback path by default; the TSF IME bridge is an optional developer validation path and is not registered by the product installer. If an older test package registered `Listener Type Voice Input`, the current installer attempts to unregister that legacy input method during install/uninstall.
 
 ### WebView2 Runtime
 

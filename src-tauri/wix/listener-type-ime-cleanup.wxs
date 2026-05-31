@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="LegacyListenerTypeImeRegistryCleanupComponent" Guid="{8E9CCDF6-0E93-4FF7-A720-2A71F2E91E76}" Win64="yes">
+        <RegistryValue Root="HKLM" Key="Software\ListenerType\InstallerCleanup" Name="LegacyImeCleanup" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveRegistryKey Root="HKLM" Key="Software\Microsoft\CTF\TIP\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767}" Action="removeOnInstall" />
+        <RemoveRegistryKey Root="HKLM" Key="Software\Classes\CLSID\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767}" Action="removeOnInstall" />
+        <RemoveRegistryKey Root="HKLM" Key="Software\WOW6432Node\Classes\CLSID\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767}" Action="removeOnInstall" />
+      </Component>
+    </DirectoryRef>
+
+    <CustomAction
+      Id="UnregisterLegacyListenerTypeImeX64OnInstall"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]windows-ime\x64\ListenerTypeIme.dll&quot;'
+      Return="ignore" />
+    <CustomAction
+      Id="UnregisterLegacyListenerTypeImeX86OnInstall"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]windows-ime\x86\ListenerTypeIme.dll&quot;'
+      Return="ignore" />
+    <CustomAction
+      Id="UnregisterLegacyListenerTypeImeX64OnRemove"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]windows-ime\x64\ListenerTypeIme.dll&quot;'
+      Return="ignore" />
+    <CustomAction
+      Id="UnregisterLegacyListenerTypeImeX86OnRemove"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s /u &quot;[INSTALLDIR]windows-ime\x86\ListenerTypeIme.dll&quot;'
+      Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="UnregisterLegacyListenerTypeImeX64OnInstall" Before="InstallFiles"><![CDATA[NOT REMOVE]]></Custom>
+      <Custom Action="UnregisterLegacyListenerTypeImeX86OnInstall" After="UnregisterLegacyListenerTypeImeX64OnInstall"><![CDATA[NOT REMOVE]]></Custom>
+      <Custom Action="UnregisterLegacyListenerTypeImeX64OnRemove" Before="RemoveFiles"><![CDATA[REMOVE]]></Custom>
+      <Custom Action="UnregisterLegacyListenerTypeImeX86OnRemove" After="UnregisterLegacyListenerTypeImeX64OnRemove"><![CDATA[REMOVE]]></Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

@@ -9,7 +9,6 @@ $ErrorActionPreference = "Stop"
 
 $appRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $releaseRoot = Join-Path $appRoot "src-tauri\target\x86_64-pc-windows-msvc\release"
-$imeBuildRoot = Join-Path $appRoot "src-tauri\target\windows-ime-msvc"
 if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
   $ArtifactsRoot = Join-Path $appRoot ".artifacts\windows-msvc"
 }
@@ -122,8 +121,25 @@ function Get-MsiName {
   return "ListenerType_$(Get-PackageVersion)_x64_en-US.msi"
 }
 
+function Get-TauriMsiName {
+  return "Listener Type_$(Get-PackageVersion)_x64_en-US.msi"
+}
+
 function Get-MsiPath {
   return Join-Path $releaseRoot "bundle\msi\$(Get-MsiName)"
+}
+
+function Get-TauriMsiPath {
+  return Join-Path $releaseRoot "bundle\msi\$(Get-TauriMsiName)"
+}
+
+function Find-BuiltMsiPath {
+  foreach ($candidate in @((Get-MsiPath), (Get-TauriMsiPath))) {
+    if (Test-Path $candidate) {
+      return $candidate
+    }
+  }
+  return Get-MsiPath
 }
 
 function Test-WebView2Runtime {
@@ -146,17 +162,11 @@ function Invoke-MsvcBuild {
     [string]$CargoBin
   )
 
-  if ([string]::IsNullOrWhiteSpace($env:LISTENER_TYPE_IME_DLL_X64) -or -not (Test-Path $env:LISTENER_TYPE_IME_DLL_X64)) {
-    throw "LISTENER_TYPE_IME_DLL_X64 must point to the built x64 ListenerTypeIme.dll before the MSI build."
-  }
-  if ([string]::IsNullOrWhiteSpace($env:LISTENER_TYPE_IME_DLL_X86) -or -not (Test-Path $env:LISTENER_TYPE_IME_DLL_X86)) {
-    throw "LISTENER_TYPE_IME_DLL_X86 must point to the built x86 ListenerTypeIme.dll before the MSI build."
-  }
-
   $msiPath = Get-MsiPath
   Remove-Item -LiteralPath $msiPath -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Get-TauriMsiPath) -Force -ErrorAction SilentlyContinue
 
-  $buildCommand = "call `"$VsDevCmd`" -arch=x64 -host_arch=x64 && set `"PATH=$CargoBin;%PATH%`" && set `"LISTENER_TYPE_IME_DLL_X64=$env:LISTENER_TYPE_IME_DLL_X64`" && set `"LISTENER_TYPE_IME_DLL_X86=$env:LISTENER_TYPE_IME_DLL_X86`" && npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
+  $buildCommand = "call `"$VsDevCmd`" -arch=x64 -host_arch=x64 && set `"PATH=$CargoBin;%PATH%`" && npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
   & cmd.exe /d /c $buildCommand
   if ($LASTEXITCODE -ne 0) {
     Write-Warning "Tauri Windows MSI build returned exit code $LASTEXITCODE. Trying to finish MSI linking from generated WiX objects."
@@ -167,11 +177,11 @@ function Invoke-MsvcBuild {
 function Repair-TauriMsiBundle {
   $wixRoot = Join-Path $releaseRoot "wix\x64"
   $mainObject = Join-Path $wixRoot "main.wixobj"
-  $imeObject = Join-Path $wixRoot "listener-type-ime.wixobj"
+  $imeCleanupObject = Join-Path $wixRoot "listener-type-ime-cleanup.wixobj"
   $locale = Join-Path $wixRoot "locale.wxl"
   $msiPath = Get-MsiPath
 
-  foreach ($requiredPath in @($mainObject, $imeObject, $locale, $env:LISTENER_TYPE_IME_DLL_X64, $env:LISTENER_TYPE_IME_DLL_X86)) {
+  foreach ($requiredPath in @($mainObject, $imeCleanupObject, $locale)) {
     if ([string]::IsNullOrWhiteSpace($requiredPath) -or -not (Test-Path $requiredPath)) {
       throw "Cannot repair Tauri MSI bundle because a required file is missing: $requiredPath"
     }
@@ -182,11 +192,7 @@ function Repair-TauriMsiBundle {
   Remove-Item -LiteralPath $msiPath -Force -ErrorAction SilentlyContinue
 
   $light = Find-WixTool "light.exe"
-  # -sice:ICE80：x86 IME DLL 与 x64 一起装进 INSTALLDIR\windows-ime\，
-  # 32-bit Component 落在 64-bit Directory 下是 ICE80 的告警，但本场景路径
-  # 绝对指向、不依赖 SysWOW64 重定向，是 Microsoft 文档允许的合法用法。
-  # 与 .github/workflows/release-tauri.yml 的 light 调用保持一致。
-  & $light -nologo -sice:ICE80 -ext WixUIExtension -ext WixUtilExtension -loc $locale -out $msiPath $mainObject $imeObject
+  & $light -nologo -ext WixUIExtension -ext WixUtilExtension -loc $locale -out $msiPath $mainObject $imeCleanupObject
   if ($LASTEXITCODE -ne 0) {
     throw "WiX light.exe failed with exit code $LASTEXITCODE."
   }
@@ -195,35 +201,6 @@ function Repair-TauriMsiBundle {
   }
 
   Write-Host "[ok] MSI linked from generated WiX objects -> $msiPath"
-}
-
-function Invoke-ListenerTypeImeBuild {
-  $buildScript = Join-Path $PSScriptRoot "windows-ime-build.ps1"
-
-  if (-not (Test-Path $buildScript)) {
-    throw "Listener Type IME build script not found: $buildScript"
-  }
-
-  $targets = @(
-    @{ Platform = "x64"; Folder = "x64"; EnvName = "LISTENER_TYPE_IME_DLL_X64" },
-    @{ Platform = "Win32"; Folder = "x86"; EnvName = "LISTENER_TYPE_IME_DLL_X86" }
-  )
-  foreach ($target in $targets) {
-    $imeOutDir = Join-Path $imeBuildRoot "$($target.Folder)\Release"
-    $imeIntDir = Join-Path $imeBuildRoot "obj\$($target.Folder)\Release"
-    & $buildScript -Configuration Release -Platform $target.Platform -OutputDirectory $imeOutDir -IntermediateDirectory $imeIntDir
-    if ($LASTEXITCODE -ne 0) {
-      throw "ListenerTypeIme $($target.Platform) build failed with exit code $LASTEXITCODE."
-    }
-
-    $imeDll = Join-Path $imeOutDir "ListenerTypeIme.dll"
-    if (-not (Test-Path $imeDll)) {
-      throw "ListenerTypeIme.dll was not produced: $imeDll"
-    }
-
-    Set-Item -Path "Env:$($target.EnvName)" -Value (Resolve-Path $imeDll).Path
-    Write-Host "[ok] $($target.EnvName) -> $((Get-Item -Path "Env:$($target.EnvName)").Value)"
-  }
 }
 
 function Reset-ArtifactsRoot {
@@ -246,7 +223,7 @@ function Reset-ArtifactsRoot {
 function Copy-WindowsArtifacts {
   $version = Get-PackageVersion
   $msiName = Get-MsiName
-  $msiPath = Get-MsiPath
+  $msiPath = Find-BuiltMsiPath
   $exePath = Join-Path $releaseRoot "listener-type.exe"
   $webView2Loader = Get-ChildItem -Path (Join-Path $releaseRoot "build") -Recurse -Filter "WebView2Loader.dll" -ErrorAction SilentlyContinue |
     Where-Object { $_.FullName -match "\\out\\x64\\WebView2Loader\.dll$" } |
@@ -261,28 +238,15 @@ function Copy-WindowsArtifacts {
   if ($null -eq $webView2Loader) {
     throw "WebView2Loader.dll x64 not found under $releaseRoot\build"
   }
-  if ([string]::IsNullOrWhiteSpace($env:LISTENER_TYPE_IME_DLL_X64) -or -not (Test-Path $env:LISTENER_TYPE_IME_DLL_X64)) {
-    throw "x64 ListenerTypeIme.dll not found for portable package: $env:LISTENER_TYPE_IME_DLL_X64"
-  }
-  if ([string]::IsNullOrWhiteSpace($env:LISTENER_TYPE_IME_DLL_X86) -or -not (Test-Path $env:LISTENER_TYPE_IME_DLL_X86)) {
-    throw "x86 ListenerTypeIme.dll not found for portable package: $env:LISTENER_TYPE_IME_DLL_X86"
-  }
 
   Reset-ArtifactsRoot
   Copy-Item -LiteralPath $msiPath -Destination (Join-Path $ArtifactsRoot $msiName) -Force
 
   $portableName = "ListenerType_${version}_x64_portable"
   $portableRoot = Join-Path $ArtifactsRoot $portableName
-  $portableImeRoot = Join-Path $portableRoot "windows-ime"
-  $portableImeX64Root = Join-Path $portableImeRoot "x64"
-  $portableImeX86Root = Join-Path $portableImeRoot "x86"
   New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
-  New-Item -ItemType Directory -Force -Path $portableImeX64Root | Out-Null
-  New-Item -ItemType Directory -Force -Path $portableImeX86Root | Out-Null
   Copy-Item -LiteralPath $exePath -Destination (Join-Path $portableRoot "listener-type.exe") -Force
   Copy-Item -LiteralPath $webView2Loader.FullName -Destination (Join-Path $portableRoot "WebView2Loader.dll") -Force
-  Copy-Item -LiteralPath $env:LISTENER_TYPE_IME_DLL_X64 -Destination (Join-Path $portableImeX64Root "ListenerTypeIme.dll") -Force
-  Copy-Item -LiteralPath $env:LISTENER_TYPE_IME_DLL_X86 -Destination (Join-Path $portableImeX86Root "ListenerTypeIme.dll") -Force
 
   $zipPath = Join-Path $ArtifactsRoot "$portableName.zip"
   Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
@@ -319,7 +283,7 @@ try {
   }
 
   $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
-  Invoke-ListenerTypeImeBuild
+  Write-Host "[info] Default Windows package does not bundle or register the optional TSF IME."
   Invoke-MsvcBuild -VsDevCmd $vsDevCmd -CargoBin $cargoBin
   Copy-WindowsArtifacts
 } finally {

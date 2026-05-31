@@ -1,14 +1,19 @@
 # Windows Build
 
-Windows builds include the Tauri app and the native Listener Type TSF IME.
+Windows builds include the Tauri app. Default 3.5/OOBE installers do not bundle
+or register the optional Listener Type TSF IME, so installing the product should
+not add a system input method. The installer does include cleanup hooks to
+unregister a legacy Listener Type TSF IME left by an older package.
 
 ## Important Files
 
 - `windows-ime/ListenerTypeIme.sln`
 - `windows-ime/ListenerTypeIme.vcxproj`
 - `windows-ime/src/`
-- `src-tauri/nsis/listener-type-ime-hooks.nsh`
-- `src-tauri/wix/listener-type-ime.wxs`
+- `src-tauri/nsis/listener-type-ime-cleanup-hooks.nsh`
+- `src-tauri/wix/listener-type-ime-cleanup.wxs`
+- `src-tauri/nsis/listener-type-ime-hooks.nsh` (optional TSF packaging only)
+- `src-tauri/wix/listener-type-ime.wxs` (optional TSF packaging only)
 - `scripts/windows-package-msvc.ps1`
 - `scripts/windows-package-msvc.test.mjs`
 
@@ -24,6 +29,11 @@ powershell -ExecutionPolicy Bypass -File scripts/windows-package-msvc.ps1
 ```
 
 The generated installer is the user-facing artifact. A clean target machine should only need Windows, the installer, and network access for WebView2 Evergreen Runtime bootstrap if the runtime is not already installed. It must not require Node.js, Rust, ESP-IDF, this repository, or firmware flashing tools.
+
+The default package path intentionally skips `ListenerTypeIme.dll` and the TSF
+registration hooks. It may unregister and remove stale IME files from a previous
+package. Use `scripts/windows-ime-register.ps1` only for manual developer
+validation of the optional TSF insertion bridge.
 
 ## WebView2 Policy
 
@@ -52,4 +62,5 @@ node scripts/windows-package-msvc.test.mjs
 node scripts/windows-startup-lifecycle-contract.test.mjs
 ```
 
-Full IME registration and insertion smoke require Windows.
+Optional IME registration and insertion smoke require Windows and explicit
+manual registration; they are not part of the default installer smoke.

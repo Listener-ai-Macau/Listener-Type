@@ -24,7 +24,7 @@ function New-FeatureSnapshot {
         stack = @(
             "Tauri 2 desktop shell with Rust backend",
             "React, TypeScript, and Vite frontend",
-            "Windows TSF IME bridge plus platform hotkey/input insertion support"
+            "Windows direct/clipboard insertion with an optional TSF IME bridge for explicit validation"
         )
         responsibilities = @(
             "Record one-tap dictation sessions from the built-in microphone or Listener BLE device audio.",
@@ -37,7 +37,7 @@ function New-FeatureSnapshot {
             "Input sources: microphone and Listener BLE, including embedded BLE audio from VKA1-style devices.",
             "ASR providers: Volcengine streaming, OpenAI batch, Apple Speech, Bailian realtime, macOS Qwen local, and Windows Foundry Local Whisper.",
             "Text pipeline: coordinator-driven dictation, correction, polish, vocabulary hotwords, translation, QA selection ask, and insertion.",
-            "Windows insertion: native TSF IME bridge with IPC/session/profile handling plus clipboard/direct fallback paths.",
+            "Windows insertion: direct/clipboard fallback paths are default; optional native TSF IME bridge remains available for explicit validation.",
             "Release shell: Tauri updater, background update gate, tray menu, autostart, single-instance behavior, and package metadata.",
             "Settings and diagnostics: shortcuts, provider credentials in OS keyring/local storage, language, permissions, advanced logs, diagnostic export, dark mode, and device health.",
             "Developer/product tools: embedded audio file/BLE CLI replay, firmware OTA package/preflight validation, BLE stream smoke, Foundry runtime probes, and updater manifest checks."
@@ -58,8 +58,9 @@ function New-FeatureSnapshot {
             [ordered]@{ path = "src-tauri/src/commands.rs"; purpose = "Tauri command surface for settings, credentials, diagnostics, provider state, BLE, local ASR, and update helpers." },
             [ordered]@{ path = "src-tauri/src/persistence.rs"; purpose = "Settings, history, dictionaries, provider credentials, and OS credential-vault persistence." },
             [ordered]@{ path = "src-tauri/src/windows_ime_*.rs"; purpose = "Windows IME IPC, profile, protocol, and session bridge." },
-            [ordered]@{ path = "windows-ime/"; purpose = "Native TSF text service built and registered by the Windows package." },
-            [ordered]@{ path = "src-tauri/nsis/listener-type-ime-hooks.nsh"; purpose = "Installer hooks for TSF IME register/unregister and upgrade cleanup." },
+            [ordered]@{ path = "windows-ime/"; purpose = "Optional native TSF text service; default Windows packages do not register it." },
+            [ordered]@{ path = "src-tauri/nsis/listener-type-ime-cleanup-hooks.nsh"; purpose = "Default installer hook that unregisters/removes legacy TSF IME files without installing a new input method." },
+            [ordered]@{ path = "src-tauri/nsis/listener-type-ime-hooks.nsh"; purpose = "Optional TSF IME register/unregister hooks for dedicated validation builds." },
             [ordered]@{ path = "src-tauri/src/cli.rs"; purpose = "Headless embedded audio file/BLE replay, firmware OTA, and diagnostic entry points." },
             [ordered]@{ path = "src-tauri/src/firmware_ota.rs"; purpose = "Shared firmware OTA package validation and headless release-gate runner." },
             [ordered]@{ path = "src/lib/localAsr.ts"; purpose = "Frontend wrappers for Qwen3-ASR and Foundry Local runtime/model commands." },
@@ -70,7 +71,7 @@ function New-FeatureSnapshot {
             [ordered]@{ path = "docs/features/"; purpose = "Human-readable feature index and per-feature source maps." }
         )
         platform_assumptions = @(
-            "Windows is the primary product path for BLE device audio and TSF IME insertion.",
+            "Windows is the primary product path for BLE device audio; default installers should not add a system input method.",
             "macOS support exists for local microphone, Accessibility insertion, and Apple Speech paths.",
             "Secrets stay in the OS credential vault or local app storage; the app remains local-first by default."
         )
@@ -90,6 +91,7 @@ function New-FeatureSnapshot {
             "cargo test --manifest-path tools\embedded_audio_replay\Cargo.toml",
             "cargo test --manifest-path tools\firmware_ota_headless\Cargo.toml",
             "node scripts\write-updater-manifest.test.mjs",
+            "node scripts\windows-package-msvc.test.mjs",
             "powershell -ExecutionPolicy Bypass -File scripts\windows-ime-build.ps1",
             "git diff --check"
         )

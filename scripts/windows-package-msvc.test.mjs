@@ -19,7 +19,9 @@ const imeEditSessionPath = join(appRoot, "windows-ime", "src", "edit_session.cpp
 const imeTextServicePath = join(appRoot, "windows-ime", "src", "text_service.cpp");
 const tauriConfigPath = join(appRoot, "src-tauri", "tauri.conf.json");
 const nsisHookPath = join(appRoot, "src-tauri", "nsis", "listener-type-ime-hooks.nsh");
+const nsisCleanupHookPath = join(appRoot, "src-tauri", "nsis", "listener-type-ime-cleanup-hooks.nsh");
 const wixFragmentPath = join(appRoot, "src-tauri", "wix", "listener-type-ime.wxs");
+const wixCleanupFragmentPath = join(appRoot, "src-tauri", "wix", "listener-type-ime-cleanup.wxs");
 
 const script = readFileSync(scriptPath, "utf8");
 const launcher = readFileSync(launcherPath, "utf8");
@@ -34,7 +36,9 @@ const imeEditSession = readFileSync(imeEditSessionPath, "utf8");
 const imeTextService = readFileSync(imeTextServicePath, "utf8");
 const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, "utf8"));
 const nsisHook = readFileSync(nsisHookPath, "utf8");
+const nsisCleanupHook = readFileSync(nsisCleanupHookPath, "utf8");
 const wixFragment = readFileSync(wixFragmentPath, "utf8");
+const wixCleanupFragment = readFileSync(wixCleanupFragmentPath, "utf8");
 
 const requiredFragments = [
   "Install-RustMsvcToolchain",
@@ -43,15 +47,12 @@ const requiredFragments = [
   "Find-VsDevCmd",
   "VsDevCmd.bat",
   "npm.cmd ci",
-  "windows-ime-build.ps1",
-  "LISTENER_TYPE_IME_DLL_X64",
-  "LISTENER_TYPE_IME_DLL_X86",
-  "ListenerTypeIme.dll",
   "tauri build -- --target x86_64-pc-windows-msvc --bundles msi",
   "Repair-TauriMsiBundle",
+  "Find-BuiltMsiPath",
   "light.exe",
   "main.wixobj",
-  "listener-type-ime.wixobj",
+  "listener-type-ime-cleanup.wixobj",
   "locale.wxl",
   "WebView2Loader.dll",
   "Compress-Archive",
@@ -70,33 +71,38 @@ assert.doesNotMatch(ciWorkflow, /WixTools314/, "CI MSI repair must not hard-code
 assert.match(script, /-Filter "WixTools\*"/, "MSVC packaging should discover Tauri WiX tools by WixTools* glob");
 assert.match(ciWorkflow, /WixTools\*\\light\.exe/, "CI MSI repair should discover Tauri WiX tools by WixTools* glob");
 
-assert.match(imeBuild, /\[string\]\$OutputDirectory/, "IME build should support a package-specific output directory");
-assert.match(imeBuild, /\[string\]\$IntermediateDirectory/, "IME build should support a package-specific intermediate directory");
-assert.match(imeBuild, /\[ValidateSet\("x64", "Win32"\)\]/, "IME build should support x64 and Win32 platforms");
-assert.match(imeBuild, /\/p:Platform=\$Platform/, "IME build should pass Platform to MSBuild");
-assert.match(imeBuild, /\$defaultOutputDirectory = Join-Path \$appRoot "windows-ime\\\$defaultPlatformFolder\\\$Configuration"/, "IME build should force stable default OutDir per platform");
-assert.match(imeBuild, /\/p:OutDir=/, "IME build should pass OutDir to MSBuild");
-assert.match(imeBuild, /\/p:IntDir=/, "IME build should pass IntDir to MSBuild");
-assert.match(imeRegister, /windows-ime-build\.ps1/, "IME register should build before registering");
-assert.doesNotMatch(imeRegister, /if \(-not \(Test-Path \$dll\)\)/, "IME register must rebuild stale DLLs, not only missing DLLs");
-assert.match(imeRegister, /windows-ime-register/, "IME register should use a side-by-side staging output to avoid locked registered DLLs");
-assert.match(imeRegister, /Get-Date/, "IME register should create a fresh staging output for each registration run");
-assert.match(imeRegister, /\$PID/, "IME register should include the process id in the staging output to avoid path reuse");
-assert.match(imeRegister, /-OutputDirectory/, "IME register should pass a staging output directory to the build script");
-assert.match(imeRegister, /-IntermediateDirectory/, "IME register should pass a staging intermediate directory to the build script");
-assert.match(imeRegister, /active-registration\.json/, "IME register should persist the staged DLL paths it registered");
-assert.match(imeUnregister, /active-registration\.json/, "IME unregister should read the registered staged DLL manifest");
-assert.match(imeUnregister, /windows-ime-register/, "IME unregister should target the same staging root used by register");
-assert.match(imeUnregister, /ConvertFrom-Json/, "IME unregister should parse persisted registered DLL paths");
-assert.doesNotMatch(imeUnregister, /windows-ime\\\$folder\\\$Configuration\\ListenerTypeIme\.dll/, "IME unregister must not only derive legacy build-output DLL paths");
+assert.equal(tauriConfig.bundle.windows.nsis.installMode, "perMachine", "Windows installer remains a machine-wide product install");
+assert.equal(tauriConfig.bundle.windows.nsis.installerHooks, "nsis/listener-type-ime-cleanup-hooks.nsh", "default NSIS may only clean up legacy TSF IME registration");
+assert.deepEqual(tauriConfig.bundle.windows.wix.fragmentPaths, ["wix/listener-type-ime-cleanup.wxs"], "default MSI may only include legacy TSF cleanup actions");
+assert.deepEqual(tauriConfig.bundle.windows.wix.componentRefs, ["LegacyListenerTypeImeRegistryCleanupComponent"], "default MSI may only include the legacy TSF registry cleanup component");
+assert.doesNotMatch(script, /Invoke-ListenerTypeImeBuild/, "default packaging must not build IME DLLs");
+assert.doesNotMatch(script, /LISTENER_TYPE_IME_DLL_X64/, "default packaging must not require an x64 IME DLL");
+assert.doesNotMatch(script, /LISTENER_TYPE_IME_DLL_X86/, "default packaging must not require an x86 IME DLL");
+assert.doesNotMatch(script, /listener-type-ime\.wixobj/, "default MSI repair must not link the IME WiX object");
+assert.match(script, /Listener Type_\$\(Get-PackageVersion\)_x64_en-US\.msi/, "packaging should accept Tauri's product-name MSI output");
+assert.match(script, /Copy-Item -LiteralPath \$msiPath -Destination \(Join-Path \$ArtifactsRoot \$msiName\)/, "packaging should copy the built MSI to the stable ListenerType artifact name");
+assert.doesNotMatch(ciWorkflow, /windows-ime-install-smoke\.ps1/, "release CI must not expect default installers to register a TSF IME");
+assert.match(ciWorkflow, /node scripts\/windows-package-msvc\.test\.mjs/, "release CI should run the static packaging guard");
 
-assert.deepEqual(tauriConfig.bundle.windows.wix.fragmentPaths, ["wix/listener-type-ime.wxs"]);
-assert.deepEqual(tauriConfig.bundle.windows.wix.componentRefs, [
-  "ListenerTypeImeDllX64Component",
-  "ListenerTypeImeDllX86Component",
-]);
-assert.equal(tauriConfig.bundle.windows.nsis.installMode, "perMachine", "NSIS must force a machine-wide install because TSF registration is machine-wide");
-assert.equal(tauriConfig.bundle.windows.nsis.installerHooks, "nsis/listener-type-ime-hooks.nsh", "NSIS must install and register the TSF DLLs");
+assert.match(imeBuild, /\[string\]\$OutputDirectory/, "standalone IME build should support a package-specific output directory");
+assert.match(imeBuild, /\[string\]\$IntermediateDirectory/, "standalone IME build should support a package-specific intermediate directory");
+assert.match(imeBuild, /\[ValidateSet\("x64", "Win32"\)\]/, "standalone IME build should support x64 and Win32 platforms");
+assert.match(imeBuild, /\/p:Platform=\$Platform/, "standalone IME build should pass Platform to MSBuild");
+assert.match(imeBuild, /\$defaultOutputDirectory = Join-Path \$appRoot "windows-ime\\\$defaultPlatformFolder\\\$Configuration"/, "standalone IME build should force stable default OutDir per platform");
+assert.match(imeBuild, /\/p:OutDir=/, "standalone IME build should pass OutDir to MSBuild");
+assert.match(imeBuild, /\/p:IntDir=/, "standalone IME build should pass IntDir to MSBuild");
+assert.match(imeRegister, /windows-ime-build\.ps1/, "manual IME register should build before registering");
+assert.doesNotMatch(imeRegister, /if \(-not \(Test-Path \$dll\)\)/, "manual IME register must rebuild stale DLLs, not only missing DLLs");
+assert.match(imeRegister, /windows-ime-register/, "manual IME register should use a side-by-side staging output to avoid locked registered DLLs");
+assert.match(imeRegister, /Get-Date/, "manual IME register should create a fresh staging output for each registration run");
+assert.match(imeRegister, /\$PID/, "manual IME register should include the process id in the staging output to avoid path reuse");
+assert.match(imeRegister, /-OutputDirectory/, "manual IME register should pass a staging output directory to the build script");
+assert.match(imeRegister, /-IntermediateDirectory/, "manual IME register should pass a staging intermediate directory to the build script");
+assert.match(imeRegister, /active-registration\.json/, "manual IME register should persist the staged DLL paths it registered");
+assert.match(imeUnregister, /active-registration\.json/, "manual IME unregister should read the registered staged DLL manifest");
+assert.match(imeUnregister, /windows-ime-register/, "manual IME unregister should target the same staging root used by register");
+assert.match(imeUnregister, /ConvertFrom-Json/, "manual IME unregister should parse persisted registered DLL paths");
+assert.doesNotMatch(imeUnregister, /windows-ime\\\$folder\\\$Configuration\\ListenerTypeIme\.dll/, "manual IME unregister must not only derive legacy build-output DLL paths");
 
 assert.match(imeSolution, /Release\|Win32/, "IME solution should include a Win32 Release configuration");
 assert.match(imeProject, /Release\|Win32/, "IME project should include a Win32 Release configuration");
@@ -108,53 +114,28 @@ assert.match(imeEditSession, /Collapse\(edit_cookie, TF_ANCHOR_END\)/, "IME shou
 assert.match(imeEditSession, /SetSelection\(edit_cookie, 1, &selection\)/, "IME should move the caret to the end of inserted text");
 assert.match(imeEditSession, /TF_AE_END/, "IME should make the end of the committed text the active selection end");
 
-assert.match(wixFragment, /DirectoryRef Id="INSTALLDIR"/, "WiX fragment should install into the app directory");
-assert.match(wixFragment, /Component Id="ListenerTypeImeDllX64Component"/, "WiX fragment should define the x64 TSF DLL component");
-assert.match(wixFragment, /Component Id="ListenerTypeImeDllX86Component"/, "WiX fragment should define the x86 TSF DLL component");
-assert.match(wixFragment, /Source="src-tauri\\target\\windows-ime-msvc\\x64\\Release\\ListenerTypeIme\.dll"/, "WiX fragment should consume the package-built x64 IME DLL");
-assert.match(wixFragment, /Source="src-tauri\\target\\windows-ime-msvc\\x86\\Release\\ListenerTypeIme\.dll"/, "WiX fragment should consume the package-built x86 IME DLL");
-assert.match(wixFragment, /regsvr32\.exe/, "MSI should register and unregister the TSF DLL");
-assert.match(wixFragment, /\[System64Folder\]regsvr32\.exe/, "MSI should register the x64 IME with 64-bit regsvr32");
-assert.match(wixFragment, /\[WindowsFolder\]SysWOW64\\regsvr32\.exe/, "MSI should register the x86 IME with 32-bit regsvr32");
-assert.match(wixFragment, /RegisterListenerTypeImeX64/, "MSI should register x64 Listener Type IME during install");
-assert.match(wixFragment, /RegisterListenerTypeImeX86/, "MSI should register x86 Listener Type IME during install");
-assert.match(wixFragment, /UnregisterListenerTypeImeX64/, "MSI should unregister x64 Listener Type IME during uninstall");
-assert.match(wixFragment, /UnregisterListenerTypeImeX86/, "MSI should unregister x86 Listener Type IME during uninstall");
+assert.match(wixFragment, /Component Id="ListenerTypeImeDllX64Component"/, "optional IME WiX fragment should still define the x64 TSF DLL component");
+assert.match(wixFragment, /Component Id="ListenerTypeImeDllX86Component"/, "optional IME WiX fragment should still define the x86 TSF DLL component");
+assert.match(wixFragment, /regsvr32\.exe/, "optional IME WiX fragment should still register and unregister the TSF DLL when deliberately wired in");
+assert.match(nsisHook, /NSIS_HOOK_POSTINSTALL/, "optional IME NSIS hook should still support TSF DLL registration when deliberately wired in");
+assert.match(nsisHook, /NSIS_HOOK_PREUNINSTALL/, "optional IME NSIS hook should still support TSF DLL unregistration when deliberately wired in");
+assert.match(wixCleanupFragment, /UnregisterLegacyListenerTypeImeX64OnInstall/, "default MSI should unregister a previously installed x64 TSF IME");
+assert.match(wixCleanupFragment, /UnregisterLegacyListenerTypeImeX86OnInstall/, "default MSI should unregister a previously installed x86 TSF IME");
+assert.match(wixCleanupFragment, /LegacyListenerTypeImeRegistryCleanupComponent/, "default MSI should include a registry cleanup component");
+assert.match(wixCleanupFragment, /RemoveRegistryKey Root="HKLM" Key="Software\\Microsoft\\CTF\\TIP\\\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767\}"/, "default MSI should remove the legacy TSF TIP key");
+assert.doesNotMatch(wixCleanupFragment, /Component Id="ListenerTypeImeDll/, "default MSI cleanup fragment must not install IME DLL components");
+assert.doesNotMatch(wixCleanupFragment, /RegisterListenerTypeImeX64/, "default MSI cleanup fragment must not register the TSF IME");
+assert.match(nsisCleanupHook, /LISTENER_TYPE_LEGACY_IME_UNREGISTER_X64/, "default NSIS hook should unregister a previously installed x64 TSF IME");
+assert.match(nsisCleanupHook, /LISTENER_TYPE_LEGACY_IME_REMOVE_REGISTRY/, "default NSIS hook should remove stale TSF registry keys");
+assert.match(nsisCleanupHook, /LISTENER_TYPE_LEGACY_IME_REMOVE_FILES/, "default NSIS hook should remove stale bundled IME DLLs");
+assert.doesNotMatch(nsisCleanupHook, /LISTENER_TYPE_IME_REGISTER_X64/, "default NSIS cleanup hook must not register the TSF IME");
 
-assert.match(nsisHook, /NSIS_HOOK_PREINSTALL/, "NSIS should copy IME DLLs before install completes");
-assert.match(nsisHook, /NSIS_HOOK_POSTINSTALL/, "NSIS should register IME DLLs after files are installed");
-assert.match(nsisHook, /NSIS_HOOK_PREUNINSTALL/, "NSIS should unregister IME DLLs before uninstall removes them");
-assert.match(nsisHook, /LISTENER_TYPE_IME_STAGE_AND_REPLACE "x64" "LISTENER_TYPE_IME_DLL_X64"/, "NSIS should consume the CI-built x64 IME DLL");
-assert.match(nsisHook, /LISTENER_TYPE_IME_STAGE_AND_REPLACE "x86" "LISTENER_TYPE_IME_DLL_X86"/, "NSIS should consume the CI-built x86 IME DLL");
-assert.match(nsisHook, /SetOutPath "\$INSTDIR\\windows-ime\\\$\{PLATFORM_DIR\}"/, "NSIS should install the IME DLL beside the app by platform");
-assert.match(nsisHook, /File \/oname=ListenerTypeIme\.dll\.new "\$%\$\{ENV_VAR\}%"/, "NSIS should embed ListenerTypeIme.dll in the installer");
-assert.match(nsisHook, /Sysnative\\regsvr32\.exe/, "NSIS should use 64-bit regsvr32 for the x64 IME");
-assert.match(nsisHook, /SysWOW64\\regsvr32\.exe/, "NSIS should use 32-bit regsvr32 for the x86 IME");
-assert.match(nsisHook, /System32\\regsvr32\.exe[\s\S]*windows-ime\\x86\\ListenerTypeIme\.dll/, "NSIS should use System32 regsvr32 for the x86 IME on 32-bit Windows");
-assert.match(nsisHook, /Abort/, "NSIS install should fail if TSF registration fails");
-assert.match(nsisHook, /LISTENER_TYPE_IME_ABORT_IF_FAILED \$0 "x64 registration"/, "NSIS install should fail if x64 TSF registration fails");
-assert.match(nsisHook, /LISTENER_TYPE_IME_ABORT_IF_FAILED \$0 "x86 registration"/, "NSIS install should fail if x86 TSF registration fails");
-assert.match(nsisHook, /LISTENER_TYPE_IME_REGISTER_X86[\s\S]*\$\{If\} \$0 != 0[\s\S]*StrCpy \$1 \$0[\s\S]*LISTENER_TYPE_IME_UNREGISTER_X64[\s\S]*StrCpy \$0 \$1[\s\S]*LISTENER_TYPE_IME_ABORT_IF_FAILED \$0 "x86 registration"/, "NSIS install should roll back x64 registration before aborting on x86 registration failure");
-assert.doesNotMatch(nsisHook, /LISTENER_TYPE_IME_ABORT_IF_FAILED \$0 "x64 unregistration"/, "NSIS uninstall should not fail if x64 TSF unregistration fails");
-assert.doesNotMatch(nsisHook, /LISTENER_TYPE_IME_ABORT_IF_FAILED \$0 "x86 unregistration"/, "NSIS uninstall should not fail if x86 TSF unregistration fails");
-assert.match(nsisHook, /Listener Type x64 TSF IME unregister exit code \$0/, "NSIS uninstall should log x64 TSF unregistration failures");
-assert.match(nsisHook, /Listener Type x86 TSF IME unregister exit code \$0/, "NSIS uninstall should log x86 TSF unregistration failures");
-
-assert.match(imeInstallSmoke, /\[ValidateSet\("nsis", "msi"\)\]/, "install smoke should support both Windows installers");
-assert.match(imeInstallSmoke, /Join-ProcessArguments/, "install smoke should quote process arguments before Start-Process");
-assert.match(imeInstallSmoke, /\$commandLine = Join-ProcessArguments \$ArgumentList/, "install smoke should build a single quoted command line");
-assert.match(imeInstallSmoke, /Start-Process -FilePath \$FilePath -ArgumentList \$commandLine/, "install smoke should pass a single quoted command line to Start-Process");
-assert.match(imeInstallSmoke, /ListenerTypeImeSubmit/, "install smoke should preserve TSF backend context");
-assert.match(imeInstallSmoke, /Software\\Classes\\CLSID\\\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767\}\\InprocServer32/, "install smoke should check x64 COM registration");
-assert.match(imeInstallSmoke, /Software\\WOW6432Node\\Classes\\CLSID\\\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767\}\\InprocServer32/, "install smoke should check x86 COM registration");
-assert.match(imeInstallSmoke, /LanguageProfile\\0x00000804\\\{19F96D43-A5EB-46C9-8A73-9FCA5A0630C8\}/, "install smoke should check the TSF language profile");
-assert.match(imeInstallSmoke, /Category\\Category\\\{34745C63-B2F0-4784-8B67-5E12C8701A31\}/, "install smoke should check the keyboard TSF category");
-assert.match(imeInstallSmoke, /foreach \(\$key in \$ExpectedBackendKeys\) \{[\s\S]*Assert-RegistryKey -View Registry64 -SubKey \$key[\s\S]*\}/, "install smoke should assert every backend-required registry key exists");
-assert.doesNotMatch(imeInstallSmoke, /foreach \(\$key in \$ExpectedBackendKeys\) \{[\s\S]*Write-Host "\[trace\] backend-required key: HKLM\\\$key"[\s\S]*\}/, "install smoke must not only trace backend-required registry keys");
-assert.match(ciWorkflow, /windows-ime-install-smoke\.ps1[\s\S]*-InstallerKind nsis/, "CI should install and verify the NSIS artifact");
-assert.match(ciWorkflow, /windows-ime-install-smoke\.ps1[\s\S]*-InstallerKind msi/, "CI should install and verify the MSI artifact");
-assert.match(ciWorkflow, /InstallerKind nsis[\s\S]*\$LASTEXITCODE -ne 0[\s\S]*NSIS installer smoke failed/, "CI should fail immediately when the NSIS smoke run fails");
-assert.match(ciWorkflow, /InstallerKind msi[\s\S]*\$LASTEXITCODE -ne 0[\s\S]*MSI installer smoke failed/, "CI should fail when the MSI smoke run fails");
+assert.match(imeInstallSmoke, /\[ValidateSet\("nsis", "msi"\)\]/, "manual IME install smoke should support both Windows installers");
+assert.match(imeInstallSmoke, /Join-ProcessArguments/, "manual IME install smoke should quote process arguments before Start-Process");
+assert.match(imeInstallSmoke, /Start-Process -FilePath \$FilePath -ArgumentList \$commandLine/, "manual IME install smoke should pass a single quoted command line to Start-Process");
+assert.match(imeInstallSmoke, /ListenerTypeImeSubmit/, "manual IME install smoke should preserve TSF backend context");
+assert.match(imeInstallSmoke, /Software\\Classes\\CLSID\\\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767\}\\InprocServer32/, "manual IME install smoke should check x64 COM registration");
+assert.match(imeInstallSmoke, /LanguageProfile\\0x00000804\\\{19F96D43-A5EB-46C9-8A73-9FCA5A0630C8\}/, "manual IME install smoke should check the TSF language profile");
 
 assert.match(launcher, /powershell\.exe/, "launcher should call powershell.exe");
 assert.match(launcher, /-ExecutionPolicy Bypass/, "launcher should bypass execution policy for this process");
