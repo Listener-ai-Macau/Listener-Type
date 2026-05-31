@@ -1028,12 +1028,19 @@ impl Coordinator {
     ) -> Result<(), String> {
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
         match embedded_ble_foreground_probe_mode(&self.inner) {
-            EmbeddedBleForegroundProbeMode::WaitForActiveBackground => {
-                wait_for_embedded_ble_listener_ready(&self.inner, timeout).await?;
-                log::info!("[embedded-ble] foreground BLE path probe skipped; background listener notify is ready");
-                clear_embedded_ble_listener_last_error(&self.inner);
-                record_embedded_ble_notify_ready(&self.inner);
-                return Ok(());
+            EmbeddedBleForegroundProbeMode::RefreshBackgroundListener => {
+                log::info!("[embedded-ble] foreground BLE path probe refreshing active background listener");
+                self.refresh_embedded_ble_listener();
+                record_embedded_ble_reconnect_attempt(&self.inner, "foreground_probe_refresh");
+                let result = wait_for_embedded_ble_listener_ready(&self.inner, timeout).await;
+                if result.is_ok() {
+                    clear_embedded_ble_listener_last_error(&self.inner);
+                    record_embedded_ble_notify_ready(&self.inner);
+                } else if let Err(err) = &result {
+                    record_embedded_ble_listener_last_error(&self.inner, err);
+                    record_embedded_ble_recovery_failure(&self.inner, err);
+                }
+                return result;
             }
             EmbeddedBleForegroundProbeMode::StartBackgroundListener => {
                 log::info!("[embedded-ble] foreground BLE path probe delegated to background listener recovery");
@@ -1092,12 +1099,6 @@ impl Coordinator {
         &self,
         timeout_ms: Option<u64>,
     ) -> Result<EmbeddedBleWakeRecoverySnapshot, String> {
-        if embedded_ble_listener_capture_ready(&self.inner) {
-            clear_embedded_ble_listener_last_error(&self.inner);
-            record_embedded_ble_notify_ready(&self.inner);
-            return Ok(self.embedded_ble_wake_recovery_snapshot());
-        }
-
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(12_000).clamp(1_000, 45_000));
         pause_embedded_ble_listener_capture(&self.inner, "customer repair action");
         clear_embedded_ble_listener_last_error(&self.inner);
@@ -2220,14 +2221,14 @@ fn embedded_ble_listener_capture_ready(inner: &Arc<Inner>) -> bool {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EmbeddedBleForegroundProbeMode {
-    WaitForActiveBackground,
+    RefreshBackgroundListener,
     StartBackgroundListener,
     ForegroundProbe,
 }
 
 fn embedded_ble_foreground_probe_mode(inner: &Arc<Inner>) -> EmbeddedBleForegroundProbeMode {
     if embedded_ble_listener_capture_active(inner) {
-        EmbeddedBleForegroundProbeMode::WaitForActiveBackground
+        EmbeddedBleForegroundProbeMode::RefreshBackgroundListener
     } else if embedded_ble_background_listener_expected(inner) {
         EmbeddedBleForegroundProbeMode::StartBackgroundListener
     } else {
@@ -3942,7 +3943,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embedded_ble_foreground_probe_preserves_ready_background_capture() {
+    async fn embedded_ble_foreground_probe_refreshes_ready_background_capture() {
         let coordinator = Coordinator::new();
         let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
         mark_embedded_ble_listener_ready(&coordinator.inner, &active);
@@ -3951,45 +3952,31 @@ mod tests {
             "BLE CCCD write async error: Some(HRESULT(0x800706BA))",
         );
 
-        coordinator
+        let _ = coordinator
             .probe_embedded_audio_ble_subscription(Some(1_000))
-            .await
-            .expect("active background listener should satisfy foreground probe");
-
-        assert_eq!(coordinator.embedded_ble_listener_last_error(), None);
-        assert!(!active.load(Ordering::SeqCst));
-        assert!(coordinator
-            .inner
-            .embedded_ble_listener_cancel
-            .lock()
-            .as_ref()
-            .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
-        assert!(embedded_ble_listener_capture_ready(&coordinator.inner));
-    }
-
-    #[tokio::test]
-    async fn embedded_ble_foreground_probe_waits_for_active_background_ready() {
-        let coordinator = Coordinator::new();
-        let mut prefs = coordinator.inner.prefs.get();
-        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
-        coordinator.inner.prefs.replace_for_tests(prefs);
-        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
-
-        let result = coordinator
-            .probe_embedded_audio_ble_subscription(Some(1))
             .await;
 
-        assert!(result
-            .expect_err("active but unready background listener should not satisfy probe")
-            .contains("notify subscription did not recover"));
-        assert!(!active.load(Ordering::SeqCst));
-        assert!(coordinator
+        assert!(active.load(Ordering::SeqCst));
+        assert!(!coordinator
             .inner
             .embedded_ble_listener_cancel
             .lock()
             .as_ref()
             .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
-        assert!(!embedded_ble_listener_capture_ready(&coordinator.inner));
+    }
+
+    #[test]
+    fn embedded_ble_foreground_probe_refreshes_active_background_even_when_unready() {
+        let coordinator = Coordinator::new();
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+
+        assert_eq!(
+            embedded_ble_foreground_probe_mode(&coordinator.inner),
+            EmbeddedBleForegroundProbeMode::RefreshBackgroundListener
+        );
+
+        cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup");
+        assert!(active.load(Ordering::SeqCst));
     }
 
     #[tokio::test]
@@ -4022,32 +4009,36 @@ mod tests {
         let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
         assert_eq!(
             embedded_ble_foreground_probe_mode(&coordinator.inner),
-            EmbeddedBleForegroundProbeMode::WaitForActiveBackground
+            EmbeddedBleForegroundProbeMode::RefreshBackgroundListener
         );
         cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup");
         assert!(active.load(Ordering::SeqCst));
     }
 
     #[tokio::test]
-    async fn embedded_ble_repair_reuses_ready_background_status() {
+    async fn embedded_ble_repair_refreshes_ready_background_status() {
         let coordinator = Coordinator::new();
-        let mut prefs = coordinator.inner.prefs.get();
-        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
-        coordinator.inner.prefs.replace_for_tests(prefs);
         let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
         mark_embedded_ble_listener_ready(&coordinator.inner, &active);
 
-        let snapshot = coordinator
+        let result = coordinator
             .repair_embedded_ble_connection(Some(1_000))
-            .await
-            .expect("ready background listener should satisfy repair action");
+            .await;
 
-        assert_eq!(snapshot.status, EmbeddedBleWakeRecoveryStatus::Ready);
-        assert_eq!(
-            snapshot.notify_subscription_state,
-            EmbeddedBleNotifySubscriptionState::Subscribed
-        );
-        assert_eq!(coordinator.embedded_ble_listener_last_error(), None);
+        assert!(active.load(Ordering::SeqCst));
+        assert!(!coordinator
+            .inner
+            .embedded_ble_listener_cancel
+            .lock()
+            .as_ref()
+            .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
+        if let Ok(snapshot) = result {
+            assert_eq!(snapshot.status, EmbeddedBleWakeRecoveryStatus::Ready);
+            assert_eq!(
+                snapshot.notify_subscription_state,
+                EmbeddedBleNotifySubscriptionState::Subscribed
+            );
+        }
     }
 
     #[test]
