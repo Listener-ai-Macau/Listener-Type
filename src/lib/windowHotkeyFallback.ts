@@ -1,7 +1,7 @@
 export function isWindowHotkeyKeyboardCandidate(event: KeyboardEvent): boolean {
   const code = event.code;
   if (event.key === 'Escape' || code === 'Escape') return true;
-  if (SUPPORTED_WINDOW_HOTKEY_CODES.has(code)) return true;
+  if (SUPPORTED_KEYBOARD_HOTKEY_CODES.has(code)) return true;
   if (/^Key[A-Z]$/.test(code)) return true;
   if (/^Digit[0-9]$/.test(code)) return true;
   if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return true;
@@ -15,7 +15,7 @@ export function windowMouseHotkeyCode(button: number): string | null {
   return null;
 }
 
-const SUPPORTED_WINDOW_HOTKEY_CODES = new Set([
+export const SUPPORTED_KEYBOARD_HOTKEY_CODES = new Set([
   'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight',
   'MetaLeft', 'MetaRight', 'CapsLock', 'ScrollLock', 'Pause', 'PrintScreen',
   'Backspace', 'Tab', 'Enter', 'Space', 'Insert', 'Delete', 'Home', 'End',

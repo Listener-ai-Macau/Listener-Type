@@ -1,6 +1,6 @@
 // RecordingSection + 内嵌子组件，从 Settings.tsx 拆出。
 // 包含：WaylandHotkeyCallout, HotkeyRecorder, MicrophonePickerDialog,
-// inferLegacyTrigger, normalizeKeyboardHotkeyCode, mouseButtonToHotkeyCode,
+// normalizeKeyboardHotkeyCode, mouseButtonToHotkeyCode,
 // LevelMeter, AutostartRow, autostartIsEnabled/Enable/Disable, RecordingSection。
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -21,10 +21,10 @@ import {
   startMicrophoneLevelMonitor,
   stopMicrophoneLevelMonitor,
 } from '../../lib/ipc';
+import { windowMouseHotkeyCode, SUPPORTED_KEYBOARD_HOTKEY_CODES } from '../../lib/windowHotkeyFallback';
 import type {
   DictationInputSource,
   HotkeyBinding,
-  HotkeyTrigger,
   MicrophoneDevice,
   PasteShortcut,
 } from '../../lib/types';
@@ -50,21 +50,11 @@ async function autostartDisable(): Promise<void> {
 
 // ─── hotkey utilities ────────────────────────────────────────────────
 
-function inferLegacyTrigger(codes: string[], fallback: HotkeyTrigger): HotkeyTrigger {
-  if (codes.includes('ControlRight')) return 'rightControl';
-  if (codes.includes('ControlLeft')) return 'leftControl';
-  if (codes.includes('AltRight')) return 'rightAlt';
-  if (codes.includes('AltLeft')) return 'leftOption';
-  if (codes.includes('MetaRight')) return 'rightCommand';
-  if (codes.includes('Fn')) return 'fn';
-  return fallback;
-}
-
 function normalizeKeyboardHotkeyCode(event: KeyboardEvent): string | null {
   if (event.key === 'Fn' || event.code === 'Fn') return 'Fn';
   if (event.key === 'FnLock' || event.code === 'FnLock') return 'FnLock';
   const code = event.code === 'OSLeft' ? 'MetaLeft' : event.code === 'OSRight' ? 'MetaRight' : event.code;
-  if (SUPPORTED_HOTKEY_CODES.has(code)) return code;
+  if (SUPPORTED_KEYBOARD_HOTKEY_CODES.has(code)) return code;
   if (/^Key[A-Z]$/.test(code)) return code;
   if (/^Digit[0-9]$/.test(code)) return code;
   if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
@@ -72,22 +62,6 @@ function normalizeKeyboardHotkeyCode(event: KeyboardEvent): string | null {
   return null;
 }
 
-function mouseButtonToHotkeyCode(button: number): string | null {
-  if (button === 3) return 'Mouse4';
-  if (button === 4) return 'Mouse5';
-  return null;
-}
-
-const SUPPORTED_HOTKEY_CODES = new Set([
-  'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight',
-  'MetaLeft', 'MetaRight', 'CapsLock', 'ScrollLock', 'Pause', 'PrintScreen',
-  'Backspace', 'Tab', 'Enter', 'Space', 'Insert', 'Delete', 'Home', 'End',
-  'PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-  'ContextMenu', 'NumpadAdd', 'NumpadSubtract', 'NumpadMultiply', 'NumpadDivide',
-  'NumpadDecimal', 'NumpadEnter', 'Backquote', 'Minus', 'Equal', 'BracketLeft',
-  'BracketRight', 'Backslash', 'Semicolon', 'Quote', 'Comma', 'Period', 'Slash',
-  'Fn', 'FnLock',
-]);
 
 // ─── shared styles ───────────────────────────────────────────────────
 
@@ -370,14 +344,14 @@ function HotkeyRecorder({
     };
 
     const onMouseDown = (event: MouseEvent) => {
-      const code = mouseButtonToHotkeyCode(event.button);
+      const code = windowMouseHotkeyCode(event.button);
       if (!code) return;
       stopEvent(event);
       applyHotkeyCode(code, true);
     };
 
     const onMouseUp = (event: MouseEvent) => {
-      const code = mouseButtonToHotkeyCode(event.button);
+      const code = windowMouseHotkeyCode(event.button);
       if (!code) return;
       stopEvent(event);
       applyHotkeyCode(code, false);

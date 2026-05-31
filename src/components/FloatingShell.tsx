@@ -19,11 +19,6 @@ import { SelectionAsk } from '../pages/SelectionAsk';
 // LocalAsr 不再作为主 nav tab——本地 ASR 模型管理已合并到 Settings → Advanced 中
 // 通过 <LocalAsr embedded /> 渲染。这里之前的 import 与 NAV_BASE 条目都已移除。
 import { APP_VERSION_LABEL, IS_BETA_BUILD } from '../lib/appVersion';
-import {
-  HOTKEY_MODE_MIGRATION_ACK_KEY,
-  HOTKEY_MODE_MIGRATION_DEFERRED_KEY,
-  shouldShowHotkeyModeMigrationPrompt,
-} from '../lib/hotkeyMigration';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
 import { getCredentials, isMainWindowStartHidden } from '../lib/ipc';
 import {
@@ -75,9 +70,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId | undefined>();
   const [providerPromptOpen, setProviderPromptOpen] = useState(false);
   const [blePairingPromptOpen, setBlePairingPromptOpen] = useState(false);
-  const [hotkeyModePromptOpen, setHotkeyModePromptOpen] = useState(false);
 
-  // tab 切换的 cross-fade：旧页 blur+fade out（180ms），结束后挂载新页（走 ol-page-slide enter）。
   // displayTab 是实际渲染的 tab，currentTab 是用户点中的目标 tab。
   const [displayTab, setDisplayTab] = useState<AppTab>(initialTab);
   const [tabPhase, setTabPhase] = useState<'idle' | 'exiting'>('idle');
@@ -153,14 +146,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     };
   }, [os, prefs?.dictationInputSource]);
 
-  useEffect(() => {
-    const acknowledgedValue = window.localStorage.getItem(HOTKEY_MODE_MIGRATION_ACK_KEY);
-    const deferredValue = window.sessionStorage.getItem(HOTKEY_MODE_MIGRATION_DEFERRED_KEY);
-    if (shouldShowHotkeyModeMigrationPrompt(acknowledgedValue, deferredValue)) {
-      setHotkeyModePromptOpen(true);
-    }
-  }, []);
-
   // 之前监听的 NAVIGATE_LOCAL_ASR_EVENT 已无意义——「模型设置」独立 tab 已下线，
   // 模型管理 UI 现在通过 Settings → Advanced 的 <LocalAsr embedded /> 渲染，
   // 用户在 Settings 内即可一站式管理，无需跨页跳转。
@@ -170,10 +155,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     setProviderPromptOpen(false);
   };
 
-  const deferHotkeyModePrompt = () => {
-    window.sessionStorage.setItem(HOTKEY_MODE_MIGRATION_DEFERRED_KEY, '1');
-    setHotkeyModePromptOpen(false);
-  };
 
   const deferBlePairingPrompt = () => {
     window.sessionStorage.setItem(BLE_PAIRING_PROMPT_DEFERRED_KEY, '1');
@@ -212,11 +193,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     openSettings('recording');
   };
 
-  const openHotkeyRecordingSettings = () => {
-    window.localStorage.setItem(HOTKEY_MODE_MIGRATION_ACK_KEY, '1');
-    setHotkeyModePromptOpen(false);
-    openSettings('recording');
-  };
 
   const openBlePairingSettings = () => {
     window.localStorage.setItem(BLE_PAIRING_PROMPT_ACK_KEY, '1');
@@ -440,11 +416,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           onLater={rememberProviderPrompt}
           onOpenSettings={openProviderSettings}
           onOpenRecording={openRecordingSettingsFromProviderPrompt}
-        />
-      ) : hotkeyModePromptOpen ? (
-        <HotkeyModeMigrationPrompt
-          onLater={deferHotkeyModePrompt}
-          onOpenSettings={openHotkeyRecordingSettings}
         />
       ) : blePairingPromptOpen ? (
         <BlePairingPrompt
@@ -738,99 +709,6 @@ const promptPrimaryButtonStyle: CSSProperties = {
   cursor: 'default',
   transition: 'background 0.16s var(--ol-motion-quick), transform 0.12s var(--ol-motion-quick)',
 };
-
-function HotkeyModeMigrationPrompt({ onLater, onOpenSettings }: { onLater: () => void; onOpenSettings: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 70,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 28,
-        background: 'rgba(15,17,22,0.28)',
-        backdropFilter: 'blur(6px) saturate(140%)',
-        WebkitBackdropFilter: 'blur(6px) saturate(140%)',
-        animation: 'ol-prompt-fade 0.2s var(--ol-motion-soft)',
-      }}
-    >
-      <div
-        style={{
-          width: 380,
-          borderRadius: 12,
-          background: 'var(--ol-surface)',
-          border: '0.5px solid var(--ol-line)',
-          boxShadow: '0 24px 70px -24px rgba(15,17,22,.38), 0 0 0 0.5px rgba(0,0,0,.06)',
-          padding: 20,
-          animation: 'ol-prompt-pop 0.26s var(--ol-motion-spring)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-          <div
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 8,
-              background: 'rgba(101,123,112,0.10)',
-              color: 'var(--ol-blue)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <Icon name="mic" size={17} />
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ol-ink)' }}>{t('shell.hotkeyModePrompt.title')}</div>
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--ol-ink-3)', lineHeight: 1.55 }}>
-          {t('shell.hotkeyModePrompt.body')}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-          <button
-            onClick={onLater}
-            style={{
-              height: 32,
-              padding: '0 13px',
-              borderRadius: 8,
-              border: '0.5px solid var(--ol-line-strong)',
-              background: 'var(--ol-surface)',
-              color: 'var(--ol-ink-3)',
-              fontFamily: 'inherit',
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: 'default',
-              transition: 'background 0.16s var(--ol-motion-quick), border-color 0.16s var(--ol-motion-quick)',
-            }}
-          >
-            {t('shell.hotkeyModePrompt.later')}
-          </button>
-          <button
-            onClick={onOpenSettings}
-            style={{
-              height: 32,
-              padding: '0 14px',
-              borderRadius: 8,
-              border: 0,
-              background: 'var(--ol-ink)',
-              color: '#fff',
-              fontFamily: 'inherit',
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: 'default',
-              transition: 'background 0.16s var(--ol-motion-quick), transform 0.12s var(--ol-motion-quick)',
-            }}
-          >
-            {t('shell.hotkeyModePrompt.openSettings')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 interface FooterIconProps {
   name: string;
