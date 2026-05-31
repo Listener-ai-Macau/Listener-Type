@@ -115,6 +115,9 @@ export interface EmbeddedBleWakeRecoverySnapshot {
 export interface EmbeddedBleFailureClassification {
   kind:
     | 'deviceMissing'
+    | 'deviceAsleep'
+    | 'missingPairing'
+    | 'lowPowerIdleDisconnect'
     | 'pairedButDisconnected'
     | 'staleGattService'
     | 'cccdProtocolError'

@@ -39,6 +39,9 @@ pub struct FirmwareOtaDeviceSnapshot {
 #[serde(rename_all = "camelCase")]
 pub enum BleFailureKind {
     DeviceMissing,
+    DeviceAsleep,
+    MissingPairing,
+    LowPowerIdleDisconnect,
     PairedButDisconnected,
     StaleGattService,
     CccdProtocolError,
@@ -125,6 +128,14 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
         || lower.contains("service reset")
     {
         BleFailureKind::WindowsBluetoothServiceResetNeeded
+    } else if lower.contains("access denied") || lower.contains("denied") {
+        BleFailureKind::AccessDenied
+    } else if ble_error_suggests_missing_pairing(&lower) {
+        BleFailureKind::MissingPairing
+    } else if ble_error_suggests_low_power_idle_disconnect(&lower) {
+        BleFailureKind::LowPowerIdleDisconnect
+    } else if ble_error_suggests_device_asleep(&lower) {
+        BleFailureKind::DeviceAsleep
     } else if lower.contains("stale")
         || lower.contains("unknown gatt")
         || (lower.contains("cached") && !lower.contains("uncached"))
@@ -132,8 +143,6 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
         || lower.contains("service changed")
     {
         BleFailureKind::StaleGattService
-    } else if lower.contains("access denied") || lower.contains("denied") {
-        BleFailureKind::AccessDenied
     } else if lower.contains("unreachable")
         || lower.contains("disconnected")
         || lower.contains("timed out")
@@ -158,6 +167,21 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
             true,
             false,
             "Wake the Listener device, confirm it is paired, then retry or re-pair.",
+        ),
+        BleFailureKind::DeviceAsleep => (
+            true,
+            false,
+            "Press KEY4 or the wake key, wait for the device to reconnect, then retry.",
+        ),
+        BleFailureKind::MissingPairing => (
+            true,
+            false,
+            "Pair the Listener device in Windows Bluetooth, then return and refresh Listener BLE.",
+        ),
+        BleFailureKind::LowPowerIdleDisconnect => (
+            true,
+            true,
+            "Listener BLE entered low-power idle; retrying will reconnect, or press KEY4 if the device is asleep.",
         ),
         BleFailureKind::PairedButDisconnected => (
             true,
@@ -218,6 +242,39 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
         user_action,
         evidence: error.chars().take(480).collect(),
     }
+}
+
+fn ble_error_suggests_missing_pairing(lower: &str) -> bool {
+    lower.contains("no paired ble device")
+        || lower.contains("no paired listener")
+        || lower.contains("not paired")
+        || lower.contains("missing pairing")
+        || lower.contains("pairing missing")
+        || lower.contains("pair the listener")
+}
+
+fn ble_error_suggests_device_asleep(lower: &str) -> bool {
+    lower.contains("deep sleep")
+        || lower.contains("asleep")
+        || lower.contains("sleeping")
+        || lower.contains("wake key")
+        || lower.contains("press key4")
+        || lower.contains("key4")
+}
+
+fn ble_error_suggests_low_power_idle_disconnect(lower: &str) -> bool {
+    lower.contains("reason=546")
+        || lower.contains("reason: 546")
+        || lower.contains("reason 546")
+        || lower.contains("reason=0x222")
+        || lower.contains("reason: 0x222")
+        || lower.contains("low-power idle")
+        || lower.contains("low power idle")
+        || lower.contains("idle disconnect")
+        || lower.contains("idle-disconnect")
+        || lower.contains("intentional idle")
+        || lower.contains("transport_not_ready")
+        || lower.contains("transport not ready")
 }
 
 fn utc_now_rfc3339() -> String {
@@ -2521,6 +2578,26 @@ mod tests {
                 "Embedded audio BLE service not found; ensure device is paired and online",
                 BleFailureKind::DeviceMissing,
                 false,
+            ),
+            (
+                "Listener BLE device asleep; press KEY4 wake key before retry",
+                BleFailureKind::DeviceAsleep,
+                false,
+            ),
+            (
+                "No paired BLE device found in Windows Bluetooth pairing store",
+                BleFailureKind::MissingPairing,
+                false,
+            ),
+            (
+                "BLE idle disconnect reason=546 produced transport_not_ready before reconnect",
+                BleFailureKind::LowPowerIdleDisconnect,
+                true,
+            ),
+            (
+                "stale cached GATT path after BLE reason=546 returned transport_not_ready",
+                BleFailureKind::LowPowerIdleDisconnect,
+                true,
             ),
             (
                 "BLE Uncached service discovery returned status=Unreachable after timeout",

@@ -14,6 +14,10 @@ export type ListenerDeviceHealthReason =
   | 'backgroundBleDisabled'
   | 'wakeRecovery'
   | 'needsWakeKey'
+  | 'lowPowerIdleDisconnect'
+  | 'staleGattCache'
+  | 'missingPairing'
+  | 'bluetoothUnavailable'
   | 'notifyRecovering'
   | 'historyUnavailable'
   | 'noBleEvidence'
@@ -169,6 +173,32 @@ function sessionAgeMinutes(session: DictationSession, now: Date): number | null 
 function classifyBleSetupFailure(errorCode: string | null): ListenerDeviceHealthReason | null {
   if (!errorCode) return null;
   const code = errorCode.toLowerCase();
+  if (code.includes('no paired') || code.includes('not paired') || code.includes('missing pairing')) {
+    return 'missingPairing';
+  }
+  if (code.includes('bluetooth service') || code.includes('radio') || code.includes('adapter') || code.includes('access denied')) {
+    return 'bluetoothUnavailable';
+  }
+  if (code.includes('reason=546')
+    || code.includes('reason: 546')
+    || code.includes('reason 546')
+    || code.includes('low-power idle')
+    || code.includes('low power idle')
+    || code.includes('idle disconnect')
+    || code.includes('transport_not_ready')
+    || code.includes('transport not ready')) {
+    return 'lowPowerIdleDisconnect';
+  }
+  if (code.includes('stale') || code.includes('gatt cache') || code.includes('unknown gatt')) {
+    return 'staleGattCache';
+  }
+  if (code.includes('deep sleep')
+    || code.includes('asleep')
+    || code.includes('sleeping')
+    || code.includes('wake key')
+    || code.includes('key4')) {
+    return 'needsWakeKey';
+  }
   if (code.includes('cccd') || code.includes('notify')) return 'bleCccdTimeout';
   if (code.includes('bletimeout') || code.includes('subscription') || code.includes('timeout')) {
     return 'bleSubscriptionTimeout';

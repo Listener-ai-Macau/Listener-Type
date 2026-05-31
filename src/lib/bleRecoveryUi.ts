@@ -186,7 +186,12 @@ function stateForFailure(failure: EmbeddedBleFailureClassification): BleRecovery
     case 'accessDenied':
       return 'needsBluetooth';
     case 'deviceMissing':
+    case 'deviceAsleep':
       return 'needsWakeKey';
+    case 'missingPairing':
+      return 'needsRePair';
+    case 'lowPowerIdleDisconnect':
+      return failure.automaticRecovery ? 'reconnecting' : 'needsWakeKey';
     case 'missingDisFirmwareRevision':
       return 'diagnosticsAvailable';
     case 'otaRebootWindow':
@@ -223,13 +228,26 @@ function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRe
   if (combined.includes('firmware revision') || combined.includes('dis firmware')) {
     return 'diagnosticsAvailable';
   }
-  if (combined.includes('stale') || combined.includes('gatt cache') || combined.includes('unknown gatt')) {
+  if (combined.includes('no paired') || combined.includes('not paired') || combined.includes('missing pairing')) {
     return 'needsRePair';
   }
   if (combined.includes('bluetooth service') || combined.includes('radio') || combined.includes('adapter') || combined.includes('access denied')) {
     return 'needsBluetooth';
   }
-  if (combined.includes('sleep') || combined.includes('wake') || combined.includes('not found') || combined.includes('no paired')) {
+  if (combined.includes('reason=546')
+    || combined.includes('reason: 546')
+    || combined.includes('reason 546')
+    || combined.includes('low-power idle')
+    || combined.includes('low power idle')
+    || combined.includes('idle disconnect')
+    || combined.includes('transport_not_ready')
+    || combined.includes('transport not ready')) {
+    return 'reconnecting';
+  }
+  if (combined.includes('stale') || combined.includes('gatt cache') || combined.includes('unknown gatt')) {
+    return 'needsRePair';
+  }
+  if (combined.includes('sleep') || combined.includes('wake') || combined.includes('not found')) {
     return 'needsWakeKey';
   }
   if (combined.includes('cccd') || combined.includes('notify') || combined.includes('cancelled') || combined.includes('background listener')) {
@@ -246,8 +264,14 @@ function stateForDeviceHealth(deviceHealth: ListenerDeviceHealthSnapshot): BleRe
     case 'noBleEvidence':
     case 'staleBleEvidence':
       return 'needsWakeKey';
+    case 'lowPowerIdleDisconnect':
     case 'notifyRecovering':
       return 'reconnecting';
+    case 'staleGattCache':
+    case 'missingPairing':
+      return 'needsRePair';
+    case 'bluetoothUnavailable':
+      return 'needsBluetooth';
     case 'wakeRecovery':
     case 'bleCccdTimeout':
     case 'bleSubscriptionTimeout':

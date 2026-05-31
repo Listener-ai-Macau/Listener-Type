@@ -160,6 +160,12 @@ assertStringEqual(
 );
 
 assertStringEqual(
+  classifyEmbeddedBleProbeError('Windows GATT disconnect reason=546 after low-power idle; transport_not_ready'),
+  'timeout',
+  'BLE idle disconnect becomes wake/retry timeout guidance',
+);
+
+assertStringEqual(
   classifyEmbeddedBleProbeError('BLE ValueChanged handler registration failed'),
   'notify',
   'BLE ValueChanged failures become notify action',
