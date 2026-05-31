@@ -1128,6 +1128,8 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
 }
 
 fn run_firmware_ota_headless_cli(intent: cli::CliIntent) -> i32 {
+    init_file_logger();
+
     let cli::CliIntent::FirmwareOta {
         manifest_path,
         firmware_path,

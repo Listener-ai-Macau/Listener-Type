@@ -863,12 +863,23 @@ mod windows_ble {
                     OTA_READINESS_UUID,
                     target.bluetooth_address,
                 )
+            })
+            .or_else(|| {
+                read_optional_string_characteristic_from_service(
+                    service,
+                    OTA_CONTROL_UUID,
+                    BluetoothCacheMode::Uncached,
+                )
             });
             if let Some(readiness) = ota_readiness {
                 snapshot.hardware_revision =
                     readiness_field(&readiness, "model").or(snapshot.hardware_revision);
                 snapshot.firmware_version =
                     readiness_field(&readiness, "fw_version").or(snapshot.firmware_version);
+            } else {
+                log::info!(
+                    "[embedded-ble] OTA readiness identity not readable from current OTA service"
+                );
             }
             let ota_capabilities = read_optional_string_characteristic_from_service(
                 service,
@@ -881,12 +892,21 @@ mod windows_ble {
                     OTA_CAPABILITIES_UUID,
                     target.bluetooth_address,
                 )
+            })
+            .or_else(|| {
+                read_optional_string_characteristic_from_service(
+                    service,
+                    OTA_DATA_UUID,
+                    BluetoothCacheMode::Uncached,
+                )
             });
             if let Some(capabilities) = ota_capabilities {
                 let parsed = split_capability_tokens(&capabilities);
                 if parsed.iter().any(|item| item == "firmware_ota_v1") {
                     snapshot.capabilities = parsed;
                 }
+            } else {
+                log::info!("[embedded-ble] OTA capabilities not readable from current OTA service");
             }
         }
         let (dis_model, dis_hardware, dis_firmware, dis_battery) =
@@ -1216,25 +1236,52 @@ mod windows_ble {
         characteristic_uuid: GUID,
         cache_mode: BluetoothCacheMode,
     ) -> Option<Vec<u8>> {
-        let result = service
+        let result = match service
             .GetCharacteristicsForUuidWithCacheModeAsync(characteristic_uuid, cache_mode)
             .ok()?
             .get()
-            .ok()?;
-        if result.Status().ok()? != GattCommunicationStatus::Success {
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log::debug!(
+                    "[embedded-ble] optional characteristic {characteristic_uuid:?} discovery wait failed via {cache_mode:?}: {err}"
+                );
+                return None;
+            }
+        };
+        let status = result.Status().ok()?;
+        if status != GattCommunicationStatus::Success {
+            log::debug!(
+                "[embedded-ble] optional characteristic {characteristic_uuid:?} discovery returned status={status:?} via {cache_mode:?}"
+            );
             return None;
         }
         let characteristics = result.Characteristics().ok()?;
         if characteristics.Size().ok()? == 0 {
+            log::debug!(
+                "[embedded-ble] optional characteristic {characteristic_uuid:?} not found via {cache_mode:?}"
+            );
             return None;
         }
         let characteristic = characteristics.GetAt(0).ok()?;
-        let read = characteristic
+        let read = match characteristic
             .ReadValueWithCacheModeAsync(cache_mode)
             .ok()?
             .get()
-            .ok()?;
-        if read.Status().ok()? != GattCommunicationStatus::Success {
+        {
+            Ok(read) => read,
+            Err(err) => {
+                log::debug!(
+                    "[embedded-ble] optional characteristic {characteristic_uuid:?} read wait failed via {cache_mode:?}: {err}"
+                );
+                return None;
+            }
+        };
+        let status = read.Status().ok()?;
+        if status != GattCommunicationStatus::Success {
+            log::debug!(
+                "[embedded-ble] optional characteristic {characteristic_uuid:?} read returned status={status:?} via {cache_mode:?}"
+            );
             return None;
         }
         buffer_to_vec(&read.Value().ok()?).ok()
@@ -1327,7 +1374,7 @@ mod windows_ble {
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        for cache_mode in [BluetoothCacheMode::Uncached] {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(OTA_SERVICE_UUID, cache_mode)
                 .map_err(|err| format!("BLE OTA {cache_mode:?} service discovery failed: {err}"))
