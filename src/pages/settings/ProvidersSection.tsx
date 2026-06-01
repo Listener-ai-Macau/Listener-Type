@@ -16,6 +16,7 @@ import {
   validateProviderCredentials,
 } from '../../lib/ipc';
 import { emitSaved } from '../../lib/savedEvent';
+import { classifyProviderConnectionError } from '../../lib/providerSetup';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { SelectLite } from '../../components/ui/SelectLite';
 import { Btn, Card, Pill } from '../_atoms';
@@ -730,23 +731,31 @@ function ProviderTools({ kind, modelAccount, onModelSelected }: { kind: 'llm' | 
 
 function providerErrorMessage(error: unknown, t: ReturnType<typeof useTranslation>['t']): string {
   const message = error instanceof Error ? error.message : String(error);
+  const kind = classifyProviderConnectionError(error);
+  if (kind === 'apiKeyRejected') return t('settings.providers.providerAuthRejected');
+  if (kind === 'rateLimited') return t('settings.providers.providerRateLimited');
+  if (kind === 'providerUnavailable') return t('settings.providers.providerUnavailable');
+  if (kind === 'network') return t('settings.providers.providerNetworkError');
+  if (kind === 'timeout') return t('settings.providers.requestTimeout');
+  if (kind === 'apiKeyMissing') return t('settings.providers.apiKeyMissing');
+  if (kind === 'endpointMissing') return t('settings.providers.endpointMissing');
+  if (kind === 'endpointInvalid') return t('settings.providers.endpointInvalid');
+  if (kind === 'httpsRequired') return t('settings.providers.endpointMustUseHttps');
+  if (kind === 'responseInvalid') {
+    if (message === 'providerResponseTooLarge') return t('settings.providers.responseTooLarge');
+    if (message === 'asrInvalidJson') return t('settings.providers.asrInvalidJson');
+    if (message === 'asrMissingTextField') return t('settings.providers.asrMissingTextField');
+    return t('settings.providers.providerResponseInvalid');
+  }
+  if (kind === 'proxy') {
+    if (message === 'proxyUrlMissing') return t('settings.providers.proxyUrlMissing');
+    if (message === 'proxyUrlInvalid') return t('settings.providers.proxyUrlInvalid');
+    if (message === 'proxyModeInvalid') return t('settings.providers.proxyModeInvalid');
+  }
+  if (message === 'tauriUnavailable') return t('common.operationFailed');
   if (message.startsWith('providerHttpStatus:')) {
     return t('settings.providers.providerHttpStatus', { status: message.split(':')[1] || '?' });
   }
-  if (message === 'endpointMustUseHttps') return t('settings.providers.endpointMustUseHttps');
-  if (message === 'endpointInvalid') return t('settings.providers.endpointInvalid');
-  if (message === 'providerResponseTooLarge') return t('settings.providers.responseTooLarge');
-  if (message === 'asrInvalidJson') return t('settings.providers.asrInvalidJson');
-  if (message === 'asrMissingTextField') return t('settings.providers.asrMissingTextField');
-  if (message === 'providerNetworkError') return t('common.networkError');
-  if (message === 'providerReadResponseFailed' || message === 'providerClientInitFailed') return t('common.operationFailed');
-  if (message === 'providerRequestTimeout') return t('settings.providers.requestTimeout');
-  if (message.includes('API Key')) return t('settings.providers.apiKeyMissing');
-  if (message.includes('Endpoint')) return t('settings.providers.endpointMissing');
-  if (message === 'proxyUrlMissing') return t('settings.providers.proxyUrlMissing');
-  if (message === 'proxyUrlInvalid') return t('settings.providers.proxyUrlInvalid');
-  if (message === 'proxyModeInvalid') return t('settings.providers.proxyModeInvalid');
-  if (message.includes('timeout') || message.includes('超时')) return t('settings.providers.requestTimeout');
   return t('common.operationFailed');
 }
 

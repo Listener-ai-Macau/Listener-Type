@@ -136,6 +136,24 @@ assertStringEqual(
 );
 
 assertStringEqual(
+  classifyProviderConnectionError('apiKeyMissing'),
+  'apiKeyMissing',
+  'backend missing API-key code becomes a concrete setup action',
+);
+
+assertStringEqual(
+  classifyProviderConnectionError('endpointMissing'),
+  'endpointMissing',
+  'backend missing endpoint code becomes a concrete setup action',
+);
+
+assertStringEqual(
+  classifyProviderConnectionError('providerInvalidModelList'),
+  'responseInvalid',
+  'invalid model-list JSON becomes a provider-response action',
+);
+
+assertStringEqual(
   classifyProviderConnectionError('llmModelMissing'),
   'modelMissing',
   'missing LLM model is a model action',

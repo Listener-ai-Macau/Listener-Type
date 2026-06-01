@@ -1,6 +1,8 @@
 //! Tauri command surface — every IPC entry the React UI invokes lives here.
 
+use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -45,6 +47,24 @@ pub type MicrophoneMonitorState = Mutex<Option<Recorder>>;
 pub type TrayMicrophoneMenuState = Mutex<Vec<TrayMicrophoneMenuItem>>;
 
 static SETTINGS_UPDATE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static PROVIDER_MODELS_CACHE: OnceLock<Mutex<Vec<ProviderModelsCacheEntry>>> = OnceLock::new();
+const PROVIDER_MODELS_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProviderModelsCacheKey {
+    kind: String,
+    provider_id: String,
+    base_url: String,
+    api_key_hash: u64,
+    proxy_config: ProviderProxyConfig,
+}
+
+#[derive(Clone, Debug)]
+struct ProviderModelsCacheEntry {
+    key: ProviderModelsCacheKey,
+    models: Vec<String>,
+    fetched_at: Instant,
+}
 
 pub struct TrayMicrophoneMenuItem {
     pub id: String,
@@ -718,7 +738,7 @@ pub async fn list_provider_models(kind: String) -> Result<ProviderModelsResult, 
         });
     }
     let config = read_openai_provider_config(&kind)?;
-    fetch_provider_models(&config)
+    fetch_provider_models_cached(&kind, &config)
         .await
         .map(|models| ProviderModelsResult { models })
 }
@@ -728,6 +748,61 @@ struct ProviderConfig {
     base_url: String,
     api_key: String,
     proxy_config: ProviderProxyConfig,
+}
+
+fn provider_models_cache() -> &'static Mutex<Vec<ProviderModelsCacheEntry>> {
+    PROVIDER_MODELS_CACHE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn provider_models_cache_key(kind: &str, config: &ProviderConfig) -> ProviderModelsCacheKey {
+    ProviderModelsCacheKey {
+        kind: kind.to_string(),
+        provider_id: config.provider_id.clone(),
+        base_url: config.base_url.trim().trim_end_matches('/').to_string(),
+        api_key_hash: hash_provider_api_key(&config.api_key),
+        proxy_config: config.proxy_config.clone(),
+    }
+}
+
+fn hash_provider_api_key(api_key: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    api_key.hash(&mut hasher);
+    hasher.finish()
+}
+
+async fn fetch_provider_models_cached(
+    kind: &str,
+    config: &ProviderConfig,
+) -> Result<Vec<String>, String> {
+    let key = provider_models_cache_key(kind, config);
+    let now = Instant::now();
+    {
+        let mut cache = provider_models_cache().lock();
+        cache.retain(|entry| now.duration_since(entry.fetched_at) < PROVIDER_MODELS_CACHE_TTL);
+        if let Some(entry) = cache.iter().find(|entry| entry.key == key) {
+            log::info!(
+                "[provider-check] models cache hit kind={} provider={}",
+                kind,
+                config.provider_id
+            );
+            return Ok(entry.models.clone());
+        }
+    }
+
+    let models = fetch_provider_models(config).await?;
+    let mut cache = provider_models_cache().lock();
+    cache.retain(|entry| entry.key != key);
+    cache.push(ProviderModelsCacheEntry {
+        key,
+        models: models.clone(),
+        fetched_at: now,
+    });
+    if cache.len() > 16 {
+        cache.sort_by_key(|entry| entry.fetched_at);
+        let overflow = cache.len() - 16;
+        cache.drain(0..overflow);
+    }
+    Ok(models)
 }
 
 fn read_openai_provider_config(kind: &str) -> Result<ProviderConfig, String> {
@@ -758,6 +833,12 @@ fn read_openai_provider_config(kind: &str) -> Result<ProviderConfig, String> {
     if base_url.trim().is_empty() {
         return Err("endpointMissing".to_string());
     }
+    if kind == "llm"
+        && api_key.trim().is_empty()
+        && llm_model_list_requires_api_key(&provider_id, &base_url)
+    {
+        return Err("apiKeyMissing".to_string());
+    }
     let proxy_config = read_provider_proxy_config(kind, &provider_id)?;
     Ok(ProviderConfig {
         provider_id,
@@ -765,6 +846,12 @@ fn read_openai_provider_config(kind: &str) -> Result<ProviderConfig, String> {
         api_key,
         proxy_config,
     })
+}
+
+fn llm_model_list_requires_api_key(provider_id: &str, base_url: &str) -> bool {
+    llm_provider_default_endpoint(provider_id)
+        .map(|default| same_llm_endpoint(base_url, default))
+        .unwrap_or(false)
 }
 
 fn read_provider_proxy_config(
@@ -3971,12 +4058,13 @@ mod tests {
     use super::{
         active_asr_is_keyless_for_validation, active_foundry_model_from_prefs,
         asr_configured_for_provider, asr_transcriptions_url, diagnostic_recent_errors,
-        fetch_provider_models, firmware_ota_snapshot_version, firmware_ota_versions_match,
-        is_diagnostic_error_line, is_gemini_base_url, is_valid_local_pack_id, is_valid_session_id,
-        llm_configured_for_provider, load_firmware_ota_package,
-        local_asr_release_plan_for_provider, models_url, normalize_foundry_language_hint,
-        parse_gemini_model_ids, parse_latest_beta_from_atom, parse_model_ids, persist_settings,
-        sanitize_diagnostic_log_line, validate_foundry_model_alias, ProviderConfig, SettingsWriter,
+        fetch_provider_models, fetch_provider_models_cached, firmware_ota_snapshot_version,
+        firmware_ota_versions_match, is_diagnostic_error_line, is_gemini_base_url,
+        is_valid_local_pack_id, is_valid_session_id, llm_configured_for_provider,
+        load_firmware_ota_package, local_asr_release_plan_for_provider, models_url,
+        normalize_foundry_language_hint, parse_gemini_model_ids, parse_latest_beta_from_atom,
+        parse_model_ids, persist_settings, provider_models_cache, sanitize_diagnostic_log_line,
+        validate_foundry_model_alias, ProviderConfig, SettingsWriter,
     };
     use crate::coordinator::Coordinator;
     use crate::embedded_audio::{SessionEndReason, SessionErrorCode, SessionStats};
@@ -5130,6 +5218,101 @@ mod tests {
 
         assert_eq!(models, vec!["m1".to_string(), "m2".to_string()]);
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetch_provider_models_sends_bearer_token_for_openai_compatible_providers() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 8192];
+            let mut request = Vec::new();
+            loop {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request_text = String::from_utf8_lossy(&request);
+            let request_text_lower = request_text.to_ascii_lowercase();
+            assert!(request_text.starts_with("GET /openai/v1/models "));
+            assert!(request_text_lower.contains("authorization: bearer test-token"));
+
+            let body = r#"{"data":[{"id":"deepseek-chat"},{"id":"deepseek-reasoner"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let models = fetch_provider_models(&ProviderConfig {
+            provider_id: "deepseek".to_string(),
+            base_url: format!("http://{addr}/openai/v1"),
+            api_key: "test-token".to_string(),
+            proxy_config: ProviderProxyConfig::provider_default("deepseek"),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            models,
+            vec!["deepseek-chat".to_string(), "deepseek-reasoner".to_string()]
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetch_provider_models_cached_reuses_recent_result_for_same_credentials() {
+        provider_models_cache().lock().clear();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 8192];
+            let mut request = Vec::new();
+            loop {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let body = r#"{"data":[{"id":"cached-model"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let config = ProviderConfig {
+            provider_id: "openai".to_string(),
+            base_url: format!("http://{addr}/v1"),
+            api_key: "cache-key".to_string(),
+            proxy_config: ProviderProxyConfig::provider_default("openai"),
+        };
+
+        let first = fetch_provider_models_cached("llm", &config).await.unwrap();
+        let second = fetch_provider_models_cached("llm", &config).await.unwrap();
+
+        assert_eq!(first, vec!["cached-model".to_string()]);
+        assert_eq!(second, first);
+        server.join().unwrap();
+        provider_models_cache().lock().clear();
     }
 
     #[test]

@@ -28,7 +28,7 @@ pub const PROXY_MODE_DIRECT: &str = "direct";
 pub const PROXY_MODE_SYSTEM: &str = "system";
 pub const PROXY_MODE_CUSTOM: &str = "custom";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ProviderProxyMode {
     ProviderDefault,
     Direct,
@@ -43,7 +43,7 @@ pub enum EffectiveProxyMode {
     Custom,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProviderProxyConfig {
     provider_id: String,
     mode: ProviderProxyMode,
