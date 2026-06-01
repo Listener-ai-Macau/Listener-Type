@@ -13,10 +13,40 @@
 // Exit 0 = all pass, 1 = any fail
 
 import { execSync } from 'node:child_process';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import process from 'node:process';
 
 const root = process.cwd();
 let failed = 0;
+
+function walkFiles(dir, cb) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'target') continue;
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkFiles(fullPath, cb);
+    } else if (entry.isFile()) {
+      cb(fullPath);
+    }
+  }
+}
+
+function checkNoProductDemoCopy() {
+  const hits = [];
+  walkFiles(join(root, 'src'), filePath => {
+    if (!/\.(ts|tsx|css|json)$/.test(filePath)) return;
+    const lines = readFileSync(filePath, 'utf-8').split('\n');
+    lines.forEach((line, index) => {
+      if (/\bdemo\b/i.test(line)) {
+        hits.push(`${relative(root, filePath)}:${index + 1}: ${line.trim()}`);
+      }
+    });
+  });
+  if (hits.length > 0) {
+    throw new Error(`Product demo copy is not allowed in src:\n${hits.join('\n')}`);
+  }
+}
 
 function run(label, cmd) {
   process.stdout.write(`  ${label} ... `);
@@ -36,9 +66,27 @@ function run(label, cmd) {
   }
 }
 
+function runCheck(label, fn) {
+  process.stdout.write(`  ${label} ... `);
+  try {
+    fn();
+    console.log('OK');
+    return true;
+  } catch (e) {
+    console.log('FAIL');
+    const message = e instanceof Error ? e.message : String(e);
+    const lines = message.split('\n').filter(l => l.trim());
+    const show = lines.slice(-10).join('\n');
+    if (show) console.error(show.split('\n').map(l => '    ' + l).join('\n'));
+    failed++;
+    return false;
+  }
+}
+
 console.log('=== Frontend Verification ===\n');
 
 // Phase 1: Static analysis (fast)
+runCheck('no product demo copy', checkNoProductDemoCopy);
 run('tsc --noEmit', 'npx tsc --noEmit');
 
 // Phase 2: Individual check scripts
