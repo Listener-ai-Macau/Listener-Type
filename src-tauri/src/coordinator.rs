@@ -2305,6 +2305,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     if is_embedded_ble_automatic_recovery_error(&err) {
                         emit_embedded_ble_recovery_capsule(
                             &inner,
+                            "reconnecting",
                             "Listener BLE 正在自动重连，回到范围后会恢复语音键。".to_string(),
                             1800,
                         );
@@ -2466,6 +2467,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         if should_emit_recovered {
             emit_embedded_ble_recovery_capsule(
                 inner,
+                "reconnected",
                 "Listener BLE 已自动重连，语音键可用。".to_string(),
                 1600,
             );
@@ -2474,10 +2476,22 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
     }
 }
 
-fn emit_embedded_ble_recovery_capsule(inner: &Arc<Inner>, message: String, idle_after_ms: u64) {
-    if inner.state.lock().phase != SessionPhase::Idle {
+fn emit_embedded_ble_recovery_capsule(
+    inner: &Arc<Inner>,
+    state: &'static str,
+    message: String,
+    idle_after_ms: u64,
+) {
+    let phase = inner.state.lock().phase;
+    if phase != SessionPhase::Idle {
+        log::info!(
+            "[embedded-ble] recovery capsule state={state} emitted=false phase={phase:?} message={message:?}"
+        );
         return;
     }
+    log::info!(
+        "[embedded-ble] recovery capsule state={state} emitted=true idle_after_ms={idle_after_ms} message={message:?}"
+    );
     emit_capsule(inner, CapsuleState::Recording, 0.0, 0, Some(message), None);
     schedule_capsule_idle(inner, idle_after_ms);
 }

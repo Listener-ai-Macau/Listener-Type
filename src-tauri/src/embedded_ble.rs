@@ -554,6 +554,12 @@ mod windows_ble {
         if let Some(token) = session_token {
             cleanup.set_session_status_token(token);
         }
+        #[cfg(debug_assertions)]
+        register_validation_disconnect_injection_handler(
+            capture_id,
+            tx.clone(),
+            Arc::clone(&cancel_requested),
+        );
 
         log::info!("[embedded-ble] capture #{capture_id}: resetting notify CCCD before enable");
         match write_cccd_with_timeout(
@@ -686,6 +692,41 @@ mod windows_ble {
                 stop_drain_deadline = Some(Instant::now() + super::STOP_DRAIN_TIMEOUT);
             }
         }
+    }
+
+    #[cfg(debug_assertions)]
+    fn register_validation_disconnect_injection_handler(
+        capture_id: u64,
+        tx: mpsc::Sender<BleCaptureSignal>,
+        cancel_requested: Arc<AtomicBool>,
+    ) {
+        let Ok(path) = std::env::var("LISTENER_TYPE_BLE_VALIDATION_DISCONNECT_SIGNAL_FILE") else {
+            return;
+        };
+        let path = path.trim().to_string();
+        if path.is_empty() {
+            return;
+        }
+        log::warn!(
+            "[embedded-ble] capture #{capture_id}: validation disconnect injection armed path={path}"
+        );
+        let _ = std::thread::Builder::new()
+            .name(format!("listener-ble-disconnect-inject-{capture_id}"))
+            .spawn(move || {
+                let path = std::path::PathBuf::from(path);
+                while !cancel_requested.load(Ordering::SeqCst) {
+                    if path.exists() {
+                        log::warn!(
+                            "[embedded-ble] capture #{capture_id}: validation disconnect injection triggered"
+                        );
+                        let _ = tx.send(BleCaptureSignal::Disconnected(
+                            "BLE validation injected disconnect through notify wait; transport_not_ready".to_string(),
+                        ));
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            });
     }
 
     fn register_device_connection_status_handler(
