@@ -964,6 +964,8 @@ export const ko: typeof zhCN = {
     resume: '계속 다운로드',
     cancel: '취소',
     delete: '삭제',
+    deleteConfirm: '로컬 모델 "{{model}}"을 삭제할까요? 디스크의 {{size}}와 완료되지 않은 다운로드가 제거됩니다.',
+    diskUsage: '디스크 사용량 {{size}}',
     setActive: '기본으로 설정',
     failed: '실패',
     cancelled: '취소됨',
