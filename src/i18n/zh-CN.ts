@@ -989,6 +989,8 @@ export const zhCN = {
     resume: '继续下载',
     cancel: '取消',
     delete: '删除',
+    deleteConfirm: '确认删除本地模型「{{model}}」？磁盘上的 {{size}} 会被移除，未完成下载也会被清理。',
+    diskUsage: '磁盘占用 {{size}}',
     setActive: '设为默认',
     failed: '失败',
     cancelled: '已取消',

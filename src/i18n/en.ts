@@ -991,6 +991,8 @@ export const en: typeof zhCN = {
     resume: 'Resume',
     cancel: 'Cancel',
     delete: 'Delete',
+    deleteConfirm: 'Delete local model "{{model}}"? {{size}} on disk will be removed, including any partial download.',
+    diskUsage: 'Disk {{size}}',
     setActive: 'Set as default',
     failed: 'Failed',
     cancelled: 'Cancelled',

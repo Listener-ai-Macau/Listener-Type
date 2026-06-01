@@ -964,6 +964,8 @@ export const ja: typeof zhCN = {
     resume: '続行',
     cancel: 'キャンセル',
     delete: '削除',
+    deleteConfirm: 'ローカルモデル「{{model}}」を削除しますか？ディスク上の {{size}} と未完了のダウンロードが削除されます。',
+    diskUsage: 'ディスク使用量 {{size}}',
     setActive: 'デフォルトに設定',
     failed: '失敗',
     cancelled: 'キャンセル済み',

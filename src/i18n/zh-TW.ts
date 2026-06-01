@@ -991,6 +991,8 @@ export const zhTW: typeof zhCN = {
     resume: '繼續下載',
     cancel: '取消',
     delete: '刪除',
+    deleteConfirm: '確認刪除本地模型「{{model}}」？磁碟上的 {{size}} 會被移除，未完成下載也會被清理。',
+    diskUsage: '磁碟占用 {{size}}',
     setActive: '設為默認',
     failed: '失敗',
     cancelled: '已取消',

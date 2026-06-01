@@ -467,6 +467,13 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
   };
 
   const handleDelete = async (modelId: string) => {
+    const model = models.find(item => item.id === modelId);
+    const bytesToRemove = Math.max(model?.downloadedBytes ?? 0, progress[modelId]?.bytesDownloaded ?? 0);
+    const sizeToRemove = bytesToRemove > 0 ? formatBytes(bytesToRemove) : t('localAsr.sizeUnknown');
+    if (!window.confirm(t('localAsr.deleteConfirm', { model: modelId, size: sizeToRemove }))) {
+      return;
+    }
+
     setBusyModelId(modelId);
     try {
       await deleteLocalAsrModel(modelId);
@@ -551,6 +558,9 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
   const selectedFoundrySizeLabel = selectedFoundrySizeMb
     ? t('localAsr.foundryApproxSizeMb', { mb: selectedFoundrySizeMb })
     : t('localAsr.sizeUnknown');
+  const selectedFoundryStorageLabel = selectedFoundryCatalog?.cached
+    ? t('localAsr.diskUsage', { size: selectedFoundrySizeLabel })
+    : selectedFoundrySizeLabel;
   const selectedFoundryDownloadLabel = selectedFoundryCatalog?.cached
     ? t('localAsr.downloadedBadge')
     : t('localAsr.notDownloadedBadge');
@@ -681,7 +691,7 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
             <div>
               <span style={{ color: 'var(--ol-ink-4)' }}>{t('localAsr.foundrySelectedModel')}: </span>
               <strong>{selectedFoundryDisplayName}</strong>
-              <span> · {selectedFoundrySizeLabel} · {selectedFoundryDownloadLabel}</span>
+              <span> · {selectedFoundryStorageLabel} · {selectedFoundryDownloadLabel}</span>
               <span> · {t(selectedFoundryModel.descKey)}</span>
             </div>
             <div>
@@ -1065,6 +1075,8 @@ function ModelRow({
     : remoteSize && remoteSize.totalBytes > 0
     ? `${formatBytes(remoteSize.totalBytes)} · ${remoteSize.fileCount} ${t('localAsr.files')}`
     : t('localAsr.sizeUnknown');
+  const diskUsageLabel =
+    downloadedBytes > 0 ? t('localAsr.diskUsage', { size: formatBytes(downloadedBytes) }) : null;
 
   return (
     <Card>
@@ -1077,6 +1089,7 @@ function ModelRow({
           </div>
           <div style={{ fontSize: 12, color: 'var(--ol-ink-3)' }}>
             {model.hfRepo} · {sizeLabel}
+            {diskUsageLabel ? <> · {diskUsageLabel}</> : null}
           </div>
           {showProgress && (
             <div style={{ marginTop: 10, maxWidth: 420 }}>
