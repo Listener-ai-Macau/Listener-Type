@@ -25,6 +25,20 @@ Implemented desktop-side KEY1-KEY4 custom action mapping for the Listener keyboa
 - PASS: `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`
 - PASS: `git diff --check`
 
+## Rework Validation
+
+Date: 2026-06-01
+Agent: oai2
+
+- PASS: confirmed the submitted step worktree is clean except ignored build outputs.
+- PASS: `npm run test`
+- PASS: `npm run build` (Vite emitted the existing large chunk warning)
+- PASS: `npm run verify`
+- PASS: `cargo test --manifest-path src-tauri\Cargo.toml --lib --no-run`
+- PASS: `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`
+- PASS: `git diff --check`
+- PASS: retained UI evidence screenshot exists at `docs/validation/voice-keyboard-custom-keys-settings.png` (114219 bytes).
+
 ## UI Evidence
 
 - PASS: Headless Edge opened the Vite app, navigated to Settings -> Shortcuts, dismissed the BLE prompt, scrolled to Device custom keys, and captured `docs/validation/voice-keyboard-custom-keys-settings.png`.
