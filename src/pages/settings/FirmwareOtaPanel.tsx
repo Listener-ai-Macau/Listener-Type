@@ -317,7 +317,7 @@ export function FirmwareOtaPanel({
   const exportDiagnostics = async () => {
     setDiagnosticStatus('busy');
     try {
-      await exportDiagnosticPackage('listener-type-ota-diagnostics.json');
+      await exportDiagnosticPackage('listener-type-ota-diagnostics-device.zip');
       setDiagnosticStatus('ok');
     } catch (error) {
       console.warn('[firmware-ota] diagnostic export failed', error);

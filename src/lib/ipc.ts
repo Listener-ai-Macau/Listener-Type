@@ -1237,11 +1237,10 @@ export async function exportDiagnosticPackage(suggestedFileName: string): Promis
   const { save } = await import('@tauri-apps/plugin-dialog');
   const target = await save({
     defaultPath: suggestedFileName,
-    filters: [{ name: 'Diagnostic package', extensions: ['json'] }],
+    filters: [{ name: 'Diagnostic package', extensions: ['zip'] }],
   });
   if (!target) return null;
-  await invokeOrMock<void>('export_diagnostic_package', { targetPath: target }, () => undefined);
-  return target;
+  return invokeOrMock<string>('export_diagnostic_package', { targetPath: target }, () => target);
 }
 
 export { isTauri };

@@ -3,7 +3,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -2973,16 +2973,12 @@ pub fn export_error_log(target_path: String) -> Result<(), String> {
 pub fn export_diagnostic_package(
     coord: CoordinatorState<'_>,
     target_path: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let package = build_diagnostic_package(coord.inner())?;
-    let bytes = serde_json::to_vec_pretty(&package).map_err(|e| format!("生成诊断包失败：{e}"))?;
-    let target = std::path::Path::new(&target_path);
-    if let Some(parent) = target.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败：{e}"))?;
-        }
-    }
-    std::fs::write(target, bytes).map_err(|e| format!("写入诊断包失败：{e}"))
+    let firmware_log = crate::embedded_ble::pull_firmware_diagnostic_log(Duration::from_secs(45));
+    let target = diagnostic_export_target_path(&target_path, &package)?;
+    write_diagnostic_package_zip(&target, &package, &firmware_log)?;
+    Ok(target.display().to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -3133,6 +3129,399 @@ struct DiagnosticPrivacy {
     excludes_api_key_values: bool,
     credential_values_exported: bool,
     notes: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticExportManifest {
+    schema_version: u32,
+    generated_at: String,
+    package_file_name: String,
+    app_version: &'static str,
+    device_descriptor: String,
+    desktop_package_schema_version: u32,
+    firmware_diagnostic_log: crate::embedded_ble::FirmwareDiagnosticLogPull,
+    files: Vec<DiagnosticZipEntry>,
+    privacy: DiagnosticExportPrivacy,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticZipEntry {
+    path: String,
+    kind: &'static str,
+    bytes: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticExportPrivacy {
+    audio_contents_included: bool,
+    audio_recordings_included: bool,
+    raw_transcripts_included: bool,
+    final_text_included: bool,
+    credential_values_included: bool,
+    notes: Vec<&'static str>,
+}
+
+struct DiagnosticAudioSampleFile {
+    session_id: String,
+    zip_path: String,
+    bytes: Vec<u8>,
+}
+
+const DIAGNOSTIC_AUDIO_SAMPLE_LIMIT: usize = 3;
+const DIAGNOSTIC_AUDIO_SAMPLE_MAX_BYTES: u64 = 20 * 1024 * 1024;
+
+fn diagnostic_export_target_path(
+    requested_path: &str,
+    package: &DiagnosticPackage,
+) -> Result<PathBuf, String> {
+    let requested = Path::new(requested_path);
+    let parent = requested
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let requested_name = requested
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let file_name = if diagnostic_requested_file_name_is_generic(requested_name) {
+        diagnostic_package_file_name(package)
+    } else if requested
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+    {
+        requested_name.to_string()
+    } else {
+        format!("{requested_name}.zip")
+    };
+    Ok(parent.join(file_name))
+}
+
+fn diagnostic_requested_file_name_is_generic(name: &str) -> bool {
+    if name.trim().is_empty() {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".json")
+        || lower.starts_with("listener-type-diagnostic")
+        || lower.starts_with("listener-type-ble-wake-diagnostics")
+        || lower.starts_with("listener-type-ota-diagnostics")
+}
+
+fn diagnostic_package_file_name(package: &DiagnosticPackage) -> String {
+    let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    format!(
+        "listener-type-diagnostic-{}-{timestamp}.zip",
+        diagnostic_device_descriptor(package)
+    )
+}
+
+fn diagnostic_device_descriptor(package: &DiagnosticPackage) -> String {
+    let firmware = package
+        .ble
+        .firmware_version
+        .as_deref()
+        .or(package.firmware.version.as_deref())
+        .unwrap_or("fw-unknown");
+    let address = package
+        .ble
+        .device_address
+        .as_deref()
+        .unwrap_or("device-offline");
+    sanitize_diagnostic_file_segment(&format!("{firmware}-{address}"))
+}
+
+fn sanitize_diagnostic_file_segment(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut previous_dash = false;
+    for ch in value.chars() {
+        let normalized = if ch.is_ascii_alphanumeric() {
+            ch.to_ascii_lowercase()
+        } else if matches!(ch, '.' | '_' | '-') {
+            ch
+        } else {
+            '-'
+        };
+        if normalized == '-' {
+            if previous_dash {
+                continue;
+            }
+            previous_dash = true;
+        } else {
+            previous_dash = false;
+        }
+        output.push(normalized);
+    }
+    let trimmed = output.trim_matches('-');
+    if trimmed.is_empty() {
+        "device-unknown".to_string()
+    } else {
+        trimmed.chars().take(80).collect()
+    }
+}
+
+fn write_diagnostic_package_zip(
+    target: &Path,
+    package: &DiagnosticPackage,
+    firmware_log: &crate::embedded_ble::FirmwareDiagnosticLogPull,
+) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败：{e}"))?;
+        }
+    }
+
+    let log_lines = read_diagnostic_log_tail(1000);
+    let desktop_package_bytes =
+        serde_json::to_vec_pretty(package).map_err(|e| format!("生成桌面诊断 JSON 失败：{e}"))?;
+    let log_tail = sanitized_diagnostic_log_tail(&log_lines);
+    let log_tail_bytes = log_tail.as_bytes().to_vec();
+    let ble_history_bytes = serde_json::to_vec_pretty(&diagnostic_ble_history(package, &log_lines))
+        .map_err(|e| format!("生成 BLE 连接历史失败：{e}"))?;
+    let audio_samples = diagnostic_audio_sample_files(package);
+    let audio_manifest_bytes =
+        serde_json::to_vec_pretty(&diagnostic_audio_samples_manifest(package, &audio_samples))
+            .map_err(|e| format!("生成音频样本清单失败：{e}"))?;
+    let firmware_summary_bytes = serde_json::to_vec_pretty(firmware_log)
+        .map_err(|e| format!("生成固件诊断摘要失败：{e}"))?;
+
+    let mut files = vec![
+        DiagnosticZipEntry {
+            path: "desktop/diagnostic_package.json".to_string(),
+            kind: "desktop_diagnostic_json",
+            bytes: desktop_package_bytes.len(),
+        },
+        DiagnosticZipEntry {
+            path: "desktop/listener-type-log-tail.txt".to_string(),
+            kind: "desktop_log_tail",
+            bytes: log_tail_bytes.len(),
+        },
+        DiagnosticZipEntry {
+            path: "desktop/ble_connection_history.json".to_string(),
+            kind: "ble_connection_history",
+            bytes: ble_history_bytes.len(),
+        },
+        DiagnosticZipEntry {
+            path: "desktop/audio_samples_manifest.json".to_string(),
+            kind: "audio_sample_metadata",
+            bytes: audio_manifest_bytes.len(),
+        },
+        DiagnosticZipEntry {
+            path: "firmware/diag_log_summary.json".to_string(),
+            kind: "firmware_diagnostic_summary",
+            bytes: firmware_summary_bytes.len(),
+        },
+    ];
+    if firmware_log.status == "ok" {
+        files.push(DiagnosticZipEntry {
+            path: "firmware/diag_log.bin".to_string(),
+            kind: "firmware_diagnostic_events",
+            bytes: firmware_log.raw_event_bytes.len(),
+        });
+    }
+    for sample in &audio_samples {
+        files.push(DiagnosticZipEntry {
+            path: sample.zip_path.clone(),
+            kind: "audio_sample_wav",
+            bytes: sample.bytes.len(),
+        });
+    }
+
+    let package_file_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("listener-type-diagnostic.zip")
+        .to_string();
+    let manifest = DiagnosticExportManifest {
+        schema_version: 1,
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        package_file_name,
+        app_version: env!("CARGO_PKG_VERSION"),
+        device_descriptor: diagnostic_device_descriptor(package),
+        desktop_package_schema_version: package.schema_version,
+        firmware_diagnostic_log: firmware_log.clone(),
+        files,
+        privacy: DiagnosticExportPrivacy {
+            audio_contents_included: !audio_samples.is_empty(),
+            audio_recordings_included: !audio_samples.is_empty(),
+            raw_transcripts_included: false,
+            final_text_included: false,
+            credential_values_included: false,
+            notes: vec![
+                "Desktop logs are exported as a sanitized tail only.",
+                "Only previously retained debug WAV recordings are included as audio samples; no new audio is captured during export.",
+                "Firmware diag_log events are raw firmware diagnostic records without desktop transcript or credential values.",
+            ],
+        },
+    };
+    let manifest_bytes = serde_json::to_vec_pretty(&manifest)
+        .map_err(|e| format!("生成诊断包 manifest 失败：{e}"))?;
+
+    let file = File::create(target).map_err(|e| format!("创建诊断 zip 失败：{e}"))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    write_zip_entry(&mut zip, "manifest.json", &manifest_bytes, options)?;
+    write_zip_entry(
+        &mut zip,
+        "desktop/diagnostic_package.json",
+        &desktop_package_bytes,
+        options,
+    )?;
+    write_zip_entry(
+        &mut zip,
+        "desktop/listener-type-log-tail.txt",
+        &log_tail_bytes,
+        options,
+    )?;
+    write_zip_entry(
+        &mut zip,
+        "desktop/ble_connection_history.json",
+        &ble_history_bytes,
+        options,
+    )?;
+    write_zip_entry(
+        &mut zip,
+        "desktop/audio_samples_manifest.json",
+        &audio_manifest_bytes,
+        options,
+    )?;
+    write_zip_entry(
+        &mut zip,
+        "firmware/diag_log_summary.json",
+        &firmware_summary_bytes,
+        options,
+    )?;
+    if firmware_log.status == "ok" {
+        write_zip_entry(
+            &mut zip,
+            "firmware/diag_log.bin",
+            &firmware_log.raw_event_bytes,
+            options,
+        )?;
+    }
+    for sample in &audio_samples {
+        write_zip_entry(&mut zip, &sample.zip_path, &sample.bytes, options)?;
+    }
+    zip.finish()
+        .map(|_| ())
+        .map_err(|e| format!("完成诊断 zip 失败：{e}"))
+}
+
+fn write_zip_entry<W: Write + std::io::Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    path: &str,
+    bytes: &[u8],
+    options: zip::write::SimpleFileOptions,
+) -> Result<(), String> {
+    zip.start_file(path, options)
+        .map_err(|e| format!("创建诊断 zip 条目 {path} 失败：{e}"))?;
+    zip.write_all(bytes)
+        .map_err(|e| format!("写入诊断 zip 条目 {path} 失败：{e}"))
+}
+
+fn sanitized_diagnostic_log_tail(lines: &[String]) -> String {
+    lines
+        .iter()
+        .filter_map(|line| sanitize_diagnostic_log_line(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn diagnostic_ble_history(package: &DiagnosticPackage, lines: &[String]) -> Value {
+    let ble_lines: Vec<String> = lines
+        .iter()
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("ble") || lower.contains("bluetooth") || lower.contains("gatt")
+        })
+        .filter_map(|line| sanitize_diagnostic_log_line(line))
+        .rev()
+        .take(160)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    serde_json::json!({
+        "capturedAt": &package.generated_at,
+        "deviceAddress": &package.ble.device_address,
+        "firmwareVersion": &package.ble.firmware_version,
+        "batteryPercent": package.ble.battery_percent,
+        "capabilities": &package.ble.capabilities,
+        "backgroundListenerActive": package.ble.background_listener_active,
+        "backgroundListenerReady": package.ble.background_listener_ready,
+        "notifySubscriptionState": &package.ble.notify_subscription_state,
+        "recentDisconnectReason": &package.ble.recent_disconnect_reason,
+        "reconnectAttempts": package.ble.reconnect_attempts,
+        "failureTaxonomy": &package.ble.failure_taxonomy,
+        "diagnosticSnapshot": &package.ble.diagnostic_snapshot,
+        "wakeRecovery": &package.ble.wake_recovery,
+        "logLines": ble_lines,
+    })
+}
+
+fn diagnostic_audio_sample_files(package: &DiagnosticPackage) -> Vec<DiagnosticAudioSampleFile> {
+    let mut samples = Vec::new();
+    for session in package.recent_sessions.iter() {
+        if samples.len() >= DIAGNOSTIC_AUDIO_SAMPLE_LIMIT {
+            break;
+        }
+        if session.has_audio_recording != Some(true) || !is_valid_session_id(&session.id) {
+            continue;
+        }
+        let Ok(path) = crate::persistence::recording_path_for_session(&session.id) else {
+            continue;
+        };
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if metadata.len() == 0 || metadata.len() > DIAGNOSTIC_AUDIO_SAMPLE_MAX_BYTES {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        samples.push(DiagnosticAudioSampleFile {
+            session_id: session.id.clone(),
+            zip_path: format!("desktop/audio_samples/{}.wav", session.id),
+            bytes,
+        });
+    }
+    samples
+}
+
+fn diagnostic_audio_samples_manifest(
+    package: &DiagnosticPackage,
+    audio_samples: &[DiagnosticAudioSampleFile],
+) -> Value {
+    let included_recordings: Vec<Value> = audio_samples
+        .iter()
+        .map(|sample| {
+            serde_json::json!({
+                "sessionId": &sample.session_id,
+                "path": &sample.zip_path,
+                "bytes": sample.bytes.len(),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "capturedAt": &package.generated_at,
+        "audioContentsIncluded": !audio_samples.is_empty(),
+        "audioRecordingsIncluded": !audio_samples.is_empty(),
+        "audioSampleLimit": DIAGNOSTIC_AUDIO_SAMPLE_LIMIT,
+        "audioSampleMaxBytes": DIAGNOSTIC_AUDIO_SAMPLE_MAX_BYTES,
+        "recordAudioForDebug": package.config.record_audio_for_debug,
+        "audioRecordingMaxEntries": package.config.audio_recording_max_entries,
+        "includedRecordings": included_recordings,
+        "recentSessions": &package.recent_sessions,
+        "latestEmbeddedSessionId": &package.ble.latest_session_id,
+        "lastEmbeddedAudioEndReason": &package.ble.last_embedded_audio_end_reason,
+        "lastEmbeddedAudioStats": &package.ble.last_embedded_audio_stats,
+    })
 }
 
 fn build_diagnostic_package(coord: &Arc<Coordinator>) -> Result<DiagnosticPackage, String> {
@@ -3303,7 +3692,7 @@ fn build_diagnostic_package_with_ble_snapshot(
             credential_values_exported: false,
             notes: vec![
                 "History rawTranscript/finalText fields are not exported.",
-                "WAV/audio recording files are not exported.",
+                "This JSON excludes WAV/audio bytes; the surrounding ZIP may include previously retained debug WAV samples when available.",
                 "Credential values, API keys, access tokens and OAuth tokens are not exported.",
             ],
         },
@@ -4267,6 +4656,7 @@ mod tests {
                 platform: "windows",
                 audio_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
                 ota_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3092a",
+                diagnostic_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3093a",
                 dis_service_uuid: "0000180a-0000-1000-8000-00805f9b34fb",
                 configured_device_address: Some("14C19F48FE72".to_string()),
                 audio_services: vec![crate::embedded_ble::BleDiagnosticServiceEntry {
@@ -4279,6 +4669,7 @@ mod tests {
                     bluetooth_address: Some("14C19F48FE72".to_string()),
                 }],
                 ota_services: Vec::new(),
+                diagnostic_services: Vec::new(),
                 firmware_snapshot: FirmwareOtaDeviceSnapshot {
                     connected: true,
                     hardware_revision: Some("keyboard-v1".to_string()),
@@ -4309,6 +4700,11 @@ mod tests {
             value["ble"]["diagnosticSnapshot"]["audioServiceUuid"],
             "710af845-6d9f-6583-0c4d-9e5b3bc3091a"
         );
+        assert_eq!(
+            value["ble"]["diagnosticSnapshot"]["diagnosticServiceUuid"],
+            "710af845-6d9f-6583-0c4d-9e5b3bc3093a"
+        );
+        assert!(value["ble"]["diagnosticSnapshot"]["diagnosticServices"].is_array());
         assert!(value["ble"]["failureTaxonomy"].is_array());
         assert!(value["ble"].get("deviceAddress").is_some());
         assert!(value["ble"].get("firmwareVersion").is_some());
@@ -4325,6 +4721,150 @@ mod tests {
         assert!(!value.to_string().to_lowercase().contains("api_key\":\""));
     }
 
+    fn diagnostic_export_test_package() -> super::DiagnosticPackage {
+        let coordinator = Arc::new(Coordinator::new());
+        super::build_diagnostic_package_with_ble_snapshot(
+            &coordinator,
+            crate::embedded_ble::BleDiagnosticSnapshot {
+                captured_at: "2026-05-28T00:00:00Z".to_string(),
+                platform: "windows",
+                audio_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
+                ota_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3092a",
+                diagnostic_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3093a",
+                dis_service_uuid: "0000180a-0000-1000-8000-00805f9b34fb",
+                configured_device_address: Some("14C19F48FE72".to_string()),
+                audio_services: Vec::new(),
+                ota_services: Vec::new(),
+                diagnostic_services: vec![crate::embedded_ble::BleDiagnosticServiceEntry {
+                    selector: "diagnostic",
+                    service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3093a",
+                    index: 0,
+                    name: "listener".to_string(),
+                    id: r"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3093A}_14C19F48FE72"
+                        .to_string(),
+                    bluetooth_address: Some("14C19F48FE72".to_string()),
+                }],
+                firmware_snapshot: FirmwareOtaDeviceSnapshot {
+                    connected: true,
+                    hardware_revision: Some("keyboard-v1".to_string()),
+                    firmware_version: Some("v1.2.3".to_string()),
+                    capabilities: vec!["firmware_ota_v1".to_string(), "diag_export_v1".to_string()],
+                    battery_percent: Some(88),
+                    usb_powered: Some(true),
+                    detail: None,
+                },
+                errors: Vec::new(),
+            },
+        )
+        .expect("diagnostic package")
+    }
+
+    #[test]
+    fn diagnostic_export_filename_includes_device_and_timestamp() {
+        let package = diagnostic_export_test_package();
+        let file_name = super::diagnostic_package_file_name(&package);
+        assert!(file_name.starts_with("listener-type-diagnostic-v1.2.3-14c19f48fe72-"));
+        assert!(file_name.ends_with(".zip"));
+    }
+
+    #[test]
+    fn diagnostic_zip_export_writes_desktop_data_and_offline_firmware_summary() {
+        let package = diagnostic_export_test_package();
+        let firmware_log = crate::embedded_ble::FirmwareDiagnosticLogPull::offline(
+            "windows",
+            "diagnostic service offline",
+        );
+        let zip_path = std::env::temp_dir().join(format!(
+            "listener-diagnostic-offline-test-{}.zip",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&zip_path);
+        super::write_diagnostic_package_zip(&zip_path, &package, &firmware_log)
+            .expect("write diagnostic zip");
+
+        let file = std::fs::File::open(&zip_path).expect("open diagnostic zip");
+        let mut archive = zip::ZipArchive::new(file).expect("read diagnostic zip");
+        assert!(archive.by_name("manifest.json").is_ok());
+        assert!(archive.by_name("desktop/diagnostic_package.json").is_ok());
+        assert!(archive
+            .by_name("desktop/listener-type-log-tail.txt")
+            .is_ok());
+        assert!(archive
+            .by_name("desktop/ble_connection_history.json")
+            .is_ok());
+        assert!(archive
+            .by_name("desktop/audio_samples_manifest.json")
+            .is_ok());
+        assert!(archive.by_name("firmware/diag_log_summary.json").is_ok());
+        assert!(archive.by_name("firmware/diag_log.bin").is_err());
+
+        let mut summary = String::new();
+        archive
+            .by_name("firmware/diag_log_summary.json")
+            .expect("firmware summary")
+            .read_to_string(&mut summary)
+            .expect("read summary");
+        let summary: serde_json::Value =
+            serde_json::from_str(&summary).expect("parse firmware summary");
+        assert_eq!(summary["status"], "offline");
+        let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn diagnostic_zip_export_includes_firmware_diag_log_bin_when_available() {
+        let package = diagnostic_export_test_package();
+        let raw_events = vec![7u8; crate::embedded_ble::DIAGNOSTIC_EVENT_BYTES * 2];
+        let firmware_log = crate::embedded_ble::FirmwareDiagnosticLogPull::from_events(
+            "windows",
+            2,
+            2,
+            2,
+            vec![crate::embedded_ble::FirmwareDiagnosticLogChunk {
+                offset: 0,
+                event_count: 2,
+                value_bytes: crate::embedded_ble::DIAGNOSTIC_CHUNK_HEADER_BYTES + raw_events.len(),
+                events_crc32: "0x00000000".to_string(),
+            }],
+            raw_events.clone(),
+        );
+        let zip_path = std::env::temp_dir().join(format!(
+            "listener-diagnostic-firmware-test-{}.zip",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&zip_path);
+        super::write_diagnostic_package_zip(&zip_path, &package, &firmware_log)
+            .expect("write diagnostic zip");
+
+        let file = std::fs::File::open(&zip_path).expect("open diagnostic zip");
+        let mut archive = zip::ZipArchive::new(file).expect("read diagnostic zip");
+        let mut firmware_bytes = Vec::new();
+        archive
+            .by_name("firmware/diag_log.bin")
+            .expect("firmware diag log")
+            .read_to_end(&mut firmware_bytes)
+            .expect("read firmware bytes");
+        assert_eq!(firmware_bytes, raw_events);
+        let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn diagnostic_audio_manifest_marks_included_debug_wav_samples() {
+        let package = diagnostic_export_test_package();
+        let samples = vec![super::DiagnosticAudioSampleFile {
+            session_id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
+            zip_path: "desktop/audio_samples/123e4567-e89b-12d3-a456-426614174000.wav".to_string(),
+            bytes: vec![1, 2, 3, 4],
+        }];
+        let manifest = super::diagnostic_audio_samples_manifest(&package, &samples);
+        assert_eq!(manifest["audioContentsIncluded"], true);
+        assert_eq!(manifest["audioRecordingsIncluded"], true);
+        assert_eq!(manifest["includedRecordings"][0]["bytes"], 4);
+        assert_eq!(
+            manifest["includedRecordings"][0]["path"],
+            "desktop/audio_samples/123e4567-e89b-12d3-a456-426614174000.wav"
+        );
+    }
+
     #[test]
     fn diagnostic_ble_failure_taxonomy_deduplicates_sources() {
         let snapshot = crate::embedded_ble::BleDiagnosticSnapshot {
@@ -4332,10 +4872,12 @@ mod tests {
             platform: "windows",
             audio_service_uuid: "audio",
             ota_service_uuid: "ota",
+            diagnostic_service_uuid: "diagnostic",
             dis_service_uuid: "dis",
             configured_device_address: Some("14C19F48FE72".to_string()),
             audio_services: Vec::new(),
             ota_services: Vec::new(),
+            diagnostic_services: Vec::new(),
             firmware_snapshot: FirmwareOtaDeviceSnapshot {
                 connected: true,
                 hardware_revision: Some("keyboard-v1".to_string()),
