@@ -500,6 +500,7 @@ mod windows_ble {
         Duration::from_millis(750),
         Duration::from_millis(1500),
     ];
+    const DIAGNOSTIC_PULL_CANDIDATE_DELAY: Duration = Duration::from_millis(350);
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
     const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -640,7 +641,44 @@ mod windows_ble {
         timeout: Duration,
     ) -> Result<crate::embedded_ble::FirmwareDiagnosticLogPull, String> {
         let timeout = timeout.clamp(Duration::from_secs(3), Duration::from_secs(60));
-        let target = open_diagnostic_target()?;
+        let candidates = diagnostic_target_candidates()?;
+        let mut errors = Vec::new();
+
+        for candidate in candidates {
+            let label = candidate.label().to_string();
+            match candidate
+                .open()
+                .and_then(|target| pull_firmware_diagnostic_log_from_target(timeout, target))
+            {
+                Ok(pull) => {
+                    log::info!("[embedded-ble] firmware diagnostic log pull succeeded via {label}");
+                    return Ok(pull);
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] firmware diagnostic log candidate {label} failed: {err}"
+                    );
+                    errors.push(format!("{label}: {err}"));
+                }
+            }
+
+            std::thread::sleep(DIAGNOSTIC_PULL_CANDIDATE_DELAY);
+        }
+
+        Err(format!(
+            "No usable Listener BLE diagnostic target completed export: {}",
+            if errors.is_empty() {
+                "no candidates attempted".to_string()
+            } else {
+                errors.join("; ")
+            }
+        ))
+    }
+
+    fn pull_firmware_diagnostic_log_from_target(
+        timeout: Duration,
+        target: OpenDiagnosticTarget,
+    ) -> Result<crate::embedded_ble::FirmwareDiagnosticLogPull, String> {
         let control = target.control.clone();
         let data = target.data.clone();
         let count = target.count.clone();
@@ -1799,21 +1837,54 @@ mod windows_ble {
         Err(last_error.unwrap_or_else(|| "No writable Listener BLE OTA service found".to_string()))
     }
 
-    fn open_diagnostic_target() -> Result<OpenDiagnosticTarget, String> {
+    fn diagnostic_target_candidates() -> Result<Vec<DiagnosticTargetCandidate>, String> {
+        let mut candidates = Vec::new();
+        let mut seen_addresses = Vec::new();
+        let mut seen_service_ids = Vec::new();
+
+        if let Some(address) = configured_bluetooth_address() {
+            push_diagnostic_device_candidate(
+                &mut candidates,
+                &mut seen_addresses,
+                address,
+                format!(
+                    "configured address {}",
+                    crate::embedded_ble::format_bluetooth_address(address)
+                ),
+            );
+        }
+
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(DIAGNOSTIC_SERVICE_UUID)
             .map_err(|err| format!("BLE diagnostic service selector failed: {err}"))?;
-        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+        let devices = match DeviceInformation::FindAllAsyncAqsFilter(&selector)
             .map_err(|err| format!("BLE diagnostic service discovery failed: {err}"))
             .and_then(|op| {
                 wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "diagnostic service discovery")
-            })?;
+            }) {
+            Ok(devices) => devices,
+            Err(err) => {
+                if candidates.is_empty() {
+                    return Err(err);
+                }
+                log::warn!(
+                    "[embedded-ble] diagnostic service discovery failed; trying configured target only: {err}"
+                );
+                return Ok(candidates);
+            }
+        };
         let count = devices
             .Size()
             .map_err(|err| format!("BLE diagnostic service collection size failed: {err}"))?;
         if count == 0 {
-            return Err(format!(
-                "Listener BLE diagnostic service {DIAGNOSTIC_SERVICE_UUID:?} not found; ensure firmware exposes diag_export_v1 and the device is paired and online"
-            ));
+            if candidates.is_empty() {
+                return Err(format!(
+                    "Listener BLE diagnostic service {DIAGNOSTIC_SERVICE_UUID:?} not found; ensure firmware exposes diag_export_v1 and the device is paired and online"
+                ));
+            }
+            log::warn!(
+                "[embedded-ble] diagnostic service discovery returned no entries; trying configured target only"
+            );
+            return Ok(candidates);
         }
 
         let mut last_error = None;
@@ -1837,43 +1908,43 @@ mod windows_ble {
                 }
             };
 
-            let mut candidate_error = None;
-            if let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
-                match open_diagnostic_target_for_device(address) {
-                    Ok(target) => {
-                        log::info!(
-                            "[embedded-ble] selected diagnostic device index={index} name={name} address={address:012X}"
-                        );
-                        return Ok(target);
-                    }
-                    Err(err) => {
-                        candidate_error = Some(format!(
-                            "{name}: BLE diagnostic device path {address:012X} failed: {err}"
-                        ));
-                    }
-                }
+            let id_text = id.to_string_lossy();
+            if let Some(address) = parse_bluetooth_address_from_device_id(&id_text) {
+                push_diagnostic_device_candidate(
+                    &mut candidates,
+                    &mut seen_addresses,
+                    address,
+                    format!("discovered service index={index} name={name} address={address:012X}"),
+                );
             }
 
-            match open_diagnostic_target_for_service(&id) {
-                Ok(target) => {
-                    log::info!(
-                        "[embedded-ble] selected diagnostic service-id fallback index={index} name={name}"
-                    );
-                    return Ok(target);
-                }
-                Err(err) => {
-                    last_error = Some(match candidate_error {
-                        Some(previous) => {
-                            format!("{previous}; diagnostic service-id fallback failed: {err}")
-                        }
-                        None => format!("{name}: {err}"),
-                    });
-                }
+            if !seen_service_ids.iter().any(|seen| seen == &id_text) {
+                seen_service_ids.push(id_text);
+                candidates.push(DiagnosticTargetCandidate::Service {
+                    label: format!("service-id fallback index={index} name={name}"),
+                    id,
+                });
             }
         }
 
-        Err(last_error
-            .unwrap_or_else(|| "No usable Listener BLE diagnostic service found".to_string()))
+        if candidates.is_empty() {
+            return Err(last_error
+                .unwrap_or_else(|| "No usable Listener BLE diagnostic service found".to_string()));
+        }
+        Ok(candidates)
+    }
+
+    fn push_diagnostic_device_candidate(
+        candidates: &mut Vec<DiagnosticTargetCandidate>,
+        seen_addresses: &mut Vec<u64>,
+        address: u64,
+        label: String,
+    ) {
+        if seen_addresses.iter().any(|seen| *seen == address) {
+            return;
+        }
+        seen_addresses.push(address);
+        candidates.push(DiagnosticTargetCandidate::Device { label, address });
     }
 
     fn open_ota_target_for_device(address: u64) -> Result<OpenOtaTarget, String> {
@@ -2622,7 +2693,7 @@ mod windows_ble {
         None
     }
 
-    fn parse_bluetooth_address_hex(value: &str) -> Option<u64> {
+    pub(super) fn parse_bluetooth_address_hex(value: &str) -> Option<u64> {
         let hex: String = value
             .chars()
             .filter(|ch| ch.is_ascii_hexdigit())
@@ -3099,6 +3170,31 @@ mod windows_ble {
         service: Option<GattDeviceService>,
         session: Option<GattSession>,
         device: Option<BluetoothLEDevice>,
+    }
+
+    enum DiagnosticTargetCandidate {
+        Device { label: String, address: u64 },
+        Service { label: String, id: HSTRING },
+    }
+
+    impl DiagnosticTargetCandidate {
+        fn label(&self) -> &str {
+            match self {
+                DiagnosticTargetCandidate::Device { label, .. }
+                | DiagnosticTargetCandidate::Service { label, .. } => label,
+            }
+        }
+
+        fn open(&self) -> Result<OpenDiagnosticTarget, String> {
+            match self {
+                DiagnosticTargetCandidate::Device { address, .. } => {
+                    open_diagnostic_target_for_device(*address)
+                }
+                DiagnosticTargetCandidate::Service { id, .. } => {
+                    open_diagnostic_target_for_service(id)
+                }
+            }
+        }
     }
 
     struct PreparedOtaCharacteristics {
@@ -3724,6 +3820,23 @@ mod tests {
                 r"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3092A}_DEV_VID&0216C0_PID&05DF_REV&0001_14C19F48FE72\A&B5FDFC&D&0009"
             ),
             Some(0x14C1_9F48_FE72)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_configured_bluetooth_address_hex_forms() {
+        assert_eq!(
+            super::windows_ble::parse_bluetooth_address_hex("D41A50FBF35E"),
+            Some(0xD41A_50FB_F35E)
+        );
+        assert_eq!(
+            super::windows_ble::parse_bluetooth_address_hex("D4:1A:50:FB:F3:5E"),
+            Some(0xD41A_50FB_F35E)
+        );
+        assert_eq!(
+            super::windows_ble::parse_bluetooth_address_hex("D4-1A-50-FB-F3-5E"),
+            Some(0xD41A_50FB_F35E)
         );
     }
 
