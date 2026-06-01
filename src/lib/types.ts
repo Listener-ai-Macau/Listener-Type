@@ -432,7 +432,7 @@ export interface UserPreferences {
   audioRecordingMaxEntries: number | null;
   /** Marketplace HTTP 基地址。空 = 本地开发默认 http://127.0.0.1:8090；生产填 https://api.<domain>。 */
   marketplaceBaseUrl: string;
-  /** Marketplace dev-mode 模拟登录用户名（GitHub login 风格）。生产换 OAuth token 后此字段废弃。 */
+  /** Marketplace GitHub login used for UI state; OAuth token stays in the OS credential vault. */
   marketplaceDevLogin: string;
 }
 

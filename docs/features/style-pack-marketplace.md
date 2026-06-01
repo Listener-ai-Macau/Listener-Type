@@ -34,7 +34,7 @@ All remote marketplace traffic goes through Rust IPC commands. The WebView must 
 | List/search styles | `GET /styles?q=<query>&sort=<new\|popular>&limit=<n>` | Returns `MarketplaceListItem[]`; unauthenticated. |
 | Style detail | `GET /styles/{id}` | Returns full metadata and `prompt`; unauthenticated. |
 | Style archive download | `GET /styles/{id}/download` | Returns the style-pack zip installed through local import validation. |
-| Upload/update style | `POST /styles/upload` | Multipart field `file` contains the zip; optional `originPackId`; dev-mode identity currently uses `X-Dev-User` until OAuth lands. |
+| Upload/update style | `POST /styles/upload` | Multipart field `file` contains the zip; optional `originPackId`; identity comes from GitHub OAuth and is forwarded as the v1 `X-Dev-User` compatibility header. |
 | Like style | `POST /styles/{id}/like` | Requires identity; returns like count and whether the user already liked it. |
 | Withdraw style | `DELETE /styles/{id}` | Requires identity; backend should soft-delete/withdraw. |
 | User likes | `GET /me/likes` | Requires identity; returns remote style ids. |
@@ -42,11 +42,14 @@ All remote marketplace traffic goes through Rust IPC commands. The WebView must 
 
 Rust classifies backend failures before surfacing them to the UI: network failure, `401 Unauthorized`, `404 Not Found`, other HTTP status, invalid URL, and decode failure.
 
+GitHub OAuth uses device flow through Rust IPC only. The access token, optional refresh token, expiry, scope, and resolved login are stored in the system credential vault with other Listener Type credentials. Mutating marketplace commands refresh an expiring GitHub token when GitHub returns refresh metadata, then call `GET https://api.github.com/user` and use the returned login for the marketplace request. Non-expiring GitHub tokens are treated as valid until GitHub rejects `/user`.
+
 ## Source Map
 
 - Frontend marketplace UI: `src/pages/Marketplace.tsx`, `src/components/MarketplaceModal.tsx`, `src/pages/Style.tsx`.
 - IPC wrappers: `src/lib/ipc.ts`.
 - Backend commands: `src-tauri/src/commands.rs`.
+- GitHub OAuth client: `src-tauri/src/github_oauth.rs`.
 - Backend HTTP client and REST contract: `src-tauri/src/marketplace_backend.rs`.
 - Local pack storage and archive import/export: `src-tauri/src/persistence.rs`.
 

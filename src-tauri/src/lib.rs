@@ -23,6 +23,7 @@ mod correction;
 mod embedded_audio;
 mod embedded_ble;
 mod firmware_ota;
+mod github_oauth;
 mod global_hotkey_runtime;
 mod hotkey;
 mod insertion;
