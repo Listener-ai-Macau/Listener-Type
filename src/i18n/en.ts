@@ -66,7 +66,7 @@ export const en: typeof zhCN = {
   marketplace: {
     kicker: 'MARKETPLACE',
     title: 'Style Pack Marketplace',
-    desc: 'Browse community style packs, install in one click, like, and share your own.',
+    desc: 'Manage local style packs. Remote sharing appears only when a marketplace backend is configured.',
     searchPlaceholder: 'Search name / description / tags…',
     sortPopular: 'Popular',
     sortNew: 'Newest',

@@ -66,7 +66,7 @@ export const zhTW: typeof zhCN = {
   marketplace: {
     kicker: 'MARKETPLACE',
     title: '風格包市場',
-    desc: '瀏覽社群風格包，一鍵安裝到本機；點讚和上傳你自己的風格包。',
+    desc: '管理本機風格包；只有配置風格市場後端後，才會啟用遠端分享。',
     searchPlaceholder: '搜尋名稱 / 描述 / 標籤…',
     sortPopular: '按熱度',
     sortNew: '最新',

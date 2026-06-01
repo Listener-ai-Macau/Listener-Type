@@ -64,7 +64,7 @@ export const zhCN = {
   marketplace: {
     kicker: 'MARKETPLACE',
     title: '风格包市场',
-    desc: '浏览社区风格包，一键安装到本地；点赞和上传你自己的风格包。',
+    desc: '管理本地风格包；只有配置风格市场后端后，才会启用远程分享。',
     searchPlaceholder: '搜索名称 / 描述 / 标签…',
     sortPopular: '按热度',
     sortNew: '最新',
