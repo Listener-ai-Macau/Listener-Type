@@ -334,7 +334,7 @@ function AboutMini() {
     setExportMessage('');
     try {
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const target = await exportDiagnosticPackage(`listener-type-diagnostic-${ts}.json`);
+      const target = await exportDiagnosticPackage(`listener-type-diagnostic-device-${ts}.zip`);
       if (target == null) {
         setExportStatus('idle');
         return;
@@ -405,6 +405,11 @@ function AboutMini() {
             <span style={{ fontSize: 11, color: 'var(--ol-ok)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 220 }}
                   title={exportMessage}>
               {t('modal.about.exportSuccess')}
+            </span>
+          )}
+          {exportStatus === 'busy' && (
+            <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
+              {t('modal.about.exportProgress')}
             </span>
           )}
           {exportStatus === 'err' && (

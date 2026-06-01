@@ -7,6 +7,13 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093a";
+pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093b";
+pub const DIAGNOSTIC_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093c";
+pub const DIAGNOSTIC_COUNT_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093d";
+pub const DIAGNOSTIC_EVENT_BYTES: usize = 24;
+pub const DIAGNOSTIC_CHUNK_HEADER_BYTES: usize = 8;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BleNotificationEvent {
     pub notification: Vec<u8>,
@@ -82,12 +89,124 @@ pub struct BleDiagnosticSnapshot {
     pub platform: &'static str,
     pub audio_service_uuid: &'static str,
     pub ota_service_uuid: &'static str,
+    pub diagnostic_service_uuid: &'static str,
     pub dis_service_uuid: &'static str,
     pub configured_device_address: Option<String>,
     pub audio_services: Vec<BleDiagnosticServiceEntry>,
     pub ota_services: Vec<BleDiagnosticServiceEntry>,
+    pub diagnostic_services: Vec<BleDiagnosticServiceEntry>,
     pub firmware_snapshot: FirmwareOtaDeviceSnapshot,
     pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareDiagnosticLogChunk {
+    pub offset: usize,
+    pub event_count: u16,
+    pub value_bytes: usize,
+    pub events_crc32: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareDiagnosticLogPull {
+    pub captured_at: String,
+    pub status: &'static str,
+    pub platform: &'static str,
+    pub service_uuid: &'static str,
+    pub control_uuid: &'static str,
+    pub data_uuid: &'static str,
+    pub count_uuid: &'static str,
+    pub event_wire_bytes: usize,
+    pub initial_count: Option<u32>,
+    pub export_count_snapshot: Option<u32>,
+    pub final_count: Option<u32>,
+    pub exported_event_count: u32,
+    pub chunk_count: usize,
+    pub max_events_per_chunk_observed: u16,
+    pub max_value_bytes_observed: usize,
+    pub event_bytes: usize,
+    pub aggregate_crc32: Option<String>,
+    pub events_sha256: Option<String>,
+    pub chunks: Vec<FirmwareDiagnosticLogChunk>,
+    pub error: Option<String>,
+    #[serde(skip_serializing)]
+    pub raw_event_bytes: Vec<u8>,
+}
+
+impl FirmwareDiagnosticLogPull {
+    pub fn offline(platform: &'static str, error: impl Into<String>) -> Self {
+        Self {
+            captured_at: utc_now_rfc3339(),
+            status: "offline",
+            platform,
+            service_uuid: DIAGNOSTIC_SERVICE_UUID_TEXT,
+            control_uuid: DIAGNOSTIC_CONTROL_UUID_TEXT,
+            data_uuid: DIAGNOSTIC_DATA_UUID_TEXT,
+            count_uuid: DIAGNOSTIC_COUNT_UUID_TEXT,
+            event_wire_bytes: DIAGNOSTIC_EVENT_BYTES,
+            initial_count: None,
+            export_count_snapshot: None,
+            final_count: None,
+            exported_event_count: 0,
+            chunk_count: 0,
+            max_events_per_chunk_observed: 0,
+            max_value_bytes_observed: 0,
+            event_bytes: 0,
+            aggregate_crc32: None,
+            events_sha256: None,
+            chunks: Vec::new(),
+            error: Some(error.into()),
+            raw_event_bytes: Vec::new(),
+        }
+    }
+
+    pub fn from_events(
+        platform: &'static str,
+        initial_count: u32,
+        export_count_snapshot: u32,
+        final_count: u32,
+        chunks: Vec<FirmwareDiagnosticLogChunk>,
+        raw_event_bytes: Vec<u8>,
+    ) -> Self {
+        let max_events_per_chunk_observed = chunks
+            .iter()
+            .map(|chunk| chunk.event_count)
+            .max()
+            .unwrap_or(0);
+        let max_value_bytes_observed = chunks
+            .iter()
+            .map(|chunk| chunk.value_bytes)
+            .max()
+            .unwrap_or(0);
+        Self {
+            captured_at: utc_now_rfc3339(),
+            status: "ok",
+            platform,
+            service_uuid: DIAGNOSTIC_SERVICE_UUID_TEXT,
+            control_uuid: DIAGNOSTIC_CONTROL_UUID_TEXT,
+            data_uuid: DIAGNOSTIC_DATA_UUID_TEXT,
+            count_uuid: DIAGNOSTIC_COUNT_UUID_TEXT,
+            event_wire_bytes: DIAGNOSTIC_EVENT_BYTES,
+            initial_count: Some(initial_count),
+            export_count_snapshot: Some(export_count_snapshot),
+            final_count: Some(final_count),
+            exported_event_count: raw_event_bytes
+                .len()
+                .checked_div(DIAGNOSTIC_EVENT_BYTES)
+                .unwrap_or(0) as u32,
+            chunk_count: chunks.len(),
+            max_events_per_chunk_observed,
+            max_value_bytes_observed,
+            event_bytes: raw_event_bytes.len(),
+            aggregate_crc32: Some(format_crc32(crc32(&raw_event_bytes))),
+            events_sha256: Some(crate::firmware_ota::sha256_hex(&raw_event_bytes)),
+            chunks,
+            error: None,
+            raw_event_bytes,
+        }
+    }
 }
 
 pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
@@ -285,6 +404,22 @@ fn format_bluetooth_address(address: u64) -> String {
     format!("{address:012X}")
 }
 
+fn format_crc32(value: u32) -> String {
+    format!("0x{value:08x}")
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = 0u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    !crc
+}
+
 fn is_terminal_notification(notification: &[u8]) -> bool {
     crate::embedded_audio::parse_packet(notification)
         .map(|packet| {
@@ -343,6 +478,10 @@ mod windows_ble {
     const OTA_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092c);
     const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
     const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
+    const DIAGNOSTIC_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093a);
+    const DIAGNOSTIC_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093b);
+    const DIAGNOSTIC_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093c);
+    const DIAGNOSTIC_COUNT_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093d);
     const DIS_SERVICE_UUID: GUID = GUID::from_u128(0x0000180a_0000_1000_8000_00805f9b34fb);
     const DIS_MODEL_NUMBER_UUID: GUID = GUID::from_u128(0x00002a24_0000_1000_8000_00805f9b34fb);
     const DIS_FIRMWARE_REVISION_UUID: GUID =
@@ -411,6 +550,18 @@ mod windows_ble {
                 Vec::new()
             }
         };
+        let diagnostic_services = match diagnostic_service_entries(
+            "diagnostic",
+            crate::embedded_ble::DIAGNOSTIC_SERVICE_UUID_TEXT,
+            DIAGNOSTIC_SERVICE_UUID,
+            "diagnostic log service discovery",
+        ) {
+            Ok(entries) => entries,
+            Err(err) => {
+                errors.push(err);
+                Vec::new()
+            }
+        };
         let firmware_snapshot = firmware_ota_device_snapshot();
         if let Some(detail) = firmware_snapshot.detail.as_ref() {
             errors.push(detail.clone());
@@ -421,11 +572,13 @@ mod windows_ble {
             platform: "windows",
             audio_service_uuid: SERVICE_UUID_TEXT,
             ota_service_uuid: OTA_SERVICE_UUID_TEXT,
+            diagnostic_service_uuid: crate::embedded_ble::DIAGNOSTIC_SERVICE_UUID_TEXT,
             dis_service_uuid: DIS_SERVICE_UUID_TEXT,
             configured_device_address: configured_bluetooth_address()
                 .map(crate::embedded_ble::format_bluetooth_address),
             audio_services,
             ota_services,
+            diagnostic_services,
             firmware_snapshot,
             errors,
         }
@@ -469,6 +622,115 @@ mod windows_ble {
             });
         }
         Ok(entries)
+    }
+
+    pub fn pull_firmware_diagnostic_log(
+        timeout: Duration,
+    ) -> crate::embedded_ble::FirmwareDiagnosticLogPull {
+        match pull_firmware_diagnostic_log_inner(timeout) {
+            Ok(pull) => pull,
+            Err(err) => {
+                log::warn!("[embedded-ble] firmware diagnostic log pull unavailable: {err}");
+                crate::embedded_ble::FirmwareDiagnosticLogPull::offline("windows", err)
+            }
+        }
+    }
+
+    fn pull_firmware_diagnostic_log_inner(
+        timeout: Duration,
+    ) -> Result<crate::embedded_ble::FirmwareDiagnosticLogPull, String> {
+        let timeout = timeout.clamp(Duration::from_secs(3), Duration::from_secs(60));
+        let target = open_diagnostic_target()?;
+        let control = target.control.clone();
+        let data = target.data.clone();
+        let count = target.count.clone();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
+            move |_sender, args| {
+                if let Some(args) = args {
+                    if let Ok(buffer) = args.CharacteristicValue() {
+                        if let Ok(bytes) = buffer_to_vec(&buffer) {
+                            let _ = tx.send(bytes);
+                        }
+                    }
+                }
+                Ok(())
+            },
+        );
+        let mut cleanup = DiagnosticNotifyCleanup::new(target);
+        let token = data
+            .ValueChanged(&handler)
+            .map_err(|err| format!("BLE diagnostic ValueChanged registration failed: {err}"))?;
+        cleanup.set_token(token);
+        let status = write_cccd_notify_with_retry(0, "diagnostic log", &data, CCCD_ENABLE_TIMEOUT)?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!(
+                "BLE diagnostic notify CCCD write returned status={status:?}"
+            ));
+        }
+
+        let initial_count = read_diagnostic_count(&count)?;
+        let mut export_started = false;
+        let result = (|| -> Result<crate::embedded_ble::FirmwareDiagnosticLogPull, String> {
+            write_diagnostic_control(&control, "{\"op\":\"start\"}", timeout, "start")?;
+            export_started = true;
+            let export_count_snapshot = read_diagnostic_count(&count)?;
+            let mut offset = 0usize;
+            let mut raw_event_bytes = Vec::new();
+            let mut chunks = Vec::new();
+
+            while offset < export_count_snapshot as usize {
+                let command = format!("{{\"op\":\"read\",\"offset\":{offset}}}");
+                write_diagnostic_control(&control, &command, timeout, "read")?;
+                let packet = rx.recv_timeout(timeout).map_err(|err| {
+                    format!("BLE diagnostic notification timed out at offset {offset}: {err}")
+                })?;
+                let (event_count, header_offset, firmware_crc, payload) =
+                    parse_diagnostic_chunk(&packet, offset)?;
+                if header_offset != (offset & 0xFFFF) as u16 {
+                    return Err(format!(
+                        "BLE diagnostic chunk offset mismatch: host={offset} firmware_header={header_offset}"
+                    ));
+                }
+                let host_crc = crate::embedded_ble::crc32(payload);
+                if host_crc != firmware_crc {
+                    return Err(format!(
+                        "BLE diagnostic chunk CRC mismatch: offset={offset} firmware={} host={}",
+                        crate::embedded_ble::format_crc32(firmware_crc),
+                        crate::embedded_ble::format_crc32(host_crc)
+                    ));
+                }
+                chunks.push(crate::embedded_ble::FirmwareDiagnosticLogChunk {
+                    offset,
+                    event_count,
+                    value_bytes: packet.len(),
+                    events_crc32: crate::embedded_ble::format_crc32(firmware_crc),
+                });
+                raw_event_bytes.extend_from_slice(payload);
+                offset += usize::from(event_count);
+                if offset < export_count_snapshot as usize {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+
+            write_diagnostic_control(&control, "{\"op\":\"stop\"}", timeout, "stop")?;
+            export_started = false;
+            let final_count = read_diagnostic_count(&count)?;
+            Ok(crate::embedded_ble::FirmwareDiagnosticLogPull::from_events(
+                "windows",
+                initial_count,
+                export_count_snapshot,
+                final_count,
+                chunks,
+                raw_event_bytes,
+            ))
+        })();
+
+        if export_started {
+            let _ = write_diagnostic_control(&control, "{\"op\":\"stop\"}", timeout, "stop");
+        }
+        cleanup.disable_notify();
+        result
     }
 
     pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
@@ -1537,6 +1799,83 @@ mod windows_ble {
         Err(last_error.unwrap_or_else(|| "No writable Listener BLE OTA service found".to_string()))
     }
 
+    fn open_diagnostic_target() -> Result<OpenDiagnosticTarget, String> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(DIAGNOSTIC_SERVICE_UUID)
+            .map_err(|err| format!("BLE diagnostic service selector failed: {err}"))?;
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .map_err(|err| format!("BLE diagnostic service discovery failed: {err}"))
+            .and_then(|op| {
+                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "diagnostic service discovery")
+            })?;
+        let count = devices
+            .Size()
+            .map_err(|err| format!("BLE diagnostic service collection size failed: {err}"))?;
+        if count == 0 {
+            return Err(format!(
+                "Listener BLE diagnostic service {DIAGNOSTIC_SERVICE_UUID:?} not found; ensure firmware exposes diag_export_v1 and the device is paired and online"
+            ));
+        }
+
+        let mut last_error = None;
+        for index in 0..count {
+            let info = match devices.GetAt(index) {
+                Ok(info) => info,
+                Err(err) => {
+                    last_error = Some(format!("read BLE diagnostic service info failed: {err}"));
+                    continue;
+                }
+            };
+            let name = info
+                .Name()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let id = match info.Id() {
+                Ok(id) => id,
+                Err(err) => {
+                    last_error = Some(format!("read BLE diagnostic service id failed: {err}"));
+                    continue;
+                }
+            };
+
+            let mut candidate_error = None;
+            if let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
+                match open_diagnostic_target_for_device(address) {
+                    Ok(target) => {
+                        log::info!(
+                            "[embedded-ble] selected diagnostic device index={index} name={name} address={address:012X}"
+                        );
+                        return Ok(target);
+                    }
+                    Err(err) => {
+                        candidate_error = Some(format!(
+                            "{name}: BLE diagnostic device path {address:012X} failed: {err}"
+                        ));
+                    }
+                }
+            }
+
+            match open_diagnostic_target_for_service(&id) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] selected diagnostic service-id fallback index={index} name={name}"
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    last_error = Some(match candidate_error {
+                        Some(previous) => {
+                            format!("{previous}; diagnostic service-id fallback failed: {err}")
+                        }
+                        None => format!("{name}: {err}"),
+                    });
+                }
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| "No usable Listener BLE diagnostic service found".to_string()))
+    }
+
     fn open_ota_target_for_device(address: u64) -> Result<OpenOtaTarget, String> {
         let device = open_ble_device(address)?;
         if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
@@ -1623,6 +1962,100 @@ mod windows_ble {
 
         Err(last_error.unwrap_or_else(|| {
             "No writable Listener BLE OTA characteristics found on device".to_string()
+        }))
+    }
+
+    fn open_diagnostic_target_for_device(address: u64) -> Result<OpenDiagnosticTarget, String> {
+        let device = open_ble_device(address)?;
+        if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
+            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "diagnostic device access").ok()
+        }) {
+            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
+                return Err(format!(
+                    "BLE diagnostic device access denied status={access:?}"
+                ));
+            }
+        }
+
+        let mut last_error = None;
+        for cache_mode in [BluetoothCacheMode::Uncached] {
+            let services_result = match device
+                .GetGattServicesForUuidWithCacheModeAsync(DIAGNOSTIC_SERVICE_UUID, cache_mode)
+                .map_err(|err| {
+                    format!("BLE diagnostic {cache_mode:?} service discovery failed: {err}")
+                })
+                .and_then(|op| {
+                    wait_async_operation(
+                        op,
+                        BLE_DISCOVERY_TIMEOUT,
+                        &format!("diagnostic {cache_mode:?} service"),
+                    )
+                    .map_err(|err| {
+                        format!(
+                            "BLE diagnostic {cache_mode:?} service discovery wait failed: {err}"
+                        )
+                    })
+                }) {
+                Ok(result) => result,
+                Err(err) => {
+                    last_error = Some(err);
+                    continue;
+                }
+            };
+            let status = services_result.Status().map_err(|err| {
+                format!("BLE diagnostic {cache_mode:?} service status read failed: {err}")
+            })?;
+            if status != GattCommunicationStatus::Success {
+                last_error = Some(format!(
+                    "BLE diagnostic {cache_mode:?} service discovery returned status={status:?}"
+                ));
+                continue;
+            }
+
+            let services = services_result.Services().map_err(|err| {
+                format!("BLE diagnostic {cache_mode:?} service list read failed: {err}")
+            })?;
+            let count = services.Size().map_err(|err| {
+                format!("BLE diagnostic {cache_mode:?} service list size failed: {err}")
+            })?;
+            if count == 0 {
+                last_error = Some(format!(
+                    "diagnostic service {DIAGNOSTIC_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
+                ));
+                continue;
+            }
+
+            for index in 0..count {
+                let service = match services.GetAt(index) {
+                    Ok(service) => service,
+                    Err(err) => {
+                        last_error = Some(format!(
+                            "read BLE diagnostic {cache_mode:?} service failed: {err}"
+                        ));
+                        continue;
+                    }
+                };
+                match open_diagnostic_characteristics_from_service(&service, cache_mode) {
+                    Ok(prepared) => {
+                        return Ok(OpenDiagnosticTarget {
+                            control: prepared.control,
+                            data: prepared.data,
+                            count: prepared.count,
+                            service: Some(service),
+                            session: prepared.session,
+                            device: Some(device),
+                        });
+                    }
+                    Err(err) => {
+                        last_error = Some(format!("{cache_mode:?}: {err}"));
+                        let _ = service.Close();
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "No usable Listener BLE diagnostic characteristics found on device".to_string()
         }))
     }
 
@@ -1771,6 +2204,35 @@ mod windows_ble {
         })
     }
 
+    fn open_diagnostic_target_for_service(
+        service_id: &HSTRING,
+    ) -> Result<OpenDiagnosticTarget, String> {
+        let service = GattDeviceService::FromIdAsync(service_id)
+            .map_err(|err| format!("BLE diagnostic service open failed: {err}"))
+            .and_then(|op| {
+                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "diagnostic service open")
+            })?;
+        let device = service.DeviceId().ok().and_then(|device_id| {
+            BluetoothLEDevice::FromIdAsync(&device_id)
+                .ok()
+                .and_then(|op| {
+                    wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "diagnostic service device")
+                        .ok()
+                })
+        });
+
+        let prepared =
+            open_diagnostic_characteristics_from_service(&service, BluetoothCacheMode::Uncached)?;
+        Ok(OpenDiagnosticTarget {
+            control: prepared.control,
+            data: prepared.data,
+            count: prepared.count,
+            service: Some(service),
+            session: prepared.session,
+            device,
+        })
+    }
+
     fn open_notify_target_for_service(service_id: &HSTRING) -> Result<OpenNotifyTarget, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
             .map_err(|err| format!("BLE service open failed: {err}"))
@@ -1824,6 +2286,46 @@ mod windows_ble {
             data,
             data_write_option,
             data_chunk_bytes,
+            session,
+        })
+    }
+
+    fn open_diagnostic_characteristics_from_service(
+        service: &GattDeviceService,
+        cache_mode: BluetoothCacheMode,
+    ) -> Result<PreparedDiagnosticCharacteristics, String> {
+        if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
+            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "diagnostic service access").ok()
+        }) {
+            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
+                return Err(format!(
+                    "BLE diagnostic service access denied status={access:?}"
+                ));
+            }
+        }
+        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT);
+        let control = open_write_characteristic_from_service(
+            service,
+            DIAGNOSTIC_CONTROL_UUID,
+            "diagnostic control",
+            cache_mode,
+        )?;
+        let data = open_notify_characteristic_by_uuid_from_service(
+            service,
+            DIAGNOSTIC_DATA_UUID,
+            "diagnostic data",
+            cache_mode,
+        )?;
+        let count = open_read_characteristic_from_service(
+            service,
+            DIAGNOSTIC_COUNT_UUID,
+            "diagnostic count",
+            cache_mode,
+        )?;
+        Ok(PreparedDiagnosticCharacteristics {
+            control,
+            data,
+            count,
             session,
         })
     }
@@ -1894,6 +2396,90 @@ mod windows_ble {
             && !properties.contains(GattCharacteristicProperties::WriteWithoutResponse)
         {
             return Err(format!("{label} characteristic is not writable"));
+        }
+        Ok(characteristic)
+    }
+
+    fn open_read_characteristic_from_service(
+        service: &GattDeviceService,
+        uuid: GUID,
+        label: &str,
+        cache_mode: BluetoothCacheMode,
+    ) -> Result<GattCharacteristic, String> {
+        let result = service
+            .GetCharacteristicsForUuidWithCacheModeAsync(uuid, cache_mode)
+            .map_err(|err| format!("BLE {label} characteristic discovery failed: {err}"))?
+            .get()
+            .map_err(|err| format!("BLE {label} characteristic discovery wait failed: {err}"))?;
+        let status = result
+            .Status()
+            .map_err(|err| format!("BLE {label} characteristic status read failed: {err}"))?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!(
+                "BLE {label} characteristic discovery returned status={status:?}"
+            ));
+        }
+        let characteristics = result
+            .Characteristics()
+            .map_err(|err| format!("BLE {label} characteristic list read failed: {err}"))?;
+        if characteristics
+            .Size()
+            .map_err(|err| format!("BLE {label} characteristic list size failed: {err}"))?
+            == 0
+        {
+            return Err(format!("{label} characteristic {uuid:?} not found"));
+        }
+
+        let characteristic = characteristics
+            .GetAt(0)
+            .map_err(|err| format!("BLE {label} characteristic read failed: {err}"))?;
+        let properties = characteristic
+            .CharacteristicProperties()
+            .map_err(|err| format!("BLE {label} characteristic properties read failed: {err}"))?;
+        if !properties.contains(GattCharacteristicProperties::Read) {
+            return Err(format!("{label} characteristic is not readable"));
+        }
+        Ok(characteristic)
+    }
+
+    fn open_notify_characteristic_by_uuid_from_service(
+        service: &GattDeviceService,
+        uuid: GUID,
+        label: &str,
+        cache_mode: BluetoothCacheMode,
+    ) -> Result<GattCharacteristic, String> {
+        let result = service
+            .GetCharacteristicsForUuidWithCacheModeAsync(uuid, cache_mode)
+            .map_err(|err| format!("BLE {label} characteristic discovery failed: {err}"))?
+            .get()
+            .map_err(|err| format!("BLE {label} characteristic discovery wait failed: {err}"))?;
+        let status = result
+            .Status()
+            .map_err(|err| format!("BLE {label} characteristic status read failed: {err}"))?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!(
+                "BLE {label} characteristic discovery returned status={status:?}"
+            ));
+        }
+        let characteristics = result
+            .Characteristics()
+            .map_err(|err| format!("BLE {label} characteristic list read failed: {err}"))?;
+        if characteristics
+            .Size()
+            .map_err(|err| format!("BLE {label} characteristic list size failed: {err}"))?
+            == 0
+        {
+            return Err(format!("{label} characteristic {uuid:?} not found"));
+        }
+
+        let characteristic = characteristics
+            .GetAt(0)
+            .map_err(|err| format!("BLE {label} characteristic read failed: {err}"))?;
+        let properties = characteristic
+            .CharacteristicProperties()
+            .map_err(|err| format!("BLE {label} characteristic properties read failed: {err}"))?;
+        if !properties.contains(GattCharacteristicProperties::Notify) {
+            return Err(format!("{label} characteristic does not advertise NOTIFY"));
         }
         Ok(characteristic)
     }
@@ -2054,6 +2640,93 @@ mod windows_ble {
         let mut bytes = vec![0u8; length];
         reader.ReadBytes(&mut bytes)?;
         Ok(bytes)
+    }
+
+    fn read_characteristic_bytes(
+        characteristic: &GattCharacteristic,
+        cache_mode: BluetoothCacheMode,
+        label: &str,
+    ) -> Result<Vec<u8>, String> {
+        let read = characteristic
+            .ReadValueWithCacheModeAsync(cache_mode)
+            .map_err(|err| format!("BLE {label} read failed: {err}"))?
+            .get()
+            .map_err(|err| format!("BLE {label} read wait failed: {err}"))?;
+        let status = read
+            .Status()
+            .map_err(|err| format!("BLE {label} read status failed: {err}"))?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!("BLE {label} read returned status={status:?}"));
+        }
+        buffer_to_vec(
+            &read
+                .Value()
+                .map_err(|err| format!("BLE {label} read value failed: {err}"))?,
+        )
+        .map_err(|err| format!("BLE {label} read buffer failed: {err}"))
+    }
+
+    fn read_diagnostic_count(characteristic: &GattCharacteristic) -> Result<u32, String> {
+        let bytes = read_characteristic_bytes(
+            characteristic,
+            BluetoothCacheMode::Uncached,
+            "diagnostic count",
+        )?;
+        let text = String::from_utf8(bytes)
+            .map_err(|err| format!("BLE diagnostic count was not UTF-8 JSON: {err}"))?;
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|err| format!("BLE diagnostic count JSON parse failed: {err}"))?;
+        let count = value
+            .get("count")
+            .and_then(|count| count.as_u64())
+            .ok_or_else(|| "BLE diagnostic count JSON missing numeric count".to_string())?;
+        u32::try_from(count).map_err(|_| format!("BLE diagnostic count too large: {count}"))
+    }
+
+    fn write_diagnostic_control(
+        characteristic: &GattCharacteristic,
+        payload: &str,
+        timeout: Duration,
+        op: &str,
+    ) -> Result<(), String> {
+        write_gatt_value_with_timeout(
+            characteristic,
+            payload.as_bytes(),
+            GattWriteOption::WriteWithResponse,
+            timeout,
+            &format!("diagnostic control {op}"),
+        )?;
+        Ok(())
+    }
+
+    fn parse_diagnostic_chunk(
+        packet: &[u8],
+        host_offset: usize,
+    ) -> Result<(u16, u16, u32, &[u8]), String> {
+        if packet.len() < crate::embedded_ble::DIAGNOSTIC_CHUNK_HEADER_BYTES {
+            return Err(format!(
+                "BLE diagnostic notification too short at offset {host_offset}: {} bytes",
+                packet.len()
+            ));
+        }
+        let event_count = u16::from_le_bytes([packet[0], packet[1]]);
+        let global_offset = u16::from_le_bytes([packet[2], packet[3]]);
+        let firmware_crc = u32::from_le_bytes([packet[4], packet[5], packet[6], packet[7]]);
+        if event_count == 0 {
+            return Err(format!(
+                "BLE diagnostic empty chunk at offset {host_offset}"
+            ));
+        }
+        let payload = &packet[crate::embedded_ble::DIAGNOSTIC_CHUNK_HEADER_BYTES..];
+        let expected_payload_len =
+            usize::from(event_count) * crate::embedded_ble::DIAGNOSTIC_EVENT_BYTES;
+        if payload.len() != expected_payload_len {
+            return Err(format!(
+                "BLE diagnostic chunk payload length mismatch: offset={host_offset} count={event_count} bytes={} expected={expected_payload_len}",
+                payload.len()
+            ));
+        }
+        Ok((event_count, global_offset, firmware_crc, payload))
     }
 
     fn write_cccd_with_timeout(
@@ -2419,11 +3092,27 @@ mod windows_ble {
         bluetooth_address: Option<u64>,
     }
 
+    struct OpenDiagnosticTarget {
+        control: GattCharacteristic,
+        data: GattCharacteristic,
+        count: GattCharacteristic,
+        service: Option<GattDeviceService>,
+        session: Option<GattSession>,
+        device: Option<BluetoothLEDevice>,
+    }
+
     struct PreparedOtaCharacteristics {
         control: GattCharacteristic,
         data: GattCharacteristic,
         data_write_option: GattWriteOption,
         data_chunk_bytes: usize,
+        session: Option<GattSession>,
+    }
+
+    struct PreparedDiagnosticCharacteristics {
+        control: GattCharacteristic,
+        data: GattCharacteristic,
+        count: GattCharacteristic,
         session: Option<GattSession>,
     }
 
@@ -2438,6 +3127,79 @@ mod windows_ble {
             if let Some(device) = self.device.take() {
                 let _ = device.Close();
             }
+        }
+    }
+
+    impl Drop for OpenDiagnosticTarget {
+        fn drop(&mut self) {
+            if let Some(session) = self.session.take() {
+                let _ = session.Close();
+            }
+            if let Some(service) = self.service.take() {
+                let _ = service.Close();
+            }
+            if let Some(device) = self.device.take() {
+                let _ = device.Close();
+            }
+        }
+    }
+
+    struct DiagnosticNotifyCleanup {
+        target: OpenDiagnosticTarget,
+        token: Option<EventRegistrationToken>,
+        notify_disabled: bool,
+    }
+
+    impl DiagnosticNotifyCleanup {
+        fn new(target: OpenDiagnosticTarget) -> Self {
+            Self {
+                target,
+                token: None,
+                notify_disabled: false,
+            }
+        }
+
+        fn set_token(&mut self, token: EventRegistrationToken) {
+            self.token = Some(token);
+        }
+
+        fn disable_notify(&mut self) {
+            if self.notify_disabled {
+                return;
+            }
+            if let Some(token) = self.token.take() {
+                if let Err(err) = self.target.data.RemoveValueChanged(token) {
+                    log::warn!(
+                        "[embedded-ble] diagnostic log ValueChanged handler remove failed: {err}"
+                    );
+                }
+            }
+            match self
+                .target
+                .data
+                .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
+                    GattClientCharacteristicConfigurationDescriptorValue::None,
+                ) {
+                Ok(operation) => {
+                    if let Err(err) =
+                        wait_gatt_write_result(operation, Duration::from_secs(2), "diagnostic CCCD")
+                    {
+                        log::warn!("[embedded-ble] diagnostic log CCCD disable skipped: {err}");
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] diagnostic log CCCD disable operation could not start: {err}"
+                    );
+                }
+            }
+            self.notify_disabled = true;
+        }
+    }
+
+    impl Drop for DiagnosticNotifyCleanup {
+        fn drop(&mut self) {
+            self.disable_notify();
         }
     }
 
@@ -2703,6 +3465,11 @@ pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
 }
 
 #[cfg(target_os = "windows")]
+pub fn pull_firmware_diagnostic_log(timeout: Duration) -> FirmwareDiagnosticLogPull {
+    windows_ble::pull_firmware_diagnostic_log(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn ble_diagnostic_snapshot() -> BleDiagnosticSnapshot {
     windows_ble::diagnostic_snapshot()
 }
@@ -2785,6 +3552,14 @@ pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn pull_firmware_diagnostic_log(_timeout: Duration) -> FirmwareDiagnosticLogPull {
+    FirmwareDiagnosticLogPull::offline(
+        std::env::consts::OS,
+        "Firmware diagnostic log over Listener BLE is only supported on Windows",
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn ble_diagnostic_snapshot() -> BleDiagnosticSnapshot {
     let detail = "Listener BLE diagnostics are only supported on Windows".to_string();
     BleDiagnosticSnapshot {
@@ -2792,10 +3567,12 @@ pub fn ble_diagnostic_snapshot() -> BleDiagnosticSnapshot {
         platform: std::env::consts::OS,
         audio_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
         ota_service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3092a",
+        diagnostic_service_uuid: DIAGNOSTIC_SERVICE_UUID_TEXT,
         dis_service_uuid: "0000180a-0000-1000-8000-00805f9b34fb",
         configured_device_address: None,
         audio_services: Vec::new(),
         ota_services: Vec::new(),
+        diagnostic_services: Vec::new(),
         firmware_snapshot: firmware_ota_device_snapshot(),
         errors: vec![detail],
     }
@@ -2959,5 +3736,11 @@ mod tests {
         );
         assert!(super::windows_ble::ota_transfer_chunk_bytes(499, 500).is_err());
         assert!(super::windows_ble::ota_transfer_chunk_bytes(514, 499).is_err());
+    }
+
+    #[test]
+    fn crc32_matches_standard_vector() {
+        assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
+        assert_eq!(format_crc32(0xcbf4_3926), "0xcbf43926");
     }
 }

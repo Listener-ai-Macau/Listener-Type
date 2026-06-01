@@ -245,7 +245,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings }: O
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     setBleDiagnosticStatus('busy');
     try {
-      const target = await exportDiagnosticPackage(`listener-type-ble-wake-diagnostics-${ts}.json`);
+      const target = await exportDiagnosticPackage(`listener-type-ble-wake-diagnostics-device-${ts}.zip`);
       setBleDiagnosticStatus(target ? 'ok' : 'idle');
     } catch (err) {
       console.warn('[overview] export diagnostic package failed', err);
