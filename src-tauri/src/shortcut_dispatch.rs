@@ -55,9 +55,8 @@ fn shortcut_primary(raw: &str) -> Result<enigo::Key, String> {
         return Err("shortcut primary is empty".into());
     }
     if trimmed.chars().count() == 1 {
-        return Ok(enigo::Key::Unicode(
-            trimmed.chars().next().expect("single char exists"),
-        ));
+        let ch = trimmed.chars().next().ok_or("single char expected")?;
+        return Ok(enigo::Key::Unicode(ch));
     }
 
     let upper = trimmed.to_ascii_uppercase();

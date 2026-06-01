@@ -501,11 +501,11 @@ mod platform {
                 )));
                 return;
             }
-            *handles.tap.lock().unwrap() = Some(tap);
+            *handles.tap.lock().unwrap_or_else(|e| e.into_inner()) = Some(tap);
 
             let source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
             let runloop = CFRunLoopGetCurrent();
-            *handles.runloop.lock().unwrap() = Some(runloop);
+            *handles.runloop.lock().unwrap_or_else(|e| e.into_inner()) = Some(runloop);
             CFRunLoopAddSource(runloop, source, kCFRunLoopCommonModes);
             CGEventTapEnable(tap, true);
 
@@ -531,7 +531,7 @@ mod platform {
 
         match event_type {
             TAP_DISABLED_BY_TIMEOUT | TAP_DISABLED_BY_USER_INPUT => {
-                if let Some(tap) = *ctx.handles.tap.lock().unwrap() {
+                if let Some(tap) = *ctx.handles.tap.lock().unwrap_or_else(|e| e.into_inner()) {
                     unsafe { CGEventTapEnable(tap, true) };
                 }
                 return event;
@@ -863,7 +863,7 @@ mod platform {
             let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), None, 0);
             match hook {
                 Ok(hook) => {
-                    *(*context).hook.lock().unwrap() = Some(hook);
+                    *(*context).hook.lock().unwrap_or_else(|e| e.into_inner()) = Some(hook);
                     log::info!("[hotkey] Windows low-level keyboard hook 已启动");
                     let _ = status_tx.send(Ok(thread_id));
                 }
@@ -893,7 +893,7 @@ mod platform {
                 let _ = DispatchMessageW(&message);
             }
 
-            if let Some(hook) = (*context).hook.lock().unwrap().take() {
+            if let Some(hook) = (*context).hook.lock().unwrap_or_else(|e| e.into_inner()).take() {
                 let _ = UnhookWindowsHookEx(hook);
             }
             HOOK_CONTEXT.store(std::ptr::null_mut(), AtomicOrdering::SeqCst);
