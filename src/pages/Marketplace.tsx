@@ -19,6 +19,7 @@ import {
   githubDeviceFlowPoll,
   githubDeviceFlowStart,
   installMarketplacePack,
+  isTauri,
   likeMarketplacePack,
   listMarketplace,
   listStylePacks,
@@ -35,6 +36,15 @@ import type { MarketplaceDetail, MarketplaceListItem, MarketplaceMyPackItem, Sty
 import { Btn, Card, PageHeader, Pill } from './_atoms';
 
 type SortMode = 'popular' | 'new' | 'liked';
+type MarketplaceTransferOperation = 'upload' | 'install';
+
+interface MarketplaceTransferProgress {
+  operation: MarketplaceTransferOperation;
+  packId: string;
+  phase: string;
+  progress: number;
+  message: string;
+}
 
 export function Marketplace() {
   const { t } = useTranslation();
@@ -51,6 +61,10 @@ export function Marketplace() {
   const [detail, setDetail] = useState<MarketplaceDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionMsg, setActionMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [transfer, setTransfer] = useState<MarketplaceTransferProgress | null>(null);
+  const transferBusy = transfer != null && transfer.phase !== 'finished' && transfer.phase !== 'failed';
+  const uploadBusy = transferBusy && transfer.operation === 'upload';
+  const installBusy = transferBusy && transfer.operation === 'install';
   // leaving=true 触发右滑出动画；动画跑完再真正 setActionMsg(null) 卸载 DOM。
   const [actionLeaving, setActionLeaving] = useState(false);
   // 自动消失：ok 2.4s、err 4s 后切 leaving；leaving 持续 ~280ms 等动画结束。
@@ -71,6 +85,26 @@ export function Marketplace() {
     setActionLeaving(true);
     window.setTimeout(() => setActionMsg(null), 280);
   };
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<MarketplaceTransferProgress>('marketplace-transfer-progress', event => {
+          if (!cancelled) setTransfer(event.payload);
+        });
+      } catch (error) {
+        console.warn('[marketplace] transfer progress listener failed', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   const [showUpload, setShowUpload] = useState(false);
   const [uploadOriginPackId, setUploadOriginPackId] = useState<string | null>(null);
@@ -230,13 +264,42 @@ export function Marketplace() {
   };
 
   const onInstall = async () => {
-    if (!detail) return;
+    if (!detail || transferBusy) return;
+    const packId = detail.id;
+    const packName = detail.name;
+    setTransfer({
+      operation: 'install',
+      packId,
+      phase: 'downloading',
+      progress: 10,
+      message: 'Preparing marketplace download',
+    });
     try {
-      await installMarketplacePack(detail.id);
-      setActionMsg({ kind: 'ok', text: t('marketplace.installed', { name: detail.name }) });
+      await installMarketplacePack(packId);
+      setTransfer({
+        operation: 'install',
+        packId,
+        phase: 'finished',
+        progress: 100,
+        message: 'Installed locally',
+      });
+      setActionMsg({ kind: 'ok', text: t('marketplace.installed', { name: packName }) });
       setSelectedId(null);
+      window.setTimeout(() => {
+        setTransfer(prev => (prev?.operation === 'install' && prev.packId === packId ? null : prev));
+      }, 800);
     } catch (error) {
+      setTransfer({
+        operation: 'install',
+        packId,
+        phase: 'failed',
+        progress: 0,
+        message: 'Download or install failed. Check the network and retry.',
+      });
       setActionMsg({ kind: 'err', text: t('marketplace.errors.install', { err: errorMessage(error) }) });
+      window.setTimeout(() => {
+        setTransfer(prev => (prev?.operation === 'install' && prev.packId === packId ? null : prev));
+      }, 1800);
     }
   };
 
@@ -336,9 +399,28 @@ export function Marketplace() {
   };
 
   const onUpload = async (packId: string) => {
+    if (transferBusy) return;
+    if (!canUpload) {
+      setActionMsg({ kind: 'err', text: t('marketplace.uploadDisabledHint') });
+      return;
+    }
     const localPack = localPacks.find(p => p.id === packId);
+    setTransfer({
+      operation: 'upload',
+      packId,
+      phase: 'auth',
+      progress: 10,
+      message: 'Verifying GitHub login',
+    });
     try {
       const result = await uploadMarketplacePack(packId, uploadOriginPackId);
+      setTransfer({
+        operation: 'upload',
+        packId,
+        phase: 'finished',
+        progress: 100,
+        message: 'Uploaded to marketplace backend',
+      });
       // optimistic：拿到 200 立即把这条包推到「我的发布」最前面，状态置为后端返回值（通常 'pending'）。
       // 避免等 1.5s / 5s 的 polling 才看到——后续 polling 会用服务端真实数据覆盖。
       if (localPack && currentLogin) {
@@ -385,11 +467,24 @@ export function Marketplace() {
       setUploadOriginPackId(null);
       setUploadTargetName(null);
       setSelectedUploadPackId(null);
+      window.setTimeout(() => {
+        setTransfer(prev => (prev?.operation === 'upload' && prev.packId === packId ? null : prev));
+      }, 800);
       // 后续 polling 用服务端真实数据校准（审核状态可能 pending→approved/rejected）。
       window.setTimeout(() => { void refresh(); void refreshMyPacks(); }, 1500);
       window.setTimeout(() => { void refresh(); void refreshMyPacks(); }, 5000);
     } catch (error) {
+      setTransfer({
+        operation: 'upload',
+        packId,
+        phase: 'failed',
+        progress: 0,
+        message: 'Upload failed. Check GitHub login, package format, and network, then retry.',
+      });
       setActionMsg({ kind: 'err', text: t('marketplace.errors.upload', { err: errorMessage(error) }) });
+      window.setTimeout(() => {
+        setTransfer(prev => (prev?.operation === 'upload' && prev.packId === packId ? null : prev));
+      }, 1800);
     }
   };
 
@@ -686,7 +781,7 @@ export function Marketplace() {
 
       {/* 详情弹窗 */}
       {selectedId && (
-        <Modal onClose={() => setSelectedId(null)}>
+        <Modal onClose={() => { if (!installBusy) setSelectedId(null); }}>
           {detailLoading || !detail ? (
             <div style={{ padding: 32, textAlign: 'center', color: 'var(--ol-ink-4)', fontSize: 13 }}>
               {t('common.loading')}
@@ -744,6 +839,9 @@ export function Marketplace() {
                     </Btn>
                   )}
                 </div>
+                {installBusy && transfer?.operation === 'install' && transfer.packId === detail.id && (
+                  <TransferProgressBar transfer={transfer} />
+                )}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <Btn variant="ghost" size="sm" onClick={() => void onLike()}>
                     <span
@@ -762,8 +860,8 @@ export function Marketplace() {
                   <Btn variant="ghost" size="sm" onClick={() => setSelectedId(null)}>
                     {t('common.cancel')}
                   </Btn>
-                  <Btn variant="blue" size="sm" onClick={() => void onInstall()}>
-                    {t('marketplace.installBtn')}
+                  <Btn variant="blue" size="sm" onClick={() => void onInstall()} disabled={transferBusy}>
+                    {installBusy ? '处理中…' : t('marketplace.installBtn')}
                   </Btn>
                 </div>
               </div>
@@ -786,6 +884,7 @@ export function Marketplace() {
         <Modal
           zIndex={60}
           onClose={() => {
+            if (uploadBusy) return;
             setShowUpload(false);
             setUploadOriginPackId(null);
             setUploadTargetName(null);
@@ -798,6 +897,9 @@ export function Marketplace() {
           <div style={{ fontSize: 12, color: 'var(--ol-ink-3)', marginBottom: 12 }}>
             {uploadOriginPackId ? '选中要上传的本地新版本风格包，下方点「确定上传」。同名包默认预选。' : t('marketplace.uploadHint', { login: prefs?.marketplaceDevLogin ?? '' })}
           </div>
+          {uploadBusy && transfer?.operation === 'upload' && (
+            <TransferProgressBar transfer={transfer} />
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflow: 'auto' }}>
             {localPacks.length === 0 ? (
               <div style={{ fontSize: 12, color: 'var(--ol-ink-4)', textAlign: 'center', padding: 20 }}>
@@ -811,6 +913,7 @@ export function Marketplace() {
                   <button
                     key={p.id}
                     type="button"
+                    disabled={uploadBusy}
                     onClick={() => setSelectedUploadPackId(prev => (prev === p.id ? null : p.id))}
                     style={{
                       textAlign: 'left',
@@ -818,7 +921,8 @@ export function Marketplace() {
                       border: selected ? '1px solid var(--ol-blue)' : '0.5px solid var(--ol-line-strong)',
                       borderRadius: 8,
                       background: selected ? 'var(--ol-blue-soft)' : 'var(--ol-surface)',
-                      cursor: 'pointer',
+                      cursor: uploadBusy ? 'default' : 'pointer',
+                      opacity: uploadBusy ? 0.72 : 1,
                       display: 'flex',
                       alignItems: 'center',
                       gap: 10,
@@ -853,20 +957,21 @@ export function Marketplace() {
           {/* 底部：取消 / 确定上传（未选中时 disabled）*/}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
             <Btn variant="ghost" size="sm" onClick={() => {
+              if (uploadBusy) return;
               setShowUpload(false);
               setUploadOriginPackId(null);
               setUploadTargetName(null);
               setSelectedUploadPackId(null);
-            }}>
+            }} disabled={uploadBusy}>
               {t('common.cancel')}
             </Btn>
             <Btn
               variant="blue"
               size="sm"
-              disabled={!selectedUploadPackId}
+              disabled={!selectedUploadPackId || uploadBusy}
               onClick={() => { if (selectedUploadPackId) void onUpload(selectedUploadPackId); }}
             >
-              确定上传
+              {uploadBusy ? '上传中…' : '确定上传'}
             </Btn>
           </div>
         </Modal>
@@ -1153,6 +1258,42 @@ export function Marketplace() {
           )}
         </Modal>
       )}
+    </div>
+  );
+}
+
+function TransferProgressBar({ transfer }: { transfer: MarketplaceTransferProgress }) {
+  const progress = Math.max(0, Math.min(100, Math.round(transfer.progress || 0)));
+  const failed = transfer.phase === 'failed';
+  return (
+    <div style={{ flex: '1 1 220px', minWidth: 180, margin: '4px 0' }} aria-live="polite">
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: 8,
+        fontSize: 11,
+        color: failed ? 'var(--ol-err)' : 'var(--ol-ink-3)',
+        marginBottom: 6,
+      }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {transfer.message}
+        </span>
+        <span style={{ fontFamily: 'var(--ol-font-mono)' }}>{failed ? '!' : `${progress}%`}</span>
+      </div>
+      <div style={{
+        height: 6,
+        borderRadius: 999,
+        overflow: 'hidden',
+        background: 'var(--ol-surface-2)',
+        border: '0.5px solid var(--ol-line)',
+      }}>
+        <div style={{
+          height: '100%',
+          width: failed ? '100%' : `${Math.max(4, progress)}%`,
+          background: failed ? 'var(--ol-err)' : 'var(--ol-blue)',
+          transition: 'width 0.18s var(--ol-motion-soft)',
+        }} />
+      </div>
     </div>
   );
 }

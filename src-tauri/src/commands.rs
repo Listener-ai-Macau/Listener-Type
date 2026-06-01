@@ -27,7 +27,8 @@ use crate::github_oauth::{
     GithubDeviceStartResponse, GithubOAuthClient, GithubOAuthError,
 };
 use crate::marketplace_backend::{
-    MarketplaceClient, MarketplaceDetail, MarketplaceListItem, MarketplaceMyPackItem,
+    MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceClient, MarketplaceDetail,
+    MarketplaceListItem, MarketplaceMyPackItem,
 };
 use crate::permissions::{self, PermissionStatus};
 use crate::persistence::{
@@ -3965,6 +3966,46 @@ fn optional_marketplace_client_from_prefs(
         .transpose()
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MarketplaceTransferProgressPayload {
+    operation: String,
+    pack_id: String,
+    phase: String,
+    progress: u8,
+    message: String,
+}
+
+fn emit_marketplace_transfer_progress(
+    app: &AppHandle,
+    operation: &str,
+    pack_id: &str,
+    phase: &str,
+    progress: u8,
+    message: &str,
+) {
+    let payload = MarketplaceTransferProgressPayload {
+        operation: operation.to_string(),
+        pack_id: pack_id.to_string(),
+        phase: phase.to_string(),
+        progress,
+        message: message.to_string(),
+    };
+    let _ = app.emit("marketplace-transfer-progress", payload);
+}
+
+fn marketplace_api_error_message(action: &str, error: MarketplaceApiError) -> String {
+    let guidance = match error.kind() {
+        MarketplaceApiErrorKind::InvalidUrl => "backend URL is invalid",
+        MarketplaceApiErrorKind::Network => "network interrupted; check the connection and retry",
+        MarketplaceApiErrorKind::Unauthorized => "GitHub or marketplace authorization failed",
+        MarketplaceApiErrorKind::NotFound => "style pack was not found on the marketplace backend",
+        MarketplaceApiErrorKind::HttpStatus => "marketplace backend rejected the request",
+        MarketplaceApiErrorKind::Decode => "marketplace backend returned an invalid response",
+    };
+    format!("{action} failed: {guidance}: {error}")
+}
+
 async fn marketplace_authenticated_github_login() -> Result<String, String> {
     let client = GithubOAuthClient::production().map_err(|error| error.to_string())?;
     marketplace_authenticated_github_login_with_client(&client).await
@@ -4069,6 +4110,7 @@ pub async fn marketplace_detail(
 #[tauri::command]
 pub async fn marketplace_install(
     coord: CoordinatorState<'_>,
+    app: AppHandle,
     pack_id: String,
 ) -> Result<StylePack, String> {
     // 安全校验：pack_id 来自远端 backend，可能含路径遍历 segment。
@@ -4080,43 +4122,77 @@ pub async fn marketplace_install(
     let prefs = coord.prefs().get();
     let client = marketplace_client_from_prefs(&prefs)?;
 
+    emit_marketplace_transfer_progress(
+        &app,
+        "install",
+        &pack_id,
+        "metadata",
+        15,
+        "Reading marketplace style pack details",
+    );
     // 先拉 detail 拿 authorLogin —— 装好后本地写 originAuthorLogin，
     // 后续编辑+发布时 backend 据此判 supersede（原作者）vs derivative（他人 fork）。
     let detail = client
         .style_detail(&pack_id)
         .await
-        .map_err(|error| format!("marketplace detail failed: {error}"))?;
+        .map_err(|error| marketplace_api_error_message("marketplace detail", error))?;
     let origin_author_login = if detail.summary.author_login.trim().is_empty() {
         None
     } else {
         Some(detail.summary.author_login)
     };
 
+    emit_marketplace_transfer_progress(
+        &app,
+        "install",
+        &pack_id,
+        "downloading",
+        35,
+        "Downloading style pack archive",
+    );
     let bytes = client
         .download_style_archive(&pack_id)
         .await
-        .map_err(|error| format!("marketplace download failed: {error}"))?;
+        .map_err(|error| marketplace_api_error_message("marketplace download", error))?;
 
+    emit_marketplace_transfer_progress(
+        &app,
+        "install",
+        &pack_id,
+        "installing",
+        70,
+        "Validating and installing style pack archive",
+    );
     // pack_id 已经过 UUID 白名单，拼临时文件路径安全。
     let tmp = std::env::temp_dir().join(format!("listener-type-marketplace-{pack_id}.zip"));
-    std::fs::write(&tmp, &bytes).map_err(|e| format!("write tmp zip: {e}"))?;
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("write temporary style pack zip: {e}"))?;
     let imported_result = coord
         .style_packs()
         .import_from_zip(&tmp)
-        .map_err(|e| e.to_string());
+        .map_err(|e| format!("style pack format validation failed: {e}"));
     let _ = std::fs::remove_file(&tmp);
     let imported = imported_result?;
 
     // 绑定 origin —— 后续编辑+发布走 derivative / supersede 分支。
-    coord
+    let imported = coord
         .style_packs()
-        .set_origin(&imported.id, Some(pack_id), origin_author_login)
-        .map_err(|e| format!("set origin failed: {e}"))
+        .set_origin(&imported.id, Some(pack_id.clone()), origin_author_login)
+        .map_err(|e| format!("set origin failed: {e}"))?;
+    emit_marketplace_transfer_progress(
+        &app,
+        "install",
+        &pack_id,
+        "finished",
+        100,
+        "Installed locally",
+    );
+    Ok(imported)
 }
 
 #[tauri::command]
 pub async fn marketplace_upload(
     coord: CoordinatorState<'_>,
+    app: AppHandle,
     pack_id: String,
     origin_pack_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
@@ -4126,14 +4202,36 @@ pub async fn marketplace_upload(
     }
     let prefs = coord.prefs().get();
     let client = marketplace_client_from_prefs(&prefs)?;
+
+    emit_marketplace_transfer_progress(
+        &app,
+        "upload",
+        &pack_id,
+        "auth",
+        10,
+        "Verifying GitHub marketplace login",
+    );
     let github_login = marketplace_authenticated_github_login().await?;
 
+    emit_marketplace_transfer_progress(
+        &app,
+        "upload",
+        &pack_id,
+        "validating",
+        25,
+        "Validating local style pack",
+    );
     // 拉本地 pack 拿 origin_pack_id —— 装过的 pack 这里有值，
     // backend 据此判同作者就 supersede 原行（新版本），他人就 derivative（独立新 row）。
     let local_pack = coord
         .style_packs()
         .get(&pack_id)
         .map_err(|e| format!("local pack not found: {e}"))?;
+    if local_pack.kind == StylePackKind::Builtin {
+        return Err(
+            "builtin style packs cannot be uploaded; duplicate it as an editable pack first".into(),
+        );
+    }
     let origin_pack_id = origin_pack_id
         .filter(|id| is_valid_session_id(id))
         .or_else(|| local_pack.origin_pack_id.clone());
@@ -4143,14 +4241,22 @@ pub async fn marketplace_upload(
     coord
         .style_packs()
         .export_to_zip(&pack_id, &tmp)
-        .map_err(|e| format!("export local pack failed: {e}"))?;
-    let bytes = std::fs::read(&tmp).map_err(|e| format!("read exported zip: {e}"))?;
+        .map_err(|e| format!("style pack format validation failed before upload: {e}"))?;
+    let bytes = std::fs::read(&tmp).map_err(|e| format!("read validated style pack zip: {e}"))?;
     let _ = std::fs::remove_file(&tmp);
 
+    emit_marketplace_transfer_progress(
+        &app,
+        "upload",
+        &pack_id,
+        "uploading",
+        60,
+        "Uploading style pack archive to marketplace backend",
+    );
     let parsed = client
         .upload_style_archive(&pack_id, origin_pack_id.as_deref(), bytes, &github_login)
         .await
-        .map_err(|error| format!("upload request failed: {error}"))?;
+        .map_err(|error| marketplace_api_error_message("marketplace upload", error))?;
 
     // 本地从未绑定 origin（首次上传一个本地原创 pack）→ 把 backend 分配的 pack id 写回本地，
     // 让用户在同设备上后续编辑能继续走「同作者 supersede」分支，更新自己原创的包。
@@ -4164,6 +4270,14 @@ pub async fn marketplace_upload(
         }
     }
 
+    emit_marketplace_transfer_progress(
+        &app,
+        "upload",
+        &pack_id,
+        "finished",
+        100,
+        "Uploaded to marketplace backend",
+    );
     Ok(parsed)
 }
 

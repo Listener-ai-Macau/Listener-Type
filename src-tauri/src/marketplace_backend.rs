@@ -313,7 +313,7 @@ impl MarketplaceClient {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
     use std::thread;
 
     const STYLE_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
@@ -326,24 +326,56 @@ mod tests {
         .unwrap()
     }
 
+    fn read_http_request(mut stream: TcpStream) -> Vec<u8> {
+        let mut buf = [0u8; 8192];
+        let mut request = Vec::new();
+        let mut headers_end = None;
+        loop {
+            let n = stream.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            request.extend_from_slice(&buf[..n]);
+            if let Some(pos) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                headers_end = Some(pos + 4);
+                break;
+            }
+        }
+
+        if let Some(headers_end) = headers_end {
+            let content_length = {
+                let header_text = String::from_utf8_lossy(&request[..headers_end]);
+                header_text
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        if name.eq_ignore_ascii_case("content-length") {
+                            value.trim().parse::<usize>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0)
+            };
+            while request.len() < headers_end + content_length {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+            }
+        }
+
+        request
+    }
+
     fn spawn_response(status: &str, body: &'static str) -> (String, thread::JoinHandle<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let status = status.to_string();
         let handle = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut buf = [0u8; 8192];
-            let mut request = Vec::new();
-            loop {
-                let n = stream.read(&mut buf).unwrap();
-                if n == 0 {
-                    break;
-                }
-                request.extend_from_slice(&buf[..n]);
-                if request.windows(4).any(|w| w == b"\r\n\r\n") {
-                    break;
-                }
-            }
+            let request = read_http_request(stream.try_clone().unwrap());
             let response = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
@@ -373,6 +405,40 @@ mod tests {
         assert!(request.contains("q=demo+pack"));
         assert!(request.contains("sort=popular"));
         assert!(request.contains("limit=10"));
+    }
+
+    #[tokio::test]
+    async fn marketplace_client_downloads_style_archive_bytes() {
+        let (base, request_handle) = spawn_response("200 OK", "ZIPDATA");
+
+        let client = test_marketplace_client(&base);
+        let bytes = client.download_style_archive(STYLE_ID).await.unwrap();
+
+        assert_eq!(&bytes[..], b"ZIPDATA");
+        let request = request_handle.join().unwrap();
+        assert!(request.starts_with(&format!("GET /styles/{STYLE_ID}/download ")));
+    }
+
+    #[tokio::test]
+    async fn marketplace_client_uploads_style_archive_with_user_and_origin() {
+        let body =
+            r#"{"id":"550e8400-e29b-41d4-a716-446655440000","state":"pending","message":"ok"}"#;
+        let (base, request_handle) = spawn_response("200 OK", body);
+
+        let client = test_marketplace_client(&base);
+        let response = client
+            .upload_style_archive("local.pack", Some(STYLE_ID), b"ZIPDATA".to_vec(), "alice")
+            .await
+            .unwrap();
+
+        assert_eq!(response["state"], "pending");
+        let request = request_handle.join().unwrap();
+        let lower = request.to_ascii_lowercase();
+        assert!(request.starts_with("POST /styles/upload "));
+        assert!(lower.contains("x-dev-user: alice"));
+        assert!(request.contains(r#"filename="local.pack.zip""#));
+        assert!(request.contains(r#"name="originPackId""#));
+        assert!(request.contains(STYLE_ID));
     }
 
     #[tokio::test]
