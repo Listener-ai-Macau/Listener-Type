@@ -62,7 +62,7 @@ listener-type --submit-embedded-audio-ble-stream 120000
 
 ## 自动 BLE 流式 smoke
 
-真实设备 smoke 默认不要人工按 KEY1。优先使用串口控制命令模拟按键，并把录音窗口对齐到第二遍 TTS 播放：
+真实设备 smoke 默认不要人工按 EC11。优先使用串口控制命令模拟录音键，并把录音窗口对齐到第二遍 TTS 播放：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\embedded_audio_replay\run_ble_stream_smoke.ps1 `

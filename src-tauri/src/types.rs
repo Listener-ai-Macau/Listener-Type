@@ -482,6 +482,103 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceCustomKeyId {
+    Key1,
+    Key2,
+    Key3,
+    Key4,
+}
+
+impl DeviceCustomKeyId {
+    pub const ALL: [DeviceCustomKeyId; 4] = [
+        DeviceCustomKeyId::Key1,
+        DeviceCustomKeyId::Key2,
+        DeviceCustomKeyId::Key3,
+        DeviceCustomKeyId::Key4,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DeviceCustomKeyId::Key1 => "KEY1",
+            DeviceCustomKeyId::Key2 => "KEY2",
+            DeviceCustomKeyId::Key3 => "KEY3",
+            DeviceCustomKeyId::Key4 => "KEY4",
+        }
+    }
+
+    pub fn fallback_primary(self) -> &'static str {
+        match self {
+            DeviceCustomKeyId::Key1 => "F13",
+            DeviceCustomKeyId::Key2 => "F14",
+            DeviceCustomKeyId::Key3 => "F15",
+            DeviceCustomKeyId::Key4 => "F16",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceCustomKeyAction {
+    Disabled,
+    OpenApp,
+    SwitchStyle,
+    Translation,
+    SelectionAsk,
+    PasteTemplate,
+    SendShortcut,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DeviceCustomKeyMapping {
+    pub action: DeviceCustomKeyAction,
+    pub paste_template: String,
+    pub shortcut: Option<ShortcutBinding>,
+}
+
+impl Default for DeviceCustomKeyMapping {
+    fn default() -> Self {
+        Self {
+            action: DeviceCustomKeyAction::Disabled,
+            paste_template: String::new(),
+            shortcut: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DeviceCustomKeys {
+    pub key1: DeviceCustomKeyMapping,
+    pub key2: DeviceCustomKeyMapping,
+    pub key3: DeviceCustomKeyMapping,
+    pub key4: DeviceCustomKeyMapping,
+}
+
+impl DeviceCustomKeys {
+    pub fn get(&self, key: DeviceCustomKeyId) -> &DeviceCustomKeyMapping {
+        match key {
+            DeviceCustomKeyId::Key1 => &self.key1,
+            DeviceCustomKeyId::Key2 => &self.key2,
+            DeviceCustomKeyId::Key3 => &self.key3,
+            DeviceCustomKeyId::Key4 => &self.key4,
+        }
+    }
+}
+
+impl Default for DeviceCustomKeys {
+    fn default() -> Self {
+        Self {
+            key1: DeviceCustomKeyMapping::default(),
+            key2: DeviceCustomKeyMapping::default(),
+            key3: DeviceCustomKeyMapping::default(),
+            key4: DeviceCustomKeyMapping::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UserPreferences {
@@ -566,6 +663,8 @@ pub struct UserPreferences {
     pub switch_style_hotkey: ShortcutBinding,
     #[serde(default = "default_open_app_hotkey")]
     pub open_app_hotkey: ShortcutBinding,
+    #[serde(default)]
+    pub device_custom_keys: DeviceCustomKeys,
     /// 本地 Qwen3-ASR 当前激活的模型 id（"qwen3-asr-0.6b" / "qwen3-asr-1.7b"）。
     /// 仅在 active_asr_provider == "local-qwen3" 时有意义。
     #[serde(default = "default_local_asr_model")]
@@ -747,6 +846,8 @@ struct UserPreferencesWire {
     translation_hotkey: Option<ShortcutBinding>,
     switch_style_hotkey: Option<ShortcutBinding>,
     open_app_hotkey: Option<ShortcutBinding>,
+    #[serde(default)]
+    device_custom_keys: DeviceCustomKeys,
     #[serde(default = "default_local_asr_model")]
     local_asr_active_model: String,
     #[serde(default = "default_local_asr_mirror")]
@@ -823,6 +924,7 @@ impl Default for UserPreferencesWire {
             translation_hotkey: None,
             switch_style_hotkey: None,
             open_app_hotkey: None,
+            device_custom_keys: prefs.device_custom_keys,
             local_asr_active_model: prefs.local_asr_active_model,
             local_asr_mirror: prefs.local_asr_mirror,
             local_asr_keep_loaded_secs: prefs.local_asr_keep_loaded_secs,
@@ -906,6 +1008,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
                 .switch_style_hotkey
                 .unwrap_or_else(default_switch_style_hotkey),
             open_app_hotkey: wire.open_app_hotkey.unwrap_or_else(default_open_app_hotkey),
+            device_custom_keys: wire.device_custom_keys,
             local_asr_active_model: wire.local_asr_active_model,
             local_asr_mirror: wire.local_asr_mirror,
             local_asr_keep_loaded_secs: wire.local_asr_keep_loaded_secs,
@@ -1304,6 +1407,7 @@ impl Default for UserPreferences {
             translation_hotkey: default_translation_hotkey(),
             switch_style_hotkey: default_switch_style_hotkey(),
             open_app_hotkey: default_open_app_hotkey(),
+            device_custom_keys: DeviceCustomKeys::default(),
             local_asr_active_model: default_local_asr_model(),
             local_asr_mirror: default_local_asr_mirror(),
             local_asr_keep_loaded_secs: default_local_asr_keep_loaded_secs(),

@@ -93,6 +93,12 @@ let mockSettings: UserPreferences = {
   translationHotkey: { primary: 'Shift', modifiers: [] },
   switchStyleHotkey: { primary: 'S', modifiers: defaultAppShortcutModifiers() },
   openAppHotkey: { primary: 'O', modifiers: defaultAppShortcutModifiers() },
+  deviceCustomKeys: {
+    key1: { action: 'disabled', pasteTemplate: '', shortcut: null },
+    key2: { action: 'disabled', pasteTemplate: '', shortcut: null },
+    key3: { action: 'disabled', pasteTemplate: '', shortcut: null },
+    key4: { action: 'disabled', pasteTemplate: '', shortcut: null },
+  },
   localAsrActiveModel: 'qwen3-asr-0.6b',
   localAsrMirror: 'huggingface',
   localAsrKeepLoadedSecs: 300,
@@ -117,11 +123,18 @@ let mockSettings: UserPreferences = {
 };
 
 function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
+  const fallbackDeviceKeys = mockSettings.deviceCustomKeys;
   return {
     ...prefs,
     hotkey: {
       ...prefs.hotkey,
       mode: 'toggle',
+    },
+    deviceCustomKeys: {
+      key1: prefs.deviceCustomKeys?.key1 ?? fallbackDeviceKeys.key1,
+      key2: prefs.deviceCustomKeys?.key2 ?? fallbackDeviceKeys.key2,
+      key3: prefs.deviceCustomKeys?.key3 ?? fallbackDeviceKeys.key3,
+      key4: prefs.deviceCustomKeys?.key4 ?? fallbackDeviceKeys.key4,
     },
   };
 }

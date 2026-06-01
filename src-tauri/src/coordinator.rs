@@ -49,9 +49,9 @@ use crate::selection::capture_selection;
 #[cfg(target_os = "windows")]
 use crate::types::PasteShortcut;
 use crate::types::{
-    CapsulePayload, CapsuleState, ChineseScriptPreference, DictationInputSource, DictationSession,
-    HotkeyCapability, HotkeyStatus, HotkeyStatusState, InsertStatus, OutputLanguagePreference,
-    PolishMode,
+    CapsulePayload, CapsuleState, ChineseScriptPreference, DeviceCustomKeyAction,
+    DeviceCustomKeyId, DictationInputSource, DictationSession, HotkeyCapability, HotkeyStatus,
+    HotkeyStatusState, InsertStatus, OutputLanguagePreference, PolishMode,
 };
 #[cfg(target_os = "windows")]
 use crate::windows_ime_ipc::ImeSubmitTarget;
@@ -180,6 +180,10 @@ struct Inner {
     translation_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
     switch_style_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
     open_app_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
+    device_key1_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
+    device_key2_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
+    device_key3_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
+    device_key4_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
     /// 翻译模式触发标志。每次 begin_session 重置为 false；hotkey 监听器在
     /// Listening / Starting 阶段看到 Shift down 边沿时 set true。
     /// end_session 在调 polish/translate 前读这个 flag + translation_target_language
@@ -290,6 +294,7 @@ impl FirmwareWakePolicySnapshot {
 enum ActionHotkeyKind {
     SwitchStyle,
     OpenApp,
+    DeviceKey(DeviceCustomKeyId),
 }
 
 #[cfg(target_os = "windows")]
@@ -352,6 +357,10 @@ impl Coordinator {
                     translation_hotkey: Mutex::new(None),
                     switch_style_hotkey: Mutex::new(None),
                     open_app_hotkey: Mutex::new(None),
+                    device_key1_hotkey: Mutex::new(None),
+                    device_key2_hotkey: Mutex::new(None),
+                    device_key3_hotkey: Mutex::new(None),
+                    device_key4_hotkey: Mutex::new(None),
                     translation_modifier_seen: AtomicBool::new(false),
                     qa_hotkey: Mutex::new(None),
                     qa_state: Mutex::new(QaSessionState::default()),
@@ -413,6 +422,10 @@ impl Coordinator {
                 translation_hotkey: Mutex::new(None),
                 switch_style_hotkey: Mutex::new(None),
                 open_app_hotkey: Mutex::new(None),
+                device_key1_hotkey: Mutex::new(None),
+                device_key2_hotkey: Mutex::new(None),
+                device_key3_hotkey: Mutex::new(None),
+                device_key4_hotkey: Mutex::new(None),
                 translation_modifier_seen: AtomicBool::new(false),
                 qa_hotkey: Mutex::new(None),
                 qa_state: Mutex::new(QaSessionState::default()),
@@ -583,6 +596,28 @@ impl Coordinator {
         take_action_hotkey_on_main_thread(&self.inner, ActionHotkeyKind::OpenApp);
     }
 
+    pub fn start_device_custom_key_hotkey_listeners(&self) {
+        for key in DeviceCustomKeyId::ALL {
+            let inner = Arc::clone(&self.inner);
+            let name = format!(
+                "listener-type-{}-hotkey-supervisor",
+                key.label().to_ascii_lowercase()
+            );
+            std::thread::Builder::new()
+                .name(name)
+                .spawn(move || {
+                    action_hotkey_supervisor_loop(inner, ActionHotkeyKind::DeviceKey(key))
+                })
+                .ok();
+        }
+    }
+
+    pub fn stop_device_custom_key_hotkey_listeners(&self) {
+        for key in DeviceCustomKeyId::ALL {
+            take_action_hotkey_on_main_thread(&self.inner, ActionHotkeyKind::DeviceKey(key));
+        }
+    }
+
     /// 用户在设置里改了自定义组合键时调用。
     pub fn update_combo_hotkey_binding(&self) {
         let prefs = self.inner.prefs.get();
@@ -746,6 +781,12 @@ impl Coordinator {
 
     pub fn update_open_app_hotkey_binding(&self) {
         self.update_action_hotkey_binding(ActionHotkeyKind::OpenApp);
+    }
+
+    pub fn update_device_custom_key_hotkey_bindings(&self) {
+        for key in DeviceCustomKeyId::ALL {
+            self.update_action_hotkey_binding(ActionHotkeyKind::DeviceKey(key));
+        }
     }
 
     fn update_action_hotkey_binding(&self, kind: ActionHotkeyKind) {
@@ -1824,7 +1865,89 @@ fn handle_action_hotkey_pressed(inner: &Arc<Inner>, kind: ActionHotkeyKind) {
                 });
             }
         }
+        ActionHotkeyKind::DeviceKey(key) => handle_device_custom_key_pressed(inner, key),
     }
+}
+
+fn handle_device_custom_key_pressed(inner: &Arc<Inner>, key: DeviceCustomKeyId) {
+    let mapping = inner.prefs.get().device_custom_keys.get(key).clone();
+    log::info!(
+        "[device-key] {} pressed action={:?}",
+        key.label(),
+        mapping.action
+    );
+
+    match mapping.action {
+        DeviceCustomKeyAction::Disabled => {}
+        DeviceCustomKeyAction::OpenApp => {
+            if let Some(app) = inner.app.lock().clone() {
+                let app_for_main = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    crate::show_main_window(&app_for_main);
+                });
+            }
+        }
+        DeviceCustomKeyAction::SwitchStyle => switch_to_previous_style(inner),
+        DeviceCustomKeyAction::SelectionAsk => {
+            let inner = Arc::clone(inner);
+            async_runtime::spawn(async move { handle_qa_hotkey_pressed(&inner).await });
+        }
+        DeviceCustomKeyAction::Translation => {
+            let inner = Arc::clone(inner);
+            async_runtime::spawn(async move { handle_device_translation_action(inner).await });
+        }
+        DeviceCustomKeyAction::PasteTemplate => {
+            let text = mapping.paste_template.trim();
+            if text.is_empty() {
+                log::warn!("[device-key] {} paste template is empty", key.label());
+                return;
+            }
+            let prefs = inner.prefs.get();
+            let status = inner.inserter.insert(
+                text,
+                prefs.restore_clipboard_after_paste,
+                prefs.paste_shortcut,
+            );
+            log::info!(
+                "[device-key] {} pasted template chars={} status={:?}",
+                key.label(),
+                text.chars().count(),
+                status
+            );
+        }
+        DeviceCustomKeyAction::SendShortcut => {
+            let Some(shortcut) = mapping.shortcut.as_ref() else {
+                log::warn!(
+                    "[device-key] {} shortcut action has no binding",
+                    key.label()
+                );
+                return;
+            };
+            match crate::shortcut_dispatch::send_shortcut(shortcut) {
+                Ok(()) => log::info!(
+                    "[device-key] {} sent shortcut {}",
+                    key.label(),
+                    shortcut.display_label()
+                ),
+                Err(error) => log::warn!(
+                    "[device-key] {} failed to send shortcut {}: {error}",
+                    key.label(),
+                    shortcut.display_label()
+                ),
+            }
+        }
+    }
+}
+
+async fn handle_device_translation_action(inner: Arc<Inner>) {
+    let phase = inner.state.lock().phase;
+    if matches!(phase, SessionPhase::Idle) {
+        let _ = begin_session(&inner).await;
+        mark_translation_modifier_seen(&inner);
+        return;
+    }
+    mark_translation_modifier_seen(&inner);
+    handle_pressed(&inner).await;
 }
 
 fn switch_to_previous_style(inner: &Arc<Inner>) {
@@ -1916,6 +2039,10 @@ fn action_hotkey_slot(
     match kind {
         ActionHotkeyKind::SwitchStyle => &inner.switch_style_hotkey,
         ActionHotkeyKind::OpenApp => &inner.open_app_hotkey,
+        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key1) => &inner.device_key1_hotkey,
+        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key2) => &inner.device_key2_hotkey,
+        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key3) => &inner.device_key3_hotkey,
+        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key4) => &inner.device_key4_hotkey,
     }
 }
 
@@ -1927,6 +2054,10 @@ fn action_hotkey_binding(
     match kind {
         ActionHotkeyKind::SwitchStyle => prefs.switch_style_hotkey,
         ActionHotkeyKind::OpenApp => prefs.open_app_hotkey,
+        ActionHotkeyKind::DeviceKey(key) => crate::types::ShortcutBinding {
+            primary: key.fallback_primary().into(),
+            modifiers: Vec::new(),
+        },
     }
 }
 
@@ -1944,6 +2075,10 @@ fn action_hotkey_bridge_thread_name(kind: ActionHotkeyKind) -> &'static str {
     match kind {
         ActionHotkeyKind::SwitchStyle => "listener-type-switch-style-hotkey-bridge",
         ActionHotkeyKind::OpenApp => "listener-type-open-app-hotkey-bridge",
+        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key1) => "listener-type-key1-hotkey-bridge",
+        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key2) => "listener-type-key2-hotkey-bridge",
+        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key3) => "listener-type-key3-hotkey-bridge",
+        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key4) => "listener-type-key4-hotkey-bridge",
     }
 }
 
@@ -2410,6 +2545,17 @@ fn reset_shortcut_held_state(inner: &Arc<Inner>) {
         if let Some(monitor) = inner.open_app_hotkey.lock().as_ref() {
             if let Err(e) = monitor.update_binding(prefs.open_app_hotkey.clone()) {
                 log::warn!("[coord] reset open-app hotkey latch failed: {e}");
+            }
+        }
+    }
+    for key in DeviceCustomKeyId::ALL {
+        if let Some(monitor) = action_hotkey_slot(inner, ActionHotkeyKind::DeviceKey(key))
+            .lock()
+            .as_ref()
+        {
+            let binding = action_hotkey_binding(inner, ActionHotkeyKind::DeviceKey(key));
+            if let Err(e) = monitor.update_binding(binding) {
+                log::warn!("[coord] reset {} hotkey latch failed: {e}", key.label());
             }
         }
     }

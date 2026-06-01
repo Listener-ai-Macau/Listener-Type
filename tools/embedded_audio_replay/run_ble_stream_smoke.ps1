@@ -2003,12 +2003,12 @@ try {
                 Write-SmokeTrace "firmware_recording_start_seen"
             } else {
                 Write-Output "manual_trigger_ready=1"
-                Write-Output "manual_trigger_hint=press KEY1 once to start recording; playback begins after the capsule appears"
+                Write-Output "manual_trigger_hint=press EC11 knob once to start recording; playback begins after the capsule appears"
                 $timeline["manual_start_ready_at_utc"] = Get-SmokeUtcNow
                 if (-not $SkipCapsuleVisibleGate) {
                     if (-not (Wait-CapsuleWindowVisible -TimeoutMs $ManualTriggerReadyDelayMs -ProcessId $process.Id)) {
                         $timeline["capsule_visible_failed_at_utc"] = Get-SmokeUtcNow
-                        throw "Recording capsule did not become visible after manual KEY1 start; aborting before audio playback"
+                        throw "Recording capsule did not become visible after manual EC11 start; aborting before audio playback"
                     }
                     $timeline["manual_start_capsule_visible_at_utc"] = Get-SmokeUtcNow
                     Write-SmokeTrace "manual_start_capsule_visible"
@@ -2070,7 +2070,7 @@ try {
                 }
             } else {
                 Write-Output "manual_trigger_playback_done=1"
-                Write-Output "manual_trigger_stop_hint=press KEY1 once to stop recording now"
+                Write-Output "manual_trigger_stop_hint=press EC11 knob once to stop recording now"
                 $timeline["manual_stop_ready_at_utc"] = Get-SmokeUtcNow
             }
         } elseif ($index -lt $PlaybackCount) {

@@ -132,6 +132,10 @@ fn parse_primary(raw: &str) -> Result<Code, ShortcutBindingError> {
         "F10" => Code::F10,
         "F11" => Code::F11,
         "F12" => Code::F12,
+        "F13" => Code::F13,
+        "F14" => Code::F14,
+        "F15" => Code::F15,
+        "F16" => Code::F16,
         _ => return Err(ShortcutBindingError::UnsupportedKey(trimmed.to_string())),
     };
     Ok(named)
@@ -212,12 +216,12 @@ mod tests {
         assert_eq!(parsed.key, Code::KeyD);
 
         let single = ShortcutBinding {
-            primary: "F8".into(),
+            primary: "F16".into(),
             modifiers: vec![],
         };
         let parsed = parse_global_hotkey(&single).expect("single key parses");
         assert!(parsed.mods.is_empty());
-        assert_eq!(parsed.key, Code::F8);
+        assert_eq!(parsed.key, Code::F16);
     }
 
     #[test]
