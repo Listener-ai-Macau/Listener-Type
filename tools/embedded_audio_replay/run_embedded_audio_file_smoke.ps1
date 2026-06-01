@@ -307,6 +307,12 @@ if (-not (Test-Path $ListenerExe)) {
         throw "Listener executable not found at $ListenerExe and Tauri frontend dist is missing at $frontendDist. Build the frontend first or pass -ListenerExe <existing listener-type.exe>."
     }
     $env:PATH = "C:\Users\Billy\.cargo\bin;$env:PATH"
+    $runningLt = Get-Process listener-type -ErrorAction SilentlyContinue
+    if ($runningLt) {
+        Write-Host "Stopping running Listener Type before cargo build..."
+        $runningLt | Stop-Process -Force
+        Start-Sleep -Milliseconds 600
+    }
     cargo build --manifest-path (Join-Path $RepoRoot "src-tauri\Cargo.toml")
 }
 if (-not (Test-Path $ListenerExe)) {

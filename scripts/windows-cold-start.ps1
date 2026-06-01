@@ -39,6 +39,13 @@ function Resolve-DefaultExePath {
 }
 
 if ($FreshBuild) {
+  # Stop running instance before build — Windows locks the exe and cargo can't overwrite it
+  $running = Get-Process listener-type -ErrorAction SilentlyContinue
+  if ($running) {
+    Write-Host "Stopping running Listener Type (would lock debug exe during build)..."
+    $running | Stop-Process -Force
+    Start-Sleep -Milliseconds 600
+  }
   Push-Location $appRoot
   try {
     Write-Host "Building frontend dist..."
