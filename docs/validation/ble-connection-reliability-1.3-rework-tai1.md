@@ -63,4 +63,3 @@ UI capsule log evidence from the same run:
 - PASS: `cargo test --manifest-path src-tauri\Cargo.toml embedded_ble --lib`
 - PASS: PowerShell parser check for `tools\verify_ble_reconnect_recovery.ps1`
 - PASS: `git diff --check`
-
