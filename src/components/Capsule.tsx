@@ -347,6 +347,7 @@ export function Capsule() {
   const [leaving, setLeaving] = useState<boolean>(false);
   const [lastVisibleState, setLastVisibleState] = useState<CapsuleState>(INITIAL_VISIBLE_STATE);
   const previousStateRef = useRef<CapsuleState>(INITIAL_VISIBLE_STATE);
+  const previousElapsedMsRef = useRef<number>(0);
   const stopAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stopRequested, setStopRequested] = useState<boolean>(false);
   const [stopAcknowledged, setStopAcknowledged] = useState<boolean>(false);
@@ -380,6 +381,16 @@ export function Capsule() {
       const { listen } = await import('@tauri-apps/api/event');
       const handle = await listen<CapsulePayload>('capsule:state', event => {
         const p = event.payload;
+        const previousState = previousStateRef.current;
+        const previousElapsedMs = previousElapsedMsRef.current;
+        previousElapsedMsRef.current = p.elapsedMs;
+        if (
+          p.state === 'recording' &&
+          (previousState !== 'recording' || p.elapsedMs < previousElapsedMs)
+        ) {
+          setStopRequested(false);
+          clearStopAcknowledgement();
+        }
         setState(p.state);
         if (p.state === 'idle') {
           setLevel(0);

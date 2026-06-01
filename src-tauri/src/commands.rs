@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -43,6 +43,8 @@ type CoordinatorState<'a> = State<'a, Arc<Coordinator>>;
 pub type MicrophoneMonitorState = Mutex<Option<Recorder>>;
 pub type TrayMicrophoneMenuState = Mutex<Vec<TrayMicrophoneMenuItem>>;
 
+static SETTINGS_UPDATE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
 pub struct TrayMicrophoneMenuItem {
     pub id: String,
     pub device_name: String,
@@ -59,6 +61,10 @@ struct LevelProbeConsumer;
 
 impl AudioConsumer for LevelProbeConsumer {
     fn consume_pcm_chunk(&self, _pcm: &[u8]) {}
+}
+
+fn settings_update_lock() -> &'static Mutex<()> {
+    SETTINGS_UPDATE_LOCK.get_or_init(|| Mutex::new(()))
 }
 
 // ─────────────────────────── settings + credentials ───────────────────────────
@@ -184,6 +190,7 @@ pub fn set_settings(
 ) -> Result<(), String> {
     let packs = coord.style_packs().list().map_err(|e| e.to_string())?;
     sync_style_pack_preferences(&mut prefs, &packs);
+    let _settings_guard = settings_update_lock().lock();
     // 广播给所有 webview。issue #205：QaPanel 跑在独立 webview，
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
@@ -194,14 +201,15 @@ pub fn set_settings(
     // 会触发 macOS 主线程断言或在 dispatch 队列上死锁，导致整个 UI 无响应（用户改
     // 偏好后所有按键都没反应即此根因）。dispatch 到主线程后立即返回，IPC 线程不阻塞。
     let app_for_main = app.clone();
-    let prefs_for_main = prefs.clone();
     let _ = app.run_on_main_thread(move || {
         if let Err(err) = crate::refresh_tray_microphone_menu(&app_for_main) {
             log::warn!("[tray] refresh microphone menu after settings save failed: {err}");
             let tray_state = app_for_main.state::<TrayMicrophoneMenuState>();
+            let coord = app_for_main.state::<Arc<Coordinator>>();
+            let current_prefs = coord.prefs().get();
             sync_tray_microphone_selection(
                 &tray_state.lock(),
-                &prefs_for_main.microphone_device_name,
+                &current_prefs.microphone_device_name,
             );
         }
     });

@@ -37,6 +37,7 @@ export interface UseAutoUpdate {
 
 export function useAutoUpdate(): UseAutoUpdate {
   const updateRef = useRef<Update | null>(null);
+  const updateOperationRef = useRef(0);
   const [status, setStatus] = useState<UpdateStatus>('idle');
   const [version, setVersion] = useState('');
   const [downloaded, setDownloaded] = useState(0);
@@ -48,17 +49,25 @@ export function useAutoUpdate(): UseAutoUpdate {
     ? Math.min(100, Math.round((downloaded / contentLength) * 100))
     : null;
 
+  const closeDetachedUpdate = async (update: Update) => {
+    try {
+      await update.close();
+    } catch (error) {
+      console.warn('[updater] failed to close update resource', error);
+    }
+  };
+
   const closeUpdate = async () => {
+    updateOperationRef.current += 1;
     const current = updateRef.current;
     updateRef.current = null;
     if (current) {
-      try {
-        await current.close();
-      } catch (error) {
-        console.warn('[updater] failed to close update resource', error);
-      }
+      await closeDetachedUpdate(current);
     }
   };
+
+  const isCurrentUpdate = (operation: number, update: Update) =>
+    updateOperationRef.current === operation && updateRef.current === update;
 
   useEffect(() => {
     return () => { void closeUpdate(); };
@@ -74,6 +83,7 @@ export function useAutoUpdate(): UseAutoUpdate {
     setVersion('');
     resetProgress();
     await closeUpdate();
+    const operation = updateOperationRef.current;
     try {
       if (!isTauri) {
         setStatus('none');
@@ -81,10 +91,15 @@ export function useAutoUpdate(): UseAutoUpdate {
       }
       const { check } = await import('@tauri-apps/plugin-updater');
       const next = await check({ timeout: UPDATE_CHECK_TIMEOUT_MS });
+      if (updateOperationRef.current !== operation) {
+        if (next) await closeDetachedUpdate(next);
+        return;
+      }
       updateRef.current = next;
       setVersion(next?.version ?? '');
       setStatus(next ? 'available' : 'none');
     } catch (error) {
+      if (updateOperationRef.current !== operation) return;
       console.error('[updater] failed to check update', error);
       setStatus('error');
     }
@@ -93,10 +108,12 @@ export function useAutoUpdate(): UseAutoUpdate {
   const installUpdate = async () => {
     const update = updateRef.current;
     if (!update) return;
+    const operation = updateOperationRef.current;
     resetProgress();
     setStatus('downloading');
     try {
       await update.download((event: DownloadEvent) => {
+        if (!isCurrentUpdate(operation, update)) return;
         if (event.event === 'Started') {
           resetProgress();
           setContentLength(event.data.contentLength ?? null);
@@ -106,11 +123,20 @@ export function useAutoUpdate(): UseAutoUpdate {
           setStatus('installing');
         }
       });
+      if (!isCurrentUpdate(operation, update)) {
+        await closeDetachedUpdate(update);
+        return;
+      }
       setStatus('installing');
       await update.install();
+      if (!isCurrentUpdate(operation, update)) return;
       await closeUpdate();
       setStatus('downloaded');
     } catch (error) {
+      if (!isCurrentUpdate(operation, update)) {
+        await closeDetachedUpdate(update);
+        return;
+      }
       console.error('[updater] failed to install update', error);
       await closeUpdate();
       setStatus('error');
