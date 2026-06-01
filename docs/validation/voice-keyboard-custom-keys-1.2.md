@@ -19,6 +19,12 @@ Implemented desktop-side KEY1-KEY4 custom action mapping for the Listener keyboa
 - PASS: `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`
 - PASS: `git diff --check`
 
+## Post-Submit Wording Sync
+
+- PASS: aligned active docs with the latest key scheme: EC11 owns recording/recovery gestures, KEY1-KEY4 are custom action keys, and F13-F16 remain safe fallback entries.
+- PASS: `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`
+- PASS: `git diff --check`
+
 ## UI Evidence
 
 - PASS: Headless Edge opened the Vite app, navigated to Settings -> Shortcuts, dismissed the BLE prompt, scrolled to Device custom keys, and captured `docs/validation/voice-keyboard-custom-keys-settings.png`.
