@@ -288,18 +288,6 @@ let mockStylePacks: StylePack[] = [
     mockSettings.styleSystemPrompts.formal,
     ['正式', '工作沟通'],
   ),
-  {
-    ...makeMockStylePack(
-      'imported.creator-note',
-      'imported',
-      'light',
-      '创作者口播',
-      '给短视频口播和社区帖文使用，句子更紧凑，保留情绪和节奏。',
-      '你是一个负责整理创作者口播稿的编辑。请把输入整理成适合发帖和口播的自然文本，保留节奏感，不要补充原文没有的信息。',
-      ['社区', '口播', '节奏感'],
-    ),
-    author: 'Demo Community',
-  },
 ];
 
 function cloneStylePack(stylePack: StylePack): StylePack {
@@ -1232,38 +1220,19 @@ export async function exportDiagnosticPackage(suggestedFileName: string): Promis
 export { isTauri };
 
 // ── Marketplace (Phase A) ─────────────────────────────────────────────
-// 5 个 IPC wrapper —— marketplace-backend HTTP 通过 Rust IPC 转发。Mock fallback
-// 让 vite dev 在浏览器里也能预览 UI（返回空列表 / 假数据）。
-
-const MOCK_MARKETPLACE: MarketplaceListItem[] = [
-  {
-    id: '00000000-0000-0000-0000-000000000001',
-    slug: 'demo-pack',
-    name: '示范风格包',
-    description: 'Mock 数据 - vite dev 模式下显示',
-    authorLogin: 'demo',
-    version: '1.0.0',
-    baseMode: 'structured',
-    tags: ['demo'],
-    likeCount: 12,
-    downloadCount: 50,
-    publishedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
+// 5 个 IPC wrapper —— marketplace-backend HTTP 通过 Rust IPC 转发。浏览器
+// dev fallback 不再注入示例内容；未连接后端时展示真实空状态。
 
 export function listMarketplace(
   options: { query?: string; sort?: 'new' | 'popular'; limit?: number } = {},
 ): Promise<MarketplaceListItem[]> {
-  return invokeOrMock('marketplace_list', options, () => MOCK_MARKETPLACE);
+  return invokeOrMock('marketplace_list', options, () => []);
 }
 
 export function fetchMarketplaceDetail(packId: string): Promise<MarketplaceDetail> {
-  return invokeOrMock('marketplace_detail', { packId }, () => ({
-    ...MOCK_MARKETPLACE[0],
-    prompt: '# 角色\n你是测试用 polish 助手。\n\n# 任务\n按整体意图整理转写。',
-    state: 'approved' as const,
-  }));
+  return invokeOrMock('marketplace_detail', { packId }, () => {
+    throw new Error('marketplaceUnavailable');
+  });
 }
 
 export function installMarketplacePack(packId: string): Promise<StylePack> {

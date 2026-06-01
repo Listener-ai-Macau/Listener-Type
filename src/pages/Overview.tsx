@@ -27,18 +27,7 @@ import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
 import { EmbeddedBleStatusPanel } from '../components/EmbeddedBleStatusPanel';
 
-function useModeLabels(): Record<PolishMode, string> {
-  const { t } = useTranslation();
-  return {
-    raw: t('style.modes.raw.name'),
-    light: t('style.modes.light.name'),
-    structured: t('style.modes.structured.name'),
-    formal: t('style.modes.formal.name'),
-  };
-}
-
 interface OverviewProps {
-  onOpenHistory?: () => void;
   onOpenProvidersSettings?: () => void;
   onOpenRecordingSettings?: () => void;
 }
@@ -68,9 +57,8 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordingSettings }: OverviewProps) {
+export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings }: OverviewProps) {
   const { t } = useTranslation();
-  const modeLabel = useModeLabels();
   const [history, setHistory] = useState<DictationSession[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [credsError, setCredsError] = useState(false);
@@ -132,21 +120,6 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
     const totalDurationMs = todays.reduce((acc, s) => acc + (s.durationMs ?? 0), 0);
     const avgLatencyMs = segmentsToday > 0 ? totalDurationMs / segmentsToday : 0;
     return { charsToday, segmentsToday, totalDurationMs, avgLatencyMs };
-  }, [history]);
-
-  // 周历:过去 7 天每天的条数
-  const weekly = useMemo(() => {
-    const buckets = Array(7).fill(0);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    history.forEach(s => {
-      const d = new Date(s.createdAt);
-      const diff = Math.floor((today.getTime() - d.setHours(0, 0, 0, 0)) / 86400000);
-      if (diff >= 0 && diff < 7) {
-        buckets[6 - diff] += 1;
-      }
-    });
-    return buckets;
   }, [history]);
 
   const asrProviderId = creds.activeAsrProvider || 'volcengine';
@@ -328,53 +301,6 @@ export function Overview({ onOpenHistory, onOpenProvidersSettings, onOpenRecordi
         <Metric icon="bolt" label={t('overview.metricTotal')} value={historyError ? '—' : String(history.length)} trend={historyError ? t('overview.historyLoadError') : t('overview.metricTotalTrend')} accent />
       </div>
 
-      {/* 底部一行 = flex:1 撑满剩余高度（父 wrapper 是 display:flex/column）。
-          只有「最近识别」内部允许滚动；其他卡片按内容自然高度，不破裂底部圆角。
-          issue #243 follow-up：去掉外层 overflow 后底部圆角被裁的视觉问题。 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 12, flex: 1, minHeight: 0 }}>
-        <Card padding={18} style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ol-ink-2)' }}>{t('overview.weekTitle')}</span>
-            <span style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>{t('overview.weekUnit')}</span>
-          </div>
-          {historyError ? (
-            <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: 12, color: 'var(--ol-ink-4)' }}>
-              {t('overview.historyLoadError')}
-            </div>
-          ) : (
-            <WeekChart data={weekly} />
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--ol-ink-4)', marginTop: 8 }}>
-            {weekDayLabels(t('overview.weekDays', { returnObjects: true }) as string[]).map((d, i) => <span key={i}>{d}</span>)}
-          </div>
-        </Card>
-
-        <Card padding={0} style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 18px', borderBottom: '0.5px solid var(--ol-line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ol-ink-2)' }}>{t('overview.recentTitle')}</span>
-            <Btn size="sm" variant="ghost" onClick={onOpenHistory}>{t('overview.recentAll')}</Btn>
-          </div>
-          <div className="ol-thinscroll" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            {historyError ? (
-              <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: 'var(--ol-ink-4)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-                <span>{t('overview.recentLoadFailed')}</span>
-                <Btn size="sm" variant="ghost" onClick={refreshHistory}>{t('overview.historyRetry')}</Btn>
-              </div>
-            ) : (
-              <>
-                {history.length === 0 && (
-                  <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: 'var(--ol-ink-4)' }}>
-                    {t('overview.recentEmpty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}
-                  </div>
-                )}
-                {history.slice(0, 5).map(s => (
-                  <RecentRow key={s.id} session={s} modeLabel={modeLabel} />
-                ))}
-              </>
-            )}
-          </div>
-        </Card>
-      </div>
     </>
   );
 }
@@ -448,77 +374,11 @@ function Metric({ icon, label, value, trend, accent }: MetricProps) {
   );
 }
 
-function WeekChart({ data }: { data: number[] }) {
-  const max = Math.max(...data, 1);
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 100 }}>
-      {data.map((v, i) => {
-        const isToday = i === 6;
-        return (
-          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <div style={{ fontSize: 9.5, color: isToday ? 'var(--ol-blue)' : 'var(--ol-ink-4)', fontWeight: isToday ? 600 : 400 }}>{v}</div>
-            <div
-              style={{
-                width: '100%',
-                height: `${(v / max) * 80}px`,
-                minHeight: 2,
-                borderRadius: 4,
-                background: isToday ? 'var(--ol-blue)' : 'var(--ol-ink)',
-                opacity: v === 0 ? 0.15 : isToday ? 1 : 0.85,
-                transition: 'height 0.18s var(--ol-motion-soft), opacity 0.18s var(--ol-motion-soft)',
-              }}
-            />
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function RecentRow({ session, modeLabel }: { session: DictationSession; modeLabel: Record<PolishMode, string> }) {
-  const { t } = useTranslation();
-  return (
-    <div style={{ padding: '12px 18px', borderBottom: '0.5px solid var(--ol-line-soft)', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, minWidth: 60 }}>
-        <span style={{ fontSize: 11, fontFamily: 'var(--ol-font-mono)', color: 'var(--ol-ink-3)' }}>
-          {formatTime(session.createdAt)}
-        </span>
-        <Pill size="sm" tone="default">{modeLabel[session.mode]}</Pill>
-      </div>
-      <div style={{ flex: 1, fontSize: 12.5, color: 'var(--ol-ink-2)', whiteSpace: 'pre-line', lineHeight: 1.55, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-        {session.finalText.split('\n')[0]}
-      </div>
-      <span style={{ fontSize: 10.5, color: 'var(--ol-ink-4)', fontFamily: 'var(--ol-font-mono)' }}>
-        {formatDuration(session.durationMs ?? 0, t)}
-      </span>
-    </div>
-  );
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  if (sameDay) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
-
 function formatDuration(ms: number, t: ReturnType<typeof useTranslation>['t']): string {
   if (ms <= 0) return '—';
   const sec = ms / 1000;
   if (sec < 60) return t('common.durationSeconds', { value: sec.toFixed(1) });
   return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
-}
-
-function weekDayLabels(names: string[]): string[] {
-  const today = new Date().getDay();
-  const out: string[] = [];
-  for (let i = 6; i >= 0; i--) {
-    out.push(names[(today - i + 7) % 7]);
-  }
-  return out;
 }
 
 interface QuickStartCardProps {

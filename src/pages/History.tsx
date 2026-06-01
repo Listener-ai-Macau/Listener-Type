@@ -84,6 +84,19 @@ export function History() {
     () => (filter === 'all' ? items : items.filter(s => s.mode === filter)),
     [items, filter],
   );
+  const weekly = useMemo(() => {
+    const buckets = Array(7).fill(0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    items.forEach(s => {
+      const d = new Date(s.createdAt);
+      const diff = Math.floor((today.getTime() - d.setHours(0, 0, 0, 0)) / 86400000);
+      if (diff >= 0 && diff < 7) {
+        buckets[6 - diff] += 1;
+      }
+    });
+    return buckets;
+  }, [items]);
   const item = useMemo(
     () => filtered.find(s => s.id === selectedId) || filtered[0],
     [filtered, selectedId],
@@ -176,7 +189,50 @@ export function History() {
           </div>
         }
       />
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 14, flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 0.9fr) minmax(300px, 1.35fr)', gap: 12, marginBottom: 14, flexShrink: 0 }}>
+        <Card padding={16} style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ol-ink-2)' }}>{t('history.weekTitle')}</span>
+            <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', whiteSpace: 'nowrap' }}>{t('history.weekUnit')}</span>
+          </div>
+          {loadError ? (
+            <div style={{ height: 86, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: 12, color: 'var(--ol-ink-4)' }}>
+              {t('history.loadFailed', { err: loadError })}
+            </div>
+          ) : (
+            <>
+              <WeekChart data={weekly} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--ol-ink-4)', marginTop: 8 }}>
+                {weekDayLabels(t('history.weekDays', { returnObjects: true }) as string[]).map((d, i) => <span key={i}>{d}</span>)}
+              </div>
+            </>
+          )}
+        </Card>
+
+        <Card padding={0} style={{ display: 'flex', flexDirection: 'column', minHeight: 150, minWidth: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '0.5px solid var(--ol-line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ol-ink-2)' }}>{t('history.recentTitle')}</span>
+            <Btn size="sm" variant="ghost" onClick={() => void refresh()}>{t('common.refresh')}</Btn>
+          </div>
+          <div className="ol-thinscroll" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+            {loading ? (
+              <div style={{ padding: 18, textAlign: 'center', fontSize: 12, color: 'var(--ol-ink-4)' }}>{t('common.loading')}</div>
+            ) : loadError ? (
+              <div style={{ padding: 18, textAlign: 'center', fontSize: 12, color: 'var(--ol-ink-4)' }}>{t('history.loadFailed', { err: loadError })}</div>
+            ) : items.length === 0 ? (
+              <div style={{ padding: 18, textAlign: 'center', fontSize: 12, color: 'var(--ol-ink-4)' }}>
+                {t('history.recentEmpty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}
+              </div>
+            ) : (
+              items.slice(0, 5).map(s => (
+                <RecentRow key={s.id} session={s} modeLabel={MODE_LABEL} onSelect={() => setSelectedId(s.id)} />
+              ))
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 300px) minmax(0, 1fr)', gap: 14, flex: 1, minHeight: 0 }}>
         <Card padding={0} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: '12px 14px', borderBottom: '0.5px solid var(--ol-line)' }}>
             <div style={{
@@ -254,16 +310,16 @@ export function History() {
           </div>
         </Card>
 
-        <Card padding={20} className="ol-thinscroll" style={{ overflow: 'auto' }}>
+        <Card padding={20} className="ol-thinscroll" style={{ overflow: 'auto', minWidth: 0 }}>
           {item ? (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 13, fontFamily: 'var(--ol-font-mono)', color: 'var(--ol-ink-3)' }}>{formatTime(item.createdAt)}</span>
                   <Pill size="sm" tone="default">{MODE_LABEL[item.mode]}</Pill>
                   <span style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>{formatDuration(item.durationMs, t)}</span>
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <Btn icon={justCopied ? 'check' : 'copy'} variant="ghost" size="sm" onClick={() => void onCopy()}>{justCopied ? t('common.copied') : t('common.copy')}</Btn>
                   {item.hasAudioRecording && !audioMissingIds.has(item.id) && (
                     <Btn icon="download" variant="ghost" size="sm" onClick={() => void onExportAudio()}>{t('history.exportRecording')}</Btn>
@@ -278,16 +334,16 @@ export function History() {
                   key={item.id}
                 />
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div style={{ padding: 14, border: '0.5px solid var(--ol-line)', borderRadius: 10, background: 'var(--ol-surface-2)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, minWidth: 0 }}>
+                <div style={{ padding: 14, border: '0.5px solid var(--ol-line)', borderRadius: 10, background: 'var(--ol-surface-2)', minWidth: 0, overflow: 'hidden' }}>
                   <Pill size="sm" tone="outline" style={{ marginBottom: 10 }}>{t('history.rawLabel')}</Pill>
-                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink-2)', whiteSpace: 'pre-wrap' }}>
+                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink-2)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                     {item.rawTranscript || t('history.rawEmpty')}
                   </p>
                 </div>
-                <div style={{ padding: 14, border: '0.5px solid var(--ol-blue)', borderRadius: 10, background: 'var(--ol-blue-soft)' }}>
+                <div style={{ padding: 14, border: '0.5px solid var(--ol-blue)', borderRadius: 10, background: 'var(--ol-blue-soft)', minWidth: 0, overflow: 'hidden' }}>
                   <Pill size="sm" tone="blue" style={{ marginBottom: 10 }}>{MODE_LABEL[item.mode]}</Pill>
-                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink)', whiteSpace: 'pre-line' }}>
+                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                     {item.finalText}
                   </p>
                 </div>
@@ -324,6 +380,96 @@ function errorMessage(error: unknown): string {
   if (typeof error === 'string') return error;
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function WeekChart({ data }: { data: number[] }) {
+  const max = Math.max(...data, 1);
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 86 }}>
+      {data.map((v, i) => {
+        const isToday = i === 6;
+        return (
+          <div key={i} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <div style={{ fontSize: 9.5, color: isToday ? 'var(--ol-blue)' : 'var(--ol-ink-4)', fontWeight: isToday ? 600 : 400 }}>{v}</div>
+            <div
+              style={{
+                width: '100%',
+                height: `${(v / max) * 66}px`,
+                minHeight: 2,
+                borderRadius: 4,
+                background: isToday ? 'var(--ol-blue)' : 'var(--ol-ink)',
+                opacity: v === 0 ? 0.15 : isToday ? 1 : 0.85,
+                transition: 'height 0.18s var(--ol-motion-soft), opacity 0.18s var(--ol-motion-soft)',
+              }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RecentRow({
+  session,
+  modeLabel,
+  onSelect,
+}: {
+  session: DictationSession;
+  modeLabel: Record<PolishMode, string>;
+  onSelect: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button
+      onClick={onSelect}
+      style={{
+        width: '100%',
+        padding: '10px 16px',
+        border: 0,
+        borderBottom: '0.5px solid var(--ol-line-soft)',
+        background: 'transparent',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(58px, auto) minmax(0, 1fr) auto',
+        gap: 10,
+        alignItems: 'start',
+        textAlign: 'left',
+        fontFamily: 'inherit',
+        cursor: 'default',
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, minWidth: 0 }}>
+        <span style={{ fontSize: 11, fontFamily: 'var(--ol-font-mono)', color: 'var(--ol-ink-3)', whiteSpace: 'nowrap' }}>
+          {formatRecentTime(session.createdAt)}
+        </span>
+        <Pill size="sm" tone="default">{modeLabel[session.mode]}</Pill>
+      </div>
+      <div style={{ minWidth: 0, fontSize: 12.5, color: 'var(--ol-ink-2)', whiteSpace: 'pre-line', lineHeight: 1.55, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflowWrap: 'anywhere' }}>
+        {session.finalText.split('\n')[0]}
+      </div>
+      <span style={{ fontSize: 10.5, color: 'var(--ol-ink-4)', fontFamily: 'var(--ol-font-mono)', whiteSpace: 'nowrap' }}>
+        {formatDuration(session.durationMs ?? 0, t)}
+      </span>
+    </button>
+  );
+}
+
+function formatRecentTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (sameDay) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function weekDayLabels(names: string[]): string[] {
+  const today = new Date().getDay();
+  const out: string[] = [];
+  for (let i = 6; i >= 0; i--) {
+    out.push(names[(today - i + 7) % 7]);
+  }
+  return out;
 }
 
 /** 当 session.hasAudioRecording 为 true 时渲染：一个加载按钮 + 拿到字节后切换为

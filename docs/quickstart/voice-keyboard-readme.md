@@ -9,7 +9,7 @@ Listener 语音键盘是一个 BLE 桌面语音输入设备。它用一个可按
 | 电脑系统 | Windows 10 1903+ 或 Windows 11 |
 | 蓝牙 | Bluetooth 4.2+ |
 | USB | USB-C 充电线和可用 USB 电源 |
-| 网络 | 云端 ASR/LLM 需要联网；Demo 模式可无 Key 体验 |
+| 网络 | 云端 ASR/LLM 需要联网；无 Key 时需配置本地 ASR 或补齐服务商凭据 |
 | 设备名 | Windows 蓝牙中显示为 `listener` |
 
 ## 安装
@@ -55,7 +55,7 @@ KEY1-KEY4 不触发语音录音。语音录音键是 EC11 旋钮的按压动作�
 | 搜索不到 `listener` | 充电、重启设备，确认蓝牙已打开 |
 | 配对失败或反复配对 | 删除 Windows 旧配对记录，再从 Listener Type 重新开始配对 |
 | 设备连上但录音没反应 | 确认按的是 EC11 旋钮，不是 KEY1-KEY4 |
-| 有录音但没有文字 | 检查 ASR/API Key、网络，或进入 Demo 模式 |
+| 有录音但没有文字 | 检查 ASR/API Key、网络，或切到已下载的本地 ASR |
 | 软件卡住 | 退出 Listener Type 后重新启动 |
 | 仍无法恢复 | 设置 -> 关于 -> 导出诊断包，并附上安装包哈希和复现步骤 |
 
