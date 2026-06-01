@@ -90,7 +90,7 @@ export function Marketplace() {
   type OAuthPhase =
     | { phase: 'idle' }
     | { phase: 'starting' }
-    | { phase: 'pending'; userCode: string; verificationUri: string; deviceCode: string }
+    | { phase: 'pending'; userCode: string; verificationUri: string; deviceCode: string; intervalMs: number }
     | { phase: 'success'; login: string }
     | { phase: 'error'; message: string };
   const [oauth, setOauth] = useState<OAuthPhase>({ phase: 'idle' });
@@ -403,6 +403,7 @@ export function Marketplace() {
         userCode: start.userCode,
         verificationUri: start.verificationUri,
         deviceCode: start.deviceCode,
+        intervalMs: Math.max(1, start.interval || 5) * 1000,
       });
       // 自动拉起浏览器到 verification_uri；失败不致命，用户可以手动复制点击
       try { await openExternal(start.verificationUri); } catch { /* user can copy manually */ }
@@ -416,7 +417,7 @@ export function Marketplace() {
     if (oauth.phase !== 'pending') return;
     let cancelled = false;
     let timer: number | null = null;
-    let interval = 5_000;
+    let interval = oauth.intervalMs;
     const pendingDeviceCode = oauth.deviceCode;
     const tick = async () => {
       if (cancelled) return;

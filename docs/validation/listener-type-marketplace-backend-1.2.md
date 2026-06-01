@@ -11,6 +11,7 @@
 ## Acceptance
 
 - PASS: GitHub device-flow API integration is covered by `github_oauth` Rust tests for start, poll, pending, slow_down, and refresh grant paths.
+- PASS: Frontend OAuth polling starts from the `interval` returned by GitHub `/login/device/code`, and `slow_down` backs off from that cadence.
 - PASS: Token, optional refresh token, expiry metadata, scope, and login are stored under `CredentialsVault` in the system keychain-backed credential payload.
 - PASS: Upload/like/delete/my marketplace commands call GitHub `/user` through the stored token before backend identity is used.
 - PASS: Expiring tokens are refreshed when GitHub provides refresh metadata; non-expiring tokens are validated through `/user` until GitHub rejects them.
