@@ -761,8 +761,7 @@ pub struct UserPreferences {
     /// Empty means remote marketplace is disabled; local style packs still work.
     #[serde(default)]
     pub marketplace_base_url: String,
-    /// Marketplace dev-mode 模拟登录用户名（GitHub login 风格）。生产换 OAuth token 后此字段废弃。
-    /// 上传 / 点赞需要带这个 header；空时上传被后端 401。
+    /// Marketplace GitHub login used for UI state; OAuth token stays in the OS credential vault.
     #[serde(default)]
     pub marketplace_dev_login: String,
 }

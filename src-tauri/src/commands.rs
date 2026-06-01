@@ -20,13 +20,17 @@ use crate::coordinator::{
     Coordinator, EmbeddedBleWakeRecoverySnapshot, FirmwareWakePolicySnapshot,
 };
 use crate::coordinator_state::SessionPhase;
+use crate::github_oauth::{
+    current_epoch_secs, refresh_token_is_expired, token_needs_refresh, GithubDevicePollStatus,
+    GithubDeviceStartResponse, GithubOAuthClient, GithubOAuthError,
+};
 use crate::marketplace_backend::{
     MarketplaceClient, MarketplaceDetail, MarketplaceListItem, MarketplaceMyPackItem,
 };
 use crate::permissions::{self, PermissionStatus};
 use crate::persistence::{
     sync_style_pack_preferences, CredentialAccount, CredentialsSnapshot, CredentialsVault,
-    PreferencesStore,
+    MarketplaceGithubCredentials, PreferencesStore,
 };
 use crate::polish::{
     http_client_builder_with_proxy, CodexOAuthConfig, CodexOAuthCredentials, CodexOAuthLLMProvider,
@@ -3427,8 +3431,9 @@ fn _ensure_snapshot_used(_: CredentialsSnapshot) {}
 //
 // 客户端跟 marketplace backend 的 HTTP 客户端封装。Backend URL 走 prefs
 // `marketplace_base_url`（默认 http://127.0.0.1:8090 开发；生产用户填 https://api.<domain>）。
-// dev-mode auth：用户在 Settings 填 `marketplace_dev_login`（GitHub 风格 username），
-// 后续 OAuth 接入时换成 token 字段。
+// auth：GitHub OAuth device flow token 写入系统 credential vault；上传、点赞、
+// 撤回和“我的发布”在调用 marketplace backend 前先用 token 调 GitHub /user
+// 取得当前 login，再沿用 v1 backend 的 X-Dev-User 身份头。
 //
 // IPC -> REST contract v1:
 // - marketplace_list      GET    /styles?q=&sort=&limit=
@@ -3483,8 +3488,73 @@ fn optional_marketplace_client_from_prefs(
         .transpose()
 }
 
-fn marketplace_dev_user(prefs: &UserPreferences) -> String {
-    prefs.marketplace_dev_login.trim().to_string()
+async fn marketplace_authenticated_github_login() -> Result<String, String> {
+    let client = GithubOAuthClient::production().map_err(|error| error.to_string())?;
+    marketplace_authenticated_github_login_with_client(&client).await
+}
+
+async fn marketplace_authenticated_github_login_with_client(
+    client: &GithubOAuthClient,
+) -> Result<String, String> {
+    let mut credentials = CredentialsVault::marketplace_github_credentials()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "未登录：请先用 GitHub OAuth 登录风格市场".to_string())?;
+
+    let now = current_epoch_secs();
+    if token_needs_refresh(&credentials, now) {
+        let client_id = get_github_oauth_client_id()?;
+        credentials = refresh_marketplace_github_credentials(client, &client_id, credentials, now)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+
+    let user = client
+        .authenticated_user(&credentials.access_token)
+        .await
+        .map_err(|error| format!("GitHub 用户信息验证失败：{error}"))?;
+
+    if credentials.login != user.login {
+        credentials.login = user.login.clone();
+        CredentialsVault::set_marketplace_github_credentials(credentials)
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(user.login)
+}
+
+async fn refresh_marketplace_github_credentials(
+    client: &GithubOAuthClient,
+    client_id: &str,
+    credentials: MarketplaceGithubCredentials,
+    now_epoch_secs: i64,
+) -> Result<MarketplaceGithubCredentials, GithubOAuthError> {
+    let Some(refresh_token) = credentials
+        .refresh_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    else {
+        return Err(GithubOAuthError::RefreshUnavailable);
+    };
+    if refresh_token_is_expired(&credentials, now_epoch_secs) {
+        return Err(GithubOAuthError::RefreshExpired);
+    }
+
+    let token = client
+        .refresh_access_token(client_id, refresh_token)
+        .await?;
+    let login = credentials.login;
+    let mut refreshed = token.into_credentials(login, current_epoch_secs());
+    if refreshed.refresh_token.is_none() {
+        refreshed.refresh_token = Some(refresh_token.to_string());
+    }
+    if refreshed.refresh_token_expires_at_epoch_secs.is_none() {
+        refreshed.refresh_token_expires_at_epoch_secs =
+            credentials.refresh_token_expires_at_epoch_secs;
+    }
+    CredentialsVault::set_marketplace_github_credentials(refreshed.clone())
+        .map_err(|error| GithubOAuthError::OAuth(error.to_string()))?;
+    Ok(refreshed)
 }
 
 #[tauri::command]
@@ -3579,10 +3649,7 @@ pub async fn marketplace_upload(
     }
     let prefs = coord.prefs().get();
     let client = marketplace_client_from_prefs(&prefs)?;
-    let dev_user = marketplace_dev_user(&prefs);
-    if dev_user.is_empty() {
-        return Err("未登录：先在 Settings 填发布者名字".into());
-    }
+    let github_login = marketplace_authenticated_github_login().await?;
 
     // 拉本地 pack 拿 origin_pack_id —— 装过的 pack 这里有值，
     // backend 据此判同作者就 supersede 原行（新版本），他人就 derivative（独立新 row）。
@@ -3604,7 +3671,7 @@ pub async fn marketplace_upload(
     let _ = std::fs::remove_file(&tmp);
 
     let parsed = client
-        .upload_style_archive(&pack_id, origin_pack_id.as_deref(), bytes, &dev_user)
+        .upload_style_archive(&pack_id, origin_pack_id.as_deref(), bytes, &github_login)
         .await
         .map_err(|error| format!("upload request failed: {error}"))?;
 
@@ -3612,12 +3679,10 @@ pub async fn marketplace_upload(
     // 让用户在同设备上后续编辑能继续走「同作者 supersede」分支，更新自己原创的包。
     if origin_pack_id.is_none() {
         if let Some(remote_id) = parsed.get("id").and_then(|v| v.as_str()) {
-            let prefs2 = coord.prefs().get();
-            let dev_user2 = marketplace_dev_user(&prefs2);
             let _ = coord.style_packs().set_origin(
                 &pack_id,
                 Some(remote_id.to_string()),
-                Some(dev_user2),
+                Some(github_login.clone()),
             );
         }
     }
@@ -3635,12 +3700,9 @@ pub async fn marketplace_like(
     }
     let prefs = coord.prefs().get();
     let client = marketplace_client_from_prefs(&prefs)?;
-    let dev_user = marketplace_dev_user(&prefs);
-    if dev_user.is_empty() {
-        return Err("未登录：先在 Settings 填发布者名字".into());
-    }
+    let github_login = marketplace_authenticated_github_login().await?;
     client
-        .like_style(&pack_id, &dev_user)
+        .like_style(&pack_id, &github_login)
         .await
         .map_err(|error| format!("like request failed: {error}"))
 }
@@ -3657,12 +3719,9 @@ pub async fn marketplace_delete(
     }
     let prefs = coord.prefs().get();
     let client = marketplace_client_from_prefs(&prefs)?;
-    let dev_user = marketplace_dev_user(&prefs);
-    if dev_user.is_empty() {
-        return Err("未登录：先在 Settings 填发布者名字".into());
-    }
+    let github_login = marketplace_authenticated_github_login().await?;
     client
-        .delete_style(&pack_id, &dev_user)
+        .delete_style(&pack_id, &github_login)
         .await
         .map_err(|error| format!("delete request failed: {error}"))
 }
@@ -3674,12 +3733,18 @@ pub async fn marketplace_my_likes(coord: CoordinatorState<'_>) -> Result<Vec<Str
     let Some(client) = optional_marketplace_client_from_prefs(&prefs)? else {
         return Ok(Vec::new());
     };
-    let dev_user = marketplace_dev_user(&prefs);
-    if dev_user.is_empty() {
+    let github_login = match marketplace_authenticated_github_login().await {
+        Ok(login) => login,
+        Err(error) => {
+            log::info!("[marketplace] my-likes skipped: {error}");
+            return Ok(Vec::new());
+        }
+    };
+    if github_login.is_empty() {
         return Ok(Vec::new()); // 未登录就空集合，UI 渲染无红心
     }
     client
-        .my_likes(&dev_user)
+        .my_likes(&github_login)
         .await
         .map_err(|error| format!("my-likes request failed: {error}"))
 }
@@ -3693,21 +3758,28 @@ pub async fn marketplace_my_packs(
     let Some(client) = optional_marketplace_client_from_prefs(&prefs)? else {
         return Ok(Vec::new());
     };
-    let dev_user = marketplace_dev_user(&prefs);
-    if dev_user.is_empty() {
+    let github_login = match marketplace_authenticated_github_login().await {
+        Ok(login) => login,
+        Err(error) => {
+            log::info!("[marketplace] my-packs skipped: {error}");
+            return Ok(Vec::new());
+        }
+    };
+    if github_login.is_empty() {
         return Ok(Vec::new());
     }
     client
-        .my_styles(&dev_user)
+        .my_styles(&github_login)
         .await
         .map_err(|error| format!("my-packs request failed: {error}"))
 }
 
 // ─────────────────────── GitHub OAuth Device Flow (Phase 1) ───────────────────────
 //
-// 客户端直连 GitHub 拿 access_token + login，前端自动把 login 写进
-// prefs.marketplaceDevLogin。Listener Type 后端未上线前，默认不内置 OAuth App，
-// 因此该能力必须由环境变量或未来配置显式开启。
+// Rust 后端直连 GitHub 拿 access_token + login。token 只写入系统
+// credential vault；前端只拿 login 用于展示/兼容现有上传按钮状态。
+// Listener Type 后端未上线前，默认不内置 OAuth App，因此该能力必须由环境变量
+// 或未来配置显式开启。
 //
 // 配置 client_id 的两种方式（OAuth App client_id 非敏感，但必须使用 Listener Type 自有 App）：
 //   1. 生产构建可在下方 GITHUB_OAUTH_CLIENT_ID 常量填 Listener Type 自有值
@@ -3740,48 +3812,14 @@ fn get_github_oauth_client_id() -> Result<String, String> {
         .to_string())
 }
 
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GithubDeviceStartResponse {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    pub interval: u32,
-    pub expires_in: u32,
-}
-
 #[tauri::command]
 pub async fn github_device_flow_start() -> Result<GithubDeviceStartResponse, String> {
     let client_id = get_github_oauth_client_id()?;
-    let client = reqwest::Client::new();
-    let resp = client
-        .post("https://github.com/login/device/code")
-        .header("Accept", "application/json")
-        .header("User-Agent", "Listener Type")
-        .form(&[("client_id", client_id.as_str()), ("scope", "read:user")])
-        .send()
+    let client = GithubOAuthClient::production().map_err(|error| error.to_string())?;
+    client
+        .start_device_flow(&client_id, "read:user")
         .await
-        .map_err(|e| format!("调用 GitHub /login/device/code 失败：{e}"))?;
-    let status = resp.status();
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析 device/code 响应失败：{e}"))?;
-    if !status.is_success() {
-        let err = body["error"].as_str().unwrap_or("unknown_error");
-        let desc = body["error_description"].as_str().unwrap_or("");
-        return Err(format!("GitHub device/code {status} {err}: {desc}"));
-    }
-    Ok(GithubDeviceStartResponse {
-        device_code: body["device_code"].as_str().unwrap_or("").to_string(),
-        user_code: body["user_code"].as_str().unwrap_or("").to_string(),
-        verification_uri: body["verification_uri"]
-            .as_str()
-            .unwrap_or("https://github.com/login/device")
-            .to_string(),
-        interval: body["interval"].as_u64().unwrap_or(5) as u32,
-        expires_in: body["expires_in"].as_u64().unwrap_or(900) as u32,
-    })
+        .map_err(|error| format!("调用 GitHub /login/device/code 失败：{error}"))
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -3798,56 +3836,39 @@ pub async fn github_device_flow_poll(
     device_code: String,
 ) -> Result<GithubDevicePollResult, String> {
     let client_id = get_github_oauth_client_id()?;
-    let client = reqwest::Client::new();
-    let token_resp = client
-        .post("https://github.com/login/oauth/access_token")
-        .header("Accept", "application/json")
-        .header("User-Agent", "Listener Type")
-        .form(&[
-            ("client_id", client_id.as_str()),
-            ("device_code", device_code.as_str()),
-            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-        ])
-        .send()
+    let client = GithubOAuthClient::production().map_err(|error| error.to_string())?;
+    let poll = client
+        .poll_device_flow(&client_id, &device_code)
         .await
-        .map_err(|e| format!("调用 GitHub /login/oauth/access_token 失败：{e}"))?;
-    let body: serde_json::Value = token_resp
-        .json()
-        .await
-        .map_err(|e| format!("解析 access_token 响应失败：{e}"))?;
+        .map_err(|error| format!("调用 GitHub /login/oauth/access_token 失败：{error}"))?;
 
-    if let Some(token) = body["access_token"].as_str() {
-        let user_resp = client
-            .get("https://api.github.com/user")
-            .header("User-Agent", "Listener Type")
-            .header("Accept", "application/vnd.github+json")
-            .bearer_auth(token)
-            .send()
-            .await
-            .map_err(|e| format!("调用 GitHub /user 失败：{e}"))?;
-        let user_body: serde_json::Value = user_resp
-            .json()
-            .await
-            .map_err(|e| format!("解析 /user 响应失败：{e}"))?;
-        let login = user_body["login"].as_str().unwrap_or("").to_string();
-        if login.is_empty() {
+    let token = match poll {
+        GithubDevicePollStatus::Authorized(token) => token,
+        GithubDevicePollStatus::Pending => return Ok(GithubDevicePollResult::Pending),
+        GithubDevicePollStatus::SlowDown => return Ok(GithubDevicePollResult::SlowDown),
+        GithubDevicePollStatus::Expired => {
             return Ok(GithubDevicePollResult::Error {
-                message: "GitHub /user 返回空 login".to_string(),
-            });
+                message: "OAuth 设备码已过期，请重新发起登录".to_string(),
+            })
         }
-        return Ok(GithubDevicePollResult::Authorized { login });
-    }
-
-    let err = body["error"].as_str().unwrap_or("");
-    let msg = match err {
-        "authorization_pending" => return Ok(GithubDevicePollResult::Pending),
-        "slow_down" => return Ok(GithubDevicePollResult::SlowDown),
-        "expired_token" => "OAuth 设备码已过期，请重新发起登录".to_string(),
-        "access_denied" => "你在 GitHub 上拒绝了授权".to_string(),
-        other if !other.is_empty() => format!("OAuth 错误：{other}"),
-        _ => "未知 OAuth 错误（access_token 缺失）".to_string(),
+        GithubDevicePollStatus::AccessDenied => {
+            return Ok(GithubDevicePollResult::Error {
+                message: "你在 GitHub 上拒绝了授权".to_string(),
+            })
+        }
+        GithubDevicePollStatus::Error(message) => {
+            return Ok(GithubDevicePollResult::Error { message })
+        }
     };
-    Ok(GithubDevicePollResult::Error { message: msg })
+
+    let user = client
+        .authenticated_user(&token.access_token)
+        .await
+        .map_err(|error| format!("调用 GitHub /user 失败：{error}"))?;
+    let credentials = token.into_credentials(user.login.clone(), current_epoch_secs());
+    CredentialsVault::set_marketplace_github_credentials(credentials)
+        .map_err(|error| format!("保存 GitHub OAuth token 失败：{error}"))?;
+    Ok(GithubDevicePollResult::Authorized { login: user.login })
 }
 
 #[cfg(test)]

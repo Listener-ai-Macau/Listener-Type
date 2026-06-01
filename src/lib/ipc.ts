@@ -1291,8 +1291,8 @@ export function marketplaceDelete(packId: string): Promise<void> {
 }
 
 // ─────────────────────── GitHub OAuth Device Flow (Phase 1) ───────────────
-// 客户端直连 GitHub OAuth Device Flow 拿 login，自动写进 prefs.marketplaceDevLogin。
-// marketplace backend 不动（继续走 X-Dev-User header；Phase 2 才接 JWT 验证）。
+// Rust 后端直连 GitHub OAuth Device Flow，token 写入系统 credential vault；
+// 前端只拿 login 展示，并写进 prefs.marketplaceDevLogin 维持按钮状态。
 //
 // 后端 Rust 实现：commands.rs:github_device_flow_start / github_device_flow_poll
 // 需要预先配置 GITHUB_OAUTH_CLIENT_ID（OAuth App client_id，非敏感，可硬编码）。
@@ -1312,20 +1312,11 @@ export type GithubDevicePollResult =
   | { kind: 'error'; message: string };
 
 export function githubDeviceFlowStart(): Promise<GithubDeviceStartResponse> {
-  return invokeOrMock<GithubDeviceStartResponse>('github_device_flow_start', undefined, () => ({
-    deviceCode: 'mock-device-code-xxxxxxxx',
-    userCode: 'MOCK-CODE',
-    verificationUri: 'https://github.com/login/device',
-    interval: 5,
-    expiresIn: 900,
-  }));
+  return invokeMarketplace<GithubDeviceStartResponse>('github_device_flow_start');
 }
 
 export function githubDeviceFlowPoll(deviceCode: string): Promise<GithubDevicePollResult> {
-  return invokeOrMock<GithubDevicePollResult>('github_device_flow_poll', { deviceCode }, () => ({
-    kind: 'authorized' as const,
-    login: 'mock-user',
-  }));
+  return invokeMarketplace<GithubDevicePollResult>('github_device_flow_poll', { deviceCode });
 }
 
 // ─────────────────────── Marketplace list 缓存 (sessionStorage) ─────────────

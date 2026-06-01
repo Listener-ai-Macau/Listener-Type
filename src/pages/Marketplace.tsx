@@ -7,9 +7,9 @@
 //   (d) 搜索框 — 顶部 input + server-side ?q=
 //   (e) 按排名自动推荐 — 默认 sort=popular
 //
-// 后端 URL 走 prefs.marketplaceBaseUrl，dev 模式默认 http://127.0.0.1:8090；
+// 后端 URL 走 prefs.marketplaceBaseUrl，默认空表示远端市场禁用；
 // 用户在 Settings 填生产 URL 后客户端自动切换。
-// dev 上传需要 prefs.marketplaceDevLogin（GitHub login 风格）—— 空时上传按钮 disabled。
+// 上传 / 点赞需要 GitHub OAuth；prefs.marketplaceDevLogin 只保留展示与按钮状态。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -425,7 +425,7 @@ export function Marketplace() {
         if (cancelled) return;
         if (res.kind === 'authorized') {
           setOauth({ phase: 'success', login: res.login });
-          // 写入 prefs.marketplaceDevLogin，让后续 X-Dev-User 走真实 GitHub login。
+          // 写入 prefs.marketplaceDevLogin 用于展示与按钮状态；token 只存在系统凭据库。
           try {
             await updatePrefs(current => ({ ...current, marketplaceDevLogin: res.login }));
           } catch (e) {

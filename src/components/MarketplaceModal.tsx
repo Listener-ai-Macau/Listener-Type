@@ -1,7 +1,7 @@
 // MarketplaceModal.tsx — 风格市场弹窗。
 // 跟 SettingsModal 同款 backdrop + 居中卡片。内容直接复用 <Marketplace />。
 // 入口在 Style 页面「风格包」标题右侧，由 Style.tsx 控制 open/close。
-// 顶部 pill 显示当前「登录身份」（dev 模式 = marketplaceDevLogin），未填时引导跳 Settings。
+// 顶部 pill 显示当前 GitHub 登录身份（marketplaceDevLogin），未填时引导跳 Settings。
 
 import { useEffect } from 'react';
 import { Icon } from './Icon';

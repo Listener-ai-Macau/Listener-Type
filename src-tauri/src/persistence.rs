@@ -359,6 +359,8 @@ struct CredsRoot {
     active: CredsActive,
     #[serde(default)]
     providers: CredsProviders,
+    #[serde(default)]
+    marketplace: CredsMarketplace,
 }
 
 fn credsroot_default_version() -> u32 {
@@ -402,6 +404,21 @@ struct CredsProviders {
     asr: HashMap<String, CredsAsrEntry>,
     #[serde(default)]
     llm: HashMap<String, CredsLlmEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+struct CredsMarketplace {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    github: Option<MarketplaceGithubCredentials>,
+}
+
+impl CredsMarketplace {
+    fn is_empty(&self) -> bool {
+        self.github
+            .as_ref()
+            .map(|credentials| credentials.is_empty())
+            .unwrap_or(true)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -511,6 +528,9 @@ fn clean_credentials(root: &CredsRoot) -> CredsRoot {
     let mut cleaned = root.clone();
     cleaned.providers.asr.retain(|_, v| !v.is_empty());
     cleaned.providers.llm.retain(|_, v| !v.is_empty());
+    if cleaned.marketplace.is_empty() {
+        cleaned.marketplace.github = None;
+    }
     cleaned
 }
 
@@ -676,7 +696,7 @@ fn load_legacy_credentials() -> Option<CredsRoot> {
 }
 
 fn legacy_vault_has_credentials(root: &CredsRoot) -> bool {
-    !root.providers.asr.is_empty() || !root.providers.llm.is_empty()
+    !root.providers.asr.is_empty() || !root.providers.llm.is_empty() || !root.marketplace.is_empty()
 }
 
 fn load_legacy_sources_without_migration() -> CredsRoot {
@@ -2241,6 +2261,32 @@ pub struct CredentialsSnapshot {
     pub ark_endpoint: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceGithubCredentials {
+    pub access_token: String,
+    #[serde(default)]
+    pub token_type: String,
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default)]
+    pub login: String,
+    #[serde(default)]
+    pub expires_at_epoch_secs: Option<i64>,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub refresh_token_expires_at_epoch_secs: Option<i64>,
+    #[serde(default)]
+    pub saved_at_epoch_secs: i64,
+}
+
+impl MarketplaceGithubCredentials {
+    pub fn is_empty(&self) -> bool {
+        self.access_token.trim().is_empty()
+    }
+}
+
 /// 凭据存储——系统凭据库；旧 JSON 文件只作为迁移来源。
 pub struct CredentialsVault;
 
@@ -2294,6 +2340,31 @@ impl CredentialsVault {
     pub fn get_active_llm() -> String {
         let _guard = credentials_lock().lock();
         load_credentials().active.llm
+    }
+
+    pub fn marketplace_github_credentials() -> Result<Option<MarketplaceGithubCredentials>> {
+        let _guard = credentials_lock().lock();
+        Ok(load_credentials().marketplace.github)
+    }
+
+    pub fn set_marketplace_github_credentials(
+        credentials: MarketplaceGithubCredentials,
+    ) -> Result<()> {
+        let _guard = credentials_lock().lock();
+        let mut root = load_credentials_for_update()?;
+        root.marketplace.github = if credentials.is_empty() {
+            None
+        } else {
+            Some(credentials)
+        };
+        save_credentials(&root)
+    }
+
+    pub fn remove_marketplace_github_credentials() -> Result<()> {
+        let _guard = credentials_lock().lock();
+        let mut root = load_credentials_for_update()?;
+        root.marketplace.github = None;
+        save_credentials(&root)
     }
 
     pub fn snapshot() -> CredentialsSnapshot {
