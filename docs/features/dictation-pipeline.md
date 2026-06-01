@@ -46,7 +46,7 @@ flowchart LR
 | `--submit-embedded-audio-ble-once [timeout_ms]` | Batch BLE capture: waits for terminal packet, then submits reconstructed PCM. |
 | `--submit-embedded-audio-ble-stream [timeout_ms]` | Streaming BLE capture: forwards notifications as they arrive and finalizes on terminal packet. |
 
-For real hardware smoke, prefer `tools/embedded_audio_replay/run_ble_stream_smoke.ps1`. It starts the CLI with the main window hidden, uses COM3 `~VREC:TOGGLE` to simulate KEY1 around the second TTS playback, and saves firmware serial logs. Add `-VerifyHistory` for P13.3 product-chain acceptance so the script checks that the history entry includes embedded BLE audio stats; add `-VerifyInsertion` only when the run should open a temporary Notepad target for automated cursor insertion checking. Manual key presses are only needed when validating the physical button itself.
+For real hardware smoke, prefer `tools/embedded_audio_replay/run_ble_stream_smoke.ps1`. It starts the CLI with the main window hidden, uses COM3 `~VREC:TOGGLE` to simulate the EC11 recording key around the second TTS playback, and saves firmware serial logs. Add `-VerifyHistory` for P13.3 product-chain acceptance so the script checks that the history entry includes embedded BLE audio stats; add `-VerifyInsertion` only when the run should open a temporary Notepad target for automated cursor insertion checking. Manual key presses are only needed when validating the physical button itself.
 
 ## Verification
 

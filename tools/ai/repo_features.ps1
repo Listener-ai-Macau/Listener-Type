@@ -38,6 +38,7 @@ function New-FeatureSnapshot {
             "ASR providers: Volcengine streaming, OpenAI batch, Apple Speech, Bailian realtime, macOS Qwen local, and Windows Foundry Local Whisper.",
             "Text pipeline: coordinator-driven dictation, correction, polish, vocabulary hotwords, translation, QA selection ask, and insertion.",
             "Windows insertion: direct/clipboard fallback paths are default; optional native TSF IME bridge remains available for explicit validation.",
+            "Device controls: Listener keyboard KEY1-KEY4 fallback shortcuts map to configurable safe actions such as open app, switch style, translation, selection ask, paste template, or send shortcut.",
             "Release shell: Tauri updater, background update gate, tray menu, autostart, single-instance behavior, and package metadata.",
             "Settings and diagnostics: shortcuts, provider credentials in OS keyring/local storage, language, permissions, advanced logs, diagnostic export, dark mode, and device health.",
             "Developer/product tools: embedded audio file/BLE CLI replay, firmware OTA package/preflight validation, BLE stream smoke, Foundry runtime probes, and updater manifest checks."
@@ -48,8 +49,10 @@ function New-FeatureSnapshot {
             [ordered]@{ path = "src/components/AutoUpdate*.tsx"; purpose = "Manual/background update UI and gate." },
             [ordered]@{ path = "src/pages/settings/RecordingSection.tsx"; purpose = "Recording mode and input-source settings." },
             [ordered]@{ path = "src/components/EmbeddedBleStatusPanel.tsx"; purpose = "Listener BLE connection and device health UI." },
+            [ordered]@{ path = "src/pages/settings/ShortcutsSection.tsx"; purpose = "Desktop and Listener device key shortcut/action settings." },
             [ordered]@{ path = "src/pages/settings/ProvidersSection.tsx"; purpose = "Cloud and local provider selection, credential setup, and model settings." },
             [ordered]@{ path = "src-tauri/src/coordinator.rs"; purpose = "Backend dictation orchestration and state transitions." },
+            [ordered]@{ path = "src-tauri/src/shortcut_dispatch.rs"; purpose = "Safe desktop shortcut dispatch for configured device-key actions." },
             [ordered]@{ path = "src-tauri/src/recorder.rs"; purpose = "Local microphone capture." },
             [ordered]@{ path = "src-tauri/src/audio_mute.rs"; purpose = "Optional system audio mute behavior while recording." },
             [ordered]@{ path = "src-tauri/src/embedded_ble.rs"; purpose = "Windows BLE discovery, connection, and subscription handling." },

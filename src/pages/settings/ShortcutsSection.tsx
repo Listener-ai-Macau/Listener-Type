@@ -2,7 +2,7 @@
 
 import { useTranslation } from 'react-i18next';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
-import { defaultQaShortcut } from '../../lib/hotkey';
+import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from '../../lib/hotkey';
 import {
   setDictationHotkey,
   setOpenAppHotkey,
@@ -10,9 +10,37 @@ import {
   setSwitchStyleHotkey,
   setTranslationHotkey,
 } from '../../lib/ipc';
+import type {
+  DeviceCustomKeyAction,
+  DeviceCustomKeyId,
+  DeviceCustomKeyMapping,
+  ShortcutBinding,
+} from '../../lib/types';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Card } from '../_atoms';
-import { SettingRow } from './shared';
+import { inputStyle, SettingRow } from './shared';
+
+const DEVICE_KEYS: Array<{ id: DeviceCustomKeyId; fallback: string }> = [
+  { id: 'key1', fallback: 'F13' },
+  { id: 'key2', fallback: 'F14' },
+  { id: 'key3', fallback: 'F15' },
+  { id: 'key4', fallback: 'F16' },
+];
+
+const DEVICE_KEY_ACTIONS: DeviceCustomKeyAction[] = [
+  'disabled',
+  'openApp',
+  'switchStyle',
+  'translation',
+  'selectionAsk',
+  'pasteTemplate',
+  'sendShortcut',
+];
+
+const fallbackShortcut = (): ShortcutBinding => ({
+  primary: 'K',
+  modifiers: defaultAppShortcutModifiers(),
+});
 
 export function ShortcutsSection() {
   const { t } = useTranslation();
@@ -105,6 +133,32 @@ export function ShortcutsSection() {
           }}
         />
       </SettingRow>
+      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 10, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
+        {t('settings.deviceKeys.title')}
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 2 }}>
+        {t('settings.deviceKeys.desc')}
+      </div>
+      {DEVICE_KEYS.map(({ id, fallback }) => (
+        <SettingRow
+          key={id}
+          label={t('settings.deviceKeys.keyLabel', { key: id.toUpperCase() })}
+          desc={t('settings.deviceKeys.fallback', { fallback })}
+        >
+          <DeviceKeyMappingControl
+            mapping={prefs.deviceCustomKeys[id]}
+            onChange={async mapping => {
+              await savePrefs(current => ({
+                ...current,
+                deviceCustomKeys: {
+                  ...current.deviceCustomKeys,
+                  [id]: mapping,
+                },
+              }));
+            }}
+          />
+        </SettingRow>
+      ))}
       {readonlyRows.map(([k, v]) => (
         <SettingRow key={k} label={k}>
           <kbd style={{
@@ -118,5 +172,72 @@ export function ShortcutsSection() {
         </SettingRow>
       ))}
     </Card>
+  );
+}
+
+function DeviceKeyMappingControl({
+  mapping,
+  onChange,
+}: {
+  mapping: DeviceCustomKeyMapping;
+  onChange: (mapping: DeviceCustomKeyMapping) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const updateAction = async (action: DeviceCustomKeyAction) => {
+    await onChange({
+      ...mapping,
+      action,
+      shortcut: action === 'sendShortcut' ? mapping.shortcut ?? fallbackShortcut() : mapping.shortcut,
+    });
+  };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(130px, 165px) minmax(0, 1fr)', gap: 8, width: '100%', alignItems: 'start' }}>
+      <select
+        value={mapping.action}
+        onChange={event => void updateAction(event.target.value as DeviceCustomKeyAction)}
+        style={{ ...inputStyle, maxWidth: 'none' }}
+      >
+        {DEVICE_KEY_ACTIONS.map(action => (
+          <option key={action} value={action}>
+            {t(`settings.deviceKeys.actions.${action}`)}
+          </option>
+        ))}
+      </select>
+      <div style={{ minWidth: 0 }}>
+        {mapping.action === 'pasteTemplate' && (
+          <input
+            value={mapping.pasteTemplate}
+            onChange={event => {
+              const pasteTemplate = event.target.value;
+              void onChange({ ...mapping, pasteTemplate });
+            }}
+            placeholder={t('settings.deviceKeys.templatePlaceholder')}
+            style={{ ...inputStyle, maxWidth: 'none' }}
+          />
+        )}
+        {mapping.action === 'sendShortcut' && (
+          <ShortcutRecorder
+            value={mapping.shortcut ?? fallbackShortcut()}
+            alignRecordButton
+            onSave={async shortcut => {
+              await onChange({ ...mapping, shortcut });
+            }}
+          />
+        )}
+        {mapping.action !== 'pasteTemplate' && mapping.action !== 'sendShortcut' && (
+          <span style={{ display: 'inline-flex', minHeight: 32, alignItems: 'center', padding: '0 10px', borderRadius: 6, background: 'var(--ol-surface-2)', border: '0.5px solid var(--ol-line-strong)', fontSize: 12, color: 'var(--ol-ink-3)' }}>
+            {mapping.action === 'disabled'
+              ? t('settings.deviceKeys.noop')
+              : t('settings.deviceKeys.actionReady')}
+          </span>
+        )}
+        {mapping.action === 'sendShortcut' && mapping.shortcut && (
+          <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', marginTop: 4 }}>
+            {formatComboLabel(mapping.shortcut)}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

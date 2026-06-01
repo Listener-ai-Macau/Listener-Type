@@ -381,6 +381,8 @@ export interface UserPreferences {
   switchStyleHotkey: ShortcutBinding;
   /** 打开 Listener Type 主窗口的全局快捷键。 */
   openAppHotkey: ShortcutBinding;
+  /** 设备 KEY1-KEY4 的动作映射。固件 fallback 入口为 F13-F16。 */
+  deviceCustomKeys: DeviceCustomKeys;
   /** 本地 Qwen3-ASR 当前激活的模型 id。仅在 activeAsrProvider === 'local-qwen3' 时有意义。 */
   localAsrActiveModel: string;
   /** 本地模型下载源镜像（'huggingface' / 'hf-mirror'）。 */
@@ -432,6 +434,30 @@ export interface UserPreferences {
   marketplaceBaseUrl: string;
   /** Marketplace dev-mode 模拟登录用户名（GitHub login 风格）。生产换 OAuth token 后此字段废弃。 */
   marketplaceDevLogin: string;
+}
+
+export type DeviceCustomKeyId = 'key1' | 'key2' | 'key3' | 'key4';
+
+export type DeviceCustomKeyAction =
+  | 'disabled'
+  | 'openApp'
+  | 'switchStyle'
+  | 'translation'
+  | 'selectionAsk'
+  | 'pasteTemplate'
+  | 'sendShortcut';
+
+export interface DeviceCustomKeyMapping {
+  action: DeviceCustomKeyAction;
+  pasteTemplate: string;
+  shortcut: ShortcutBinding | null;
+}
+
+export interface DeviceCustomKeys {
+  key1: DeviceCustomKeyMapping;
+  key2: DeviceCustomKeyMapping;
+  key3: DeviceCustomKeyMapping;
+  key4: DeviceCustomKeyMapping;
 }
 
 export interface MarketplaceListItem {

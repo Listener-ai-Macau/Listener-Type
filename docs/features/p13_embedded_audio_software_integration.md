@@ -4,6 +4,8 @@
 协议：共享 `C:\Users\Billy\Desktop\listener\docs\ai_collaboration_protocol.md`
 归档状态：`docs/features/p13_status.json`（P13 已完成，JSON 保留执行证据）
 
+2026-06-01 按键口径说明：P13 执行时的硬件验证证据沿用了当时的 `KEY1` 录音键说法；现行产品方案已收敛为 EC11 旋钮按压负责录音，`KEY1`-`KEY4` 是自定义动作键。本文保留历史证据，但活跃验收和用户文档应使用 EC11 录音键口径。
+
 ## 目标
 
 完成嵌入式 BLE 音频从设备到桌面端听写的完整产品化，包括 batch 基线跑通和流式 ASR ingest 改造。
@@ -58,7 +60,7 @@ session_stop   -> send last frame / end_session / await final
 | 5 | ASR 链路跑通（火山引擎） | Listener-Type | 软件 baseline 转写通过 |
 | 6 | P1-P10 固件回归 | 固件 | `--fail-on-warning` 10/10 pass |
 | 7 | Listener-Type 前端改动收口 | Listener-Type | `npm run build` + `cargo check` 通过 |
-| 8 | 端到端集成验证 | 固件 + Listener-Type | KEY1 → BLE → ASR → 文本完整闭环 |
+| 8 | 端到端集成验证 | 固件 + Listener-Type | EC11 录音键 → BLE → ASR → 文本完整闭环 |
 | 9 | 识别准确度验证 | Listener-Type | seeded 多句 CER 统计，简繁归一 |
 | 10 | 固件 master 推送 origin | 固件 | 推送前审核 gate 通过后 push |
 | 11 | Listener-Type 分支推送 origin | Listener-Type | 推送前审核 gate 通过后 push |
@@ -77,7 +79,7 @@ session_stop   -> send last frame / end_session / await final
 | 3.4 | coordinator 流式嵌入式 dictation | Listener-Type | S3 | `session_start` 创建 ASR consumer，`audio_data` 到一包推一包，`session_stop` 后等待 final text | `coordinator/dictation.rs` | 等 3.1/3.2 接口稳定；避免与 2.3 同改 `dictation.rs` |
 | 3.5 | cancel/error/link_lost 流式收尾 | Listener-Type | S4 | cancel/error/link_lost 后 coordinator 回 Idle，不留下 Recording/ASR 资源 | `dictation.rs`, `embedded_ble.rs` | 等 3.4 主路径后接 |
 | 3.6 | batch/debug 入口兼容回归 + 文档 | 固件 + Listener-Type | S5 | `submit_embedded_audio_file`、`submit_embedded_audio_notifications`、batch BLE once 不回归；`!docs/features/` 反映流式架构 | 测试、文档 | 可在 3.1/3.2 后部分启动，最终等 3.4/3.5 |
-| 3.7 | 真实设备流式 smoke | 固件 + Listener-Type | HW | KEY1 录音期间 audio_data 持续送 ASR，停止后输出 final text | COM3/BLE 资源锁 | 后置；需要硬件锁，不和软件并行段抢资源 |
+| 3.7 | 真实设备流式 smoke | 固件 + Listener-Type | HW | EC11 录音期间 audio_data 持续送 ASR，停止后输出 final text | COM3/BLE 资源锁 | 后置；需要硬件锁，不和软件并行段抢资源 |
 
 推荐认领顺序：
 
@@ -94,7 +96,7 @@ session_stop   -> send last frame / end_session / await final
 
 | 编号 | 场景 | 通过标准 |
 |---|---|---|
-| P13.1 | BLE host adapter smoke | KEY1 触发后软件端收到完整 session |
+| P13.1 | BLE host adapter smoke | EC11 触发后软件端收到完整 session |
 | P13.2 | ASR 转写 | 嵌入式 PCM → raw transcript |
 | P13.3 | 产品链路 | 润色/插入/历史记录，记录 session stats |
 | P13.4 | cancel/error | session_cancel/error/断链后软件回到 Idle |
@@ -108,7 +110,7 @@ session_stop   -> send last frame / end_session / await final
 | S-BLE-1 | 软件 replay 流式路径 | replay start/audio/stop 可进入 ASR，最终文本与 batch 路径一致或接近 |
 | S-BLE-2 | cancel/error | cancel/error 后 coordinator 回 Idle，不留下 Recording |
 | S-BLE-3 | batch 兼容 | 现有 batch 入口不回归 |
-| S-BLE-4 | 真实 KEY1 smoke | 设备 KEY1 开始后 audio_data 持续送 ASR；停止后输出 final text |
+| S-BLE-4 | 真实 EC11 recording smoke | 设备 EC11 录音键开始后 audio_data 持续送 ASR；停止后输出 final text |
 | S-BLE-5 | 固件回归 | P1-P10 realistic `--fail-on-warning` 不回归 |
 
 ## 已验证记录
@@ -117,11 +119,11 @@ session_stop   -> send last frame / end_session / await final
 - P13.2 火山 ASR baseline：直连火山 provider 通过
 - P13.2 真实 BLE + 火山：407/407 包零丢包，声学削顶导致空 transcript
 - P13.6 固件回归：realistic + `--fail-on-warning`，10/10 pass
-- P13.3.7 真实 KEY1 流式 smoke：BLE notify subscription 成功，KEY1 启动 embedded session，Volcengine ASR 返回 final text `这是一段新的合成语音，用来检查火山识别和蓝牙。`
+- P13.3.7 真实录音键流式 smoke（历史记录称 KEY1，现行口径为 EC11）：BLE notify subscription 成功，录音键启动 embedded session，Volcengine ASR 返回 final text `这是一段新的合成语音，用来检查火山识别和蓝牙。`
 - P13.3.7 CLI 收口：`pcm_bytes=262080`，`missing_packets=138`；下游 LLM 401 属于 polish/agent 凭据问题，不计入 BLE -> ASR 验收。
 
 ## 完成结论
 
 - P13 batch 基线和流式 ASR ingest 均已完成。
 - P13 当前无活跃阻塞项。
-- `missing_packets=138` 是真实流式 smoke 中记录到的尾段 gap 注意事项；验收口径是 BLE notify 订阅、真实 KEY1 session、ASR final text 和 CLI 正常完成，均已满足。
+- `missing_packets=138` 是真实流式 smoke 中记录到的尾段 gap 注意事项；验收口径是 BLE notify 订阅、真实录音键 session（历史记录称 KEY1，现行口径为 EC11）、ASR final text 和 CLI 正常完成，均已满足。

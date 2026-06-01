@@ -34,6 +34,7 @@ mod qa_hotkey;
 mod recorder;
 mod selection;
 mod shortcut_binding;
+mod shortcut_dispatch;
 mod types;
 mod unicode_keystroke;
 mod windows_ime_ipc;
@@ -429,6 +430,7 @@ pub fn run() {
                 coordinator.start_translation_hotkey_listener();
                 coordinator.start_switch_style_hotkey_listener();
                 coordinator.start_open_app_hotkey_listener();
+                coordinator.start_device_custom_key_hotkey_listeners();
             }
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => show_main_window(app),
@@ -449,6 +451,7 @@ pub fn run() {
                 coordinator.stop_translation_hotkey_listener();
                 coordinator.stop_switch_style_hotkey_listener();
                 coordinator.stop_open_app_hotkey_listener();
+                coordinator.stop_device_custom_key_hotkey_listeners();
             }
             _ => {}
         });

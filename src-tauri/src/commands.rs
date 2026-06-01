@@ -33,8 +33,9 @@ use crate::polish::{
 use crate::recorder::{AudioConsumer, Recorder};
 use crate::types::{
     builtin_style_pack_id, default_active_style_pack_id, ChineseScriptPreference, ComboBinding,
-    CorrectionRule, CredentialsStatus, DictationSession, DictionaryEntry, HotkeyCapability,
-    HotkeyStatus, OutputLanguagePreference, PolishMode, ShortcutBinding, StylePack, StylePackKind,
+    CorrectionRule, CredentialsStatus, DeviceCustomKeyAction, DeviceCustomKeyMapping,
+    DeviceCustomKeys, DictationSession, DictionaryEntry, HotkeyCapability, HotkeyStatus,
+    OutputLanguagePreference, PolishMode, ShortcutBinding, StylePack, StylePackKind,
     StylePackRuntimeDiagnostics, StyleSystemPrompts, UpdateChannel, UserPreferences,
     VocabPresetStore, WindowsImeStatus,
 };
@@ -103,6 +104,7 @@ trait SettingsWriter {
     fn refresh_translation_hotkey(&self);
     fn refresh_switch_style_hotkey(&self);
     fn refresh_open_app_hotkey(&self);
+    fn refresh_device_custom_key_hotkeys(&self);
 }
 
 impl SettingsWriter for Coordinator {
@@ -132,6 +134,10 @@ impl SettingsWriter for Coordinator {
 
     fn refresh_open_app_hotkey(&self) {
         self.update_open_app_hotkey_binding();
+    }
+
+    fn refresh_device_custom_key_hotkeys(&self) {
+        self.update_device_custom_key_hotkey_bindings();
     }
 }
 
@@ -163,6 +169,10 @@ impl<T: SettingsWriter + ?Sized> SettingsWriter for Arc<T> {
     fn refresh_open_app_hotkey(&self) {
         (**self).refresh_open_app_hotkey();
     }
+
+    fn refresh_device_custom_key_hotkeys(&self) {
+        (**self).refresh_device_custom_key_hotkeys();
+    }
 }
 
 fn persist_settings<T: SettingsWriter>(
@@ -171,6 +181,7 @@ fn persist_settings<T: SettingsWriter>(
 ) -> Result<(), String> {
     sync_dictation_hotkey_legacy_fields(&mut prefs);
     reject_hotkey_collisions(&prefs)?;
+    validate_device_custom_keys(&prefs.device_custom_keys)?;
     coord.write_settings(prefs)?;
     coord.refresh_dictation_hotkey();
     coord.refresh_qa_hotkey();
@@ -178,6 +189,7 @@ fn persist_settings<T: SettingsWriter>(
     coord.refresh_translation_hotkey();
     coord.refresh_switch_style_hotkey();
     coord.refresh_open_app_hotkey();
+    coord.refresh_device_custom_key_hotkeys();
     Ok(())
 }
 
@@ -2409,6 +2421,34 @@ fn reject_hotkey_collisions(prefs: &UserPreferences) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_device_custom_keys(keys: &DeviceCustomKeys) -> Result<(), String> {
+    for mapping in [&keys.key1, &keys.key2, &keys.key3, &keys.key4] {
+        validate_device_custom_key_mapping(mapping)?;
+    }
+    Ok(())
+}
+
+fn validate_device_custom_key_mapping(mapping: &DeviceCustomKeyMapping) -> Result<(), String> {
+    if mapping.action != DeviceCustomKeyAction::SendShortcut {
+        return Ok(());
+    }
+    let shortcut = mapping
+        .shortcut
+        .as_ref()
+        .ok_or_else(|| "设备自定义键的快捷键动作缺少按键绑定".to_string())?;
+    crate::shortcut_binding::validate_binding(shortcut).map_err(|e| e.to_string())?;
+    reject_modifier_only_action_shortcut(shortcut)?;
+    if shortcut.modifiers.is_empty()
+        && matches!(
+            shortcut.primary.trim().to_ascii_uppercase().as_str(),
+            "F13" | "F14" | "F15" | "F16"
+        )
+    {
+        return Err("设备自定义键不能转发为 F13-F16，避免重复触发自身".into());
+    }
+    Ok(())
+}
+
 fn reject_dictation_translation_hotkey_overlap(
     dictation: &ShortcutBinding,
     translation: &ShortcutBinding,
@@ -3944,8 +3984,9 @@ mod tests {
     use crate::persistence::CredentialsSnapshot;
     use crate::polish::ProviderProxyConfig;
     use crate::types::{
-        ComboBinding, DictationSession, HotkeyBinding, HotkeyMode, HotkeyTrigger, InsertStatus,
-        PolishMode, ShortcutBinding, UserPreferences,
+        ComboBinding, DeviceCustomKeyAction, DeviceCustomKeyMapping, DictationSession,
+        HotkeyBinding, HotkeyMode, HotkeyTrigger, InsertStatus, PolishMode, ShortcutBinding,
+        UserPreferences,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -4116,6 +4157,7 @@ mod tests {
         dictation_refreshes: Mutex<u32>,
         qa_refreshes: Mutex<u32>,
         combo_refreshes: Mutex<u32>,
+        device_key_refreshes: Mutex<u32>,
     }
 
     fn snapshot() -> CredentialsSnapshot {
@@ -4561,6 +4603,9 @@ mod tests {
         fn refresh_translation_hotkey(&self) {}
         fn refresh_switch_style_hotkey(&self) {}
         fn refresh_open_app_hotkey(&self) {}
+        fn refresh_device_custom_key_hotkeys(&self) {
+            *self.device_key_refreshes.lock().unwrap() += 1;
+        }
     }
 
     #[test]
@@ -4701,6 +4746,38 @@ mod tests {
         assert_eq!(*writer.dictation_refreshes.lock().unwrap(), 1);
         assert_eq!(*writer.qa_refreshes.lock().unwrap(), 1);
         assert_eq!(*writer.combo_refreshes.lock().unwrap(), 1);
+        assert_eq!(*writer.device_key_refreshes.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn validate_device_shortcut_rejects_self_triggering_fallback() {
+        let mapping = DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SendShortcut,
+            shortcut: Some(ShortcutBinding {
+                primary: "F13".into(),
+                modifiers: vec![],
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            super::validate_device_custom_key_mapping(&mapping),
+            Err("设备自定义键不能转发为 F13-F16，避免重复触发自身".into())
+        );
+    }
+
+    #[test]
+    fn validate_device_shortcut_accepts_modified_shortcut() {
+        let mapping = DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SendShortcut,
+            shortcut: Some(ShortcutBinding {
+                primary: "K".into(),
+                modifiers: vec!["ctrl".into(), "shift".into()],
+            }),
+            ..Default::default()
+        };
+
+        assert!(super::validate_device_custom_key_mapping(&mapping).is_ok());
     }
 
     #[test]
