@@ -320,14 +320,16 @@ mod windows_ble {
     use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
     use std::time::{Duration, Instant};
 
-    use windows::core::{GUID, HSTRING};
+    use windows::core::{IInspectable, GUID, HSTRING};
     use windows::Devices::Bluetooth::GenericAttributeProfile::{
         GattCharacteristic, GattCharacteristicProperties,
         GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
-        GattDeviceService, GattSession, GattSessionStatus, GattValueChangedEventArgs,
-        GattWriteOption, GattWriteResult,
+        GattDeviceService, GattSession, GattSessionStatus, GattSessionStatusChangedEventArgs,
+        GattValueChangedEventArgs, GattWriteOption, GattWriteResult,
     };
-    use windows::Devices::Bluetooth::{BluetoothCacheMode, BluetoothLEDevice};
+    use windows::Devices::Bluetooth::{
+        BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
+    };
     use windows::Devices::Enumeration::{DeviceAccessStatus, DeviceInformation};
     use windows::Foundation::{
         AsyncStatus, EventRegistrationToken, IAsyncOperation, TypedEventHandler,
@@ -368,6 +370,11 @@ mod windows_ble {
     const OTA_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
     const OTA_REQUIRED_DATA_CHUNK_BYTES: usize = 500;
+
+    enum BleCaptureSignal {
+        Notification(Vec<u8>),
+        Disconnected(String),
+    }
 
     pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
         let mut notifications = Vec::new();
@@ -514,13 +521,14 @@ mod windows_ble {
         let capture_id = capture_guard.session_id();
         let target = open_notify_target()?;
         let characteristic = target.characteristic.clone();
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (tx, rx) = mpsc::channel::<BleCaptureSignal>();
+        let notification_tx = tx.clone();
         let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
             move |_sender, args| {
                 if let Some(args) = args {
                     if let Ok(buffer) = args.CharacteristicValue() {
                         if let Ok(bytes) = buffer_to_vec(&buffer) {
-                            let _ = tx.send(bytes);
+                            let _ = notification_tx.send(BleCaptureSignal::Notification(bytes));
                         }
                     }
                 }
@@ -534,6 +542,24 @@ mod windows_ble {
             .map_err(|err| format!("BLE ValueChanged handler registration failed: {err}"))?;
         cleanup.set_token(token);
         log::info!("[embedded-ble] capture #{capture_id}: ValueChanged handler registered");
+        let connection_token = cleanup.target.device.as_ref().and_then(|device| {
+            register_device_connection_status_handler(capture_id, device, tx.clone())
+        });
+        if let Some(token) = connection_token {
+            cleanup.set_connection_status_token(token);
+        }
+        let session_token = cleanup.target.session.as_ref().and_then(|session| {
+            register_gatt_session_status_handler(capture_id, session, tx.clone())
+        });
+        if let Some(token) = session_token {
+            cleanup.set_session_status_token(token);
+        }
+        #[cfg(debug_assertions)]
+        register_validation_disconnect_injection_handler(
+            capture_id,
+            tx.clone(),
+            Arc::clone(&cancel_requested),
+        );
 
         log::info!("[embedded-ble] capture #{capture_id}: resetting notify CCCD before enable");
         match write_cccd_with_timeout(
@@ -600,8 +626,8 @@ mod windows_ble {
                 .or_else(|| deadline.map(|deadline| deadline.saturating_duration_since(now)))
                 .unwrap_or(RECEIVE_POLL_INTERVAL)
                 .min(RECEIVE_POLL_INTERVAL);
-            let notification = match rx.recv_timeout(receive_timeout) {
-                Ok(notification) => notification,
+            let signal = match rx.recv_timeout(receive_timeout) {
+                Ok(signal) => signal,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
                     if cancel_requested.load(Ordering::SeqCst) {
@@ -630,6 +656,14 @@ mod windows_ble {
                     ));
                 }
             };
+            let notification = match signal {
+                BleCaptureSignal::Notification(notification) => notification,
+                BleCaptureSignal::Disconnected(reason) => {
+                    log::warn!("[embedded-ble] capture #{capture_id}: {reason}");
+                    cleanup.disable_notify();
+                    return Err(reason);
+                }
+            };
             let terminal = super::is_terminal_notification(&notification);
             let local_event = collector.handle_notification(&notification).ok();
             on_event(crate::embedded_ble::BleNotificationEvent {
@@ -656,6 +690,146 @@ mod windows_ble {
             }
             if collector.terminal_received() && stop_drain_deadline.is_some() {
                 stop_drain_deadline = Some(Instant::now() + super::STOP_DRAIN_TIMEOUT);
+            }
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn register_validation_disconnect_injection_handler(
+        capture_id: u64,
+        tx: mpsc::Sender<BleCaptureSignal>,
+        cancel_requested: Arc<AtomicBool>,
+    ) {
+        let Ok(path) = std::env::var("LISTENER_TYPE_BLE_VALIDATION_DISCONNECT_SIGNAL_FILE") else {
+            return;
+        };
+        let path = path.trim().to_string();
+        if path.is_empty() {
+            return;
+        }
+        log::warn!(
+            "[embedded-ble] capture #{capture_id}: validation disconnect injection armed path={path}"
+        );
+        let _ = std::thread::Builder::new()
+            .name(format!("listener-ble-disconnect-inject-{capture_id}"))
+            .spawn(move || {
+                let path = std::path::PathBuf::from(path);
+                while !cancel_requested.load(Ordering::SeqCst) {
+                    if path.exists() {
+                        log::warn!(
+                            "[embedded-ble] capture #{capture_id}: validation disconnect injection triggered"
+                        );
+                        let _ = tx.send(BleCaptureSignal::Disconnected(
+                            "BLE validation injected disconnect through notify wait; transport_not_ready".to_string(),
+                        ));
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            });
+    }
+
+    fn register_device_connection_status_handler(
+        capture_id: u64,
+        device: &BluetoothLEDevice,
+        tx: mpsc::Sender<BleCaptureSignal>,
+    ) -> Option<EventRegistrationToken> {
+        if let Ok(status) = device.ConnectionStatus() {
+            log::info!("[embedded-ble] capture #{capture_id}: device connection status={status:?}");
+            if status == BluetoothConnectionStatus::Disconnected {
+                let _ = tx.send(BleCaptureSignal::Disconnected(format!(
+                    "BLE device connection status changed to Disconnected before notify wait; transport_not_ready"
+                )));
+            }
+        }
+
+        let handler_tx = tx.clone();
+        let handler = TypedEventHandler::<BluetoothLEDevice, IInspectable>::new(
+            move |sender, _args| {
+                if let Some(device) = sender {
+                    match device.ConnectionStatus() {
+                        Ok(status) => {
+                            log::info!(
+                                "[embedded-ble] capture #{capture_id}: device connection status changed to {status:?}"
+                            );
+                            if status == BluetoothConnectionStatus::Disconnected {
+                                let _ = handler_tx.send(BleCaptureSignal::Disconnected(format!(
+                                    "BLE device connection status changed to Disconnected; transport_not_ready"
+                                )));
+                            }
+                        }
+                        Err(err) => {
+                            let _ = handler_tx.send(BleCaptureSignal::Disconnected(format!(
+                                "BLE device connection status read failed after status change: {err}; transport_not_ready"
+                            )));
+                        }
+                    }
+                }
+                Ok(())
+            },
+        );
+
+        match device.ConnectionStatusChanged(&handler) {
+            Ok(token) => {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: device connection status handler registered"
+                );
+                Some(token)
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] capture #{capture_id}: device connection status handler registration failed: {err}"
+                );
+                None
+            }
+        }
+    }
+
+    fn register_gatt_session_status_handler(
+        capture_id: u64,
+        session: &GattSession,
+        tx: mpsc::Sender<BleCaptureSignal>,
+    ) -> Option<EventRegistrationToken> {
+        if let Ok(status) = session.SessionStatus() {
+            log::info!("[embedded-ble] capture #{capture_id}: GATT session status={status:?}");
+            if status != GattSessionStatus::Active {
+                let _ = tx.send(BleCaptureSignal::Disconnected(format!(
+                    "BLE GATT session status changed to {status:?} before notify wait; transport_not_ready"
+                )));
+            }
+        }
+
+        let handler_tx = tx.clone();
+        let handler = TypedEventHandler::<GattSession, GattSessionStatusChangedEventArgs>::new(
+            move |_sender, args| {
+                if let Some(args) = args {
+                    let status = args.Status().ok();
+                    let error = args.Error().ok();
+                    log::info!(
+                        "[embedded-ble] capture #{capture_id}: GATT session status changed status={status:?} error={error:?}"
+                    );
+                    if status.is_some_and(|status| status != GattSessionStatus::Active) {
+                        let _ = handler_tx.send(BleCaptureSignal::Disconnected(format!(
+                            "BLE GATT session status changed to {status:?} error={error:?}; transport_not_ready"
+                        )));
+                    }
+                }
+                Ok(())
+            },
+        );
+
+        match session.SessionStatusChanged(&handler) {
+            Ok(token) => {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: GATT session status handler registered"
+                );
+                Some(token)
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] capture #{capture_id}: GATT session status handler registration failed: {err}"
+                );
+                None
             }
         }
     }
@@ -2271,6 +2445,8 @@ mod windows_ble {
         capture_id: u64,
         target: OpenNotifyTarget,
         token: Option<EventRegistrationToken>,
+        connection_status_token: Option<EventRegistrationToken>,
+        session_status_token: Option<EventRegistrationToken>,
         notify_disabled: bool,
     }
 
@@ -2280,12 +2456,22 @@ mod windows_ble {
                 capture_id,
                 target,
                 token: None,
+                connection_status_token: None,
+                session_status_token: None,
                 notify_disabled: false,
             }
         }
 
         fn set_token(&mut self, token: EventRegistrationToken) {
             self.token = Some(token);
+        }
+
+        fn set_connection_status_token(&mut self, token: EventRegistrationToken) {
+            self.connection_status_token = Some(token);
+        }
+
+        fn set_session_status_token(&mut self, token: EventRegistrationToken) {
+            self.session_status_token = Some(token);
         }
 
         fn disable_notify(&mut self) {
@@ -2296,6 +2482,7 @@ mod windows_ble {
             if self.notify_disabled {
                 return;
             }
+            self.remove_status_handlers();
             self.remove_handler();
             match teardown {
                 NotifyCccdTeardown::Disable => {
@@ -2338,6 +2525,37 @@ mod windows_ble {
                 }
             }
             self.notify_disabled = true;
+        }
+
+        fn remove_status_handlers(&mut self) {
+            if let Some(token) = self.connection_status_token.take() {
+                if let Some(device) = self.target.device.as_ref() {
+                    match device.RemoveConnectionStatusChanged(token) {
+                        Ok(()) => log::info!(
+                            "[embedded-ble] capture #{}: connection status handler removed",
+                            self.capture_id
+                        ),
+                        Err(err) => log::warn!(
+                            "[embedded-ble] capture #{}: connection status handler remove failed: {err}",
+                            self.capture_id
+                        ),
+                    }
+                }
+            }
+            if let Some(token) = self.session_status_token.take() {
+                if let Some(session) = self.target.session.as_ref() {
+                    match session.RemoveSessionStatusChanged(token) {
+                        Ok(()) => log::info!(
+                            "[embedded-ble] capture #{}: GATT session status handler removed",
+                            self.capture_id
+                        ),
+                        Err(err) => log::warn!(
+                            "[embedded-ble] capture #{}: GATT session status handler remove failed: {err}",
+                            self.capture_id
+                        ),
+                    }
+                }
+            }
         }
 
         fn remove_handler(&mut self) {
@@ -2638,6 +2856,11 @@ mod tests {
             ),
             (
                 "BLE idle disconnect reason=546 produced transport_not_ready before reconnect",
+                BleFailureKind::LowPowerIdleDisconnect,
+                true,
+            ),
+            (
+                "BLE device connection status changed to Disconnected; transport_not_ready",
                 BleFailureKind::LowPowerIdleDisconnect,
                 true,
             ),

@@ -62,9 +62,10 @@ mod dictation;
 mod qa;
 mod resources;
 
-const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
-const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(12);
-const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(8);
+const EMBEDDED_BLE_RETRY_FAST_DELAY: Duration = Duration::from_millis(500);
+const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
+const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
+const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(3);
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);
 const EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(12);
@@ -2301,6 +2302,14 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 } else {
                     record_embedded_ble_listener_last_error(&inner, &err);
                     record_embedded_ble_recovery_failure(&inner, &err);
+                    if is_embedded_ble_automatic_recovery_error(&err) {
+                        emit_embedded_ble_recovery_capsule(
+                            &inner,
+                            "reconnecting",
+                            "Listener BLE 正在自动重连，回到范围后会恢复语音键。".to_string(),
+                            1800,
+                        );
+                    }
                 }
                 retry_delay = next_embedded_ble_background_retry_delay(&err, retry_delay);
                 log::warn!(
@@ -2321,13 +2330,38 @@ fn next_embedded_ble_background_retry_delay(err: &str, current: Duration) -> Dur
         return EMBEDDED_BLE_RETRY_BASE_DELAY;
     }
 
+    if is_embedded_ble_link_loss_error(err) {
+        return EMBEDDED_BLE_RETRY_FAST_DELAY;
+    }
+
     if is_embedded_ble_transient_reopen_error(err) {
-        return EMBEDDED_BLE_RETRY_LONG_DELAY.max(current);
+        return EMBEDDED_BLE_RETRY_LONG_DELAY
+            .max(current)
+            .min(EMBEDDED_BLE_RETRY_MAX_DELAY);
     }
 
     current
         .saturating_mul(2)
         .clamp(EMBEDDED_BLE_RETRY_BASE_DELAY, EMBEDDED_BLE_RETRY_MAX_DELAY)
+}
+
+fn is_embedded_ble_automatic_recovery_error(err: &str) -> bool {
+    is_embedded_ble_link_loss_error(err)
+        || crate::embedded_ble::classify_ble_failure(err).automatic_recovery
+}
+
+fn is_embedded_ble_link_loss_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("connection status changed")
+        || lower.contains("gatt session status changed")
+        || lower.contains("transport_not_ready")
+        || lower.contains("transport not ready")
+        || lower.contains("reason=546")
+        || lower.contains("reason: 546")
+        || lower.contains("reason 546")
+        || lower.contains("low-power idle")
+        || lower.contains("low power idle")
+        || lower.contains("idle disconnect")
 }
 
 fn is_embedded_ble_transient_reopen_error(err: &str) -> bool {
@@ -2419,9 +2453,47 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         inner
             .embedded_ble_listener_ready
             .store(true, Ordering::SeqCst);
+        let should_emit_recovered = {
+            let snapshot = inner.embedded_ble_wake_recovery.lock();
+            snapshot.recent_disconnect_reason.is_some()
+                && matches!(
+                    snapshot.status,
+                    EmbeddedBleWakeRecoveryStatus::Reconnecting
+                        | EmbeddedBleWakeRecoveryStatus::NeedsWakeKey
+                        | EmbeddedBleWakeRecoveryStatus::Failed
+                )
+        };
         record_embedded_ble_notify_ready(inner);
+        if should_emit_recovered {
+            emit_embedded_ble_recovery_capsule(
+                inner,
+                "reconnected",
+                "Listener BLE 已自动重连，语音键可用。".to_string(),
+                1600,
+            );
+        }
         log::info!("[embedded-ble] background listener notify ready");
     }
+}
+
+fn emit_embedded_ble_recovery_capsule(
+    inner: &Arc<Inner>,
+    state: &'static str,
+    message: String,
+    idle_after_ms: u64,
+) {
+    let phase = inner.state.lock().phase;
+    if phase != SessionPhase::Idle {
+        log::info!(
+            "[embedded-ble] recovery capsule state={state} emitted=false phase={phase:?} message={message:?}"
+        );
+        return;
+    }
+    log::info!(
+        "[embedded-ble] recovery capsule state={state} emitted=true idle_after_ms={idle_after_ms} message={message:?}"
+    );
+    emit_capsule(inner, CapsuleState::Recording, 0.0, 0, Some(message), None);
+    schedule_capsule_idle(inner, idle_after_ms);
 }
 
 fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> Arc<AtomicBool> {
@@ -4201,7 +4273,7 @@ mod tests {
                 "BLE CCCD write async error: Some(HRESULT(0x800706BA))",
                 Duration::from_secs(10),
             ),
-            Duration::from_secs(10)
+            EMBEDDED_BLE_RETRY_MAX_DELAY
         );
     }
 
@@ -4212,7 +4284,7 @@ mod tests {
                 "BLE embedded audio notification wait failed: disconnected",
                 EMBEDDED_BLE_RETRY_BASE_DELAY,
             ),
-            Duration::from_secs(4)
+            Duration::from_secs(2)
         );
         assert_eq!(
             next_embedded_ble_background_retry_delay(
@@ -4221,6 +4293,20 @@ mod tests {
             ),
             EMBEDDED_BLE_RETRY_MAX_DELAY
         );
+    }
+
+    #[test]
+    fn embedded_ble_background_retry_is_fast_for_link_loss_events() {
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(
+                "BLE device connection status changed to Disconnected; transport_not_ready",
+                Duration::from_secs(4),
+            ),
+            EMBEDDED_BLE_RETRY_FAST_DELAY
+        );
+        assert!(is_embedded_ble_automatic_recovery_error(
+            "BLE GATT session status changed to Some(GattSessionStatus(0)); transport_not_ready"
+        ));
     }
 
     #[test]

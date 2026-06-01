@@ -156,6 +156,14 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings }: O
     ],
   );
   const embeddedBleSupported = detectOS() === 'win';
+  useEffect(() => {
+    if (!embeddedBleSupported || (prefs?.dictationInputSource ?? 'microphone') !== 'embeddedBle') {
+      return;
+    }
+    const interval = window.setInterval(refreshBleRuntimeStatus, 3000);
+    return () => window.clearInterval(interval);
+  }, [embeddedBleSupported, prefs?.dictationInputSource, refreshBleRuntimeStatus]);
+
   const bleRecoveryUi = useMemo(
     () => buildBleRecoveryUi({
       supported: embeddedBleSupported,
