@@ -36,6 +36,7 @@ export function HotkeySettingsProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const latestPrefsRef = useRef<UserPreferences | null>(null);
+  const persistedPrefsRef = useRef<UserPreferences | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -47,6 +48,8 @@ export function HotkeySettingsProvider({ children }: { children: ReactNode }) {
       ]);
       let nextError: string | null = null;
       if (prefsResult.status === 'fulfilled') {
+        latestPrefsRef.current = prefsResult.value;
+        persistedPrefsRef.current = prefsResult.value;
         setPrefs(prefsResult.value);
       } else {
         console.error('[hotkey-settings] failed to load preferences', prefsResult.reason);
@@ -75,6 +78,7 @@ export function HotkeySettingsProvider({ children }: { children: ReactNode }) {
         if (!current) return;
         const next = resolveNext(current);
         await setSettings(next);
+        persistedPrefsRef.current = next;
       });
     persistQueueRef.current = task;
     return task;
@@ -95,6 +99,7 @@ export function HotkeySettingsProvider({ children }: { children: ReactNode }) {
           const nextPrefs = event.payload;
           if (!nextPrefs) return;
           latestPrefsRef.current = nextPrefs;
+          persistedPrefsRef.current = nextPrefs;
           setPrefs(nextPrefs);
         });
         if (cancelled) {
@@ -151,10 +156,24 @@ export function HotkeySettingsProvider({ children }: { children: ReactNode }) {
     async (next: UserPreferences | ((current: UserPreferences) => UserPreferences)) => {
       const current = latestPrefsRef.current;
       if (!current) return;
+      const rollbackPrefs = persistedPrefsRef.current ?? current;
       const resolved = typeof next === 'function' ? next(current) : next;
       setPrefs(resolved);
       latestPrefsRef.current = resolved;
-      await queueSetSettings(() => resolved);
+      try {
+        await queueSetSettings(() => resolved);
+        setError(null);
+      } catch (error) {
+        const message = errorMessage(error);
+        console.error('[hotkey-settings] failed to persist preferences', error);
+        if (latestPrefsRef.current === resolved) {
+          const rollback = persistedPrefsRef.current ?? rollbackPrefs;
+          latestPrefsRef.current = rollback;
+          setPrefs(rollback);
+        }
+        setError(message);
+        throw error;
+      }
     },
     [queueSetSettings],
   );
