@@ -2179,6 +2179,7 @@ pub fn set_qa_hotkey(
 ) -> Result<(), String> {
     if let Some(binding) = binding.as_ref() {
         crate::shortcut_binding::validate_binding(binding).map_err(|e| e.to_string())?;
+        reject_device_fallback_reserved_hotkey(binding)?;
         if binding.modifiers.is_empty() && binding.primary.eq_ignore_ascii_case("shift") {
             return Err("Shift 单键目前只能用于翻译快捷键".into());
         }
@@ -2213,7 +2214,8 @@ pub fn qa_window_pin(coord: CoordinatorState<'_>, pinned: bool) {
 /// 测试一个组合键是否可以注册（验证格式，不实际注册）。
 #[tauri::command]
 pub fn validate_shortcut_binding(binding: ShortcutBinding) -> Result<(), String> {
-    crate::shortcut_binding::validate_binding(&binding).map_err(|e| e.to_string())
+    crate::shortcut_binding::validate_binding(&binding).map_err(|e| e.to_string())?;
+    reject_device_fallback_reserved_hotkey(&binding)
 }
 
 #[tauri::command]
@@ -2222,6 +2224,7 @@ pub fn set_dictation_hotkey(
     binding: ShortcutBinding,
 ) -> Result<(), String> {
     crate::shortcut_binding::validate_binding(&binding).map_err(|e| e.to_string())?;
+    reject_device_fallback_reserved_hotkey(&binding)?;
     reject_bare_shift_dictation_shortcut(&binding)?;
     let mut prefs = coord.prefs().get();
     if let Some(qa_hotkey) = prefs.qa_hotkey.as_ref() {
@@ -2244,6 +2247,7 @@ pub fn set_translation_hotkey(
     binding: ShortcutBinding,
 ) -> Result<(), String> {
     crate::shortcut_binding::validate_binding(&binding).map_err(|e| e.to_string())?;
+    reject_device_fallback_reserved_hotkey(&binding)?;
     let previous = coord.prefs().get();
     reject_dictation_translation_hotkey_overlap(&previous.dictation_hotkey, &binding)?;
     if let Some(qa_hotkey) = previous.qa_hotkey.as_ref() {
@@ -2270,6 +2274,7 @@ pub fn set_switch_style_hotkey(
     binding: ShortcutBinding,
 ) -> Result<(), String> {
     crate::shortcut_binding::validate_binding(&binding).map_err(|e| e.to_string())?;
+    reject_device_fallback_reserved_hotkey(&binding)?;
     reject_modifier_only_action_shortcut(&binding)?;
     let mut prefs = coord.prefs().get();
     reject_dictation_switch_style_hotkey_overlap(&prefs.dictation_hotkey, &binding)?;
@@ -2290,6 +2295,7 @@ pub fn set_open_app_hotkey(
     binding: ShortcutBinding,
 ) -> Result<(), String> {
     crate::shortcut_binding::validate_binding(&binding).map_err(|e| e.to_string())?;
+    reject_device_fallback_reserved_hotkey(&binding)?;
     reject_modifier_only_action_shortcut(&binding)?;
     let mut prefs = coord.prefs().get();
     reject_dictation_open_app_hotkey_overlap(&prefs.dictation_hotkey, &binding)?;
@@ -2334,6 +2340,7 @@ pub fn set_combo_hotkey(coord: CoordinatorState<'_>, binding: ComboBinding) -> R
     };
     reject_bare_shift_dictation_shortcut(&shortcut)?;
     crate::combo_hotkey::validate_binding(&shortcut).map_err(|e| e.to_string())?;
+    reject_device_fallback_reserved_hotkey(&shortcut)?;
     if let Some(qa_hotkey) = prefs.qa_hotkey.as_ref() {
         reject_dictation_qa_hotkey_overlap(&shortcut, qa_hotkey)?;
     }
@@ -2352,6 +2359,21 @@ pub fn set_combo_hotkey(coord: CoordinatorState<'_>, binding: ComboBinding) -> R
 fn reject_bare_shift_dictation_shortcut(binding: &ShortcutBinding) -> Result<(), String> {
     if binding.modifiers.is_empty() && binding.primary.eq_ignore_ascii_case("shift") {
         return Err("Shift 单键目前只能用于翻译快捷键".into());
+    }
+    Ok(())
+}
+
+fn is_device_fallback_reserved_hotkey(binding: &ShortcutBinding) -> bool {
+    binding.modifiers.is_empty()
+        && matches!(
+            binding.primary.trim().to_ascii_uppercase().as_str(),
+            "F13" | "F14" | "F15" | "F16"
+        )
+}
+
+fn reject_device_fallback_reserved_hotkey(binding: &ShortcutBinding) -> Result<(), String> {
+    if is_device_fallback_reserved_hotkey(binding) {
+        return Err("F13-F16 已保留给设备 KEY1-KEY4".into());
     }
     Ok(())
 }
@@ -2397,7 +2419,12 @@ fn reject_hotkey_overlap(
 }
 
 fn reject_hotkey_collisions(prefs: &UserPreferences) -> Result<(), String> {
+    reject_device_fallback_reserved_hotkey(&prefs.dictation_hotkey)?;
+    reject_device_fallback_reserved_hotkey(&prefs.translation_hotkey)?;
+    reject_device_fallback_reserved_hotkey(&prefs.switch_style_hotkey)?;
+    reject_device_fallback_reserved_hotkey(&prefs.open_app_hotkey)?;
     if let Some(qa_hotkey) = prefs.qa_hotkey.as_ref() {
+        reject_device_fallback_reserved_hotkey(qa_hotkey)?;
         reject_dictation_qa_hotkey_overlap(&prefs.dictation_hotkey, qa_hotkey)?;
         reject_qa_translation_hotkey_overlap(qa_hotkey, &prefs.translation_hotkey)?;
         reject_qa_switch_style_hotkey_overlap(qa_hotkey, &prefs.switch_style_hotkey)?;
@@ -2441,12 +2468,7 @@ fn validate_device_custom_key_mapping(mapping: &DeviceCustomKeyMapping) -> Resul
         .ok_or_else(|| "设备自定义键的快捷键动作缺少按键绑定".to_string())?;
     crate::shortcut_binding::validate_binding(shortcut).map_err(|e| e.to_string())?;
     reject_modifier_only_action_shortcut(shortcut)?;
-    if shortcut.modifiers.is_empty()
-        && matches!(
-            shortcut.primary.trim().to_ascii_uppercase().as_str(),
-            "F13" | "F14" | "F15" | "F16"
-        )
-    {
+    if is_device_fallback_reserved_hotkey(shortcut) {
         return Err("设备自定义键不能转发为 F13-F16，避免重复触发自身".into());
     }
     Ok(())
@@ -4645,6 +4667,29 @@ mod tests {
     }
 
     #[test]
+    fn validate_shortcut_binding_rejects_device_fallback_hotkey() {
+        let binding = ShortcutBinding {
+            primary: "F14".into(),
+            modifiers: vec![],
+        };
+
+        assert_eq!(
+            super::validate_shortcut_binding(binding),
+            Err("F13-F16 已保留给设备 KEY1-KEY4".into())
+        );
+    }
+
+    #[test]
+    fn validate_shortcut_binding_allows_modified_function_hotkey() {
+        let binding = ShortcutBinding {
+            primary: "F14".into(),
+            modifiers: vec!["ctrl".into()],
+        };
+
+        assert!(super::validate_shortcut_binding(binding).is_ok());
+    }
+
+    #[test]
     fn sync_dictation_hotkey_sets_modifier_trigger_and_clears_combo() {
         let mut prefs = UserPreferences {
             hotkey: HotkeyBinding {
@@ -4909,6 +4954,42 @@ mod tests {
         assert_eq!(
             persist_settings(&writer, prefs),
             Err("打开应用快捷键不能和切换风格快捷键相同".into())
+        );
+        assert!(writer.saved.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn persist_settings_rejects_device_fallback_dictation_hotkey() {
+        let writer = FakeSettingsWriter::default();
+        let prefs = UserPreferences {
+            dictation_hotkey: ShortcutBinding {
+                primary: "F13".into(),
+                modifiers: vec![],
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            persist_settings(&writer, prefs),
+            Err("F13-F16 已保留给设备 KEY1-KEY4".into())
+        );
+        assert!(writer.saved.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn persist_settings_rejects_device_fallback_qa_hotkey() {
+        let writer = FakeSettingsWriter::default();
+        let prefs = UserPreferences {
+            qa_hotkey: Some(ShortcutBinding {
+                primary: "F16".into(),
+                modifiers: vec![],
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            persist_settings(&writer, prefs),
+            Err("F13-F16 已保留给设备 KEY1-KEY4".into())
         );
         assert!(writer.saved.lock().unwrap().is_none());
     }
