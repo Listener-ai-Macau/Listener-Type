@@ -137,24 +137,29 @@ const MOCK_FOUNDRY_CATALOG: FoundryLocalAsrCatalogModel[] = [
   },
 ];
 
+const isLocalAsrVisualFixture =
+  import.meta.env.DEV &&
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('visual') === 'local-asr';
+
 const MOCK_SETTINGS: LocalAsrSettings = {
   providerId: 'local-qwen3',
   activeModel: 'qwen3-asr-0.6b',
   mirror: 'huggingface',
-  engineAvailable: false,
+  engineAvailable: isLocalAsrVisualFixture,
 };
 
 const MOCK_MODELS: LocalAsrModelStatus[] = [
   {
     id: 'qwen3-asr-0.6b',
     hfRepo: 'Qwen/Qwen3-ASR-0.6B',
-    downloadedBytes: 0,
-    isDownloaded: false,
+    downloadedBytes: isLocalAsrVisualFixture ? 684 * 1024 * 1024 : 0,
+    isDownloaded: isLocalAsrVisualFixture,
   },
   {
     id: 'qwen3-asr-1.7b',
     hfRepo: 'Qwen/Qwen3-ASR-1.7B',
-    downloadedBytes: 0,
+    downloadedBytes: isLocalAsrVisualFixture ? 512 * 1024 * 1024 : 0,
     isDownloaded: false,
   },
 ];
@@ -185,8 +190,22 @@ export function fetchLocalAsrRemoteInfo(
     () => ({
       modelId,
       mirror: mirror ?? 'huggingface',
-      files: [],
-      totalBytes: 0,
+      files: isLocalAsrVisualFixture
+        ? [
+            { path: 'config.json', size: 4096 },
+            {
+              path: 'model.safetensors',
+              size: modelId === 'qwen3-asr-1.7b'
+                ? 2_100 * 1024 * 1024
+                : 684 * 1024 * 1024,
+            },
+          ]
+        : [],
+      totalBytes: isLocalAsrVisualFixture
+        ? modelId === 'qwen3-asr-1.7b'
+          ? 2_100 * 1024 * 1024
+          : 684 * 1024 * 1024
+        : 0,
     }),
   );
 }

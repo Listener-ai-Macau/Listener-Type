@@ -2,6 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { LocalAsr } from "./pages/LocalAsr";
+import { HotkeySettingsProvider } from "./state/HotkeySettingsContext";
 import i18n from "./i18n"; // 副作用：触发 i18next init
 import "./styles/tokens.css";
 import "./styles/global.css";
@@ -10,6 +12,8 @@ const params = new URLSearchParams(window.location.search);
 const windowKind = params.get("window");
 const isCapsule = windowKind === "capsule";
 const isQa = windowKind === "qa";
+const isLocalAsrVisual =
+  import.meta.env.DEV && params.get("visual") === "local-asr";
 
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
@@ -17,7 +21,13 @@ const renderApp = () => {
   root.render(
     <React.StrictMode>
       <ErrorBoundary>
-        <App isCapsule={isCapsule} isQa={isQa} />
+        {isLocalAsrVisual ? (
+          <HotkeySettingsProvider>
+            <LocalAsr />
+          </HotkeySettingsProvider>
+        ) : (
+          <App isCapsule={isCapsule} isQa={isQa} />
+        )}
       </ErrorBoundary>
     </React.StrictMode>,
   );

@@ -3,6 +3,12 @@ import { type CSSProperties, type ReactNode } from 'react';
 export type OS = 'mac' | 'win' | 'linux';
 
 export function detectOS(): OS {
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    const osOverride = new URLSearchParams(window.location.search).get('devOs');
+    if (osOverride === 'mac' || osOverride === 'win' || osOverride === 'linux') {
+      return osOverride;
+    }
+  }
   if (typeof navigator === 'undefined') return 'mac';
   const uaDataPlatform = (
     navigator as Navigator & { userAgentData?: { platform?: string } }
