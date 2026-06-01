@@ -63,6 +63,7 @@ function New-FeatureSnapshot {
             [ordered]@{ path = "src-tauri/nsis/listener-type-ime-hooks.nsh"; purpose = "Optional TSF IME register/unregister hooks for dedicated validation builds." },
             [ordered]@{ path = "src-tauri/src/cli.rs"; purpose = "Headless embedded audio file/BLE replay, firmware OTA, and diagnostic entry points." },
             [ordered]@{ path = "src-tauri/src/firmware_ota.rs"; purpose = "Shared firmware OTA package validation and headless release-gate runner." },
+            [ordered]@{ path = "src-tauri/src/marketplace_backend.rs"; purpose = "Style marketplace REST contract and Rust HTTP client error handling." },
             [ordered]@{ path = "src/lib/localAsr.ts"; purpose = "Frontend wrappers for Qwen3-ASR and Foundry Local runtime/model commands." },
             [ordered]@{ path = "tools/collect_ai_diagnostics.ps1"; purpose = "One-command AI diagnostic bundle collector for logs, artifacts, BLE/audio summaries, workflow metadata, and optional firmware diagnostic input." },
             [ordered]@{ path = "tools/firmware_ota_headless/"; purpose = "Standalone firmware OTA package/preflight validation helper for release-gate artifacts." },

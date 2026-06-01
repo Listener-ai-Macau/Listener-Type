@@ -1,6 +1,7 @@
 // ipc.ts — typed wrapper around Tauri `invoke`. When running outside Tauri
-// (e.g. `vite dev` in a browser), every command falls back to mock data so
-// the UI is still operable for visual review.
+// (e.g. `vite dev` in a browser), local app commands fall back to mock data so
+// the UI is still operable for visual review. Remote marketplace commands do
+// not mock server state; they require the Rust command layer.
 
 import type {
   ComboBinding,
@@ -53,6 +54,17 @@ export async function invokeOrMock<T>(
 ): Promise<T> {
   if (!isTauri) {
     return mock();
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<T>(cmd, args);
+}
+
+async function invokeMarketplace<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  if (!isTauri) {
+    throw new Error('marketplaceUnavailable');
   }
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<T>(cmd, args);
@@ -1226,52 +1238,43 @@ export { isTauri };
 export function listMarketplace(
   options: { query?: string; sort?: 'new' | 'popular'; limit?: number } = {},
 ): Promise<MarketplaceListItem[]> {
-  return invokeOrMock('marketplace_list', options, () => []);
+  return invokeMarketplace('marketplace_list', options);
 }
 
 export function fetchMarketplaceDetail(packId: string): Promise<MarketplaceDetail> {
-  return invokeOrMock('marketplace_detail', { packId }, () => {
-    throw new Error('marketplaceUnavailable');
-  });
+  return invokeMarketplace('marketplace_detail', { packId });
 }
 
 export function installMarketplacePack(packId: string): Promise<StylePack> {
-  return invokeOrMock('marketplace_install', { packId }, () => mockStylePacks[0]);
+  return invokeMarketplace('marketplace_install', { packId });
 }
 
 export function uploadMarketplacePack(
   packId: string,
   originPackId?: string | null,
 ): Promise<{ id: string; state: string; message: string }> {
-  return invokeOrMock('marketplace_upload', { packId, originPackId: originPackId ?? null }, () => ({
-    id: 'mock-uploaded',
-    state: 'pending',
-    message: 'Mock 上传成功（vite dev）',
-  }));
+  return invokeMarketplace('marketplace_upload', { packId, originPackId: originPackId ?? null });
 }
 
 export function likeMarketplacePack(
   packId: string,
 ): Promise<{ likeCount: number; alreadyLiked: boolean }> {
-  return invokeOrMock('marketplace_like', { packId }, () => ({
-    likeCount: 13,
-    alreadyLiked: false,
-  }));
+  return invokeMarketplace('marketplace_like', { packId });
 }
 
 /** 拉当前登录用户赞过的所有 pack id（用于红心 + 「我赞过的」过滤）。 */
 export function marketplaceMyLikes(): Promise<string[]> {
-  return invokeOrMock<string[]>('marketplace_my_likes', undefined, () => []);
+  return invokeMarketplace<string[]>('marketplace_my_likes');
 }
 
 /** 拉当前登录用户发布过的所有 pack（含审核中/已撤回），用于「我的发布」。 */
 export function marketplaceMyPacks(): Promise<MarketplaceMyPackItem[]> {
-  return invokeOrMock<MarketplaceMyPackItem[]>('marketplace_my_packs', undefined, () => []);
+  return invokeMarketplace<MarketplaceMyPackItem[]>('marketplace_my_packs');
 }
 
 /** 撤回自己发布的 pack（后端软删 state='withdrawn'）。仅允许原作者。 */
 export function marketplaceDelete(packId: string): Promise<void> {
-  return invokeOrMock<void>('marketplace_delete', { packId }, () => undefined);
+  return invokeMarketplace<void>('marketplace_delete', { packId });
 }
 
 // ─────────────────────── GitHub OAuth Device Flow (Phase 1) ───────────────

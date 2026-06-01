@@ -27,6 +27,7 @@ mod global_hotkey_runtime;
 mod hotkey;
 mod insertion;
 mod llm_gemini;
+mod marketplace_backend;
 mod permissions;
 mod persistence;
 mod polish;

@@ -23,11 +23,31 @@ GITHUB_OAUTH_CLIENT_ID=<listener-type-oauth-client-id>
 
 Do not use old service domains or OAuth clients.
 
+## Backend API Contract
+
+Contract version: `listener-type-marketplace-v1`
+
+All remote marketplace traffic goes through Rust IPC commands. The WebView must not call these endpoints directly.
+
+| Operation | Method and path | Notes |
+|---|---|---|
+| List/search styles | `GET /styles?q=<query>&sort=<new\|popular>&limit=<n>` | Returns `MarketplaceListItem[]`; unauthenticated. |
+| Style detail | `GET /styles/{id}` | Returns full metadata and `prompt`; unauthenticated. |
+| Style archive download | `GET /styles/{id}/download` | Returns the style-pack zip installed through local import validation. |
+| Upload/update style | `POST /styles/upload` | Multipart field `file` contains the zip; optional `originPackId`; dev-mode identity currently uses `X-Dev-User` until OAuth lands. |
+| Like style | `POST /styles/{id}/like` | Requires identity; returns like count and whether the user already liked it. |
+| Withdraw style | `DELETE /styles/{id}` | Requires identity; backend should soft-delete/withdraw. |
+| User likes | `GET /me/likes` | Requires identity; returns remote style ids. |
+| User styles | `GET /me/styles` | Requires identity; includes pending/approved/rejected/withdrawn styles. |
+
+Rust classifies backend failures before surfacing them to the UI: network failure, `401 Unauthorized`, `404 Not Found`, other HTTP status, invalid URL, and decode failure.
+
 ## Source Map
 
 - Frontend marketplace UI: `src/pages/Marketplace.tsx`, `src/components/MarketplaceModal.tsx`, `src/pages/Style.tsx`.
 - IPC wrappers: `src/lib/ipc.ts`.
 - Backend commands: `src-tauri/src/commands.rs`.
+- Backend HTTP client and REST contract: `src-tauri/src/marketplace_backend.rs`.
 - Local pack storage and archive import/export: `src-tauri/src/persistence.rs`.
 
 ## Verification
