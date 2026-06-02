@@ -2305,6 +2305,8 @@ pub enum CapsuleState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapsulePayload {
+    pub seq: u64,
+    pub session_id: Option<String>,
     pub state: CapsuleState,
     pub level: f32, // 0..1 RMS
     pub elapsed_ms: u64,
@@ -2352,6 +2354,27 @@ pub struct QaChatMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capsule_payload_serializes_session_ordering_contract() {
+        let payload = CapsulePayload {
+            seq: 7,
+            session_id: Some("session-1".to_string()),
+            state: CapsuleState::Recording,
+            level: 0.25,
+            elapsed_ms: 123,
+            message: Some("partial".to_string()),
+            inserted_chars: None,
+            translation: true,
+        };
+
+        let json = serde_json::to_value(payload).unwrap();
+
+        assert_eq!(json["seq"], 7);
+        assert_eq!(json["sessionId"], "session-1");
+        assert_eq!(json["elapsedMs"], 123);
+        assert_eq!(json["state"], "recording");
+    }
 
     #[test]
     fn non_tsf_insertion_fallback_defaults_to_enabled() {

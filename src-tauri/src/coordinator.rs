@@ -205,6 +205,9 @@ struct Inner {
     /// 限流：Recording 状态下 UI show/position 操作的最小间隔（100ms）。
     /// emit_to 事件不受限，保证电平条实时更新。
     capsule_ui_throttle: Mutex<Option<std::time::Instant>>,
+    /// Monotonic capsule payload sequence. The frontend rejects older snapshots
+    /// so delayed UI events cannot overwrite newer terminal states.
+    capsule_sequence: AtomicU64,
     /// QA 用的 ASR 句柄（始终是 Volcengine 流式）。
     qa_asr: Mutex<Option<Arc<VolcengineStreamingASR>>>,
     /// QA 用的 Recorder 句柄。
@@ -372,6 +375,7 @@ impl Coordinator {
                     qa_state: Mutex::new(QaSessionState::default()),
                     capsule_layout: Mutex::new(None),
                     capsule_ui_throttle: Mutex::new(None),
+                    capsule_sequence: AtomicU64::new(0),
                     qa_asr: Mutex::new(None),
                     qa_recorder: Mutex::new(None),
                     qa_stream_cancelled: Arc::new(AtomicBool::new(false)),
@@ -435,6 +439,7 @@ impl Coordinator {
                 qa_state: Mutex::new(QaSessionState::default()),
                 capsule_layout: Mutex::new(None),
                 capsule_ui_throttle: Mutex::new(None),
+                capsule_sequence: AtomicU64::new(0),
                 qa_asr: Mutex::new(None),
                 qa_recorder: Mutex::new(None),
                 qa_stream_cancelled: Arc::new(AtomicBool::new(false)),
@@ -6013,8 +6018,15 @@ fn emit_capsule(
 ) {
     let app_opt = inner.app.lock().clone();
     let Some(app) = app_opt else { return };
+    let seq = inner.capsule_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+    let session_id = {
+        let state = inner.state.lock();
+        (!state.session_id.is_nil()).then(|| state.session_id.to_string())
+    };
     let translation = inner.translation_modifier_seen.load(Ordering::SeqCst);
     let payload = CapsulePayload {
+        seq,
+        session_id,
         state,
         level,
         elapsed_ms,
@@ -6028,12 +6040,16 @@ fn emit_capsule(
         || elapsed_ms == 0
         || payload.message.is_some()
         || elapsed_ms % 500 == 0;
+    let session_id_for_log = payload
+        .session_id
+        .clone()
+        .unwrap_or_else(|| "-".to_string());
     if should_trace_emit {
         crate::timeline::mark(
             "backend.capsule",
             "emit_request",
             format!(
-                "state={state:?} elapsed_ms={elapsed_ms} level={level:.3} visible={visible} message={}",
+                "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms} level={level:.3} visible={visible} message={}",
                 payload.message.as_deref().unwrap_or("-")
             ),
         );
@@ -6062,13 +6078,14 @@ fn emit_capsule(
     if !skip_ui {
         let inner_for_main = Arc::clone(inner);
         let app_for_main = app.clone();
+        let session_id_for_main = session_id_for_log.clone();
         let _ = app.run_on_main_thread(move || {
             let Some(window) = app_for_main.get_webview_window("capsule") else {
                 log::warn!("[capsule] emit requested but capsule window is missing");
                 crate::timeline::mark(
                     "backend.capsule",
                     "missing_window",
-                    format!("state={state:?} elapsed_ms={elapsed_ms}"),
+                    format!("seq={seq} session_id={session_id_for_main} state={state:?} elapsed_ms={elapsed_ms}"),
                 );
                 return;
             };
@@ -6081,7 +6098,7 @@ fn emit_capsule(
                     "backend.capsule",
                     "show_request",
                     format!(
-                        "state={state:?} elapsed_ms={elapsed_ms} shown_no_activate={shown_no_activate}"
+                        "seq={seq} session_id={session_id_for_main} state={state:?} elapsed_ms={elapsed_ms} shown_no_activate={shown_no_activate}"
                     ),
                 );
                 log::info!(
@@ -6100,7 +6117,7 @@ fn emit_capsule(
                     "backend.capsule",
                     "hide_request",
                     format!(
-                        "state={state:?} elapsed_ms={elapsed_ms} show_capsule={show_capsule} visible={visible}"
+                        "seq={seq} session_id={session_id_for_main} state={state:?} elapsed_ms={elapsed_ms} show_capsule={show_capsule} visible={visible}"
                     ),
                 );
                 log::info!(
@@ -6116,7 +6133,9 @@ fn emit_capsule(
         crate::timeline::mark(
             "backend.capsule",
             "emit_to_frontend",
-            format!("state={state:?} elapsed_ms={elapsed_ms}"),
+            format!(
+                "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms}"
+            ),
         );
     }
     let _ = app.emit_to("capsule", "capsule:state", payload);

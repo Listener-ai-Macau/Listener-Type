@@ -616,6 +616,8 @@ export type CapsuleState =
   | 'error';
 
 export interface CapsulePayload {
+  seq: number;
+  sessionId: string | null;
   state: CapsuleState;
   level: number; // 0..1 RMS
   elapsedMs: number;
