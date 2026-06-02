@@ -88,31 +88,97 @@ fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: Session
         *slot = Some(preview.clone());
     }
 
-    let (should_emit, capsule_state, elapsed) = {
+    emit_embedded_audio_partial_preview_if_active(inner, session_id, preview);
+}
+
+fn emit_embedded_audio_partial_preview_if_active(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    preview: String,
+) -> bool {
+    let Some((capsule_state, elapsed)) = ({
         let state = inner.state.lock();
-        let active_session = state.session_id == session_id;
-        let capsule_state = if matches!(
-            state.phase,
-            SessionPhase::Starting | SessionPhase::Listening
-        ) && embedded_audio_stop_feedback_latched(inner)
-        {
-            CapsuleState::Transcribing
+        if state.session_id != session_id || state.cancelled {
+            None
         } else {
-            match state.phase {
-                SessionPhase::Starting | SessionPhase::Listening => CapsuleState::Recording,
-                SessionPhase::Processing | SessionPhase::Inserting => CapsuleState::Transcribing,
-                _ => CapsuleState::Idle,
-            }
-        };
-        (
-            active_session && capsule_state != CapsuleState::Idle,
-            capsule_state,
-            state.started_at.elapsed().as_millis() as u64,
-        )
+            let capsule_state = if matches!(
+                state.phase,
+                SessionPhase::Starting | SessionPhase::Listening
+            ) && embedded_audio_stop_feedback_latched(inner)
+            {
+                CapsuleState::Transcribing
+            } else {
+                match state.phase {
+                    SessionPhase::Starting | SessionPhase::Listening => CapsuleState::Recording,
+                    SessionPhase::Processing | SessionPhase::Inserting => {
+                        CapsuleState::Transcribing
+                    }
+                    _ => return false,
+                }
+            };
+            Some((capsule_state, state.started_at.elapsed().as_millis() as u64))
+        }
+    }) else {
+        return false;
     };
-    if should_emit {
-        emit_capsule(inner, capsule_state, 0.0, elapsed, Some(preview), None);
-    }
+    emit_capsule(inner, capsule_state, 0.0, elapsed, Some(preview), None);
+    true
+}
+
+fn emit_embedded_audio_pcm_capsule_if_active(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    capsule_state: CapsuleState,
+    level: f32,
+    message: Option<String>,
+) -> bool {
+    let Some(elapsed) = ({
+        let state = inner.state.lock();
+        if state.session_id != session_id
+            || state.cancelled
+            || state.phase != SessionPhase::Listening
+        {
+            None
+        } else {
+            Some(state.started_at.elapsed().as_millis() as u64)
+        }
+    }) else {
+        return false;
+    };
+    emit_capsule(inner, capsule_state, level, elapsed, message, None);
+    true
+}
+
+fn emit_embedded_audio_transcribing_if_active(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    message: Option<String>,
+) -> bool {
+    let Some(elapsed) = ({
+        let state = inner.state.lock();
+        if state.session_id != session_id
+            || state.cancelled
+            || !matches!(
+                state.phase,
+                SessionPhase::Starting | SessionPhase::Listening | SessionPhase::Processing
+            )
+        {
+            None
+        } else {
+            Some(state.started_at.elapsed().as_millis() as u64)
+        }
+    }) else {
+        return false;
+    };
+    emit_capsule(
+        inner,
+        CapsuleState::Transcribing,
+        0.0,
+        elapsed,
+        message,
+        None,
+    );
+    true
 }
 
 fn store_embedded_audio_stats(inner: &Arc<Inner>, stats: crate::embedded_audio::SessionStats) {
@@ -145,11 +211,30 @@ impl EmbeddedAudioDictationSession {
             return Err("嵌入式音频 PCM chunk 长度不是 16-bit 对齐".to_string());
         }
 
+        let (asr_pcm, gain_stats) = prepare_embedded_streaming_pcm_for_asr(&self.active_asr, pcm);
+        let capsule_state = if embedded_audio_stop_feedback_latched(inner) {
+            CapsuleState::Transcribing
+        } else {
+            CapsuleState::Recording
+        };
+        if !emit_embedded_audio_pcm_capsule_if_active(
+            inner,
+            self.session_id,
+            capsule_state,
+            embedded_pcm_peak_level(&asr_pcm),
+            current_embedded_audio_partial_preview(inner),
+        ) {
+            log::debug!(
+                "[coord] embedded audio streaming PCM ignored for inactive dictation session ({})",
+                self.session_id
+            );
+            return Ok(());
+        }
+
         if let Some(archive_pcm) = self.archive_pcm.as_mut() {
             archive_pcm.extend_from_slice(pcm);
         }
 
-        let (asr_pcm, gain_stats) = prepare_embedded_streaming_pcm_for_asr(&self.active_asr, pcm);
         self.streamed_pcm_bytes += pcm.len();
         self.normalized_pcm_bytes += asr_pcm.len();
         if gain_stats.gain > 1.0 {
@@ -158,20 +243,6 @@ impl EmbeddedAudioDictationSession {
             self.clipped_samples += gain_stats.clipped_samples;
         }
 
-        let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
-        let capsule_state = if embedded_audio_stop_feedback_latched(inner) {
-            CapsuleState::Transcribing
-        } else {
-            CapsuleState::Recording
-        };
-        emit_capsule(
-            inner,
-            capsule_state,
-            embedded_pcm_peak_level(&asr_pcm),
-            elapsed,
-            current_embedded_audio_partial_preview(inner),
-            None,
-        );
         feed_embedded_asr_preroll_if_needed(self);
         for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
             self.consumer.consume_pcm_chunk(chunk);
@@ -1792,16 +1863,12 @@ impl EmbeddedStreamingDictation {
     }
 
     fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
-        if self.session.is_some() {
+        if let Some(session) = self.session.as_ref() {
             latch_embedded_audio_stop_feedback(inner);
-            let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
-            emit_capsule(
+            emit_embedded_audio_transcribing_if_active(
                 inner,
-                CapsuleState::Transcribing,
-                0.0,
-                elapsed,
+                session.session_id,
                 current_embedded_audio_partial_preview(inner),
-                None,
             );
         }
     }
@@ -3030,18 +3097,48 @@ mod tests {
         embedded_streaming_chunk_is_asr_input, finalize_polished_text,
         normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
         register_embedded_ble_cancel_flag, streaming_insert_eligible, wayland_done_message,
-        EmbeddedStreamingDictation, EMBEDDED_AUDIO_ASR_PREROLL_BYTES,
-        EMBEDDED_AUDIO_ASR_PREROLL_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
+        EmbeddedAudioDictationSession, EmbeddedStreamingDictation,
+        EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
+        EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
     use crate::coordinator::Coordinator;
-    use crate::coordinator_state::SessionPhase;
+    use crate::coordinator_state::{new_session_id, SessionPhase};
     use crate::embedded_audio::{
         build_audio_data_notification, build_session_start_notification,
         build_session_stop_notification, StreamingPcmChunk,
     };
     use crate::types::{ChineseScriptPreference, CorrectionRule, InsertStatus, PolishMode};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    #[derive(Default)]
+    struct CountingConsumer {
+        bytes: AtomicUsize,
+    }
+
+    impl crate::recorder::AudioConsumer for CountingConsumer {
+        fn consume_pcm_chunk(&self, pcm: &[u8]) {
+            self.bytes.fetch_add(pcm.len(), Ordering::SeqCst);
+        }
+    }
+
+    fn embedded_audio_test_session(
+        session_id: crate::coordinator_state::SessionId,
+        consumer: Arc<dyn crate::recorder::AudioConsumer>,
+    ) -> EmbeddedAudioDictationSession {
+        EmbeddedAudioDictationSession {
+            session_id,
+            active_asr: "openai".into(),
+            consumer,
+            archive_pcm: Some(Vec::new()),
+            streamed_pcm_bytes: 0,
+            normalized_pcm_bytes: 0,
+            boosted_chunk_count: 0,
+            max_gain: 1.0,
+            clipped_samples: 0,
+            asr_preroll_sent: false,
+        }
+    }
 
     fn correction_rule(pattern: &str, replacement: &str) -> CorrectionRule {
         CorrectionRule {
@@ -3119,6 +3216,56 @@ mod tests {
             Some(timeout)
         );
         assert_eq!(embedded_ble_stream_idle_timeout(timeout, false), None);
+    }
+
+    #[test]
+    fn embedded_streaming_pcm_after_cancel_is_not_fed_to_asr() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Idle;
+            state.cancelled = true;
+        }
+        let consumer = Arc::new(CountingConsumer::default());
+        let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+        let mut session = embedded_audio_test_session(session_id, consumer_for_session);
+        let pcm = pcm_from_samples(&[100, -100, 200, -200]);
+
+        session
+            .consume_streaming_pcm(&coordinator.inner, &pcm)
+            .expect("cancelled PCM is ignored without error");
+
+        assert_eq!(session.streamed_pcm_bytes, 0);
+        assert_eq!(session.normalized_pcm_bytes, 0);
+        assert!(session.archive_pcm.as_ref().expect("archive").is_empty());
+        assert_eq!(consumer.bytes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn embedded_streaming_pcm_for_active_session_still_feeds_asr() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        let consumer = Arc::new(CountingConsumer::default());
+        let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+        let mut session = embedded_audio_test_session(session_id, consumer_for_session);
+        let pcm = pcm_from_samples(&[100, -100, 200, -200]);
+
+        session
+            .consume_streaming_pcm(&coordinator.inner, &pcm)
+            .expect("active PCM is accepted");
+
+        assert_eq!(session.streamed_pcm_bytes, pcm.len());
+        assert_eq!(session.normalized_pcm_bytes, pcm.len());
+        assert_eq!(session.archive_pcm.as_ref().expect("archive"), &pcm);
+        assert_eq!(consumer.bytes.load(Ordering::SeqCst), pcm.len());
     }
 
     #[test]
