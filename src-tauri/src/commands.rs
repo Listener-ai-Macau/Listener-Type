@@ -19,7 +19,8 @@ use crate::asr::local::foundry::{
 };
 use crate::asr::local::FoundryLocalRuntime;
 use crate::coordinator::{
-    Coordinator, EmbeddedBleWakeRecoverySnapshot, FirmwareWakePolicySnapshot,
+    Coordinator, EmbeddedBleNotifySubscriptionState, EmbeddedBleWakeRecoverySnapshot,
+    FirmwareWakePolicySnapshot,
 };
 use crate::coordinator_state::SessionPhase;
 use crate::github_oauth::{
@@ -1786,6 +1787,61 @@ fn should_attempt_embedded_ble_auto_unpair(
     )
 }
 
+fn runtime_suggests_embedded_ble_auto_unpair(
+    repair_error: &str,
+    listener_last_error: Option<&str>,
+    wake_recovery: &EmbeddedBleWakeRecoverySnapshot,
+) -> bool {
+    if wake_recovery.reconnect_attempts < 3 {
+        return false;
+    }
+
+    if !matches!(
+        wake_recovery.notify_subscription_state,
+        EmbeddedBleNotifySubscriptionState::Failed
+            | EmbeddedBleNotifySubscriptionState::Opening
+            | EmbeddedBleNotifySubscriptionState::Lost
+            | EmbeddedBleNotifySubscriptionState::Unknown
+    ) {
+        return false;
+    }
+
+    let combined = [
+        Some(repair_error),
+        listener_last_error,
+        wake_recovery.recent_disconnect_reason.as_deref(),
+        Some(wake_recovery.user_guidance.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ")
+    .to_ascii_lowercase();
+
+    let low_power_idle = combined.contains("reason=546")
+        || combined.contains("reason: 546")
+        || combined.contains("reason 546")
+        || combined.contains("low-power idle")
+        || combined.contains("low power idle")
+        || combined.contains("idle disconnect")
+        || combined.contains("transport_not_ready")
+        || combined.contains("transport not ready");
+    let notify_or_gatt_failure = combined.contains("cccd")
+        || combined.contains("notify write")
+        || combined.contains("notify subscription")
+        || combined.contains("gatt session still not active")
+        || combined.contains("gattsessionstatus(0)")
+        || combined.contains("bluetoothconnectionstatus(0)");
+    let timeout_like = combined.contains("timed out")
+        || combined.contains("timeout")
+        || combined.contains("not active")
+        || combined.contains("not recover")
+        || combined.contains("did not recover")
+        || combined.contains("disconnected");
+
+    notify_or_gatt_failure && timeout_like && !low_power_idle
+}
+
 fn embedded_ble_recovery_message(
     failure: &crate::embedded_ble::BleFailureClassification,
     unpair_result: Option<&crate::embedded_ble::BleDeviceUnpairResult>,
@@ -1917,13 +1973,35 @@ pub async fn recover_embedded_ble_device(
                 embedded_ble_repair_failure_action(&failure);
             let mut recovery_action = embedded_ble_recovery_action_for_failure(&failure);
             let mut unpair_result = None;
+            let listener_last_error = coord.embedded_ble_listener_last_error();
+            let wake_recovery = coord.embedded_ble_wake_recovery_snapshot();
+            let runtime_requests_auto_unpair = runtime_suggests_embedded_ble_auto_unpair(
+                &err,
+                listener_last_error.as_deref(),
+                &wake_recovery,
+            );
 
-            if should_attempt_embedded_ble_auto_unpair(&failure) {
+            if should_attempt_embedded_ble_auto_unpair(&failure) || runtime_requests_auto_unpair {
+                log::info!(
+                    "[embedded-ble] one-click recovery attempting automatic Listener unpair failure_kind={:?} runtime_escalated={runtime_requests_auto_unpair} reconnect_attempts={} notify_state={:?}",
+                    failure.kind,
+                    wake_recovery.reconnect_attempts,
+                    wake_recovery.notify_subscription_state,
+                );
                 let unpair = tauri::async_runtime::spawn_blocking(
                     crate::embedded_ble::unpair_listener_devices,
                 )
                 .await
                 .map_err(|err| format!("Listener BLE automatic unpair task failed: {err}"))?;
+                log::info!(
+                    "[embedded-ble] one-click recovery automatic Listener unpair result status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
+                    unpair.status,
+                    unpair.matched_devices,
+                    unpair.unpaired_devices,
+                    unpair.already_unpaired_devices,
+                    unpair.failed_devices,
+                    unpair.needs_user_action,
+                );
                 user_action_required = true;
                 open_bluetooth_settings = true;
                 recovery_action = EmbeddedBleRecoveryAction::RePairRequired;
@@ -4985,6 +5063,43 @@ mod tests {
             super::embedded_ble_recovery_action_for_failure(&cccd),
             super::EmbeddedBleRecoveryAction::RePairRequired
         );
+    }
+
+    #[test]
+    fn one_click_recovery_escalates_runtime_cccd_history_after_repair_timeout() {
+        let wake_recovery = crate::coordinator::EmbeddedBleWakeRecoverySnapshot {
+            status: crate::coordinator::EmbeddedBleWakeRecoveryStatus::Reconnecting,
+            user_guidance: "正在重连 Listener BLE 并恢复音频 notify".to_string(),
+            recent_disconnect_reason: Some(
+                "嵌入式 BLE 流式抓音中断: cause=BLE CCCD write timed out after 8000 ms".to_string(),
+            ),
+            reconnect_attempts: 6,
+            notify_subscription_state:
+                crate::coordinator::EmbeddedBleNotifySubscriptionState::Opening,
+            ..Default::default()
+        };
+
+        assert!(super::runtime_suggests_embedded_ble_auto_unpair(
+            "Listener BLE notify subscription did not recover within 15000 ms after foreground probe",
+            None,
+            &wake_recovery,
+        ));
+
+        let idle_recovery = crate::coordinator::EmbeddedBleWakeRecoverySnapshot {
+            recent_disconnect_reason: Some(
+                "Windows GATT disconnected reason=546 after low-power idle; transport_not_ready"
+                    .to_string(),
+            ),
+            reconnect_attempts: 6,
+            notify_subscription_state:
+                crate::coordinator::EmbeddedBleNotifySubscriptionState::Opening,
+            ..wake_recovery
+        };
+        assert!(!super::runtime_suggests_embedded_ble_auto_unpair(
+            "Listener BLE notify subscription did not recover within 15000 ms after foreground probe",
+            None,
+            &idle_recovery,
+        ));
     }
 
     #[test]
