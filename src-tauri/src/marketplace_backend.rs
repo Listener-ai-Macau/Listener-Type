@@ -387,6 +387,16 @@ mod tests {
         (format!("http://{addr}"), handle)
     }
 
+    #[test]
+    fn marketplace_client_percent_encodes_style_id_path_segments() {
+        let client = test_marketplace_client("http://127.0.0.1:65535/api/");
+        let url = client
+            .url(&[STYLES_PATH, "pack/with slash"])
+            .expect("URL builds");
+
+        assert_eq!(url.path(), "/api/styles/pack%2Fwith%20slash");
+    }
+
     #[tokio::test]
     async fn marketplace_client_uses_styles_contract_paths() {
         let body = r#"[{"id":"550e8400-e29b-41d4-a716-446655440000","slug":"demo","name":"Demo","description":"","authorLogin":"alice","version":"1.0.0","baseMode":"structured","tags":[],"likeCount":1,"downloadCount":2,"publishedAt":"2026-06-01T00:00:00Z","updatedAt":"2026-06-01T00:00:00Z"}]"#;

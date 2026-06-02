@@ -37,6 +37,7 @@ mod recorder;
 mod selection;
 mod shortcut_binding;
 mod shortcut_dispatch;
+mod timeline;
 mod types;
 mod unicode_keystroke;
 mod windows_ime_ipc;
@@ -199,8 +200,7 @@ pub fn run() {
                 // LISTENER_TYPE_HIDE_MAIN_ON_START=1 → 不弹主窗口，用户从菜单栏 /
                 // 托盘点击访问。LISTENER_TYPE_SHOW_MAIN_ON_START=1 仍保留老的强制
                 // show 路径（手动 dispatch 测试 / dev 用），优先级最高。
-                let force_show =
-                    std::env::var("LISTENER_TYPE_SHOW_MAIN_ON_START").ok().as_deref() == Some("1");
+                let force_show = should_force_show_main_on_start();
                 let hide_main_on_start = std::env::var("LISTENER_TYPE_HIDE_MAIN_ON_START")
                     .ok()
                     .as_deref()
@@ -279,7 +279,7 @@ pub fn run() {
             coordinator.refresh_embedded_ble_listener();
             // QA / custom combo hotkeys use `global-hotkey` (Carbon on macOS).
             // Start those after RunEvent::Ready, when the AppKit event loop is live.
-            if std::env::var("LISTENER_TYPE_SHOW_MAIN_ON_START").ok().as_deref() == Some("1") {
+            if should_force_show_main_on_start() {
                 show_main_window(app.handle());
             }
 
@@ -304,6 +304,8 @@ pub fn run() {
             commands::get_settings,
             commands::is_main_window_start_hidden,
             commands::get_default_style_system_prompts,
+            commands::list_installed_applications,
+            commands::record_ui_timeline_event,
             commands::set_settings,
             commands::get_update_channel,
             commands::set_update_channel,
@@ -436,6 +438,14 @@ pub fn run() {
             }
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => show_main_window(app),
+            RunEvent::ExitRequested {
+                code: None, api, ..
+            } => {
+                log::warn!(
+                    "[main] exit requested without explicit code; keeping Listener Type alive"
+                );
+                api.prevent_exit();
+            }
             RunEvent::WindowEvent { label, event, .. } => {
                 if label == "main" {
                     if let tauri::WindowEvent::CloseRequested { ref api, .. } = event {
@@ -445,6 +455,7 @@ pub fn run() {
                 }
             }
             RunEvent::Exit => {
+                log::info!("[main] exit");
                 TRAY_MICROPHONE_WATCHER_STOPPING.store(true, Ordering::Relaxed);
                 let coordinator = app.state::<Arc<coordinator::Coordinator>>();
                 coordinator.stop_hotkey_listener();
@@ -457,6 +468,14 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+fn should_force_show_main_on_start() -> bool {
+    std::env::var("LISTENER_TYPE_SHOW_MAIN_ON_START")
+        .ok()
+        .as_deref()
+        == Some("1")
+        || std::env::args().any(|arg| arg == "--show-main")
 }
 
 struct MicrophoneTrayMenu {

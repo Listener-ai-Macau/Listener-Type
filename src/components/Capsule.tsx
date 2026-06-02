@@ -330,6 +330,26 @@ const STOP_ACK_MS = PREVIEW_FINAL_TRANSITION.stopAckMs;
 // 浏览器 dev 模式从 recording 开始以便直接看到胶囊。
 const INITIAL_VISIBLE_STATE: CapsuleState = isTauri ? 'idle' : 'recording';
 
+function traceCapsule(
+  event: string,
+  payload: { state?: CapsuleState; elapsedMs?: number; detail?: Record<string, unknown> } = {},
+) {
+  if (!isTauri) return;
+  void invokeOrMock<void>(
+    'record_ui_timeline_event',
+    {
+      payload: {
+        source: 'frontend.capsule',
+        event,
+        state: payload.state,
+        elapsedMs: payload.elapsedMs,
+        detail: payload.detail ?? {},
+      },
+    },
+    () => undefined,
+  ).catch(() => undefined);
+}
+
 export function Capsule() {
   const { t } = useTranslation();
   const os = detectOS();
@@ -381,6 +401,16 @@ export function Capsule() {
       const { listen } = await import('@tauri-apps/api/event');
       const handle = await listen<CapsulePayload>('capsule:state', event => {
         const p = event.payload;
+        traceCapsule('event_received', {
+          state: p.state,
+          elapsedMs: p.elapsedMs,
+          detail: {
+            level: p.level,
+            insertedChars: p.insertedChars ?? null,
+            hasMessage: Boolean(p.message),
+            translation: p.translation === true,
+          },
+        });
         const previousState = previousStateRef.current;
         const previousElapsedMs = previousElapsedMsRef.current;
         previousElapsedMsRef.current = p.elapsedMs;
@@ -416,6 +446,10 @@ export function Capsule() {
   useEffect(() => {
     const previous = previousStateRef.current;
     previousStateRef.current = state;
+    traceCapsule('state_applied', {
+      state,
+      detail: { previous, leaving, stopRequested, stopAcknowledged },
+    });
     if (previous === 'recording' && (state === 'transcribing' || state === 'polishing')) {
       armStopAcknowledgement();
     }
@@ -447,14 +481,20 @@ export function Capsule() {
       // 立即恢复可见，并取消上一轮可能挂着的离场。
       if (leaving) setLeaving(false);
       setLastVisibleState(state);
+      traceCapsule('visible', { state, detail: { leaving } });
       return undefined;
     }
     // state === 'idle'：判断是不是从可见态过渡过来。
     if (lastVisibleState === 'idle') return undefined;
     setLeaving(true);
+    traceCapsule('exit_animation_start', {
+      state: lastVisibleState,
+      detail: { exitAnimMs: EXIT_ANIM_MS },
+    });
     const timer = setTimeout(() => {
       setLeaving(false);
       setLastVisibleState('idle');
+      traceCapsule('exit_animation_end', { state: lastVisibleState });
     }, EXIT_ANIM_MS);
     return () => clearTimeout(timer);
     // 故意只依赖 state —— lastVisibleState / leaving 是内部派生量，
@@ -463,12 +503,14 @@ export function Capsule() {
   }, [state]);
 
   const onCancel = () => {
+    traceCapsule('cancel_click', { state });
     setStopRequested(false);
     clearStopAcknowledgement();
     void invokeOrMock<void>('cancel_dictation', undefined, () => undefined);
   };
 
   const onConfirm = () => {
+    traceCapsule('confirm_click', { state });
     if (state === 'recording') {
       setStopRequested(true);
       armStopAcknowledgement();
@@ -480,6 +522,7 @@ export function Capsule() {
   };
 
   const onDismiss = () => {
+    traceCapsule('dismiss_click', { state });
     setStopRequested(false);
     clearStopAcknowledgement();
     setState('idle');
@@ -487,6 +530,7 @@ export function Capsule() {
   };
 
   const onRetry = () => {
+    traceCapsule('retry_click', { state });
     setStopRequested(false);
     clearStopAcknowledgement();
     setState('idle');

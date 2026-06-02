@@ -6,6 +6,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
+import { listen } from '@tauri-apps/api/event';
 import { Icon } from './Icon';
 import { WindowChrome, detectOS, type OS } from './WindowChrome';
 import { SettingsModal } from './SettingsModal';
@@ -21,6 +22,7 @@ import { SelectionAsk } from '../pages/SelectionAsk';
 import { APP_VERSION_LABEL, IS_BETA_BUILD } from '../lib/appVersion';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
 import { getCredentials, isMainWindowStartHidden } from '../lib/ipc';
+import type { DeviceCustomKeyAppPage } from '../lib/types';
 import {
   PROVIDER_SETUP_PROMPT_DEFERRED_KEY,
   shouldShowProviderSetupPrompt,
@@ -170,6 +172,49 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     setSettingsInitialSection(section);
     setSettingsOpen(true);
   };
+
+  const openDeviceKeyAppPage = (page: DeviceCustomKeyAppPage) => {
+    const settingsPages: Partial<Record<DeviceCustomKeyAppPage, SettingsSectionId>> = {
+      settingsRecording: 'recording',
+      settingsProviders: 'providers',
+      settingsShortcuts: 'shortcuts',
+      settingsPermissions: 'permissions',
+      settingsLanguage: 'language',
+      settingsAdvanced: 'advanced',
+    };
+    const settingsSection = settingsPages[page];
+    if (settingsSection) {
+      openSettings(settingsSection);
+      return;
+    }
+    const appTabs: Partial<Record<DeviceCustomKeyAppPage, AppTab>> = {
+      overview: 'overview',
+      history: 'history',
+      vocab: 'vocab',
+      style: 'style',
+      translation: 'translation',
+      selectionAsk: 'selectionAsk',
+    };
+    const tab = appTabs[page] ?? 'overview';
+    setSettingsOpen(false);
+    setCurrentTab(tab);
+  };
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<DeviceCustomKeyAppPage>('device-key:open-app-page', event => {
+      openDeviceKeyAppPage(event.payload);
+    }).then(fn => {
+      unlisten = fn;
+    }).catch(error => {
+      console.warn('[device-key] open app page listener setup failed', error);
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+    // openSettings only wraps stable React setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ⌘, 打开设置页面
   useEffect(() => {

@@ -221,5 +221,5 @@ function hasTransportError(stats: EmbeddedAudioSessionStats): boolean {
   if (stats.endReason == null) return false;
   if (stats.endReason === 'stop') return false;
   if (stats.endReason === 'cancel') return true;
-  return 'error' in stats.endReason;
+  return typeof stats.endReason === 'object' && stats.endReason.error != null;
 }

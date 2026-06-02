@@ -509,11 +509,55 @@ impl DeviceCustomKeyId {
     }
 
     pub fn fallback_primary(self) -> &'static str {
+        self.fallback_primary_for(DeviceCustomKeyGesture::SingleClick)
+    }
+
+    pub fn fallback_primary_for(self, gesture: DeviceCustomKeyGesture) -> &'static str {
         match self {
-            DeviceCustomKeyId::Key1 => "F13",
-            DeviceCustomKeyId::Key2 => "F14",
-            DeviceCustomKeyId::Key3 => "F15",
-            DeviceCustomKeyId::Key4 => "F16",
+            DeviceCustomKeyId::Key1 => match gesture {
+                DeviceCustomKeyGesture::SingleClick => "F13",
+                DeviceCustomKeyGesture::DoubleClick => "F17",
+                DeviceCustomKeyGesture::LongPress => "F21",
+            },
+            DeviceCustomKeyId::Key2 => match gesture {
+                DeviceCustomKeyGesture::SingleClick => "F14",
+                DeviceCustomKeyGesture::DoubleClick => "F18",
+                DeviceCustomKeyGesture::LongPress => "F22",
+            },
+            DeviceCustomKeyId::Key3 => match gesture {
+                DeviceCustomKeyGesture::SingleClick => "F15",
+                DeviceCustomKeyGesture::DoubleClick => "F19",
+                DeviceCustomKeyGesture::LongPress => "F23",
+            },
+            DeviceCustomKeyId::Key4 => match gesture {
+                DeviceCustomKeyGesture::SingleClick => "F16",
+                DeviceCustomKeyGesture::DoubleClick => "F20",
+                DeviceCustomKeyGesture::LongPress => "F24",
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceCustomKeyGesture {
+    SingleClick,
+    DoubleClick,
+    LongPress,
+}
+
+impl DeviceCustomKeyGesture {
+    pub const ALL: [DeviceCustomKeyGesture; 3] = [
+        DeviceCustomKeyGesture::SingleClick,
+        DeviceCustomKeyGesture::DoubleClick,
+        DeviceCustomKeyGesture::LongPress,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DeviceCustomKeyGesture::SingleClick => "singleClick",
+            DeviceCustomKeyGesture::DoubleClick => "doubleClick",
+            DeviceCustomKeyGesture::LongPress => "longPress",
         }
     }
 }
@@ -523,6 +567,11 @@ impl DeviceCustomKeyId {
 pub enum DeviceCustomKeyAction {
     Disabled,
     OpenApp,
+    OpenExternalApp,
+    Dictation,
+    CopyShortcut,
+    PasteShortcut,
+    UndoShortcut,
     SwitchStyle,
     Translation,
     SelectionAsk,
@@ -530,10 +579,35 @@ pub enum DeviceCustomKeyAction {
     SendShortcut,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceCustomKeyAppPage {
+    Overview,
+    History,
+    Vocab,
+    Style,
+    Translation,
+    SelectionAsk,
+    SettingsRecording,
+    SettingsProviders,
+    SettingsShortcuts,
+    SettingsPermissions,
+    SettingsLanguage,
+    SettingsAdvanced,
+}
+
+impl Default for DeviceCustomKeyAppPage {
+    fn default() -> Self {
+        Self::SettingsShortcuts
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct DeviceCustomKeyMapping {
     pub action: DeviceCustomKeyAction,
+    pub app_page: DeviceCustomKeyAppPage,
+    pub external_app_path: String,
     pub paste_template: String,
     pub shortcut: Option<ShortcutBinding>,
 }
@@ -542,6 +616,8 @@ impl Default for DeviceCustomKeyMapping {
     fn default() -> Self {
         Self {
             action: DeviceCustomKeyAction::Disabled,
+            app_page: DeviceCustomKeyAppPage::default(),
+            external_app_path: String::new(),
             paste_template: String::new(),
             shortcut: None,
         }
@@ -566,10 +642,8 @@ impl DeviceCustomKeys {
             DeviceCustomKeyId::Key4 => &self.key4,
         }
     }
-}
 
-impl Default for DeviceCustomKeys {
-    fn default() -> Self {
+    pub fn disabled() -> Self {
         Self {
             key1: DeviceCustomKeyMapping::default(),
             key2: DeviceCustomKeyMapping::default(),
@@ -577,6 +651,78 @@ impl Default for DeviceCustomKeys {
             key4: DeviceCustomKeyMapping::default(),
         }
     }
+
+    pub fn is_all_disabled(&self) -> bool {
+        [&self.key1, &self.key2, &self.key3, &self.key4]
+            .iter()
+            .all(|mapping| mapping.action == DeviceCustomKeyAction::Disabled)
+    }
+}
+
+impl Default for DeviceCustomKeys {
+    fn default() -> Self {
+        Self {
+            key1: DeviceCustomKeyMapping {
+                action: DeviceCustomKeyAction::OpenApp,
+                ..DeviceCustomKeyMapping::default()
+            },
+            key2: DeviceCustomKeyMapping {
+                action: DeviceCustomKeyAction::PasteShortcut,
+                ..DeviceCustomKeyMapping::default()
+            },
+            key3: DeviceCustomKeyMapping {
+                action: DeviceCustomKeyAction::Dictation,
+                ..DeviceCustomKeyMapping::default()
+            },
+            key4: DeviceCustomKeyMapping {
+                action: DeviceCustomKeyAction::OpenExternalApp,
+                external_app_path: default_device_external_app_path(),
+                ..DeviceCustomKeyMapping::default()
+            },
+        }
+    }
+}
+
+fn default_disabled_device_custom_keys() -> DeviceCustomKeys {
+    DeviceCustomKeys::disabled()
+}
+
+fn legacy_device_custom_keys_default() -> DeviceCustomKeys {
+    DeviceCustomKeys {
+        key1: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::PasteShortcut,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key2: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::Dictation,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key3: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenExternalApp,
+            external_app_path: default_device_external_app_path(),
+            ..DeviceCustomKeyMapping::default()
+        },
+        key4: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::UndoShortcut,
+            ..DeviceCustomKeyMapping::default()
+        },
+    }
+}
+
+fn default_device_external_app_path() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let code = std::path::Path::new(&local_app_data)
+                .join("Programs")
+                .join("Microsoft VS Code")
+                .join("Code.exe");
+            if code.exists() {
+                return code.display().to_string();
+            }
+        }
+    }
+    "code".into()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -665,6 +811,12 @@ pub struct UserPreferences {
     pub open_app_hotkey: ShortcutBinding,
     #[serde(default)]
     pub device_custom_keys: DeviceCustomKeys,
+    #[serde(default = "default_disabled_device_custom_keys")]
+    pub device_custom_key_double_clicks: DeviceCustomKeys,
+    #[serde(default = "default_disabled_device_custom_keys")]
+    pub device_custom_key_long_presses: DeviceCustomKeys,
+    #[serde(default = "default_true")]
+    pub device_custom_keys_default_migrated: bool,
     /// 本地 Qwen3-ASR 当前激活的模型 id（"qwen3-asr-0.6b" / "qwen3-asr-1.7b"）。
     /// 仅在 active_asr_provider == "local-qwen3" 时有意义。
     #[serde(default = "default_local_asr_model")]
@@ -847,6 +999,12 @@ struct UserPreferencesWire {
     open_app_hotkey: Option<ShortcutBinding>,
     #[serde(default)]
     device_custom_keys: DeviceCustomKeys,
+    #[serde(default = "default_disabled_device_custom_keys")]
+    device_custom_key_double_clicks: DeviceCustomKeys,
+    #[serde(default = "default_disabled_device_custom_keys")]
+    device_custom_key_long_presses: DeviceCustomKeys,
+    #[serde(default)]
+    device_custom_keys_default_migrated: bool,
     #[serde(default = "default_local_asr_model")]
     local_asr_active_model: String,
     #[serde(default = "default_local_asr_mirror")]
@@ -924,6 +1082,9 @@ impl Default for UserPreferencesWire {
             switch_style_hotkey: None,
             open_app_hotkey: None,
             device_custom_keys: prefs.device_custom_keys,
+            device_custom_key_double_clicks: prefs.device_custom_key_double_clicks,
+            device_custom_key_long_presses: prefs.device_custom_key_long_presses,
+            device_custom_keys_default_migrated: prefs.device_custom_keys_default_migrated,
             local_asr_active_model: prefs.local_asr_active_model,
             local_asr_mirror: prefs.local_asr_mirror,
             local_asr_keep_loaded_secs: prefs.local_asr_keep_loaded_secs,
@@ -968,6 +1129,21 @@ impl<'de> Deserialize<'de> for UserPreferences {
         } else {
             true
         };
+        let device_custom_key_double_clicks = wire.device_custom_key_double_clicks;
+        let device_custom_key_long_presses = wire.device_custom_key_long_presses;
+        let mut device_custom_keys = wire.device_custom_keys;
+        if !wire.device_custom_keys_default_migrated
+            && device_custom_keys.is_all_disabled()
+            && device_custom_key_double_clicks.is_all_disabled()
+            && device_custom_key_long_presses.is_all_disabled()
+        {
+            device_custom_keys = DeviceCustomKeys::default();
+        } else if device_custom_keys == legacy_device_custom_keys_default()
+            && device_custom_key_double_clicks.is_all_disabled()
+            && device_custom_key_long_presses.is_all_disabled()
+        {
+            device_custom_keys = DeviceCustomKeys::default();
+        }
 
         Ok(Self {
             hotkey,
@@ -1007,7 +1183,10 @@ impl<'de> Deserialize<'de> for UserPreferences {
                 .switch_style_hotkey
                 .unwrap_or_else(default_switch_style_hotkey),
             open_app_hotkey: wire.open_app_hotkey.unwrap_or_else(default_open_app_hotkey),
-            device_custom_keys: wire.device_custom_keys,
+            device_custom_keys,
+            device_custom_key_double_clicks,
+            device_custom_key_long_presses,
+            device_custom_keys_default_migrated: true,
             local_asr_active_model: wire.local_asr_active_model,
             local_asr_mirror: wire.local_asr_mirror,
             local_asr_keep_loaded_secs: wire.local_asr_keep_loaded_secs,
@@ -1407,6 +1586,9 @@ impl Default for UserPreferences {
             switch_style_hotkey: default_switch_style_hotkey(),
             open_app_hotkey: default_open_app_hotkey(),
             device_custom_keys: DeviceCustomKeys::default(),
+            device_custom_key_double_clicks: DeviceCustomKeys::disabled(),
+            device_custom_key_long_presses: DeviceCustomKeys::disabled(),
+            device_custom_keys_default_migrated: true,
             local_asr_active_model: default_local_asr_model(),
             local_asr_mirror: default_local_asr_mirror(),
             local_asr_keep_loaded_secs: default_local_asr_keep_loaded_secs(),
@@ -2111,6 +2293,69 @@ mod tests {
 
         let from_empty: UserPreferences = serde_json::from_str("{}").unwrap();
         assert_eq!(from_empty.paste_shortcut, PasteShortcut::CtrlV);
+    }
+
+    #[test]
+    fn device_custom_keys_default_to_shortcuts_page_paste_dictation_and_external_app() {
+        let prefs = UserPreferences::default();
+
+        assert_eq!(
+            prefs.device_custom_keys.key1.action,
+            DeviceCustomKeyAction::OpenApp
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key1.app_page,
+            DeviceCustomKeyAppPage::SettingsShortcuts
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key2.action,
+            DeviceCustomKeyAction::PasteShortcut
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key3.action,
+            DeviceCustomKeyAction::Dictation
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key4.action,
+            DeviceCustomKeyAction::OpenExternalApp
+        );
+        assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
+        assert!(prefs.device_custom_key_long_presses.is_all_disabled());
+    }
+
+    #[test]
+    fn legacy_device_custom_key_defaults_migrate_to_current_defaults() {
+        let raw = serde_json::json!({
+            "deviceCustomKeysDefaultMigrated": true,
+            "deviceCustomKeys": {
+                "key1": { "action": "pasteShortcut", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "dictation", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "openExternalApp", "externalAppPath": default_device_external_app_path(), "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "undoShortcut", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            }
+        });
+        let prefs: UserPreferences = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(
+            prefs.device_custom_keys.key1.action,
+            DeviceCustomKeyAction::OpenApp
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key1.app_page,
+            DeviceCustomKeyAppPage::SettingsShortcuts
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key2.action,
+            DeviceCustomKeyAction::PasteShortcut
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key3.action,
+            DeviceCustomKeyAction::Dictation
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key4.action,
+            DeviceCustomKeyAction::OpenExternalApp
+        );
     }
 
     #[test]

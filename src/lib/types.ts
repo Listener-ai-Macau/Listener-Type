@@ -381,8 +381,13 @@ export interface UserPreferences {
   switchStyleHotkey: ShortcutBinding;
   /** 打开 Listener Type 主窗口的全局快捷键。 */
   openAppHotkey: ShortcutBinding;
-  /** 设备 KEY1-KEY4 的动作映射。固件 fallback 入口为 F13-F16。 */
+  /** 设备 KEY1-KEY4 的单击动作映射。固件 fallback 入口为 F13-F16。 */
   deviceCustomKeys: DeviceCustomKeys;
+  /** 设备 KEY1-KEY4 的双击动作映射。固件 fallback 入口为 F17-F20。 */
+  deviceCustomKeyDoubleClicks: DeviceCustomKeys;
+  /** 设备 KEY1-KEY4 的长按动作映射。固件 fallback 入口为 F21-F24。 */
+  deviceCustomKeyLongPresses: DeviceCustomKeys;
+  deviceCustomKeysDefaultMigrated: boolean;
   /** 本地 Qwen3-ASR 当前激活的模型 id。仅在 activeAsrProvider === 'local-qwen3' 时有意义。 */
   localAsrActiveModel: string;
   /** 本地模型下载源镜像（'huggingface' / 'hf-mirror'）。 */
@@ -437,20 +442,48 @@ export interface UserPreferences {
 }
 
 export type DeviceCustomKeyId = 'key1' | 'key2' | 'key3' | 'key4';
+export type DeviceCustomKeyGesture = 'singleClick' | 'doubleClick' | 'longPress';
 
 export type DeviceCustomKeyAction =
   | 'disabled'
   | 'openApp'
+  | 'openExternalApp'
+  | 'dictation'
+  | 'copyShortcut'
+  | 'pasteShortcut'
+  | 'undoShortcut'
   | 'switchStyle'
   | 'translation'
   | 'selectionAsk'
   | 'pasteTemplate'
   | 'sendShortcut';
 
+export type DeviceCustomKeyAppPage =
+  | 'overview'
+  | 'history'
+  | 'vocab'
+  | 'style'
+  | 'translation'
+  | 'selectionAsk'
+  | 'settingsRecording'
+  | 'settingsProviders'
+  | 'settingsShortcuts'
+  | 'settingsPermissions'
+  | 'settingsLanguage'
+  | 'settingsAdvanced';
+
 export interface DeviceCustomKeyMapping {
   action: DeviceCustomKeyAction;
+  appPage: DeviceCustomKeyAppPage;
+  externalAppPath: string;
   pasteTemplate: string;
   shortcut: ShortcutBinding | null;
+}
+
+export interface InstalledApplication {
+  name: string;
+  path: string;
+  source: string;
 }
 
 export interface DeviceCustomKeys {

@@ -473,6 +473,7 @@ mod windows_ble {
 
     const SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091a);
     const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b);
+    const AUDIO_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091e);
     const OTA_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092a);
     const OTA_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092b);
     const OTA_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092c);
@@ -795,6 +796,28 @@ mod windows_ble {
         }
         log::info!("[embedded-ble] probe #{capture_id}: notify CCCD enabled");
         cleanup.finish(NotifyCccdTeardown::for_probe_success());
+        Ok(())
+    }
+
+    pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
+        let target = open_notify_target()?;
+        let Some(service) = target.service.as_ref() else {
+            return Err("Listener BLE audio service unavailable for recording control".into());
+        };
+        let control = open_write_characteristic_from_service(
+            service,
+            AUDIO_CONTROL_UUID,
+            "audio control",
+            BluetoothCacheMode::Uncached,
+        )?;
+        write_gatt_value_with_timeout(
+            &control,
+            b"VREC:TOGGLE\n",
+            GattWriteOption::WriteWithResponse,
+            timeout,
+            "audio control toggle",
+        )?;
+        log::info!("[embedded-ble] audio control toggle sent");
         Ok(())
     }
 
@@ -3484,6 +3507,11 @@ pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_control_toggle(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn capture_notification_events(
     timeout: Duration,
     on_event: &mut BleNotificationHandler<'_>,
@@ -3578,6 +3606,11 @@ pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, St
 #[cfg(not(target_os = "windows"))]
 pub fn probe_notify_subscription(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_toggle(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE recording control is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

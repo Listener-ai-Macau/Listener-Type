@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LocalAsr } from "./pages/LocalAsr";
+import { Settings } from "./pages/Settings";
 import { HotkeySettingsProvider } from "./state/HotkeySettingsContext";
 import i18n from "./i18n"; // 副作用：触发 i18next init
 import "./styles/tokens.css";
@@ -14,6 +15,13 @@ const isCapsule = windowKind === "capsule";
 const isQa = windowKind === "qa";
 const isLocalAsrVisual =
   import.meta.env.DEV && params.get("visual") === "local-asr";
+const isSettingsShortcutsVisual =
+  import.meta.env.DEV && params.get("visual") === "settings-shortcuts";
+
+if (import.meta.env.DEV && params.get("theme") === "dark") {
+  document.documentElement.setAttribute("data-theme", "dark");
+  window.localStorage.setItem("ol-dark-mode", "true");
+}
 
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
@@ -24,6 +32,12 @@ const renderApp = () => {
         {isLocalAsrVisual ? (
           <HotkeySettingsProvider>
             <LocalAsr />
+          </HotkeySettingsProvider>
+        ) : isSettingsShortcutsVisual ? (
+          <HotkeySettingsProvider>
+            <div style={{ width: "100%", height: "100%", padding: 24, overflow: "auto", background: "var(--ol-window-bg)" }}>
+              <Settings embedded initialSection="shortcuts" />
+            </div>
           </HotkeySettingsProvider>
         ) : (
           <App isCapsule={isCapsule} isQa={isQa} />

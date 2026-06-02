@@ -50,6 +50,8 @@ export const inputStyle: CSSProperties = {
   borderRadius: 8, fontSize: 12.5,
   fontFamily: 'inherit', outline: 'none',
   background: 'var(--ol-surface-2)',
+  color: 'var(--ol-ink)',
+  colorScheme: 'light dark',
   width: '100%', maxWidth: 360,
   transition: 'background 0.16s var(--ol-motion-quick), border-color 0.16s var(--ol-motion-quick)',
 };

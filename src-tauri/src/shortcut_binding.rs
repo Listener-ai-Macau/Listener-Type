@@ -136,6 +136,14 @@ fn parse_primary(raw: &str) -> Result<Code, ShortcutBindingError> {
         "F14" => Code::F14,
         "F15" => Code::F15,
         "F16" => Code::F16,
+        "F17" => Code::F17,
+        "F18" => Code::F18,
+        "F19" => Code::F19,
+        "F20" => Code::F20,
+        "F21" => Code::F21,
+        "F22" => Code::F22,
+        "F23" => Code::F23,
+        "F24" => Code::F24,
         _ => return Err(ShortcutBindingError::UnsupportedKey(trimmed.to_string())),
     };
     Ok(named)

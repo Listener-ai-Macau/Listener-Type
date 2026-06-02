@@ -175,12 +175,9 @@ impl GithubOAuthClient {
             });
         }
         Ok(GithubDeviceStartResponse {
-            device_code: body["device_code"].as_str().unwrap_or("").to_string(),
-            user_code: body["user_code"].as_str().unwrap_or("").to_string(),
-            verification_uri: body["verification_uri"]
-                .as_str()
-                .unwrap_or("https://github.com/login/device")
-                .to_string(),
+            device_code: required_string_field(&body, "device_code")?,
+            user_code: required_string_field(&body, "user_code")?,
+            verification_uri: required_string_field(&body, "verification_uri")?,
             interval: body["interval"]
                 .as_u64()
                 .unwrap_or(DEFAULT_INTERVAL_SECS as u64) as u32,
@@ -393,6 +390,18 @@ fn github_error_message(body: &serde_json::Value) -> String {
     }
 }
 
+fn required_string_field(
+    body: &serde_json::Value,
+    field: &str,
+) -> Result<String, GithubOAuthError> {
+    body[field]
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| GithubOAuthError::Decode(format!("missing required field: {field}")))
+}
+
 async fn decode_json_response(
     response: reqwest::Response,
 ) -> Result<serde_json::Value, GithubOAuthError> {
@@ -525,6 +534,21 @@ mod tests {
         assert!(request2
             .lines()
             .any(|line| line.eq_ignore_ascii_case("authorization: Bearer access")));
+    }
+
+    #[tokio::test]
+    async fn device_flow_rejects_success_response_missing_device_code() {
+        let (base, _requests) = spawn_sequence(vec![json_response(
+            r#"{"user_code":"USER-CODE","verification_uri":"https://github.com/login/device"}"#,
+        )]);
+        let client = GithubOAuthClient::with_client(test_http_client(), &base, &base).unwrap();
+
+        let error = client
+            .start_device_flow("client123", "read:user")
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("device_code"));
     }
 
     #[tokio::test]

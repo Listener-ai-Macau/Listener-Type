@@ -1,9 +1,12 @@
 // 快捷键设置：开始/停止、翻译、问答、切风格、唤起 App、以及只读取消/确认提示。
 
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
+import { SelectLite } from '../../components/ui/SelectLite';
 import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from '../../lib/hotkey';
 import {
+  listInstalledApplications,
   setDictationHotkey,
   setOpenAppHotkey,
   setQaHotkey,
@@ -12,30 +15,85 @@ import {
 } from '../../lib/ipc';
 import type {
   DeviceCustomKeyAction,
+  DeviceCustomKeyAppPage,
+  DeviceCustomKeyGesture,
   DeviceCustomKeyId,
+  DeviceCustomKeys,
   DeviceCustomKeyMapping,
+  InstalledApplication,
   ShortcutBinding,
 } from '../../lib/types';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Card } from '../_atoms';
 import { inputStyle, SettingRow } from './shared';
 
-const DEVICE_KEYS: Array<{ id: DeviceCustomKeyId; fallback: string }> = [
-  { id: 'key1', fallback: 'F13' },
-  { id: 'key2', fallback: 'F14' },
-  { id: 'key3', fallback: 'F15' },
-  { id: 'key4', fallback: 'F16' },
+const DEVICE_KEYS: Array<{ id: DeviceCustomKeyId }> = [
+  { id: 'key1' },
+  { id: 'key2' },
+  { id: 'key3' },
+  { id: 'key4' },
+];
+
+type DeviceKeyMapKey =
+  | 'deviceCustomKeys'
+  | 'deviceCustomKeyDoubleClicks'
+  | 'deviceCustomKeyLongPresses';
+
+const DEVICE_GESTURES: Array<{
+  id: DeviceCustomKeyGesture;
+  mapKey: DeviceKeyMapKey;
+  fallbacks: Record<DeviceCustomKeyId, string>;
+}> = [
+  {
+    id: 'singleClick',
+    mapKey: 'deviceCustomKeys',
+    fallbacks: { key1: 'F13', key2: 'F14', key3: 'F15', key4: 'F16' },
+  },
+  {
+    id: 'doubleClick',
+    mapKey: 'deviceCustomKeyDoubleClicks',
+    fallbacks: { key1: 'F17', key2: 'F18', key3: 'F19', key4: 'F20' },
+  },
+  {
+    id: 'longPress',
+    mapKey: 'deviceCustomKeyLongPresses',
+    fallbacks: { key1: 'F21', key2: 'F22', key3: 'F23', key4: 'F24' },
+  },
 ];
 
 const DEVICE_KEY_ACTIONS: DeviceCustomKeyAction[] = [
   'disabled',
   'openApp',
-  'switchStyle',
+  'dictation',
+  'copyShortcut',
+  'pasteShortcut',
+  'undoShortcut',
+  'openExternalApp',
+];
+
+const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
+  'overview',
+  'history',
+  'vocab',
+  'style',
   'translation',
   'selectionAsk',
-  'pasteTemplate',
-  'sendShortcut',
+  'settingsRecording',
+  'settingsProviders',
+  'settingsShortcuts',
+  'settingsPermissions',
+  'settingsLanguage',
+  'settingsAdvanced',
 ];
+
+const KNOB_FIXED_ACTIONS = [
+  { gesture: 'shortPress', action: 'recording' },
+  { gesture: 'doubleClick', action: 'bluetoothReset' },
+  { gesture: 'longPress', action: 'powerOff' },
+] as const;
+
+const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
+const defaultExternalAppPath = () => 'code';
 
 const fallbackShortcut = (): ShortcutBinding => ({
   primary: 'K',
@@ -45,6 +103,30 @@ const fallbackShortcut = (): ShortcutBinding => ({
 export function ShortcutsSection() {
   const { t } = useTranslation();
   const { prefs, hotkey, capability, updatePrefs: savePrefs } = useHotkeySettings();
+  const [installedApps, setInstalledApps] = useState<InstalledApplication[]>([]);
+  const [installedAppsLoading, setInstalledAppsLoading] = useState(false);
+  const autoOpenDeviceKeyActionMenu =
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).get('openDeviceKeyActionMenu') === '1';
+
+  useEffect(() => {
+    let cancelled = false;
+    setInstalledAppsLoading(true);
+    listInstalledApplications()
+      .then(apps => {
+        if (!cancelled) setInstalledApps(apps);
+      })
+      .catch(error => {
+        console.warn('[device-key] list installed applications failed', error);
+        if (!cancelled) setInstalledApps([]);
+      })
+      .finally(() => {
+        if (!cancelled) setInstalledAppsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!prefs || !hotkey || !capability) {
     return (
@@ -54,17 +136,49 @@ export function ShortcutsSection() {
     );
   }
 
-  const desc = capability.requiresAccessibilityPermission
-    ? t('settings.shortcuts.descAcc')
-    : t('settings.shortcuts.descNoAcc');
   const readonlyRows: Array<[string, string]> = [
     [t('settings.shortcuts.cancel'), 'Esc'],
     [t('settings.shortcuts.confirm'), t('settings.shortcuts.confirmHint')],
   ];
+
   return (
     <Card>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{t('settings.shortcuts.title')}</div>
-      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginBottom: 6 }}>{desc}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+        {t('settings.deviceKeys.title')}
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 2 }}>
+        {t('settings.deviceKeys.desc')}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+        {DEVICE_GESTURES.map(gesture => (
+          <DeviceKeyGestureGroup
+            key={gesture.id}
+            gesture={gesture}
+            keys={prefs[gesture.mapKey]}
+            installedApps={installedApps}
+            installedAppsLoading={installedAppsLoading}
+            autoOpenDeviceKeyActionMenu={autoOpenDeviceKeyActionMenu}
+            onChange={async (id, mapping) => {
+              await savePrefs(current => ({
+                ...current,
+                [gesture.mapKey]: {
+                  ...current[gesture.mapKey],
+                  [id]: mapping,
+                },
+              }));
+            }}
+          />
+        ))}
+      </div>
+
+      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 18, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
+        {t('settings.shortcuts.title')}
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 6 }}>
+        {capability.requiresAccessibilityPermission
+          ? t('settings.shortcuts.descAcc')
+          : t('settings.shortcuts.descNoAcc')}
+      </div>
       <SettingRow label={t('settings.shortcuts.startStop')}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
           <ShortcutRecorder
@@ -133,32 +247,6 @@ export function ShortcutsSection() {
           }}
         />
       </SettingRow>
-      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 10, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
-        {t('settings.deviceKeys.title')}
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 2 }}>
-        {t('settings.deviceKeys.desc')}
-      </div>
-      {DEVICE_KEYS.map(({ id, fallback }) => (
-        <SettingRow
-          key={id}
-          label={t('settings.deviceKeys.keyLabel', { key: id.toUpperCase() })}
-          desc={t('settings.deviceKeys.fallback', { fallback })}
-        >
-          <DeviceKeyMappingControl
-            mapping={prefs.deviceCustomKeys[id]}
-            onChange={async mapping => {
-              await savePrefs(current => ({
-                ...current,
-                deviceCustomKeys: {
-                  ...current.deviceCustomKeys,
-                  [id]: mapping,
-                },
-              }));
-            }}
-          />
-        </SettingRow>
-      ))}
       {readonlyRows.map(([k, v]) => (
         <SettingRow key={k} label={k}>
           <kbd style={{
@@ -171,40 +259,210 @@ export function ShortcutsSection() {
           }}>{v}</kbd>
         </SettingRow>
       ))}
+      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 18, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
+        {t('settings.deviceKeys.knob.title')}
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 8 }}>
+        {t('settings.deviceKeys.knob.desc')}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {KNOB_FIXED_ACTIONS.map(item => (
+          <div
+            key={item.gesture}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
+              gap: 12,
+              alignItems: 'center',
+              opacity: 0.72,
+            }}
+          >
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink-3)' }}>
+              {t(`settings.deviceKeys.knob.gestures.${item.gesture}`)}
+            </div>
+            <div
+              aria-disabled="true"
+              style={{
+                minHeight: 32,
+                display: 'inline-flex',
+                alignItems: 'center',
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '0 10px',
+                borderRadius: 6,
+                background: 'var(--ol-surface-2)',
+                border: '0.5px solid var(--ol-line-strong)',
+                color: 'var(--ol-ink-4)',
+                fontSize: 12,
+              }}
+            >
+              {t(`settings.deviceKeys.knob.actions.${item.action}`)}
+            </div>
+          </div>
+        ))}
+      </div>
     </Card>
+  );
+}
+
+function DeviceKeyGestureGroup({
+  gesture,
+  keys,
+  installedApps,
+  installedAppsLoading,
+  autoOpenDeviceKeyActionMenu,
+  onChange,
+}: {
+  gesture: (typeof DEVICE_GESTURES)[number];
+  keys: DeviceCustomKeys;
+  installedApps: InstalledApplication[];
+  installedAppsLoading: boolean;
+  autoOpenDeviceKeyActionMenu: boolean;
+  onChange: (id: DeviceCustomKeyId, mapping: DeviceCustomKeyMapping) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div style={{ borderTop: '0.5px solid var(--ol-line-soft)', paddingTop: 12 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)', marginBottom: 8 }}>
+        {t(`settings.deviceKeys.gestures.${gesture.id}`)}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {DEVICE_KEYS.map(({ id }) => (
+          <div
+            key={`${gesture.id}-${id}`}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
+              gap: 12,
+              alignItems: 'start',
+            }}
+          >
+            <div style={{ minWidth: 0, paddingTop: 6 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
+                {t('settings.deviceKeys.keyLabel', { key: id.toUpperCase() })}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
+                {t('settings.deviceKeys.fallback', { fallback: gesture.fallbacks[id] })}
+              </div>
+            </div>
+            <DeviceKeyMappingControl
+              mapping={keys[id]}
+              installedApps={installedApps}
+              installedAppsLoading={installedAppsLoading}
+              autoOpen={autoOpenDeviceKeyActionMenu && gesture.id === 'singleClick' && id === 'key1'}
+              onChange={mapping => onChange(id, mapping)}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
 function DeviceKeyMappingControl({
   mapping,
+  installedApps,
+  installedAppsLoading,
+  autoOpen = false,
   onChange,
 }: {
   mapping: DeviceCustomKeyMapping;
+  installedApps: InstalledApplication[];
+  installedAppsLoading: boolean;
+  autoOpen?: boolean;
   onChange: (mapping: DeviceCustomKeyMapping) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const externalAppPath = mapping.externalAppPath ?? '';
+  const matchingInstalledApp = useMemo(
+    () => installedApps.find(app => app.path.toLocaleLowerCase() === externalAppPath.toLocaleLowerCase()),
+    [externalAppPath, installedApps],
+  );
+  const externalAppOptions = useMemo(() => [
+    {
+      value: EXTERNAL_APP_MANUAL_VALUE,
+      label: installedAppsLoading
+        ? t('settings.deviceKeys.installedAppLoading')
+        : t('settings.deviceKeys.installedAppManual'),
+    },
+    ...installedApps.map(app => ({
+      value: app.path,
+      label: app.name,
+    })),
+  ], [installedApps, installedAppsLoading, t]);
+  const externalAppPickerValue = matchingInstalledApp?.path ?? EXTERNAL_APP_MANUAL_VALUE;
+
   const updateAction = async (action: DeviceCustomKeyAction) => {
     await onChange({
       ...mapping,
       action,
       shortcut: action === 'sendShortcut' ? mapping.shortcut ?? fallbackShortcut() : mapping.shortcut,
+      appPage: action === 'openApp' ? mapping.appPage ?? 'settingsShortcuts' : mapping.appPage,
+      externalAppPath:
+        action === 'openExternalApp' && !externalAppPath.trim()
+          ? defaultExternalAppPath()
+          : externalAppPath,
     });
   };
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(130px, 165px) minmax(0, 1fr)', gap: 8, width: '100%', alignItems: 'start' }}>
-      <select
+      <SelectLite
         value={mapping.action}
-        onChange={event => void updateAction(event.target.value as DeviceCustomKeyAction)}
-        style={{ ...inputStyle, maxWidth: 'none' }}
-      >
-        {DEVICE_KEY_ACTIONS.map(action => (
-          <option key={action} value={action}>
-            {t(`settings.deviceKeys.actions.${action}`)}
-          </option>
-        ))}
-      </select>
+        onChange={value => void updateAction(value as DeviceCustomKeyAction)}
+        options={DEVICE_KEY_ACTIONS.map(action => ({
+          value: action,
+          label: t(`settings.deviceKeys.actions.${action}`),
+        }))}
+        defaultOpen={autoOpen}
+        style={{ ...inputStyle, maxWidth: 'none', minWidth: 0 }}
+        ariaLabel={t('settings.deviceKeys.actionSelectAria')}
+      />
       <div style={{ minWidth: 0 }}>
+        {mapping.action === 'openApp' && (
+          <SelectLite
+            value={mapping.appPage ?? 'settingsShortcuts'}
+            onChange={value => void onChange({ ...mapping, appPage: value as DeviceCustomKeyAppPage })}
+            options={DEVICE_KEY_APP_PAGES.map(page => ({
+              value: page,
+              label: t(`settings.deviceKeys.appPages.${page}`),
+            }))}
+            style={{ ...inputStyle, maxWidth: 'none' }}
+            ariaLabel={t('settings.deviceKeys.appPageSelectAria')}
+          />
+        )}
+        {mapping.action === 'openExternalApp' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(130px, 220px) minmax(0, 1fr)', gap: 8, width: '100%' }}>
+            <SelectLite
+              value={externalAppPickerValue}
+              onChange={value => {
+                if (value === EXTERNAL_APP_MANUAL_VALUE) return;
+                void onChange({ ...mapping, externalAppPath: value });
+              }}
+              options={externalAppOptions}
+              style={{ ...inputStyle, maxWidth: 'none', minWidth: 0 }}
+              ariaLabel={t('settings.deviceKeys.installedAppSelectAria')}
+            />
+            <input
+              value={externalAppPath}
+              onChange={event => {
+                const externalAppPath = event.target.value;
+                void onChange({ ...mapping, externalAppPath });
+              }}
+              placeholder={
+                installedApps.length === 0 && !installedAppsLoading
+                  ? t('settings.deviceKeys.installedAppEmpty')
+                  : t('settings.deviceKeys.externalAppPlaceholder')
+              }
+              style={{ ...inputStyle, maxWidth: 'none' }}
+            />
+          </div>
+        )}
+        {mapping.action === 'openExternalApp' && externalAppPath && !matchingInstalledApp && (
+          <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', marginTop: 4 }}>
+            {t('settings.deviceKeys.installedAppManualHint')}
+          </div>
+        )}
         {mapping.action === 'pasteTemplate' && (
           <input
             value={mapping.pasteTemplate}
@@ -225,7 +483,10 @@ function DeviceKeyMappingControl({
             }}
           />
         )}
-        {mapping.action !== 'pasteTemplate' && mapping.action !== 'sendShortcut' && (
+        {mapping.action !== 'pasteTemplate' &&
+          mapping.action !== 'sendShortcut' &&
+          mapping.action !== 'openApp' &&
+          mapping.action !== 'openExternalApp' && (
           <span style={{ display: 'inline-flex', minHeight: 32, alignItems: 'center', padding: '0 10px', borderRadius: 6, background: 'var(--ol-surface-2)', border: '0.5px solid var(--ol-line-strong)', fontSize: 12, color: 'var(--ol-ink-3)' }}>
             {mapping.action === 'disabled'
               ? t('settings.deviceKeys.noop')
