@@ -196,8 +196,9 @@ function stateForFailure(failure: EmbeddedBleFailureClassification): BleRecovery
       return 'diagnosticsAvailable';
     case 'otaRebootWindow':
       return 'otaReconnecting';
-    case 'pairedButDisconnected':
     case 'cccdProtocolError':
+      return 'needsRePair';
+    case 'pairedButDisconnected':
     case 'backgroundListenerContention':
       return failure.automaticRecovery ? 'reconnecting' : 'needsRepair';
     case 'unsupportedPlatform':
@@ -210,10 +211,6 @@ function stateForFailure(failure: EmbeddedBleFailureClassification): BleRecovery
 
 function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRecoveryUiState | null {
   if (!runtime) return null;
-  const wakeStatus = runtime.wakeRecovery?.status;
-  if (wakeStatus === 'reconnecting') return 'reconnecting';
-  if (wakeStatus === 'needsWakeKey') return 'needsWakeKey';
-
   const combined = [
     runtime.backgroundListenerLastError,
     runtime.wakeRecovery?.recentDisconnectReason,
@@ -222,6 +219,15 @@ function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRe
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     .join(' ')
     .toLowerCase();
+
+  if (combined) {
+    const highConfidenceState = stateForHighConfidenceRuntimeFailure(runtime, combined);
+    if (highConfidenceState) return highConfidenceState;
+  }
+
+  const wakeStatus = runtime.wakeRecovery?.status;
+  if (wakeStatus === 'reconnecting') return 'reconnecting';
+  if (wakeStatus === 'needsWakeKey') return 'needsWakeKey';
 
   if (!combined) return null;
   if (combined.includes('ota') || combined.includes('reboot')) return 'otaReconnecting';
@@ -256,6 +262,65 @@ function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRe
   if (wakeStatus === 'ready') return null;
   if (wakeStatus === 'failed') return 'needsRepair';
   return null;
+}
+
+function stateForHighConfidenceRuntimeFailure(
+  runtime: EmbeddedBleRuntimeStatus,
+  combined: string,
+): BleRecoveryUiState | null {
+  if (combined.includes('no paired') || combined.includes('not paired') || combined.includes('missing pairing')) {
+    return 'needsRePair';
+  }
+  if (combined.includes('bluetooth service') || combined.includes('radio') || combined.includes('adapter') || combined.includes('access denied')) {
+    return 'needsBluetooth';
+  }
+  if (combined.includes('firmware revision') || combined.includes('dis firmware')) {
+    return 'diagnosticsAvailable';
+  }
+
+  const lowPowerIdle = combined.includes('reason=546')
+    || combined.includes('reason: 546')
+    || combined.includes('reason 546')
+    || combined.includes('low-power idle')
+    || combined.includes('low power idle')
+    || combined.includes('idle disconnect')
+    || combined.includes('transport_not_ready')
+    || combined.includes('transport not ready');
+  if (!lowPowerIdle && (combined.includes('stale') || combined.includes('gatt cache') || combined.includes('unknown gatt'))) {
+    return 'needsRePair';
+  }
+
+  if (repeatedNotifySetupFailure(runtime, combined)) {
+    return 'needsRePair';
+  }
+
+  return null;
+}
+
+function repeatedNotifySetupFailure(runtime: EmbeddedBleRuntimeStatus, combined: string): boolean {
+  const attempts = runtime.wakeRecovery?.reconnectAttempts ?? 0;
+  if (attempts < 3) return false;
+
+  const notifyState = runtime.wakeRecovery?.notifySubscriptionState ?? 'unknown';
+  const notifySetupStillUnavailable =
+    notifyState === 'failed'
+    || notifyState === 'opening'
+    || notifyState === 'lost'
+    || notifyState === 'unknown';
+  if (!notifySetupStillUnavailable) return false;
+
+  const notifyOrGattFailure = combined.includes('cccd')
+    || combined.includes('notify write')
+    || combined.includes('notify subscription')
+    || combined.includes('gatt session still not active')
+    || combined.includes('gattsessionstatus(0)')
+    || combined.includes('bluetoothconnectionstatus(0)');
+  const timeoutLike = combined.includes('timed out')
+    || combined.includes('timeout')
+    || combined.includes('not active')
+    || combined.includes('disconnected');
+
+  return notifyOrGattFailure && timeoutLike;
 }
 
 function stateForDeviceHealth(deviceHealth: ListenerDeviceHealthSnapshot): BleRecoveryUiState | null {

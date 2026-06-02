@@ -129,7 +129,7 @@ assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('missingP
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('lowPowerIdleDisconnect', { failure: failure('lowPowerIdleDisconnect', { automaticRecovery: true }) }) })), 'reconnecting');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('missingDisFirmwareRevision') })), 'diagnosticsAvailable');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('otaRebootWindow') })), 'otaReconnecting');
-assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('cccdProtocolError', { failure: failure('cccdProtocolError', { automaticRecovery: true }) }) })), 'reconnecting');
+assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('cccdProtocolError', { failure: failure('cccdProtocolError', { automaticRecovery: true }) }) })), 'needsRePair');
 
 assert.equal(
   selectBleRecoveryUiState(input({
@@ -150,6 +150,54 @@ assert.equal(
     },
   })),
   'reconnecting',
+);
+
+assert.equal(
+  selectBleRecoveryUiState(input({
+    runtime: {
+      ...baseRuntime,
+      backgroundListenerLastError: 'BLE CCCD write timed out after 8000 ms',
+      wakeRecovery: {
+        ...baseRuntime.wakeRecovery,
+        status: 'reconnecting',
+        reconnectAttempts: 1,
+        notifySubscriptionState: 'opening',
+      },
+    },
+  })),
+  'reconnecting',
+);
+
+assert.equal(
+  selectBleRecoveryUiState(input({
+    runtime: {
+      ...baseRuntime,
+      backgroundListenerLastError: 'BLE CCCD write timed out after 8000 ms',
+      wakeRecovery: {
+        ...baseRuntime.wakeRecovery,
+        status: 'reconnecting',
+        reconnectAttempts: 3,
+        notifySubscriptionState: 'failed',
+      },
+    },
+  })),
+  'needsRePair',
+);
+
+assert.equal(
+  selectBleRecoveryUiState(input({
+    runtime: {
+      ...baseRuntime,
+      backgroundListenerLastError: 'GATT session still not active after 8000 ms current=Some(GattSessionStatus(0))',
+      wakeRecovery: {
+        ...baseRuntime.wakeRecovery,
+        status: 'reconnecting',
+        reconnectAttempts: 4,
+        notifySubscriptionState: 'opening',
+      },
+    },
+  })),
+  'needsRePair',
 );
 
 assert.equal(

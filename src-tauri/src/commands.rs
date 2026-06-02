@@ -1723,6 +1723,7 @@ fn embedded_ble_repair_failure_action(
         crate::embedded_ble::BleFailureKind::DeviceMissing
             | crate::embedded_ble::BleFailureKind::MissingPairing
             | crate::embedded_ble::BleFailureKind::StaleGattService
+            | crate::embedded_ble::BleFailureKind::CccdProtocolError
             | crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded
             | crate::embedded_ble::BleFailureKind::AccessDenied
     );
@@ -4765,6 +4766,23 @@ mod tests {
             super::embedded_ble_repair_failure_action(&transient);
         assert!(!user_action_required);
         assert!(!open_bluetooth_settings);
+    }
+
+    #[test]
+    fn repair_failure_escalates_cccd_timeout_to_repair_user_action() {
+        let cccd = crate::embedded_ble::classify_ble_failure(
+            "BLE CCCD write timed out after 8000 ms after customer repair",
+        );
+        assert_eq!(
+            cccd.kind,
+            crate::embedded_ble::BleFailureKind::CccdProtocolError
+        );
+        assert!(cccd.automatic_recovery);
+
+        let (user_action_required, open_bluetooth_settings) =
+            super::embedded_ble_repair_failure_action(&cccd);
+        assert!(user_action_required);
+        assert!(open_bluetooth_settings);
     }
 
     #[test]
