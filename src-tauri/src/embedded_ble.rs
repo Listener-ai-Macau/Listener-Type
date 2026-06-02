@@ -71,6 +71,28 @@ pub struct BleFailureClassification {
     pub evidence: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BleDeviceUnpairStatus {
+    NotFound,
+    Removed,
+    AlreadyClean,
+    NeedsUserAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BleDeviceUnpairResult {
+    pub status: BleDeviceUnpairStatus,
+    pub attempted: bool,
+    pub matched_devices: u32,
+    pub unpaired_devices: u32,
+    pub already_unpaired_devices: u32,
+    pub failed_devices: u32,
+    pub needs_user_action: bool,
+    pub details: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BleDiagnosticServiceEntry {
@@ -455,7 +477,7 @@ mod windows_ble {
     use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
     use std::time::{Duration, Instant};
 
-    use windows::core::{IInspectable, GUID, HSTRING};
+    use windows::core::{IInspectable, GUID, HSTRING, PCWSTR};
     use windows::Devices::Bluetooth::GenericAttributeProfile::{
         GattCharacteristic, GattCharacteristicProperties,
         GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
@@ -465,11 +487,18 @@ mod windows_ble {
     use windows::Devices::Bluetooth::{
         BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
     };
-    use windows::Devices::Enumeration::{DeviceAccessStatus, DeviceInformation};
+    use windows::Devices::Enumeration::{
+        DeviceAccessStatus, DeviceClass, DeviceInformation, DeviceUnpairingResultStatus,
+    };
     use windows::Foundation::{
         AsyncStatus, EventRegistrationToken, IAsyncOperation, TypedEventHandler,
     };
     use windows::Storage::Streams::{DataReader, DataWriter, IBuffer};
+    use windows::Win32::Devices::DeviceAndDriverInstallation::{
+        CM_Locate_DevNodeW, CM_Query_And_Remove_SubTreeW, CM_LOCATE_DEVNODE_NORMAL,
+        CM_REMOVE_NO_RESTART, CM_REMOVE_UI_NOT_OK, CONFIGRET, CR_ACCESS_DENIED, CR_NO_SUCH_DEVINST,
+        CR_NO_SUCH_DEVNODE, CR_QUERY_VETOED, CR_REMOVE_VETOED, CR_SUCCESS, PNP_VETO_TYPE,
+    };
 
     const SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091a);
     const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b);
@@ -624,6 +653,506 @@ mod windows_ble {
             });
         }
         Ok(entries)
+    }
+
+    pub fn unpair_listener_devices() -> crate::embedded_ble::BleDeviceUnpairResult {
+        match unpair_listener_devices_inner() {
+            Ok(result) => result,
+            Err(err) => {
+                log::warn!("[embedded-ble] automatic Listener unpair unavailable: {err}");
+                crate::embedded_ble::BleDeviceUnpairResult {
+                    status: crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction,
+                    attempted: false,
+                    matched_devices: 0,
+                    unpaired_devices: 0,
+                    already_unpaired_devices: 0,
+                    failed_devices: 0,
+                    needs_user_action: true,
+                    details: vec![err],
+                }
+            }
+        }
+    }
+
+    fn unpair_listener_devices_inner() -> Result<crate::embedded_ble::BleDeviceUnpairResult, String>
+    {
+        let candidates = listener_unpair_candidates()?;
+        let mut target_addresses = listener_recovery_target_addresses_from_candidates(&candidates);
+        let mut result = crate::embedded_ble::BleDeviceUnpairResult {
+            status: crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction,
+            attempted: true,
+            matched_devices: candidates.len() as u32,
+            unpaired_devices: 0,
+            already_unpaired_devices: 0,
+            failed_devices: 0,
+            needs_user_action: true,
+            details: Vec::new(),
+        };
+
+        for candidate in candidates {
+            match unpair_listener_candidate(&candidate) {
+                Ok(DeviceUnpairOutcome::Unpaired) => {
+                    result.unpaired_devices = result.unpaired_devices.saturating_add(1);
+                    result.details.push(format!(
+                        "Removed stale Listener pairing: {}",
+                        candidate.label
+                    ));
+                }
+                Ok(DeviceUnpairOutcome::AlreadyUnpaired) => {
+                    result.already_unpaired_devices =
+                        result.already_unpaired_devices.saturating_add(1);
+                    result.details.push(format!(
+                        "Listener pairing was already removed: {}",
+                        candidate.label
+                    ));
+                }
+                Err(err) => {
+                    result.failed_devices = result.failed_devices.saturating_add(1);
+                    result
+                        .details
+                        .push(format!("Could not remove {}: {err}", candidate.label));
+                }
+            }
+        }
+
+        match listener_pnp_remove_candidates(&target_addresses) {
+            Ok(pnp_candidates) => {
+                result.matched_devices = result
+                    .matched_devices
+                    .saturating_add(pnp_candidates.len() as u32);
+                for candidate in pnp_candidates {
+                    if let Some(address) =
+                        parse_bluetooth_address_from_device_id(&candidate.instance_id)
+                    {
+                        push_unique_address(&mut target_addresses, address);
+                    }
+                    match remove_pnp_device_candidate(&candidate) {
+                        Ok(DeviceUnpairOutcome::Unpaired) => {
+                            result.unpaired_devices = result.unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Removed stale Listener device node: {}",
+                                candidate.label
+                            ));
+                        }
+                        Ok(DeviceUnpairOutcome::AlreadyUnpaired) => {
+                            result.already_unpaired_devices =
+                                result.already_unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Listener device node was already removed: {}",
+                                candidate.label
+                            ));
+                        }
+                        Err(err) => {
+                            result.failed_devices = result.failed_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Could not remove stale Listener device node {}: {err}",
+                                candidate.label
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                log::warn!("[embedded-ble] Listener PnP stale-node cleanup unavailable: {err}");
+                result.details.push(format!(
+                    "Listener PnP stale-node cleanup unavailable: {err}"
+                ));
+            }
+        }
+
+        if result.matched_devices == 0 {
+            return Ok(crate::embedded_ble::BleDeviceUnpairResult {
+                status: crate::embedded_ble::BleDeviceUnpairStatus::NotFound,
+                attempted: false,
+                matched_devices: 0,
+                unpaired_devices: 0,
+                already_unpaired_devices: 0,
+                failed_devices: 0,
+                needs_user_action: true,
+                details: vec![
+                    "No Listener pairing entry was found. Windows Bluetooth will open for manual pairing."
+                        .to_string(),
+                ],
+            });
+        }
+
+        result.status = if result.unpaired_devices > 0 && result.failed_devices == 0 {
+            crate::embedded_ble::BleDeviceUnpairStatus::Removed
+        } else if result.failed_devices == 0
+            && result.already_unpaired_devices == result.matched_devices
+        {
+            crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
+        } else {
+            crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction
+        };
+        Ok(result)
+    }
+
+    #[derive(Clone)]
+    struct ListenerUnpairCandidate {
+        label: String,
+        info: DeviceInformation,
+    }
+
+    #[derive(Clone)]
+    struct ListenerPnpRemoveCandidate {
+        label: String,
+        instance_id: String,
+    }
+
+    enum DeviceUnpairOutcome {
+        Unpaired,
+        AlreadyUnpaired,
+    }
+
+    fn unpair_listener_candidate(
+        candidate: &ListenerUnpairCandidate,
+    ) -> Result<DeviceUnpairOutcome, String> {
+        let pairing = candidate
+            .info
+            .Pairing()
+            .map_err(|err| format!("read pairing info failed: {err}"))?;
+        let is_paired = pairing
+            .IsPaired()
+            .map_err(|err| format!("read pairing state failed: {err}"))?;
+        if !is_paired {
+            return Ok(DeviceUnpairOutcome::AlreadyUnpaired);
+        }
+
+        let operation = pairing
+            .UnpairAsync()
+            .map_err(|err| format!("Windows unpair operation failed to start: {err}"))?;
+        let unpair = wait_async_operation(operation, BLE_DISCOVERY_TIMEOUT, "device unpair")?;
+        let status = unpair
+            .Status()
+            .map_err(|err| format!("Windows unpair status read failed: {err}"))?;
+        match status {
+            DeviceUnpairingResultStatus::Unpaired => Ok(DeviceUnpairOutcome::Unpaired),
+            DeviceUnpairingResultStatus::AlreadyUnpaired => {
+                Ok(DeviceUnpairOutcome::AlreadyUnpaired)
+            }
+            DeviceUnpairingResultStatus::OperationAlreadyInProgress => {
+                Err("Windows is already removing or pairing this device".to_string())
+            }
+            DeviceUnpairingResultStatus::AccessDenied => Err(
+                "Windows requires the user to remove this device in Bluetooth settings".to_string(),
+            ),
+            DeviceUnpairingResultStatus::Failed => {
+                Err("Windows failed to remove this Bluetooth pairing".to_string())
+            }
+            other => Err(format!("Windows returned unpair status={other:?}")),
+        }
+    }
+
+    fn listener_unpair_candidates() -> Result<Vec<ListenerUnpairCandidate>, String> {
+        let mut candidates = Vec::new();
+        let mut seen_ids = Vec::new();
+        let mut target_addresses = listener_recovery_target_addresses();
+        let mut errors = Vec::new();
+
+        for (label, service_uuid) in [
+            ("audio service", SERVICE_UUID),
+            ("OTA service", OTA_SERVICE_UUID),
+            ("diagnostic service", DIAGNOSTIC_SERVICE_UUID),
+        ] {
+            match push_service_unpair_candidates(
+                &mut candidates,
+                &mut seen_ids,
+                &mut target_addresses,
+                label,
+                service_uuid,
+            ) {
+                Ok(()) => {}
+                Err(err) => errors.push(err),
+            }
+        }
+
+        match push_ble_device_unpair_candidates(&mut candidates, &mut seen_ids, &target_addresses) {
+            Ok(()) => {}
+            Err(err) => errors.push(err),
+        }
+
+        if candidates.is_empty() && !errors.is_empty() {
+            return Err(errors.join("; "));
+        }
+        Ok(candidates)
+    }
+
+    fn listener_recovery_target_addresses() -> Vec<u64> {
+        configured_bluetooth_address().into_iter().collect()
+    }
+
+    fn listener_recovery_target_addresses_from_candidates(
+        candidates: &[ListenerUnpairCandidate],
+    ) -> Vec<u64> {
+        let mut target_addresses = listener_recovery_target_addresses();
+        for candidate in candidates {
+            let id = candidate
+                .info
+                .Id()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            if let Some(address) = parse_bluetooth_address_from_device_id(&id) {
+                push_unique_address(&mut target_addresses, address);
+            }
+        }
+        target_addresses
+    }
+
+    fn push_service_unpair_candidates(
+        candidates: &mut Vec<ListenerUnpairCandidate>,
+        seen_ids: &mut Vec<String>,
+        target_addresses: &mut Vec<u64>,
+        label: &str,
+        service_uuid: GUID,
+    ) -> Result<(), String> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(service_uuid)
+            .map_err(|err| format!("BLE {label} selector failed: {err}"))?;
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .map_err(|err| format!("BLE {label} query failed: {err}"))
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, label))?;
+        let count = devices
+            .Size()
+            .map_err(|err| format!("BLE {label} collection size failed: {err}"))?;
+        for index in 0..count {
+            let info = devices
+                .GetAt(index)
+                .map_err(|err| format!("BLE {label} entry {index} read failed: {err}"))?;
+            let id = info
+                .Id()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            if let Some(address) = parse_bluetooth_address_from_device_id(&id) {
+                push_unique_address(target_addresses, address);
+            }
+            push_unpair_candidate(candidates, seen_ids, info, label);
+        }
+        Ok(())
+    }
+
+    fn push_ble_device_unpair_candidates(
+        candidates: &mut Vec<ListenerUnpairCandidate>,
+        seen_ids: &mut Vec<String>,
+        target_addresses: &[u64],
+    ) -> Result<(), String> {
+        let selector = BluetoothLEDevice::GetDeviceSelector()
+            .map_err(|err| format!("BLE device selector failed: {err}"))?;
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .map_err(|err| format!("BLE device query failed: {err}"))
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "BLE device query"))?;
+        let count = devices
+            .Size()
+            .map_err(|err| format!("BLE device collection size failed: {err}"))?;
+        for index in 0..count {
+            let info = devices
+                .GetAt(index)
+                .map_err(|err| format!("BLE device entry {index} read failed: {err}"))?;
+            let name = info
+                .Name()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let id = info
+                .Id()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let address_matches = parse_bluetooth_address_from_device_id(&id)
+                .is_some_and(|address| target_addresses.contains(&address));
+            if address_matches || listener_device_name_matches(&name) {
+                push_unpair_candidate(candidates, seen_ids, info, "BLE device");
+            }
+        }
+        Ok(())
+    }
+
+    fn listener_device_name_matches(name: &str) -> bool {
+        name.to_ascii_lowercase().contains("listener")
+    }
+
+    fn push_unpair_candidate(
+        candidates: &mut Vec<ListenerUnpairCandidate>,
+        seen_ids: &mut Vec<String>,
+        info: DeviceInformation,
+        source: &str,
+    ) {
+        let name = info
+            .Name()
+            .map(|value| value.to_string_lossy())
+            .unwrap_or_default();
+        let id = info
+            .Id()
+            .map(|value| value.to_string_lossy())
+            .unwrap_or_default();
+        if id.is_empty() || seen_ids.iter().any(|seen| seen == &id) {
+            return;
+        }
+        seen_ids.push(id.clone());
+        let address = parse_bluetooth_address_from_device_id(&id)
+            .map(crate::embedded_ble::format_bluetooth_address);
+        let label = match (name.trim().is_empty(), address) {
+            (false, Some(address)) => format!("{source} {name} ({address})"),
+            (false, None) => format!("{source} {name}"),
+            (true, Some(address)) => format!("{source} {address}"),
+            (true, None) => source.to_string(),
+        };
+        candidates.push(ListenerUnpairCandidate { label, info });
+    }
+
+    fn listener_pnp_remove_candidates(
+        target_addresses: &[u64],
+    ) -> Result<Vec<ListenerPnpRemoveCandidate>, String> {
+        let devices = DeviceInformation::FindAllAsyncDeviceClass(DeviceClass::All)
+            .map_err(|err| format!("Windows PnP device query failed: {err}"))
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "PnP device query"))?;
+        let count = devices
+            .Size()
+            .map_err(|err| format!("Windows PnP device collection size failed: {err}"))?;
+        let mut candidates = Vec::new();
+        let mut seen_ids = Vec::new();
+        for index in 0..count {
+            let info = devices
+                .GetAt(index)
+                .map_err(|err| format!("Windows PnP device entry {index} read failed: {err}"))?;
+            let name = info
+                .Name()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let raw_id = info
+                .Id()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let Some(instance_id) = normalize_pnp_device_instance_id(&raw_id) else {
+                continue;
+            };
+            let address = parse_bluetooth_address_from_device_id(&instance_id);
+            let address_matches = address.is_some_and(|value| target_addresses.contains(&value));
+            if !address_matches && !listener_device_name_matches(&name) {
+                continue;
+            }
+            if seen_ids.iter().any(|seen| seen == &instance_id) {
+                continue;
+            }
+            seen_ids.push(instance_id.clone());
+            let label = match (name.trim().is_empty(), address) {
+                (false, Some(address)) => format!(
+                    "{} ({}) [{}]",
+                    name,
+                    crate::embedded_ble::format_bluetooth_address(address),
+                    instance_id
+                ),
+                (false, None) => format!("{name} [{instance_id}]"),
+                (true, Some(address)) => format!(
+                    "{} [{}]",
+                    crate::embedded_ble::format_bluetooth_address(address),
+                    instance_id
+                ),
+                (true, None) => instance_id.clone(),
+            };
+            candidates.push(ListenerPnpRemoveCandidate { label, instance_id });
+        }
+        Ok(candidates)
+    }
+
+    pub(super) fn normalize_pnp_device_instance_id(raw_id: &str) -> Option<String> {
+        let trimmed = raw_id.trim().trim_matches('\0');
+        if trimmed.is_empty() {
+            return None;
+        }
+        let upper = trimmed.to_ascii_uppercase();
+        let start = upper
+            .find("BTHLE\\DEV_")
+            .or_else(|| upper.find("BTHLE#DEV_"))?;
+        let mut value = trimmed[start..].to_string();
+        if let Some(guid_marker) = value.find("#{") {
+            value.truncate(guid_marker);
+        }
+        if value.contains('#') {
+            value = value.replace('#', "\\");
+        }
+        let normalized_upper = value.to_ascii_uppercase();
+        if !normalized_upper.starts_with("BTHLE\\DEV_") {
+            return None;
+        }
+        Some(value)
+    }
+
+    fn remove_pnp_device_candidate(
+        candidate: &ListenerPnpRemoveCandidate,
+    ) -> Result<DeviceUnpairOutcome, String> {
+        let wide_id: Vec<u16> = candidate
+            .instance_id
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut devinst = 0u32;
+        let locate = unsafe {
+            CM_Locate_DevNodeW(
+                &mut devinst,
+                PCWSTR(wide_id.as_ptr()),
+                CM_LOCATE_DEVNODE_NORMAL,
+            )
+        };
+        if locate == CR_NO_SUCH_DEVINST || locate == CR_NO_SUCH_DEVNODE {
+            return Ok(DeviceUnpairOutcome::AlreadyUnpaired);
+        }
+        if locate != CR_SUCCESS {
+            return Err(format!("locate failed: {}", configret_detail(locate, None)));
+        }
+
+        let mut veto_type = PNP_VETO_TYPE(0);
+        let mut veto_name = vec![0u16; 260];
+        let remove = unsafe {
+            CM_Query_And_Remove_SubTreeW(
+                devinst,
+                Some(&mut veto_type as *mut PNP_VETO_TYPE),
+                Some(veto_name.as_mut_slice()),
+                CM_REMOVE_UI_NOT_OK | CM_REMOVE_NO_RESTART,
+            )
+        };
+        if remove == CR_SUCCESS {
+            return Ok(DeviceUnpairOutcome::Unpaired);
+        }
+        if remove == CR_NO_SUCH_DEVINST || remove == CR_NO_SUCH_DEVNODE {
+            return Ok(DeviceUnpairOutcome::AlreadyUnpaired);
+        }
+        Err(format!(
+            "remove failed: {}",
+            configret_detail(remove, Some((&veto_type, &veto_name)))
+        ))
+    }
+
+    fn configret_detail(status: CONFIGRET, veto: Option<(&PNP_VETO_TYPE, &[u16])>) -> String {
+        let label = if status == CR_ACCESS_DENIED {
+            "access denied"
+        } else if status == CR_REMOVE_VETOED {
+            "remove vetoed"
+        } else if status == CR_QUERY_VETOED {
+            "query vetoed"
+        } else if status == CR_NO_SUCH_DEVINST || status == CR_NO_SUCH_DEVNODE {
+            "device node not found"
+        } else {
+            "configuration manager error"
+        };
+        let mut detail = format!("{label} ({status:?})");
+        if let Some((veto_type, veto_name)) = veto {
+            let end = veto_name
+                .iter()
+                .position(|ch| *ch == 0)
+                .unwrap_or(veto_name.len());
+            let veto_name = String::from_utf16_lossy(&veto_name[..end]);
+            if !veto_name.trim().is_empty() || veto_type.0 != 0 {
+                detail.push_str(&format!(
+                    ", veto_type={veto_type:?}, veto_name={}",
+                    veto_name.trim()
+                ));
+            }
+        }
+        detail
+    }
+
+    fn push_unique_address(addresses: &mut Vec<u64>, address: u64) {
+        if !addresses.contains(&address) {
+            addresses.push(address);
+        }
     }
 
     pub fn pull_firmware_diagnostic_log(
@@ -2697,6 +3226,11 @@ mod windows_ble {
                 return u64::from_str_radix(&hex, 16).ok();
             }
         }
+        for segment in upper.rsplit(|ch: char| matches!(ch, '\\' | '/' | '#' | '_' | '-')) {
+            if let Some(address) = parse_bluetooth_address_hex_exact(segment) {
+                return Some(address);
+            }
+        }
         None
     }
 
@@ -2717,11 +3251,11 @@ mod windows_ble {
     }
 
     pub(super) fn parse_bluetooth_address_hex(value: &str) -> Option<u64> {
-        let hex: String = value
-            .chars()
-            .filter(|ch| ch.is_ascii_hexdigit())
-            .take(12)
-            .collect();
+        parse_bluetooth_address_hex_exact(value)
+    }
+
+    fn parse_bluetooth_address_hex_exact(value: &str) -> Option<u64> {
+        let hex: String = value.chars().filter(|ch| ch.is_ascii_hexdigit()).collect();
         if hex.len() != 12 {
             return None;
         }
@@ -3598,6 +4132,11 @@ pub fn ble_diagnostic_snapshot() -> BleDiagnosticSnapshot {
     windows_ble::diagnostic_snapshot()
 }
 
+#[cfg(target_os = "windows")]
+pub fn unpair_listener_devices() -> BleDeviceUnpairResult {
+    windows_ble::unpair_listener_devices()
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
@@ -3707,6 +4246,20 @@ pub fn ble_diagnostic_snapshot() -> BleDiagnosticSnapshot {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn unpair_listener_devices() -> BleDeviceUnpairResult {
+    BleDeviceUnpairResult {
+        status: BleDeviceUnpairStatus::NeedsUserAction,
+        attempted: false,
+        matched_devices: 0,
+        unpaired_devices: 0,
+        already_unpaired_devices: 0,
+        failed_devices: 0,
+        needs_user_action: true,
+        details: vec!["Listener BLE device recovery is only supported on Windows".to_string()],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3740,6 +4293,27 @@ mod tests {
     #[test]
     fn invalid_notification_is_not_terminal() {
         assert!(!is_terminal_notification(b"not-vka1"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn pnp_device_instance_normalizer_extracts_bthle_devnode() {
+        assert_eq!(
+            windows_ble::normalize_pnp_device_instance_id(
+                r#"\\?\BTHLE#DEV_D41A50FBF35E#9&B465B9E&0&D41A50FBF35E#{0000180a-0000-1000-8000-00805f9b34fb}"#
+            ),
+            Some(r#"BTHLE\DEV_D41A50FBF35E\9&B465B9E&0&D41A50FBF35E"#.to_string())
+        );
+        assert_eq!(
+            windows_ble::normalize_pnp_device_instance_id(
+                r#"BTHLE\DEV_D41A50FBF35E\9&B465B9E&0&D41A50FBF35E"#
+            ),
+            Some(r#"BTHLE\DEV_D41A50FBF35E\9&B465B9E&0&D41A50FBF35E"#.to_string())
+        );
+        assert_eq!(
+            windows_ble::normalize_pnp_device_instance_id(r#"USB\VID_0000&PID_0000"#),
+            None
+        );
     }
 
     #[test]
@@ -3842,6 +4416,17 @@ mod tests {
                 r"BTHLE\DEV_DCB4D91112CE\7&29C9821A&0&0000"
             ),
             Some(0xDCB4_D911_12CE)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_bluetooth_address_from_bluetooth_le_selector_id() {
+        assert_eq!(
+            super::windows_ble::parse_bluetooth_address_from_device_id(
+                r"BluetoothLE#BluetoothLE00:11:22:33:44:55-D4:1A:50:FB:F3:5E"
+            ),
+            Some(0xD41A_50FB_F35E)
         );
     }
 

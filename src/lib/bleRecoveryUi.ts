@@ -104,7 +104,7 @@ const DEFAULT_MESSAGES: Record<RecoveryCopyKey, string> = {
   reconnecting: 'Listener Type is reconnecting in the background. Wait a moment, then retry if it does not recover.',
   needsWakeKey: 'The device may be asleep. Press KEY4 or the wake key, then retry Listener BLE.',
   needsBluetooth: 'Turn on Windows Bluetooth, reconnect the Listener device, then retry.',
-  needsRepair: 'Run Repair connection. If it still fails, restart Listener Type and export diagnostics.',
+  needsRepair: 'Run One-click repair. If it still fails, export diagnostics.',
   needsRePair: 'Windows may have a stale Bluetooth pairing. Remove the Listener device in Windows Bluetooth, then pair it again.',
   otaReconnecting: 'The device is reconnecting after firmware update. Wait for it to return, then refresh status.',
   diagnosticsAvailable: 'Export diagnostics and contact support. No SDK, serial monitor, or COM port is required.',
@@ -115,8 +115,11 @@ export function buildBleRecoveryUi(input: BleRecoveryUiInput, t: TFunction): Ble
   const state = selectBleRecoveryUiState(input);
   const copyKey = copyKeyForState(state);
   const tone = toneForState(state);
+  const directFailureMessage = input.lastRepairResult && !input.lastRepairResult.recovered
+    ? input.lastRepairResult.message
+    : input.probeMessage;
   const message = input.probeStatus === 'error'
-    ? customerSafeProbeMessage(input.probeMessage, state, t)
+    ? customerSafeProbeMessage(directFailureMessage, state, t)
     : t(MESSAGE_KEY_BY_COPY[copyKey], DEFAULT_MESSAGES[copyKey]);
   const showDetails = state !== 'ready';
 
@@ -196,8 +199,9 @@ function stateForFailure(failure: EmbeddedBleFailureClassification): BleRecovery
       return 'diagnosticsAvailable';
     case 'otaRebootWindow':
       return 'otaReconnecting';
-    case 'pairedButDisconnected':
     case 'cccdProtocolError':
+      return 'needsRePair';
+    case 'pairedButDisconnected':
     case 'backgroundListenerContention':
       return failure.automaticRecovery ? 'reconnecting' : 'needsRepair';
     case 'unsupportedPlatform':
@@ -210,10 +214,6 @@ function stateForFailure(failure: EmbeddedBleFailureClassification): BleRecovery
 
 function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRecoveryUiState | null {
   if (!runtime) return null;
-  const wakeStatus = runtime.wakeRecovery?.status;
-  if (wakeStatus === 'reconnecting') return 'reconnecting';
-  if (wakeStatus === 'needsWakeKey') return 'needsWakeKey';
-
   const combined = [
     runtime.backgroundListenerLastError,
     runtime.wakeRecovery?.recentDisconnectReason,
@@ -222,6 +222,15 @@ function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRe
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     .join(' ')
     .toLowerCase();
+
+  if (combined) {
+    const highConfidenceState = stateForHighConfidenceRuntimeFailure(runtime, combined);
+    if (highConfidenceState) return highConfidenceState;
+  }
+
+  const wakeStatus = runtime.wakeRecovery?.status;
+  if (wakeStatus === 'reconnecting') return 'reconnecting';
+  if (wakeStatus === 'needsWakeKey') return 'needsWakeKey';
 
   if (!combined) return null;
   if (combined.includes('ota') || combined.includes('reboot')) return 'otaReconnecting';
@@ -256,6 +265,65 @@ function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRe
   if (wakeStatus === 'ready') return null;
   if (wakeStatus === 'failed') return 'needsRepair';
   return null;
+}
+
+function stateForHighConfidenceRuntimeFailure(
+  runtime: EmbeddedBleRuntimeStatus,
+  combined: string,
+): BleRecoveryUiState | null {
+  if (combined.includes('no paired') || combined.includes('not paired') || combined.includes('missing pairing')) {
+    return 'needsRePair';
+  }
+  if (combined.includes('bluetooth service') || combined.includes('radio') || combined.includes('adapter') || combined.includes('access denied')) {
+    return 'needsBluetooth';
+  }
+  if (combined.includes('firmware revision') || combined.includes('dis firmware')) {
+    return 'diagnosticsAvailable';
+  }
+
+  const lowPowerIdle = combined.includes('reason=546')
+    || combined.includes('reason: 546')
+    || combined.includes('reason 546')
+    || combined.includes('low-power idle')
+    || combined.includes('low power idle')
+    || combined.includes('idle disconnect')
+    || combined.includes('transport_not_ready')
+    || combined.includes('transport not ready');
+  if (!lowPowerIdle && (combined.includes('stale') || combined.includes('gatt cache') || combined.includes('unknown gatt'))) {
+    return 'needsRePair';
+  }
+
+  if (repeatedNotifySetupFailure(runtime, combined)) {
+    return 'needsRePair';
+  }
+
+  return null;
+}
+
+function repeatedNotifySetupFailure(runtime: EmbeddedBleRuntimeStatus, combined: string): boolean {
+  const attempts = runtime.wakeRecovery?.reconnectAttempts ?? 0;
+  if (attempts < 3) return false;
+
+  const notifyState = runtime.wakeRecovery?.notifySubscriptionState ?? 'unknown';
+  const notifySetupStillUnavailable =
+    notifyState === 'failed'
+    || notifyState === 'opening'
+    || notifyState === 'lost'
+    || notifyState === 'unknown';
+  if (!notifySetupStillUnavailable) return false;
+
+  const notifyOrGattFailure = combined.includes('cccd')
+    || combined.includes('notify write')
+    || combined.includes('notify subscription')
+    || combined.includes('gatt session still not active')
+    || combined.includes('gattsessionstatus(0)')
+    || combined.includes('bluetoothconnectionstatus(0)');
+  const timeoutLike = combined.includes('timed out')
+    || combined.includes('timeout')
+    || combined.includes('not active')
+    || combined.includes('disconnected');
+
+  return notifyOrGattFailure && timeoutLike;
 }
 
 function stateForDeviceHealth(deviceHealth: ListenerDeviceHealthSnapshot): BleRecoveryUiState | null {

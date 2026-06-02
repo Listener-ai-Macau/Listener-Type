@@ -353,6 +353,7 @@ pub fn run() {
             commands::submit_embedded_audio_ble_once,
             commands::probe_embedded_audio_ble_subscription,
             commands::repair_embedded_ble_connection,
+            commands::recover_embedded_ble_device,
             commands::get_embedded_ble_runtime_status,
             commands::get_firmware_ota_preflight_snapshot,
             commands::load_firmware_ota_package,

@@ -134,12 +134,39 @@ export interface EmbeddedBleFailureClassification {
   evidence: string;
 }
 
+export type EmbeddedBleRecoveryAction =
+  | 'none'
+  | 'reconnected'
+  | 'waitForAutomaticRecovery'
+  | 'rePairRequired'
+  | 'bluetoothSettingsRequired'
+  | 'diagnosticsRequired';
+
+export type BleDeviceUnpairStatus =
+  | 'notFound'
+  | 'removed'
+  | 'alreadyClean'
+  | 'needsUserAction';
+
+export interface BleDeviceUnpairResult {
+  status: BleDeviceUnpairStatus;
+  attempted: boolean;
+  matchedDevices: number;
+  unpairedDevices: number;
+  alreadyUnpairedDevices: number;
+  failedDevices: number;
+  needsUserAction: boolean;
+  details: string[];
+}
+
 export interface EmbeddedBleRepairResult {
   recovered: boolean;
   userActionRequired: boolean;
   openBluetoothSettings: boolean;
+  recoveryAction?: EmbeddedBleRecoveryAction;
   message: string;
   failure: EmbeddedBleFailureClassification | null;
+  unpairResult?: BleDeviceUnpairResult | null;
   runtime: EmbeddedBleRuntimeStatus;
   firmware: FirmwareOtaDeviceSnapshot;
 }

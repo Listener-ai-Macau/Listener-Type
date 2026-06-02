@@ -839,8 +839,59 @@ export function repairEmbeddedBleConnection(timeoutMs?: number): Promise<Embedde
       recovered: true,
       userActionRequired: false,
       openBluetoothSettings: false,
+      recoveryAction: 'reconnected',
       message: 'Listener BLE 已连接，音频 notify 已订阅。',
       failure: null,
+      unpairResult: null,
+      runtime: {
+        backgroundListenerDisabledByEnv: false,
+        backgroundListenerActive: true,
+        backgroundListenerReady: true,
+        backgroundListenerGeneration: 1,
+        backgroundListenerLastError: null,
+        wakeRecovery: {
+          status: 'ready',
+          userGuidance: 'Listener BLE 已连接，音频 notify 已订阅。',
+          recentDisconnectReason: null,
+          reconnectAttempts: 1,
+          notifySubscriptionState: 'subscribed',
+          firmwareWakePolicy: {
+            policy: 'key4_only',
+            wakeCapableKeys: 'KEY4/GPIO21',
+            voiceKey: 'GPIO35',
+            voiceKeyDeepSleepWake: false,
+            readiness: 'voice_key_cannot_wake_from_deep_sleep_on_current_v1_board',
+            source: 'Mock firmware wake-policy contract',
+          },
+          lastAttemptAt: new Date().toISOString(),
+          lastReadyAt: new Date().toISOString(),
+        },
+      },
+      firmware: {
+        connected: true,
+        hardwareRevision: null,
+        firmwareVersion: null,
+        capabilities: [],
+        batteryPercent: null,
+        usbPowered: null,
+        detail: null,
+      },
+    }),
+  );
+}
+
+export function recoverEmbeddedBleDevice(timeoutMs?: number): Promise<EmbeddedBleRepairResult> {
+  return invokeOrMock(
+    'recover_embedded_ble_device',
+    { timeoutMs: timeoutMs ?? null },
+    () => ({
+      recovered: true,
+      userActionRequired: false,
+      openBluetoothSettings: false,
+      recoveryAction: 'reconnected',
+      message: 'Listener BLE 已连接，音频 notify 已订阅。',
+      failure: null,
+      unpairResult: null,
       runtime: {
         backgroundListenerDisabledByEnv: false,
         backgroundListenerActive: true,

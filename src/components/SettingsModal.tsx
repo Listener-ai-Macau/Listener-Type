@@ -19,6 +19,7 @@ import {
   getUpdateChannel,
   openExternal,
   openSystemSettings,
+  recoverEmbeddedBleDevice,
   setUpdateChannel,
   type LatestBetaRelease,
   type UpdateChannel,
@@ -431,9 +432,17 @@ function AboutMini() {
                 console.warn('[about] cancel active session before recovery failed', err);
               }
               try {
-                await openSystemSettings('bluetooth');
+                const result = await recoverEmbeddedBleDevice(15_000);
+                if (result.openBluetoothSettings) {
+                  await openSystemSettings('bluetooth');
+                }
               } catch (err) {
-                console.warn('[about] open bluetooth settings failed', err);
+                console.warn('[about] one-click device recovery failed', err);
+                try {
+                  await openSystemSettings('bluetooth');
+                } catch (settingsErr) {
+                  console.warn('[about] open bluetooth settings failed', settingsErr);
+                }
               }
             })();
           }}
