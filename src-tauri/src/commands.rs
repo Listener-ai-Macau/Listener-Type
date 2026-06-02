@@ -2002,11 +2002,40 @@ pub async fn recover_embedded_ble_device(
                     unpair.failed_devices,
                     unpair.needs_user_action,
                 );
+                let retry_after_cleanup =
+                    unpair.status == crate::embedded_ble::BleDeviceUnpairStatus::Removed;
                 user_action_required = true;
                 open_bluetooth_settings = true;
                 recovery_action = EmbeddedBleRecoveryAction::RePairRequired;
-                unpair_result = Some(unpair);
+                unpair_result = Some(unpair.clone());
                 coord.refresh_embedded_ble_listener();
+                if retry_after_cleanup {
+                    log::info!(
+                        "[embedded-ble] one-click recovery retrying Listener connection after stale device cleanup"
+                    );
+                    match coord.repair_embedded_ble_connection(timeout_ms).await {
+                        Ok(snapshot) => {
+                            let (runtime, firmware) =
+                                embedded_ble_runtime_and_firmware(&coord).await?;
+                            return Ok(EmbeddedBleRepairResult {
+                                recovered: true,
+                                user_action_required: false,
+                                open_bluetooth_settings: false,
+                                recovery_action: EmbeddedBleRecoveryAction::Reconnected,
+                                message: snapshot.user_guidance,
+                                failure: None,
+                                unpair_result,
+                                runtime,
+                                firmware,
+                            });
+                        }
+                        Err(retry_err) => {
+                            log::warn!(
+                                "[embedded-ble] one-click recovery reconnect after stale device cleanup failed: {retry_err}"
+                            );
+                        }
+                    }
+                }
             }
 
             let (runtime, firmware) = embedded_ble_runtime_and_firmware(&coord).await?;
