@@ -23,6 +23,12 @@ use crate::asr::RawTranscript;
 #[cfg(target_os = "windows")]
 use super::foundry_runtime::FoundryLocalRuntime;
 
+const FOUNDRY_LEAD_SILENCE_PADDING_MS: usize = 250;
+const FOUNDRY_LEAD_SILENCE_PADDING_SAMPLES: usize =
+    16_000 * FOUNDRY_LEAD_SILENCE_PADDING_MS / 1_000;
+const FOUNDRY_MIN_AUDIO_CONTEXT_MS: usize = 4_000;
+const FOUNDRY_MIN_AUDIO_CONTEXT_SAMPLES: usize = 16_000 * FOUNDRY_MIN_AUDIO_CONTEXT_MS / 1_000;
+
 pub struct FoundryLocalWhisperAsr {
     #[cfg(target_os = "windows")]
     runtime: Arc<FoundryLocalRuntime>,
@@ -153,12 +159,20 @@ fn pcm_duration_ms(pcm: &[u8]) -> u64 {
     (pcm.len() as u64 / 2) * 1000 / 16_000
 }
 
-fn pcm_to_wav_with_tail_silence(pcm: &[u8]) -> Vec<u8> {
-    let mut samples: Vec<i16> = pcm
-        .chunks_exact(2)
-        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
-        .collect();
+fn pcm_to_wav_with_foundry_context_padding(pcm: &[u8]) -> Vec<u8> {
+    let pcm_samples = pcm.chunks_exact(2).len();
+    let mut samples: Vec<i16> = Vec::with_capacity(
+        FOUNDRY_MIN_AUDIO_CONTEXT_SAMPLES.max(FOUNDRY_LEAD_SILENCE_PADDING_SAMPLES + pcm_samples),
+    );
+    samples.extend(std::iter::repeat(0).take(FOUNDRY_LEAD_SILENCE_PADDING_SAMPLES));
+    samples.extend(
+        pcm.chunks_exact(2)
+            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]])),
+    );
     append_tail_silence_16k_mono(&mut samples);
+    if samples.len() < FOUNDRY_MIN_AUDIO_CONTEXT_SAMPLES {
+        samples.resize(FOUNDRY_MIN_AUDIO_CONTEXT_SAMPLES, 0);
+    }
     encode_wav_16k_mono(&samples)
 }
 
@@ -173,7 +187,7 @@ impl TempWavFile {
         let dir = foundry_temp_dir();
         fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
         let path = dir.join(format!("foundry-whisper-{}.wav", Uuid::new_v4()));
-        let wav = pcm_to_wav_with_tail_silence(pcm);
+        let wav = pcm_to_wav_with_foundry_context_padding(pcm);
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -287,17 +301,20 @@ mod tests {
     }
 
     #[test]
-    fn foundry_provider_wav_ignores_odd_trailing_byte() {
+    fn foundry_provider_wav_adds_context_padding_and_ignores_odd_trailing_byte() {
         let pcm = [0x01, 0x00, 0xff, 0x7f, 0xee];
-        let wav = super::pcm_to_wav_with_tail_silence(&pcm);
+        let wav = super::pcm_to_wav_with_foundry_context_padding(&pcm);
 
         assert_eq!(&wav[0..4], b"RIFF");
         assert_eq!(
             u32::from_le_bytes(wav[40..44].try_into().unwrap()),
-            (2 + crate::asr::wav::WAV_TAIL_SILENCE_PADDING_SAMPLES as u32) * 2
+            super::FOUNDRY_MIN_AUDIO_CONTEXT_SAMPLES as u32 * 2
         );
-        assert_eq!(&wav[44..48], &[0x01, 0x00, 0xff, 0x7f]);
-        assert!(wav[48..].iter().all(|byte| *byte == 0));
+        let data = &wav[44..];
+        let lead_bytes = super::FOUNDRY_LEAD_SILENCE_PADDING_SAMPLES * 2;
+        assert!(data[..lead_bytes].iter().all(|byte| *byte == 0));
+        assert_eq!(&data[lead_bytes..lead_bytes + 4], &[0x01, 0x00, 0xff, 0x7f]);
+        assert!(data[lead_bytes + 4..].iter().all(|byte| *byte == 0));
     }
 
     #[cfg(target_os = "windows")]

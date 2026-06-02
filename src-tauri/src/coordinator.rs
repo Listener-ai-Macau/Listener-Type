@@ -71,6 +71,8 @@ const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(3);
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);
 const EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(12);
+const EMBEDDED_BLE_RECORDING_CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
     "Listener BLE 正在重连。若设备已深度睡眠，请按 KEY4/唤醒键，再重试；仍失败可导出诊断。";
 
@@ -1196,38 +1198,7 @@ impl Coordinator {
     }
 
     pub fn refresh_embedded_ble_listener(&self) {
-        if self.inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
-            log::info!("[embedded-ble] background listener refresh skipped during firmware OTA");
-            return;
-        }
-        let generation = self
-            .inner
-            .embedded_ble_listener_generation
-            .fetch_add(1, Ordering::SeqCst)
-            + 1;
-        cancel_embedded_ble_listener_capture(&self.inner, "refresh");
-        if std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
-            .ok()
-            .as_deref()
-            == Some("1")
-        {
-            log::info!(
-                "[embedded-ble] background listener disabled by LISTENER_TYPE_DISABLE_BACKGROUND_BLE"
-            );
-            clear_embedded_ble_listener_last_error(&self.inner);
-            return;
-        }
-        let source = self.inner.prefs.get().dictation_input_source;
-        if source != DictationInputSource::EmbeddedBle {
-            log::info!("[embedded-ble] background listener disabled (source={source:?})");
-            clear_embedded_ble_listener_last_error(&self.inner);
-            return;
-        }
-
-        let inner = Arc::clone(&self.inner);
-        async_runtime::spawn(async move {
-            embedded_ble_background_listener_loop(inner, generation).await;
-        });
+        refresh_embedded_ble_listener(&self.inner);
     }
 
     /// 返回当前听写阶段（read-only 快照），供 CLI 入口在 dispatch toggle 时决策。
@@ -2237,6 +2208,50 @@ async fn handle_device_dictation_action(
     );
 
     if input_source == DictationInputSource::EmbeddedBle {
+        if !embedded_ble_listener_capture_ready(&inner) {
+            record_embedded_ble_reconnect_attempt(&inner, "device_key_recording_control");
+            refresh_embedded_ble_listener(&inner);
+            emit_capsule(
+                &inner,
+                CapsuleState::Recording,
+                0.0,
+                0,
+                Some("设备键已触发，正在恢复 Listener BLE 音频通道...".to_string()),
+                None,
+            );
+        }
+        if let Err(error) = wait_for_embedded_ble_listener_ready(
+            &inner,
+            EMBEDDED_BLE_RECORDING_CONTROL_READY_TIMEOUT,
+        )
+        .await
+        {
+            record_embedded_ble_listener_last_error(&inner, &error);
+            record_embedded_ble_recovery_failure(&inner, &error);
+            crate::timeline::mark(
+                "backend.device_key",
+                "ble_recording_control_wait_failed",
+                format!(
+                    "key={} gesture={} error={error}",
+                    key.label(),
+                    gesture.label()
+                ),
+            );
+            emit_capsule(
+                &inner,
+                CapsuleState::Error,
+                0.0,
+                0,
+                Some(format!(
+                    "设备键已触发，但 Listener BLE 音频通道未恢复：{}",
+                    embedded_ble_wake_guidance_for_error(&error)
+                )),
+                None,
+            );
+            schedule_capsule_idle(&inner, 6000);
+            return;
+        }
+
         emit_capsule(
             &inner,
             CapsuleState::Recording,
@@ -2246,21 +2261,34 @@ async fn handle_device_dictation_action(
             None,
         );
         let result = async_runtime::spawn_blocking(move || {
-            crate::embedded_ble::send_recording_control_toggle(Duration::from_secs(5))
+            crate::embedded_ble::send_recording_control_toggle(
+                EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+            )
         })
         .await
         .map_err(|err| err.to_string())
         .and_then(|value| value);
         match result {
             Ok(()) => {
+                clear_embedded_ble_listener_last_error(&inner);
                 crate::timeline::mark(
                     "backend.device_key",
                     "ble_recording_control_sent",
                     format!("key={} gesture={}", key.label(), gesture.label()),
                 );
-                schedule_capsule_idle(&inner, 1800);
+                emit_capsule(
+                    &inner,
+                    CapsuleState::Recording,
+                    0.0,
+                    0,
+                    Some("设备录音控制已发送，等待 Listener 音频...".to_string()),
+                    None,
+                );
             }
             Err(error) => {
+                record_embedded_ble_listener_last_error(&inner, &error);
+                record_embedded_ble_recovery_failure(&inner, &error);
+                refresh_embedded_ble_listener(&inner);
                 crate::timeline::mark(
                     "backend.device_key",
                     "ble_recording_control_failed",
@@ -2275,12 +2303,10 @@ async fn handle_device_dictation_action(
                     CapsuleState::Error,
                     0.0,
                     0,
-                    Some(format!(
-                        "设备键录音控制失败：{error}。请确认已刷支持录音控制的新固件。"
-                    )),
+                    Some(embedded_ble_recording_control_guidance(&error)),
                     None,
                 );
-                schedule_capsule_idle(&inner, 5000);
+                schedule_capsule_idle(&inner, 6000);
             }
         }
         return;
@@ -2489,6 +2515,40 @@ fn clear_embedded_ble_listener_last_error(inner: &Arc<Inner>) {
     *inner.embedded_ble_listener_last_error.lock() = None;
 }
 
+fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
+    if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+        log::info!("[embedded-ble] background listener refresh skipped during firmware OTA");
+        return;
+    }
+    let generation = inner
+        .embedded_ble_listener_generation
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+    cancel_embedded_ble_listener_capture(inner, "refresh");
+    if std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        log::info!(
+            "[embedded-ble] background listener disabled by LISTENER_TYPE_DISABLE_BACKGROUND_BLE"
+        );
+        clear_embedded_ble_listener_last_error(inner);
+        return;
+    }
+    let source = inner.prefs.get().dictation_input_source;
+    if source != DictationInputSource::EmbeddedBle {
+        log::info!("[embedded-ble] background listener disabled (source={source:?})");
+        clear_embedded_ble_listener_last_error(inner);
+        return;
+    }
+
+    let inner = Arc::clone(inner);
+    async_runtime::spawn(async move {
+        embedded_ble_background_listener_loop(inner, generation).await;
+    });
+}
+
 fn embedded_ble_wake_recovery_snapshot(inner: &Arc<Inner>) -> EmbeddedBleWakeRecoverySnapshot {
     inner.embedded_ble_wake_recovery.lock().clone()
 }
@@ -2582,6 +2642,25 @@ fn embedded_ble_wake_guidance_for_error(err: &str) -> String {
     }
     "Listener BLE 暂时不可用。请重新连接设备，或按 KEY4/唤醒键后重试；仍失败可导出诊断。"
         .to_string()
+}
+
+fn embedded_ble_recording_control_guidance(err: &str) -> String {
+    let lower = err.to_ascii_lowercase();
+    if lower.contains("audio control")
+        || lower.contains("characteristic")
+        || lower.contains("no characteristics")
+        || lower.contains("element not found")
+        || lower.contains("not found")
+    {
+        return format!(
+            "设备键已触发，但当前固件或 Windows GATT 缓存没有 BLE 录音控制特征：{err}。请刷支持录音控制的新固件，或在 Windows 蓝牙中删除 Listener 后重新配对。"
+        );
+    }
+
+    format!(
+        "设备键录音控制失败：{err}。{}",
+        embedded_ble_wake_guidance_for_error(err)
+    )
 }
 
 fn is_embedded_ble_wake_or_sleep_error(err: &str) -> bool {
@@ -4670,6 +4749,17 @@ mod tests {
 
         clear_embedded_ble_listener_last_error(&coordinator.inner);
         assert_eq!(coordinator.embedded_ble_listener_last_error(), None);
+    }
+
+    #[test]
+    fn embedded_ble_recording_control_guidance_calls_out_stale_firmware_or_gatt_cache() {
+        let message = embedded_ble_recording_control_guidance(
+            "audio control characteristic not found in Listener BLE service",
+        );
+
+        assert!(message.contains("BLE 录音控制特征"));
+        assert!(message.contains("新固件"));
+        assert!(message.contains("重新配对"));
     }
 
     #[test]
