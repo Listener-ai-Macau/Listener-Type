@@ -212,6 +212,7 @@ struct EmbeddedStreamingDictation {
     embedded_session_id: Option<u32>,
     pending_stop_expected_packet_count: Option<u16>,
     terminal_received: bool,
+    keep_listening_after_pipeline_errors: bool,
 }
 
 /// 跑流式润色路径（opt-in，跨平台）。
@@ -1415,7 +1416,11 @@ async fn submit_embedded_audio_ble_stream_impl(
         capture_result
     });
 
-    let mut streaming = EmbeddedStreamingDictation::default();
+    let mut streaming = if emit_idle_capture_errors {
+        EmbeddedStreamingDictation::default()
+    } else {
+        EmbeddedStreamingDictation::background_listener()
+    };
     while let Some(notification) = rx.recv().await {
         match streaming.handle_notification(inner, &notification).await {
             Ok(true) => {
@@ -1504,6 +1509,13 @@ fn embedded_audio_file_session_id() -> u32 {
 }
 
 impl EmbeddedStreamingDictation {
+    fn background_listener() -> Self {
+        Self {
+            keep_listening_after_pipeline_errors: true,
+            ..Self::default()
+        }
+    }
+
     async fn handle_notification(
         &mut self,
         inner: &Arc<Inner>,
@@ -1547,13 +1559,12 @@ impl EmbeddedStreamingDictation {
                 }
                 if let Some(expected_packet_count) = self.pending_stop_expected_packet_count {
                     if self.collector.inner().has_successful_complete_session() {
-                        self.finish_streaming_session(
+                        self.finish_completed_streaming_session(
                             inner,
                             chunk_session_id,
                             expected_packet_count,
                         )
                         .await?;
-                        self.terminal_received = true;
                         return Ok(true);
                     }
                 }
@@ -1566,9 +1577,12 @@ impl EmbeddedStreamingDictation {
                 self.pending_stop_expected_packet_count = Some(expected_packet_count);
                 self.show_transcribing_after_stop(inner);
                 if self.collector.inner().has_successful_complete_session() {
-                    self.finish_streaming_session(inner, session_id, expected_packet_count)
-                        .await?;
-                    self.terminal_received = true;
+                    self.finish_completed_streaming_session(
+                        inner,
+                        session_id,
+                        expected_packet_count,
+                    )
+                    .await?;
                     Ok(true)
                 } else {
                     let stats = self.collector.inner().stats();
@@ -1700,6 +1714,31 @@ impl EmbeddedStreamingDictation {
         end_session(inner).await
     }
 
+    async fn finish_completed_streaming_session(
+        &mut self,
+        inner: &Arc<Inner>,
+        embedded_session_id: u32,
+        expected_packet_count: u16,
+    ) -> Result<(), String> {
+        match self
+            .finish_streaming_session(inner, embedded_session_id, expected_packet_count)
+            .await
+        {
+            Ok(()) => {
+                self.terminal_received = true;
+                Ok(())
+            }
+            Err(err) if self.keep_listening_after_pipeline_errors && self.session.is_none() => {
+                self.terminal_received = true;
+                log::warn!(
+                    "[embedded-ble] background session completed with dictation pipeline error; keeping notify open: {err}"
+                );
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     async fn finish_pending_stop_after_capture(
         &mut self,
         inner: &Arc<Inner>,
@@ -1717,10 +1756,8 @@ impl EmbeddedStreamingDictation {
                     .and_then(|count| u16::try_from(count).ok())
             })
             .ok_or_else(|| "嵌入式 BLE 流式会话尚未收到结束包".to_string())?;
-        self.finish_streaming_session(inner, embedded_session_id, expected_packet_count)
-            .await?;
-        self.terminal_received = true;
-        Ok(())
+        self.finish_completed_streaming_session(inner, embedded_session_id, expected_packet_count)
+            .await
     }
 
     fn abort_streaming_session(
@@ -3120,6 +3157,22 @@ mod tests {
         assert!(streaming.pending_stop_expected_packet_count.is_none());
         assert_eq!(streaming.collector.inner().stats().session_id, None);
         assert!(streaming.submission_result().is_err());
+    }
+
+    #[test]
+    fn embedded_streaming_background_listener_keeps_pipeline_error_policy_after_reset() {
+        let mut streaming = EmbeddedStreamingDictation::background_listener();
+
+        assert!(streaming.keep_listening_after_pipeline_errors);
+        streaming.terminal_received = true;
+        streaming.embedded_session_id = Some(42);
+
+        streaming.reset_for_next_session();
+
+        assert!(streaming.keep_listening_after_pipeline_errors);
+        assert!(!streaming.terminal_received);
+        assert!(streaming.embedded_session_id.is_none());
+        assert!(!EmbeddedStreamingDictation::default().keep_listening_after_pipeline_errors);
     }
 
     #[test]
