@@ -721,18 +721,23 @@ export const zhTW: typeof zhCN = {
         settingsAdvanced: '進階設定',
       },
       knob: {
-        title: '旋鈕固定功能',
-        desc: '旋鈕由韌體固定分配，目前不可在這裡修改。',
+        title: '旋鈕動作',
+        desc: '旋轉動作可同步到裝置：調整電腦音量、調整螢幕亮度或停用。按壓類手勢仍由韌體固定。',
         gestures: {
-          shortPress: '短按旋鈕',
+          rotate: '旋鈕旋轉',
+          shortPress: '旋鈕單擊',
           doubleClick: '雙擊旋鈕',
           longPress: '長按旋鈕',
         },
         actions: {
+          systemVolume: '電腦音量',
+          screenBrightness: '螢幕亮度',
+          disabled: '停用',
           recording: '開始 / 停止錄音',
           bluetoothReset: '重置藍牙 / 重新配對',
           powerOff: '關機',
         },
+        rotationActionSelectAria: '選擇旋鈕旋轉動作',
       },
       actions: {
         disabled: '無',

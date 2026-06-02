@@ -694,18 +694,23 @@ export const ko: typeof zhCN = {
         settingsAdvanced: '고급 설정',
       },
       knob: {
-        title: '노브 고정 기능',
-        desc: '노브 제스처는 펌웨어에서 고정되어 여기서 변경할 수 없습니다.',
+        title: '노브 동작',
+        desc: '회전 동작은 장치로 동기화할 수 있습니다. 컴퓨터 볼륨, 화면 밝기, 비활성화 중에서 선택하세요. 클릭 제스처는 펌웨어에 고정되어 있습니다.',
         gestures: {
-          shortPress: '노브 짧게 누르기',
+          rotate: '노브 회전',
+          shortPress: '노브 클릭',
           doubleClick: '노브 더블 클릭',
           longPress: '노브 길게 누르기',
         },
         actions: {
+          systemVolume: '컴퓨터 볼륨',
+          screenBrightness: '화면 밝기',
+          disabled: '비활성화',
           recording: '녹음 시작 / 중지',
           bluetoothReset: 'Bluetooth 재설정 / 다시 페어링',
           powerOff: '전원 끄기',
         },
+        rotationActionSelectAria: '노브 회전 동작 선택',
       },
       actions: {
         disabled: '없음',

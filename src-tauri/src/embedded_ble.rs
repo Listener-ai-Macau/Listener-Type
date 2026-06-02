@@ -1356,6 +1356,29 @@ mod windows_ble {
         Ok(())
     }
 
+    pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), String> {
+        let target = open_notify_target()?;
+        let Some(service) = target.service.as_ref() else {
+            return Err("Listener BLE audio service unavailable for EC11 rotation control".into());
+        };
+        let control = open_write_characteristic_from_service(
+            service,
+            AUDIO_CONTROL_UUID,
+            "audio control",
+            BluetoothCacheMode::Uncached,
+        )?;
+        let command = format!("EC11:MODE:{mode}\n");
+        write_gatt_value_with_timeout(
+            &control,
+            command.as_bytes(),
+            GattWriteOption::WriteWithResponse,
+            timeout,
+            "EC11 rotation mode",
+        )?;
+        log::info!("[embedded-ble] EC11 rotation mode sent mode={mode}");
+        Ok(())
+    }
+
     pub fn capture_notification_events(
         timeout: Duration,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
@@ -4095,6 +4118,11 @@ pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), String> {
+    windows_ble::send_ec11_rotation_mode(mode, timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn capture_notification_events(
     timeout: Duration,
     on_event: &mut BleNotificationHandler<'_>,
@@ -4214,6 +4242,11 @@ pub fn probe_notify_subscription(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_toggle(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_ec11_rotation_mode(_mode: &str, _timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE EC11 rotation control is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

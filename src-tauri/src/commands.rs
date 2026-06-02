@@ -45,8 +45,8 @@ use crate::recorder::{AudioConsumer, Recorder};
 use crate::types::{
     builtin_style_pack_id, default_active_style_pack_id, ChineseScriptPreference, ComboBinding,
     CorrectionRule, CredentialsStatus, DeviceCustomKeyAction, DeviceCustomKeyMapping,
-    DeviceCustomKeys, DictationSession, DictionaryEntry, HotkeyCapability, HotkeyStatus,
-    OutputLanguagePreference, PolishMode, ShortcutBinding, StylePack, StylePackKind,
+    DeviceCustomKeys, DictationInputSource, DictationSession, DictionaryEntry, HotkeyCapability,
+    HotkeyStatus, OutputLanguagePreference, PolishMode, ShortcutBinding, StylePack, StylePackKind,
     StylePackRuntimeDiagnostics, StyleSystemPrompts, UpdateChannel, UserPreferences,
     VocabPresetStore, WindowsImeStatus,
 };
@@ -401,11 +401,19 @@ pub fn set_settings(
     let packs = coord.style_packs().list().map_err(|e| e.to_string())?;
     sync_style_pack_preferences(&mut prefs, &packs);
     let _settings_guard = settings_update_lock().lock();
+    let previous_knob_rotation_action = coord.prefs().get().device_knob_rotation_action;
+    let next_knob_rotation_action = prefs.device_knob_rotation_action;
+    let next_input_source = prefs.dictation_input_source;
     // 广播给所有 webview。issue #205：QaPanel 跑在独立 webview，
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
     persist_settings(&*coord, prefs.clone())?;
     coord.refresh_embedded_ble_listener();
+    if next_input_source == DictationInputSource::EmbeddedBle
+        || previous_knob_rotation_action != next_knob_rotation_action
+    {
+        coord.sync_device_knob_rotation_action_to_firmware("settings_save");
+    }
     // refresh_tray_microphone_menu 内部会调用 NSStatusItem.set_menu，必须在主线程上跑。
     // set_settings 本身是同步 Tauri command，在 IPC handler 线程上执行；从这里直接调
     // 会触发 macOS 主线程断言或在 dispatch 队列上死锁，导致整个 UI 无响应（用户改

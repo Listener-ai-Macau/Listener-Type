@@ -20,6 +20,7 @@ import type {
   DeviceCustomKeyId,
   DeviceCustomKeys,
   DeviceCustomKeyMapping,
+  DeviceKnobRotationAction,
   InstalledApplication,
   ShortcutBinding,
 } from '../../lib/types';
@@ -91,10 +92,13 @@ const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
   'settingsAdvanced',
 ];
 
-const KNOB_FIXED_ACTIONS = [
-  { gesture: 'shortPress', action: 'recording' },
-  { gesture: 'doubleClick', action: 'bluetoothReset' },
-  { gesture: 'longPress', action: 'powerOff' },
+const KNOB_ROTATION_ACTIONS: DeviceKnobRotationAction[] = ['systemVolume', 'screenBrightness', 'disabled'];
+
+const KNOB_ACTION_ROWS = [
+  { gesture: 'rotate', action: 'systemVolume', locked: false },
+  { gesture: 'shortPress', action: 'recording', locked: true },
+  { gesture: 'doubleClick', action: 'bluetoothReset', locked: true },
+  { gesture: 'longPress', action: 'powerOff', locked: true },
 ] as const;
 
 const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
@@ -144,6 +148,17 @@ export function ShortcutsSection() {
     [t('settings.shortcuts.cancel'), 'Esc'],
     [t('settings.shortcuts.confirm'), t('settings.shortcuts.confirmHint')],
   ];
+  const knobRotationAction = prefs.deviceKnobRotationAction ?? 'systemVolume';
+  const knobRotationActionOptions = KNOB_ROTATION_ACTIONS.map(action => ({
+    value: action,
+    label: t(`settings.deviceKeys.knob.actions.${action}`),
+  }));
+  const updateKnobRotationAction = async (value: string) => {
+    await savePrefs(current => ({
+      ...current,
+      deviceKnobRotationAction: value as DeviceKnobRotationAction,
+    }));
+  };
 
   return (
     <Card>
@@ -270,7 +285,7 @@ export function ShortcutsSection() {
         {t('settings.deviceKeys.knob.desc')}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {KNOB_FIXED_ACTIONS.map(item => (
+        {KNOB_ACTION_ROWS.map(item => (
           <div
             key={item.gesture}
             style={{
@@ -278,29 +293,43 @@ export function ShortcutsSection() {
               gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
               gap: 12,
               alignItems: 'center',
-              opacity: 0.72,
+              opacity: item.locked ? 0.66 : 1,
             }}
           >
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink-3)' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: item.locked ? 'var(--ol-ink-3)' : 'var(--ol-ink)' }}>
               {t(`settings.deviceKeys.knob.gestures.${item.gesture}`)}
             </div>
             <div
-              aria-disabled="true"
+              aria-disabled={item.locked}
               style={{
                 minHeight: 32,
-                display: 'inline-flex',
+                display: 'flex',
                 alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
                 width: '100%',
                 boxSizing: 'border-box',
                 padding: '0 10px',
                 borderRadius: 6,
                 background: 'var(--ol-surface-2)',
                 border: '0.5px solid var(--ol-line-strong)',
-                color: 'var(--ol-ink-4)',
+                color: item.locked ? 'var(--ol-ink-4)' : 'var(--ol-ink-2)',
                 fontSize: 12,
               }}
             >
-              {t(`settings.deviceKeys.knob.actions.${item.action}`)}
+              {item.gesture === 'rotate' ? (
+                <SelectLite
+                  value={knobRotationAction}
+                  onChange={value => void updateKnobRotationAction(value)}
+                  options={knobRotationActionOptions}
+                  ariaLabel={t('settings.deviceKeys.knob.rotationActionSelectAria')}
+                  style={{ minWidth: 160, width: 'min(100%, 240px)', height: 28, fontSize: 12, borderRadius: 6 }}
+                />
+              ) : (
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {t(`settings.deviceKeys.knob.actions.${item.action}`)}
+                </span>
+              )}
             </div>
           </div>
         ))}

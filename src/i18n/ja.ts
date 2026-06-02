@@ -694,18 +694,23 @@ export const ja: typeof zhCN = {
         settingsAdvanced: '詳細設定',
       },
       knob: {
-        title: 'ノブ固定機能',
-        desc: 'ノブのジェスチャーはファームウェアで固定されており、ここでは変更できません。',
+        title: 'ノブの動作',
+        desc: '回転動作はデバイスへ同期できます。音量、画面の明るさ、無効から選べます。クリック系ジェスチャーはファームウェア固定です。',
         gestures: {
-          shortPress: 'ノブ短押し',
+          rotate: 'ノブ回転',
+          shortPress: 'ノブクリック',
           doubleClick: 'ノブダブルクリック',
           longPress: 'ノブ長押し',
         },
         actions: {
+          systemVolume: 'コンピューター音量',
+          screenBrightness: '画面の明るさ',
+          disabled: '無効',
           recording: '録音開始 / 停止',
           bluetoothReset: 'Bluetooth リセット / 再ペアリング',
           powerOff: '電源オフ',
         },
+        rotationActionSelectAria: 'ノブ回転動作を選択',
       },
       actions: {
         disabled: 'なし',

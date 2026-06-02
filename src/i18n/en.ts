@@ -721,18 +721,23 @@ export const en: typeof zhCN = {
           settingsAdvanced: 'Advanced settings',
         },
         knob: {
-          title: 'Knob fixed functions',
-          desc: 'Knob gestures are fixed in firmware and cannot be changed here.',
+          title: 'Knob actions',
+          desc: 'Rotation can be sent to the device as volume, brightness, or disabled. Click gestures stay fixed in firmware.',
           gestures: {
-            shortPress: 'Knob short press',
+            rotate: 'Knob rotation',
+            shortPress: 'Knob click',
             doubleClick: 'Knob double click',
             longPress: 'Knob long press',
           },
           actions: {
+            systemVolume: 'Computer volume',
+            screenBrightness: 'Screen brightness',
+            disabled: 'Disabled',
             recording: 'Start / stop recording',
             bluetoothReset: 'Reset Bluetooth / re-pair',
             powerOff: 'Power off',
           },
+          rotationActionSelectAria: 'Choose knob rotation action',
         },
         actions: {
           disabled: 'None',

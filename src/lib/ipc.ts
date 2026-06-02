@@ -125,6 +125,7 @@ let mockSettings: UserPreferences = {
     key4: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
   },
   deviceCustomKeysDefaultMigrated: true,
+  deviceKnobRotationAction: 'systemVolume',
   localAsrActiveModel: 'qwen3-asr-0.6b',
   localAsrMirror: 'huggingface',
   localAsrKeepLoadedSecs: 300,
@@ -197,6 +198,7 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
       key4: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeyLongPresses?.key4, fallbackDisabledDeviceKeys.key4),
     },
     deviceCustomKeysDefaultMigrated: prefs.deviceCustomKeysDefaultMigrated ?? true,
+    deviceKnobRotationAction: prefs.deviceKnobRotationAction ?? 'systemVolume',
   };
 }
 

@@ -416,6 +416,8 @@ export interface UserPreferences {
   /** 设备 KEY1-KEY4 的长按动作映射。固件 fallback 入口为 F21-F24。 */
   deviceCustomKeyLongPresses: DeviceCustomKeys;
   deviceCustomKeysDefaultMigrated: boolean;
+  /** EC11 旋钮旋转动作。默认调电脑音量；可切换为屏幕亮度或禁用。 */
+  deviceKnobRotationAction: DeviceKnobRotationAction;
   /** 本地 Qwen3-ASR 当前激活的模型 id。仅在 activeAsrProvider === 'local-qwen3' 时有意义。 */
   localAsrActiveModel: string;
   /** 本地模型下载源镜像（'huggingface' / 'hf-mirror'）。 */
@@ -520,6 +522,8 @@ export interface DeviceCustomKeys {
   key3: DeviceCustomKeyMapping;
   key4: DeviceCustomKeyMapping;
 }
+
+export type DeviceKnobRotationAction = 'systemVolume' | 'screenBrightness' | 'disabled';
 
 export interface MarketplaceListItem {
   id: string;

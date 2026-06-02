@@ -38,7 +38,7 @@ function New-FeatureSnapshot {
             "ASR providers: Volcengine streaming, OpenAI batch, Apple Speech, Bailian realtime, macOS Qwen local, and Windows Foundry Local Whisper.",
             "Text pipeline: coordinator-driven dictation, correction, polish, vocabulary hotwords, translation, QA selection ask, and insertion.",
             "Windows insertion: direct/clipboard fallback paths are default; optional native TSF IME bridge remains available for explicit validation.",
-            "Device controls: Listener keyboard KEY1-KEY4 fallback shortcuts map to configurable safe actions such as open app, switch style, translation, selection ask, paste template, or send shortcut.",
+            "Device controls: Listener keyboard KEY1-KEY4 fallback shortcuts map to configurable safe actions; EC11 rotation can be set to system volume, screen brightness, or disabled and is synced to firmware over BLE.",
             "Release shell: Tauri updater, background update gate, tray menu, autostart, single-instance behavior, and package metadata.",
             "Settings and diagnostics: shortcuts, provider credentials in OS keyring/local storage, language, permissions, advanced logs, diagnostic export, dark mode, and device health.",
             "Developer/product tools: embedded audio file/BLE CLI replay, firmware OTA package/preflight validation, BLE stream smoke, Foundry runtime probes, and updater manifest checks."

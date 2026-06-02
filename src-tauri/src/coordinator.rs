@@ -52,9 +52,9 @@ use crate::selection::capture_selection;
 use crate::types::PasteShortcut;
 use crate::types::{
     CapsulePayload, CapsuleState, ChineseScriptPreference, DeviceCustomKeyAction,
-    DeviceCustomKeyGesture, DeviceCustomKeyId, DeviceCustomKeyMapping, DictationInputSource,
-    DictationSession, HotkeyCapability, HotkeyStatus, HotkeyStatusState, InsertStatus,
-    OutputLanguagePreference, PolishMode, ShortcutBinding,
+    DeviceCustomKeyGesture, DeviceCustomKeyId, DeviceCustomKeyMapping, DeviceKnobRotationAction,
+    DictationInputSource, DictationSession, HotkeyCapability, HotkeyStatus, HotkeyStatusState,
+    InsertStatus, OutputLanguagePreference, PolishMode, ShortcutBinding,
 };
 #[cfg(target_os = "windows")]
 use crate::windows_ime_ipc::ImeSubmitTarget;
@@ -1208,6 +1208,10 @@ impl Coordinator {
 
     pub fn refresh_embedded_ble_listener(&self) {
         refresh_embedded_ble_listener(&self.inner);
+    }
+
+    pub fn sync_device_knob_rotation_action_to_firmware(&self, reason: &'static str) {
+        sync_device_knob_rotation_action_to_firmware(&self.inner, reason);
     }
 
     /// 返回当前听写阶段（read-only 快照），供 CLI 入口在 dispatch toggle 时决策。
@@ -2641,6 +2645,28 @@ fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) {
     snapshot.last_ready_at = Some(now_rfc3339());
 }
 
+fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationAction) -> &'static str {
+    match action {
+        DeviceKnobRotationAction::SystemVolume => "VOLUME",
+        DeviceKnobRotationAction::ScreenBrightness => "BRIGHTNESS",
+        DeviceKnobRotationAction::Disabled => "DISABLED",
+    }
+}
+
+fn sync_device_knob_rotation_action_to_firmware(inner: &Arc<Inner>, reason: &'static str) {
+    let mode = firmware_mode_for_device_knob_rotation_action(
+        inner.prefs.get().device_knob_rotation_action,
+    );
+    async_runtime::spawn_blocking(move || {
+        match crate::embedded_ble::send_ec11_rotation_mode(mode, Duration::from_secs(2)) {
+            Ok(()) => log::info!("[device-knob] synced EC11 rotation mode={mode} reason={reason}"),
+            Err(err) => {
+                log::warn!("[device-knob] EC11 rotation mode sync skipped reason={reason}: {err}")
+            }
+        }
+    });
+}
+
 fn record_embedded_ble_listener_cancelled(inner: &Arc<Inner>, reason: &str) {
     let mut snapshot = inner.embedded_ble_wake_recovery.lock();
     snapshot.status = EmbeddedBleWakeRecoveryStatus::Idle;
@@ -2980,6 +3006,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             .embedded_ble_listener_ready
             .store(true, Ordering::SeqCst);
         record_embedded_ble_notify_ready(inner);
+        sync_device_knob_rotation_action_to_firmware(inner, "ble_ready");
         log::info!("[embedded-ble] background listener notify ready");
     }
 }

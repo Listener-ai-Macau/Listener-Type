@@ -857,6 +857,20 @@ fn windows_wechat_executable_candidates() -> Vec<std::path::PathBuf> {
     paths
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceKnobRotationAction {
+    SystemVolume,
+    ScreenBrightness,
+    Disabled,
+}
+
+impl Default for DeviceKnobRotationAction {
+    fn default() -> Self {
+        Self::SystemVolume
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UserPreferences {
@@ -949,6 +963,10 @@ pub struct UserPreferences {
     pub device_custom_key_long_presses: DeviceCustomKeys,
     #[serde(default = "default_true")]
     pub device_custom_keys_default_migrated: bool,
+    /// EC11 rotation action. Firmware defaults to system volume; the desktop
+    /// syncs this preference over the BLE audio control characteristic.
+    #[serde(default)]
+    pub device_knob_rotation_action: DeviceKnobRotationAction,
     /// 本地 Qwen3-ASR 当前激活的模型 id（"qwen3-asr-0.6b" / "qwen3-asr-1.7b"）。
     /// 仅在 active_asr_provider == "local-qwen3" 时有意义。
     #[serde(default = "default_local_asr_model")]
@@ -1137,6 +1155,8 @@ struct UserPreferencesWire {
     device_custom_key_long_presses: DeviceCustomKeys,
     #[serde(default)]
     device_custom_keys_default_migrated: bool,
+    #[serde(default)]
+    device_knob_rotation_action: DeviceKnobRotationAction,
     #[serde(default = "default_local_asr_model")]
     local_asr_active_model: String,
     #[serde(default = "default_local_asr_mirror")]
@@ -1217,6 +1237,7 @@ impl Default for UserPreferencesWire {
             device_custom_key_double_clicks: prefs.device_custom_key_double_clicks,
             device_custom_key_long_presses: prefs.device_custom_key_long_presses,
             device_custom_keys_default_migrated: prefs.device_custom_keys_default_migrated,
+            device_knob_rotation_action: prefs.device_knob_rotation_action,
             local_asr_active_model: prefs.local_asr_active_model,
             local_asr_mirror: prefs.local_asr_mirror,
             local_asr_keep_loaded_secs: prefs.local_asr_keep_loaded_secs,
@@ -1319,6 +1340,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             device_custom_key_double_clicks,
             device_custom_key_long_presses,
             device_custom_keys_default_migrated: true,
+            device_knob_rotation_action: wire.device_knob_rotation_action,
             local_asr_active_model: wire.local_asr_active_model,
             local_asr_mirror: wire.local_asr_mirror,
             local_asr_keep_loaded_secs: wire.local_asr_keep_loaded_secs,
@@ -1721,6 +1743,7 @@ impl Default for UserPreferences {
             device_custom_key_double_clicks: DeviceCustomKeys::disabled(),
             device_custom_key_long_presses: DeviceCustomKeys::disabled(),
             device_custom_keys_default_migrated: true,
+            device_knob_rotation_action: DeviceKnobRotationAction::default(),
             local_asr_active_model: default_local_asr_model(),
             local_asr_mirror: default_local_asr_mirror(),
             local_asr_keep_loaded_secs: default_local_asr_keep_loaded_secs(),

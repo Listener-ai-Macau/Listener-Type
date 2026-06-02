@@ -719,18 +719,23 @@ export const zhCN = {
           settingsAdvanced: '高级设置',
         },
         knob: {
-          title: '旋钮固定功能',
-          desc: '旋钮由固件固定分配，当前不可在这里修改。',
+          title: '旋钮动作',
+          desc: '旋转动作可同步到设备：调电脑音量、调屏幕亮度或禁用。按压类手势仍由固件固定。',
           gestures: {
-            shortPress: '短按旋钮',
+            rotate: '旋钮旋转',
+            shortPress: '旋钮单击',
             doubleClick: '双击旋钮',
             longPress: '长按旋钮',
           },
           actions: {
+            systemVolume: '电脑音量',
+            screenBrightness: '屏幕亮度',
+            disabled: '禁用',
             recording: '开始 / 停止录音',
             bluetoothReset: '重置蓝牙 / 重新配对',
             powerOff: '关机',
           },
+          rotationActionSelectAria: '选择旋钮旋转动作',
         },
         actions: {
           disabled: '无',
