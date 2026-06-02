@@ -6,6 +6,7 @@
 //! window.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -2134,32 +2135,89 @@ fn send_builtin_shortcut(
 
 #[cfg(target_os = "windows")]
 fn open_external_app_path(path: &str) -> Result<(), String> {
-    match shell_execute_open(path) {
-        Ok(()) => return Ok(()),
-        Err(shell_error) => {
-            let direct = std::process::Command::new(path).spawn();
-            if direct.is_ok() {
-                return Ok(());
-            }
-            std::process::Command::new("cmd")
-                .args(["/C", "start", "", path])
-                .spawn()
-                .map(|_| ())
-                .map_err(|err| format!("{shell_error}; cmd start failed: {err}"))
-        }
-    }
+    let path = validate_external_app_path(path)?;
+    shell_execute_open(&path)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn open_external_app_path(path: &str) -> Result<(), String> {
-    std::process::Command::new(path)
+    let path = validate_external_app_path(path)?;
+    std::process::Command::new("/usr/bin/open")
+        .arg(&path)
         .spawn()
         .map(|_| ())
         .map_err(|err| err.to_string())
 }
 
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn open_external_app_path(path: &str) -> Result<(), String> {
+    let path = validate_external_app_path(path)?;
+    if path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("desktop"))
+    {
+        return std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|err| err.to_string());
+    }
+    std::process::Command::new(&path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| err.to_string())
+}
+
+fn validate_external_app_path(path: &str) -> Result<PathBuf, String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err("应用路径为空".into());
+    }
+    let path = PathBuf::from(path);
+    if !path.exists() {
+        return Err("应用路径不存在，请从已安装应用中选择或填写完整应用路径".into());
+    }
+    if !is_supported_external_app_path(&path) {
+        return Err("仅支持已安装应用或应用快捷方式路径，不支持命令或脚本".into());
+    }
+    Ok(path)
+}
+
 #[cfg(target_os = "windows")]
-fn shell_execute_open(path: &str) -> Result<(), String> {
+fn is_supported_external_app_path(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "exe" | "lnk" | "appref-ms"
+                )
+            })
+}
+
+#[cfg(target_os = "macos")]
+fn is_supported_external_app_path(path: &Path) -> bool {
+    path.is_dir()
+        && path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("app"))
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn is_supported_external_app_path(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("desktop"))
+}
+
+#[cfg(target_os = "windows")]
+fn shell_execute_open(path: &Path) -> Result<(), String> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
@@ -2167,12 +2225,12 @@ fn shell_execute_open(path: &str) -> Result<(), String> {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-    fn wide(value: &str) -> Vec<u16> {
-        OsStr::new(value).encode_wide().chain(Some(0)).collect()
+    fn wide(value: &OsStr) -> Vec<u16> {
+        value.encode_wide().chain(Some(0)).collect()
     }
 
-    let operation = wide("open");
-    let file = wide(path);
+    let operation = wide(OsStr::new("open"));
+    let file = wide(path.as_os_str());
     let result = unsafe {
         ShellExecuteW(
             HWND(std::ptr::null_mut()),
@@ -4529,8 +4587,74 @@ mod tests {
 
     static ENV_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
 
+    fn temp_path_for_test(name: &str) -> std::path::PathBuf {
+        let path = std::path::Path::new(name);
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or(name);
+        let suffix = format!("{}-{}", std::process::id(), Uuid::new_v4());
+        let file_name = match path.extension().and_then(|value| value.to_str()) {
+            Some(ext) => format!("listener-type-{stem}-{suffix}.{ext}"),
+            None => format!("listener-type-{stem}-{suffix}"),
+        };
+        std::env::temp_dir().join(file_name)
+    }
+
     fn session_id(n: u128) -> SessionId {
         Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn external_app_path_validation_rejects_command_text() {
+        assert!(validate_external_app_path("code").is_err());
+        assert!(validate_external_app_path("cmd /C start notepad").is_err());
+    }
+
+    #[test]
+    fn external_app_path_validation_rejects_script_files() {
+        #[cfg(target_os = "windows")]
+        let path = temp_path_for_test("device-key-script.cmd");
+        #[cfg(target_os = "macos")]
+        let path = temp_path_for_test("device-key-script.command");
+        #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+        let path = temp_path_for_test("device-key-script.sh");
+
+        std::fs::write(&path, b"echo unsafe").unwrap();
+        let result = validate_external_app_path(&path.display().to_string());
+        let _ = std::fs::remove_file(&path);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn external_app_path_validation_accepts_platform_app_entry() {
+        #[cfg(target_os = "windows")]
+        {
+            let path = temp_path_for_test("device-key-app.exe");
+            std::fs::write(&path, b"").unwrap();
+            let result = validate_external_app_path(&path.display().to_string());
+            let _ = std::fs::remove_file(&path);
+            assert!(result.is_ok());
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let path = temp_path_for_test("DeviceKeyTest.app");
+            std::fs::create_dir(&path).unwrap();
+            let result = validate_external_app_path(&path.display().to_string());
+            let _ = std::fs::remove_dir(&path);
+            assert!(result.is_ok());
+        }
+
+        #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+        {
+            let path = temp_path_for_test("device-key-app.desktop");
+            std::fs::write(&path, b"[Desktop Entry]\nType=Application\nName=Test\n").unwrap();
+            let result = validate_external_app_path(&path.display().to_string());
+            let _ = std::fs::remove_file(&path);
+            assert!(result.is_ok());
+        }
     }
 
     fn force_microphone_input_for_test(coordinator: &Coordinator) {
