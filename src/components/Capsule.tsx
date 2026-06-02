@@ -13,6 +13,10 @@ import {
   PREVIEW_FINAL_TRANSITION,
   shouldShowStopAcknowledgement,
 } from '../lib/capsulePreviewRules';
+import {
+  applyCapsulePayloadOrdering,
+  createCapsuleOrderingTracker,
+} from '../lib/capsuleEventOrdering';
 import type { CapsulePayload, CapsuleState } from '../lib/types';
 
 interface AudioBarsProps {
@@ -368,6 +372,7 @@ export function Capsule() {
   const [lastVisibleState, setLastVisibleState] = useState<CapsuleState>(INITIAL_VISIBLE_STATE);
   const previousStateRef = useRef<CapsuleState>(INITIAL_VISIBLE_STATE);
   const previousElapsedMsRef = useRef<number>(0);
+  const capsuleOrderingRef = useRef(createCapsuleOrderingTracker());
   const stopAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stopRequested, setStopRequested] = useState<boolean>(false);
   const [stopAcknowledged, setStopAcknowledged] = useState<boolean>(false);
@@ -409,8 +414,23 @@ export function Capsule() {
             insertedChars: p.insertedChars ?? null,
             hasMessage: Boolean(p.message),
             translation: p.translation === true,
+            seq: p.seq,
+            sessionId: p.sessionId,
           },
         });
+        const ordering = applyCapsulePayloadOrdering(capsuleOrderingRef.current, p);
+        if (!ordering.accepted) {
+          traceCapsule('event_dropped_stale', {
+            state: p.state,
+            elapsedMs: p.elapsedMs,
+            detail: {
+              reason: ordering.reason,
+              seq: p.seq,
+              sessionId: p.sessionId,
+            },
+          });
+          return;
+        }
         const previousState = previousStateRef.current;
         const previousElapsedMs = previousElapsedMsRef.current;
         previousElapsedMsRef.current = p.elapsedMs;
