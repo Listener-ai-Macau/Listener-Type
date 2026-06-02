@@ -1982,6 +1982,17 @@ pub async fn recover_embedded_ble_device(
             );
 
             if should_attempt_embedded_ble_auto_unpair(&failure) || runtime_requests_auto_unpair {
+                let cleanup_wait_timeout = Duration::from_secs(45);
+                log::info!(
+                    "[embedded-ble] one-click recovery waiting for active Listener capture to stop before device cleanup timeout_ms={}",
+                    cleanup_wait_timeout.as_millis()
+                );
+                let capture_stopped = coord
+                    .pause_embedded_ble_listener_for_recovery_cleanup(cleanup_wait_timeout)
+                    .await;
+                log::info!(
+                    "[embedded-ble] one-click recovery capture stop before device cleanup stopped={capture_stopped}"
+                );
                 log::info!(
                     "[embedded-ble] one-click recovery attempting automatic Listener unpair failure_kind={:?} runtime_escalated={runtime_requests_auto_unpair} reconnect_attempts={} notify_state={:?}",
                     failure.kind,

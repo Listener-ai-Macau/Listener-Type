@@ -1174,6 +1174,14 @@ impl Coordinator {
         }
     }
 
+    pub async fn pause_embedded_ble_listener_for_recovery_cleanup(
+        &self,
+        timeout: Duration,
+    ) -> bool {
+        pause_embedded_ble_listener_capture(&self.inner, "customer recovery cleanup");
+        wait_for_embedded_ble_listener_inactive(&self.inner, timeout).await
+    }
+
     pub fn cancel_dictation(&self) {
         cancel_session(&self.inner);
     }
@@ -2805,6 +2813,19 @@ async fn wait_for_embedded_ble_listener_ready(
                 "Listener BLE notify subscription did not recover within {} ms after foreground probe{suffix}",
                 timeout.as_millis()
             ));
+        }
+        tokio::time::sleep(EMBEDDED_BLE_PROBE_RECOVERY_POLL).await;
+    }
+}
+
+async fn wait_for_embedded_ble_listener_inactive(inner: &Arc<Inner>, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if !embedded_ble_listener_capture_active(inner) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
         }
         tokio::time::sleep(EMBEDDED_BLE_PROBE_RECOVERY_POLL).await;
     }
