@@ -31,6 +31,8 @@ const TARGET_AUDIO_CHUNK_MS: usize = 200;
 const BYTES_PER_MS: f64 = 32.0;
 const HOTWORD_CAP: usize = 80;
 const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);
+const WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_millis(1_200);
+const FINAL_FRAME_SEND_BUDGET: Duration = Duration::from_millis(1_800);
 const AUDIO_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(3);
 const FINAL_SILENCE_FRAMES: usize = 5; // 1000 ms, using 200 ms TARGET_AUDIO_CHUNK_BYTES frames.
 const FINAL_SILENCE_PADDING_MS: usize = FINAL_SILENCE_FRAMES * TARGET_AUDIO_CHUNK_MS;
@@ -366,6 +368,7 @@ impl VolcengineStreamingASR {
         }
 
         // Drain leftover audio (if any) into one final positive-sequence frame.
+        let finish_send_deadline = Instant::now() + FINAL_FRAME_SEND_BUDGET;
         let leftover = {
             let mut st = self.state.lock();
             if st.pending_audio.is_empty() {
@@ -390,7 +393,7 @@ impl VolcengineStreamingASR {
                 st.bytes_sent += len;
                 st.frames_sent += 1;
             }
-            send_binary(&self.writer, frame).await?;
+            self.send_finish_frame(frame, finish_send_deadline).await?;
         }
 
         for _ in 0..FINAL_SILENCE_FRAMES {
@@ -407,7 +410,7 @@ impl VolcengineStreamingASR {
                 st.bytes_sent += TARGET_AUDIO_CHUNK_BYTES;
                 st.frames_sent += 1;
             }
-            send_binary(&self.writer, frame).await?;
+            self.send_finish_frame(frame, finish_send_deadline).await?;
         }
 
         // Final frame: negativeSequence + negative seq number signals stream end.
@@ -425,7 +428,7 @@ impl VolcengineStreamingASR {
             &[],
             Some(final_seq),
         );
-        send_binary(&self.writer, frame).await?;
+        self.send_finish_frame(frame, finish_send_deadline).await?;
 
         let (total_bytes, total_frames) = {
             let st = self.state.lock();
@@ -440,6 +443,26 @@ impl VolcengineStreamingASR {
             FINAL_SILENCE_PADDING_MS
         );
         Ok(())
+    }
+
+    async fn send_finish_frame(
+        &self,
+        frame: Vec<u8>,
+        deadline: Instant,
+    ) -> Result<(), VolcengineASRError> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(VolcengineASRError::ConnectionFailed(format!(
+                "final frame send budget exhausted after {} ms",
+                FINAL_FRAME_SEND_BUDGET.as_millis()
+            )));
+        }
+        send_binary_with_timeout(
+            &self.writer,
+            frame,
+            std::cmp::min(remaining, WEBSOCKET_SEND_TIMEOUT),
+        )
+        .await
     }
 
     pub async fn await_final_result(&self) -> Result<RawTranscript, VolcengineASRError> {
@@ -728,14 +751,35 @@ impl AudioConsumer for VolcengineStreamingASR {
 }
 
 async fn send_binary(writer: &SharedWriter, data: Vec<u8>) -> Result<(), VolcengineASRError> {
-    let mut guard = writer.lock().await;
+    send_binary_with_timeout(writer, data, WEBSOCKET_SEND_TIMEOUT).await
+}
+
+async fn send_binary_with_timeout(
+    writer: &SharedWriter,
+    data: Vec<u8>,
+    timeout: Duration,
+) -> Result<(), VolcengineASRError> {
+    let mut guard = tokio::time::timeout(timeout, writer.lock())
+        .await
+        .map_err(|_| {
+            VolcengineASRError::ConnectionFailed(format!(
+                "websocket writer lock timed out after {} ms",
+                timeout.as_millis()
+            ))
+        })?;
     let Some(sink) = guard.as_mut() else {
         return Err(VolcengineASRError::ConnectionFailed(
             "websocket not open".into(),
         ));
     };
-    sink.send(Message::Binary(data))
+    tokio::time::timeout(timeout, sink.send(Message::Binary(data)))
         .await
+        .map_err(|_| {
+            VolcengineASRError::ConnectionFailed(format!(
+                "websocket send timed out after {} ms",
+                timeout.as_millis()
+            ))
+        })?
         .map_err(|e| VolcengineASRError::ConnectionFailed(e.to_string()))
 }
 
@@ -877,6 +921,32 @@ mod tests {
         assert_eq!(FINAL_SILENCE_PADDING_MS, 1_000);
         assert!(FINAL_SILENCE_PADDING_MS as u32 >= SECOND_PASS_FORCE_TO_SPEECH_MS);
         assert!(FINAL_SILENCE_PADDING_MS as u32 >= SECOND_PASS_END_WINDOW_MS);
+    }
+
+    #[test]
+    fn final_frame_send_budget_stays_below_final_result_wait() {
+        assert!(WEBSOCKET_SEND_TIMEOUT < FINAL_RESULT_TIMEOUT);
+        assert!(FINAL_FRAME_SEND_BUDGET < FINAL_RESULT_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn send_binary_times_out_when_writer_lock_is_stuck() {
+        let writer: SharedWriter = Arc::new(AsyncMutex::new(None));
+        let _guard = writer.lock().await;
+        let start = Instant::now();
+
+        let err = send_binary_with_timeout(&writer, vec![1, 2, 3], Duration::from_millis(10))
+            .await
+            .unwrap_err();
+
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "send should fail on the short timeout"
+        );
+        assert!(
+            err.to_string().contains("writer lock timed out"),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]
