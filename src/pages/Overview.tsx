@@ -18,7 +18,7 @@ import {
   getEmbeddedBleRuntimeStatus,
   listHistory,
   openSystemSettings,
-  repairEmbeddedBleConnection,
+  recoverEmbeddedBleDevice,
   setActiveAsrProvider,
   startDictation,
 } from '../lib/ipc';
@@ -214,7 +214,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings }: O
       refreshBleRuntimeStatus();
     }
   }, [embeddedBleProbeStatus, embeddedBleSupported, refreshBleRuntimeStatus, refreshHistory, t]);
-  const repairEmbeddedBle = useCallback(async () => {
+  const recoverEmbeddedBle = useCallback(async () => {
     if (!embeddedBleSupported || embeddedBleProbeStatus === 'checking') return;
     const runId = embeddedBleProbeRunId.current + 1;
     embeddedBleProbeRunId.current = runId;
@@ -222,12 +222,12 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings }: O
     setEmbeddedBleProbeMessage(t('settings.recording.embeddedBleConnectionMessageChecking'));
     setLastBleRepairResult(null);
     try {
-      const result = await repairEmbeddedBleConnection(15_000);
+      const result = await recoverEmbeddedBleDevice(15_000);
       if (embeddedBleProbeRunId.current !== runId) return;
       setLastBleRepairResult(result);
       setBleRuntimeStatus(result.runtime);
       setEmbeddedBleProbeStatus(result.recovered ? 'ok' : 'error');
-      setEmbeddedBleProbeMessage('');
+      setEmbeddedBleProbeMessage(result.message ?? '');
       if (result.openBluetoothSettings) {
         openBluetoothSettings();
       }
@@ -277,7 +277,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings }: O
           recovery={bleRecoveryUi}
           onOpenBluetoothSettings={openBluetoothSettings}
           onProbe={() => void runEmbeddedBleProbe()}
-          onRepair={() => void repairEmbeddedBle()}
+          onRepair={() => void recoverEmbeddedBle()}
           onOpenRecordingSettings={onOpenRecordingSettings}
           onUseMicrophone={useMicrophoneInput}
           onExportDiagnostics={() => void exportBleDiagnostics()}

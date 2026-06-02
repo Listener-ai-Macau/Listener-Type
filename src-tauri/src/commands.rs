@@ -1709,10 +1709,23 @@ pub struct EmbeddedBleRepairResult {
     pub recovered: bool,
     pub user_action_required: bool,
     pub open_bluetooth_settings: bool,
+    pub recovery_action: EmbeddedBleRecoveryAction,
     pub message: String,
     pub failure: Option<crate::embedded_ble::BleFailureClassification>,
+    pub unpair_result: Option<crate::embedded_ble::BleDeviceUnpairResult>,
     pub runtime: EmbeddedBleRuntimeStatus,
     pub firmware: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EmbeddedBleRecoveryAction {
+    None,
+    Reconnected,
+    WaitForAutomaticRecovery,
+    RePairRequired,
+    BluetoothSettingsRequired,
+    DiagnosticsRequired,
 }
 
 fn embedded_ble_repair_failure_action(
@@ -1731,12 +1744,95 @@ fn embedded_ble_repair_failure_action(
     (user_action_required, open_bluetooth_settings)
 }
 
-#[tauri::command]
-pub async fn repair_embedded_ble_connection(
-    coord: CoordinatorState<'_>,
-    timeout_ms: Option<u64>,
-) -> Result<EmbeddedBleRepairResult, String> {
-    let repair = coord.repair_embedded_ble_connection(timeout_ms).await;
+fn embedded_ble_recovery_action_for_failure(
+    failure: &crate::embedded_ble::BleFailureClassification,
+) -> EmbeddedBleRecoveryAction {
+    match failure.kind {
+        crate::embedded_ble::BleFailureKind::MissingPairing
+        | crate::embedded_ble::BleFailureKind::StaleGattService
+        | crate::embedded_ble::BleFailureKind::CccdProtocolError => {
+            EmbeddedBleRecoveryAction::RePairRequired
+        }
+        crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded
+        | crate::embedded_ble::BleFailureKind::AccessDenied
+        | crate::embedded_ble::BleFailureKind::DeviceMissing => {
+            EmbeddedBleRecoveryAction::BluetoothSettingsRequired
+        }
+        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
+        | crate::embedded_ble::BleFailureKind::PairedButDisconnected
+        | crate::embedded_ble::BleFailureKind::BackgroundListenerContention
+        | crate::embedded_ble::BleFailureKind::OtaRebootWindow => {
+            EmbeddedBleRecoveryAction::WaitForAutomaticRecovery
+        }
+        crate::embedded_ble::BleFailureKind::DeviceAsleep => {
+            EmbeddedBleRecoveryAction::WaitForAutomaticRecovery
+        }
+        crate::embedded_ble::BleFailureKind::MissingDisFirmwareRevision
+        | crate::embedded_ble::BleFailureKind::UnsupportedPlatform
+        | crate::embedded_ble::BleFailureKind::Unknown => {
+            EmbeddedBleRecoveryAction::DiagnosticsRequired
+        }
+    }
+}
+
+fn should_attempt_embedded_ble_auto_unpair(
+    failure: &crate::embedded_ble::BleFailureClassification,
+) -> bool {
+    matches!(
+        failure.kind,
+        crate::embedded_ble::BleFailureKind::MissingPairing
+            | crate::embedded_ble::BleFailureKind::StaleGattService
+            | crate::embedded_ble::BleFailureKind::CccdProtocolError
+    )
+}
+
+fn embedded_ble_recovery_message(
+    failure: &crate::embedded_ble::BleFailureClassification,
+    unpair_result: Option<&crate::embedded_ble::BleDeviceUnpairResult>,
+) -> String {
+    if let Some(unpair) = unpair_result {
+        return match unpair.status {
+            crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
+                "旧的 Listener 蓝牙配对已清理。请在打开的 Windows 蓝牙设置里重新配对 Listener，Type 会自动恢复。".to_string()
+            }
+            crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
+            | crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
+                "Type 没找到可自动清理的旧配对。请在打开的 Windows 蓝牙设置里配对 Listener，Type 会自动恢复。".to_string()
+            }
+            crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
+                "Windows 需要你确认移除 Listener。请在打开的蓝牙设置里删除 Listener 后重新配对，Type 会自动恢复。".to_string()
+            }
+        };
+    }
+    match embedded_ble_recovery_action_for_failure(failure) {
+        EmbeddedBleRecoveryAction::WaitForAutomaticRecovery => {
+            "Listener Type 正在自动恢复连接。请保持设备唤醒，稍等片刻。".to_string()
+        }
+        EmbeddedBleRecoveryAction::BluetoothSettingsRequired => {
+            "请在打开的 Windows 蓝牙设置里确认 Listener 已连接；如果仍失败，请删除后重新配对。"
+                .to_string()
+        }
+        EmbeddedBleRecoveryAction::DiagnosticsRequired => {
+            "Type 不能自动恢复这个状态。请导出诊断包给支持人员。".to_string()
+        }
+        EmbeddedBleRecoveryAction::RePairRequired => {
+            "请重新配对 Listener；Type 会继续检测并自动恢复。".to_string()
+        }
+        EmbeddedBleRecoveryAction::None | EmbeddedBleRecoveryAction::Reconnected => {
+            failure.user_action.to_string()
+        }
+    }
+}
+
+async fn embedded_ble_runtime_and_firmware(
+    coord: &Coordinator,
+) -> Result<
+    (
+        EmbeddedBleRuntimeStatus,
+        crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+    ),
+    String,
+> {
     let runtime = EmbeddedBleRuntimeStatus {
         background_listener_disabled_by_env: std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
             .ok()
@@ -1751,14 +1847,26 @@ pub async fn repair_embedded_ble_connection(
         tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
             .await
             .map_err(|err| format!("Listener BLE repair snapshot task failed: {err}"))?;
+    Ok((runtime, firmware))
+}
+
+#[tauri::command]
+pub async fn repair_embedded_ble_connection(
+    coord: CoordinatorState<'_>,
+    timeout_ms: Option<u64>,
+) -> Result<EmbeddedBleRepairResult, String> {
+    let repair = coord.repair_embedded_ble_connection(timeout_ms).await;
+    let (runtime, firmware) = embedded_ble_runtime_and_firmware(&coord).await?;
 
     match repair {
         Ok(snapshot) => Ok(EmbeddedBleRepairResult {
             recovered: true,
             user_action_required: false,
             open_bluetooth_settings: false,
+            recovery_action: EmbeddedBleRecoveryAction::Reconnected,
             message: snapshot.user_guidance,
             failure: None,
+            unpair_result: None,
             runtime,
             firmware,
         }),
@@ -1766,12 +1874,72 @@ pub async fn repair_embedded_ble_connection(
             let failure = crate::embedded_ble::classify_ble_failure(&err);
             let (user_action_required, open_bluetooth_settings) =
                 embedded_ble_repair_failure_action(&failure);
+            let recovery_action = embedded_ble_recovery_action_for_failure(&failure);
             Ok(EmbeddedBleRepairResult {
                 recovered: false,
                 user_action_required,
                 open_bluetooth_settings,
-                message: failure.user_action.to_string(),
+                recovery_action,
+                message: embedded_ble_recovery_message(&failure, None),
                 failure: Some(failure),
+                unpair_result: None,
+                runtime,
+                firmware,
+            })
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn recover_embedded_ble_device(
+    coord: CoordinatorState<'_>,
+    timeout_ms: Option<u64>,
+) -> Result<EmbeddedBleRepairResult, String> {
+    let repair = coord.repair_embedded_ble_connection(timeout_ms).await;
+    match repair {
+        Ok(snapshot) => {
+            let (runtime, firmware) = embedded_ble_runtime_and_firmware(&coord).await?;
+            Ok(EmbeddedBleRepairResult {
+                recovered: true,
+                user_action_required: false,
+                open_bluetooth_settings: false,
+                recovery_action: EmbeddedBleRecoveryAction::Reconnected,
+                message: snapshot.user_guidance,
+                failure: None,
+                unpair_result: None,
+                runtime,
+                firmware,
+            })
+        }
+        Err(err) => {
+            let failure = crate::embedded_ble::classify_ble_failure(&err);
+            let (mut user_action_required, mut open_bluetooth_settings) =
+                embedded_ble_repair_failure_action(&failure);
+            let mut recovery_action = embedded_ble_recovery_action_for_failure(&failure);
+            let mut unpair_result = None;
+
+            if should_attempt_embedded_ble_auto_unpair(&failure) {
+                let unpair = tauri::async_runtime::spawn_blocking(
+                    crate::embedded_ble::unpair_listener_devices,
+                )
+                .await
+                .map_err(|err| format!("Listener BLE automatic unpair task failed: {err}"))?;
+                user_action_required = true;
+                open_bluetooth_settings = true;
+                recovery_action = EmbeddedBleRecoveryAction::RePairRequired;
+                unpair_result = Some(unpair);
+                coord.refresh_embedded_ble_listener();
+            }
+
+            let (runtime, firmware) = embedded_ble_runtime_and_firmware(&coord).await?;
+            Ok(EmbeddedBleRepairResult {
+                recovered: false,
+                user_action_required,
+                open_bluetooth_settings,
+                recovery_action,
+                message: embedded_ble_recovery_message(&failure, unpair_result.as_ref()),
+                failure: Some(failure),
+                unpair_result,
                 runtime,
                 firmware,
             })
@@ -4783,6 +4951,62 @@ mod tests {
             super::embedded_ble_repair_failure_action(&cccd);
         assert!(user_action_required);
         assert!(open_bluetooth_settings);
+    }
+
+    #[test]
+    fn one_click_recovery_attempts_unpair_only_for_stale_pairing_failures() {
+        let cccd = crate::embedded_ble::classify_ble_failure(
+            "BLE CCCD write timed out after 8000 ms after customer repair",
+        );
+        let stale = crate::embedded_ble::classify_ble_failure(
+            "Unknown GATT service from stale cached service table after customer repair",
+        );
+        let missing_pairing =
+            crate::embedded_ble::classify_ble_failure("No paired BLE device for Listener");
+        let transient = crate::embedded_ble::classify_ble_failure(
+            "BLE device disconnected while waiting for reconnect",
+        );
+        let asleep = crate::embedded_ble::classify_ble_failure(
+            "Listener BLE device asleep; press KEY4 wake key",
+        );
+
+        assert!(super::should_attempt_embedded_ble_auto_unpair(&cccd));
+        assert!(super::should_attempt_embedded_ble_auto_unpair(&stale));
+        assert!(super::should_attempt_embedded_ble_auto_unpair(
+            &missing_pairing
+        ));
+        assert!(!super::should_attempt_embedded_ble_auto_unpair(&transient));
+        assert!(!super::should_attempt_embedded_ble_auto_unpair(&asleep));
+        assert_eq!(
+            super::embedded_ble_recovery_action_for_failure(&transient),
+            super::EmbeddedBleRecoveryAction::WaitForAutomaticRecovery
+        );
+        assert_eq!(
+            super::embedded_ble_recovery_action_for_failure(&cccd),
+            super::EmbeddedBleRecoveryAction::RePairRequired
+        );
+    }
+
+    #[test]
+    fn one_click_recovery_message_hides_transport_details() {
+        let failure = crate::embedded_ble::classify_ble_failure(
+            "BLE CCCD write timed out after 8000 ms after customer repair",
+        );
+        let unpair = crate::embedded_ble::BleDeviceUnpairResult {
+            status: crate::embedded_ble::BleDeviceUnpairStatus::Removed,
+            attempted: true,
+            matched_devices: 1,
+            unpaired_devices: 1,
+            already_unpaired_devices: 0,
+            failed_devices: 0,
+            needs_user_action: true,
+            details: vec!["Removed stale Listener pairing".to_string()],
+        };
+
+        let message = super::embedded_ble_recovery_message(&failure, Some(&unpair));
+        assert!(message.contains("重新配对"));
+        assert!(!message.to_ascii_lowercase().contains("cccd"));
+        assert!(!message.to_ascii_lowercase().contains("gatt"));
     }
 
     #[test]
