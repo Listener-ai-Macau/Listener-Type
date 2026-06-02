@@ -110,7 +110,7 @@ let mockSettings: UserPreferences = {
     key1: { action: 'openApp', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
     key2: { action: 'pasteShortcut', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
     key3: { action: 'dictation', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key4: { action: 'openExternalApp', appPage: 'settingsShortcuts', externalAppPath: 'C:\\Program Files\\Microsoft VS Code\\Code.exe', pasteTemplate: '', shortcut: null },
+    key4: { action: 'openExternalApp', appPage: 'settingsShortcuts', externalAppPath: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\微信\\微信.lnk', pasteTemplate: '', shortcut: null },
   },
   deviceCustomKeyDoubleClicks: {
     key1: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
@@ -149,6 +149,7 @@ let mockSettings: UserPreferences = {
 };
 
 const mockInstalledApplications: InstalledApplication[] = [
+  { name: '微信', path: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\微信\\微信.lnk', source: 'mock' },
   { name: 'Visual Studio Code', path: 'C:\\Program Files\\Microsoft VS Code\\Code.exe', source: 'mock' },
   { name: 'Notepad', path: 'C:\\Windows\\System32\\notepad.exe', source: 'mock' },
   { name: 'Windows Terminal', path: 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsTerminal\\wt.exe', source: 'mock' },

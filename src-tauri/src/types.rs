@@ -661,25 +661,7 @@ impl DeviceCustomKeys {
 
 impl Default for DeviceCustomKeys {
     fn default() -> Self {
-        Self {
-            key1: DeviceCustomKeyMapping {
-                action: DeviceCustomKeyAction::OpenApp,
-                ..DeviceCustomKeyMapping::default()
-            },
-            key2: DeviceCustomKeyMapping {
-                action: DeviceCustomKeyAction::PasteShortcut,
-                ..DeviceCustomKeyMapping::default()
-            },
-            key3: DeviceCustomKeyMapping {
-                action: DeviceCustomKeyAction::Dictation,
-                ..DeviceCustomKeyMapping::default()
-            },
-            key4: DeviceCustomKeyMapping {
-                action: DeviceCustomKeyAction::OpenExternalApp,
-                external_app_path: default_device_external_app_path(),
-                ..DeviceCustomKeyMapping::default()
-            },
-        }
+        current_device_custom_keys_default_with_external_app_path(default_device_external_app_path())
     }
 }
 
@@ -689,6 +671,30 @@ fn default_disabled_device_custom_keys() -> DeviceCustomKeys {
 
 fn legacy_device_custom_keys_default() -> DeviceCustomKeys {
     legacy_device_custom_keys_default_with_external_app_path(default_device_external_app_path())
+}
+
+fn current_device_custom_keys_default_with_external_app_path(
+    external_app_path: String,
+) -> DeviceCustomKeys {
+    DeviceCustomKeys {
+        key1: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenApp,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key2: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::PasteShortcut,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key3: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::Dictation,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key4: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenExternalApp,
+            external_app_path,
+            ..DeviceCustomKeyMapping::default()
+        },
+    }
 }
 
 fn legacy_device_custom_keys_default_with_external_app_path(
@@ -718,22 +724,137 @@ fn legacy_device_custom_keys_default_with_external_app_path(
 fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
     keys == &legacy_device_custom_keys_default()
         || keys == &legacy_device_custom_keys_default_with_external_app_path("code".into())
+        || previous_device_custom_key_external_app_paths()
+            .into_iter()
+            .any(|path| {
+                keys == &legacy_device_custom_keys_default_with_external_app_path(path.clone())
+                    || keys == &current_device_custom_keys_default_with_external_app_path(path)
+            })
+}
+
+fn previous_device_custom_key_external_app_paths() -> Vec<String> {
+    let mut paths = vec![
+        "code".to_string(),
+        r"C:\Program Files\Microsoft VS Code\Code.exe".to_string(),
+        r"C:\Program Files (x86)\Microsoft VS Code\Code.exe".to_string(),
+    ];
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            paths.push(
+                std::path::Path::new(&local_app_data)
+                    .join("Programs")
+                    .join("Microsoft VS Code")
+                    .join("Code.exe")
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+    paths
 }
 
 fn default_device_external_app_path() -> String {
     #[cfg(target_os = "windows")]
     {
-        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            let code = std::path::Path::new(&local_app_data)
-                .join("Programs")
-                .join("Microsoft VS Code")
-                .join("Code.exe");
-            if code.exists() {
-                return code.display().to_string();
+        if let Some(path) = find_windows_start_menu_app_shortcut(&["WeChat", "微信"]) {
+            return path;
+        }
+        for path in windows_wechat_executable_candidates() {
+            if path.exists() {
+                return path.display().to_string();
             }
         }
     }
     String::new()
+}
+
+#[cfg(target_os = "windows")]
+fn find_windows_start_menu_app_shortcut(names: &[&str]) -> Option<String> {
+    for root in windows_start_menu_roots() {
+        if let Some(path) = find_start_menu_shortcut_named(&root, names) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn windows_start_menu_roots() -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        roots.push(
+            std::path::Path::new(&appdata)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+    if let Ok(programdata) = std::env::var("PROGRAMDATA") {
+        roots.push(
+            std::path::Path::new(&programdata)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+    roots
+}
+
+#[cfg(target_os = "windows")]
+fn find_start_menu_shortcut_named(root: &std::path::Path, names: &[&str]) -> Option<String> {
+    let entries = std::fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_start_menu_shortcut_named(&path, names) {
+                return Some(found);
+            }
+            continue;
+        }
+        let Some(ext) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "lnk" | "appref-ms" | "exe"
+        ) {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if names.iter().any(|name| stem.eq_ignore_ascii_case(name)) {
+            return Some(path.display().to_string());
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn windows_wechat_executable_candidates() -> Vec<std::path::PathBuf> {
+    let mut paths = vec![
+        std::path::PathBuf::from(r"C:\Program Files\Tencent\WeChat\WeChat.exe"),
+        std::path::PathBuf::from(r"C:\Program Files (x86)\Tencent\WeChat\WeChat.exe"),
+    ];
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        paths.push(
+            std::path::Path::new(&local_app_data)
+                .join("Tencent")
+                .join("WeChat")
+                .join("WeChat.exe"),
+        );
+        paths.push(
+            std::path::Path::new(&local_app_data)
+                .join("Programs")
+                .join("Tencent")
+                .join("WeChat")
+                .join("WeChat.exe"),
+        );
+    }
+    paths
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2369,6 +2490,51 @@ mod tests {
         );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
+    }
+
+    #[test]
+    fn previous_code_external_app_default_migrates_to_current_defaults() {
+        let old_code_path = r"C:\Program Files\Microsoft VS Code\Code.exe";
+        let raw = serde_json::json!({
+            "deviceCustomKeysDefaultMigrated": true,
+            "deviceCustomKeys": {
+                "key1": { "action": "openApp", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "pasteShortcut", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "dictation", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "openExternalApp", "appPage": "settingsShortcuts", "externalAppPath": old_code_path, "pasteTemplate": "", "shortcut": null }
+            }
+        });
+        let prefs: UserPreferences = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(
+            prefs.device_custom_keys.key4.action,
+            DeviceCustomKeyAction::OpenExternalApp
+        );
+        assert_ne!(
+            prefs.device_custom_keys.key4.external_app_path,
+            old_code_path
+        );
+        assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
+        assert!(prefs.device_custom_key_long_presses.is_all_disabled());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn default_external_app_shortcut_lookup_uses_exact_wechat_name() {
+        let root = std::env::temp_dir().join(format!(
+            "listener-type-wechat-shortcut-test-{}",
+            std::process::id()
+        ));
+        let app_dir = root.join("微信");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        std::fs::write(app_dir.join("卸载微信.lnk"), b"").unwrap();
+        let shortcut = app_dir.join("微信.lnk");
+        std::fs::write(&shortcut, b"").unwrap();
+
+        let found = find_start_menu_shortcut_named(&root, &["WeChat", "微信"]).unwrap();
+
+        assert_eq!(std::path::PathBuf::from(found), shortcut);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
