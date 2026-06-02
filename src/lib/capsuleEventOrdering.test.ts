@@ -5,7 +5,7 @@ import {
 } from './capsuleEventOrdering.ts';
 import type { CapsulePayload, CapsuleState } from './types.ts';
 
-function payload(seq: number, sessionId: string, state: CapsuleState): CapsulePayload {
+function payload(seq: number, sessionId: string | null, state: CapsuleState): CapsulePayload {
   return {
     seq,
     sessionId,
@@ -27,6 +27,10 @@ function payload(seq: number, sessionId: string, state: CapsuleState): CapsulePa
   const lateRecording = applyCapsulePayloadOrdering(tracker, payload(4, 's1', 'recording'));
   assert.equal(lateRecording.accepted, false);
   assert.equal(lateRecording.reason, 'closed-session-active-state');
+
+  const latePartial = applyCapsulePayloadOrdering(tracker, payload(5, 's1', 'transcribing'));
+  assert.equal(latePartial.accepted, false);
+  assert.equal(latePartial.reason, 'closed-session-active-state');
 }
 
 {
@@ -52,6 +56,25 @@ function payload(seq: number, sessionId: string, state: CapsuleState): CapsulePa
   assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, 's1', 'recording')).accepted, true);
   assert.equal(applyCapsulePayloadOrdering(tracker, payload(2, 's1', 'idle')).accepted, true);
   assert.equal(applyCapsulePayloadOrdering(tracker, payload(3, 's2', 'recording')).accepted, true);
+
+  const staleOldRecording = applyCapsulePayloadOrdering(tracker, payload(4, 's1', 'recording'));
+  assert.equal(staleOldRecording.accepted, false);
+  assert.equal(staleOldRecording.reason, 'closed-session-active-state');
+}
+
+{
+  const tracker = createCapsuleOrderingTracker();
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, 's1', 'recording')).accepted, true);
+
+  const nonSessionIdle = applyCapsulePayloadOrdering(tracker, payload(2, null, 'idle'));
+  assert.equal(nonSessionIdle.accepted, false);
+  assert.equal(nonSessionIdle.reason, 'non-session-terminal-while-session-active');
+}
+
+{
+  const tracker = createCapsuleOrderingTracker();
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, null, 'recording')).accepted, true);
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(2, null, 'idle')).accepted, true);
 }
 
 console.log('capsuleEventOrdering: all assertions passed');

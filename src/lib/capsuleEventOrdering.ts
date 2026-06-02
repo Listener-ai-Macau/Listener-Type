@@ -33,6 +33,14 @@ export function applyCapsulePayloadOrdering(
     return { accepted: false, reason: 'older-sequence' };
   }
 
+  if (!sessionId && tracker.activeSessionId && ACTIVE_STATES.has(payload.state)) {
+    return { accepted: false, reason: 'non-session-active-while-session-active' };
+  }
+
+  if (!sessionId && tracker.activeSessionId && TERMINAL_STATES.has(payload.state)) {
+    return { accepted: false, reason: 'non-session-terminal-while-session-active' };
+  }
+
   if (sessionId && ACTIVE_STATES.has(payload.state) && tracker.closedSessionIds.has(sessionId)) {
     return { accepted: false, reason: 'closed-session-active-state' };
   }

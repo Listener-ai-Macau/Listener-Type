@@ -1003,7 +1003,7 @@ impl Coordinator {
                         Some("Listener BLE 已连接，按设备语音键开始录音。".to_string()),
                         None,
                     );
-                    schedule_capsule_idle(&self.inner, 1400);
+                    schedule_capsule_idle(&self.inner, 1400, None);
                 }
                 Err(err) => {
                     record_embedded_ble_listener_last_error(&self.inner, &err);
@@ -1017,7 +1017,7 @@ impl Coordinator {
                         Some(message.clone()),
                         None,
                     );
-                    schedule_capsule_idle(&self.inner, 5000);
+                    schedule_capsule_idle(&self.inner, 5000, None);
                     return Err(message);
                 }
             }
@@ -1944,7 +1944,7 @@ fn handle_device_custom_key_pressed(
                     Some("设备键打开应用失败：路径为空".to_string()),
                     None,
                 );
-                schedule_capsule_idle(inner, 2200);
+                schedule_capsule_idle(inner, 2200, None);
                 return;
             }
             if let Err(error) = open_external_app_path(path) {
@@ -1960,7 +1960,7 @@ fn handle_device_custom_key_pressed(
                     Some(format!("打开应用失败：{error}")),
                     None,
                 );
-                schedule_capsule_idle(inner, 3000);
+                schedule_capsule_idle(inner, 3000, None);
             } else {
                 crate::timeline::mark(
                     "backend.device_key",
@@ -2145,7 +2145,7 @@ fn send_builtin_shortcut(
                 Some(format!("{label} 快捷键发送失败：{error}")),
                 None,
             );
-            schedule_capsule_idle(inner, 2200);
+            schedule_capsule_idle(inner, 2200, None);
         }
     }
 }
@@ -2323,7 +2323,7 @@ async fn handle_device_dictation_action(
                 )),
                 None,
             );
-            schedule_capsule_idle(&inner, 6000);
+            schedule_capsule_idle(&inner, 6000, None);
             return;
         }
 
@@ -2381,7 +2381,7 @@ async fn handle_device_dictation_action(
                     Some(embedded_ble_recording_control_guidance(&error)),
                     None,
                 );
-                schedule_capsule_idle(&inner, 6000);
+                schedule_capsule_idle(&inner, 6000, None);
             }
         }
         return;
@@ -4435,7 +4435,7 @@ fn finish_qa_with_error(inner: &Arc<Inner>, message: String) {
         );
     }
     emit_capsule(inner, CapsuleState::Error, 0.0, 0, Some(message), None);
-    schedule_capsule_idle(inner, 1500);
+    schedule_capsule_idle(inner, 1500, None);
     let mut state = inner.qa_state.lock();
     state.phase = QaPhase::Idle;
     state.cancelled = false;
@@ -5713,7 +5713,7 @@ fn set_phase_idle_if_session_matches(inner: &Arc<Inner>, session_id: SessionId) 
     }
 }
 
-fn schedule_capsule_idle(inner: &Arc<Inner>, delay_ms: u64) {
+fn schedule_capsule_idle(inner: &Arc<Inner>, delay_ms: u64, session_id: Option<SessionId>) {
     let inner_clone = Arc::clone(inner);
     async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
@@ -5722,7 +5722,15 @@ fn schedule_capsule_idle(inner: &Arc<Inner>, delay_ms: u64) {
         let dictation_idle = inner_clone.state.lock().phase == SessionPhase::Idle;
         let qa_idle = inner_clone.qa_state.lock().phase == QaPhase::Idle;
         if dictation_idle && qa_idle {
-            emit_capsule(&inner_clone, CapsuleState::Idle, 0.0, 0, None, None);
+            emit_capsule_with_session(
+                &inner_clone,
+                session_id,
+                CapsuleState::Idle,
+                0.0,
+                0,
+                None,
+                None,
+            );
         }
     });
 }
@@ -6016,13 +6024,50 @@ fn emit_capsule(
     message: Option<String>,
     inserted_chars: Option<u32>,
 ) {
+    emit_capsule_with_session(
+        inner,
+        None,
+        state,
+        level,
+        elapsed_ms,
+        message,
+        inserted_chars,
+    );
+}
+
+fn emit_capsule_for_session(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    state: CapsuleState,
+    level: f32,
+    elapsed_ms: u64,
+    message: Option<String>,
+    inserted_chars: Option<u32>,
+) {
+    emit_capsule_with_session(
+        inner,
+        Some(session_id),
+        state,
+        level,
+        elapsed_ms,
+        message,
+        inserted_chars,
+    );
+}
+
+fn emit_capsule_with_session(
+    inner: &Arc<Inner>,
+    event_session_id: Option<SessionId>,
+    state: CapsuleState,
+    level: f32,
+    elapsed_ms: u64,
+    message: Option<String>,
+    inserted_chars: Option<u32>,
+) {
     let app_opt = inner.app.lock().clone();
     let Some(app) = app_opt else { return };
     let seq = inner.capsule_sequence.fetch_add(1, Ordering::SeqCst) + 1;
-    let session_id = {
-        let state = inner.state.lock();
-        (!state.session_id.is_nil()).then(|| state.session_id.to_string())
-    };
+    let session_id = event_session_id.map(|id| id.to_string());
     let translation = inner.translation_modifier_seen.load(Ordering::SeqCst);
     let payload = CapsulePayload {
         seq,
