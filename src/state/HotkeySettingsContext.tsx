@@ -150,7 +150,11 @@ export function HotkeySettingsProvider({ children }: { children: ReactNode }) {
         console.warn('[settings] sync locale output preferences failed', error);
       },
     );
-  }, [prefs, queueSetSettings]);
+  }, [
+    prefs?.chineseScriptPreference,
+    prefs?.outputLanguagePreference,
+    queueSetSettings,
+  ]);
 
   const updatePrefs = useCallback(
     async (next: UserPreferences | ((current: UserPreferences) => UserPreferences)) => {

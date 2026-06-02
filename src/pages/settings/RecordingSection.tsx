@@ -114,13 +114,24 @@ function WaylandHotkeyCallout() {
   // 三条命令各自独立的"已复制"反馈。用 string 而非 boolean 数组，
   // 避免 stale state（重复点击不同按钮时旧 timer 把别人擦掉）。
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
+  const copiedResetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (copiedResetTimerRef.current != null) {
+      window.clearTimeout(copiedResetTimerRef.current);
+    }
+  }, []);
 
   const onCopy = useCallback(async (command: string) => {
     try {
       await navigator.clipboard.writeText(command);
       setCopiedCommand(command);
       // 1.5s 后还原按钮文案；同时校验仍是这条命令，避免被后点的覆盖。
-      setTimeout(() => {
+      if (copiedResetTimerRef.current != null) {
+        window.clearTimeout(copiedResetTimerRef.current);
+      }
+      copiedResetTimerRef.current = window.setTimeout(() => {
+        copiedResetTimerRef.current = null;
         setCopiedCommand(prev => (prev === command ? null : prev));
       }, 1500);
     } catch (err) {

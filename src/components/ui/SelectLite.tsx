@@ -41,6 +41,7 @@ interface SelectLiteProps {
   options: SelectOption[];
   placeholder?: string;
   disabled?: boolean;
+  defaultOpen?: boolean;
   style?: CSSProperties;
   ariaLabel?: string;
 }
@@ -72,13 +73,19 @@ export function SelectLite({
   options,
   placeholder,
   disabled = false,
+  defaultOpen = false,
   style,
   ariaLabel,
 }: SelectLiteProps) {
-  const [open, setOpen] = useState(false);
+  const initialHighlight = useMemo(() => {
+    const selectedIndex = options.findIndex(opt => opt.value === value && !opt.disabled);
+    if (selectedIndex >= 0) return selectedIndex;
+    return options.findIndex(opt => !opt.disabled);
+  }, [options, value]);
+  const [open, setOpen] = useState(defaultOpen && !disabled);
   // leaving 让 popover 在卸载前播完 exit keyframe（用户报"没有收缩动画"——之前直接 unmount）
   const [leaving, setLeaving] = useState(false);
-  const [highlight, setHighlight] = useState<number>(-1);
+  const [highlight, setHighlight] = useState<number>(defaultOpen && !disabled ? initialHighlight : -1);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
@@ -157,6 +164,7 @@ export function SelectLite({
   // 点击外部 / 滚动外部 → 关闭。popover 内部 scroll 保持打开。
   useEffect(() => {
     if (!open) return;
+    if (defaultOpen && import.meta.env.DEV) return;
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (!target) return;

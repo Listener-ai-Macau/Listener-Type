@@ -14,6 +14,7 @@ import type {
   DictionaryEntry,
   EmbeddedAudioSubmissionResult,
   HotkeyCapability,
+  InstalledApplication,
   MarketplaceDetail,
   MarketplaceListItem,
   MarketplaceMyPackItem,
@@ -106,11 +107,24 @@ let mockSettings: UserPreferences = {
   switchStyleHotkey: { primary: 'S', modifiers: defaultAppShortcutModifiers() },
   openAppHotkey: { primary: 'O', modifiers: defaultAppShortcutModifiers() },
   deviceCustomKeys: {
-    key1: { action: 'disabled', pasteTemplate: '', shortcut: null },
-    key2: { action: 'disabled', pasteTemplate: '', shortcut: null },
-    key3: { action: 'disabled', pasteTemplate: '', shortcut: null },
-    key4: { action: 'disabled', pasteTemplate: '', shortcut: null },
+    key1: { action: 'openApp', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key2: { action: 'pasteShortcut', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key3: { action: 'dictation', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key4: { action: 'openExternalApp', appPage: 'settingsShortcuts', externalAppPath: 'code', pasteTemplate: '', shortcut: null },
   },
+  deviceCustomKeyDoubleClicks: {
+    key1: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key2: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key3: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key4: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+  },
+  deviceCustomKeyLongPresses: {
+    key1: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key2: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key3: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key4: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+  },
+  deviceCustomKeysDefaultMigrated: true,
   localAsrActiveModel: 'qwen3-asr-0.6b',
   localAsrMirror: 'huggingface',
   localAsrKeepLoadedSecs: 300,
@@ -134,8 +148,29 @@ let mockSettings: UserPreferences = {
   marketplaceDevLogin: '',
 };
 
+const mockInstalledApplications: InstalledApplication[] = [
+  { name: 'Visual Studio Code', path: 'code', source: 'mock' },
+  { name: 'Notepad', path: 'notepad.exe', source: 'mock' },
+  { name: 'Windows Terminal', path: 'wt.exe', source: 'mock' },
+];
+
+function normalizeDeviceCustomKeyMapping(
+  mapping: UserPreferences['deviceCustomKeys']['key1'] | undefined,
+  fallback: UserPreferences['deviceCustomKeys']['key1'],
+): UserPreferences['deviceCustomKeys']['key1'] {
+  return {
+    ...fallback,
+    ...mapping,
+    appPage: mapping?.appPage ?? fallback.appPage,
+    externalAppPath: mapping?.externalAppPath ?? fallback.externalAppPath,
+    pasteTemplate: mapping?.pasteTemplate ?? fallback.pasteTemplate,
+    shortcut: mapping?.shortcut ?? fallback.shortcut,
+  };
+}
+
 function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
   const fallbackDeviceKeys = mockSettings.deviceCustomKeys;
+  const fallbackDisabledDeviceKeys = mockSettings.deviceCustomKeyDoubleClicks;
   return {
     ...prefs,
     hotkey: {
@@ -143,11 +178,24 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
       mode: 'toggle',
     },
     deviceCustomKeys: {
-      key1: prefs.deviceCustomKeys?.key1 ?? fallbackDeviceKeys.key1,
-      key2: prefs.deviceCustomKeys?.key2 ?? fallbackDeviceKeys.key2,
-      key3: prefs.deviceCustomKeys?.key3 ?? fallbackDeviceKeys.key3,
-      key4: prefs.deviceCustomKeys?.key4 ?? fallbackDeviceKeys.key4,
+      key1: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeys?.key1, fallbackDeviceKeys.key1),
+      key2: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeys?.key2, fallbackDeviceKeys.key2),
+      key3: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeys?.key3, fallbackDeviceKeys.key3),
+      key4: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeys?.key4, fallbackDeviceKeys.key4),
     },
+    deviceCustomKeyDoubleClicks: {
+      key1: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeyDoubleClicks?.key1, fallbackDisabledDeviceKeys.key1),
+      key2: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeyDoubleClicks?.key2, fallbackDisabledDeviceKeys.key2),
+      key3: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeyDoubleClicks?.key3, fallbackDisabledDeviceKeys.key3),
+      key4: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeyDoubleClicks?.key4, fallbackDisabledDeviceKeys.key4),
+    },
+    deviceCustomKeyLongPresses: {
+      key1: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeyLongPresses?.key1, fallbackDisabledDeviceKeys.key1),
+      key2: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeyLongPresses?.key2, fallbackDisabledDeviceKeys.key2),
+      key3: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeyLongPresses?.key3, fallbackDisabledDeviceKeys.key3),
+      key4: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeyLongPresses?.key4, fallbackDisabledDeviceKeys.key4),
+    },
+    deviceCustomKeysDefaultMigrated: prefs.deviceCustomKeysDefaultMigrated ?? true,
   };
 }
 
@@ -483,12 +531,12 @@ export async function getSettings(): Promise<UserPreferences> {
   return normalizeUserPreferences(await invokeOrMock('get_settings', undefined, () => ({ ...mockSettings })));
 }
 
-export function isMainWindowStartHidden(): Promise<boolean> {
-  return invokeOrMock('is_main_window_start_hidden', undefined, () => false);
+export function listInstalledApplications(): Promise<InstalledApplication[]> {
+  return invokeOrMock('list_installed_applications', undefined, () => mockInstalledApplications);
 }
 
-export function getDefaultStyleSystemPrompts(): Promise<StyleSystemPrompts> {
-  return invokeOrMock('get_default_style_system_prompts', undefined, () => ({ ...mockDefaultStyleSystemPrompts }));
+export function isMainWindowStartHidden(): Promise<boolean> {
+  return invokeOrMock('is_main_window_start_hidden', undefined, () => false);
 }
 
 export function setSettings(prefs: UserPreferences): Promise<void> {

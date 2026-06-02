@@ -893,7 +893,12 @@ mod platform {
                 let _ = DispatchMessageW(&message);
             }
 
-            if let Some(hook) = (*context).hook.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            if let Some(hook) = (*context)
+                .hook
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+            {
                 let _ = UnhookWindowsHookEx(hook);
             }
             HOOK_CONTEXT.store(std::ptr::null_mut(), AtomicOrdering::SeqCst);
@@ -909,7 +914,11 @@ mod platform {
         if code == HC_ACTION as i32 && lparam.0 != 0 {
             if let Some(ctx) = callback_context() {
                 let keyboard = *(lparam.0 as *const KBDLLHOOKSTRUCT);
-                if keyboard.flags.0 & LLKHF_INJECTED == 0 || accept_injected_events() {
+                let physical = keyboard.flags.0 & LLKHF_INJECTED == 0;
+                if physical {
+                    log_raw_device_key_event(keyboard.vkCode, wparam.0);
+                }
+                if physical || accept_injected_events() {
                     if dispatch_keyboard_event(ctx, keyboard.vkCode, wparam.0) {
                         return LRESULT(1);
                     }
@@ -918,6 +927,36 @@ mod platform {
         }
 
         CallNextHookEx(None, code, wparam, lparam)
+    }
+
+    fn log_raw_device_key_event(vk_code: u32, message: usize) {
+        let Some(label) = device_fallback_vk_label(vk_code) else {
+            return;
+        };
+        let event = match message {
+            WM_KEYDOWN | WM_SYSKEYDOWN => "pressed",
+            WM_KEYUP | WM_SYSKEYUP => "released",
+            _ => return,
+        };
+        log::info!("[hotkey.raw-device] {label} {event} vk=0x{vk_code:02X} physical=true");
+    }
+
+    fn device_fallback_vk_label(vk_code: u32) -> Option<&'static str> {
+        match vk_code {
+            0x7C => Some("KEY1 singleClick F13"),
+            0x7D => Some("KEY2 singleClick F14"),
+            0x7E => Some("KEY3 singleClick F15"),
+            0x7F => Some("KEY4 singleClick F16"),
+            0x80 => Some("KEY1 doubleClick F17"),
+            0x81 => Some("KEY2 doubleClick F18"),
+            0x82 => Some("KEY3 doubleClick F19"),
+            0x83 => Some("KEY4 doubleClick F20"),
+            0x84 => Some("KEY1 longPress F21"),
+            0x85 => Some("KEY2 longPress F22"),
+            0x86 => Some("KEY3 longPress F23"),
+            0x87 => Some("KEY4 longPress F24"),
+            _ => None,
+        }
     }
 
     unsafe fn callback_context<'a>() -> Option<&'a CallbackContext> {

@@ -29,14 +29,18 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const { capability } = useHotkeySettings();
 
   const refresh = async () => {
-    const [a, m] = await Promise.all([
-      checkAccessibilityPermission(),
-      checkMicrophonePermission(),
-    ]);
-    setAccessibility(a);
-    setMicrophone(m);
-    if ((a === 'granted' || a === 'notApplicable') && (m === 'granted' || m === 'notApplicable')) {
-      onComplete();
+    try {
+      const [a, m] = await Promise.all([
+        checkAccessibilityPermission(),
+        checkMicrophonePermission(),
+      ]);
+      setAccessibility(a);
+      setMicrophone(m);
+      if ((a === 'granted' || a === 'notApplicable') && (m === 'granted' || m === 'notApplicable')) {
+        onComplete();
+      }
+    } catch (error) {
+      console.warn('[onboarding] permission refresh failed', error);
     }
   };
 

@@ -7,7 +7,7 @@
 //  - 监听 `local-asr-download-progress` 事件实时刷新进度
 //  - Win 端引擎不可用时禁用下载按钮，提示见 issue #256
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { isTauri, setActiveAsrProvider } from '../lib/ipc';
 import {
@@ -48,7 +48,7 @@ import {
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { detectOS } from '../components/WindowChrome';
 import { SelectLite } from '../components/ui/SelectLite';
-import { Btn, Card, PageHeader, Pill } from './_atoms';
+import { Btn, Card, Pill } from './_atoms';
 
 // Foundry Local Whisper 后端只在 Windows 编译实体（foundry_local_sdk 仅 Windows），
 // 非 Windows 平台 runtime 是 stub 永远 unavailable。前端这一页对应的卡片、状态拉取、
@@ -68,16 +68,7 @@ interface RemoteSize {
   error: string | null;
 }
 
-interface LocalAsrProps {
-  /// `embedded=true` 表示作为子组件嵌入「高级」设置页（Settings → Advanced）；
-  /// 此时跳过外层 page padding/height、PageHeader 与独立警告 Card —— 这些由
-  /// 宿主 AdvancedSection 决定（包括把警告统一到页面顶部的浮层 popup 上）。
-  /// `embedded=false`（默认）保留原全屏页样式，供 v 旧版本的独立「模型设置」
-  /// 页面入口使用——但当前代码里该入口已删，本分支会一并移除。
-  embedded?: boolean;
-}
-
-export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
+export function LocalAsr() {
   const { t } = useTranslation();
   const { prefs, updatePrefs } = useHotkeySettings();
   const [settings, setSettings] = useState<LocalAsrSettings | null>(null);
@@ -579,36 +570,8 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
       ? t('localAsr.foundryRetryPrepare')
       : t('localAsr.foundryPrepare');
 
-  // embedded=true 嵌入「高级」设置：跳过外层 page padding/height、PageHeader，
-  // 与独立警告 Card——AdvancedSection 自己负责标题与短警告 + 启用时的浮层 popup，
-  // LocalAsr 只输出实际功能 Cards（Foundry / Qwen3 模型状态 / 模型列表）。
-  const Wrapper = embedded
-    ? (props: { children: ReactNode }) => <>{props.children}</>
-    : (props: { children: ReactNode }) => (
-        <div style={{ padding: '20px 28px 32px', overflowY: 'auto', height: '100%' }}>
-          {props.children}
-        </div>
-      );
-
   return (
-    <Wrapper>
-      {!embedded && (
-        <PageHeader
-          kicker={t('localAsr.kicker')}
-          title={t('localAsr.title')}
-          desc={t('localAsr.desc')}
-        />
-      )}
-
-      {!embedded && (
-        /* 性能/质量预期警告 —— embedded 模式下由 AdvancedSection 自己渲染，避免重复。 */
-        <Card style={{ marginBottom: 16, background: 'rgba(255, 215, 130, 0.18)' }}>
-          <div style={{ fontSize: 13, color: 'var(--ol-ink-2)', lineHeight: 1.6 }}>
-            ⚠️ {t('localAsr.performanceWarning')}
-          </div>
-        </Card>
-      )}
-
+    <>
       {IS_WINDOWS && (
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -933,7 +896,7 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
         )}
       </div>
       )}
-    </Wrapper>
+    </>
   );
 }
 

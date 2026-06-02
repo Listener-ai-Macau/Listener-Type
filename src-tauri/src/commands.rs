@@ -1,6 +1,6 @@
 //! Tauri command surface — every IPC entry the React UI invokes lives here.
 
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::DefaultHasher, BTreeMap};
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 
@@ -56,6 +56,7 @@ pub type TrayMicrophoneMenuState = Mutex<Vec<TrayMicrophoneMenuItem>>;
 
 static SETTINGS_UPDATE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static PROVIDER_MODELS_CACHE: OnceLock<Mutex<Vec<ProviderModelsCacheEntry>>> = OnceLock::new();
+static PROVIDER_MODELS_FETCH_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 const PROVIDER_MODELS_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +123,171 @@ pub fn is_main_window_start_hidden(coord: CoordinatorState<'_>) -> bool {
 #[tauri::command]
 pub fn get_default_style_system_prompts() -> StyleSystemPrompts {
     StyleSystemPrompts::default()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledApplication {
+    pub name: String,
+    pub path: String,
+    pub source: String,
+}
+
+#[tauri::command]
+pub fn list_installed_applications() -> Vec<InstalledApplication> {
+    collect_installed_applications()
+}
+
+#[cfg(target_os = "windows")]
+fn collect_installed_applications() -> Vec<InstalledApplication> {
+    let mut apps = BTreeMap::<String, InstalledApplication>::new();
+    for (root, source) in windows_start_menu_roots() {
+        collect_start_menu_shortcuts(&root, source, &mut apps);
+    }
+    let mut values: Vec<_> = apps.into_values().collect();
+    values.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    values.truncate(400);
+    values
+}
+
+#[cfg(not(target_os = "windows"))]
+fn collect_installed_applications() -> Vec<InstalledApplication> {
+    Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn windows_start_menu_roots() -> Vec<(PathBuf, &'static str)> {
+    let mut roots = Vec::new();
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        roots.push((
+            PathBuf::from(appdata)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+            "userStartMenu",
+        ));
+    }
+    if let Ok(programdata) = std::env::var("PROGRAMDATA") {
+        roots.push((
+            PathBuf::from(programdata)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+            "commonStartMenu",
+        ));
+    }
+    roots
+}
+
+#[cfg(target_os = "windows")]
+fn collect_start_menu_shortcuts(
+    root: &Path,
+    source: &'static str,
+    apps: &mut BTreeMap<String, InstalledApplication>,
+) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_start_menu_shortcuts(&path, source, apps);
+            continue;
+        }
+        let Some(ext) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let ext = ext.to_ascii_lowercase();
+        if !matches!(ext.as_str(), "lnk" | "appref-ms" | "exe") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let name = cleanup_start_menu_app_name(name);
+        if name.is_empty() || is_non_launch_shortcut_name(&name) {
+            continue;
+        }
+        let path = path.display().to_string();
+        let key = format!(
+            "{}|{}",
+            name.to_ascii_lowercase(),
+            path.to_ascii_lowercase()
+        );
+        apps.entry(key).or_insert(InstalledApplication {
+            name,
+            path,
+            source: source.to_string(),
+        });
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn cleanup_start_menu_app_name(raw: &str) -> String {
+    raw.trim()
+        .trim_end_matches(" - Shortcut")
+        .trim_end_matches(" - 快捷方式")
+        .trim()
+        .to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn is_non_launch_shortcut_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        "uninstall",
+        "readme",
+        "read me",
+        "license",
+        "documentation",
+        "website",
+        "help",
+        "卸载",
+        "解除安装",
+        "解除安裝",
+        "说明",
+        "說明",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiTimelineEvent {
+    source: String,
+    event: String,
+    state: Option<String>,
+    elapsed_ms: Option<u64>,
+    detail: Option<Value>,
+}
+
+#[tauri::command]
+pub fn record_ui_timeline_event(payload: UiTimelineEvent) {
+    crate::timeline::mark(
+        &payload.source,
+        &payload.event,
+        format!(
+            "state={} elapsed_ms={} detail={}",
+            payload.state.as_deref().unwrap_or("-"),
+            payload
+                .elapsed_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".into()),
+            payload
+                .detail
+                .as_ref()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "{}".into())
+        ),
+    );
 }
 
 trait SettingsWriter {
@@ -208,8 +374,11 @@ fn persist_settings<T: SettingsWriter>(
     mut prefs: UserPreferences,
 ) -> Result<(), String> {
     sync_dictation_hotkey_legacy_fields(&mut prefs);
+    prefs.device_custom_keys_default_migrated = true;
     reject_hotkey_collisions(&prefs)?;
     validate_device_custom_keys(&prefs.device_custom_keys)?;
+    validate_device_custom_keys(&prefs.device_custom_key_double_clicks)?;
+    validate_device_custom_keys(&prefs.device_custom_key_long_presses)?;
     coord.write_settings(prefs)?;
     coord.refresh_dictation_hotkey();
     coord.refresh_qa_hotkey();
@@ -762,6 +931,10 @@ fn provider_models_cache() -> &'static Mutex<Vec<ProviderModelsCacheEntry>> {
     PROVIDER_MODELS_CACHE.get_or_init(|| Mutex::new(Vec::new()))
 }
 
+fn provider_models_fetch_lock() -> &'static tokio::sync::Mutex<()> {
+    PROVIDER_MODELS_FETCH_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 fn provider_models_cache_key(kind: &str, config: &ProviderConfig) -> ProviderModelsCacheKey {
     ProviderModelsCacheKey {
         kind: kind.to_string(),
@@ -783,7 +956,7 @@ async fn fetch_provider_models_cached(
     config: &ProviderConfig,
 ) -> Result<Vec<String>, String> {
     let key = provider_models_cache_key(kind, config);
-    let now = Instant::now();
+    let mut now = Instant::now();
     {
         let mut cache = provider_models_cache().lock();
         cache.retain(|entry| now.duration_since(entry.fetched_at) < PROVIDER_MODELS_CACHE_TTL);
@@ -797,13 +970,31 @@ async fn fetch_provider_models_cached(
         }
     }
 
+    let _fetch_guard = provider_models_fetch_lock().lock().await;
+    now = Instant::now();
+    {
+        let mut cache = provider_models_cache().lock();
+        cache.retain(|entry| now.duration_since(entry.fetched_at) < PROVIDER_MODELS_CACHE_TTL);
+        if let Some(entry) = cache.iter().find(|entry| entry.key == key) {
+            log::info!(
+                "[provider-check] models cache hit after wait kind={} provider={}",
+                kind,
+                config.provider_id
+            );
+            return Ok(entry.models.clone());
+        }
+    }
+
     let models = fetch_provider_models(config).await?;
+    let fetched_at = Instant::now();
     let mut cache = provider_models_cache().lock();
-    cache.retain(|entry| entry.key != key);
+    cache.retain(|entry| {
+        fetched_at.duration_since(entry.fetched_at) < PROVIDER_MODELS_CACHE_TTL && entry.key != key
+    });
     cache.push(ProviderModelsCacheEntry {
         key,
         models: models.clone(),
-        fetched_at: now,
+        fetched_at,
     });
     if cache.len() > 16 {
         cache.sort_by_key(|entry| entry.fetched_at);
@@ -2460,13 +2651,24 @@ fn is_device_fallback_reserved_hotkey(binding: &ShortcutBinding) -> bool {
     binding.modifiers.is_empty()
         && matches!(
             binding.primary.trim().to_ascii_uppercase().as_str(),
-            "F13" | "F14" | "F15" | "F16"
+            "F13"
+                | "F14"
+                | "F15"
+                | "F16"
+                | "F17"
+                | "F18"
+                | "F19"
+                | "F20"
+                | "F21"
+                | "F22"
+                | "F23"
+                | "F24"
         )
 }
 
 fn reject_device_fallback_reserved_hotkey(binding: &ShortcutBinding) -> Result<(), String> {
     if is_device_fallback_reserved_hotkey(binding) {
-        return Err("F13-F16 已保留给设备 KEY1-KEY4".into());
+        return Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into());
     }
     Ok(())
 }
@@ -2562,7 +2764,7 @@ fn validate_device_custom_key_mapping(mapping: &DeviceCustomKeyMapping) -> Resul
     crate::shortcut_binding::validate_binding(shortcut).map_err(|e| e.to_string())?;
     reject_modifier_only_action_shortcut(shortcut)?;
     if is_device_fallback_reserved_hotkey(shortcut) {
-        return Err("设备自定义键不能转发为 F13-F16，避免重复触发自身".into());
+        return Err("设备自定义键不能转发为 F13-F24，避免重复触发自身".into());
     }
     Ok(())
 }
@@ -4489,7 +4691,10 @@ mod tests {
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    };
     use std::thread;
 
     fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
@@ -5414,7 +5619,7 @@ mod tests {
 
         assert_eq!(
             super::validate_device_custom_key_mapping(&mapping),
-            Err("设备自定义键不能转发为 F13-F16，避免重复触发自身".into())
+            Err("设备自定义键不能转发为 F13-F24，避免重复触发自身".into())
         );
     }
 
@@ -5441,7 +5646,7 @@ mod tests {
 
         assert_eq!(
             super::validate_shortcut_binding(binding),
-            Err("F13-F16 已保留给设备 KEY1-KEY4".into())
+            Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into())
         );
     }
 
@@ -5568,7 +5773,10 @@ mod tests {
             modifiers: vec![],
         });
 
-        assert_eq!(result, Err("F13-F16 已保留给设备 KEY1-KEY4".into()));
+        assert_eq!(
+            result,
+            Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into())
+        );
     }
 
     #[test]
@@ -5747,7 +5955,7 @@ mod tests {
 
         assert_eq!(
             persist_settings(&writer, prefs),
-            Err("F13-F16 已保留给设备 KEY1-KEY4".into())
+            Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into())
         );
         assert!(writer.saved.lock().unwrap().is_none());
     }
@@ -5765,7 +5973,7 @@ mod tests {
 
         assert_eq!(
             persist_settings(&writer, prefs),
-            Err("F13-F16 已保留给设备 KEY1-KEY4".into())
+            Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into())
         );
         assert!(writer.saved.lock().unwrap().is_none());
     }
@@ -5945,6 +6153,70 @@ mod tests {
         assert_eq!(first, vec!["cached-model".to_string()]);
         assert_eq!(second, first);
         server.join().unwrap();
+        provider_models_cache().lock().clear();
+    }
+
+    #[tokio::test]
+    async fn fetch_provider_models_cached_coalesces_concurrent_misses() {
+        provider_models_cache().lock().clear();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let done = Arc::new(AtomicBool::new(false));
+        let server_done = Arc::clone(&done);
+
+        let server = thread::spawn(move || {
+            let mut request_count = 0usize;
+            let mut buf = [0u8; 8192];
+            while !server_done.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        request_count += 1;
+                        let mut request = Vec::new();
+                        loop {
+                            let n = stream.read(&mut buf).unwrap();
+                            if n == 0 {
+                                break;
+                            }
+                            request.extend_from_slice(&buf[..n]);
+                            if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+
+                        let body = r#"{"data":[{"id":"concurrent-model"}]}"#;
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        stream.write_all(response.as_bytes()).unwrap();
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("provider model test server failed: {error}"),
+                }
+            }
+            request_count
+        });
+
+        let config = ProviderConfig {
+            provider_id: "openai".to_string(),
+            base_url: format!("http://{addr}/v1"),
+            api_key: "cache-key".to_string(),
+            proxy_config: ProviderProxyConfig::provider_default("openai"),
+        };
+
+        let (first, second) = tokio::join!(
+            fetch_provider_models_cached("llm", &config),
+            fetch_provider_models_cached("llm", &config)
+        );
+
+        done.store(true, Ordering::SeqCst);
+        assert_eq!(first.unwrap(), vec!["concurrent-model".to_string()]);
+        assert_eq!(second.unwrap(), vec!["concurrent-model".to_string()]);
+        assert_eq!(server.join().unwrap(), 1);
         provider_models_cache().lock().clear();
     }
 

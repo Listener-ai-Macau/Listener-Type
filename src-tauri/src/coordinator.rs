@@ -5,6 +5,7 @@
 //! insertion, persists history, emits `capsule:state` events to the capsule
 //! window.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -50,8 +51,9 @@ use crate::selection::capture_selection;
 use crate::types::PasteShortcut;
 use crate::types::{
     CapsulePayload, CapsuleState, ChineseScriptPreference, DeviceCustomKeyAction,
-    DeviceCustomKeyId, DictationInputSource, DictationSession, HotkeyCapability, HotkeyStatus,
-    HotkeyStatusState, InsertStatus, OutputLanguagePreference, PolishMode,
+    DeviceCustomKeyGesture, DeviceCustomKeyId, DeviceCustomKeyMapping, DictationInputSource,
+    DictationSession, HotkeyCapability, HotkeyStatus, HotkeyStatusState, InsertStatus,
+    OutputLanguagePreference, PolishMode, ShortcutBinding,
 };
 #[cfg(target_os = "windows")]
 use crate::windows_ime_ipc::ImeSubmitTarget;
@@ -181,10 +183,9 @@ struct Inner {
     translation_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
     switch_style_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
     open_app_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
-    device_key1_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
-    device_key2_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
-    device_key3_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
-    device_key4_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
+    device_key_hotkeys: [Mutex<Option<ComboHotkeyMonitor>>; 12],
+    device_key_last_dispatch_at:
+        Mutex<HashMap<(DeviceCustomKeyGesture, DeviceCustomKeyId), Instant>>,
     /// 翻译模式触发标志。每次 begin_session 重置为 false；hotkey 监听器在
     /// Listening / Starting 阶段看到 Shift down 边沿时 set true。
     /// end_session 在调 polish/translate 前读这个 flag + translation_target_language
@@ -295,7 +296,10 @@ impl FirmwareWakePolicySnapshot {
 enum ActionHotkeyKind {
     SwitchStyle,
     OpenApp,
-    DeviceKey(DeviceCustomKeyId),
+    DeviceKey {
+        key: DeviceCustomKeyId,
+        gesture: DeviceCustomKeyGesture,
+    },
 }
 
 #[cfg(target_os = "windows")]
@@ -358,10 +362,8 @@ impl Coordinator {
                     translation_hotkey: Mutex::new(None),
                     switch_style_hotkey: Mutex::new(None),
                     open_app_hotkey: Mutex::new(None),
-                    device_key1_hotkey: Mutex::new(None),
-                    device_key2_hotkey: Mutex::new(None),
-                    device_key3_hotkey: Mutex::new(None),
-                    device_key4_hotkey: Mutex::new(None),
+                    device_key_hotkeys: std::array::from_fn(|_| Mutex::new(None)),
+                    device_key_last_dispatch_at: Mutex::new(HashMap::new()),
                     translation_modifier_seen: AtomicBool::new(false),
                     qa_hotkey: Mutex::new(None),
                     qa_state: Mutex::new(QaSessionState::default()),
@@ -423,10 +425,8 @@ impl Coordinator {
                 translation_hotkey: Mutex::new(None),
                 switch_style_hotkey: Mutex::new(None),
                 open_app_hotkey: Mutex::new(None),
-                device_key1_hotkey: Mutex::new(None),
-                device_key2_hotkey: Mutex::new(None),
-                device_key3_hotkey: Mutex::new(None),
-                device_key4_hotkey: Mutex::new(None),
+                device_key_hotkeys: std::array::from_fn(|_| Mutex::new(None)),
+                device_key_last_dispatch_at: Mutex::new(HashMap::new()),
                 translation_modifier_seen: AtomicBool::new(false),
                 qa_hotkey: Mutex::new(None),
                 qa_state: Mutex::new(QaSessionState::default()),
@@ -598,24 +598,35 @@ impl Coordinator {
     }
 
     pub fn start_device_custom_key_hotkey_listeners(&self) {
-        for key in DeviceCustomKeyId::ALL {
-            let inner = Arc::clone(&self.inner);
-            let name = format!(
-                "listener-type-{}-hotkey-supervisor",
-                key.label().to_ascii_lowercase()
-            );
-            std::thread::Builder::new()
-                .name(name)
-                .spawn(move || {
-                    action_hotkey_supervisor_loop(inner, ActionHotkeyKind::DeviceKey(key))
-                })
-                .ok();
+        for gesture in DeviceCustomKeyGesture::ALL {
+            for key in DeviceCustomKeyId::ALL {
+                let inner = Arc::clone(&self.inner);
+                let name = format!(
+                    "listener-type-{}-{}-hotkey-supervisor",
+                    key.label().to_ascii_lowercase(),
+                    gesture.label()
+                );
+                std::thread::Builder::new()
+                    .name(name)
+                    .spawn(move || {
+                        action_hotkey_supervisor_loop(
+                            inner,
+                            ActionHotkeyKind::DeviceKey { key, gesture },
+                        )
+                    })
+                    .ok();
+            }
         }
     }
 
     pub fn stop_device_custom_key_hotkey_listeners(&self) {
-        for key in DeviceCustomKeyId::ALL {
-            take_action_hotkey_on_main_thread(&self.inner, ActionHotkeyKind::DeviceKey(key));
+        for gesture in DeviceCustomKeyGesture::ALL {
+            for key in DeviceCustomKeyId::ALL {
+                take_action_hotkey_on_main_thread(
+                    &self.inner,
+                    ActionHotkeyKind::DeviceKey { key, gesture },
+                );
+            }
         }
     }
 
@@ -785,8 +796,10 @@ impl Coordinator {
     }
 
     pub fn update_device_custom_key_hotkey_bindings(&self) {
-        for key in DeviceCustomKeyId::ALL {
-            self.update_action_hotkey_binding(ActionHotkeyKind::DeviceKey(key));
+        for gesture in DeviceCustomKeyGesture::ALL {
+            for key in DeviceCustomKeyId::ALL {
+                self.update_action_hotkey_binding(ActionHotkeyKind::DeviceKey { key, gesture });
+            }
         }
     }
 
@@ -1847,8 +1860,18 @@ fn action_hotkey_bridge_loop(
 ) {
     while let Ok(evt) = rx.recv() {
         if inner.shortcut_recording_active.load(Ordering::SeqCst) {
+            crate::timeline::mark(
+                "backend.hotkey",
+                "ignored_shortcut_recording_active",
+                format!("kind={kind:?} event={evt:?}"),
+            );
             continue;
         }
+        crate::timeline::mark(
+            "backend.hotkey",
+            "event",
+            format!("kind={kind:?} event={evt:?}"),
+        );
         if matches!(evt, ComboHotkeyEvent::Pressed) {
             handle_action_hotkey_pressed(&inner, kind);
         }
@@ -1866,15 +1889,35 @@ fn handle_action_hotkey_pressed(inner: &Arc<Inner>, kind: ActionHotkeyKind) {
                 });
             }
         }
-        ActionHotkeyKind::DeviceKey(key) => handle_device_custom_key_pressed(inner, key),
+        ActionHotkeyKind::DeviceKey { key, gesture } => {
+            handle_device_custom_key_pressed(inner, key, gesture)
+        }
     }
 }
 
-fn handle_device_custom_key_pressed(inner: &Arc<Inner>, key: DeviceCustomKeyId) {
-    let mapping = inner.prefs.get().device_custom_keys.get(key).clone();
+fn handle_device_custom_key_pressed(
+    inner: &Arc<Inner>,
+    key: DeviceCustomKeyId,
+    gesture: DeviceCustomKeyGesture,
+) {
+    let mapping = device_custom_key_mapping(inner, key, gesture);
+    crate::timeline::mark(
+        "backend.device_key",
+        "pressed",
+        format!(
+            "key={} gesture={} action={:?}",
+            key.label(),
+            gesture.label(),
+            mapping.action
+        ),
+    );
+    if device_key_action_debounced(inner, key, gesture, &mapping) {
+        return;
+    }
     log::info!(
-        "[device-key] {} pressed action={:?}",
+        "[device-key] {} {} pressed action={:?}",
         key.label(),
+        gesture.label(),
         mapping.action
     );
 
@@ -1883,10 +1926,82 @@ fn handle_device_custom_key_pressed(inner: &Arc<Inner>, key: DeviceCustomKeyId) 
         DeviceCustomKeyAction::OpenApp => {
             if let Some(app) = inner.app.lock().clone() {
                 let app_for_main = app.clone();
+                let app_page = mapping.app_page;
                 let _ = app.run_on_main_thread(move || {
                     crate::show_main_window(&app_for_main);
+                    let _ = app_for_main.emit("device-key:open-app-page", app_page);
                 });
+                crate::timeline::mark(
+                    "backend.device_key",
+                    "open_app_page",
+                    format!(
+                        "key={} gesture={} page={:?}",
+                        key.label(),
+                        gesture.label(),
+                        app_page
+                    ),
+                );
             }
+        }
+        DeviceCustomKeyAction::OpenExternalApp => {
+            let path = mapping.external_app_path.trim();
+            if path.is_empty() {
+                log::warn!("[device-key] {} external app path is empty", key.label());
+                emit_capsule(
+                    inner,
+                    CapsuleState::Error,
+                    0.0,
+                    0,
+                    Some("设备键打开应用失败：路径为空".to_string()),
+                    None,
+                );
+                schedule_capsule_idle(inner, 2200);
+                return;
+            }
+            if let Err(error) = open_external_app_path(path) {
+                log::warn!(
+                    "[device-key] {} failed to open external app {path}: {error}",
+                    key.label()
+                );
+                emit_capsule(
+                    inner,
+                    CapsuleState::Error,
+                    0.0,
+                    0,
+                    Some(format!("打开应用失败：{error}")),
+                    None,
+                );
+                schedule_capsule_idle(inner, 3000);
+            } else {
+                crate::timeline::mark(
+                    "backend.device_key",
+                    "open_external_app",
+                    format!(
+                        "key={} gesture={} path={path}",
+                        key.label(),
+                        gesture.label()
+                    ),
+                );
+                log::info!(
+                    "[device-key] {} opened external app path={path}",
+                    key.label()
+                );
+            }
+        }
+        DeviceCustomKeyAction::Dictation => {
+            let inner = Arc::clone(inner);
+            async_runtime::spawn(async move {
+                handle_device_dictation_action(inner, key, gesture).await;
+            });
+        }
+        DeviceCustomKeyAction::CopyShortcut => {
+            send_builtin_shortcut(inner, key, gesture, "C", "copy");
+        }
+        DeviceCustomKeyAction::PasteShortcut => {
+            send_builtin_shortcut(inner, key, gesture, "V", "paste");
+        }
+        DeviceCustomKeyAction::UndoShortcut => {
+            send_builtin_shortcut(inner, key, gesture, "Z", "undo");
         }
         DeviceCustomKeyAction::SwitchStyle => switch_to_previous_style(inner),
         DeviceCustomKeyAction::SelectionAsk => {
@@ -1937,6 +2052,251 @@ fn handle_device_custom_key_pressed(inner: &Arc<Inner>, key: DeviceCustomKeyId) 
                 ),
             }
         }
+    }
+}
+
+fn device_custom_key_mapping(
+    inner: &Arc<Inner>,
+    key: DeviceCustomKeyId,
+    gesture: DeviceCustomKeyGesture,
+) -> DeviceCustomKeyMapping {
+    let prefs = inner.prefs.get();
+    match gesture {
+        DeviceCustomKeyGesture::SingleClick => prefs.device_custom_keys.get(key).clone(),
+        DeviceCustomKeyGesture::DoubleClick => {
+            prefs.device_custom_key_double_clicks.get(key).clone()
+        }
+        DeviceCustomKeyGesture::LongPress => prefs.device_custom_key_long_presses.get(key).clone(),
+    }
+}
+
+fn device_key_action_debounced(
+    inner: &Arc<Inner>,
+    key: DeviceCustomKeyId,
+    gesture: DeviceCustomKeyGesture,
+    mapping: &DeviceCustomKeyMapping,
+) -> bool {
+    let window = match mapping.action {
+        DeviceCustomKeyAction::Disabled => return false,
+        DeviceCustomKeyAction::CopyShortcut
+        | DeviceCustomKeyAction::PasteShortcut
+        | DeviceCustomKeyAction::UndoShortcut
+        | DeviceCustomKeyAction::SendShortcut => Duration::from_millis(160),
+        DeviceCustomKeyAction::Dictation => Duration::from_millis(650),
+        DeviceCustomKeyAction::OpenApp | DeviceCustomKeyAction::OpenExternalApp => {
+            Duration::from_millis(900)
+        }
+        _ => Duration::from_millis(350),
+    };
+    let now = Instant::now();
+    let mut last_dispatch = inner.device_key_last_dispatch_at.lock();
+    let key_tuple = (gesture, key);
+    if let Some(last) = last_dispatch.get(&key_tuple) {
+        if now.duration_since(*last) < window {
+            crate::timeline::mark(
+                "backend.device_key",
+                "debounced",
+                format!(
+                    "key={} gesture={} action={:?} window_ms={}",
+                    key.label(),
+                    gesture.label(),
+                    mapping.action,
+                    window.as_millis()
+                ),
+            );
+            return true;
+        }
+    }
+    last_dispatch.insert(key_tuple, now);
+    false
+}
+
+fn builtin_shortcut(primary: &str) -> ShortcutBinding {
+    ShortcutBinding {
+        primary: primary.into(),
+        modifiers: vec![if cfg!(target_os = "macos") {
+            "cmd".into()
+        } else {
+            "ctrl".into()
+        }],
+    }
+}
+
+fn send_builtin_shortcut(
+    inner: &Arc<Inner>,
+    key: DeviceCustomKeyId,
+    gesture: DeviceCustomKeyGesture,
+    primary: &str,
+    label: &str,
+) {
+    let shortcut = builtin_shortcut(primary);
+    crate::timeline::mark(
+        "backend.device_key",
+        "send_builtin_shortcut",
+        format!(
+            "key={} gesture={} label={} binding={}",
+            key.label(),
+            gesture.label(),
+            label,
+            shortcut.display_label()
+        ),
+    );
+    match crate::shortcut_dispatch::send_shortcut(&shortcut) {
+        Ok(()) => log::info!("[device-key] {} sent {label}", key.label()),
+        Err(error) => {
+            log::warn!(
+                "[device-key] {} failed to send {label}: {error}",
+                key.label()
+            );
+            emit_capsule(
+                inner,
+                CapsuleState::Error,
+                0.0,
+                0,
+                Some(format!("{label} 快捷键发送失败：{error}")),
+                None,
+            );
+            schedule_capsule_idle(inner, 2200);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn open_external_app_path(path: &str) -> Result<(), String> {
+    match shell_execute_open(path) {
+        Ok(()) => return Ok(()),
+        Err(shell_error) => {
+            let direct = std::process::Command::new(path).spawn();
+            if direct.is_ok() {
+                return Ok(());
+            }
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", path])
+                .spawn()
+                .map(|_| ())
+                .map_err(|err| format!("{shell_error}; cmd start failed: {err}"))
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_external_app_path(path: &str) -> Result<(), String> {
+    std::process::Command::new(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| err.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn shell_execute_open(path: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    fn wide(value: &str) -> Vec<u16> {
+        OsStr::new(value).encode_wide().chain(Some(0)).collect()
+    }
+
+    let operation = wide("open");
+    let file = wide(path);
+    let result = unsafe {
+        ShellExecuteW(
+            HWND(std::ptr::null_mut()),
+            PCWSTR(operation.as_ptr()),
+            PCWSTR(file.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if result.0 as isize > 32 {
+        Ok(())
+    } else {
+        Err(format!("ShellExecuteW failed code={}", result.0 as isize))
+    }
+}
+
+async fn handle_device_dictation_action(
+    inner: Arc<Inner>,
+    key: DeviceCustomKeyId,
+    gesture: DeviceCustomKeyGesture,
+) {
+    let input_source = inner.prefs.get().dictation_input_source;
+    let phase = inner.state.lock().phase;
+    crate::timeline::mark(
+        "backend.device_key",
+        "dictation_action",
+        format!(
+            "key={} gesture={} source={input_source:?} phase={phase:?}",
+            key.label(),
+            gesture.label()
+        ),
+    );
+
+    if input_source == DictationInputSource::EmbeddedBle {
+        emit_capsule(
+            &inner,
+            CapsuleState::Recording,
+            0.0,
+            0,
+            Some("正在发送设备录音控制，等待 Listener 音频...".to_string()),
+            None,
+        );
+        let result = async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::send_recording_control_toggle(Duration::from_secs(5))
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|value| value);
+        match result {
+            Ok(()) => {
+                crate::timeline::mark(
+                    "backend.device_key",
+                    "ble_recording_control_sent",
+                    format!("key={} gesture={}", key.label(), gesture.label()),
+                );
+                schedule_capsule_idle(&inner, 1800);
+            }
+            Err(error) => {
+                crate::timeline::mark(
+                    "backend.device_key",
+                    "ble_recording_control_failed",
+                    format!(
+                        "key={} gesture={} error={error}",
+                        key.label(),
+                        gesture.label()
+                    ),
+                );
+                emit_capsule(
+                    &inner,
+                    CapsuleState::Error,
+                    0.0,
+                    0,
+                    Some(format!(
+                        "设备键录音控制失败：{error}。请确认已刷支持录音控制的新固件。"
+                    )),
+                    None,
+                );
+                schedule_capsule_idle(&inner, 5000);
+            }
+        }
+        return;
+    }
+
+    match phase {
+        SessionPhase::Idle => {
+            let _ = begin_session(&inner).await;
+        }
+        SessionPhase::Listening => {
+            let _ = end_session(&inner).await;
+        }
+        SessionPhase::Starting => {
+            request_stop_during_starting(&inner, "device key dictation toggle");
+        }
+        _ => {}
     }
 }
 
@@ -2040,11 +2400,25 @@ fn action_hotkey_slot(
     match kind {
         ActionHotkeyKind::SwitchStyle => &inner.switch_style_hotkey,
         ActionHotkeyKind::OpenApp => &inner.open_app_hotkey,
-        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key1) => &inner.device_key1_hotkey,
-        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key2) => &inner.device_key2_hotkey,
-        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key3) => &inner.device_key3_hotkey,
-        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key4) => &inner.device_key4_hotkey,
+        ActionHotkeyKind::DeviceKey { key, gesture } => {
+            &inner.device_key_hotkeys[device_key_hotkey_index(key, gesture)]
+        }
     }
+}
+
+fn device_key_hotkey_index(key: DeviceCustomKeyId, gesture: DeviceCustomKeyGesture) -> usize {
+    let gesture_offset = match gesture {
+        DeviceCustomKeyGesture::SingleClick => 0,
+        DeviceCustomKeyGesture::DoubleClick => 4,
+        DeviceCustomKeyGesture::LongPress => 8,
+    };
+    let key_offset = match key {
+        DeviceCustomKeyId::Key1 => 0,
+        DeviceCustomKeyId::Key2 => 1,
+        DeviceCustomKeyId::Key3 => 2,
+        DeviceCustomKeyId::Key4 => 3,
+    };
+    gesture_offset + key_offset
 }
 
 fn action_hotkey_binding(
@@ -2055,8 +2429,8 @@ fn action_hotkey_binding(
     match kind {
         ActionHotkeyKind::SwitchStyle => prefs.switch_style_hotkey,
         ActionHotkeyKind::OpenApp => prefs.open_app_hotkey,
-        ActionHotkeyKind::DeviceKey(key) => crate::types::ShortcutBinding {
-            primary: key.fallback_primary().into(),
+        ActionHotkeyKind::DeviceKey { key, gesture } => crate::types::ShortcutBinding {
+            primary: key.fallback_primary_for(gesture).into(),
             modifiers: Vec::new(),
         },
     }
@@ -2076,10 +2450,7 @@ fn action_hotkey_bridge_thread_name(kind: ActionHotkeyKind) -> &'static str {
     match kind {
         ActionHotkeyKind::SwitchStyle => "listener-type-switch-style-hotkey-bridge",
         ActionHotkeyKind::OpenApp => "listener-type-open-app-hotkey-bridge",
-        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key1) => "listener-type-key1-hotkey-bridge",
-        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key2) => "listener-type-key2-hotkey-bridge",
-        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key3) => "listener-type-key3-hotkey-bridge",
-        ActionHotkeyKind::DeviceKey(DeviceCustomKeyId::Key4) => "listener-type-key4-hotkey-bridge",
+        ActionHotkeyKind::DeviceKey { .. } => "listener-type-device-key-hotkey-bridge",
     }
 }
 
@@ -2303,11 +2674,8 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     record_embedded_ble_listener_last_error(&inner, &err);
                     record_embedded_ble_recovery_failure(&inner, &err);
                     if is_embedded_ble_automatic_recovery_error(&err) {
-                        emit_embedded_ble_recovery_capsule(
-                            &inner,
-                            "reconnecting",
-                            "Listener BLE 正在自动重连，回到范围后会恢复语音键。".to_string(),
-                            1800,
+                        log::info!(
+                            "[embedded-ble] automatic recovery in progress; capsule suppressed"
                         );
                     }
                 }
@@ -2453,47 +2821,9 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         inner
             .embedded_ble_listener_ready
             .store(true, Ordering::SeqCst);
-        let should_emit_recovered = {
-            let snapshot = inner.embedded_ble_wake_recovery.lock();
-            snapshot.recent_disconnect_reason.is_some()
-                && matches!(
-                    snapshot.status,
-                    EmbeddedBleWakeRecoveryStatus::Reconnecting
-                        | EmbeddedBleWakeRecoveryStatus::NeedsWakeKey
-                        | EmbeddedBleWakeRecoveryStatus::Failed
-                )
-        };
         record_embedded_ble_notify_ready(inner);
-        if should_emit_recovered {
-            emit_embedded_ble_recovery_capsule(
-                inner,
-                "reconnected",
-                "Listener BLE 已自动重连，语音键可用。".to_string(),
-                1600,
-            );
-        }
         log::info!("[embedded-ble] background listener notify ready");
     }
-}
-
-fn emit_embedded_ble_recovery_capsule(
-    inner: &Arc<Inner>,
-    state: &'static str,
-    message: String,
-    idle_after_ms: u64,
-) {
-    let phase = inner.state.lock().phase;
-    if phase != SessionPhase::Idle {
-        log::info!(
-            "[embedded-ble] recovery capsule state={state} emitted=false phase={phase:?} message={message:?}"
-        );
-        return;
-    }
-    log::info!(
-        "[embedded-ble] recovery capsule state={state} emitted=true idle_after_ms={idle_after_ms} message={message:?}"
-    );
-    emit_capsule(inner, CapsuleState::Recording, 0.0, 0, Some(message), None);
-    schedule_capsule_idle(inner, idle_after_ms);
 }
 
 fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> Arc<AtomicBool> {
@@ -2620,14 +2950,18 @@ fn reset_shortcut_held_state(inner: &Arc<Inner>) {
             }
         }
     }
-    for key in DeviceCustomKeyId::ALL {
-        if let Some(monitor) = action_hotkey_slot(inner, ActionHotkeyKind::DeviceKey(key))
-            .lock()
-            .as_ref()
-        {
-            let binding = action_hotkey_binding(inner, ActionHotkeyKind::DeviceKey(key));
-            if let Err(e) = monitor.update_binding(binding) {
-                log::warn!("[coord] reset {} hotkey latch failed: {e}", key.label());
+    for gesture in DeviceCustomKeyGesture::ALL {
+        for key in DeviceCustomKeyId::ALL {
+            let kind = ActionHotkeyKind::DeviceKey { key, gesture };
+            if let Some(monitor) = action_hotkey_slot(inner, kind).lock().as_ref() {
+                let binding = action_hotkey_binding(inner, kind);
+                if let Err(e) = monitor.update_binding(binding) {
+                    log::warn!(
+                        "[coord] reset {} {} hotkey latch failed: {e}",
+                        key.label(),
+                        gesture.label()
+                    );
+                }
             }
         }
     }
@@ -5428,6 +5762,20 @@ fn emit_capsule(
     };
 
     let visible = !matches!(state, CapsuleState::Idle);
+    let should_trace_emit = !matches!(state, CapsuleState::Recording)
+        || elapsed_ms == 0
+        || payload.message.is_some()
+        || elapsed_ms % 500 == 0;
+    if should_trace_emit {
+        crate::timeline::mark(
+            "backend.capsule",
+            "emit_request",
+            format!(
+                "state={state:?} elapsed_ms={elapsed_ms} level={level:.3} visible={visible} message={}",
+                payload.message.as_deref().unwrap_or("-")
+            ),
+        );
+    }
 
     // 限流：Recording 状态下，UI show/position 操作最小间隔 100ms。
     // emit_to 事件不受限，保证电平条实时更新。
@@ -5455,6 +5803,11 @@ fn emit_capsule(
         let _ = app.run_on_main_thread(move || {
             let Some(window) = app_for_main.get_webview_window("capsule") else {
                 log::warn!("[capsule] emit requested but capsule window is missing");
+                crate::timeline::mark(
+                    "backend.capsule",
+                    "missing_window",
+                    format!("state={state:?} elapsed_ms={elapsed_ms}"),
+                );
                 return;
             };
             let show_capsule = inner_for_main.prefs.get().show_capsule;
@@ -5462,6 +5815,13 @@ fn emit_capsule(
             maybe_position_capsule_bottom_center(&inner_for_main, &window, translation);
             if show_capsule && visible {
                 let shown_no_activate = show_capsule_window_no_activate(&app_for_main, &window);
+                crate::timeline::mark(
+                    "backend.capsule",
+                    "show_request",
+                    format!(
+                        "state={state:?} elapsed_ms={elapsed_ms} shown_no_activate={shown_no_activate}"
+                    ),
+                );
                 log::info!(
                     "[capsule] show request state={state:?} shown_no_activate={shown_no_activate}"
                 );
@@ -5474,6 +5834,13 @@ fn emit_capsule(
                 #[cfg(target_os = "macos")]
                 crate::restore_main_window_key_if_active(&app_for_main);
             } else {
+                crate::timeline::mark(
+                    "backend.capsule",
+                    "hide_request",
+                    format!(
+                        "state={state:?} elapsed_ms={elapsed_ms} show_capsule={show_capsule} visible={visible}"
+                    ),
+                );
                 log::info!(
                     "[capsule] hide request state={state:?} show_capsule={show_capsule} visible={visible}"
                 );
@@ -5483,6 +5850,13 @@ fn emit_capsule(
         });
     }
 
+    if should_trace_emit {
+        crate::timeline::mark(
+            "backend.capsule",
+            "emit_to_frontend",
+            format!("state={state:?} elapsed_ms={elapsed_ms}"),
+        );
+    }
     let _ = app.emit_to("capsule", "capsule:state", payload);
 }
 
