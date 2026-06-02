@@ -2,7 +2,6 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { LocalAsr } from "./pages/LocalAsr";
 import { Settings } from "./pages/Settings";
 import { HotkeySettingsProvider } from "./state/HotkeySettingsContext";
 import i18n from "./i18n"; // 副作用：触发 i18next init
@@ -31,7 +30,9 @@ const renderApp = () => {
       <ErrorBoundary>
         {isLocalAsrVisual ? (
           <HotkeySettingsProvider>
-            <LocalAsr />
+            <div style={{ width: "100%", height: "100%", padding: 24, overflow: "auto", background: "var(--ol-window-bg)" }}>
+              <Settings embedded initialSection="advanced" />
+            </div>
           </HotkeySettingsProvider>
         ) : isSettingsShortcutsVisual ? (
           <HotkeySettingsProvider>

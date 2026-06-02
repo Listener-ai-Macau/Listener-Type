@@ -18,7 +18,7 @@ import { Translation } from '../pages/Translation';
 import { SelectionAsk } from '../pages/SelectionAsk';
 // 风格市场不再作为独立 nav tab —— 已整合为 Style 页面内 modal（入口在「风格包」标题右侧）。
 // LocalAsr 不再作为主 nav tab——本地 ASR 模型管理已合并到 Settings → Advanced 中
-// 通过 <LocalAsr embedded /> 渲染。这里之前的 import 与 NAV_BASE 条目都已移除。
+// 通过 Settings -> Advanced 内的 <LocalAsr /> 渲染。这里之前的 import 与 NAV_BASE 条目都已移除。
 import { APP_VERSION_LABEL, IS_BETA_BUILD } from '../lib/appVersion';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
 import { getCredentials, isMainWindowStartHidden } from '../lib/ipc';
@@ -148,8 +148,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     };
   }, [os, prefs?.dictationInputSource]);
 
-  // 之前监听的 NAVIGATE_LOCAL_ASR_EVENT 已无意义——「模型设置」独立 tab 已下线，
-  // 模型管理 UI 现在通过 Settings → Advanced 的 <LocalAsr embedded /> 渲染，
+  // 之前监听的模型设置跳转事件已无意义——「模型设置」独立 tab 已下线，
+  // 模型管理 UI 现在通过 Settings → Advanced 的 <LocalAsr /> 渲染，
   // 用户在 Settings 内即可一站式管理，无需跨页跳转。
 
   const rememberProviderPrompt = () => {

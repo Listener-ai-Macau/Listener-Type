@@ -246,7 +246,7 @@ export function AdvancedSection() {
 
       {/* 模型管理 UI（镜像源 / 模型列表 / 下载 / 删除 / 设为默认 / Foundry Local）
           inline 渲染——「模型设置」独立页已删，这里是唯一入口。 */}
-      {platformSupported && <LocalAsr embedded />}
+      {platformSupported && <LocalAsr />}
     </>
   );
 }

@@ -60,10 +60,8 @@ export const ko: typeof zhCN = {
     history: '기록',
     vocab: '어휘',
     style: '스타일',
-    marketplace: '마켓',
     translation: '번역',
     selectionAsk: '선택 질문',
-    localAsr: '모델 설정',
   },
   shell: {
     shortcutLabel: '녹음 단축키',
@@ -71,7 +69,6 @@ export const ko: typeof zhCN = {
     betaTag: 'BETA',
     betaNote: '모든 데이터는 로컬에만 저장됩니다.',
     footer: {
-      account: '계정',
       feedback: '피드백',
       settings: '설정',
       help: '도움말',
@@ -593,8 +590,6 @@ export const ko: typeof zhCN = {
       localAsrPerformanceWarning: '로컬 추론은 CPU + Apple Silicon Accelerate 에서 동작하므로, 한 번의 전사 시간이 **클라우드 ASR 보다 몇 초 더 걸립니다**. 중국어 인식 정확도와 방언/억양 대응도 **일반적으로** Volcengine / Whisper turbo 에 미치지 못합니다. 네트워크 제한 또는 프라이버시가 중요한 경우에 사용하세요.',
       localAsrReady: '{{model}} 다운로드됨',
       localAsrNotReady: '{{model}} 다운로드되지 않음',
-      localAsrGoDownload: '모델 설정에서 다운로드',
-      localAsrManage: '모델 설정으로 이동',
       localAsrDownloadedTitle: '다운로드된 모델',
       localAsrDelete: '삭제',
       fillDefault: '기본값 입력',
@@ -860,18 +855,11 @@ export const ko: typeof zhCN = {
   },
   modal: {
     sections: {
-      account: '계정',
       settings: '설정',
       personalize: '개인 설정',
       about: '정보',
       helpCenter: '도움말 센터',
       releaseNotes: '릴리스 노트',
-    },
-    account: {
-      localUser: '로컬 사용자',
-      localUserDesc: '로그인하지 않음 · 모든 데이터는 로컬에 저장',
-      loginSync: '로그인 / 동기화',
-      footer: 'Listener Type 는 기본적으로 완전히 로컬에서 동작합니다. 로그인 시 여러 기기 간에 어휘와 스타일 프리셋을 동기화할 수 있으며, 인식은 본 기기 또는 설정한 공급자에서 수행됩니다.',
     },
     personalize: {
       appearance: '모양',
