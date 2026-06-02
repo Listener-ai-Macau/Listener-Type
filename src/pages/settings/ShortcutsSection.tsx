@@ -64,11 +64,16 @@ const DEVICE_GESTURES: Array<{
 const DEVICE_KEY_ACTIONS: DeviceCustomKeyAction[] = [
   'disabled',
   'openApp',
+  'openExternalApp',
+  'switchStyle',
+  'translation',
+  'selectionAsk',
+  'pasteTemplate',
+  'sendShortcut',
   'dictation',
   'copyShortcut',
   'pasteShortcut',
   'undoShortcut',
-  'openExternalApp',
 ];
 
 const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
@@ -93,7 +98,6 @@ const KNOB_FIXED_ACTIONS = [
 ] as const;
 
 const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
-const defaultExternalAppPath = () => 'code';
 
 const fallbackShortcut = (): ShortcutBinding => ({
   primary: 'K',
@@ -398,10 +402,7 @@ function DeviceKeyMappingControl({
       action,
       shortcut: action === 'sendShortcut' ? mapping.shortcut ?? fallbackShortcut() : mapping.shortcut,
       appPage: action === 'openApp' ? mapping.appPage ?? 'settingsShortcuts' : mapping.appPage,
-      externalAppPath:
-        action === 'openExternalApp' && !externalAppPath.trim()
-          ? defaultExternalAppPath()
-          : externalAppPath,
+      externalAppPath,
     });
   };
 

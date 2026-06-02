@@ -688,6 +688,12 @@ fn default_disabled_device_custom_keys() -> DeviceCustomKeys {
 }
 
 fn legacy_device_custom_keys_default() -> DeviceCustomKeys {
+    legacy_device_custom_keys_default_with_external_app_path(default_device_external_app_path())
+}
+
+fn legacy_device_custom_keys_default_with_external_app_path(
+    external_app_path: String,
+) -> DeviceCustomKeys {
     DeviceCustomKeys {
         key1: DeviceCustomKeyMapping {
             action: DeviceCustomKeyAction::PasteShortcut,
@@ -699,7 +705,7 @@ fn legacy_device_custom_keys_default() -> DeviceCustomKeys {
         },
         key3: DeviceCustomKeyMapping {
             action: DeviceCustomKeyAction::OpenExternalApp,
-            external_app_path: default_device_external_app_path(),
+            external_app_path,
             ..DeviceCustomKeyMapping::default()
         },
         key4: DeviceCustomKeyMapping {
@@ -707,6 +713,11 @@ fn legacy_device_custom_keys_default() -> DeviceCustomKeys {
             ..DeviceCustomKeyMapping::default()
         },
     }
+}
+
+fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
+    keys == &legacy_device_custom_keys_default()
+        || keys == &legacy_device_custom_keys_default_with_external_app_path("code".into())
 }
 
 fn default_device_external_app_path() -> String {
@@ -722,7 +733,7 @@ fn default_device_external_app_path() -> String {
             }
         }
     }
-    "code".into()
+    String::new()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1138,7 +1149,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             && device_custom_key_long_presses.is_all_disabled()
         {
             device_custom_keys = DeviceCustomKeys::default();
-        } else if device_custom_keys == legacy_device_custom_keys_default()
+        } else if is_legacy_device_custom_keys_default(&device_custom_keys)
             && device_custom_key_double_clicks.is_all_disabled()
             && device_custom_key_long_presses.is_all_disabled()
         {
@@ -2330,7 +2341,7 @@ mod tests {
             "deviceCustomKeys": {
                 "key1": { "action": "pasteShortcut", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
                 "key2": { "action": "dictation", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
-                "key3": { "action": "openExternalApp", "externalAppPath": default_device_external_app_path(), "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "openExternalApp", "externalAppPath": "code", "pasteTemplate": "", "shortcut": null },
                 "key4": { "action": "undoShortcut", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
             }
         });
@@ -2356,6 +2367,8 @@ mod tests {
             prefs.device_custom_keys.key4.action,
             DeviceCustomKeyAction::OpenExternalApp
         );
+        assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
+        assert!(prefs.device_custom_key_long_presses.is_all_disabled());
     }
 
     #[test]
