@@ -58,10 +58,8 @@ export const en: typeof zhCN = {
     history: 'History',
     vocab: 'Vocabulary',
     style: 'Style',
-    marketplace: 'Marketplace',
     translation: 'Translation',
     selectionAsk: 'Ask',
-    localAsr: 'Models',
   },
   marketplace: {
     kicker: 'MARKETPLACE',
@@ -98,7 +96,6 @@ export const en: typeof zhCN = {
     betaTag: 'BETA',
     betaNote: 'All data stays on this device.',
     footer: {
-      account: 'Account',
       feedback: 'Feedback',
       settings: 'Settings',
       help: 'Help',
@@ -620,8 +617,6 @@ export const en: typeof zhCN = {
       localAsrPerformanceWarning: 'Local inference runs on CPU + Apple Silicon Accelerate; each transcription takes **several seconds longer than cloud ASR**, and Chinese / dialect accuracy is **typically lower** than Volcengine or Whisper turbo. Use it for offline, privacy-sensitive, or no-cloud-API scenarios.',
       localAsrReady: '{{model}} downloaded',
       localAsrNotReady: '{{model}} not downloaded',
-      localAsrGoDownload: 'Open Models page to download',
-      localAsrManage: 'Open Models page',
       localAsrDownloadedTitle: 'Downloaded models',
       localAsrDelete: 'Delete',
       fillDefault: 'Fill default value',
@@ -887,18 +882,11 @@ export const en: typeof zhCN = {
   },
   modal: {
     sections: {
-      account: 'Account',
       settings: 'Settings',
       personalize: 'Personalize',
       about: 'About',
       helpCenter: 'Help center',
       releaseNotes: 'Release notes',
-    },
-    account: {
-      localUser: 'Local user',
-      localUserDesc: 'Not signed in · all data stays local',
-      loginSync: 'Sign in / Sync',
-      footer: 'Listener Type runs fully locally by default. Signing in syncs vocabulary and style presets across devices; recognition still happens on this machine or your configured provider.',
     },
     personalize: {
       appearance: 'Appearance',

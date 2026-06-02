@@ -60,10 +60,8 @@ export const ja: typeof zhCN = {
     history: '履歴',
     vocab: '語彙',
     style: 'スタイル',
-    marketplace: 'マーケット',
     translation: '翻訳',
     selectionAsk: '選択追問',
-    localAsr: 'モデル設定',
   },
   shell: {
     shortcutLabel: '録音ショートカット',
@@ -71,7 +69,6 @@ export const ja: typeof zhCN = {
     betaTag: 'BETA',
     betaNote: 'すべてのデータはローカルにのみ保存されます。',
     footer: {
-      account: 'アカウント',
       feedback: 'フィードバック',
       settings: '設定',
       help: 'ヘルプ',
@@ -593,8 +590,6 @@ export const ja: typeof zhCN = {
       localAsrPerformanceWarning: 'ローカル推論は CPU + Apple Silicon Accelerate で動作するため、1 回の転写時間は **クラウド ASR より数秒長くなります**。中国語認識精度や方言/訛り対応も **通常は** Volcengine / Whisper turbo に劣ります。ネットワーク制限下またはプライバシー重視の場合に選択してください。',
       localAsrReady: '{{model}} ダウンロード済み',
       localAsrNotReady: '{{model}} 未ダウンロード',
-      localAsrGoDownload: 'モデル設定でダウンロード',
-      localAsrManage: 'モデル設定を開く',
       localAsrDownloadedTitle: 'ダウンロード済みモデル',
       localAsrDelete: '削除',
       fillDefault: 'デフォルト値を入力',
@@ -860,18 +855,11 @@ export const ja: typeof zhCN = {
   },
   modal: {
     sections: {
-      account: 'アカウント',
       settings: '設定',
       personalize: 'パーソナライズ',
       about: '情報',
       helpCenter: 'ヘルプセンター',
       releaseNotes: 'リリースノート',
-    },
-    account: {
-      localUser: 'ローカルユーザー',
-      localUserDesc: '未ログイン · すべてのデータはローカルに保存',
-      loginSync: 'ログイン / 同期',
-      footer: 'Listener Type は既定で完全にローカルで動作します。ログインすると複数デバイス間で語彙とスタイルプリセットを同期できますが、認識は本機または設定済みプロバイダーで行われます。',
     },
     personalize: {
       appearance: '外観',

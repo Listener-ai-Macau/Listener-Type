@@ -28,7 +28,6 @@ import {
   type LocalAsrSettings,
 } from '../../lib/localAsr';
 import { SettingRow, Toggle, inputStyle, type AsrPresetId } from './shared';
-import { NAVIGATE_LOCAL_ASR_EVENT } from '../Settings';
 
 // ─── LLM Thinking Toggle ──────────────────────────────────────────────
 
@@ -484,10 +483,7 @@ export function ProvidersSection() {
             </div>
           </>
         ) : committedAsrProvider === 'local-qwen3' || committedAsrProvider === 'foundry-local-whisper' ? (
-          // 用户已经在用本地 ASR——dropdown 行的 localAsrActiveNotice 已经把
-          // "在高级中切换或禁用"讲清楚了，body 不再重复 LocalAsrProviderHint。
-          // 模型管理 UI 唯一入口在 AdvancedSection 里的 <LocalAsr embedded />。
-          null
+          <LocalAsrProviderHint provider={committedAsrProvider} selectedProvider={committedAsrProvider} />
         ) : (
           <>
             <CredentialField key={`${committedAsrProvider}:api_key`} label={t('settings.providers.apiKeyLabel')} account="asr.api_key" mono mask />
@@ -1018,10 +1014,6 @@ function LocalAsrProviderHint({
     };
   }, [provider, selectedProvider]);
 
-  const goToLocalAsr = () => {
-    window.dispatchEvent(new CustomEvent(NAVIGATE_LOCAL_ASR_EVENT));
-  };
-
   const handleDelete = async (modelId: string) => {
     const seq = refreshSeqRef.current;
     if (!qwenReadyForFetch()) {
@@ -1065,11 +1057,6 @@ function LocalAsrProviderHint({
         <div style={{ fontSize: 12.5, color: 'var(--ol-ink-3)', lineHeight: 1.6 }}>
           {t(hintKey)}
         </div>
-        <div>
-          <Btn variant="ghost" size="sm" onClick={goToLocalAsr}>
-            {t('settings.providers.localAsrManage')}
-          </Btn>
-        </div>
       </div>
     );
   }
@@ -1100,11 +1087,6 @@ function LocalAsrProviderHint({
             ? t('settings.providers.localAsrReady', { model: active?.id ?? '' })
             : t('settings.providers.localAsrNotReady', { model: settings?.activeModel ?? '' })}
         </Pill>
-        <Btn variant={isReady ? 'ghost' : 'primary'} size="sm" onClick={goToLocalAsr}>
-          {isReady
-            ? t('settings.providers.localAsrManage')
-            : t('settings.providers.localAsrGoDownload')}
-        </Btn>
       </div>
 
       {/* 已下载模型列表 + 删除按钮（用户：已下载的项目要在旁边显示 + 提供删除） */}

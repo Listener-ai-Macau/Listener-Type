@@ -187,6 +187,7 @@ export type HotkeyTrigger =
 
 // `hold` / `doubleClick` are accepted only for legacy preference files.
 // Current UI and IPC normalize recording to `toggle`.
+/** @deprecated Product recording is toggle-first; keep only for migrating older preferences. */
 export type HotkeyMode = 'toggle' | 'hold' | 'doubleClick';
 
 export interface HotkeyKey {

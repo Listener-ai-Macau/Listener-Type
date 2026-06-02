@@ -8,8 +8,7 @@ export type AppTab =
   | 'vocab'
   | 'style'
   | 'translation'
-  | 'selectionAsk'
-  | 'localAsr';
+  | 'selectionAsk';
 
 export interface AppState {
   currentTab: AppTab;

@@ -58,10 +58,8 @@ export const zhTW: typeof zhCN = {
     history: '歷史',
     vocab: '詞彙表',
     style: '風格',
-    marketplace: '風格市場',
     translation: '翻譯',
     selectionAsk: '劃詞追問',
-    localAsr: '模型設置',
   },
   marketplace: {
     kicker: 'MARKETPLACE',
@@ -98,7 +96,6 @@ export const zhTW: typeof zhCN = {
     betaTag: 'BETA',
     betaNote: '所有數據都只保存在本機。',
     footer: {
-      account: '賬戶',
       feedback: '反饋',
       settings: '設置',
       help: '幫助',
@@ -620,8 +617,6 @@ export const zhTW: typeof zhCN = {
       localAsrPerformanceWarning: '本地推理跑在 CPU + Apple Silicon Accelerate 上，**首次轉寫需要加載模型（數秒）**，之後單次轉寫也會比雲端 ASR 慢若干秒；中文識別準確率與方言/口音表現通常不如火山引擎 / Whisper turbo。適用場景：離線 / 隱私敏感 / 不願付費雲 API。',
       localAsrReady: '{{model}} 已下載',
       localAsrNotReady: '{{model}} 未下載',
-      localAsrGoDownload: '前往模型設置下載',
-      localAsrManage: '前往模型設置',
       localAsrDownloadedTitle: '已下載模型',
       localAsrDelete: '刪除',
       fillDefault: '填入默認值',
@@ -887,18 +882,11 @@ export const zhTW: typeof zhCN = {
   },
   modal: {
     sections: {
-      account: '賬戶',
       settings: '設置',
       personalize: '個性化',
       about: '關於',
       helpCenter: '幫助中心',
       releaseNotes: '版本說明',
-    },
-    account: {
-      localUser: '本地用戶',
-      localUserDesc: '未登錄 · 所有數據保存在本機',
-      loginSync: '登錄 / 同步',
-      footer: 'Listener Type 默認完全本地運行。登錄後可在多設備間同步詞彙表與風格預設，識別仍在本機或你配置的 Provider 上完成。',
     },
     personalize: {
       appearance: '外觀',

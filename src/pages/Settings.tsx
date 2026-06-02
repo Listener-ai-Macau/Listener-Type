@@ -15,10 +15,6 @@ import { LanguageSection } from './settings/LanguageSection';
 export { Toggle } from './settings/shared';
 export { AboutUpdateControl } from './settings/AboutUpdateControl';
 
-/// Settings → ASR 选了 local-qwen3 时触发跳到「模型设置」页 + 关 Settings modal。
-/// FloatingShell 监听同名事件做 setCurrentTab('localAsr') + setSettingsOpen(false)。
-export const NAVIGATE_LOCAL_ASR_EVENT = 'listener-type:navigate-local-asr';
-
 interface SettingsProps {
   embedded?: boolean;
   initialSection?: SettingsSectionId;

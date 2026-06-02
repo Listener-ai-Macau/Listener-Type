@@ -5,7 +5,7 @@
 //   状态喂给 <SavedToast>，pill 浮在右上角。
 //
 // 用 DOM CustomEvent（而不是 React Context）是为了让 CredentialField / ProviderTools
-// 这类深层叶子组件不必沿 props 链传 dispatcher，跟 NAVIGATE_LOCAL_ASR_EVENT 同惯例。
+// 这类深层叶子组件不必沿 props 链传 dispatcher。
 
 import { useEffect, useState } from 'react';
 
