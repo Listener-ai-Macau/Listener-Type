@@ -31,7 +31,7 @@ All remote marketplace traffic goes through Rust IPC commands. The WebView must 
 
 | Operation | Method and path | Notes |
 |---|---|---|
-| List/search styles | `GET /styles?q=<query>&sort=<new\|popular>&limit=<n>` | Returns `MarketplaceListItem[]`; unauthenticated. |
+| List/search styles | `GET /styles?q=<query>&category=<raw\|light\|structured\|formal>&sort=<new\|popular>&limit=<n>&offset=<n>` | Returns `MarketplaceListPage`; unauthenticated. Older array responses are still accepted by the desktop client. |
 | Style detail | `GET /styles/{id}` | Returns full metadata and `prompt`; unauthenticated. |
 | Style archive download | `GET /styles/{id}/download` | Returns the style-pack zip installed through local import validation. |
 | Upload/update style | `POST /styles/upload` | Multipart field `file` contains the zip; optional `originPackId`; identity comes from GitHub OAuth and is forwarded as the v1 `X-Dev-User` compatibility header. |
@@ -47,6 +47,7 @@ GitHub OAuth uses device flow through Rust IPC only. The access token, optional 
 ## Source Map
 
 - Frontend marketplace UI: `src/pages/Marketplace.tsx`, `src/components/MarketplaceModal.tsx`, `src/pages/Style.tsx`.
+- Marketplace discovery helpers: `src/lib/marketplaceDiscovery.ts`.
 - IPC wrappers: `src/lib/ipc.ts`.
 - Backend commands: `src-tauri/src/commands.rs`.
 - GitHub OAuth client: `src-tauri/src/github_oauth.rs`.

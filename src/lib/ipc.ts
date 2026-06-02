@@ -17,6 +17,7 @@ import type {
   InstalledApplication,
   MarketplaceDetail,
   MarketplaceListItem,
+  MarketplaceListPage,
   MarketplaceMyPackItem,
   HotkeyStatus,
   MicrophoneDevice,
@@ -1352,9 +1353,25 @@ export { isTauri };
 // dev fallback 不再注入示例内容；未连接后端时展示真实空状态。
 
 export function listMarketplace(
-  options: { query?: string; sort?: 'new' | 'popular'; limit?: number } = {},
-): Promise<MarketplaceListItem[]> {
-  return invokeMarketplace('marketplace_list', options);
+  options: { query?: string; category?: string; sort?: 'new' | 'popular'; limit?: number; offset?: number } = {},
+): Promise<MarketplaceListPage> {
+  return invokeMarketplace<MarketplaceListPage | MarketplaceListItem[]>('marketplace_list', options)
+    .then(response => {
+      if (Array.isArray(response)) {
+        return {
+          items: response,
+          nextOffset: null,
+          hasMore: false,
+          total: null,
+        };
+      }
+      return {
+        items: Array.isArray(response.items) ? response.items : [],
+        nextOffset: response.nextOffset ?? null,
+        hasMore: Boolean(response.hasMore),
+        total: response.total ?? null,
+      };
+    });
 }
 
 export function fetchMarketplaceDetail(packId: string): Promise<MarketplaceDetail> {

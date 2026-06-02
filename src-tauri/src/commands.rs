@@ -29,7 +29,7 @@ use crate::github_oauth::{
 };
 use crate::marketplace_backend::{
     MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceClient, MarketplaceDetail,
-    MarketplaceListItem, MarketplaceMyPackItem,
+    MarketplaceListPage, MarketplaceMyPackItem,
 };
 use crate::permissions::{self, PermissionStatus};
 use crate::persistence::{
@@ -4411,7 +4411,7 @@ fn _ensure_snapshot_used(_: CredentialsSnapshot) {}
 // 取得当前 login，再沿用 v1 backend 的 X-Dev-User 身份头。
 //
 // IPC -> REST contract v1:
-// - marketplace_list      GET    /styles?q=&sort=&limit=
+// - marketplace_list      GET    /styles?q=&category=&sort=&limit=&offset=
 // - marketplace_detail    GET    /styles/{id}
 // - marketplace_install   GET    /styles/{id}, GET /styles/{id}/download
 // - marketplace_upload    POST   /styles/upload (multipart zip)
@@ -4576,15 +4576,23 @@ async fn refresh_marketplace_github_credentials(
 pub async fn marketplace_list(
     coord: CoordinatorState<'_>,
     query: Option<String>,
+    category: Option<String>,
     sort: Option<String>,
     limit: Option<u32>,
-) -> Result<Vec<MarketplaceListItem>, String> {
+    offset: Option<u32>,
+) -> Result<MarketplaceListPage, String> {
     let prefs = coord.prefs().get();
     let Some(client) = optional_marketplace_client_from_prefs(&prefs)? else {
-        return Ok(Vec::new());
+        return Ok(MarketplaceListPage::empty());
     };
     client
-        .list_styles(query.as_deref(), sort.as_deref(), limit)
+        .list_styles(
+            query.as_deref(),
+            category.as_deref(),
+            sort.as_deref(),
+            limit,
+            offset,
+        )
         .await
         .map_err(|error| error.to_string())
 }

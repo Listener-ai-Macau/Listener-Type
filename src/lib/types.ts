@@ -543,6 +543,13 @@ export interface MarketplaceListItem {
   originAuthorLogin?: string | null;
 }
 
+export interface MarketplaceListPage {
+  items: MarketplaceListItem[];
+  nextOffset: number | null;
+  hasMore: boolean;
+  total: number | null;
+}
+
 export interface MarketplaceDetail extends MarketplaceListItem {
   prompt: string;
   state: 'pending' | 'approved' | 'rejected';

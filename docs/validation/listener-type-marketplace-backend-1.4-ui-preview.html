@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>listener-type-marketplace-backend 1.4 UI preview</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #202124;
+      --muted: #687078;
+      --line: #d7dadf;
+      --surface: #ffffff;
+      --soft: #f5f6f7;
+      --blue: #4f6fbd;
+      --blue-soft: #edf2ff;
+      --ok: #4d7a5e;
+      --ok-soft: #eaf4ed;
+      --err: #c2413c;
+      --err-soft: #fff1f0;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+    }
+    body {
+      margin: 0;
+      background: #f7f7f5;
+      color: var(--ink);
+    }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+    .kicker {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0;
+      margin-bottom: 8px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 26px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .search {
+      flex: 1;
+      min-width: 220px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      padding: 8px 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    button.active {
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+    button.category.active {
+      color: var(--ink);
+      background: var(--soft);
+    }
+    .error {
+      border: 1px solid var(--err);
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 12px 14px;
+      color: var(--err);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+      font-size: 12px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    .card,
+    .empty {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .card {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 132px;
+    }
+    .card-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .name {
+      font-weight: 650;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .version,
+    .meta {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .desc {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      min-height: 36px;
+    }
+    .pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 10.5px;
+      background: var(--soft);
+      color: var(--muted);
+    }
+    .pill.ok {
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+    .pill.outline {
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+    .card-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: auto;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .more {
+      display: flex;
+      justify-content: center;
+      padding: 16px 0 24px;
+    }
+    .empty {
+      margin-top: 18px;
+      padding: 28px;
+      text-align: center;
+    }
+    .empty strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 6px;
+      color: var(--muted);
+    }
+    .empty span {
+      color: #8a9199;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <div class="kicker">MARKETPLACE</div>
+        <h1>风格包市场</h1>
+        <p>1.4 preview: search, category filters, hot/new/liked sorting, installed badges, lazy pagination, empty and network error states.</p>
+      </div>
+      <div class="row">
+        <button>我的发布</button>
+        <button>刷新</button>
+      </div>
+    </header>
+
+    <section class="toolbar" aria-label="marketplace filters">
+      <div class="row">
+        <div class="search">搜索名称 / 描述 / 标签...</div>
+        <button class="active">按热度</button>
+        <button>最新</button>
+        <button>我赞过的</button>
+      </div>
+      <div class="row">
+        <button class="category active">全部</button>
+        <button class="category">原文</button>
+        <button class="category">轻润色</button>
+        <button class="category">结构化</button>
+        <button class="category">正式</button>
+      </div>
+    </section>
+
+    <section class="error">
+      <span>加载失败：marketplace network failure: connection reset</span>
+      <button>重试</button>
+    </section>
+
+    <section class="grid" aria-label="marketplace list">
+      <article class="card">
+        <div class="card-title">
+          <span class="name">会议纪要 · 结构化</span>
+          <span class="version">v1.2.0</span>
+        </div>
+        <div class="desc">把多人会议口述整理成议题、决策和待办，适合项目同步。</div>
+        <div class="pills">
+          <span class="pill outline">structured</span>
+          <span class="pill ok">已安装</span>
+          <span class="pill">会议</span>
+          <span class="pill">项目</span>
+        </div>
+        <div class="card-footer">
+          <span>@alice</span>
+          <span>★ 128 · ↓ 402</span>
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-title">
+          <span class="name">客服回复 · 正式</span>
+          <span class="version">v1.0.3</span>
+        </div>
+        <div class="desc">把口语反馈整理成克制、清晰、可发送给客户的正式表达。</div>
+        <div class="pills">
+          <span class="pill outline">formal</span>
+          <span class="pill">客服</span>
+          <span class="pill">邮件</span>
+        </div>
+        <div class="card-footer">
+          <span>@bob</span>
+          <span>☆ 42 · ↓ 91</span>
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-title">
+          <span class="name">原话备忘录</span>
+          <span class="version">v0.9.8</span>
+        </div>
+        <div class="desc">保留原话顺序，只补必要标点和断句。</div>
+        <div class="pills">
+          <span class="pill outline">raw</span>
+          <span class="pill">备忘</span>
+        </div>
+        <div class="card-footer">
+          <span>@carol</span>
+          <span>☆ 17 · ↓ 66</span>
+        </div>
+      </article>
+    </section>
+
+    <div class="more"><button>加载更多</button></div>
+
+    <section class="empty">
+      <strong>没有匹配的风格包</strong>
+      <span>换个关键词或类别再试一次</span>
+    </section>
+  </main>
+</body>
+</html>
