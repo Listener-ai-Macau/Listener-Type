@@ -3,7 +3,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::coordinator_state::request_stop_during_starting_state;
+use crate::coordinator_state::{
+    apply_dictation_event, request_stop_during_starting_state, DictationEvent, DictationTransition,
+    DictationUiState,
+};
 use crate::correction::apply_correction_rules;
 use crate::types::HotkeyMode;
 
@@ -20,6 +23,56 @@ const EMBEDDED_AUDIO_ASR_PREROLL_BYTES: usize = 16_000 * 2 * EMBEDDED_AUDIO_ASR_
 const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
+
+fn apply_and_publish_dictation_event(
+    inner: &Arc<Inner>,
+    event: DictationEvent,
+    level: f32,
+    message: Option<String>,
+    inserted_chars: Option<u32>,
+) -> bool {
+    let transition = {
+        let mut state = inner.state.lock();
+        apply_dictation_event(&mut state, event)
+    };
+    publish_dictation_transition(inner, transition, level, message, inserted_chars)
+}
+
+fn publish_dictation_pipeline_error(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    message: String,
+) -> bool {
+    apply_and_publish_dictation_event(
+        inner,
+        DictationEvent::PipelineError { session_id },
+        0.0,
+        Some(message),
+        None,
+    )
+}
+
+fn publish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: String) -> bool {
+    apply_and_publish_dictation_event(
+        inner,
+        DictationEvent::Timeout { session_id },
+        0.0,
+        Some(message),
+        None,
+    )
+}
+
+fn finish_dictation_pipeline_error(inner: &Arc<Inner>, session_id: SessionId, message: String) {
+    publish_dictation_pipeline_error(inner, session_id, message);
+    restore_prepared_windows_ime_session(inner, session_id);
+    schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(session_id));
+}
+
+fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: String) {
+    publish_dictation_timeout(inner, session_id, message);
+    restore_prepared_windows_ime_session(inner, session_id);
+    schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(session_id));
+}
 
 fn clear_embedded_audio_stats(inner: &Arc<Inner>) {
     *inner.embedded_audio_stats.lock() = None;
@@ -96,41 +149,16 @@ fn emit_embedded_audio_partial_preview_if_active(
     session_id: SessionId,
     preview: String,
 ) -> bool {
-    let Some((capsule_state, elapsed)) = ({
-        let state = inner.state.lock();
-        if state.session_id != session_id || state.cancelled {
-            None
-        } else {
-            let capsule_state = if matches!(
-                state.phase,
-                SessionPhase::Starting | SessionPhase::Listening
-            ) && embedded_audio_stop_feedback_latched(inner)
-            {
-                CapsuleState::Transcribing
-            } else {
-                match state.phase {
-                    SessionPhase::Starting | SessionPhase::Listening => CapsuleState::Recording,
-                    SessionPhase::Processing | SessionPhase::Inserting => {
-                        CapsuleState::Transcribing
-                    }
-                    _ => return false,
-                }
-            };
-            Some((capsule_state, state.started_at.elapsed().as_millis() as u64))
-        }
-    }) else {
-        return false;
-    };
-    emit_capsule_for_session(
+    apply_and_publish_dictation_event(
         inner,
-        session_id,
-        capsule_state,
+        DictationEvent::AsrPartial {
+            session_id,
+            after_stop: embedded_audio_stop_feedback_latched(inner),
+        },
         0.0,
-        elapsed,
         Some(preview),
         None,
-    );
-    true
+    )
 }
 
 fn emit_embedded_audio_pcm_capsule_if_active(
@@ -140,29 +168,21 @@ fn emit_embedded_audio_pcm_capsule_if_active(
     level: f32,
     message: Option<String>,
 ) -> bool {
-    let Some(elapsed) = ({
-        let state = inner.state.lock();
-        if state.session_id != session_id
-            || state.cancelled
-            || state.phase != SessionPhase::Listening
-        {
-            None
-        } else {
-            Some(state.started_at.elapsed().as_millis() as u64)
-        }
-    }) else {
-        return false;
+    let after_stop = match capsule_state {
+        CapsuleState::Recording => false,
+        CapsuleState::Transcribing => true,
+        _ => return false,
     };
-    emit_capsule_for_session(
+    apply_and_publish_dictation_event(
         inner,
-        session_id,
-        capsule_state,
+        DictationEvent::BlePcm {
+            session_id,
+            after_stop,
+        },
         level,
-        elapsed,
         message,
         None,
-    );
-    true
+    )
 }
 
 fn emit_embedded_audio_transcribing_if_active(
@@ -170,32 +190,16 @@ fn emit_embedded_audio_transcribing_if_active(
     session_id: SessionId,
     message: Option<String>,
 ) -> bool {
-    let Some(elapsed) = ({
-        let state = inner.state.lock();
-        if state.session_id != session_id
-            || state.cancelled
-            || !matches!(
-                state.phase,
-                SessionPhase::Starting | SessionPhase::Listening | SessionPhase::Processing
-            )
-        {
-            None
-        } else {
-            Some(state.started_at.elapsed().as_millis() as u64)
-        }
-    }) else {
-        return false;
-    };
-    emit_capsule_for_session(
+    apply_and_publish_dictation_event(
         inner,
-        session_id,
-        CapsuleState::Transcribing,
+        DictationEvent::AsrPartial {
+            session_id,
+            after_stop: true,
+        },
         0.0,
-        elapsed,
         message,
         None,
-    );
-    true
+    )
 }
 
 fn store_embedded_audio_stats(inner: &Arc<Inner>, stats: crate::embedded_audio::SessionStats) {
@@ -802,33 +806,23 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
 
     #[cfg(any(debug_assertions, test))]
     if hotkey_injection_dry_run_enabled() {
-        emit_capsule_for_session(
+        apply_and_publish_dictation_event(
             inner,
-            current_session_id,
-            CapsuleState::Recording,
+            DictationEvent::BleStart {
+                session_id: current_session_id,
+            },
             0.0,
-            0,
             None,
             None,
         );
-        inner.state.lock().phase = SessionPhase::Listening;
         log::info!("[coord] session started (hotkey-injection dry-run)");
         return Ok(());
     }
 
     if let Err(message) = ensure_asr_credentials() {
         log::warn!("[coord] ASR credential gate failed: {message}");
-        emit_capsule_for_session(
-            inner,
-            current_session_id,
-            CapsuleState::Error,
-            0.0,
-            0,
-            Some(message.clone()),
-            None,
-        );
+        publish_dictation_pipeline_error(inner, current_session_id, message.clone());
         restore_prepared_windows_ime_session(inner, current_session_id);
-        inner.state.lock().phase = SessionPhase::Idle;
         return Err(message);
     }
 
@@ -836,17 +830,8 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
 
     if let Err(message) = ensure_microphone_permission(inner) {
         log::warn!("[coord] microphone permission gate failed: {message}");
-        emit_capsule_for_session(
-            inner,
-            current_session_id,
-            CapsuleState::Error,
-            0.0,
-            0,
-            Some(message.clone()),
-            None,
-        );
+        publish_dictation_pipeline_error(inner, current_session_id, message.clone());
         restore_prepared_windows_ime_session(inner, current_session_id);
-        inner.state.lock().phase = SessionPhase::Idle;
         schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
         return Err(message);
     }
@@ -892,17 +877,12 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
             Ok(l) => l,
             Err(e) => {
                 log::error!("[coord] 本地 Qwen3-ASR 初始化失败: {e:#}");
-                emit_capsule_for_session(
+                publish_dictation_pipeline_error(
                     inner,
                     current_session_id,
-                    CapsuleState::Error,
-                    0.0,
-                    0,
-                    Some(format!("本地模型初始化失败: {e}")),
-                    None,
+                    format!("本地模型初始化失败: {e}"),
                 );
                 restore_prepared_windows_ime_session(inner, current_session_id);
-                inner.state.lock().phase = SessionPhase::Idle;
                 schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
                 return Err(format!("local ASR init failed: {e}"));
             }
@@ -953,17 +933,12 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                 }
             }
             discard_startup_resources_for_session(inner, current_session_id);
-            emit_capsule_for_session(
+            publish_dictation_pipeline_error(
                 inner,
                 current_session_id,
-                CapsuleState::Error,
-                0.0,
-                0,
-                Some(format!("ASR 连接失败: {e}")),
-                None,
+                format!("ASR 连接失败: {e}"),
             );
             restore_prepared_windows_ime_session(inner, current_session_id);
-            set_phase_idle_if_session_matches(inner, current_session_id);
             schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
             return Err(e.to_string());
         }
@@ -1056,17 +1031,12 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                 StartupRaceStatus::ActiveStarting => {}
             }
             discard_startup_resources_for_session(inner, current_session_id);
-            emit_capsule_for_session(
+            publish_dictation_pipeline_error(
                 inner,
                 current_session_id,
-                CapsuleState::Error,
-                0.0,
-                0,
-                Some(format!("ASR 连接失败: {e}")),
-                None,
+                format!("ASR 连接失败: {e}"),
             );
             restore_prepared_windows_ime_session(inner, current_session_id);
-            set_phase_idle_if_session_matches(inner, current_session_id);
             schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
             return Err(e.to_string());
         }
@@ -1116,18 +1086,14 @@ pub(super) async fn start_recorder_for_starting(
     let last_emit_at = Arc::new(Mutex::new(None::<Instant>));
     const LEVEL_EMIT_MIN_INTERVAL_MS: u64 = 33;
     let level_handler: Arc<dyn Fn(f32) + Send + Sync> = Arc::new(move |level| {
-        let Some(elapsed) = ({
+        let active = {
             let state = inner_for_level.state.lock();
-            if state.session_id != session_id_for_level
-                || (state.phase != SessionPhase::Listening && state.phase != SessionPhase::Starting)
-            {
-                None
-            } else {
-                Some(state.started_at.elapsed().as_millis() as u64)
-            }
-        }) else {
-            return;
+            state.session_id == session_id_for_level
+                && (state.phase == SessionPhase::Listening || state.phase == SessionPhase::Starting)
         };
+        if !active {
+            return;
+        }
         let now = Instant::now();
         {
             let mut last = last_emit_at.lock();
@@ -1138,12 +1104,11 @@ pub(super) async fn start_recorder_for_starting(
             }
             *last = Some(now);
         }
-        emit_capsule_for_session(
+        publish_dictation_capsule(
             &inner_for_level,
             session_id_for_level,
-            CapsuleState::Recording,
+            DictationUiState::Recording,
             level,
-            elapsed,
             None,
             None,
         );
@@ -1204,18 +1169,9 @@ pub(super) async fn start_recorder_for_starting(
         Err(e) => {
             log::error!("[coord] recorder start failed: {e}");
             cancel_asr_for_session(inner, session_id);
-            emit_capsule_for_session(
-                inner,
-                session_id,
-                CapsuleState::Error,
-                0.0,
-                0,
-                Some(format!("录音启动失败: {e}")),
-                None,
-            );
+            publish_dictation_pipeline_error(inner, session_id, format!("录音启动失败: {e}"));
             restore_prepared_windows_ime_session(inner, session_id);
             release_recording_mute(inner, "dictation");
-            inner.state.lock().phase = SessionPhase::Idle;
             schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(session_id));
             return Err(e.to_string());
         }
@@ -1265,12 +1221,11 @@ pub(super) fn abort_recording_with_error(inner: &Arc<Inner>, message: String) {
         publish_abort_idle_after_restore(&mut state, abort.session_id);
     }
 
-    emit_capsule_for_session(
+    publish_dictation_capsule(
         inner,
         abort.session_id,
-        CapsuleState::Error,
+        DictationUiState::Error,
         0.0,
-        abort.elapsed,
         Some(message),
         None,
     );
@@ -1884,20 +1839,9 @@ impl EmbeddedStreamingDictation {
         if let Some(session) = self.session.take() {
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
-            set_phase_idle_if_session_matches(inner, session.session_id);
-        }
-        let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
-        if let Some(session_id) = event_session_id {
-            emit_capsule_for_session(
-                inner,
-                session_id,
-                CapsuleState::Error,
-                0.0,
-                elapsed,
-                Some(message.to_string()),
-                None,
-            );
+            publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
         } else {
+            let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
             emit_capsule(
                 inner,
                 CapsuleState::Error,
@@ -1997,29 +1941,19 @@ async fn begin_embedded_audio_dictation_session(
     inner
         .audio_archive_active
         .store(false, std::sync::atomic::Ordering::Relaxed);
-    emit_capsule_for_session(
+    publish_dictation_capsule(
         inner,
         current_session_id,
-        CapsuleState::Recording,
+        DictationUiState::Recording,
         0.0,
-        0,
         None,
         None,
     );
 
     if let Err(message) = ensure_asr_credentials() {
         log::warn!("[coord] embedded audio ASR credential gate failed: {message}");
-        emit_capsule_for_session(
-            inner,
-            current_session_id,
-            CapsuleState::Error,
-            0.0,
-            0,
-            Some(message.clone()),
-            None,
-        );
+        publish_dictation_pipeline_error(inner, current_session_id, message.clone());
         restore_prepared_windows_ime_session(inner, current_session_id);
-        inner.state.lock().phase = SessionPhase::Idle;
         schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
         return Err(message);
     }
@@ -2030,18 +1964,9 @@ async fn begin_embedded_audio_dictation_session(
             Ok(consumer) => consumer,
             Err(message) => {
                 log::warn!("[coord] embedded audio ASR setup failed: {message}");
-                emit_capsule_for_session(
-                    inner,
-                    current_session_id,
-                    CapsuleState::Error,
-                    0.0,
-                    0,
-                    Some(message.clone()),
-                    None,
-                );
+                publish_dictation_pipeline_error(inner, current_session_id, message.clone());
                 restore_prepared_windows_ime_session(inner, current_session_id);
                 cancel_asr_for_session(inner, current_session_id);
-                inner.state.lock().phase = SessionPhase::Idle;
                 schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
                 return Err(message);
             }
@@ -2067,25 +1992,17 @@ fn activate_embedded_audio_dictation_session(
     session_id: SessionId,
     initial_level: f32,
 ) -> bool {
-    {
+    let transition = {
         let mut state = inner.state.lock();
-        if state.session_id != session_id || state.phase != SessionPhase::Starting {
-            cancel_asr_for_session(inner, session_id);
-            restore_prepared_windows_ime_session(inner, session_id);
-            return false;
-        }
-        state.phase = SessionPhase::Listening;
+        apply_dictation_event(&mut state, DictationEvent::BleStart { session_id })
+    };
+    if matches!(transition, DictationTransition::Ignored { .. }) {
+        cancel_asr_for_session(inner, session_id);
+        restore_prepared_windows_ime_session(inner, session_id);
+        return false;
     }
 
-    emit_capsule_for_session(
-        inner,
-        session_id,
-        CapsuleState::Recording,
-        initial_level,
-        0,
-        None,
-        None,
-    );
+    publish_dictation_transition(inner, transition, initial_level, None, None);
     true
 }
 
@@ -2344,25 +2261,27 @@ fn embedded_pcm_rms_and_peak(pcm: &[u8]) -> (f64, u16) {
 }
 
 pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
-    let current_session_id = {
+    let transition = {
         let mut state = inner.state.lock();
-        let Some(session_id) = start_processing_if_listening(&mut state) else {
-            return Ok(());
-        };
-        session_id
+        let session_id = state.session_id;
+        apply_dictation_event(&mut state, DictationEvent::Stop { session_id })
     };
-
-    let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
-    emit_capsule_for_session(
+    let current_session_id = match transition {
+        DictationTransition::Applied {
+            session_id: Some(session_id),
+            ..
+        } => session_id,
+        _ => {
+            return Ok(());
+        }
+    };
+    publish_dictation_transition(
         inner,
-        current_session_id,
-        CapsuleState::Transcribing,
+        transition,
         0.0,
-        elapsed,
         current_embedded_audio_partial_preview(inner),
         None,
     );
-
     if let Some(rec) = take_recorder_for_session(inner, current_session_id) {
         rec.stop();
         release_recording_mute(inner, "dictation");
@@ -2374,7 +2293,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         None => {
             restore_prepared_windows_ime_session(inner, current_session_id);
             clear_embedded_audio_stats(inner);
-            inner.state.lock().phase = SessionPhase::Idle;
+            set_phase_idle_if_session_matches(inner, current_session_id);
             return Ok(());
         }
     };
@@ -2386,18 +2305,11 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
             if let Err(e) = asr.send_last_frame().await {
                 log::error!("[coord] send last frame failed: {e}");
                 asr.cancel();
-                emit_capsule_for_session(
+                finish_dictation_pipeline_error(
                     inner,
                     current_session_id,
-                    CapsuleState::Error,
-                    0.0,
-                    elapsed,
-                    Some(format!("识别收尾失败: {e}")),
-                    None,
+                    format!("识别收尾失败: {e}"),
                 );
-                restore_prepared_windows_ime_session(inner, current_session_id);
-                inner.state.lock().phase = SessionPhase::Idle;
-                schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
                 return Err(e.to_string());
             }
             // 添加全局超时保护：防止 await_final_result() 永远挂起
@@ -2406,21 +2318,10 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => {
                     log::error!("[coord] await final failed: {e}");
-                    emit_capsule_for_session(
+                    finish_dictation_pipeline_error(
                         inner,
                         current_session_id,
-                        CapsuleState::Error,
-                        0.0,
-                        elapsed,
-                        Some(format!("识别失败: {e}")),
-                        None,
-                    );
-                    restore_prepared_windows_ime_session(inner, current_session_id);
-                    inner.state.lock().phase = SessionPhase::Idle;
-                    schedule_capsule_idle(
-                        inner,
-                        CAPSULE_AUTO_HIDE_DELAY_MS,
-                        Some(current_session_id),
+                        format!("识别失败: {e}"),
                     );
                     return Err(e.to_string());
                 }
@@ -2432,22 +2333,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                     );
                     // 清理 ASR session，避免资源泄漏
                     asr.cancel();
-                    emit_capsule_for_session(
-                        inner,
-                        current_session_id,
-                        CapsuleState::Error,
-                        0.0,
-                        elapsed,
-                        Some("识别超时".to_string()),
-                        None,
-                    );
-                    restore_prepared_windows_ime_session(inner, current_session_id);
-                    inner.state.lock().phase = SessionPhase::Idle;
-                    schedule_capsule_idle(
-                        inner,
-                        CAPSULE_AUTO_HIDE_DELAY_MS,
-                        Some(current_session_id),
-                    );
+                    finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
                     return Err("global timeout".to_string());
                 }
             }
@@ -2460,21 +2346,10 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => {
                     log::error!("[coord] whisper transcribe failed: {e}");
-                    emit_capsule_for_session(
+                    finish_dictation_pipeline_error(
                         inner,
                         current_session_id,
-                        CapsuleState::Error,
-                        0.0,
-                        elapsed,
-                        Some(format!("识别失败: {e}")),
-                        None,
-                    );
-                    restore_prepared_windows_ime_session(inner, current_session_id);
-                    inner.state.lock().phase = SessionPhase::Idle;
-                    schedule_capsule_idle(
-                        inner,
-                        CAPSULE_AUTO_HIDE_DELAY_MS,
-                        Some(current_session_id),
+                        format!("识别失败: {e}"),
                     );
                     return Err(e.to_string());
                 }
@@ -2483,22 +2358,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                         "[coord] whisper 全局超时 {} 秒",
                         COORDINATOR_GLOBAL_TIMEOUT_SECS
                     );
-                    emit_capsule_for_session(
-                        inner,
-                        current_session_id,
-                        CapsuleState::Error,
-                        0.0,
-                        elapsed,
-                        Some("识别超时".to_string()),
-                        None,
-                    );
-                    restore_prepared_windows_ime_session(inner, current_session_id);
-                    inner.state.lock().phase = SessionPhase::Idle;
-                    schedule_capsule_idle(
-                        inner,
-                        CAPSULE_AUTO_HIDE_DELAY_MS,
-                        Some(current_session_id),
-                    );
+                    finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
                     return Err("whisper global timeout".to_string());
                 }
             }
@@ -2513,21 +2373,10 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => {
                     log::error!("[coord] Bailian await final failed: {e}");
-                    emit_capsule_for_session(
+                    finish_dictation_pipeline_error(
                         inner,
                         current_session_id,
-                        CapsuleState::Error,
-                        0.0,
-                        elapsed,
-                        Some(format!("识别失败: {e}")),
-                        None,
-                    );
-                    restore_prepared_windows_ime_session(inner, current_session_id);
-                    inner.state.lock().phase = SessionPhase::Idle;
-                    schedule_capsule_idle(
-                        inner,
-                        CAPSULE_AUTO_HIDE_DELAY_MS,
-                        Some(current_session_id),
+                        format!("识别失败: {e}"),
                     );
                     return Err(e.to_string());
                 }
@@ -2537,22 +2386,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                         COORDINATOR_GLOBAL_TIMEOUT_SECS
                     );
                     asr.cancel();
-                    emit_capsule_for_session(
-                        inner,
-                        current_session_id,
-                        CapsuleState::Error,
-                        0.0,
-                        elapsed,
-                        Some("识别超时".to_string()),
-                        None,
-                    );
-                    restore_prepared_windows_ime_session(inner, current_session_id);
-                    inner.state.lock().phase = SessionPhase::Idle;
-                    schedule_capsule_idle(
-                        inner,
-                        CAPSULE_AUTO_HIDE_DELAY_MS,
-                        Some(current_session_id),
-                    );
+                    finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
                     return Err("bailian global timeout".to_string());
                 }
             }
@@ -2580,21 +2414,10 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                     }
                     log::error!("[coord] Foundry Local Whisper transcribe failed: {e:#}");
                     schedule_foundry_local_asr_release(inner, current_session_id);
-                    emit_capsule_for_session(
+                    finish_dictation_pipeline_error(
                         inner,
                         current_session_id,
-                        CapsuleState::Error,
-                        0.0,
-                        elapsed,
-                        Some(format!("本地识别失败: {e}")),
-                        None,
-                    );
-                    restore_prepared_windows_ime_session(inner, current_session_id);
-                    inner.state.lock().phase = SessionPhase::Idle;
-                    schedule_capsule_idle(
-                        inner,
-                        CAPSULE_AUTO_HIDE_DELAY_MS,
-                        Some(current_session_id),
+                        format!("本地识别失败: {e}"),
                     );
                     return Err(e.to_string());
                 }
@@ -2622,21 +2445,10 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => {
                     log::error!("[coord] local Qwen3-ASR transcribe failed: {e:#}");
-                    emit_capsule_for_session(
+                    finish_dictation_pipeline_error(
                         inner,
                         current_session_id,
-                        CapsuleState::Error,
-                        0.0,
-                        elapsed,
-                        Some(format!("本地识别失败: {e}")),
-                        None,
-                    );
-                    restore_prepared_windows_ime_session(inner, current_session_id);
-                    inner.state.lock().phase = SessionPhase::Idle;
-                    schedule_capsule_idle(
-                        inner,
-                        CAPSULE_AUTO_HIDE_DELAY_MS,
-                        Some(current_session_id),
+                        format!("本地识别失败: {e}"),
                     );
                     return Err(e.to_string());
                 }
@@ -2646,22 +2458,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                         timeout_duration.as_secs(),
                         audio_secs
                     );
-                    emit_capsule_for_session(
-                        inner,
-                        current_session_id,
-                        CapsuleState::Error,
-                        0.0,
-                        elapsed,
-                        Some("识别超时".to_string()),
-                        None,
-                    );
-                    restore_prepared_windows_ime_session(inner, current_session_id);
-                    inner.state.lock().phase = SessionPhase::Idle;
-                    schedule_capsule_idle(
-                        inner,
-                        CAPSULE_AUTO_HIDE_DELAY_MS,
-                        Some(current_session_id),
-                    );
+                    finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
                     return Err("local global timeout".to_string());
                 }
             }
@@ -2728,20 +2525,31 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         ) {
             log::error!("[coord] history append failed: {e}");
         }
-        emit_capsule_for_session(
+        apply_and_publish_dictation_event(
             inner,
-            current_session_id,
-            CapsuleState::Error,
+            DictationEvent::AsrFinal {
+                session_id: current_session_id,
+                transcript_empty: true,
+            },
             0.0,
-            elapsed,
             Some("没有识别到语音".to_string()),
             None,
         );
         restore_prepared_windows_ime_session(inner, current_session_id);
-        inner.state.lock().phase = SessionPhase::Idle;
         schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
         return Err("ASR returned empty transcript".to_string());
     }
+
+    apply_and_publish_dictation_event(
+        inner,
+        DictationEvent::AsrFinal {
+            session_id: current_session_id,
+            transcript_empty: false,
+        },
+        0.0,
+        Some(raw.text.clone()),
+        None,
+    );
 
     let correction_rules = match inner.correction_rules.list() {
         Ok(rules) => rules,
@@ -2762,16 +2570,6 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
             raw.text = corrected;
         }
     }
-    emit_capsule_for_session(
-        inner,
-        current_session_id,
-        CapsuleState::Polishing,
-        0.0,
-        elapsed,
-        Some(raw.text.clone()),
-        None,
-    );
-
     let prefs = inner.prefs.get();
     let force_raw_output = std::env::var("LISTENER_TYPE_FORCE_RAW_OUTPUT")
         .map(|value| value == "1")
@@ -2918,12 +2716,11 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         &correction_rules,
         already_streamed,
     );
-    emit_capsule_for_session(
+    publish_dictation_capsule(
         inner,
         current_session_id,
-        CapsuleState::Polishing,
+        DictationUiState::Polishing,
         0.0,
-        elapsed,
         Some(polished.clone()),
         None,
     );
@@ -2935,17 +2732,17 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     // 流式路径例外：`already_streamed = true` 表示字符已经一边流一边落到光标了，
     // 撤销不掉。即使 cancel 旗在中途被立起来，也只能尊重「已经发生」的事实，进入
     // Inserting 状态完成 history / vocab 等收尾工作。
-    let proceed_to_insert = {
+    let insert_transition = {
         let mut state = inner.state.lock();
-        if state.cancelled && !already_streamed {
-            state.phase = SessionPhase::Idle;
-            false
-        } else {
-            state.phase = SessionPhase::Inserting;
-            true
-        }
+        apply_dictation_event(
+            &mut state,
+            DictationEvent::InsertionStarted {
+                session_id: current_session_id,
+                already_streamed,
+            },
+        )
     };
-    if !proceed_to_insert {
+    if matches!(insert_transition, DictationTransition::Ignored { .. }) {
         log::info!(
             "[coord] cancel detected before insert — discarding output (chars={})",
             polished.chars().count()
@@ -3122,21 +2919,16 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         default_done_message(status, polish_error.is_some())
     };
 
-    emit_capsule_for_session(
+    apply_and_publish_dictation_event(
         inner,
-        current_session_id,
-        CapsuleState::Done,
+        DictationEvent::InsertionComplete {
+            session_id: current_session_id,
+        },
         0.0,
-        elapsed,
         done_message,
         Some(inserted_chars),
     );
 
-    {
-        let mut state = inner.state.lock();
-        state.phase = SessionPhase::Idle;
-        state.focus_target = None;
-    }
     schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
 
     Ok(())
@@ -3167,41 +2959,29 @@ pub(super) fn dictation_error_code(
 }
 
 pub(super) fn cancel_session(inner: &Arc<Inner>) {
-    let Some(decision) = ({
+    let (session_id, phase, transition) = {
         let mut state = inner.state.lock();
+        let session_id = state.session_id;
         let phase = state.phase;
-        let decision = begin_cancel_session_state(&mut state);
-        if phase == SessionPhase::Inserting {
-            log::info!("[coord] cancel ignored — already in Inserting phase, can't undo paste");
+        let transition = apply_dictation_event(&mut state, DictationEvent::Cancel { session_id });
+        if matches!(transition, DictationTransition::Ignored { .. }) {
+            if phase == SessionPhase::Inserting {
+                log::info!("[coord] cancel ignored — already in Inserting phase, can't undo paste");
+            }
+            return;
         }
-        decision
-    }) else {
-        return;
+        (session_id, phase, transition)
     };
 
-    stop_recorder_for_session(inner, decision.session_id);
-    cancel_asr_for_session(inner, decision.session_id);
-    restore_prepared_windows_ime_session(inner, decision.session_id);
+    stop_recorder_for_session(inner, session_id);
+    cancel_asr_for_session(inner, session_id);
+    restore_prepared_windows_ime_session(inner, session_id);
     if request_embedded_ble_capture_cancel(inner) {
         log::info!("[coord] embedded BLE capture cancel requested");
     }
-    // Processing 阶段保持 phase=Processing 让 end_session 自己走完检查 + 收尾；
-    // 其他阶段直接转 Idle。
-    if decision.phase != SessionPhase::Processing {
-        let mut state = inner.state.lock();
-        finish_cancel_session_state(&mut state, decision);
-    }
-    emit_capsule_for_session(
-        inner,
-        decision.session_id,
-        CapsuleState::Cancelled,
-        0.0,
-        0,
-        None,
-        None,
-    );
-    log::info!("[coord] session cancelled (was {:?})", decision.phase);
-    schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(decision.session_id));
+    publish_dictation_transition(inner, transition, 0.0, None, None);
+    log::info!("[coord] session cancelled (was {:?})", phase);
+    schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(session_id));
 }
 
 fn append_typed_prefix(target: &mut String, delta: &str, typed_chars: usize) -> usize {

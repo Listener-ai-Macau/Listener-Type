@@ -64,23 +64,461 @@ impl Default for SessionState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DictationEvent {
+    Start {
+        focus_target: Option<usize>,
+        front_app: Option<String>,
+    },
+    Stop {
+        session_id: SessionId,
+    },
+    Cancel {
+        session_id: SessionId,
+    },
+    BleStart {
+        session_id: SessionId,
+    },
+    BlePcm {
+        session_id: SessionId,
+        after_stop: bool,
+    },
+    BleStop {
+        session_id: SessionId,
+    },
+    AsrPartial {
+        session_id: SessionId,
+        after_stop: bool,
+    },
+    AsrFinal {
+        session_id: SessionId,
+        transcript_empty: bool,
+    },
+    PipelineError {
+        session_id: SessionId,
+    },
+    InsertionStarted {
+        session_id: SessionId,
+        already_streamed: bool,
+    },
+    InsertionComplete {
+        session_id: SessionId,
+    },
+    Timeout {
+        session_id: SessionId,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DictationUiState {
+    Recording,
+    Transcribing,
+    Polishing,
+    Done,
+    Cancelled,
+    Error,
+    Idle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DictationSnapshot {
+    pub(crate) session_id: SessionId,
+    pub(crate) state: DictationUiState,
+    pub(crate) elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DictationIgnoreReason {
+    StaleSession,
+    CancelledSession,
+    InvalidPhase,
+    InsertionCannotCancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DictationActionableError {
+    EmptyTranscript,
+    PipelineError,
+    Timeout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DictationTransition {
+    Applied {
+        session_id: Option<SessionId>,
+        snapshot: Option<DictationSnapshot>,
+    },
+    Ignored {
+        reason: DictationIgnoreReason,
+    },
+    ActionableError {
+        session_id: SessionId,
+        error: DictationActionableError,
+        snapshot: DictationSnapshot,
+    },
+}
+
+impl DictationTransition {
+    pub(crate) fn snapshot(self) -> Option<DictationSnapshot> {
+        match self {
+            DictationTransition::Applied { snapshot, .. } => snapshot,
+            DictationTransition::ActionableError { snapshot, .. } => Some(snapshot),
+            DictationTransition::Ignored { .. } => None,
+        }
+    }
+}
+
+fn dictation_snapshot(state: &SessionState, ui_state: DictationUiState) -> DictationSnapshot {
+    DictationSnapshot {
+        session_id: state.session_id,
+        state: ui_state,
+        elapsed_ms: state.started_at.elapsed().as_millis() as u64,
+    }
+}
+
+fn dictation_stale_or_cancelled(
+    state: &SessionState,
+    session_id: SessionId,
+) -> Option<DictationTransition> {
+    if state.session_id != session_id {
+        Some(DictationTransition::Ignored {
+            reason: DictationIgnoreReason::StaleSession,
+        })
+    } else if state.cancelled {
+        Some(DictationTransition::Ignored {
+            reason: DictationIgnoreReason::CancelledSession,
+        })
+    } else {
+        None
+    }
+}
+
+pub(crate) fn publishable_dictation_snapshot(
+    state: &SessionState,
+    session_id: SessionId,
+    ui_state: DictationUiState,
+) -> Result<DictationSnapshot, DictationIgnoreReason> {
+    if state.session_id != session_id {
+        return Err(DictationIgnoreReason::StaleSession);
+    }
+    if state.cancelled && !matches!(ui_state, DictationUiState::Cancelled) {
+        return Err(DictationIgnoreReason::CancelledSession);
+    }
+
+    let valid = match ui_state {
+        DictationUiState::Recording => {
+            matches!(
+                state.phase,
+                SessionPhase::Starting | SessionPhase::Listening
+            )
+        }
+        DictationUiState::Transcribing => matches!(
+            state.phase,
+            SessionPhase::Starting
+                | SessionPhase::Listening
+                | SessionPhase::Processing
+                | SessionPhase::Inserting
+        ),
+        DictationUiState::Polishing => matches!(state.phase, SessionPhase::Processing),
+        DictationUiState::Done => matches!(state.phase, SessionPhase::Inserting),
+        DictationUiState::Cancelled => state.cancelled,
+        DictationUiState::Error => state.phase != SessionPhase::Idle || state.cancelled,
+        DictationUiState::Idle => matches!(state.phase, SessionPhase::Idle),
+    };
+    if valid {
+        Ok(dictation_snapshot(state, ui_state))
+    } else {
+        Err(DictationIgnoreReason::InvalidPhase)
+    }
+}
+
+/// Pure dictation lifecycle FSM. It owns only coordinator session state and
+/// publishable UI snapshots; Tauri, recorder, ASR, BLE, insertion, and history
+/// side effects remain outside this layer.
+pub(crate) fn apply_dictation_event(
+    state: &mut SessionState,
+    event: DictationEvent,
+) -> DictationTransition {
+    match event {
+        DictationEvent::Start {
+            focus_target,
+            front_app,
+        } => {
+            if state.phase != SessionPhase::Idle {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            state.phase = SessionPhase::Starting;
+            state.started_at = Instant::now();
+            state.pending_stop = false;
+            state.cancelled = false;
+            state.focus_target = focus_target;
+            state.session_id = new_session_id();
+            state.front_app = front_app;
+            DictationTransition::Applied {
+                session_id: Some(state.session_id),
+                snapshot: None,
+            }
+        }
+        DictationEvent::Stop { session_id } => {
+            if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
+                return result;
+            }
+            match state.phase {
+                SessionPhase::Starting => {
+                    state.pending_stop = true;
+                    DictationTransition::Applied {
+                        session_id: Some(session_id),
+                        snapshot: Some(dictation_snapshot(state, DictationUiState::Transcribing)),
+                    }
+                }
+                SessionPhase::Listening => {
+                    state.phase = SessionPhase::Processing;
+                    DictationTransition::Applied {
+                        session_id: Some(session_id),
+                        snapshot: Some(dictation_snapshot(state, DictationUiState::Transcribing)),
+                    }
+                }
+                _ => DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                },
+            }
+        }
+        DictationEvent::Cancel { session_id } => {
+            if state.session_id != session_id {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::StaleSession,
+                };
+            }
+            match state.phase {
+                SessionPhase::Idle => DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                },
+                SessionPhase::Inserting => DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InsertionCannotCancel,
+                },
+                SessionPhase::Starting | SessionPhase::Listening | SessionPhase::Processing => {
+                    state.cancelled = true;
+                    state.focus_target = None;
+                    if state.phase != SessionPhase::Processing {
+                        state.phase = SessionPhase::Idle;
+                    }
+                    DictationTransition::Applied {
+                        session_id: Some(session_id),
+                        snapshot: Some(dictation_snapshot(state, DictationUiState::Cancelled)),
+                    }
+                }
+            }
+        }
+        DictationEvent::BleStart { session_id } => {
+            if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
+                return result;
+            }
+            if state.phase != SessionPhase::Starting {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            state.phase = SessionPhase::Listening;
+            DictationTransition::Applied {
+                session_id: Some(session_id),
+                snapshot: Some(dictation_snapshot(state, DictationUiState::Recording)),
+            }
+        }
+        DictationEvent::BlePcm {
+            session_id,
+            after_stop,
+        } => {
+            if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
+                return result;
+            }
+            if state.phase != SessionPhase::Listening {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            let ui_state = if after_stop {
+                DictationUiState::Transcribing
+            } else {
+                DictationUiState::Recording
+            };
+            DictationTransition::Applied {
+                session_id: Some(session_id),
+                snapshot: Some(dictation_snapshot(state, ui_state)),
+            }
+        }
+        DictationEvent::BleStop { session_id } => {
+            if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
+                return result;
+            }
+            if state.phase != SessionPhase::Listening {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            DictationTransition::Applied {
+                session_id: Some(session_id),
+                snapshot: Some(dictation_snapshot(state, DictationUiState::Transcribing)),
+            }
+        }
+        DictationEvent::AsrPartial {
+            session_id,
+            after_stop,
+        } => {
+            if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
+                return result;
+            }
+            let ui_state = match state.phase {
+                SessionPhase::Starting | SessionPhase::Listening if !after_stop => {
+                    DictationUiState::Recording
+                }
+                SessionPhase::Starting
+                | SessionPhase::Listening
+                | SessionPhase::Processing
+                | SessionPhase::Inserting => DictationUiState::Transcribing,
+                SessionPhase::Idle => {
+                    return DictationTransition::Ignored {
+                        reason: DictationIgnoreReason::InvalidPhase,
+                    }
+                }
+            };
+            DictationTransition::Applied {
+                session_id: Some(session_id),
+                snapshot: Some(dictation_snapshot(state, ui_state)),
+            }
+        }
+        DictationEvent::AsrFinal {
+            session_id,
+            transcript_empty,
+        } => {
+            if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
+                return result;
+            }
+            if state.phase != SessionPhase::Processing {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            if transcript_empty {
+                state.phase = SessionPhase::Idle;
+                let snapshot = dictation_snapshot(state, DictationUiState::Error);
+                DictationTransition::ActionableError {
+                    session_id,
+                    error: DictationActionableError::EmptyTranscript,
+                    snapshot,
+                }
+            } else {
+                DictationTransition::Applied {
+                    session_id: Some(session_id),
+                    snapshot: Some(dictation_snapshot(state, DictationUiState::Polishing)),
+                }
+            }
+        }
+        DictationEvent::PipelineError { session_id } => {
+            if state.session_id != session_id {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::StaleSession,
+                };
+            }
+            if state.phase == SessionPhase::Idle {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            state.phase = SessionPhase::Idle;
+            let snapshot = dictation_snapshot(state, DictationUiState::Error);
+            DictationTransition::ActionableError {
+                session_id,
+                error: DictationActionableError::PipelineError,
+                snapshot,
+            }
+        }
+        DictationEvent::InsertionStarted {
+            session_id,
+            already_streamed,
+        } => {
+            if state.session_id != session_id {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::StaleSession,
+                };
+            }
+            if state.phase != SessionPhase::Processing {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            if state.cancelled && !already_streamed {
+                state.phase = SessionPhase::Idle;
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::CancelledSession,
+                };
+            }
+            state.phase = SessionPhase::Inserting;
+            DictationTransition::Applied {
+                session_id: Some(session_id),
+                snapshot: None,
+            }
+        }
+        DictationEvent::InsertionComplete { session_id } => {
+            if state.session_id != session_id {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::StaleSession,
+                };
+            }
+            if state.phase != SessionPhase::Inserting {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            state.phase = SessionPhase::Idle;
+            state.focus_target = None;
+            DictationTransition::Applied {
+                session_id: Some(session_id),
+                snapshot: Some(dictation_snapshot(state, DictationUiState::Done)),
+            }
+        }
+        DictationEvent::Timeout { session_id } => {
+            if state.session_id != session_id {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::StaleSession,
+                };
+            }
+            if state.phase == SessionPhase::Idle {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
+            state.phase = SessionPhase::Idle;
+            let snapshot = dictation_snapshot(state, DictationUiState::Error);
+            DictationTransition::ActionableError {
+                session_id,
+                error: DictationActionableError::Timeout,
+                snapshot,
+            }
+        }
+    }
+}
+
 /// begin_session 的锁内转移：只有 Idle 能进入 Starting，并生成新 session id。
 pub(crate) fn begin_session_state(
     state: &mut SessionState,
     focus_target: Option<usize>,
     front_app: Option<String>,
 ) -> Option<SessionId> {
-    if state.phase != SessionPhase::Idle {
-        return None;
+    match apply_dictation_event(
+        state,
+        DictationEvent::Start {
+            focus_target,
+            front_app,
+        },
+    ) {
+        DictationTransition::Applied {
+            session_id: Some(session_id),
+            ..
+        } => Some(session_id),
+        _ => None,
     }
-    state.phase = SessionPhase::Starting;
-    state.started_at = Instant::now();
-    state.pending_stop = false;
-    state.cancelled = false;
-    state.focus_target = focus_target;
-    state.session_id = new_session_id();
-    state.front_app = front_app;
-    Some(state.session_id)
 }
 
 /// stop_dictation / hold release 在 Starting 阶段只记录 pending_stop，等待启动完成后处理。
@@ -88,8 +526,11 @@ pub(crate) fn request_stop_during_starting_state(state: &mut SessionState) -> bo
     if state.phase != SessionPhase::Starting {
         return false;
     }
-    state.pending_stop = true;
-    true
+    let session_id = state.session_id;
+    matches!(
+        apply_dictation_event(state, DictationEvent::Stop { session_id },),
+        DictationTransition::Applied { .. }
+    )
 }
 
 /// begin_session 中各 await 之间的 cancel race 检查结果。
@@ -494,5 +935,232 @@ mod tests {
             assert_eq!(state.phase, phase);
             assert_eq!(state.cancelled, cancelled);
         }
+    }
+
+    #[test]
+    fn dictation_fsm_models_rapid_short_utterance() {
+        let mut state = SessionState {
+            phase: SessionPhase::Starting,
+            session_id: session_id(1),
+            ..Default::default()
+        };
+
+        let cases = [
+            (
+                DictationEvent::BleStart {
+                    session_id: session_id(1),
+                },
+                SessionPhase::Listening,
+                Some(DictationUiState::Recording),
+            ),
+            (
+                DictationEvent::BlePcm {
+                    session_id: session_id(1),
+                    after_stop: false,
+                },
+                SessionPhase::Listening,
+                Some(DictationUiState::Recording),
+            ),
+            (
+                DictationEvent::BleStop {
+                    session_id: session_id(1),
+                },
+                SessionPhase::Listening,
+                Some(DictationUiState::Transcribing),
+            ),
+            (
+                DictationEvent::Stop {
+                    session_id: session_id(1),
+                },
+                SessionPhase::Processing,
+                Some(DictationUiState::Transcribing),
+            ),
+            (
+                DictationEvent::AsrFinal {
+                    session_id: session_id(1),
+                    transcript_empty: false,
+                },
+                SessionPhase::Processing,
+                Some(DictationUiState::Polishing),
+            ),
+            (
+                DictationEvent::InsertionStarted {
+                    session_id: session_id(1),
+                    already_streamed: false,
+                },
+                SessionPhase::Inserting,
+                None,
+            ),
+            (
+                DictationEvent::InsertionComplete {
+                    session_id: session_id(1),
+                },
+                SessionPhase::Idle,
+                Some(DictationUiState::Done),
+            ),
+        ];
+
+        for (event, expected_phase, expected_ui) in cases {
+            let transition = apply_dictation_event(&mut state, event);
+            assert_eq!(state.phase, expected_phase);
+            assert_eq!(
+                transition.snapshot().map(|snapshot| snapshot.state),
+                expected_ui
+            );
+        }
+    }
+
+    #[test]
+    fn dictation_fsm_handles_cancel_stop_races() {
+        let cases = [
+            (
+                "stop-then-cancel",
+                vec![
+                    DictationEvent::Stop {
+                        session_id: session_id(2),
+                    },
+                    DictationEvent::Cancel {
+                        session_id: session_id(2),
+                    },
+                ],
+                SessionPhase::Processing,
+                true,
+                vec![
+                    Some(DictationUiState::Transcribing),
+                    Some(DictationUiState::Cancelled),
+                ],
+            ),
+            (
+                "cancel-then-stop",
+                vec![
+                    DictationEvent::Cancel {
+                        session_id: session_id(2),
+                    },
+                    DictationEvent::Stop {
+                        session_id: session_id(2),
+                    },
+                ],
+                SessionPhase::Idle,
+                true,
+                vec![Some(DictationUiState::Cancelled), None],
+            ),
+        ];
+
+        for (label, events, expected_phase, expected_cancelled, expected_ui) in cases {
+            let mut state = SessionState {
+                phase: SessionPhase::Listening,
+                session_id: session_id(2),
+                ..Default::default()
+            };
+
+            let actual_ui: Vec<_> = events
+                .into_iter()
+                .map(|event| {
+                    apply_dictation_event(&mut state, event)
+                        .snapshot()
+                        .map(|s| s.state)
+                })
+                .collect();
+
+            assert_eq!(actual_ui, expected_ui, "{label}");
+            assert_eq!(state.phase, expected_phase, "{label}");
+            assert_eq!(state.cancelled, expected_cancelled, "{label}");
+        }
+    }
+
+    #[test]
+    fn dictation_fsm_ignores_stale_ble_chunks_and_asr_updates() {
+        let cases = [
+            DictationEvent::BlePcm {
+                session_id: session_id(41),
+                after_stop: false,
+            },
+            DictationEvent::BleStop {
+                session_id: session_id(41),
+            },
+            DictationEvent::AsrPartial {
+                session_id: session_id(41),
+                after_stop: false,
+            },
+            DictationEvent::AsrFinal {
+                session_id: session_id(41),
+                transcript_empty: false,
+            },
+        ];
+
+        for event in cases {
+            let mut state = SessionState {
+                phase: SessionPhase::Listening,
+                session_id: session_id(42),
+                ..Default::default()
+            };
+
+            assert_eq!(
+                apply_dictation_event(&mut state, event),
+                DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::StaleSession,
+                }
+            );
+            assert_eq!(state.phase, SessionPhase::Listening);
+            assert_eq!(state.session_id, session_id(42));
+        }
+    }
+
+    #[test]
+    fn dictation_fsm_turns_empty_asr_result_into_actionable_error() {
+        let mut state = SessionState {
+            phase: SessionPhase::Processing,
+            session_id: session_id(3),
+            ..Default::default()
+        };
+
+        let transition = apply_dictation_event(
+            &mut state,
+            DictationEvent::AsrFinal {
+                session_id: session_id(3),
+                transcript_empty: true,
+            },
+        );
+
+        assert_eq!(state.phase, SessionPhase::Idle);
+        match transition {
+            DictationTransition::ActionableError {
+                session_id: transition_session_id,
+                error,
+                snapshot,
+            } => {
+                assert_eq!(transition_session_id, session_id(3));
+                assert_eq!(error, DictationActionableError::EmptyTranscript);
+                assert_eq!(snapshot.session_id, session_id(3));
+                assert_eq!(snapshot.state, DictationUiState::Error);
+            }
+            other => panic!("expected actionable empty transcript error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dictation_fsm_rejects_cancel_during_insertion_without_state_change() {
+        let mut state = SessionState {
+            phase: SessionPhase::Inserting,
+            session_id: session_id(4),
+            cancelled: false,
+            focus_target: Some(9),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            apply_dictation_event(
+                &mut state,
+                DictationEvent::Cancel {
+                    session_id: session_id(4),
+                },
+            ),
+            DictationTransition::Ignored {
+                reason: DictationIgnoreReason::InsertionCannotCancel,
+            }
+        );
+        assert_eq!(state.phase, SessionPhase::Inserting);
+        assert!(!state.cancelled);
+        assert_eq!(state.focus_target, Some(9));
     }
 }

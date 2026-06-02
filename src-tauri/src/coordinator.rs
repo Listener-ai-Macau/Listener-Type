@@ -27,10 +27,10 @@ use crate::asr::{
 };
 use crate::combo_hotkey::{ComboHotkeyError, ComboHotkeyEvent, ComboHotkeyMonitor};
 use crate::coordinator_state::{
-    begin_cancel_session_state, begin_recording_abort_before_restore, begin_session_state,
-    finish_cancel_session_state, finish_starting_session_state, new_session_id,
-    publish_abort_idle_after_restore, start_processing_if_listening, startup_race_status,
-    BeginOutcome, SessionId, SessionPhase, SessionState, StartupRaceStatus,
+    begin_recording_abort_before_restore, begin_session_state, finish_starting_session_state,
+    new_session_id, publish_abort_idle_after_restore, publishable_dictation_snapshot,
+    startup_race_status, BeginOutcome, DictationSnapshot, DictationTransition, DictationUiState,
+    SessionId, SessionPhase, SessionState, StartupRaceStatus,
 };
 use crate::hotkey::{HotkeyEvent, HotkeyMonitor};
 use crate::insertion::TextInserter;
@@ -6053,6 +6053,70 @@ fn emit_capsule_for_session(
         message,
         inserted_chars,
     );
+}
+
+fn capsule_state_from_dictation(ui_state: DictationUiState) -> CapsuleState {
+    match ui_state {
+        DictationUiState::Recording => CapsuleState::Recording,
+        DictationUiState::Transcribing => CapsuleState::Transcribing,
+        DictationUiState::Polishing => CapsuleState::Polishing,
+        DictationUiState::Done => CapsuleState::Done,
+        DictationUiState::Cancelled => CapsuleState::Cancelled,
+        DictationUiState::Error => CapsuleState::Error,
+        DictationUiState::Idle => CapsuleState::Idle,
+    }
+}
+
+fn emit_dictation_snapshot(
+    inner: &Arc<Inner>,
+    snapshot: DictationSnapshot,
+    level: f32,
+    message: Option<String>,
+    inserted_chars: Option<u32>,
+) {
+    emit_capsule_for_session(
+        inner,
+        snapshot.session_id,
+        capsule_state_from_dictation(snapshot.state),
+        level,
+        snapshot.elapsed_ms,
+        message,
+        inserted_chars,
+    );
+}
+
+fn publish_dictation_transition(
+    inner: &Arc<Inner>,
+    transition: DictationTransition,
+    level: f32,
+    message: Option<String>,
+    inserted_chars: Option<u32>,
+) -> bool {
+    if let Some(snapshot) = transition.snapshot() {
+        emit_dictation_snapshot(inner, snapshot, level, message, inserted_chars);
+        true
+    } else {
+        false
+    }
+}
+
+fn publish_dictation_capsule(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    ui_state: DictationUiState,
+    level: f32,
+    message: Option<String>,
+    inserted_chars: Option<u32>,
+) -> bool {
+    let snapshot = {
+        let state = inner.state.lock();
+        publishable_dictation_snapshot(&state, session_id, ui_state).ok()
+    };
+    let Some(snapshot) = snapshot else {
+        return false;
+    };
+    emit_dictation_snapshot(inner, snapshot, level, message, inserted_chars);
+    true
 }
 
 fn emit_capsule_with_session(
