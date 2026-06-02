@@ -1391,23 +1391,53 @@ async fn submit_embedded_audio_ble_stream_impl(
             }
             Ok(())
         };
-        crate::embedded_ble::capture_notification_events_until_cancelled(
-            embedded_ble_stream_idle_timeout(timeout, emit_idle_capture_errors),
-            cancel_capture_for_task,
-            &mut on_ready,
-            &mut |event| {
-                tx.send(event.notification)
-                    .map_err(|_| "嵌入式音频流式处理已结束".to_string())
-            },
-        )
+        let capture_result = if emit_idle_capture_errors {
+            crate::embedded_ble::capture_notification_events_until_cancelled(
+                embedded_ble_stream_idle_timeout(timeout, emit_idle_capture_errors),
+                cancel_capture_for_task,
+                &mut on_ready,
+                &mut |event| {
+                    tx.send(event.notification)
+                        .map_err(|_| "嵌入式音频流式处理已结束".to_string())
+                },
+            )
+        } else {
+            crate::embedded_ble::capture_notification_events_continuous_until_cancelled(
+                embedded_ble_stream_idle_timeout(timeout, emit_idle_capture_errors),
+                cancel_capture_for_task,
+                &mut on_ready,
+                &mut |event| {
+                    tx.send(event.notification)
+                        .map_err(|_| "嵌入式音频流式处理已结束".to_string())
+                },
+            )
+        };
+        capture_result
     });
 
     let mut streaming = EmbeddedStreamingDictation::default();
     while let Some(notification) = rx.recv().await {
         match streaming.handle_notification(inner, &notification).await {
             Ok(true) => {
-                cancel_capture.store(true, Ordering::SeqCst);
-                break;
+                if emit_idle_capture_errors {
+                    cancel_capture.store(true, Ordering::SeqCst);
+                    break;
+                }
+                match streaming.submission_result() {
+                    Ok(result) => {
+                        log::info!(
+                            "[embedded-ble] background session completed while keeping notify open pcm_bytes={} missing_packets={}",
+                            result.reconstructed_pcm_bytes,
+                            result.stats.missing_packet_count
+                        );
+                    }
+                    Err(err) => {
+                        cancel_capture.store(true, Ordering::SeqCst);
+                        clear_embedded_ble_cancel_flag(inner, &cancel_capture);
+                        return Err(err);
+                    }
+                }
+                streaming.reset_for_next_session();
             }
             Ok(false) => {}
             Err(err) => {
@@ -1739,24 +1769,24 @@ impl EmbeddedStreamingDictation {
         }
     }
 
+    fn submission_result(
+        &self,
+    ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+        submission_result_from_stats(self.terminal_received, self.collector.inner().stats())
+    }
+
+    fn reset_for_next_session(&mut self) {
+        self.collector.reset();
+        self.session = None;
+        self.embedded_session_id = None;
+        self.pending_stop_expected_packet_count = None;
+        self.terminal_received = false;
+    }
+
     fn into_submission_result(
         self,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-        let collector = self.collector.into_inner();
-        let stats = collector.stats();
-        if !self.terminal_received || !stats.terminal_received {
-            return Err("嵌入式音频流式会话尚未收到结束包".to_string());
-        }
-        if stats.end_reason != Some(crate::embedded_audio::SessionEndReason::Stop) {
-            return Err(format!(
-                "嵌入式音频流式会话未正常结束: {:?}",
-                stats.end_reason
-            ));
-        }
-        Ok(crate::embedded_audio::EmbeddedAudioSubmissionResult {
-            reconstructed_pcm_bytes: stats.reconstructed_pcm_bytes,
-            stats,
-        })
+        submission_result_from_stats(self.terminal_received, self.collector.into_inner().stats())
     }
 
     fn into_cancelled_submission_result(
@@ -1770,6 +1800,25 @@ impl EmbeddedStreamingDictation {
             stats,
         }
     }
+}
+
+fn submission_result_from_stats(
+    terminal_received: bool,
+    stats: crate::embedded_audio::SessionStats,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    if !terminal_received || !stats.terminal_received {
+        return Err("嵌入式音频流式会话尚未收到结束包".to_string());
+    }
+    if stats.end_reason != Some(crate::embedded_audio::SessionEndReason::Stop) {
+        return Err(format!(
+            "嵌入式音频流式会话未正常结束: {:?}",
+            stats.end_reason
+        ));
+    }
+    Ok(crate::embedded_audio::EmbeddedAudioSubmissionResult {
+        reconstructed_pcm_bytes: stats.reconstructed_pcm_bytes,
+        stats,
+    })
 }
 
 async fn begin_embedded_audio_dictation_session(
@@ -2164,6 +2213,19 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
             debug_assert!(uses_global_timeout);
             if let Err(e) = asr.send_last_frame().await {
                 log::error!("[coord] send last frame failed: {e}");
+                asr.cancel();
+                emit_capsule(
+                    inner,
+                    CapsuleState::Error,
+                    0.0,
+                    elapsed,
+                    Some(format!("识别收尾失败: {e}")),
+                    None,
+                );
+                restore_prepared_windows_ime_session(inner, current_session_id);
+                inner.state.lock().phase = SessionPhase::Idle;
+                schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS);
+                return Err(e.to_string());
             }
             // 添加全局超时保护：防止 await_final_result() 永远挂起
             let timeout_duration = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
@@ -2936,7 +2998,10 @@ mod tests {
     };
     use crate::coordinator::Coordinator;
     use crate::coordinator_state::SessionPhase;
-    use crate::embedded_audio::StreamingPcmChunk;
+    use crate::embedded_audio::{
+        build_audio_data_notification, build_session_start_notification,
+        build_session_stop_notification, StreamingPcmChunk,
+    };
     use crate::types::{ChineseScriptPreference, CorrectionRule, InsertStatus, PolishMode};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -3017,6 +3082,44 @@ mod tests {
             Some(timeout)
         );
         assert_eq!(embedded_ble_stream_idle_timeout(timeout, false), None);
+    }
+
+    #[test]
+    fn embedded_streaming_reset_prepares_background_listener_for_next_session() {
+        let mut streaming = EmbeddedStreamingDictation::default();
+        let pcm = pcm_from_samples(&[100, -100]);
+
+        streaming
+            .collector
+            .handle_notification(&build_session_start_notification(7))
+            .expect("start notification");
+        streaming
+            .collector
+            .handle_notification(
+                &build_audio_data_notification(7, 0, &pcm).expect("audio notification"),
+            )
+            .expect("audio notification");
+        streaming
+            .collector
+            .handle_notification(&build_session_stop_notification(7, 1))
+            .expect("stop notification");
+        streaming.terminal_received = true;
+
+        let result = streaming
+            .submission_result()
+            .expect("complete streaming result");
+        assert_eq!(result.stats.session_id, Some(7));
+        assert_eq!(result.stats.received_packet_count, 1);
+        assert_eq!(result.reconstructed_pcm_bytes, pcm.len());
+
+        streaming.reset_for_next_session();
+
+        assert!(!streaming.terminal_received);
+        assert!(streaming.session.is_none());
+        assert!(streaming.embedded_session_id.is_none());
+        assert!(streaming.pending_stop_expected_packet_count.is_none());
+        assert_eq!(streaming.collector.inner().stats().session_id, None);
+        assert!(streaming.submission_result().is_err());
     }
 
     #[test]

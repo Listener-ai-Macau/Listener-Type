@@ -546,6 +546,12 @@ mod windows_ble {
         Disconnected(String),
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum CaptureTerminalBehavior {
+        StopCapture,
+        ContinueListening,
+    }
+
     pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
         let mut notifications = Vec::new();
         capture_notification_events(timeout, &mut |event| {
@@ -1369,6 +1375,37 @@ mod windows_ble {
         on_ready: &mut crate::embedded_ble::BleReadyHandler<'_>,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
     ) -> Result<(), String> {
+        capture_notification_events_until_cancelled_impl(
+            idle_timeout,
+            cancel_requested,
+            on_ready,
+            on_event,
+            CaptureTerminalBehavior::StopCapture,
+        )
+    }
+
+    pub fn capture_notification_events_continuous_until_cancelled(
+        idle_timeout: Option<Duration>,
+        cancel_requested: Arc<AtomicBool>,
+        on_ready: &mut crate::embedded_ble::BleReadyHandler<'_>,
+        on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
+    ) -> Result<(), String> {
+        capture_notification_events_until_cancelled_impl(
+            idle_timeout,
+            cancel_requested,
+            on_ready,
+            on_event,
+            CaptureTerminalBehavior::ContinueListening,
+        )
+    }
+
+    fn capture_notification_events_until_cancelled_impl(
+        idle_timeout: Option<Duration>,
+        cancel_requested: Arc<AtomicBool>,
+        on_ready: &mut crate::embedded_ble::BleReadyHandler<'_>,
+        on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
+        terminal_behavior: CaptureTerminalBehavior,
+    ) -> Result<(), String> {
         let capture_guard = BleCaptureGuard::enter(idle_timeout)?;
         let capture_id = capture_guard.session_id();
         let target = open_notify_target()?;
@@ -1537,6 +1574,18 @@ mod windows_ble {
                 stop_drain_deadline = Some(Instant::now() + super::STOP_DRAIN_TIMEOUT);
             }
             if collector.has_successful_complete_session() {
+                if terminal_behavior == CaptureTerminalBehavior::ContinueListening {
+                    let stats = collector.stats();
+                    log::info!(
+                        "[embedded-ble] capture #{capture_id}: complete session received; keeping notify open for background listener (session_id={:?}, pcm_bytes={}, packets={})",
+                        stats.session_id,
+                        stats.received_pcm_bytes,
+                        stats.received_packet_count
+                    );
+                    collector.reset();
+                    stop_drain_deadline = None;
+                    continue;
+                }
                 cleanup.disable_notify();
                 return Ok(());
             }
@@ -4069,6 +4118,21 @@ pub fn capture_notification_events_until_cancelled(
 }
 
 #[cfg(target_os = "windows")]
+pub fn capture_notification_events_continuous_until_cancelled(
+    idle_timeout: Option<Duration>,
+    cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_ready: &mut BleReadyHandler<'_>,
+    on_event: &mut BleNotificationHandler<'_>,
+) -> Result<(), String> {
+    windows_ble::capture_notification_events_continuous_until_cancelled(
+        idle_timeout,
+        cancel_requested,
+        on_ready,
+        on_event,
+    )
+}
+
+#[cfg(target_os = "windows")]
 pub fn transfer_firmware_ota(
     version: &str,
     firmware_sha256: &str,
@@ -4162,6 +4226,16 @@ pub fn capture_notification_events(
 
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notification_events_until_cancelled(
+    _idle_timeout: Option<Duration>,
+    _cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    _on_ready: &mut BleReadyHandler<'_>,
+    _on_event: &mut BleNotificationHandler<'_>,
+) -> Result<(), String> {
+    Err("Embedded BLE audio input is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn capture_notification_events_continuous_until_cancelled(
     _idle_timeout: Option<Duration>,
     _cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
     _on_ready: &mut BleReadyHandler<'_>,
