@@ -34,6 +34,41 @@ pub struct MarketplaceListItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct MarketplaceListPage {
+    #[serde(default)]
+    pub items: Vec<MarketplaceListItem>,
+    #[serde(default)]
+    pub next_offset: Option<u32>,
+    #[serde(default)]
+    pub has_more: bool,
+    #[serde(default)]
+    pub total: Option<u32>,
+}
+
+impl MarketplaceListPage {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    fn from_legacy_items(items: Vec<MarketplaceListItem>) -> Self {
+        Self {
+            items,
+            next_offset: None,
+            has_more: false,
+            total: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum MarketplaceListResponse {
+    Page(MarketplaceListPage),
+    Items(Vec<MarketplaceListItem>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct MarketplaceDetail {
     #[serde(flatten)]
     pub summary: MarketplaceListItem,
@@ -202,12 +237,17 @@ impl MarketplaceClient {
     pub async fn list_styles(
         &self,
         query: Option<&str>,
+        category: Option<&str>,
         sort: Option<&str>,
         limit: Option<u32>,
-    ) -> Result<Vec<MarketplaceListItem>, MarketplaceApiError> {
+        offset: Option<u32>,
+    ) -> Result<MarketplaceListPage, MarketplaceApiError> {
         let mut url = self.url(&[STYLES_PATH])?;
         if let Some(query) = query.map(str::trim).filter(|value| !value.is_empty()) {
             url.query_pairs_mut().append_pair("q", query);
+        }
+        if let Some(category) = category.map(str::trim).filter(|value| !value.is_empty()) {
+            url.query_pairs_mut().append_pair("category", category);
         }
         if let Some(sort) = sort.map(str::trim).filter(|value| !value.is_empty()) {
             url.query_pairs_mut().append_pair("sort", sort);
@@ -216,7 +256,26 @@ impl MarketplaceClient {
             url.query_pairs_mut()
                 .append_pair("limit", &limit.to_string());
         }
-        self.json(self.client.get(url)).await
+        if let Some(offset) = offset {
+            url.query_pairs_mut()
+                .append_pair("offset", &offset.to_string());
+        }
+
+        match self.json(self.client.get(url)).await? {
+            MarketplaceListResponse::Page(mut page) => {
+                if page.has_more && page.next_offset.is_none() {
+                    page.next_offset =
+                        Some(offset.unwrap_or(0).saturating_add(page.items.len() as u32));
+                }
+                if !page.has_more {
+                    page.next_offset = None;
+                }
+                Ok(page)
+            }
+            MarketplaceListResponse::Items(items) => {
+                Ok(MarketplaceListPage::from_legacy_items(items))
+            }
+        }
     }
 
     pub async fn style_detail(
@@ -399,22 +458,50 @@ mod tests {
 
     #[tokio::test]
     async fn marketplace_client_uses_styles_contract_paths() {
-        let body = r#"[{"id":"550e8400-e29b-41d4-a716-446655440000","slug":"demo","name":"Demo","description":"","authorLogin":"alice","version":"1.0.0","baseMode":"structured","tags":[],"likeCount":1,"downloadCount":2,"publishedAt":"2026-06-01T00:00:00Z","updatedAt":"2026-06-01T00:00:00Z"}]"#;
+        let body = r#"{"items":[{"id":"550e8400-e29b-41d4-a716-446655440000","slug":"demo","name":"Demo","description":"","authorLogin":"alice","version":"1.0.0","baseMode":"structured","tags":[],"likeCount":1,"downloadCount":2,"publishedAt":"2026-06-01T00:00:00Z","updatedAt":"2026-06-01T00:00:00Z"}],"nextOffset":30,"hasMore":true,"total":52}"#;
         let (base, request_handle) = spawn_response("200 OK", body);
 
         let client = test_marketplace_client(&base);
-        let items = client
-            .list_styles(Some("demo pack"), Some("popular"), Some(10))
+        let page = client
+            .list_styles(
+                Some("demo pack"),
+                Some("structured"),
+                Some("popular"),
+                Some(10),
+                Some(20),
+            )
             .await
             .unwrap();
 
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].slug, "demo");
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].slug, "demo");
+        assert_eq!(page.next_offset, Some(30));
+        assert!(page.has_more);
+        assert_eq!(page.total, Some(52));
         let request = request_handle.join().unwrap();
         assert!(request.starts_with("GET /styles?"));
         assert!(request.contains("q=demo+pack"));
+        assert!(request.contains("category=structured"));
         assert!(request.contains("sort=popular"));
         assert!(request.contains("limit=10"));
+        assert!(request.contains("offset=20"));
+    }
+
+    #[tokio::test]
+    async fn marketplace_client_stops_pagination_for_legacy_array_list_response() {
+        let body = r#"[{"id":"550e8400-e29b-41d4-a716-446655440000","slug":"demo","name":"Demo","description":"","authorLogin":"alice","version":"1.0.0","baseMode":"structured","tags":[],"likeCount":1,"downloadCount":2,"publishedAt":"2026-06-01T00:00:00Z","updatedAt":"2026-06-01T00:00:00Z"}]"#;
+        let (base, _request_handle) = spawn_response("200 OK", body);
+
+        let client = test_marketplace_client(&base);
+        let page = client
+            .list_styles(None, None, Some("popular"), Some(1), Some(5))
+            .await
+            .unwrap();
+
+        assert_eq!(page.items.len(), 1);
+        assert!(!page.has_more);
+        assert_eq!(page.next_offset, None);
+        assert_eq!(page.total, None);
     }
 
     #[tokio::test]
@@ -484,7 +571,10 @@ mod tests {
         drop(listener);
 
         let client = test_marketplace_client(&format!("http://{addr}"));
-        let error = client.list_styles(None, None, None).await.unwrap_err();
+        let error = client
+            .list_styles(None, None, None, None, None)
+            .await
+            .unwrap_err();
 
         assert_eq!(error.kind(), MarketplaceApiErrorKind::Network);
         assert_eq!(error.status_code(), None);
