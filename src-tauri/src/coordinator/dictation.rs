@@ -1221,10 +1221,11 @@ pub(super) fn abort_recording_with_error(inner: &Arc<Inner>, message: String) {
         publish_abort_idle_after_restore(&mut state, abort.session_id);
     }
 
-    publish_dictation_capsule(
+    apply_and_publish_dictation_event(
         inner,
-        abort.session_id,
-        DictationUiState::Error,
+        DictationEvent::RecordingAbort {
+            session_id: abort.session_id,
+        },
         0.0,
         Some(message),
         None,

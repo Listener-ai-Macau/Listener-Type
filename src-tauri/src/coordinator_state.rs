@@ -97,6 +97,9 @@ pub(crate) enum DictationEvent {
     PipelineError {
         session_id: SessionId,
     },
+    RecordingAbort {
+        session_id: SessionId,
+    },
     InsertionStarted {
         session_id: SessionId,
         already_streamed: bool,
@@ -416,10 +419,8 @@ pub(crate) fn apply_dictation_event(
             }
         }
         DictationEvent::PipelineError { session_id } => {
-            if state.session_id != session_id {
-                return DictationTransition::Ignored {
-                    reason: DictationIgnoreReason::StaleSession,
-                };
+            if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
+                return result;
             }
             if state.phase == SessionPhase::Idle {
                 return DictationTransition::Ignored {
@@ -427,6 +428,24 @@ pub(crate) fn apply_dictation_event(
                 };
             }
             state.phase = SessionPhase::Idle;
+            let snapshot = dictation_snapshot(state, DictationUiState::Error);
+            DictationTransition::ActionableError {
+                session_id,
+                error: DictationActionableError::PipelineError,
+                snapshot,
+            }
+        }
+        DictationEvent::RecordingAbort { session_id } => {
+            if state.session_id != session_id {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::StaleSession,
+                };
+            }
+            if !state.cancelled || state.phase != SessionPhase::Idle {
+                return DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::InvalidPhase,
+                };
+            }
             let snapshot = dictation_snapshot(state, DictationUiState::Error);
             DictationTransition::ActionableError {
                 session_id,
@@ -479,10 +498,8 @@ pub(crate) fn apply_dictation_event(
             }
         }
         DictationEvent::Timeout { session_id } => {
-            if state.session_id != session_id {
-                return DictationTransition::Ignored {
-                    reason: DictationIgnoreReason::StaleSession,
-                };
+            if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
+                return result;
             }
             if state.phase == SessionPhase::Idle {
                 return DictationTransition::Ignored {
@@ -1135,6 +1152,67 @@ mod tests {
                 assert_eq!(snapshot.state, DictationUiState::Error);
             }
             other => panic!("expected actionable empty transcript error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dictation_fsm_ignores_pipeline_error_and_timeout_after_cancel() {
+        for event in [
+            DictationEvent::PipelineError {
+                session_id: session_id(5),
+            },
+            DictationEvent::Timeout {
+                session_id: session_id(5),
+            },
+        ] {
+            let mut state = SessionState {
+                phase: SessionPhase::Processing,
+                session_id: session_id(5),
+                cancelled: true,
+                ..Default::default()
+            };
+
+            assert_eq!(
+                apply_dictation_event(&mut state, event),
+                DictationTransition::Ignored {
+                    reason: DictationIgnoreReason::CancelledSession,
+                }
+            );
+            assert_eq!(state.phase, SessionPhase::Processing);
+            assert!(state.cancelled);
+        }
+    }
+
+    #[test]
+    fn dictation_fsm_allows_recorder_abort_error_after_cancelled_abort_state() {
+        let mut state = SessionState {
+            phase: SessionPhase::Idle,
+            session_id: session_id(6),
+            cancelled: true,
+            ..Default::default()
+        };
+
+        let transition = apply_dictation_event(
+            &mut state,
+            DictationEvent::RecordingAbort {
+                session_id: session_id(6),
+            },
+        );
+
+        assert_eq!(state.phase, SessionPhase::Idle);
+        assert!(state.cancelled);
+        match transition {
+            DictationTransition::ActionableError {
+                session_id: transition_session_id,
+                error,
+                snapshot,
+            } => {
+                assert_eq!(transition_session_id, session_id(6));
+                assert_eq!(error, DictationActionableError::PipelineError);
+                assert_eq!(snapshot.session_id, session_id(6));
+                assert_eq!(snapshot.state, DictationUiState::Error);
+            }
+            other => panic!("expected recorder abort error snapshot, got {other:?}"),
         }
     }
 
