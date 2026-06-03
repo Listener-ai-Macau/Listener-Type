@@ -85,7 +85,7 @@ use dictation::{
     submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
     submit_embedded_audio_ble_stream_background, submit_embedded_audio_file,
     submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,
-    submit_embedded_audio_streaming_notifications,
+    submit_embedded_audio_streaming_notifications, HOTKEY_DEBOUNCE,
 };
 use qa::{close_qa_panel, handle_qa_hotkey_pressed, QaPhase, QaSessionState};
 #[cfg(test)]
@@ -2071,7 +2071,7 @@ fn device_key_action_debounced(
         | DeviceCustomKeyAction::PasteShortcut
         | DeviceCustomKeyAction::UndoShortcut
         | DeviceCustomKeyAction::SendShortcut => Duration::from_millis(160),
-        DeviceCustomKeyAction::Dictation => Duration::from_millis(650),
+        DeviceCustomKeyAction::Dictation => HOTKEY_DEBOUNCE,
         DeviceCustomKeyAction::OpenApp | DeviceCustomKeyAction::OpenExternalApp => {
             Duration::from_millis(900)
         }
@@ -4714,6 +4714,40 @@ mod tests {
         let mut prefs = coordinator.inner.prefs.get();
         prefs.dictation_input_source = DictationInputSource::Microphone;
         coordinator.inner.prefs.replace_for_tests(prefs);
+    }
+
+    #[test]
+    fn device_key_dictation_debounce_matches_hotkey_edge_debounce() {
+        let coordinator = Coordinator::new();
+        let mapping = DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::Dictation,
+            ..DeviceCustomKeyMapping::default()
+        };
+
+        assert_eq!(HOTKEY_DEBOUNCE, Duration::from_millis(250));
+        assert!(!device_key_action_debounced(
+            &coordinator.inner,
+            DeviceCustomKeyId::Key3,
+            DeviceCustomKeyGesture::SingleClick,
+            &mapping
+        ));
+        assert!(device_key_action_debounced(
+            &coordinator.inner,
+            DeviceCustomKeyId::Key3,
+            DeviceCustomKeyGesture::SingleClick,
+            &mapping
+        ));
+
+        coordinator.inner.device_key_last_dispatch_at.lock().insert(
+            (DeviceCustomKeyGesture::SingleClick, DeviceCustomKeyId::Key3),
+            Instant::now() - HOTKEY_DEBOUNCE - Duration::from_millis(1),
+        );
+        assert!(!device_key_action_debounced(
+            &coordinator.inner,
+            DeviceCustomKeyId::Key3,
+            DeviceCustomKeyGesture::SingleClick,
+            &mapping
+        ));
     }
 
     #[test]

@@ -544,6 +544,62 @@ mod windows_ble {
     enum BleCaptureSignal {
         Notification(Vec<u8>),
         Disconnected(String),
+        AudioControl(AudioControlRequest),
+    }
+
+    struct AudioControlRequest {
+        bytes: Vec<u8>,
+        label: String,
+        timeout: Duration,
+        result_tx: mpsc::Sender<Result<(), String>>,
+    }
+
+    #[derive(Clone)]
+    struct ActiveAudioControlSender {
+        capture_id: u64,
+        tx: mpsc::Sender<BleCaptureSignal>,
+    }
+
+    fn active_audio_control_slot() -> &'static Mutex<Option<ActiveAudioControlSender>> {
+        static SLOT: OnceLock<Mutex<Option<ActiveAudioControlSender>>> = OnceLock::new();
+        SLOT.get_or_init(|| Mutex::new(None))
+    }
+
+    fn active_audio_control_sender() -> Option<ActiveAudioControlSender> {
+        active_audio_control_slot().lock().ok()?.clone()
+    }
+
+    fn clear_active_audio_control_sender(capture_id: u64) {
+        let Ok(mut slot) = active_audio_control_slot().lock() else {
+            return;
+        };
+        if slot
+            .as_ref()
+            .is_some_and(|active| active.capture_id == capture_id)
+        {
+            *slot = None;
+            log::info!("[embedded-ble] capture #{capture_id}: audio control sender cleared");
+        }
+    }
+
+    struct ActiveAudioControlRegistration {
+        capture_id: u64,
+    }
+
+    impl ActiveAudioControlRegistration {
+        fn install(capture_id: u64, tx: mpsc::Sender<BleCaptureSignal>) -> Self {
+            if let Ok(mut slot) = active_audio_control_slot().lock() {
+                *slot = Some(ActiveAudioControlSender { capture_id, tx });
+                log::info!("[embedded-ble] capture #{capture_id}: audio control sender registered");
+            }
+            Self { capture_id }
+        }
+    }
+
+    impl Drop for ActiveAudioControlRegistration {
+        fn drop(&mut self) {
+            clear_active_audio_control_sender(self.capture_id);
+        }
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1335,18 +1391,16 @@ mod windows_ble {
     }
 
     pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
-        let target = open_notify_target()?;
-        let Some(service) = target.service.as_ref() else {
-            return Err("Listener BLE audio service unavailable for recording control".into());
-        };
-        let control = open_write_characteristic_from_service(
-            service,
-            AUDIO_CONTROL_UUID,
-            "audio control",
-            BluetoothCacheMode::Uncached,
-        )?;
+        if let Some(result) =
+            send_audio_control_via_active_capture(b"VREC:TOGGLE\n", timeout, "audio control toggle")
+        {
+            result?;
+            log::info!("[embedded-ble] audio control toggle sent via active capture");
+            return Ok(());
+        }
+        let target = open_audio_control_target()?;
         write_gatt_value_with_timeout(
-            &control,
+            &target.control,
             b"VREC:TOGGLE\n",
             GattWriteOption::WriteWithResponse,
             timeout,
@@ -1357,19 +1411,17 @@ mod windows_ble {
     }
 
     pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), String> {
-        let target = open_notify_target()?;
-        let Some(service) = target.service.as_ref() else {
-            return Err("Listener BLE audio service unavailable for EC11 rotation control".into());
-        };
-        let control = open_write_characteristic_from_service(
-            service,
-            AUDIO_CONTROL_UUID,
-            "audio control",
-            BluetoothCacheMode::Uncached,
-        )?;
         let command = format!("EC11:MODE:{mode}\n");
+        if let Some(result) =
+            send_audio_control_via_active_capture(command.as_bytes(), timeout, "EC11 rotation mode")
+        {
+            result?;
+            log::info!("[embedded-ble] EC11 rotation mode sent via active capture mode={mode}");
+            return Ok(());
+        }
+        let target = open_audio_control_target()?;
         write_gatt_value_with_timeout(
-            &control,
+            &target.control,
             command.as_bytes(),
             GattWriteOption::WriteWithResponse,
             timeout,
@@ -1377,6 +1429,39 @@ mod windows_ble {
         )?;
         log::info!("[embedded-ble] EC11 rotation mode sent mode={mode}");
         Ok(())
+    }
+
+    fn send_audio_control_via_active_capture(
+        bytes: &[u8],
+        timeout: Duration,
+        label: &str,
+    ) -> Option<Result<(), String>> {
+        let active = active_audio_control_sender()?;
+        let (result_tx, result_rx) = mpsc::channel();
+        let request = AudioControlRequest {
+            bytes: bytes.to_vec(),
+            label: label.to_string(),
+            timeout,
+            result_tx,
+        };
+        if active
+            .tx
+            .send(BleCaptureSignal::AudioControl(request))
+            .is_err()
+        {
+            clear_active_audio_control_sender(active.capture_id);
+            return None;
+        }
+        Some(
+            result_rx
+                .recv_timeout(timeout + Duration::from_secs(1))
+                .unwrap_or_else(|_| {
+                    Err(format!(
+                        "active Listener BLE audio control timed out after {} ms",
+                        timeout.as_millis()
+                    ))
+                }),
+        )
     }
 
     pub fn capture_notification_events(
@@ -1449,6 +1534,16 @@ mod windows_ble {
         );
 
         let mut cleanup = NotifyCleanup::new(capture_id, target);
+        if cleanup.target.control.is_some() {
+            cleanup.set_audio_control_registration(ActiveAudioControlRegistration::install(
+                capture_id,
+                tx.clone(),
+            ));
+        } else {
+            log::warn!(
+                "[embedded-ble] capture #{capture_id}: audio control unavailable for active capture"
+            );
+        }
         let token = characteristic
             .ValueChanged(&handler)
             .map_err(|err| format!("BLE ValueChanged handler registration failed: {err}"))?;
@@ -1574,6 +1669,10 @@ mod windows_ble {
                     log::warn!("[embedded-ble] capture #{capture_id}: {reason}");
                     cleanup.disable_notify();
                     return Err(reason);
+                }
+                BleCaptureSignal::AudioControl(request) => {
+                    cleanup.handle_audio_control_request(request);
+                    continue;
                 }
             };
             let terminal = super::is_terminal_notification(&notification);
@@ -2166,6 +2265,84 @@ mod windows_ble {
 
         Err(last_error.unwrap_or_else(|| {
             "No subscribable embedded audio BLE notify characteristic found".to_string()
+        }))
+    }
+
+    fn open_audio_control_target() -> Result<OpenAudioControlTarget, String> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(SERVICE_UUID)
+            .map_err(|err| format!("BLE audio control service selector failed: {err}"))?;
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .map_err(|err| format!("BLE audio control service discovery failed: {err}"))
+            .and_then(|op| {
+                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "audio control service discovery")
+            })?;
+        let count = devices
+            .Size()
+            .map_err(|err| format!("BLE audio control service collection size failed: {err}"))?;
+        if count == 0 {
+            return Err(format!(
+                "Embedded audio BLE service {SERVICE_UUID:?} not found for recording control; ensure device is paired and online"
+            ));
+        }
+
+        let mut last_error = None;
+        for index in 0..count {
+            let info = match devices.GetAt(index) {
+                Ok(info) => info,
+                Err(err) => {
+                    last_error = Some(format!("read BLE audio control service info failed: {err}"));
+                    continue;
+                }
+            };
+            let name = info
+                .Name()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let id = match info.Id() {
+                Ok(id) => id,
+                Err(err) => {
+                    last_error = Some(format!("read BLE audio control service id failed: {err}"));
+                    continue;
+                }
+            };
+
+            let mut candidate_error = None;
+            if let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
+                match open_audio_control_target_for_device(address) {
+                    Ok(target) => {
+                        log::info!(
+                            "[embedded-ble] selected audio control device path index={index} name={name} address={address:012X}"
+                        );
+                        return Ok(target);
+                    }
+                    Err(err) => {
+                        candidate_error = Some(format!(
+                            "{name}: BLE audio control device path {address:012X} failed: {err}"
+                        ));
+                    }
+                }
+            }
+
+            match open_audio_control_target_for_service(&id) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] selected audio control service-id fallback index={index} name={name}"
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    last_error = Some(match candidate_error {
+                        Some(previous) => {
+                            format!("{previous}; audio control service-id fallback failed: {err}")
+                        }
+                        None => format!("{name}: {err}"),
+                    });
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "No writable Listener BLE audio control characteristic found".into()
         }))
     }
 
@@ -2822,6 +2999,7 @@ mod windows_ble {
                     Ok(prepared) => {
                         return Ok(OpenNotifyTarget {
                             characteristic: prepared.characteristic,
+                            control: prepared.control,
                             service: Some(service),
                             session: prepared.session,
                             device: Some(device),
@@ -2837,6 +3015,100 @@ mod windows_ble {
 
         Err(last_error.unwrap_or_else(|| {
             "No subscribable embedded audio BLE notify characteristic found on device".to_string()
+        }))
+    }
+
+    fn open_audio_control_target_for_device(
+        address: u64,
+    ) -> Result<OpenAudioControlTarget, String> {
+        let device = open_ble_device(address)?;
+        if let Some(access) = device
+            .RequestAccessAsync()
+            .ok()
+            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "device access").ok())
+        {
+            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
+                return Err(format!("BLE device access denied status={access:?}"));
+            }
+        }
+
+        let mut last_error = None;
+        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+            let services_result = match device
+                .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, cache_mode)
+                .map_err(|err| {
+                    format!("BLE audio control {cache_mode:?} service discovery failed: {err}")
+                })
+                .and_then(|op| {
+                    wait_async_operation(
+                        op,
+                        BLE_DISCOVERY_TIMEOUT,
+                        &format!("audio control {cache_mode:?} service"),
+                    )
+                    .map_err(|err| {
+                        format!(
+                            "BLE audio control {cache_mode:?} service discovery wait failed: {err}"
+                        )
+                    })
+                }) {
+                Ok(result) => result,
+                Err(err) => {
+                    last_error = Some(err);
+                    continue;
+                }
+            };
+            let status = services_result.Status().map_err(|err| {
+                format!("BLE audio control {cache_mode:?} service status read failed: {err}")
+            })?;
+            if status != GattCommunicationStatus::Success {
+                last_error = Some(format!(
+                    "BLE audio control {cache_mode:?} service discovery returned status={status:?}"
+                ));
+                continue;
+            }
+
+            let services = services_result.Services().map_err(|err| {
+                format!("BLE audio control {cache_mode:?} service list read failed: {err}")
+            })?;
+            let count = services.Size().map_err(|err| {
+                format!("BLE audio control {cache_mode:?} service list size failed: {err}")
+            })?;
+            if count == 0 {
+                last_error = Some(format!(
+                    "service {SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
+                ));
+                continue;
+            }
+
+            for index in 0..count {
+                let service = match services.GetAt(index) {
+                    Ok(service) => service,
+                    Err(err) => {
+                        last_error = Some(format!(
+                            "read BLE audio control {cache_mode:?} service failed: {err}"
+                        ));
+                        continue;
+                    }
+                };
+                match open_audio_control_characteristic_from_service(&service, cache_mode) {
+                    Ok(prepared) => {
+                        return Ok(OpenAudioControlTarget {
+                            control: prepared.control,
+                            service: Some(service),
+                            session: prepared.session,
+                            device: Some(device),
+                        });
+                    }
+                    Err(err) => {
+                        last_error = Some(format!("{cache_mode:?}: {err}"));
+                        let _ = service.Close();
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "No writable Listener BLE audio control characteristic found on device".to_string()
         }))
     }
 
@@ -2937,6 +3209,26 @@ mod windows_ble {
             open_notify_characteristic_from_service(&service, BluetoothCacheMode::Uncached)?;
         Ok(OpenNotifyTarget {
             characteristic: prepared.characteristic,
+            control: prepared.control,
+            service: Some(service),
+            session: prepared.session,
+            device: None,
+        })
+    }
+
+    fn open_audio_control_target_for_service(
+        service_id: &HSTRING,
+    ) -> Result<OpenAudioControlTarget, String> {
+        let service = GattDeviceService::FromIdAsync(service_id)
+            .map_err(|err| format!("BLE audio control service open failed: {err}"))
+            .and_then(|op| {
+                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "audio control service open")
+            })?;
+
+        let prepared =
+            open_audio_control_characteristic_from_service(&service, BluetoothCacheMode::Uncached)?;
+        Ok(OpenAudioControlTarget {
+            control: prepared.control,
             service: Some(service),
             session: prepared.session,
             device: None,
@@ -3023,6 +3315,29 @@ mod windows_ble {
             count,
             session,
         })
+    }
+
+    fn open_audio_control_characteristic_from_service(
+        service: &GattDeviceService,
+        cache_mode: BluetoothCacheMode,
+    ) -> Result<PreparedAudioControlCharacteristic, String> {
+        if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
+            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "audio control service access").ok()
+        }) {
+            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
+                return Err(format!(
+                    "BLE audio control service access denied status={access:?}"
+                ));
+            }
+        }
+        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT);
+        let control = open_write_characteristic_from_service(
+            service,
+            AUDIO_CONTROL_UUID,
+            "audio control",
+            cache_mode,
+        )?;
+        Ok(PreparedAudioControlCharacteristic { control, session })
     }
 
     fn ota_data_chunk_bytes(session: Option<&GattSession>) -> usize {
@@ -3193,6 +3508,20 @@ mod windows_ble {
             }
         }
         let session = prepare_gatt_session(service, GATT_READY_TIMEOUT);
+        let control = match open_write_characteristic_from_service(
+            service,
+            AUDIO_CONTROL_UUID,
+            "audio control",
+            cache_mode,
+        ) {
+            Ok(control) => Some(control),
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] audio control characteristic unavailable during notify setup via {cache_mode:?}: {err}"
+                );
+                None
+            }
+        };
 
         let result = service
             .GetCharacteristicsForUuidWithCacheModeAsync(NOTIFY_UUID, cache_mode)
@@ -3229,6 +3558,7 @@ mod windows_ble {
         }
         Ok(PreparedNotifyCharacteristic {
             characteristic,
+            control,
             session,
         })
     }
@@ -3771,6 +4101,14 @@ mod windows_ble {
 
     struct OpenNotifyTarget {
         characteristic: GattCharacteristic,
+        control: Option<GattCharacteristic>,
+        service: Option<GattDeviceService>,
+        session: Option<GattSession>,
+        device: Option<BluetoothLEDevice>,
+    }
+
+    struct OpenAudioControlTarget {
+        control: GattCharacteristic,
         service: Option<GattDeviceService>,
         session: Option<GattSession>,
         device: Option<BluetoothLEDevice>,
@@ -3778,6 +4116,12 @@ mod windows_ble {
 
     struct PreparedNotifyCharacteristic {
         characteristic: GattCharacteristic,
+        control: Option<GattCharacteristic>,
+        session: Option<GattSession>,
+    }
+
+    struct PreparedAudioControlCharacteristic {
+        control: GattCharacteristic,
         session: Option<GattSession>,
     }
 
@@ -3842,6 +4186,20 @@ mod windows_ble {
     }
 
     impl Drop for OpenOtaTarget {
+        fn drop(&mut self) {
+            if let Some(session) = self.session.take() {
+                let _ = session.Close();
+            }
+            if let Some(service) = self.service.take() {
+                let _ = service.Close();
+            }
+            if let Some(device) = self.device.take() {
+                let _ = device.Close();
+            }
+        }
+    }
+
+    impl Drop for OpenAudioControlTarget {
         fn drop(&mut self) {
             if let Some(session) = self.session.take() {
                 let _ = session.Close();
@@ -3934,6 +4292,7 @@ mod windows_ble {
         token: Option<EventRegistrationToken>,
         connection_status_token: Option<EventRegistrationToken>,
         session_status_token: Option<EventRegistrationToken>,
+        audio_control_registration: Option<ActiveAudioControlRegistration>,
         notify_disabled: bool,
     }
 
@@ -3945,6 +4304,7 @@ mod windows_ble {
                 token: None,
                 connection_status_token: None,
                 session_status_token: None,
+                audio_control_registration: None,
                 notify_disabled: false,
             }
         }
@@ -3959,6 +4319,10 @@ mod windows_ble {
 
         fn set_session_status_token(&mut self, token: EventRegistrationToken) {
             self.session_status_token = Some(token);
+        }
+
+        fn set_audio_control_registration(&mut self, registration: ActiveAudioControlRegistration) {
+            self.audio_control_registration = Some(registration);
         }
 
         fn disable_notify(&mut self) {
@@ -4011,7 +4375,25 @@ mod windows_ble {
                     );
                 }
             }
+            let _ = self.audio_control_registration.take();
             self.notify_disabled = true;
+        }
+
+        fn handle_audio_control_request(&self, request: AudioControlRequest) {
+            let result = match self.target.control.as_ref() {
+                Some(control) => write_gatt_value_with_timeout(
+                    control,
+                    &request.bytes,
+                    GattWriteOption::WriteWithResponse,
+                    request.timeout,
+                    &request.label,
+                )
+                .map(|_| ()),
+                None => Err(
+                    "active Listener BLE capture has no audio control characteristic".to_string(),
+                ),
+            };
+            let _ = request.result_tx.send(result);
         }
 
         fn remove_status_handlers(&mut self) {
@@ -4091,6 +4473,31 @@ mod windows_ble {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        fn active_audio_control_test_lock() -> &'static Mutex<()> {
+            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+            LOCK.get_or_init(|| Mutex::new(()))
+        }
+
+        #[test]
+        fn active_audio_control_registration_only_clears_matching_capture() {
+            let _guard = active_audio_control_test_lock().lock().unwrap();
+            *active_audio_control_slot().lock().unwrap() = None;
+
+            let (tx1, _rx1) = mpsc::channel();
+            let registration1 = ActiveAudioControlRegistration::install(10, tx1);
+            assert_eq!(active_audio_control_sender().unwrap().capture_id, 10);
+
+            let (tx2, _rx2) = mpsc::channel();
+            let registration2 = ActiveAudioControlRegistration::install(20, tx2);
+            assert_eq!(active_audio_control_sender().unwrap().capture_id, 20);
+
+            drop(registration1);
+            assert_eq!(active_audio_control_sender().unwrap().capture_id, 20);
+
+            drop(registration2);
+            assert!(active_audio_control_sender().is_none());
+        }
 
         #[test]
         fn foreground_probe_success_leaves_notify_cccd_enabled() {

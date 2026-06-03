@@ -13,7 +13,7 @@ use super::*;
 
 /// 同一个 hotkey 边沿之间的最小间隔。低于此阈值的连按整体作为误触丢弃 ——
 /// 避免微动开关回弹 / 用户手抖双击造成的空转写报错和 ASR session 抢资源。
-const HOTKEY_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
+pub(super) const HOTKEY_DEBOUNCE: Duration = Duration::from_millis(250);
 const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
 const EMBEDDED_AUDIO_ASR_PREROLL_MS: usize = 800;
 const EMBEDDED_AUDIO_ASR_PREROLL_BYTES: usize = 16_000 * 2 * EMBEDDED_AUDIO_ASR_PREROLL_MS / 1_000;
