@@ -81,11 +81,11 @@ const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
 use dictation::dictation_error_code;
 use dictation::{
     begin_session, cancel_session, end_session, handle_pressed, handle_pressed_edge,
-    handle_released, handle_released_edge, request_stop_during_starting,
-    submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
-    submit_embedded_audio_ble_stream_background, submit_embedded_audio_file,
-    submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,
-    submit_embedded_audio_streaming_notifications, HOTKEY_DEBOUNCE,
+    handle_released_edge, request_stop_during_starting, submit_embedded_audio_ble_once,
+    submit_embedded_audio_ble_stream, submit_embedded_audio_ble_stream_background,
+    submit_embedded_audio_file, submit_embedded_audio_notifications,
+    submit_embedded_audio_streaming_file, submit_embedded_audio_streaming_notifications,
+    HOTKEY_DEBOUNCE,
 };
 use qa::{close_qa_panel, handle_qa_hotkey_pressed, QaPhase, QaSessionState};
 #[cfg(test)]
@@ -1259,7 +1259,7 @@ impl Coordinator {
     pub async fn inject_hotkey_click_for_dev(&self) -> Result<(), String> {
         log::info!("[coord] dev hotkey injection started");
         handle_pressed(&self.inner).await;
-        handle_released(&self.inner).await;
+        dictation::handle_released(&self.inner).await;
         cancel_session(&self.inner);
         Ok(())
     }
