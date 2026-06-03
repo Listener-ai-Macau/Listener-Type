@@ -50,24 +50,11 @@ impl MarketplaceListPage {
         Self::default()
     }
 
-    fn from_legacy_items(
-        items: Vec<MarketplaceListItem>,
-        limit: Option<u32>,
-        offset: Option<u32>,
-    ) -> Self {
-        let item_count = items.len() as u32;
-        let has_more = match limit {
-            Some(limit) if limit > 0 => item_count >= limit,
-            _ => false,
-        };
+    fn from_legacy_items(items: Vec<MarketplaceListItem>) -> Self {
         Self {
             items,
-            next_offset: if has_more {
-                Some(offset.unwrap_or(0).saturating_add(item_count))
-            } else {
-                None
-            },
-            has_more,
+            next_offset: None,
+            has_more: false,
             total: None,
         }
     }
@@ -286,7 +273,7 @@ impl MarketplaceClient {
                 Ok(page)
             }
             MarketplaceListResponse::Items(items) => {
-                Ok(MarketplaceListPage::from_legacy_items(items, limit, offset))
+                Ok(MarketplaceListPage::from_legacy_items(items))
             }
         }
     }
@@ -501,7 +488,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn marketplace_client_accepts_legacy_array_list_response() {
+    async fn marketplace_client_stops_pagination_for_legacy_array_list_response() {
         let body = r#"[{"id":"550e8400-e29b-41d4-a716-446655440000","slug":"demo","name":"Demo","description":"","authorLogin":"alice","version":"1.0.0","baseMode":"structured","tags":[],"likeCount":1,"downloadCount":2,"publishedAt":"2026-06-01T00:00:00Z","updatedAt":"2026-06-01T00:00:00Z"}]"#;
         let (base, _request_handle) = spawn_response("200 OK", body);
 
@@ -512,8 +499,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(page.items.len(), 1);
-        assert!(page.has_more);
-        assert_eq!(page.next_offset, Some(6));
+        assert!(!page.has_more);
+        assert_eq!(page.next_offset, None);
         assert_eq!(page.total, None);
     }
 

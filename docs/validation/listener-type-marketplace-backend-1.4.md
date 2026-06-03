@@ -1,6 +1,6 @@
 # listener-type-marketplace-backend 1.4 Validation
 
-Date: 2026-06-02
+Date: 2026-06-03
 Agent: oai2
 
 ## Scope
@@ -8,6 +8,12 @@ Agent: oai2
 - Marketplace list IPC now supports `query`, `category`, `sort`, `limit`, and `offset`.
 - The Rust backend client returns `MarketplaceListPage` and remains compatible with legacy array responses.
 - The Marketplace UI supports category filters, hot/new/liked filtering, automatic near-bottom pagination, installed badges, retryable network errors, and filtered empty states.
+
+## Rework
+
+- Addressed review feedback for legacy pre-1.4 array `/styles` responses.
+- Legacy array responses no longer synthesize `hasMore` or `nextOffset`; pagination stops because older backends do not guarantee `offset` support.
+- Added Rust coverage for the full-page legacy array path so an older backend cannot repeat page 1 indefinitely behind a visible load-more affordance.
 
 ## Visual Artifact
 
@@ -22,7 +28,9 @@ Agent: oai2
 - PASS: `npm run build`
 - PASS: `cargo test --manifest-path src-tauri\Cargo.toml marketplace_backend --lib`
 - PASS: `npm run verify`
+- PASS: `npm run check:cloud`
 - PASS: `pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check`
 - PASS: `git diff --check`
+- PASS: `git merge-tree --write-tree origin/main HEAD`
 
 Note: the first Rust test attempt failed before exercising test logic because Tauri's `generate_context!` requires `dist/` to exist. `npm run build` generated `dist/`, then the same Rust test command passed with 8 marketplace backend tests.
