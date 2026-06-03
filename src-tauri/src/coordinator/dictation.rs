@@ -62,16 +62,55 @@ fn publish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message:
     )
 }
 
-fn finish_dictation_pipeline_error(inner: &Arc<Inner>, session_id: SessionId, message: String) {
-    publish_dictation_pipeline_error(inner, session_id, message);
+fn finish_dictation_pipeline_error(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    message: String,
+) -> bool {
+    if !publish_dictation_pipeline_error(inner, session_id, message)
+        && cleanup_cancelled_processing_session(inner, session_id)
+    {
+        return false;
+    }
     restore_prepared_windows_ime_session(inner, session_id);
     schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(session_id));
+    true
 }
 
-fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: String) {
-    publish_dictation_timeout(inner, session_id, message);
+fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: String) -> bool {
+    if !publish_dictation_timeout(inner, session_id, message)
+        && cleanup_cancelled_processing_session(inner, session_id)
+    {
+        return false;
+    }
     restore_prepared_windows_ime_session(inner, session_id);
     schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(session_id));
+    true
+}
+
+fn cleanup_cancelled_processing_session(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let should_cleanup = {
+        let state = inner.state.lock();
+        state.session_id == session_id && state.cancelled && state.phase == SessionPhase::Processing
+    };
+    if !should_cleanup {
+        return false;
+    }
+
+    restore_prepared_windows_ime_session(inner, session_id);
+    clear_embedded_audio_stats(inner);
+    {
+        let mut state = inner.state.lock();
+        if state.session_id != session_id
+            || !state.cancelled
+            || state.phase != SessionPhase::Processing
+        {
+            return false;
+        }
+        state.phase = SessionPhase::Idle;
+        state.focus_target = None;
+    }
+    true
 }
 
 fn clear_embedded_audio_stats(inner: &Arc<Inner>) {
@@ -3002,8 +3041,9 @@ mod tests {
         append_typed_prefix, cancel_session, clear_embedded_ble_cancel_flag, default_done_message,
         dictation_error_code, embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak,
         embedded_streaming_chunk_is_asr_input, finalize_polished_text,
-        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
-        register_embedded_ble_cancel_flag, streaming_insert_eligible, wayland_done_message,
+        finish_dictation_pipeline_error, finish_dictation_timeout, normalize_embedded_pcm_for_asr,
+        prepare_embedded_streaming_pcm_for_asr, register_embedded_ble_cancel_flag,
+        store_embedded_audio_stats, streaming_insert_eligible, wayland_done_message,
         EmbeddedAudioDictationSession, EmbeddedStreamingDictation,
         EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
         EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
@@ -3062,6 +3102,58 @@ mod tests {
             .iter()
             .flat_map(|sample| sample.to_le_bytes())
             .collect()
+    }
+
+    fn seed_cancelled_processing_session(
+        coordinator: &Coordinator,
+    ) -> crate::coordinator_state::SessionId {
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Processing;
+            state.cancelled = true;
+            state.focus_target = Some(42);
+        }
+        store_embedded_audio_stats(
+            &coordinator.inner,
+            crate::embedded_audio::SessionCollector::default().stats(),
+        );
+        session_id
+    }
+
+    fn assert_cancelled_processing_session_cleaned(coordinator: &Coordinator) {
+        {
+            let state = coordinator.inner.state.lock();
+            assert_eq!(state.phase, SessionPhase::Idle);
+            assert!(state.cancelled);
+            assert_eq!(state.focus_target, None);
+        }
+        assert!(coordinator.inner.embedded_audio_stats.lock().is_none());
+    }
+
+    #[test]
+    fn finish_pipeline_error_after_processing_cancel_cleans_without_error_finish() {
+        let coordinator = Coordinator::new();
+        let session_id = seed_cancelled_processing_session(&coordinator);
+
+        let finished_as_error =
+            finish_dictation_pipeline_error(&coordinator.inner, session_id, "识别失败".to_string());
+
+        assert!(!finished_as_error);
+        assert_cancelled_processing_session_cleaned(&coordinator);
+    }
+
+    #[test]
+    fn finish_timeout_after_processing_cancel_cleans_without_error_finish() {
+        let coordinator = Coordinator::new();
+        let session_id = seed_cancelled_processing_session(&coordinator);
+
+        let finished_as_error =
+            finish_dictation_timeout(&coordinator.inner, session_id, "识别超时".to_string());
+
+        assert!(!finished_as_error);
+        assert_cancelled_processing_session_cleaned(&coordinator);
     }
 
     #[test]
