@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use crate::coordinator_state::{SessionId, SessionPhase};
 use crate::recorder::Recorder;
-use crate::types::CapsuleState;
 use tauri::Manager;
 
-use super::{emit_capsule, ActiveAsr, Inner};
+use crate::coordinator_state::DictationUiState;
+
+use super::{publish_dictation_capsule, ActiveAsr, Inner};
 
 pub(super) struct SessionResource<T> {
     pub(super) session_id: SessionId,
@@ -229,8 +230,14 @@ pub(super) fn stop_recorder_if_pending_start_stop(inner: &Arc<Inner>) {
     if let Some(rec) = take_recorder_for_session(inner, session_id) {
         rec.stop();
         release_recording_mute(inner, "dictation");
-        let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
-        emit_capsule(inner, CapsuleState::Transcribing, 0.0, elapsed, None, None);
+        publish_dictation_capsule(
+            inner,
+            session_id,
+            DictationUiState::Transcribing,
+            0.0,
+            None,
+            None,
+        );
         log::info!("[coord] stopped recorder while ASR is still connecting");
     }
 }
