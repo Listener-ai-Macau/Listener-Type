@@ -78,6 +78,16 @@ fn finish_dictation_pipeline_error(
 }
 
 fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: String) -> bool {
+    if inner.embedded_audio_stats.lock().is_some()
+        || inner.embedded_ble_cancel_flag.lock().is_some()
+    {
+        record_embedded_ble_session_actor_command(
+            inner,
+            EmbeddedBleSessionActorCommand::Timeout,
+            Some(session_id),
+            message.clone(),
+        );
+    }
     if !publish_dictation_timeout(inner, session_id, message)
         && cleanup_cancelled_processing_session(inner, session_id)
     {
@@ -156,6 +166,13 @@ fn clear_embedded_ble_cancel_flag(inner: &Arc<Inner>, flag: &Arc<AtomicBool>) {
 fn request_embedded_ble_capture_cancel(inner: &Arc<Inner>) -> bool {
     let flag = inner.embedded_ble_cancel_flag.lock().clone();
     if let Some(flag) = flag {
+        let session_id = inner.state.lock().session_id;
+        record_embedded_ble_session_actor_command(
+            inner,
+            EmbeddedBleSessionActorCommand::CancelCommand,
+            Some(session_id),
+            "cancel requested for active BLE capture",
+        );
         flag.store(true, Ordering::SeqCst);
         true
     } else {
@@ -180,6 +197,12 @@ fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: Session
         *slot = Some(preview.clone());
     }
 
+    record_embedded_ble_session_actor_command(
+        inner,
+        EmbeddedBleSessionActorCommand::AsrPartial,
+        Some(session_id),
+        format!("chars={}", preview.chars().count()),
+    );
     emit_embedded_audio_partial_preview_if_active(inner, session_id, preview);
 }
 
@@ -1545,6 +1568,12 @@ async fn submit_embedded_audio_ble_stream_impl(
                     }
                 }
                 streaming.reset_for_next_session();
+                record_embedded_ble_session_actor_command(
+                    inner,
+                    EmbeddedBleSessionActorCommand::ActorRestart,
+                    None,
+                    "background listener ready for next BLE session without reopening notify",
+                );
             }
             Ok(false) => {}
             Err(err) => {
@@ -1635,6 +1664,13 @@ impl EmbeddedStreamingDictation {
         inner: &Arc<Inner>,
         event: crate::embedded_audio::StreamingSessionEvent,
     ) -> Result<bool, String> {
+        let event_detail = embedded_ble_session_event_detail(&event);
+        record_embedded_ble_session_actor_command(
+            inner,
+            EmbeddedBleSessionActorCommand::BlePacket,
+            self.session.as_ref().map(|session| session.session_id),
+            event_detail,
+        );
         match event {
             crate::embedded_audio::StreamingSessionEvent::Started { session_id } => {
                 self.begin_session_if_needed(inner, session_id).await?;
@@ -1813,6 +1849,14 @@ impl EmbeddedStreamingDictation {
             session.normalized_pcm_bytes,
             archive_active
         );
+        record_embedded_ble_session_actor_command(
+            inner,
+            EmbeddedBleSessionActorCommand::StopCommand,
+            Some(session.session_id),
+            format!(
+                "embedded_session_id={embedded_session_id} expected_packets={expected_packet_count}"
+            ),
+        );
         end_session(inner).await
     }
 
@@ -1830,15 +1874,32 @@ impl EmbeddedStreamingDictation {
                 self.terminal_received = true;
                 Ok(())
             }
-            Err(err) if self.keep_listening_after_pipeline_errors && self.session.is_none() => {
-                self.terminal_received = true;
-                log::warn!(
-                    "[embedded-ble] background session completed with dictation pipeline error; keeping notify open: {err}"
-                );
+            Err(err) if self.keep_notify_ready_after_completed_pipeline_error(inner, &err) => {
                 Ok(())
             }
             Err(err) => Err(err),
         }
+    }
+
+    fn keep_notify_ready_after_completed_pipeline_error(
+        &mut self,
+        inner: &Arc<Inner>,
+        err: &str,
+    ) -> bool {
+        if !self.keep_listening_after_pipeline_errors || self.session.is_some() {
+            return false;
+        }
+        self.terminal_received = true;
+        record_embedded_ble_session_actor_command(
+            inner,
+            EmbeddedBleSessionActorCommand::ActorRestart,
+            None,
+            format!("completed session pipeline error kept notify ready: {err}"),
+        );
+        log::warn!(
+            "[embedded-ble] background session completed with dictation pipeline error; keeping notify open: {err}"
+        );
+        true
     }
 
     async fn finish_pending_stop_after_capture(
@@ -2097,6 +2158,45 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
 
 fn embedded_streaming_chunk_is_asr_input(chunk: &crate::embedded_audio::StreamingPcmChunk) -> bool {
     !chunk.after_stop_boundary
+}
+
+fn embedded_ble_session_event_detail(
+    event: &crate::embedded_audio::StreamingSessionEvent,
+) -> String {
+    match event {
+        crate::embedded_audio::StreamingSessionEvent::Started { session_id } => {
+            format!("event=start embedded_session_id={session_id}")
+        }
+        crate::embedded_audio::StreamingSessionEvent::PcmChunk(chunk) => format!(
+            "event=pcm embedded_session_id={} packet_sequence={} pcm_bytes={} after_stop={}",
+            chunk.session_id,
+            chunk.packet_sequence,
+            chunk.pcm.len(),
+            chunk.after_stop_boundary
+        ),
+        crate::embedded_audio::StreamingSessionEvent::Stopped {
+            session_id,
+            expected_packet_count,
+        } => format!(
+            "event=stop embedded_session_id={session_id} expected_packets={expected_packet_count}"
+        ),
+        crate::embedded_audio::StreamingSessionEvent::Cancelled {
+            session_id,
+            expected_packet_count,
+        } => format!(
+            "event=cancel embedded_session_id={session_id} expected_packets={expected_packet_count}"
+        ),
+        crate::embedded_audio::StreamingSessionEvent::Error {
+            session_id,
+            expected_packet_count,
+            error_code,
+        } => format!(
+            "event=error embedded_session_id={session_id} expected_packets={expected_packet_count} error_code={error_code:?}"
+        ),
+        crate::embedded_audio::StreamingSessionEvent::Ignored(reason) => {
+            format!("event=ignored reason={reason:?}")
+        }
+    }
 }
 
 async fn build_embedded_audio_asr_consumer(
@@ -2536,6 +2636,15 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
             );
             raw.text = debug_text;
         }
+    }
+
+    if inner.embedded_audio_stats.lock().is_some() {
+        record_embedded_ble_session_actor_command(
+            inner,
+            EmbeddedBleSessionActorCommand::AsrFinal,
+            Some(current_session_id),
+            format!("transcript_empty={}", raw.text.trim().is_empty()),
+        );
     }
 
     if raw.text.trim().is_empty() {
@@ -3038,13 +3147,18 @@ fn append_typed_prefix(target: &mut String, delta: &str, typed_chars: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        append_typed_prefix, cancel_session, clear_embedded_ble_cancel_flag, default_done_message,
-        dictation_error_code, embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak,
+        append_typed_prefix, cancel_embedded_ble_listener_capture, cancel_session,
+        clear_embedded_ble_cancel_flag, default_done_message, dictation_error_code,
+        embedded_ble_listener_capture_ready, embedded_ble_session_actor_history,
+        embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak,
         embedded_streaming_chunk_is_asr_input, finalize_polished_text,
-        finish_dictation_pipeline_error, finish_dictation_timeout, normalize_embedded_pcm_for_asr,
-        prepare_embedded_streaming_pcm_for_asr, register_embedded_ble_cancel_flag,
-        store_embedded_audio_stats, streaming_insert_eligible, wayland_done_message,
-        EmbeddedAudioDictationSession, EmbeddedStreamingDictation,
+        finish_dictation_pipeline_error, finish_dictation_timeout,
+        install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
+        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
+        record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
+        store_embedded_audio_stats, streaming_insert_eligible,
+        update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
+        EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
         EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
         EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
@@ -3193,6 +3307,123 @@ mod tests {
 
         clear_embedded_ble_cancel_flag(&coordinator.inner, &second);
         assert!(coordinator.inner.embedded_ble_cancel_flag.lock().is_none());
+    }
+
+    #[test]
+    fn background_listener_keeps_notify_ready_after_completed_pipeline_failure() {
+        let coordinator = Coordinator::new();
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        mark_embedded_ble_listener_ready(&coordinator.inner, &active);
+        let mut streaming = EmbeddedStreamingDictation::background_listener();
+
+        assert!(streaming.keep_notify_ready_after_completed_pipeline_error(
+            &coordinator.inner,
+            "ASR final failed after completed BLE audio session"
+        ));
+
+        assert!(streaming.terminal_received);
+        assert!(!active.load(Ordering::SeqCst));
+        assert!(embedded_ble_listener_capture_ready(&coordinator.inner));
+        let history = embedded_ble_session_actor_history(&coordinator.inner);
+        assert!(history.iter().any(|record| {
+            record.command == EmbeddedBleSessionActorCommand::ActorRestart
+                && record.detail.contains("pipeline error")
+        }));
+    }
+
+    #[test]
+    fn session_actor_command_log_serializes_ble_asr_cancel_timeout_and_empty_final() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        register_embedded_ble_cancel_flag(&coordinator.inner, &cancel_flag);
+
+        record_embedded_ble_session_actor_command(
+            &coordinator.inner,
+            EmbeddedBleSessionActorCommand::BlePacket,
+            Some(session_id),
+            "tail packet after stop boundary",
+        );
+        update_embedded_audio_partial_preview(&coordinator.inner, session_id, "partial".into());
+        cancel_session(&coordinator.inner);
+        assert!(cancel_flag.load(Ordering::SeqCst));
+
+        let timeout_session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = timeout_session_id;
+            state.phase = SessionPhase::Processing;
+            state.cancelled = false;
+        }
+        record_embedded_ble_session_actor_command(
+            &coordinator.inner,
+            EmbeddedBleSessionActorCommand::AsrFinal,
+            Some(timeout_session_id),
+            "transcript_empty=true",
+        );
+        store_embedded_audio_stats(
+            &coordinator.inner,
+            crate::embedded_audio::SessionCollector::default().stats(),
+        );
+        finish_dictation_timeout(
+            &coordinator.inner,
+            timeout_session_id,
+            "识别超时".to_string(),
+        );
+
+        let history = embedded_ble_session_actor_history(&coordinator.inner);
+        let commands: Vec<_> = history.iter().map(|record| record.command).collect();
+        assert!(commands.contains(&EmbeddedBleSessionActorCommand::BlePacket));
+        assert!(commands.contains(&EmbeddedBleSessionActorCommand::AsrPartial));
+        assert!(commands.contains(&EmbeddedBleSessionActorCommand::CancelCommand));
+        assert!(commands.contains(&EmbeddedBleSessionActorCommand::AsrFinal));
+        assert!(commands.contains(&EmbeddedBleSessionActorCommand::Timeout));
+        assert!(history.windows(2).all(|pair| pair[0].seq < pair[1].seq));
+    }
+
+    #[test]
+    fn session_actor_restart_history_covers_rapid_repeated_short_sessions() {
+        let coordinator = Coordinator::new();
+        let mut streaming = EmbeddedStreamingDictation::background_listener();
+
+        assert!(streaming.keep_notify_ready_after_completed_pipeline_error(
+            &coordinator.inner,
+            "first short session ASR empty result"
+        ));
+        streaming.reset_for_next_session();
+        assert!(streaming.keep_notify_ready_after_completed_pipeline_error(
+            &coordinator.inner,
+            "second short session polish failure"
+        ));
+
+        let restarts: Vec<_> = embedded_ble_session_actor_history(&coordinator.inner)
+            .into_iter()
+            .filter(|record| record.command == EmbeddedBleSessionActorCommand::ActorRestart)
+            .collect();
+        assert_eq!(restarts.len(), 2);
+        assert!(restarts[0].seq < restarts[1].seq);
+    }
+
+    #[test]
+    fn notify_cleanup_delay_records_listener_actor_command() {
+        let coordinator = Coordinator::new();
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        mark_embedded_ble_listener_ready(&coordinator.inner, &active);
+
+        cancel_embedded_ble_listener_capture(&coordinator.inner, "notify cleanup delay test");
+
+        assert!(active.load(Ordering::SeqCst));
+        let history = embedded_ble_session_actor_history(&coordinator.inner);
+        assert!(history.iter().any(|record| {
+            record.command == EmbeddedBleSessionActorCommand::NotifyCleanupDelay
+                && record.detail.contains("notify cleanup delay test")
+        }));
     }
 
     #[test]

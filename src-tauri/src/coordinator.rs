@@ -5,7 +5,7 @@
 //! insertion, persists history, emits `capsule:state` events to the capsule
 //! window.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -167,6 +167,11 @@ struct Inner {
     /// 用户动作触发 BLE 恢复时的结构化快照。用于 Overview、胶囊错误文案和诊断导出，
     /// 避免把底层 transport/notify 错误直接暴露给用户。
     embedded_ble_wake_recovery: Mutex<EmbeddedBleWakeRecoverySnapshot>,
+    /// Listener BLE session actor command log. The actor itself is deliberately
+    /// small: all BLE packets, ASR callbacks, stop/cancel, timeout, and restart
+    /// markers take a monotonically ordered ticket before touching the shared
+    /// dictation FSM. That makes short-session races replayable from logs.
+    embedded_ble_session_actor: Mutex<EmbeddedBleSessionActorState>,
     /// 当前嵌入式 BLE 抓音循环的取消标志。胶囊取消走 cancel_session 时会置位，
     /// 让 blocking BLE notify loop 及时退出。
     embedded_ble_cancel_flag: Mutex<Option<Arc<AtomicBool>>>,
@@ -255,6 +260,51 @@ pub enum EmbeddedBleNotifySubscriptionState {
     Lost,
     Failed,
     Cancelled,
+}
+
+const EMBEDDED_BLE_SESSION_ACTOR_HISTORY_LIMIT: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbeddedBleSessionActorCommand {
+    BlePacket,
+    AsrPartial,
+    AsrFinal,
+    StopCommand,
+    CancelCommand,
+    Timeout,
+    NotifyReady,
+    NotifyCleanupDelay,
+    ActorRestart,
+}
+
+impl EmbeddedBleSessionActorCommand {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::BlePacket => "ble_packet",
+            Self::AsrPartial => "asr_partial",
+            Self::AsrFinal => "asr_final",
+            Self::StopCommand => "stop_command",
+            Self::CancelCommand => "cancel_command",
+            Self::Timeout => "timeout",
+            Self::NotifyReady => "notify_ready",
+            Self::NotifyCleanupDelay => "notify_cleanup_delay",
+            Self::ActorRestart => "actor_restart",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EmbeddedBleSessionActorRecord {
+    seq: u64,
+    command: EmbeddedBleSessionActorCommand,
+    session_id: Option<SessionId>,
+    detail: String,
+}
+
+#[derive(Debug, Default)]
+struct EmbeddedBleSessionActorState {
+    next_seq: u64,
+    history: VecDeque<EmbeddedBleSessionActorRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -357,6 +407,7 @@ impl Coordinator {
                     embedded_ble_wake_recovery: Mutex::new(
                         EmbeddedBleWakeRecoverySnapshot::default(),
                     ),
+                    embedded_ble_session_actor: Mutex::new(EmbeddedBleSessionActorState::default()),
                     embedded_ble_cancel_flag: Mutex::new(None),
                     recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                     hotkey: Mutex::new(None),
@@ -421,6 +472,7 @@ impl Coordinator {
                 embedded_ble_listener_ready: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
                 embedded_ble_wake_recovery: Mutex::new(EmbeddedBleWakeRecoverySnapshot::default()),
+                embedded_ble_session_actor: Mutex::new(EmbeddedBleSessionActorState::default()),
                 embedded_ble_cancel_flag: Mutex::new(None),
                 recording_mute: Mutex::new(SharedRecordingMuteState::new()),
                 hotkey: Mutex::new(None),
@@ -977,6 +1029,20 @@ impl Coordinator {
 
     pub async fn start_dictation(&self) -> Result<(), String> {
         if self.inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle {
+            if embedded_ble_listener_capture_ready(&self.inner) {
+                record_embedded_ble_notify_ready(&self.inner);
+                emit_capsule(
+                    &self.inner,
+                    CapsuleState::Recording,
+                    0.0,
+                    0,
+                    Some("Listener BLE 已连接，按设备语音键开始录音。".to_string()),
+                    None,
+                );
+                schedule_capsule_idle(&self.inner, 1400, None);
+                log::info!("[coord] start_dictation reused ready Listener BLE background listener");
+                return Ok(());
+            }
             self.refresh_embedded_ble_listener();
             record_embedded_ble_reconnect_attempt(&self.inner, "start_dictation");
             emit_capsule(
@@ -2590,6 +2656,47 @@ fn clear_embedded_ble_listener_last_error(inner: &Arc<Inner>) {
     *inner.embedded_ble_listener_last_error.lock() = None;
 }
 
+fn record_embedded_ble_session_actor_command(
+    inner: &Arc<Inner>,
+    command: EmbeddedBleSessionActorCommand,
+    session_id: Option<SessionId>,
+    detail: impl Into<String>,
+) -> u64 {
+    let detail = detail.into();
+    let seq = {
+        let mut actor = inner.embedded_ble_session_actor.lock();
+        actor.next_seq = actor.next_seq.saturating_add(1);
+        let seq = actor.next_seq;
+        actor.history.push_back(EmbeddedBleSessionActorRecord {
+            seq,
+            command,
+            session_id,
+            detail: detail.clone(),
+        });
+        while actor.history.len() > EMBEDDED_BLE_SESSION_ACTOR_HISTORY_LIMIT {
+            actor.history.pop_front();
+        }
+        seq
+    };
+    crate::timeline::mark(
+        "backend.embedded_ble_session_actor",
+        command.as_str(),
+        format!("seq={seq} session_id={session_id:?} {detail}"),
+    );
+    seq
+}
+
+#[cfg(test)]
+fn embedded_ble_session_actor_history(inner: &Arc<Inner>) -> Vec<EmbeddedBleSessionActorRecord> {
+    inner
+        .embedded_ble_session_actor
+        .lock()
+        .history
+        .iter()
+        .cloned()
+        .collect()
+}
+
 fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
     if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
         log::info!("[embedded-ble] background listener refresh skipped during firmware OTA");
@@ -3011,6 +3118,12 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             .embedded_ble_listener_ready
             .store(true, Ordering::SeqCst);
         record_embedded_ble_notify_ready(inner);
+        record_embedded_ble_session_actor_command(
+            inner,
+            EmbeddedBleSessionActorCommand::NotifyReady,
+            None,
+            "background notify subscription ready",
+        );
         sync_device_knob_rotation_action_to_firmware(inner, "ble_ready");
         log::info!("[embedded-ble] background listener notify ready");
     }
@@ -3055,6 +3168,12 @@ fn cancel_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
         .store(false, Ordering::SeqCst);
     let previous = inner.embedded_ble_listener_cancel.lock().take();
     if let Some(cancel) = previous {
+        record_embedded_ble_session_actor_command(
+            inner,
+            EmbeddedBleSessionActorCommand::NotifyCleanupDelay,
+            None,
+            format!("reason={reason}"),
+        );
         cancel.store(true, Ordering::SeqCst);
         record_embedded_ble_listener_cancelled(inner, reason);
         log::info!("[embedded-ble] requested active background capture stop ({reason})");
@@ -4716,6 +4835,12 @@ mod tests {
         coordinator.inner.prefs.replace_for_tests(prefs);
     }
 
+    fn force_embedded_ble_input_for_test(coordinator: &Coordinator) {
+        let mut prefs = coordinator.inner.prefs.get();
+        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+        coordinator.inner.prefs.replace_for_tests(prefs);
+    }
+
     #[test]
     fn device_key_dictation_debounce_matches_hotkey_edge_debounce() {
         let coordinator = Coordinator::new();
@@ -4800,6 +4925,30 @@ mod tests {
 
         assert!(active.load(Ordering::SeqCst));
         assert!(!coordinator
+            .inner
+            .embedded_ble_listener_cancel
+            .lock()
+            .as_ref()
+            .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
+    }
+
+    #[tokio::test]
+    async fn embedded_ble_start_dictation_reuses_ready_background_without_reopen() {
+        let coordinator = Coordinator::new();
+        force_embedded_ble_input_for_test(&coordinator);
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        mark_embedded_ble_listener_ready(&coordinator.inner, &active);
+        let generation_before = coordinator.embedded_ble_listener_generation();
+
+        coordinator.start_dictation().await.unwrap();
+
+        assert_eq!(
+            coordinator.embedded_ble_listener_generation(),
+            generation_before
+        );
+        assert!(!active.load(Ordering::SeqCst));
+        assert!(embedded_ble_listener_capture_ready(&coordinator.inner));
+        assert!(coordinator
             .inner
             .embedded_ble_listener_cancel
             .lock()
