@@ -167,10 +167,10 @@ struct Inner {
     /// 用户动作触发 BLE 恢复时的结构化快照。用于 Overview、胶囊错误文案和诊断导出，
     /// 避免把底层 transport/notify 错误直接暴露给用户。
     embedded_ble_wake_recovery: Mutex<EmbeddedBleWakeRecoverySnapshot>,
-    /// Listener BLE session actor command log. The actor itself is deliberately
-    /// small: all BLE packets, ASR callbacks, stop/cancel, timeout, and restart
-    /// markers take a monotonically ordered ticket before touching the shared
-    /// dictation FSM. That makes short-session races replayable from logs.
+    /// Listener BLE session actor state. Embedded BLE paths must take a
+    /// monotonically ordered actor ticket here before mutating the shared
+    /// dictation FSM, so BLE packets, ASR callbacks, stop/cancel commands, and
+    /// timeout/final events are replayable from one serialized history.
     embedded_ble_session_actor: Mutex<EmbeddedBleSessionActorState>,
     /// 当前嵌入式 BLE 抓音循环的取消标志。胶囊取消走 cancel_session 时会置位，
     /// 让 blocking BLE notify loop 及时退出。
@@ -2662,8 +2662,18 @@ fn record_embedded_ble_session_actor_command(
     session_id: Option<SessionId>,
     detail: impl Into<String>,
 ) -> u64 {
+    dispatch_embedded_ble_session_actor_command(inner, command, session_id, detail, |seq| seq)
+}
+
+fn dispatch_embedded_ble_session_actor_command<T>(
+    inner: &Arc<Inner>,
+    command: EmbeddedBleSessionActorCommand,
+    session_id: Option<SessionId>,
+    detail: impl Into<String>,
+    handle: impl FnOnce(u64) -> T,
+) -> T {
     let detail = detail.into();
-    let seq = {
+    let (seq, result) = {
         let mut actor = inner.embedded_ble_session_actor.lock();
         actor.next_seq = actor.next_seq.saturating_add(1);
         let seq = actor.next_seq;
@@ -2676,14 +2686,15 @@ fn record_embedded_ble_session_actor_command(
         while actor.history.len() > EMBEDDED_BLE_SESSION_ACTOR_HISTORY_LIMIT {
             actor.history.pop_front();
         }
-        seq
+        let result = handle(seq);
+        (seq, result)
     };
     crate::timeline::mark(
         "backend.embedded_ble_session_actor",
         command.as_str(),
         format!("seq={seq} session_id={session_id:?} {detail}"),
     );
-    seq
+    result
 }
 
 #[cfg(test)]
