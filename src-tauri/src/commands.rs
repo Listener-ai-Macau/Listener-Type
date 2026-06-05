@@ -6593,6 +6593,7 @@ mod tests {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         request_count += 1;
+                        stream.set_nonblocking(false).unwrap();
                         let mut request = Vec::new();
                         loop {
                             let n = stream.read(&mut buf).unwrap();
