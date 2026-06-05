@@ -5867,6 +5867,7 @@ fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
 /// 终止态（Done / Cancelled / Error）后延迟 N ms 把胶囊改回 Idle，让浮窗自动消失。
 /// 硬件 BLE 听写的日常路径需要按键结束后立刻收起；详细结果可在历史记录里复盘。
 const CAPSULE_AUTO_HIDE_DELAY_MS: u64 = 0;
+const CAPSULE_STREAM_ERROR_HIDE_DELAY_MS: u64 = 6_000;
 
 /// Coordinator 全局超时保护：防止 ASR await_final_result() 永远挂起。
 /// 设置为 15 秒（比 ASR 的 12 秒 FINAL_RESULT_TIMEOUT 稍长），

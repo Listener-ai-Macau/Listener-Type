@@ -1077,6 +1077,7 @@ function Convert-SerialReportForJson {
         streaming_queued = [bool]$Report.streaming_queued
         transport_not_ready = [bool]$Report.transport_not_ready
         transport_not_ready_rejection_line_index = if ($null -ne $Report.transport_not_ready_rejection_line_index) { [int]$Report.transport_not_ready_rejection_line_index } else { $null }
+        pre_start_cancel_sent = [bool]$Report.pre_start_cancel_sent
         stream_ready_wait_count = [int]$Report.stream_ready_wait_count
         transport_ready_retry_count = [int]$Report.transport_ready_retry_count
         record_start_rejected = [bool]$Report.record_start_rejected
@@ -1247,6 +1248,7 @@ transport_ready_retry_count = 0
 stream_ready_confirmed_before_toggle = False
 stream_ready_confirmed_line_index = None
 transport_not_ready_rejection_line_index = None
+pre_start_cancel_sent = False
 
 AUDIO_TRANSPORT_STATE_MARKER = "audio transport state:"
 AUDIO_TRANSPORT_STREAM_READY_MARKER = "stream_ready"
@@ -1279,6 +1281,13 @@ def send_command(ser, command):
     ser.flush()
     time.sleep(0.05)
     poll_lines(ser)
+
+def send_pre_start_cancel(ser):
+    global pre_start_cancel_sent
+    send_command(ser, "~VREC:CANCEL")
+    pre_start_cancel_sent = True
+    poll_until(ser, time.monotonic() + 0.75)
+    print("serial_pre_start_cancel_sent=1", flush=True)
 
 def wait_for_start_signal(ser):
     deadline = time.monotonic() + max_wait_seconds
@@ -1432,6 +1441,7 @@ try:
     ser.setDTR(False)
     ser.setRTS(False)
     ser.reset_input_buffer()
+    send_pre_start_cancel(ser)
     wait_for_start_signal(ser)
     start_recording_with_retry(ser)
     wait_for_stop_signal(ser)
@@ -1465,6 +1475,7 @@ summary = {
     "streaming_queued": contains("session_start_queued") or contains("stream session start queued"),
     "transport_not_ready": contains("BLE audio transport not ready"),
     "transport_not_ready_rejection_line_index": transport_not_ready_rejection_line_index,
+    "pre_start_cancel_sent": pre_start_cancel_sent,
     "stream_ready_wait_count": stream_ready_wait_count,
     "transport_ready_retry_count": transport_ready_retry_count,
     "record_start_rejected": contains("record session start rejected"),
@@ -1968,6 +1979,14 @@ try {
     }
     $timeline["notify_ready_at_utc"] = Get-SmokeUtcNow
     Write-SmokeTrace "notify_ready"
+    if (-not $SkipCapsuleVisibleGate) {
+        if (Wait-CapsuleWindowVisible -TimeoutMs 1400 -ProcessId $process.Id) {
+            $timeline["notify_ready_capsule_visible_at_utc"] = Get-SmokeUtcNow
+            Write-SmokeTrace "notify_ready_capsule_visible"
+        } else {
+            Write-SmokeTrace "notify_ready_capsule_visible_timeout"
+        }
+    }
     Start-Sleep -Milliseconds ([int]($NotifySettleSeconds * 1000))
     $foregroundAfterListenerReady = Get-ForegroundWindowSnapshot
     Write-ForegroundTrace -Label "after_listener_ready" -Snapshot $foregroundAfterListenerReady
