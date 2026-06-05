@@ -188,3 +188,5 @@ assertStringEqual(
   'notify',
   'BLE ValueChanged failures become notify action',
 );
+
+console.log('providerSetup: all assertions passed');
