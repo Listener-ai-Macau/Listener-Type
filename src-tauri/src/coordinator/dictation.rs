@@ -23,6 +23,7 @@ const EMBEDDED_AUDIO_ASR_PREROLL_BYTES: usize = 16_000 * 2 * EMBEDDED_AUDIO_ASR_
 const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
+const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
 
 fn apply_and_publish_dictation_event(
     inner: &Arc<Inner>,
@@ -1594,6 +1595,11 @@ fn embedded_ble_stream_idle_timeout(
     emit_idle_capture_errors.then_some(timeout)
 }
 
+enum EmbeddedBleStreamSignal {
+    Ready,
+    Notification(Vec<u8>),
+}
+
 async fn submit_embedded_audio_ble_stream_impl(
     inner: &Arc<Inner>,
     timeout_ms: Option<u64>,
@@ -1601,15 +1607,20 @@ async fn submit_embedded_audio_ble_stream_impl(
     cancel_capture: Arc<AtomicBool>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<EmbeddedBleStreamSignal>();
     register_embedded_ble_cancel_flag(inner, &cancel_capture);
     let cancel_capture_for_task = Arc::clone(&cancel_capture);
     let ready_inner = (!emit_idle_capture_errors).then(|| Arc::clone(inner));
     let ready_cancel = Arc::clone(&cancel_capture);
     let capture_task = tauri::async_runtime::spawn_blocking(move || {
+        let ready_tx = tx.clone();
         let mut on_ready = || {
             if let Some(inner) = ready_inner.as_ref() {
                 mark_embedded_ble_listener_ready(inner, &ready_cancel);
+            } else {
+                ready_tx
+                    .send(EmbeddedBleStreamSignal::Ready)
+                    .map_err(|_| "嵌入式音频流式处理已结束".to_string())?;
             }
             Ok(())
         };
@@ -1619,7 +1630,7 @@ async fn submit_embedded_audio_ble_stream_impl(
                 cancel_capture_for_task,
                 &mut on_ready,
                 &mut |event| {
-                    tx.send(event.notification)
+                    tx.send(EmbeddedBleStreamSignal::Notification(event.notification))
                         .map_err(|_| "嵌入式音频流式处理已结束".to_string())
                 },
             )
@@ -1629,7 +1640,7 @@ async fn submit_embedded_audio_ble_stream_impl(
                 cancel_capture_for_task,
                 &mut on_ready,
                 &mut |event| {
-                    tx.send(event.notification)
+                    tx.send(EmbeddedBleStreamSignal::Notification(event.notification))
                         .map_err(|_| "嵌入式音频流式处理已结束".to_string())
                 },
             )
@@ -1642,7 +1653,25 @@ async fn submit_embedded_audio_ble_stream_impl(
     } else {
         EmbeddedStreamingDictation::background_listener()
     };
-    while let Some(notification) = rx.recv().await {
+    let mut ready_capsule_shown = false;
+    while let Some(signal) = rx.recv().await {
+        let notification = match signal {
+            EmbeddedBleStreamSignal::Ready => {
+                if emit_idle_capture_errors && !ready_capsule_shown {
+                    ready_capsule_shown = true;
+                    emit_capsule(
+                        inner,
+                        CapsuleState::Recording,
+                        0.0,
+                        0,
+                        Some(EMBEDDED_BLE_READY_CAPSULE_MESSAGE.to_string()),
+                        None,
+                    );
+                }
+                continue;
+            }
+            EmbeddedBleStreamSignal::Notification(notification) => notification,
+        };
         match streaming.handle_notification(inner, &notification).await {
             Ok(true) => {
                 if emit_idle_capture_errors {
@@ -2056,7 +2085,7 @@ impl EmbeddedStreamingDictation {
                 None,
             );
         }
-        schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, event_session_id);
+        schedule_capsule_idle(inner, CAPSULE_STREAM_ERROR_HIDE_DELAY_MS, event_session_id);
         self.terminal_received = true;
     }
 
