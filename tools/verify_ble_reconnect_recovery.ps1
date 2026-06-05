@@ -9,6 +9,8 @@ param(
     [string]$DisconnectMode = "validation-injected",
     [int]$InitialReadyTimeoutSeconds = 20,
     [int]$ReconnectReadyTimeoutSeconds = 5,
+    [ValidateRange(1, 10)]
+    [int]$CycleCount = 1,
     [int]$PostRestartSettleMilliseconds = 0,
     [int]$PostReconnectStreamSmokeAttempts = 3,
     [int]$PostReconnectStreamSmokeRetryDelaySeconds = 3,
@@ -405,6 +407,7 @@ function Write-MarkdownReport {
     $lines.Add("- Port/address: ``$($Report.port)`` / ``$($Report.bluetooth_address)``")
     $lines.Add("- Deterministic disconnect: ``$($Report.deterministic_disconnect.method)``; $($Report.deterministic_disconnect.justification)")
     $lines.Add("- Disconnect-to-ready: ``$($Report.reconnect.disconnect_to_ready_ms) ms`` (limit ``$($Report.reconnect.limit_ms) ms``)")
+    $lines.Add("- Reconnect cycles: ``$(@($Report.reconnect_cycles).Count)``")
     $lines.Add("- OTA identity after reconnect: ``$($Report.ota_after.status)``")
     $lines.Add("- Audio stream after reconnect: ``$($Report.stream.status)``")
     $lines.Add("- UI capsule evidence: reconnecting lines ``$(@($Report.ui_capsule.reconnecting_lines).Count)``, reconnected lines ``$(@($Report.ui_capsule.reconnected_lines).Count)``")
@@ -422,6 +425,14 @@ function Write-MarkdownReport {
     }
     if (@($Report.ui_capsule.reconnecting_lines + $Report.ui_capsule.reconnected_lines).Count -eq 0) {
         $lines.Add("- No recovery capsule lines captured.")
+    }
+    if (@($Report.reconnect_cycles).Count -gt 1) {
+        $lines.Add("")
+        $lines.Add("## Reconnect Cycles")
+        $lines.Add("")
+        foreach ($cycle in @($Report.reconnect_cycles)) {
+            $lines.Add("- Cycle ``$($cycle.cycle)`` disconnect-to-ready=``$($cycle.disconnect_to_ready_ms) ms`` within_limit=``$($cycle.within_limit)``")
+        }
     }
     $lines.Add("")
     $lines.Add("## Command Results")
@@ -510,6 +521,7 @@ $report = [ordered]@{
         disconnect_to_ready_ms = $null
         within_limit = $false
     }
+    reconnect_cycles = @()
     ota_before = $null
     ota_after = $null
     stream = [ordered]@{
@@ -639,81 +651,105 @@ try {
     $postReadyLogOffsetValue = if (Test-Path $LogPath) { (Get-Item $LogPath).Length } else { $logOffset.Value }
     $logOffset = [ref]$postReadyLogOffsetValue
 
-    if ($SkipBluetoothRestart) {
-        $report.reconnect.disconnect_at_utc = Get-UtcNowText
-    } else {
-        $capturedLog += Read-NewLogText -Path $LogPath -Offset $logOffset
-        $disconnectStarted = Get-Date
-        $report.reconnect.disconnect_at_utc = $disconnectStarted.ToUniversalTime().ToString("o")
-        if ($DisconnectMode -eq "validation-injected") {
-            Set-Content -LiteralPath $validationDisconnectSignalPath -Value "disconnect" -Encoding ASCII
-            Start-Sleep -Milliseconds 1000
-            Remove-Item -LiteralPath $validationDisconnectSignalPath -Force -ErrorAction SilentlyContinue
-        } elseif ($DisconnectMode -eq "serial-reset") {
-            $resetResult = Invoke-SerialReset -PortName $Port
-            $commands.Add($resetResult)
-            Require-Success $resetResult
-        } else {
-            $restartResult = Invoke-External `
-                -Label "restart-windows-bluetooth" `
-                -FilePath "powershell.exe" `
-                -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $restartScript, "-RestartPanAdapter")
-            $commands.Add($restartResult)
-            Require-Success $restartResult
-        }
-    }
-
-    if ($PostRestartSettleMilliseconds -gt 0) {
-        Start-Sleep -Milliseconds $PostRestartSettleMilliseconds
+    if ($CycleCount -gt 1 -and ($DisconnectMode -ne "validation-injected" -or $SkipBluetoothRestart)) {
+        throw "-CycleCount greater than 1 requires validation-injected disconnects without -SkipBluetoothRestart."
     }
 
     $disconnectPattern = "transport_not_ready|connection status changed to Disconnected|GATT session status changed"
     $readyPattern = "\[embedded-ble\] recovery capsule state=reconnected emitted=true|\[embedded-ble\].*background listener notify ready"
-    $observeDisconnectDeadline = (Get-Date).AddSeconds([Math]::Max(30, $ReconnectReadyTimeoutSeconds))
-    $disconnectObservedAt = $null
-    $postDisconnectLog = ""
-    while ((Get-Date) -lt $observeDisconnectDeadline) {
-        $newLogText = Read-NewLogText -Path $LogPath -Offset $logOffset
-        if ($newLogText.Length -gt 0) {
-            $capturedLog += $newLogText
-            $postDisconnectLog += $newLogText
-            $disconnectObservedAt = Get-FirstLogTimestampUtc -Text $postDisconnectLog -Pattern $disconnectPattern
-            if ($disconnectObservedAt) {
-                break
+
+    for ($cycleIndex = 1; $cycleIndex -le $CycleCount; $cycleIndex++) {
+        if ($appProcess -and $appProcess.HasExited) {
+            throw "Listener-Type exited before reconnect cycle $cycleIndex could run."
+        }
+        $cycle = [ordered]@{
+            cycle = $cycleIndex
+            limit_ms = $ReconnectReadyTimeoutSeconds * 1000
+            disconnect_at_utc = $null
+            disconnect_observed_at_utc = $null
+            ready_at_utc = $null
+            disconnect_to_ready_ms = $null
+            within_limit = $false
+        }
+        $capturedLog += Read-NewLogText -Path $LogPath -Offset $logOffset
+
+        if ($SkipBluetoothRestart) {
+            $cycle.disconnect_at_utc = Get-UtcNowText
+        } else {
+            $disconnectStarted = Get-Date
+            $cycle.disconnect_at_utc = $disconnectStarted.ToUniversalTime().ToString("o")
+            if ($DisconnectMode -eq "validation-injected") {
+                Set-Content -LiteralPath $validationDisconnectSignalPath -Value "disconnect" -Encoding ASCII
+                Start-Sleep -Milliseconds 1000
+                Remove-Item -LiteralPath $validationDisconnectSignalPath -Force -ErrorAction SilentlyContinue
+            } elseif ($DisconnectMode -eq "serial-reset") {
+                $resetResult = Invoke-SerialReset -PortName $Port
+                $commands.Add($resetResult)
+                Require-Success $resetResult
+            } else {
+                $restartResult = Invoke-External `
+                    -Label "restart-windows-bluetooth" `
+                    -FilePath "powershell.exe" `
+                    -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $restartScript, "-RestartPanAdapter")
+                $commands.Add($restartResult)
+                Require-Success $restartResult
             }
         }
-        Start-Sleep -Milliseconds 100
-    }
-    if (-not $disconnectObservedAt) {
-        throw "Listener-Type did not log a BLE/GATT disconnect after the deterministic disconnect trigger."
-    }
-    $report.reconnect.disconnect_observed_at_utc = $disconnectObservedAt.ToUniversalTime().ToString("o")
 
-    $readyDeadline = (Get-Date).AddSeconds($ReconnectReadyTimeoutSeconds)
-    $ready = $false
-    $readyAt = $null
-    while ((Get-Date) -lt $readyDeadline) {
-        $newLogText = Read-NewLogText -Path $LogPath -Offset $logOffset
-        if ($newLogText.Length -gt 0) {
-            $capturedLog += $newLogText
-            $postDisconnectLog += $newLogText
+        if ($PostRestartSettleMilliseconds -gt 0) {
+            Start-Sleep -Milliseconds $PostRestartSettleMilliseconds
         }
-        $readyAt = Get-LastLogTimestampUtc -Text $postDisconnectLog -Pattern $readyPattern
-        if ($readyAt -and $readyAt -ge $disconnectObservedAt) {
-            $ready = $true
-            break
+
+        $observeDisconnectDeadline = (Get-Date).AddSeconds([Math]::Max(30, $ReconnectReadyTimeoutSeconds))
+        $disconnectObservedAt = $null
+        $postDisconnectLog = ""
+        while ((Get-Date) -lt $observeDisconnectDeadline) {
+            $newLogText = Read-NewLogText -Path $LogPath -Offset $logOffset
+            if ($newLogText.Length -gt 0) {
+                $capturedLog += $newLogText
+                $postDisconnectLog += $newLogText
+                $disconnectObservedAt = Get-FirstLogTimestampUtc -Text $postDisconnectLog -Pattern $disconnectPattern
+                if ($disconnectObservedAt) {
+                    break
+                }
+            }
+            Start-Sleep -Milliseconds 100
         }
-        Start-Sleep -Milliseconds 100
-    }
-    $capturedLog += Read-NewLogText -Path $LogPath -Offset $logOffset
-    if (-not $ready) {
-        throw "BLE reconnect did not return to notify-ready within $ReconnectReadyTimeoutSeconds seconds."
-    }
-    $report.reconnect.ready_at_utc = $readyAt.ToUniversalTime().ToString("o")
-    $report.reconnect.disconnect_to_ready_ms = [int][Math]::Round(($readyAt.ToUniversalTime() - $disconnectObservedAt.ToUniversalTime()).TotalMilliseconds)
-    $report.reconnect.within_limit = ([int]$report.reconnect.disconnect_to_ready_ms -le [int]$report.reconnect.limit_ms)
-    if (-not [bool]$report.reconnect.within_limit) {
-        throw "Disconnect-to-ready timing exceeded $($report.reconnect.limit_ms) ms: $($report.reconnect.disconnect_to_ready_ms) ms."
+        if (-not $disconnectObservedAt) {
+            throw "Listener-Type did not log a BLE/GATT disconnect after deterministic disconnect trigger cycle $cycleIndex."
+        }
+        $cycle.disconnect_observed_at_utc = $disconnectObservedAt.ToUniversalTime().ToString("o")
+
+        $readyDeadline = (Get-Date).AddSeconds($ReconnectReadyTimeoutSeconds)
+        $ready = $false
+        $readyAt = $null
+        while ((Get-Date) -lt $readyDeadline) {
+            $newLogText = Read-NewLogText -Path $LogPath -Offset $logOffset
+            if ($newLogText.Length -gt 0) {
+                $capturedLog += $newLogText
+                $postDisconnectLog += $newLogText
+            }
+            $readyAt = Get-LastLogTimestampUtc -Text $postDisconnectLog -Pattern $readyPattern
+            if ($readyAt -and $readyAt -ge $disconnectObservedAt) {
+                $ready = $true
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        $capturedLog += Read-NewLogText -Path $LogPath -Offset $logOffset
+        if (-not $ready) {
+            throw "BLE reconnect cycle $cycleIndex did not return to notify-ready within $ReconnectReadyTimeoutSeconds seconds."
+        }
+        $cycle.ready_at_utc = $readyAt.ToUniversalTime().ToString("o")
+        $cycle.disconnect_to_ready_ms = [int][Math]::Round(($readyAt.ToUniversalTime() - $disconnectObservedAt.ToUniversalTime()).TotalMilliseconds)
+        $cycle.within_limit = ([int]$cycle.disconnect_to_ready_ms -le [int]$cycle.limit_ms)
+        if (-not [bool]$cycle.within_limit) {
+            throw "Disconnect-to-ready timing exceeded $($cycle.limit_ms) ms in cycle ${cycleIndex}: $($cycle.disconnect_to_ready_ms) ms."
+        }
+        $report["reconnect"] = $cycle
+        $report["reconnect_cycles"] = @($report["reconnect_cycles"] + $cycle)
+        $postReadyLogOffsetValue = if (Test-Path $LogPath) { (Get-Item $LogPath).Length } else { $logOffset.Value }
+        $logOffset = [ref]$postReadyLogOffsetValue
     }
 
     $otaAfter = Invoke-External `
