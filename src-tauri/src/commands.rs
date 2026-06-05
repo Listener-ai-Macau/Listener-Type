@@ -4996,9 +4996,15 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     };
     use std::thread;
+
+    static PROVIDER_MODELS_CACHE_TEST_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+    fn provider_models_cache_test_lock() -> &'static tokio::sync::Mutex<()> {
+        PROVIDER_MODELS_CACHE_TEST_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
 
     fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
         FirmwareOtaDeviceSnapshot {
@@ -6525,6 +6531,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_provider_models_cached_reuses_recent_result_for_same_credentials() {
+        let _cache_test_guard = provider_models_cache_test_lock().lock().await;
         provider_models_cache().lock().clear();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -6571,6 +6578,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_provider_models_cached_coalesces_concurrent_misses() {
+        let _cache_test_guard = provider_models_cache_test_lock().lock().await;
         provider_models_cache().lock().clear();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -6585,6 +6593,7 @@ mod tests {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         request_count += 1;
+                        stream.set_nonblocking(false).unwrap();
                         let mut request = Vec::new();
                         loop {
                             let n = stream.read(&mut buf).unwrap();
