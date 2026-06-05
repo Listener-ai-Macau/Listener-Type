@@ -19,8 +19,8 @@ use crate::asr::local::foundry::{
 };
 use crate::asr::local::FoundryLocalRuntime;
 use crate::coordinator::{
-    Coordinator, EmbeddedBleNotifySubscriptionState, EmbeddedBleWakeRecoverySnapshot,
-    FirmwareWakePolicySnapshot,
+    Coordinator, EmbeddedBleNotifySubscriptionState, EmbeddedBleSessionActorDiagnosticRecord,
+    EmbeddedBleWakeRecoverySnapshot, FirmwareWakePolicySnapshot,
 };
 use crate::coordinator_state::SessionPhase;
 use crate::github_oauth::{
@@ -3549,6 +3549,7 @@ struct DiagnosticBle {
     reconnect_attempts: u32,
     notify_subscription_state: String,
     wake_recovery: EmbeddedBleWakeRecoverySnapshot,
+    session_actor_history: Vec<EmbeddedBleSessionActorDiagnosticRecord>,
     recent_embedded_session_count: usize,
     latest_session_id: Option<String>,
     last_error_code: Option<String>,
@@ -3958,6 +3959,7 @@ fn diagnostic_ble_history(package: &DiagnosticPackage, lines: &[String]) -> Valu
         "failureTaxonomy": &package.ble.failure_taxonomy,
         "diagnosticSnapshot": &package.ble.diagnostic_snapshot,
         "wakeRecovery": &package.ble.wake_recovery,
+        "sessionActorHistory": &package.ble.session_actor_history,
         "logLines": ble_lines,
     })
 }
@@ -4122,6 +4124,7 @@ fn build_diagnostic_package_with_ble_snapshot(
             reconnect_attempts: wake_recovery.reconnect_attempts,
             notify_subscription_state: format!("{:?}", wake_recovery.notify_subscription_state),
             wake_recovery,
+            session_actor_history: coord.embedded_ble_session_actor_diagnostics(),
             recent_embedded_session_count: embedded_sessions.len(),
             latest_session_id: latest_embedded.map(|session| session.id.clone()),
             last_error_code: recent_sessions
@@ -5444,6 +5447,7 @@ mod tests {
         );
         assert!(value["ble"]["diagnosticSnapshot"]["diagnosticServices"].is_array());
         assert!(value["ble"]["failureTaxonomy"].is_array());
+        assert!(value["ble"]["sessionActorHistory"].is_array());
         assert!(value["ble"].get("deviceAddress").is_some());
         assert!(value["ble"].get("firmwareVersion").is_some());
         assert!(value["ble"].get("batteryPercent").is_some());

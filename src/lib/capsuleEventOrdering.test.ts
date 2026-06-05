@@ -35,6 +35,58 @@ function payload(seq: number, sessionId: string | null, state: CapsuleState): Ca
 
 {
   const tracker = createCapsuleOrderingTracker();
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, 's1', 'recording')).accepted, true);
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(2, 's1', 'done')).accepted, true);
+
+  const lateError = applyCapsulePayloadOrdering(tracker, payload(3, 's1', 'error'));
+  assert.equal(lateError.accepted, false);
+  assert.equal(lateError.reason, 'closed-session-error-state');
+}
+
+{
+  const tracker = createCapsuleOrderingTracker();
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, 's1', 'recording')).accepted, true);
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(2, 's1', 'cancelled')).accepted, true);
+
+  const lateError = applyCapsulePayloadOrdering(tracker, payload(3, 's1', 'error'));
+  assert.equal(lateError.accepted, false);
+  assert.equal(lateError.reason, 'closed-session-error-state');
+}
+
+{
+  const tracker = createCapsuleOrderingTracker();
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, 's1', 'recording')).accepted, true);
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(2, 's1', 'error')).accepted, true);
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(3, 's1', 'idle')).accepted, true);
+
+  const lateError = applyCapsulePayloadOrdering(tracker, payload(4, 's1', 'error'));
+  assert.equal(lateError.accepted, false);
+  assert.equal(lateError.reason, 'closed-session-error-state');
+}
+
+{
+  const tracker = createCapsuleOrderingTracker();
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, 's1', 'recording')).accepted, true);
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(2, 's1', 'cancelled')).accepted, true);
+
+  const lateDone = applyCapsulePayloadOrdering(tracker, payload(3, 's1', 'done'));
+  assert.equal(lateDone.accepted, false);
+  assert.equal(lateDone.reason, 'closed-session-terminal-state');
+}
+
+{
+  const tracker = createCapsuleOrderingTracker();
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, 's1', 'recording')).accepted, true);
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(2, 's1', 'done')).accepted, true);
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(3, 's1', 'idle')).accepted, true);
+
+  const lateCancelled = applyCapsulePayloadOrdering(tracker, payload(4, 's1', 'cancelled'));
+  assert.equal(lateCancelled.accepted, false);
+  assert.equal(lateCancelled.reason, 'closed-session-terminal-state');
+}
+
+{
+  const tracker = createCapsuleOrderingTracker();
   assert.equal(applyCapsulePayloadOrdering(tracker, payload(10, 's1', 'recording')).accepted, true);
 
   const olderPartial = applyCapsulePayloadOrdering(tracker, payload(9, 's1', 'transcribing'));
