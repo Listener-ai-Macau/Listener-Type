@@ -2760,12 +2760,21 @@ fn record_embedded_ble_reconnect_attempt(inner: &Arc<Inner>, reason: &str) {
     );
 }
 
-fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) {
+fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) -> bool {
     let mut snapshot = inner.embedded_ble_wake_recovery.lock();
+    let recovered = snapshot.recent_disconnect_reason.is_some()
+        || matches!(
+            snapshot.notify_subscription_state,
+            EmbeddedBleNotifySubscriptionState::Lost | EmbeddedBleNotifySubscriptionState::Failed
+        );
     snapshot.status = EmbeddedBleWakeRecoveryStatus::Ready;
     snapshot.user_guidance = "Listener BLE 已连接，音频 notify 已订阅。".to_string();
     snapshot.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Subscribed;
     snapshot.last_ready_at = Some(now_rfc3339());
+    if recovered {
+        snapshot.recent_disconnect_reason = None;
+    }
+    recovered
 }
 
 fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationAction) -> &'static str {
@@ -2826,6 +2835,26 @@ fn record_embedded_ble_recovery_failure(inner: &Arc<Inner>, err: &str) {
     } else {
         EmbeddedBleNotifySubscriptionState::Lost
     };
+}
+
+fn emit_embedded_ble_recovery_capsule(
+    inner: &Arc<Inner>,
+    state_label: &str,
+    message: impl Into<String>,
+    idle_after_ms: Option<u64>,
+) {
+    emit_capsule(
+        inner,
+        CapsuleState::Recording,
+        0.0,
+        0,
+        Some(message.into()),
+        None,
+    );
+    log::info!("[embedded-ble] recovery capsule state={state_label} emitted=true");
+    if let Some(delay_ms) = idle_after_ms {
+        schedule_capsule_idle(inner, delay_ms, None);
+    }
 }
 
 fn embedded_ble_wake_guidance_for_error(err: &str) -> String {
@@ -2968,8 +2997,11 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     record_embedded_ble_listener_last_error(&inner, &err);
                     record_embedded_ble_recovery_failure(&inner, &err);
                     if is_embedded_ble_automatic_recovery_error(&err) {
-                        log::info!(
-                            "[embedded-ble] automatic recovery in progress; capsule suppressed"
+                        emit_embedded_ble_recovery_capsule(
+                            &inner,
+                            "reconnecting",
+                            "Listener BLE 已断开，正在自动重连音频通道...",
+                            None,
                         );
                     }
                 }
@@ -3128,7 +3160,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         inner
             .embedded_ble_listener_ready
             .store(true, Ordering::SeqCst);
-        record_embedded_ble_notify_ready(inner);
+        let recovered = record_embedded_ble_notify_ready(inner);
         record_embedded_ble_session_actor_command(
             inner,
             EmbeddedBleSessionActorCommand::NotifyReady,
@@ -3136,6 +3168,14 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             "background notify subscription ready",
         );
         sync_device_knob_rotation_action_to_firmware(inner, "ble_ready");
+        if recovered {
+            emit_embedded_ble_recovery_capsule(
+                inner,
+                "reconnected",
+                "Listener BLE 已重连，音频通道已恢复。",
+                Some(1400),
+            );
+        }
         log::info!("[embedded-ble] background listener notify ready");
     }
 }
@@ -5190,6 +5230,25 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("reason=546"));
+    }
+
+    #[test]
+    fn embedded_ble_notify_ready_reports_recovered_after_disconnect() {
+        let coordinator = Coordinator::new();
+
+        record_embedded_ble_recovery_failure(
+            &coordinator.inner,
+            "Windows BLE disconnected; reason=546; audio path returned transport_not_ready",
+        );
+        assert!(record_embedded_ble_notify_ready(&coordinator.inner));
+        let snapshot = coordinator.embedded_ble_wake_recovery_snapshot();
+
+        assert_eq!(snapshot.status, EmbeddedBleWakeRecoveryStatus::Ready);
+        assert_eq!(
+            snapshot.notify_subscription_state,
+            EmbeddedBleNotifySubscriptionState::Subscribed
+        );
+        assert!(snapshot.recent_disconnect_reason.is_none());
     }
 
     #[tokio::test]

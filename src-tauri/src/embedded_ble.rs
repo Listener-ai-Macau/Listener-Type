@@ -530,6 +530,13 @@ mod windows_ble {
         Duration::from_millis(750),
         Duration::from_millis(1500),
     ];
+    const NOTIFY_TARGET_OPEN_RETRY_DELAYS: [Duration; 5] = [
+        Duration::from_millis(250),
+        Duration::from_millis(500),
+        Duration::from_millis(1000),
+        Duration::from_millis(2000),
+        Duration::from_millis(3000),
+    ];
     const ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT: Duration = Duration::from_secs(24);
     const DIAGNOSTIC_PULL_CANDIDATE_DELAY: Duration = Duration::from_millis(350);
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -1367,7 +1374,7 @@ mod windows_ble {
     pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
         let capture_guard = BleCaptureGuard::enter(Some(timeout))?;
         let capture_id = capture_guard.session_id();
-        let target = open_notify_target()?;
+        let target = open_notify_target_with_retry(capture_id)?;
         let characteristic = target.characteristic.clone();
         let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
             |_sender, _args| Ok(()),
@@ -1517,7 +1524,7 @@ mod windows_ble {
     ) -> Result<(), String> {
         let capture_guard = BleCaptureGuard::enter(idle_timeout)?;
         let capture_id = capture_guard.session_id();
-        let target = open_notify_target()?;
+        let target = open_notify_target_with_retry(capture_id)?;
         let characteristic = target.characteristic.clone();
         let (tx, rx) = mpsc::channel::<BleCaptureSignal>();
         let notification_tx = tx.clone();
@@ -2332,6 +2339,51 @@ mod windows_ble {
         Err(last_error.unwrap_or_else(|| {
             "No subscribable embedded audio BLE notify characteristic found".to_string()
         }))
+    }
+
+    fn open_notify_target_with_retry(capture_id: u64) -> Result<OpenNotifyTarget, String> {
+        let mut last_error = None;
+        for attempt in 1..=NOTIFY_TARGET_OPEN_RETRY_DELAYS.len() + 1 {
+            match open_notify_target() {
+                Ok(target) => {
+                    if attempt > 1 {
+                        log::info!(
+                            "[embedded-ble] capture #{capture_id}: notify target open recovered on attempt {attempt}"
+                        );
+                    }
+                    return Ok(target);
+                }
+                Err(err) => {
+                    if attempt > NOTIFY_TARGET_OPEN_RETRY_DELAYS.len()
+                        || !is_transient_notify_target_open_error(&err)
+                    {
+                        return Err(err);
+                    }
+                    let delay = NOTIFY_TARGET_OPEN_RETRY_DELAYS[attempt - 1];
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: notify target open attempt {attempt} failed: {err}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    last_error = Some(err);
+                    std::thread::sleep(delay);
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            "No subscribable embedded audio BLE notify characteristic found".to_string()
+        }))
+    }
+
+    pub(super) fn is_transient_notify_target_open_error(err: &str) -> bool {
+        err.contains("GattCommunicationStatus(3)")
+            || err.contains("Unreachable")
+            || err.contains("unreachable")
+            || err.contains("HRESULT(0x800706BA)")
+            || err.contains("BLE characteristic discovery returned status")
+            || err.contains("BLE service open wait failed")
+            || err.contains("BLE service discovery wait failed")
+            || err.contains("device open by address")
+            || err.contains("device open by id")
     }
 
     fn open_audio_control_target() -> Result<OpenAudioControlTarget, String> {
@@ -4904,6 +4956,20 @@ mod tests {
             .expect("stop notification");
         assert!(!windows_ble::collector_has_active_recoverable_session(
             &collector
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn notify_target_open_retry_classifies_windows_gatt_transients() {
+        assert!(windows_ble::is_transient_notify_target_open_error(
+            "BLE characteristic discovery returned status=GattCommunicationStatus(3)"
+        ));
+        assert!(windows_ble::is_transient_notify_target_open_error(
+            "BLE service open wait failed: HRESULT(0x800706BA)"
+        ));
+        assert!(!windows_ble::is_transient_notify_target_open_error(
+            "notify characteristic not found"
         ));
     }
 
