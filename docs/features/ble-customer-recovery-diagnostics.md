@@ -27,6 +27,26 @@ The diagnostic package classifies BLE errors into stable support categories:
 - `ble.diagnosticSnapshot.audioServices` and `ble.diagnosticSnapshot.otaServices`: Windows PnP/GATT service selector entries with service UUID, device name, instance id, and parsed Bluetooth address.
 - `ble.diagnosticSnapshot.errors`: snapshot collection failures or live firmware snapshot details.
 - `ble.failureTaxonomy`: deduplicated classifications from listener errors, wake recovery state, recent log errors, and snapshot errors.
+- `ble.sessionActorHistory`: ordered BLE session actor commands (`seq`, `command`, `sessionId`, `detail`) for notify readiness, BLE packets, ASR partial/final, stop, cancel, timeout, and actor restart events. Details record counts and state, not transcript text.
+
+`desktop/ble_connection_history.json` repeats the BLE recovery fields plus `sessionActorHistory`, so support can line up:
+
+- `backend.capsule` timeline entries with capsule `seq`/`sessionId`.
+- `notify_ready` actor entries with `ble.backgroundListenerReady` and `ble.wakeRecovery.notifySubscriptionState`.
+- `asr_partial`/`asr_final`, `stop_command`, `cancel_command`, and `timeout` actor entries with the same coordinator `sessionId`.
+- `recentSessions[].id` and `embeddedAudioStats` after history insertion.
+- `firmware/diag_log_summary.json` refs, including `eventsSha256` when firmware diag events were exported.
+
+## Session Source Convergence
+
+Listener Type treats recording starts/stops/cancels as separate sources but converges them at the coordinator session FSM:
+
+| Source | Entry point | BLE source behavior | Session/capsule contract |
+|---|---|---|---|
+| Device voice key / custom key | `handle_device_dictation_action` | If background notify is not ready, refreshes and waits; then sends the BLE recording-control toggle characteristic. | Does not create a desktop session until firmware sends BLE audio start; failures emit an actionable Error capsule and recovery diagnostics. |
+| App/tray/IPC command | `start_dictation` / `stop_dictation` / `cancel_dictation` | For Listener BLE source, start reuses or refreshes the background listener instead of opening a competing foreground capture. | Non-BLE microphone sessions still use the same `SessionId` FSM and capsule payload ordering. |
+| CLI toggle | `listener-type --toggle-dictation` routed by `dispatch_cli_intent` | Shares `start_dictation` / `stop_dictation`, including Starting pending-stop behavior. | The CLI is only a command source; it does not bypass session ownership. |
+| BLE audio packets/control notifications | background listener `EmbeddedStreamingDictation` | Packets, stop/cancel/error events, ASR callbacks, and timeout all pass through the BLE session actor. | Capsule payloads carry monotonic `seq` and `sessionId`; late active/error snapshots cannot overwrite completed, cancelled, or idled sessions. |
 
 ## Support Script Findings
 

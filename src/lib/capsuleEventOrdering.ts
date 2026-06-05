@@ -3,7 +3,7 @@ import type { CapsulePayload, CapsuleState } from './types';
 export interface CapsuleOrderingTracker {
   lastSeq: number;
   activeSessionId: string | null;
-  closedSessionIds: Set<string>;
+  closedSessionStates: Map<string, CapsuleState>;
 }
 
 export interface CapsuleOrderingDecision {
@@ -18,7 +18,7 @@ export function createCapsuleOrderingTracker(): CapsuleOrderingTracker {
   return {
     lastSeq: 0,
     activeSessionId: null,
-    closedSessionIds: new Set<string>(),
+    closedSessionStates: new Map<string, CapsuleState>(),
   };
 }
 
@@ -41,8 +41,29 @@ export function applyCapsulePayloadOrdering(
     return { accepted: false, reason: 'non-session-terminal-while-session-active' };
   }
 
-  if (sessionId && ACTIVE_STATES.has(payload.state) && tracker.closedSessionIds.has(sessionId)) {
+  const closedState = sessionId ? tracker.closedSessionStates.get(sessionId) : undefined;
+
+  if (sessionId && ACTIVE_STATES.has(payload.state) && closedState) {
     return { accepted: false, reason: 'closed-session-active-state' };
+  }
+
+  if (
+    sessionId
+    && payload.state === 'error'
+    && closedState
+    && closedState !== 'error'
+  ) {
+    return { accepted: false, reason: 'closed-session-error-state' };
+  }
+
+  if (
+    sessionId
+    && closedState
+    && TERMINAL_STATES.has(payload.state)
+    && payload.state !== 'idle'
+    && closedState !== payload.state
+  ) {
+    return { accepted: false, reason: 'closed-session-terminal-state' };
   }
 
   if (
@@ -61,7 +82,7 @@ export function applyCapsulePayloadOrdering(
     tracker.activeSessionId = sessionId;
   }
   if (sessionId && TERMINAL_STATES.has(payload.state)) {
-    tracker.closedSessionIds.add(sessionId);
+    tracker.closedSessionStates.set(sessionId, payload.state);
     if (tracker.activeSessionId === sessionId) {
       tracker.activeSessionId = null;
     }

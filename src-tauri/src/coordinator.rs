@@ -301,6 +301,26 @@ struct EmbeddedBleSessionActorRecord {
     detail: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedBleSessionActorDiagnosticRecord {
+    pub seq: u64,
+    pub command: &'static str,
+    pub session_id: Option<String>,
+    pub detail: String,
+}
+
+impl EmbeddedBleSessionActorRecord {
+    fn diagnostic(&self) -> EmbeddedBleSessionActorDiagnosticRecord {
+        EmbeddedBleSessionActorDiagnosticRecord {
+            seq: self.seq,
+            command: self.command.as_str(),
+            session_id: self.session_id.map(|id| id.to_string()),
+            detail: self.detail.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct EmbeddedBleSessionActorState {
     next_seq: u64,
@@ -1021,6 +1041,12 @@ impl Coordinator {
 
     pub fn embedded_ble_wake_recovery_snapshot(&self) -> EmbeddedBleWakeRecoverySnapshot {
         embedded_ble_wake_recovery_snapshot(&self.inner)
+    }
+
+    pub fn embedded_ble_session_actor_diagnostics(
+        &self,
+    ) -> Vec<EmbeddedBleSessionActorDiagnosticRecord> {
+        embedded_ble_session_actor_diagnostics(&self.inner)
     }
 
     pub fn hotkey_capability(&self) -> HotkeyCapability {
@@ -2705,6 +2731,18 @@ fn embedded_ble_session_actor_history(inner: &Arc<Inner>) -> Vec<EmbeddedBleSess
         .history
         .iter()
         .cloned()
+        .collect()
+}
+
+fn embedded_ble_session_actor_diagnostics(
+    inner: &Arc<Inner>,
+) -> Vec<EmbeddedBleSessionActorDiagnosticRecord> {
+    inner
+        .embedded_ble_session_actor
+        .lock()
+        .history
+        .iter()
+        .map(EmbeddedBleSessionActorRecord::diagnostic)
         .collect()
 }
 
@@ -6045,6 +6083,7 @@ fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
 /// 终止态（Done / Cancelled / Error）后延迟 N ms 把胶囊改回 Idle，让浮窗自动消失。
 /// 硬件 BLE 听写的日常路径需要按键结束后立刻收起；详细结果可在历史记录里复盘。
 const CAPSULE_AUTO_HIDE_DELAY_MS: u64 = 0;
+const CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS: u64 = 6_000;
 const CAPSULE_STREAM_ERROR_HIDE_DELAY_MS: u64 = 6_000;
 const CAPSULE_RECORDING_WINDOW_KEEPALIVE_MS: u64 = 1_000;
 

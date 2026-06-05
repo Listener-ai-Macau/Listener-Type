@@ -82,6 +82,14 @@ fn publish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message:
     )
 }
 
+fn schedule_actionable_error_capsule_idle(inner: &Arc<Inner>, session_id: SessionId) {
+    schedule_capsule_idle(
+        inner,
+        CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS,
+        Some(session_id),
+    );
+}
+
 fn publish_embedded_ble_asr_final(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -128,7 +136,7 @@ fn finish_dictation_pipeline_error(
         return false;
     }
     restore_prepared_windows_ime_session(inner, session_id);
-    schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(session_id));
+    schedule_actionable_error_capsule_idle(inner, session_id);
     true
 }
 
@@ -151,7 +159,7 @@ fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: 
         return false;
     }
     restore_prepared_windows_ime_session(inner, session_id);
-    schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(session_id));
+    schedule_actionable_error_capsule_idle(inner, session_id);
     true
 }
 
@@ -991,7 +999,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         log::warn!("[coord] microphone permission gate failed: {message}");
         publish_dictation_pipeline_error(inner, current_session_id, message.clone());
         restore_prepared_windows_ime_session(inner, current_session_id);
-        schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
+        schedule_actionable_error_capsule_idle(inner, current_session_id);
         return Err(message);
     }
 
@@ -1042,7 +1050,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                     format!("本地模型初始化失败: {e}"),
                 );
                 restore_prepared_windows_ime_session(inner, current_session_id);
-                schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
+                schedule_actionable_error_capsule_idle(inner, current_session_id);
                 return Err(format!("local ASR init failed: {e}"));
             }
         };
@@ -1098,7 +1106,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                 format!("ASR 连接失败: {e}"),
             );
             restore_prepared_windows_ime_session(inner, current_session_id);
-            schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
+            schedule_actionable_error_capsule_idle(inner, current_session_id);
             return Err(e.to_string());
         }
         match startup_race_status_for_starting(inner, current_session_id) {
@@ -1196,7 +1204,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                 format!("ASR 连接失败: {e}"),
             );
             restore_prepared_windows_ime_session(inner, current_session_id);
-            schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
+            schedule_actionable_error_capsule_idle(inner, current_session_id);
             return Err(e.to_string());
         }
         // open_session.await 期间用户可能按了 Esc / 改变心意。如果 cancel_session
@@ -1331,7 +1339,7 @@ pub(super) async fn start_recorder_for_starting(
             publish_dictation_pipeline_error(inner, session_id, format!("录音启动失败: {e}"));
             restore_prepared_windows_ime_session(inner, session_id);
             release_recording_mute(inner, "dictation");
-            schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(session_id));
+            schedule_actionable_error_capsule_idle(inner, session_id);
             return Err(e.to_string());
         }
     }
@@ -1389,7 +1397,7 @@ pub(super) fn abort_recording_with_error(inner: &Arc<Inner>, message: String) {
         Some(message),
         None,
     );
-    schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(abort.session_id));
+    schedule_actionable_error_capsule_idle(inner, abort.session_id);
 }
 
 pub(super) async fn start_recorder_and_enter_listening(
@@ -2188,7 +2196,7 @@ async fn begin_embedded_audio_dictation_session(
         log::warn!("[coord] embedded audio ASR credential gate failed: {message}");
         publish_dictation_pipeline_error(inner, current_session_id, message.clone());
         restore_prepared_windows_ime_session(inner, current_session_id);
-        schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
+        schedule_actionable_error_capsule_idle(inner, current_session_id);
         return Err(message);
     }
 
@@ -2201,7 +2209,7 @@ async fn begin_embedded_audio_dictation_session(
                 publish_dictation_pipeline_error(inner, current_session_id, message.clone());
                 restore_prepared_windows_ime_session(inner, current_session_id);
                 cancel_asr_for_session(inner, current_session_id);
-                schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
+                schedule_actionable_error_capsule_idle(inner, current_session_id);
                 return Err(message);
             }
         };
@@ -2847,7 +2855,7 @@ async fn finish_end_session_after_stop_transition(
             Some("没有识别到语音".to_string()),
         );
         restore_prepared_windows_ime_session(inner, current_session_id);
-        schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
+        schedule_actionable_error_capsule_idle(inner, current_session_id);
         return Err("ASR returned empty transcript".to_string());
     }
 
@@ -3351,8 +3359,8 @@ mod tests {
         finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
         install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
         normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
-        publish_embedded_ble_asr_final, register_embedded_ble_cancel_flag,
-        store_embedded_audio_stats, streaming_insert_eligible,
+        publish_embedded_ble_asr_final, record_embedded_ble_session_actor_command,
+        register_embedded_ble_cancel_flag, store_embedded_audio_stats, streaming_insert_eligible,
         update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
         EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
         EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
@@ -3717,6 +3725,35 @@ mod tests {
             record.command == EmbeddedBleSessionActorCommand::NotifyCleanupDelay
                 && record.detail.contains("notify cleanup delay test")
         }));
+    }
+
+    #[test]
+    fn session_actor_diagnostics_expose_ordered_safe_event_context() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+
+        record_embedded_ble_session_actor_command(
+            &coordinator.inner,
+            EmbeddedBleSessionActorCommand::AsrPartial,
+            Some(session_id),
+            "chars=12",
+        );
+        record_embedded_ble_session_actor_command(
+            &coordinator.inner,
+            EmbeddedBleSessionActorCommand::AsrFinal,
+            Some(session_id),
+            "transcript_empty=false",
+        );
+
+        let diagnostics = coordinator.embedded_ble_session_actor_diagnostics();
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].seq, 1);
+        assert_eq!(diagnostics[0].command, "asr_partial");
+        assert_eq!(diagnostics[0].session_id, Some(session_id.to_string()));
+        assert_eq!(diagnostics[0].detail, "chars=12");
+        assert_eq!(diagnostics[1].seq, 2);
+        assert_eq!(diagnostics[1].command, "asr_final");
+        assert_eq!(diagnostics[1].detail, "transcript_empty=false");
     }
 
     #[test]
