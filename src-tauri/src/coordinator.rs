@@ -2811,7 +2811,8 @@ fn record_embedded_ble_recovery_failure(inner: &Arc<Inner>, err: &str) {
     let mut snapshot = inner.embedded_ble_wake_recovery.lock();
     let failure = crate::embedded_ble::classify_ble_failure(err);
     snapshot.status = match failure.kind {
-        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect => {
+        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
+        | crate::embedded_ble::BleFailureKind::PairedButDisconnected => {
             EmbeddedBleWakeRecoveryStatus::Reconnecting
         }
         crate::embedded_ble::BleFailureKind::DeviceAsleep
@@ -3048,6 +3049,7 @@ fn is_embedded_ble_link_loss_error(err: &str) -> bool {
     let lower = err.to_ascii_lowercase();
     lower.contains("connection status changed")
         || lower.contains("gatt session status changed")
+        || (lower.contains("notification wait failed") && lower.contains("disconnected"))
         || lower.contains("transport_not_ready")
         || lower.contains("transport not ready")
         || lower.contains("reason=546")
@@ -5105,14 +5107,14 @@ mod tests {
     fn embedded_ble_background_retry_caps_generic_errors() {
         assert_eq!(
             next_embedded_ble_background_retry_delay(
-                "BLE embedded audio notification wait failed: disconnected",
+                "BLE embedded audio notification wait failed: channel closed unexpectedly",
                 EMBEDDED_BLE_RETRY_BASE_DELAY,
             ),
             Duration::from_secs(2)
         );
         assert_eq!(
             next_embedded_ble_background_retry_delay(
-                "BLE embedded audio notification wait failed: disconnected",
+                "BLE embedded audio notification wait failed: channel closed unexpectedly",
                 Duration::from_secs(10),
             ),
             EMBEDDED_BLE_RETRY_MAX_DELAY
@@ -5124,6 +5126,13 @@ mod tests {
         assert_eq!(
             next_embedded_ble_background_retry_delay(
                 "BLE device connection status changed to Disconnected; transport_not_ready",
+                Duration::from_secs(4),
+            ),
+            EMBEDDED_BLE_RETRY_FAST_DELAY
+        );
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(
+                "BLE embedded audio notification wait failed: disconnected",
                 Duration::from_secs(4),
             ),
             EMBEDDED_BLE_RETRY_FAST_DELAY
@@ -5249,6 +5258,51 @@ mod tests {
             EmbeddedBleNotifySubscriptionState::Subscribed
         );
         assert!(snapshot.recent_disconnect_reason.is_none());
+    }
+
+    #[test]
+    fn embedded_ble_repeated_notification_disconnects_stay_fast_and_diagnostic() {
+        let coordinator = Coordinator::new();
+
+        for attempt in 1..=5 {
+            record_embedded_ble_reconnect_attempt(&coordinator.inner, "rapid_reconnect_test");
+            record_embedded_ble_recovery_failure(
+                &coordinator.inner,
+                "BLE embedded audio notification wait failed: disconnected",
+            );
+            let reconnecting = coordinator.embedded_ble_wake_recovery_snapshot();
+
+            assert_eq!(reconnecting.reconnect_attempts, attempt);
+            assert_eq!(
+                reconnecting.status,
+                EmbeddedBleWakeRecoveryStatus::Reconnecting
+            );
+            assert_eq!(
+                reconnecting.notify_subscription_state,
+                EmbeddedBleNotifySubscriptionState::Lost
+            );
+            assert!(reconnecting
+                .recent_disconnect_reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("notification wait failed"));
+            assert_eq!(
+                next_embedded_ble_background_retry_delay(
+                    reconnecting.recent_disconnect_reason.as_deref().unwrap(),
+                    Duration::from_secs(4),
+                ),
+                EMBEDDED_BLE_RETRY_FAST_DELAY
+            );
+
+            assert!(record_embedded_ble_notify_ready(&coordinator.inner));
+            let ready = coordinator.embedded_ble_wake_recovery_snapshot();
+            assert_eq!(ready.status, EmbeddedBleWakeRecoveryStatus::Ready);
+            assert_eq!(
+                ready.notify_subscription_state,
+                EmbeddedBleNotifySubscriptionState::Subscribed
+            );
+            assert!(ready.recent_disconnect_reason.is_none());
+        }
     }
 
     #[tokio::test]
