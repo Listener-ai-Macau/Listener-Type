@@ -207,9 +207,9 @@ struct Inner {
     /// 最近一次应用到 capsule 窗口的几何状态。避免录音 level tick 反复触发
     /// resize / reposition。
     capsule_layout: Mutex<Option<CapsuleLayoutState>>,
-    /// 限流：Recording 状态下 UI show/position 操作的最小间隔（100ms）。
-    /// emit_to 事件不受限，保证电平条实时更新。
-    capsule_ui_throttle: Mutex<Option<std::time::Instant>>,
+    /// 限流 capsule 窗口 show/position 操作；`capsule:state` 事件不受限，
+    /// 保证电平条仍按前端可接受频率更新。
+    capsule_ui_throttle: Mutex<CapsuleUiThrottleState>,
     /// Monotonic capsule payload sequence. The frontend rejects older snapshots
     /// so delayed UI events cannot overwrite newer terminal states.
     capsule_sequence: AtomicU64,
@@ -425,7 +425,7 @@ impl Coordinator {
                     qa_hotkey: Mutex::new(None),
                     qa_state: Mutex::new(QaSessionState::default()),
                     capsule_layout: Mutex::new(None),
-                    capsule_ui_throttle: Mutex::new(None),
+                    capsule_ui_throttle: Mutex::new(CapsuleUiThrottleState::default()),
                     capsule_sequence: AtomicU64::new(0),
                     qa_asr: Mutex::new(None),
                     qa_recorder: Mutex::new(None),
@@ -490,7 +490,7 @@ impl Coordinator {
                 qa_hotkey: Mutex::new(None),
                 qa_state: Mutex::new(QaSessionState::default()),
                 capsule_layout: Mutex::new(None),
-                capsule_ui_throttle: Mutex::new(None),
+                capsule_ui_throttle: Mutex::new(CapsuleUiThrottleState::default()),
                 capsule_sequence: AtomicU64::new(0),
                 qa_asr: Mutex::new(None),
                 qa_recorder: Mutex::new(None),
@@ -5910,6 +5910,71 @@ mod tests {
 
         assert!(coordinator.inner.asr.lock().is_none());
     }
+
+    #[test]
+    fn capsule_recording_window_ops_are_low_frequency() {
+        let mut throttle = CapsuleUiThrottleState::default();
+        let start = Instant::now();
+        let mut runs = 0;
+
+        for tick in 0..300 {
+            let now = start + Duration::from_millis(tick * 33);
+            if throttle.should_run_window_ops(
+                CapsuleWindowRequest {
+                    session_id: Some("session-1".to_string()),
+                    state: CapsuleState::Recording,
+                    visible: true,
+                    translation: false,
+                    show_capsule: true,
+                },
+                now,
+            ) {
+                runs += 1;
+            }
+        }
+
+        assert!(
+            runs <= 10,
+            "30 Hz Recording ticks over ~10s should produce <= 10 window ops, got {runs}"
+        );
+    }
+
+    #[test]
+    fn capsule_state_transition_bypasses_recording_window_throttle() {
+        let mut throttle = CapsuleUiThrottleState::default();
+        let start = Instant::now();
+
+        assert!(throttle.should_run_window_ops(
+            CapsuleWindowRequest {
+                session_id: Some("session-1".to_string()),
+                state: CapsuleState::Recording,
+                visible: true,
+                translation: false,
+                show_capsule: true,
+            },
+            start,
+        ));
+        assert!(!throttle.should_run_window_ops(
+            CapsuleWindowRequest {
+                session_id: Some("session-1".to_string()),
+                state: CapsuleState::Recording,
+                visible: true,
+                translation: false,
+                show_capsule: true,
+            },
+            start + Duration::from_millis(100),
+        ));
+        assert!(throttle.should_run_window_ops(
+            CapsuleWindowRequest {
+                session_id: Some("session-1".to_string()),
+                state: CapsuleState::Transcribing,
+                visible: true,
+                translation: false,
+                show_capsule: true,
+            },
+            start + Duration::from_millis(100),
+        ));
+    }
 }
 
 fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
@@ -5927,6 +5992,7 @@ fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
 /// 硬件 BLE 听写的日常路径需要按键结束后立刻收起；详细结果可在历史记录里复盘。
 const CAPSULE_AUTO_HIDE_DELAY_MS: u64 = 0;
 const CAPSULE_STREAM_ERROR_HIDE_DELAY_MS: u64 = 6_000;
+const CAPSULE_RECORDING_WINDOW_KEEPALIVE_MS: u64 = 1_000;
 
 /// Coordinator 全局超时保护：防止 ASR await_final_result() 永远挂起。
 /// 设置为 15 秒（比 ASR 的 12 秒 FINAL_RESULT_TIMEOUT 稍长），
@@ -6399,6 +6465,7 @@ fn emit_capsule_with_session(
     };
 
     let visible = !matches!(state, CapsuleState::Idle);
+    let show_capsule = inner.prefs.get().show_capsule;
     let should_trace_emit = !matches!(state, CapsuleState::Recording)
         || elapsed_ms == 0
         || payload.message.is_some()
@@ -6418,27 +6485,21 @@ fn emit_capsule_with_session(
         );
     }
 
-    // 限流：Recording 状态下，UI show/position 操作最小间隔 100ms。
-    // emit_to 事件不受限，保证电平条实时更新。
-    let is_recording_tick = matches!(state, CapsuleState::Recording);
-    let skip_ui = if is_recording_tick {
+    let run_window_ops = {
         let mut throttle = inner.capsule_ui_throttle.lock();
-        match *throttle {
-            Some(last) if last.elapsed() < std::time::Duration::from_millis(100) => true,
-            _ => {
-                *throttle = Some(std::time::Instant::now());
-                false
-            }
-        }
-    } else {
-        // 状态转换（非 Recording）总是执行 UI 操作并重置限流
-        if !is_recording_tick {
-            *inner.capsule_ui_throttle.lock() = None;
-        }
-        false
+        throttle.should_run_window_ops(
+            CapsuleWindowRequest {
+                session_id: payload.session_id.clone(),
+                state,
+                visible,
+                translation,
+                show_capsule,
+            },
+            Instant::now(),
+        )
     };
 
-    if !skip_ui {
+    if run_window_ops {
         let inner_for_main = Arc::clone(inner);
         let app_for_main = app.clone();
         let session_id_for_main = session_id_for_log.clone();
@@ -6452,7 +6513,6 @@ fn emit_capsule_with_session(
                 );
                 return;
             };
-            let show_capsule = inner_for_main.prefs.get().show_capsule;
             crate::prepare_capsule_window_for_overlay(&window);
             maybe_position_capsule_bottom_center(&inner_for_main, &window, translation);
             if show_capsule && visible {
@@ -6502,6 +6562,54 @@ fn emit_capsule_with_session(
         );
     }
     let _ = app.emit_to("capsule", "capsule:state", payload);
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CapsuleWindowRequest {
+    session_id: Option<String>,
+    state: CapsuleState,
+    visible: bool,
+    translation: bool,
+    show_capsule: bool,
+}
+
+impl CapsuleWindowRequest {
+    fn visible_recording(&self) -> bool {
+        self.visible && self.show_capsule && matches!(self.state, CapsuleState::Recording)
+    }
+}
+
+#[derive(Debug, Default)]
+struct CapsuleUiThrottleState {
+    last_request: Option<CapsuleWindowRequest>,
+    last_recording_keepalive_at: Option<Instant>,
+}
+
+impl CapsuleUiThrottleState {
+    fn should_run_window_ops(&mut self, request: CapsuleWindowRequest, now: Instant) -> bool {
+        let visible_recording = request.visible_recording();
+        if self.last_request.as_ref() != Some(&request) {
+            self.last_request = Some(request);
+            self.last_recording_keepalive_at = visible_recording.then_some(now);
+            return true;
+        }
+
+        if visible_recording {
+            let due = self
+                .last_recording_keepalive_at
+                .map(|last| {
+                    now.duration_since(last)
+                        >= Duration::from_millis(CAPSULE_RECORDING_WINDOW_KEEPALIVE_MS)
+                })
+                .unwrap_or(true);
+            if due {
+                self.last_recording_keepalive_at = Some(now);
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
