@@ -1,8 +1,8 @@
 # voice-keyboard-production-readiness/1.5 validation
 
-Agent: tai1  
-Date: 2026-06-05  
-Worktree: `Listener-Type-wt-tai1-voice-keyboard-production-readiness-1.5`  
+Agent: tai1
+Date: 2026-06-05
+Worktree: `Listener-Type-wt-tai1-voice-keyboard-production-readiness-1.5`
 Branch: `ai/tai1-voice-keyboard-production-readiness-1.5`
 
 ## Acceptance Evidence
