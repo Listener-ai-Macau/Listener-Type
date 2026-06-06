@@ -952,7 +952,7 @@ function Find-LatestRecordingAfter {
     if (-not $root -or -not (Test-Path $root)) {
         return $null
     }
-    $threshold = $StartedAt.ToUniversalTime().AddMinutes(-1)
+    $threshold = $StartedAt.ToUniversalTime().AddSeconds(-1)
     $candidate = Get-ChildItem -Path $root -Filter "*.wav" -File -ErrorAction SilentlyContinue |
         Where-Object { $_.LastWriteTimeUtc -ge $threshold } |
         Sort-Object LastWriteTimeUtc -Descending |
@@ -971,7 +971,7 @@ function Find-SmokeHistorySession {
     )
 
     $sessions = @(Read-SmokeHistorySessions)
-    $threshold = $StartedAt.ToUniversalTime().AddMinutes(-2)
+    $threshold = $StartedAt.ToUniversalTime().AddSeconds(-1)
     $candidates = @()
     foreach ($session in $sessions) {
         if (-not $session.createdAt) {
@@ -1874,6 +1874,11 @@ if (-not $SkipEnsureBle) {
         -DurationSeconds 8 `
         -PollIntervalSeconds 2 `
         -ExitOnReady
+    $ensureExitCode = $LASTEXITCODE
+    if ($ensureExitCode -ne 0) {
+        Write-SmokeTrace "ensure_ble_failed exit_code=$ensureExitCode"
+        throw "BLE ensure failed before Listener-Type start exit_code=$ensureExitCode"
+    }
     Write-SmokeTrace "ensure_ble_done"
 }
 

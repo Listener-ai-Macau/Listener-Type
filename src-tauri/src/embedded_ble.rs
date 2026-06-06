@@ -2382,6 +2382,7 @@ mod windows_ble {
             || err.contains("BLE characteristic discovery returned status")
             || err.contains("BLE service open wait failed")
             || err.contains("BLE service discovery wait failed")
+            || err.contains("GATT session did not become active")
             || err.contains("device open by address")
             || err.contains("device open by id")
     }
@@ -3364,7 +3365,7 @@ mod windows_ble {
                 return Err(format!("BLE OTA service access denied status={access:?}"));
             }
         }
-        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT);
+        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
         let control = open_write_characteristic_from_service(
             service,
             OTA_CONTROL_UUID,
@@ -3408,7 +3409,7 @@ mod windows_ble {
                 ));
             }
         }
-        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT);
+        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
         let control = open_write_characteristic_from_service(
             service,
             DIAGNOSTIC_CONTROL_UUID,
@@ -3448,7 +3449,7 @@ mod windows_ble {
                 ));
             }
         }
-        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT);
+        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
         let control = open_write_characteristic_from_service(
             service,
             AUDIO_CONTROL_UUID,
@@ -3625,7 +3626,7 @@ mod windows_ble {
                 return Err(format!("BLE service access denied status={access:?}"));
             }
         }
-        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT);
+        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
         let control = match open_write_characteristic_from_service(
             service,
             AUDIO_CONTROL_UUID,
@@ -3681,12 +3682,15 @@ mod windows_ble {
         })
     }
 
-    fn prepare_gatt_session(service: &GattDeviceService, timeout: Duration) -> Option<GattSession> {
+    fn prepare_gatt_session(
+        service: &GattDeviceService,
+        timeout: Duration,
+    ) -> Result<Option<GattSession>, String> {
         let session = match service.Session() {
             Ok(session) => session,
             Err(err) => {
                 log::warn!("[embedded-ble] GATT session unavailable: {err}");
-                return None;
+                return Ok(None);
             }
         };
         match session.CanMaintainConnection() {
@@ -3706,14 +3710,22 @@ mod windows_ble {
                 session.SessionStatus().ok()
             );
         } else {
+            let current_status = session.SessionStatus().ok();
             log::warn!(
-                "[embedded-ble] GATT session still not active after {} ms initial={:?} current={:?}; continuing",
+                "[embedded-ble] GATT session still not active after {} ms initial={:?} current={:?}; failing before GATT write",
                 timeout.as_millis(),
                 initial_status,
-                session.SessionStatus().ok()
+                current_status
             );
+            let _ = session.Close();
+            return Err(format!(
+                "BLE GATT session did not become active after {} ms initial={:?} current={:?}; stale GATT/cache or paired device disconnected",
+                timeout.as_millis(),
+                initial_status,
+                current_status
+            ));
         }
-        Some(session)
+        Ok(Some(session))
     }
 
     fn wait_gatt_session_ready(session: &GattSession, timeout: Duration) -> bool {
@@ -5034,6 +5046,11 @@ mod tests {
             ),
             (
                 "Unknown GATT service from stale cached service table",
+                BleFailureKind::StaleGattService,
+                true,
+            ),
+            (
+                "BLE GATT session did not become active after 8000 ms initial=Some(GattSessionStatus(0)) current=Some(GattSessionStatus(0)); stale GATT/cache or paired device disconnected",
                 BleFailureKind::StaleGattService,
                 true,
             ),
