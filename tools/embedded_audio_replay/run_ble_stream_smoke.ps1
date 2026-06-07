@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("serial-toggle", "serial-cancel", "manual-key")]
+    [ValidateSet("serial-toggle", "serial-cancel", "desktop-cancel", "manual-key")]
     [string]$TriggerMode = "serial-toggle",
     [string]$Port = "COM3",
     [string]$DeviceName = "listener",
@@ -276,6 +276,7 @@ function Get-SmokeReportSchema {
             "history_session.insertStatus",
             "serial_report",
             "serial_log_path",
+            "desktop_cancel_report",
             "insertion_target_path",
             "expected_stream_failure",
             "error"
@@ -627,6 +628,15 @@ public static class ListenerSmokeWindow {
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out ListenerSmokeRect lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
 }
 "@
 }
@@ -667,6 +677,181 @@ function Write-ForegroundTrace {
         return
     }
     Write-SmokeTrace "$Label foreground_pid=$($Snapshot.ProcessId) foreground_visible=$($Snapshot.Visible) foreground_title=$($Snapshot.Title)"
+}
+
+function Get-CapsuleWindowSnapshot {
+    param([int]$ProcessId = 0)
+
+    Ensure-WindowInterop
+
+    $fromHandle = {
+        param([IntPtr]$hWnd)
+
+        if ($hWnd -eq [IntPtr]::Zero -or -not [ListenerSmokeWindow]::IsWindowVisible($hWnd)) {
+            return $null
+        }
+        [uint32]$windowPid = 0
+        [void][ListenerSmokeWindow]::GetWindowThreadProcessId($hWnd, [ref]$windowPid)
+        if ($ProcessId -gt 0 -and $windowPid -ne [uint32]$ProcessId) {
+            return $null
+        }
+        $rect = New-Object ListenerSmokeRect
+        if (-not [ListenerSmokeWindow]::GetWindowRect($hWnd, [ref]$rect)) {
+            return $null
+        }
+        $width = [int]($rect.Right - $rect.Left)
+        $height = [int]($rect.Bottom - $rect.Top)
+        return [ordered]@{
+            found = $true
+            handle = ('0x{0:X}' -f $hWnd.ToInt64())
+            process_id = [int]$windowPid
+            title = Get-WindowTitleByHandle -Handle $hWnd
+            left = [int]$rect.Left
+            top = [int]$rect.Top
+            right = [int]$rect.Right
+            bottom = [int]$rect.Bottom
+            width = $width
+            height = $height
+            handle_value = $hWnd
+        }
+    }
+
+    $handle = [ListenerSmokeWindow]::FindWindow($null, "Listener Type Capsule")
+    $snapshot = & $fromHandle $handle
+    if ($snapshot) {
+        return $snapshot
+    }
+
+    $script:CapsuleWindowSnapshot = $null
+    $callback = [ListenerSmokeEnumWindowsProc]{
+        param([IntPtr]$hWnd, [IntPtr]$lParam)
+
+        [uint32]$windowPid = 0
+        [void][ListenerSmokeWindow]::GetWindowThreadProcessId($hWnd, [ref]$windowPid)
+        if ($ProcessId -gt 0 -and $windowPid -ne [uint32]$ProcessId) {
+            return $true
+        }
+        if (-not [ListenerSmokeWindow]::IsWindowVisible($hWnd)) {
+            return $true
+        }
+        $title = Get-WindowTitleByHandle -Handle $hWnd
+        $rect = New-Object ListenerSmokeRect
+        if (-not [ListenerSmokeWindow]::GetWindowRect($hWnd, [ref]$rect)) {
+            return $true
+        }
+        $width = [int]($rect.Right - $rect.Left)
+        $height = [int]($rect.Bottom - $rect.Top)
+        Write-SmokeTrace "window_visible pid=$windowPid title=$title rect=$($rect.Left),$($rect.Top),$width,$height"
+        if ($title -match "Capsule" -or ($width -ge 180 -and $width -le 420 -and $height -ge 50 -and $height -le 190)) {
+            $script:CapsuleWindowSnapshot = [ordered]@{
+                found = $true
+                handle = ('0x{0:X}' -f $hWnd.ToInt64())
+                process_id = [int]$windowPid
+                title = $title
+                left = [int]$rect.Left
+                top = [int]$rect.Top
+                right = [int]$rect.Right
+                bottom = [int]$rect.Bottom
+                width = $width
+                height = $height
+                handle_value = $hWnd
+            }
+            return $false
+        }
+        return $true
+    }
+    [void][ListenerSmokeWindow]::EnumWindows($callback, [IntPtr]::Zero)
+    $snapshot = $script:CapsuleWindowSnapshot
+    $script:CapsuleWindowSnapshot = $null
+    return $snapshot
+}
+
+function Invoke-CapsuleCancelClick {
+    param(
+        [int]$ProcessId = 0,
+        [int]$TimeoutMs = 2200
+    )
+
+    Ensure-WindowInterop
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $deadline) {
+        $snapshot = Get-CapsuleWindowSnapshot -ProcessId $ProcessId
+        if ($snapshot) {
+            $handle = [IntPtr]$snapshot.handle_value
+            $buttonX = [int]($snapshot.left + [Math]::Min(48, [Math]::Max(28, [Math]::Round($snapshot.width * 0.11))))
+            $buttonY = [int]($snapshot.top + [Math]::Round($snapshot.height / 2.0))
+            $screenshotPath = $null
+            $screenScreenshotPath = $null
+            if (-not [string]::IsNullOrWhiteSpace([string]$script:DesktopCancelScreenshotPath)) {
+                try {
+                    Add-Type -AssemblyName System.Drawing
+                    Add-Type -AssemblyName System.Windows.Forms
+                    $screenshotParent = Split-Path -Parent $script:DesktopCancelScreenshotPath
+                    New-Item -ItemType Directory -Force -Path $screenshotParent | Out-Null
+                    $bitmap = [System.Drawing.Bitmap]::new([int]$snapshot.width, [int]$snapshot.height)
+                    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                    try {
+                        $graphics.CopyFromScreen(
+                            [int]$snapshot.left,
+                            [int]$snapshot.top,
+                            0,
+                            0,
+                            [System.Drawing.Size]::new([int]$snapshot.width, [int]$snapshot.height)
+                        )
+                        $bitmap.Save($script:DesktopCancelScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+                        $screenshotPath = $script:DesktopCancelScreenshotPath
+                        Write-SmokeTrace "desktop_cancel_screenshot path=$screenshotPath"
+                    } finally {
+                        $graphics.Dispose()
+                        $bitmap.Dispose()
+                    }
+                    $screenScreenshotPath = [System.IO.Path]::ChangeExtension($script:DesktopCancelScreenshotPath, ".screen.png")
+                    $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                    $screenBitmap = [System.Drawing.Bitmap]::new([int]$bounds.Width, [int]$bounds.Height)
+                    $screenGraphics = [System.Drawing.Graphics]::FromImage($screenBitmap)
+                    try {
+                        $screenGraphics.CopyFromScreen(
+                            [int]$bounds.Left,
+                            [int]$bounds.Top,
+                            0,
+                            0,
+                            [System.Drawing.Size]::new([int]$bounds.Width, [int]$bounds.Height)
+                        )
+                        $screenBitmap.Save($screenScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+                        Write-SmokeTrace "desktop_cancel_screen_screenshot path=$screenScreenshotPath"
+                    } finally {
+                        $screenGraphics.Dispose()
+                        $screenBitmap.Dispose()
+                    }
+                } catch {
+                    Write-SmokeTrace "desktop_cancel_screenshot_failed error=$($_.Exception.Message)"
+                }
+            }
+            [void][ListenerSmokeWindow]::SetForegroundWindow($handle)
+            Start-Sleep -Milliseconds 80
+            [void][ListenerSmokeWindow]::SetCursorPos($buttonX, $buttonY)
+            Start-Sleep -Milliseconds 40
+            [ListenerSmokeWindow]::mouse_event([ListenerSmokeWindow]::MOUSEEVENTF_LEFTDOWN, [uint32]0, [uint32]0, [uint32]0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 80
+            [ListenerSmokeWindow]::mouse_event([ListenerSmokeWindow]::MOUSEEVENTF_LEFTUP, [uint32]0, [uint32]0, [uint32]0, [UIntPtr]::Zero)
+            Write-SmokeTrace "desktop_cancel_clicked x=$buttonX y=$buttonY rect=$($snapshot.left),$($snapshot.top),$($snapshot.width),$($snapshot.height)"
+            $snapshot.Remove("handle_value")
+            return [ordered]@{
+                clicked = $true
+                x = $buttonX
+                y = $buttonY
+                screenshot_path = $screenshotPath
+                screen_screenshot_path = $screenScreenshotPath
+                window = $snapshot
+            }
+        }
+        Start-Sleep -Milliseconds 80
+    }
+
+    return [ordered]@{
+        clicked = $false
+        error = "Capsule window was not visible before desktop cancel click."
+    }
 }
 
 function Restore-ForegroundWindow {
@@ -1794,6 +1979,7 @@ if ($NoNotificationTimeoutSeconds -lt 1) {
 
 $RunStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $script:TraceLogPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.trace.log"
+$script:DesktopCancelScreenshotPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.desktop-cancel.png"
 Write-SmokeTrace "start trigger=$TriggerMode port=$Port timeout_ms=$TimeoutMs"
 $AudioProfileConfig = Get-SmokeAudioProfile -Name $AudioProfile
 if (-not $PSBoundParameters.ContainsKey("TtsRate")) {
@@ -1886,6 +2072,8 @@ if (-not $SkipEnsureBle) {
 $logPath = Join-Path $env:LOCALAPPDATA "Listener Type\Logs\listener-type.log"
 $logDir = Split-Path -Parent $logPath
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+Get-Process listener-type -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Milliseconds 300
 $logOffsetValue = if (Test-Path $logPath) { (Get-Item $logPath).Length } else { 0 }
 $logOffset = [ref]$logOffsetValue
 $capturedLog = ""
@@ -1894,11 +2082,11 @@ $listenerChildStderrLog = Join-Path $OutDir "listener-type-child-$RunStamp.stder
 
 $foregroundBeforeListenerStart = Get-ForegroundWindowSnapshot
 Write-ForegroundTrace -Label "before_listener_start" -Snapshot $foregroundBeforeListenerStart
-Get-Process listener-type -ErrorAction SilentlyContinue | Stop-Process -Force
 
 $process = $null
 $serialWindow = $null
 $serialReport = $null
+$desktopCancelReport = $null
 $recordingStarted = $false
 $insertionTarget = $null
 $insertedText = $null
@@ -1912,8 +2100,9 @@ $timeline = [ordered]@{
     smoke_started_at_utc = $smokeStartedAt.ToUniversalTime().ToString("o")
 }
 $scriptExitCode = 0
-$usesSerialSignal = @("serial-toggle", "serial-cancel") -contains $TriggerMode
-$serialEndCommand = if ($TriggerMode -eq "serial-cancel") { "cancel" } else { "toggle" }
+$usesSerialSignal = @("serial-toggle", "serial-cancel", "desktop-cancel") -contains $TriggerMode
+$serialEndCommand = if (@("serial-cancel", "desktop-cancel") -contains $TriggerMode) { "cancel" } else { "toggle" }
+$usesDesktopCancel = $TriggerMode -eq "desktop-cancel"
 $expectedStreamFailure = $null
 $playbackVolumeSnapshot = $null
 try {
@@ -2085,7 +2274,15 @@ try {
         Write-SmokeTrace "playback_done index=$index actual_ms=$playbackElapsedMs"
         if ($index -eq $RecordPlaybackIndex) {
             $recordPlaybackDurationMs = $playbackElapsedMs
-            if ($usesSerialSignal) {
+            if ($usesDesktopCancel) {
+                Start-Sleep -Milliseconds $PostPlaybackRecordMs
+                $desktopCancelReport = Invoke-CapsuleCancelClick -ProcessId $process.Id
+                $timeline["desktop_cancel_clicked_at_utc"] = Get-SmokeUtcNow
+                if (-not [bool]$desktopCancelReport.clicked) {
+                    throw ([string]$desktopCancelReport.error)
+                }
+                Write-SmokeTrace "desktop_cancel_requested"
+            } elseif ($usesSerialSignal) {
                 Start-Sleep -Milliseconds $PostPlaybackRecordMs
                 Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
                 $timeline["serial_stop_signal_at_utc"] = Get-SmokeUtcNow
@@ -2161,6 +2358,16 @@ try {
     if ((-not $doneMatch -or -not $doneMatch.Success) -and -not $expectedStreamFailure) {
         throw "Timed out waiting for Listener-Type BLE stream completion"
     }
+    if ($usesDesktopCancel -and $serialWindow) {
+        Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
+        $timeline["serial_cleanup_signal_at_utc"] = Get-SmokeUtcNow
+        Write-SmokeTrace "desktop_cancel_serial_cleanup_signal_written"
+        $serialReport = Wait-SerialRecordingWindow -Window $serialWindow
+        $serialWindow = $null
+        $recordingStarted = $false
+        $timeline["serial_cleanup_done_at_utc"] = Get-SmokeUtcNow
+        Write-SmokeTrace "desktop_cancel_serial_cleanup_done"
+    }
     Start-Sleep -Milliseconds 200
     $capturedLog += Read-NewLogText -Path $logPath -Offset $logOffset
     if (Test-Path $listenerChildStdoutLog) {
@@ -2181,7 +2388,7 @@ try {
     }
     $verificationErrors = @()
     $needsHistoryLookup = $VerifyHistory -and -not $VerifyInsertion -and -not $ExpectNoText
-    if ($VerifyInsertion -and [string]::IsNullOrWhiteSpace($transcript)) {
+    if ($VerifyInsertion -and -not $ExpectNoText -and [string]::IsNullOrWhiteSpace($transcript)) {
         $needsHistoryLookup = $true
     }
     if ($needsHistoryLookup) {
@@ -2231,7 +2438,7 @@ try {
             if (-not [bool]$serialReport.recording_start_seen) {
                 $verificationErrors += "firmware recording start was not confirmed before playback"
             }
-            if ($TriggerMode -eq "serial-cancel") {
+            if (@("serial-cancel", "desktop-cancel") -contains $TriggerMode) {
                 if (-not [bool]$serialReport.cancel_completed) {
                     $verificationErrors += "firmware recording cancel was not confirmed after playback"
                 }
@@ -2242,6 +2449,17 @@ try {
             }
         }
     }
+    if ($usesDesktopCancel) {
+        if (-not $desktopCancelReport -or -not [bool]$desktopCancelReport.clicked) {
+            $verificationErrors += "desktop capsule cancel click was not executed"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($expectedStreamFailure)) {
+            $verificationErrors += "Listener-Type BLE stream failed instead of returning Ok after desktop cancel: $expectedStreamFailure"
+        }
+        if ($capturedLog -notmatch "\[embedded-ble\] streaming capture stopped after dictation cancel") {
+            $verificationErrors += "Listener-Type did not log BLE capture stop after dictation cancel"
+        }
+    }
     $insertionVerified = $false
     if ($VerifyInsertion) {
         $timeline["insertion_read_started_at_utc"] = Get-SmokeUtcNow
@@ -2249,19 +2467,19 @@ try {
         $insertedText = Read-InsertionTargetText -Target $insertionTarget
         $timeline["insertion_read_done_at_utc"] = Get-SmokeUtcNow
         Write-SmokeTrace "insertion_read_done len=$(([string]$insertedText).Length)"
-        $expectedText = ""
+        $insertionExpectedText = ""
         if ($historySession -and -not [string]::IsNullOrWhiteSpace([string]$historySession.finalText)) {
-            $expectedText = [string]$historySession.finalText
+            $insertionExpectedText = [string]$historySession.finalText
         } elseif (-not [string]::IsNullOrWhiteSpace($transcript)) {
-            $expectedText = $transcript
+            $insertionExpectedText = $transcript
         }
         if ($ExpectNoText) {
             if (-not [string]::IsNullOrWhiteSpace([string]$insertedText)) {
                 $verificationErrors += "target editor contains text during no-text expectation"
             }
-        } elseif ([string]::IsNullOrWhiteSpace($expectedText)) {
+        } elseif ([string]::IsNullOrWhiteSpace($insertionExpectedText)) {
             $verificationErrors += "no transcript/final text available for insertion verification"
-        } elseif (-not ([string]$insertedText).Contains($expectedText)) {
+        } elseif (-not ([string]$insertedText).Contains($insertionExpectedText)) {
             $verificationErrors += "target editor does not contain final text"
         } else {
             $insertionVerified = $true
@@ -2364,6 +2582,7 @@ try {
         keep_playback_volume = [bool]$KeepPlaybackVolume
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReportJson
+        desktop_cancel_report = $desktopCancelReport
         pcm_bytes = $pcmBytes
         missing_packets = $missingPackets
         max_missing_packets = $MaxMissingPackets
@@ -2469,6 +2688,7 @@ try {
         keep_playback_volume = [bool]$KeepPlaybackVolume
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReportJson
+        desktop_cancel_report = $desktopCancelReport
         verify_insertion = [bool]$VerifyInsertion
         verify_history = [bool]$VerifyHistory
         insert_status = $null
