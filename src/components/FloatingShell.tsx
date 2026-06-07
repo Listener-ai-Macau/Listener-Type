@@ -5,6 +5,7 @@
 // Ported verbatim from design_handoff_listener_type/variants.jsx::FloatingShell.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 import { Icon } from './Icon';
@@ -21,9 +22,17 @@ import { SelectionAsk } from '../pages/SelectionAsk';
 // 通过 Settings -> Advanced 内的 <LocalAsr /> 渲染。这里之前的 import 与 NAV_BASE 条目都已移除。
 import { APP_VERSION_LABEL, IS_BETA_BUILD } from '../lib/appVersion';
 import { createDemoModeSession, type DemoModeSession } from '../lib/demoMode';
+import { embeddedBleProbeErrorMessage, runEmbeddedBleProbeWithTimeout, type EmbeddedBleProbeStatus } from '../lib/embeddedBleProbe';
+import { buildFirstRunPairingWizard, type FirstRunPairingAction, type FirstRunPairingStageStatus } from '../lib/firstRunPairingWizard';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
-import { getCredentials, isMainWindowStartHidden } from '../lib/ipc';
-import type { DeviceCustomKeyAppPage } from '../lib/types';
+import {
+  getCredentials,
+  getEmbeddedBleRuntimeStatus,
+  isMainWindowStartHidden,
+  openSystemSettings,
+  recoverEmbeddedBleDevice,
+} from '../lib/ipc';
+import type { DeviceCustomKeyAppPage, EmbeddedBleRepairResult, EmbeddedBleRuntimeStatus } from '../lib/types';
 import {
   PROVIDER_SETUP_PROMPT_DEFERRED_KEY,
   shouldShowProviderSetupPrompt,
@@ -266,15 +275,17 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   };
 
 
-  const openBlePairingSettings = () => {
-    window.localStorage.setItem(BLE_PAIRING_PROMPT_ACK_KEY, '1');
-    setBlePairingPromptOpen(false);
+  const enableEmbeddedBleInputFromPrompt = async () => {
     if (prefs && (prefs.dictationInputSource ?? 'microphone') !== 'embeddedBle') {
-      void updatePrefs({ ...prefs, dictationInputSource: 'embeddedBle' }).catch(error => {
+      await updatePrefs({ ...prefs, dictationInputSource: 'embeddedBle' }).catch(error => {
         console.warn('[ble-pairing] failed to switch input source', error);
       });
     }
-    openSettings('recording');
+  };
+
+  const completeBlePairingPrompt = () => {
+    window.localStorage.setItem(BLE_PAIRING_PROMPT_ACK_KEY, '1');
+    setBlePairingPromptOpen(false);
   };
 
   return (
@@ -502,7 +513,8 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         <BlePairingPrompt
           onLater={deferBlePairingPrompt}
           onUseMicrophone={keepMicrophoneFromBlePrompt}
-          onOpenPairing={openBlePairingSettings}
+          onEnableEmbeddedBle={enableEmbeddedBleInputFromPrompt}
+          onComplete={completeBlePairingPrompt}
           onStartDemo={startDeviceDemoMode}
         />
       ) : null}
@@ -645,15 +657,145 @@ function DemoModeBanner({
 function BlePairingPrompt({
   onLater,
   onUseMicrophone,
-  onOpenPairing,
+  onEnableEmbeddedBle,
+  onComplete,
   onStartDemo,
 }: {
   onLater: () => void;
   onUseMicrophone: () => void;
-  onOpenPairing: () => void;
+  onEnableEmbeddedBle: () => Promise<void>;
+  onComplete: () => void;
   onStartDemo: () => void;
 }) {
   const { t } = useTranslation();
+  const [probeStatus, setProbeStatus] = useState<EmbeddedBleProbeStatus>('idle');
+  const [probeMessage, setProbeMessage] = useState<string | null>(null);
+  const [runtime, setRuntime] = useState<EmbeddedBleRuntimeStatus | null>(null);
+  const [lastRepairResult, setLastRepairResult] = useState<EmbeddedBleRepairResult | null>(null);
+  const [busyAction, setBusyAction] = useState<FirstRunPairingAction | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getEmbeddedBleRuntimeStatus()
+      .then(value => {
+        if (!cancelled) setRuntime(value);
+      })
+      .catch(error => {
+        console.warn('[ble-pairing] failed to load runtime status', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const wizard = useMemo(
+    () => buildFirstRunPairingWizard({
+      supported: true,
+      probeStatus,
+      probeMessage,
+      runtime,
+      lastRepairResult,
+    }, t),
+    [lastRepairResult, probeMessage, probeStatus, runtime, t],
+  );
+
+  const refreshRuntime = async () => {
+    try {
+      const value = await getEmbeddedBleRuntimeStatus();
+      setRuntime(value);
+    } catch (error) {
+      console.warn('[ble-pairing] failed to refresh runtime status', error);
+    }
+  };
+
+  const runPairingCheck = async () => {
+    setBusyAction('startCheck');
+    setProbeStatus('checking');
+    setProbeMessage(null);
+    setLastRepairResult(null);
+    try {
+      await onEnableEmbeddedBle();
+      await refreshRuntime();
+      await runEmbeddedBleProbeWithTimeout();
+      setProbeStatus('ok');
+      setProbeMessage(t('shell.blePairingPrompt.readyBody'));
+      await refreshRuntime();
+    } catch (error) {
+      setProbeStatus('error');
+      setProbeMessage(embeddedBleProbeErrorMessage(error, t));
+      await refreshRuntime();
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const runPairingRepair = async () => {
+    setBusyAction('repair');
+    setProbeStatus('checking');
+    setProbeMessage(null);
+    try {
+      await onEnableEmbeddedBle();
+      const result = await recoverEmbeddedBleDevice(15_000);
+      setLastRepairResult(result);
+      if (result.runtime) {
+        setRuntime(result.runtime);
+      } else {
+        await refreshRuntime();
+      }
+      if (result.recovered) {
+        setProbeStatus('ok');
+        setProbeMessage(t('shell.blePairingPrompt.readyBody'));
+      } else {
+        setProbeStatus('error');
+        setProbeMessage(result.message ?? t('shell.blePairingPrompt.needsRepairBody'));
+      }
+      if (result.openBluetoothSettings) {
+        await openSystemSettings('bluetooth');
+      }
+    } catch (error) {
+      setProbeStatus('error');
+      setProbeMessage(embeddedBleProbeErrorMessage(error, t));
+      await refreshRuntime();
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const openBluetooth = async () => {
+    setBusyAction('openBluetooth');
+    try {
+      await onEnableEmbeddedBle();
+      await openSystemSettings('bluetooth');
+      await refreshRuntime();
+    } catch (error) {
+      console.warn('[ble-pairing] failed to open bluetooth settings', error);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleAction = (action: FirstRunPairingAction) => {
+    if (busyAction) return;
+    if (action === 'startCheck' || action === 'retry') {
+      void runPairingCheck();
+      return;
+    }
+    if (action === 'repair') {
+      void runPairingRepair();
+      return;
+    }
+    if (action === 'openBluetooth') {
+      void openBluetooth();
+      return;
+    }
+    onComplete();
+  };
+
+  const primaryDisabled = busyAction !== null;
+  const secondaryAction = wizard.secondaryAction && wizard.secondaryAction !== wizard.primaryAction
+    ? wizard.secondaryAction
+    : null;
+
   return (
     <div
       style={{
@@ -672,7 +814,8 @@ function BlePairingPrompt({
     >
       <div
         style={{
-          width: 390,
+          width: 500,
+          maxWidth: 'calc(100vw - 56px)',
           borderRadius: 12,
           background: 'var(--ol-surface)',
           border: '0.5px solid rgba(0,0,0,.08)',
@@ -697,43 +840,161 @@ function BlePairingPrompt({
           >
             <Icon name="bolt" size={17} />
           </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ol-ink)' }}>{t('shell.blePairingPrompt.title')}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ol-ink)' }}>{wizard.title}</div>
+            <div style={{ marginTop: 2, fontSize: 11.5, color: toneColor(wizard.tone) }}>
+              {t(`shell.blePairingPrompt.tone.${wizard.tone}`)}
+            </div>
+          </div>
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--ol-ink-3)', lineHeight: 1.55 }}>
-          {t('shell.blePairingPrompt.body')}
+          {wizard.message}
         </div>
-        <div style={{ fontSize: 12, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 8 }}>
+        <div
+          style={{
+            marginTop: 16,
+            display: 'grid',
+            gap: 7,
+            padding: 10,
+            borderRadius: 8,
+            border: '0.5px solid var(--ol-line)',
+            background: 'rgba(0,0,0,0.018)',
+          }}
+        >
+          {wizard.stages.map(stage => (
+            <div
+              key={stage.id}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '20px minmax(0, 1fr) auto',
+                alignItems: 'center',
+                gap: 8,
+                minHeight: 30,
+              }}
+            >
+              <div
+                aria-hidden
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 999,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: stage.status === 'pending' ? '0.5px solid var(--ol-line-strong)' : '0',
+                  background: stageDotBackground(stage.status),
+                  color: stage.status === 'pending' ? 'var(--ol-ink-4)' : '#fff',
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
+                {stageDotText(stage.status)}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, color: 'var(--ol-ink)', fontWeight: 600, lineHeight: 1.25 }}>
+                  {stage.label}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.25 }}>
+                  {stage.description}
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: stageTextColor(stage.status), whiteSpace: 'nowrap' }}>
+                {t(`shell.blePairingPrompt.stageStatus.${stage.status}`)}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 10 }}>
           {t('shell.blePairingPrompt.demoHint')}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <button
             onClick={onLater}
+            disabled={primaryDisabled}
             style={promptSecondaryButtonStyle}
           >
             {t('shell.blePairingPrompt.later')}
           </button>
-          <button
-            onClick={onUseMicrophone}
-            style={promptSoftButtonStyle}
-          >
-            {t('shell.blePairingPrompt.useMicrophone')}
-          </button>
+          {wizard.showUseMicrophone && (
+            <button
+              onClick={onUseMicrophone}
+              disabled={primaryDisabled}
+              style={promptSoftButtonStyle}
+            >
+              {t('shell.blePairingPrompt.useMicrophone')}
+            </button>
+          )}
+          {secondaryAction && (
+            <button
+              onClick={() => handleAction(secondaryAction)}
+              disabled={primaryDisabled}
+              style={promptSoftButtonStyle}
+            >
+              {actionLabel(secondaryAction, t)}
+            </button>
+          )}
           <button
             onClick={onStartDemo}
+            disabled={primaryDisabled}
             style={promptSoftButtonStyle}
           >
             {t('shell.blePairingPrompt.demoMode')}
           </button>
           <button
-            onClick={onOpenPairing}
+            onClick={() => handleAction(wizard.primaryAction)}
+            disabled={primaryDisabled}
             style={promptPrimaryButtonStyle}
           >
-            {t('shell.blePairingPrompt.openPairing')}
+            {busyAction ? t('shell.blePairingPrompt.working') : actionLabel(wizard.primaryAction, t)}
           </button>
         </div>
       </div>
     </div>
   );
+}
+
+function actionLabel(action: FirstRunPairingAction, t: TFunction): string {
+  switch (action) {
+    case 'openBluetooth':
+      return t('shell.blePairingPrompt.openBluetooth');
+    case 'retry':
+      return t('shell.blePairingPrompt.retryCheck');
+    case 'repair':
+      return t('shell.blePairingPrompt.repair');
+    case 'done':
+      return t('shell.blePairingPrompt.done');
+    case 'startCheck':
+    default:
+      return t('shell.blePairingPrompt.startCheck');
+  }
+}
+
+function stageDotText(status: FirstRunPairingStageStatus): string {
+  if (status === 'done') return '✓';
+  if (status === 'error') return '!';
+  if (status === 'current') return '•';
+  return '';
+}
+
+function stageDotBackground(status: FirstRunPairingStageStatus): string {
+  if (status === 'done') return 'var(--ol-blue)';
+  if (status === 'error') return '#b42318';
+  if (status === 'current') return 'var(--ol-ink)';
+  return 'transparent';
+}
+
+function stageTextColor(status: FirstRunPairingStageStatus): string {
+  if (status === 'done') return 'var(--ol-blue)';
+  if (status === 'error') return '#b42318';
+  if (status === 'current') return 'var(--ol-ink)';
+  return 'var(--ol-ink-4)';
+}
+
+function toneColor(tone: 'outline' | 'blue' | 'ok' | 'err'): string {
+  if (tone === 'ok') return 'var(--ol-blue)';
+  if (tone === 'err') return '#b42318';
+  if (tone === 'blue') return 'var(--ol-ink)';
+  return 'var(--ol-ink-4)';
 }
 
 function ProviderSetupPrompt({
