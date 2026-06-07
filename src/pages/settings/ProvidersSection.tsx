@@ -15,6 +15,7 @@ import {
   setCredential,
   validateProviderCredentials,
 } from '../../lib/ipc';
+import { providerDemoRecoveryForKind } from '../../lib/demoMode';
 import { emitSaved } from '../../lib/savedEvent';
 import { classifyProviderConnectionError } from '../../lib/providerSetup';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
@@ -728,31 +729,32 @@ function ProviderTools({ kind, modelAccount, onModelSelected }: { kind: 'llm' | 
 function providerErrorMessage(error: unknown, t: ReturnType<typeof useTranslation>['t']): string {
   const message = error instanceof Error ? error.message : String(error);
   const kind = classifyProviderConnectionError(error);
-  if (kind === 'apiKeyRejected') return t('settings.providers.providerAuthRejected');
-  if (kind === 'rateLimited') return t('settings.providers.providerRateLimited');
-  if (kind === 'providerUnavailable') return t('settings.providers.providerUnavailable');
-  if (kind === 'network') return t('settings.providers.providerNetworkError');
-  if (kind === 'timeout') return t('settings.providers.requestTimeout');
-  if (kind === 'apiKeyMissing') return t('settings.providers.apiKeyMissing');
-  if (kind === 'endpointMissing') return t('settings.providers.endpointMissing');
-  if (kind === 'endpointInvalid') return t('settings.providers.endpointInvalid');
-  if (kind === 'httpsRequired') return t('settings.providers.endpointMustUseHttps');
+  const withRecovery = (base: string) => `${base} ${t(providerDemoRecoveryForKind(kind).copyKey)}`;
+  if (kind === 'apiKeyRejected') return withRecovery(t('settings.providers.providerAuthRejected'));
+  if (kind === 'rateLimited') return withRecovery(t('settings.providers.providerRateLimited'));
+  if (kind === 'providerUnavailable') return withRecovery(t('settings.providers.providerUnavailable'));
+  if (kind === 'network') return withRecovery(t('settings.providers.providerNetworkError'));
+  if (kind === 'timeout') return withRecovery(t('settings.providers.requestTimeout'));
+  if (kind === 'apiKeyMissing') return withRecovery(t('settings.providers.apiKeyMissing'));
+  if (kind === 'endpointMissing') return withRecovery(t('settings.providers.endpointMissing'));
+  if (kind === 'endpointInvalid') return withRecovery(t('settings.providers.endpointInvalid'));
+  if (kind === 'httpsRequired') return withRecovery(t('settings.providers.endpointMustUseHttps'));
   if (kind === 'responseInvalid') {
-    if (message === 'providerResponseTooLarge') return t('settings.providers.responseTooLarge');
-    if (message === 'asrInvalidJson') return t('settings.providers.asrInvalidJson');
-    if (message === 'asrMissingTextField') return t('settings.providers.asrMissingTextField');
-    return t('settings.providers.providerResponseInvalid');
+    if (message === 'providerResponseTooLarge') return withRecovery(t('settings.providers.responseTooLarge'));
+    if (message === 'asrInvalidJson') return withRecovery(t('settings.providers.asrInvalidJson'));
+    if (message === 'asrMissingTextField') return withRecovery(t('settings.providers.asrMissingTextField'));
+    return withRecovery(t('settings.providers.providerResponseInvalid'));
   }
   if (kind === 'proxy') {
-    if (message === 'proxyUrlMissing') return t('settings.providers.proxyUrlMissing');
-    if (message === 'proxyUrlInvalid') return t('settings.providers.proxyUrlInvalid');
-    if (message === 'proxyModeInvalid') return t('settings.providers.proxyModeInvalid');
+    if (message === 'proxyUrlMissing') return withRecovery(t('settings.providers.proxyUrlMissing'));
+    if (message === 'proxyUrlInvalid') return withRecovery(t('settings.providers.proxyUrlInvalid'));
+    if (message === 'proxyModeInvalid') return withRecovery(t('settings.providers.proxyModeInvalid'));
   }
-  if (message === 'tauriUnavailable') return t('common.operationFailed');
+  if (message === 'tauriUnavailable') return withRecovery(t('common.operationFailed'));
   if (message.startsWith('providerHttpStatus:')) {
-    return t('settings.providers.providerHttpStatus', { status: message.split(':')[1] || '?' });
+    return withRecovery(t('settings.providers.providerHttpStatus', { status: message.split(':')[1] || '?' }));
   }
-  return t('common.operationFailed');
+  return withRecovery(t('common.operationFailed'));
 }
 
 // ─── Credential Field ─────────────────────────────────────────────────

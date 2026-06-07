@@ -30,6 +30,7 @@ import { EmbeddedBleStatusPanel } from '../components/EmbeddedBleStatusPanel';
 interface OverviewProps {
   onOpenProvidersSettings?: () => void;
   onOpenRecordingSettings?: () => void;
+  onStartDemoMode?: () => void;
 }
 
 const ASR_NAME_KEY_BY_ID: Record<string, string> = {
@@ -57,7 +58,7 @@ const LLM_NAME_KEY_BY_ID: Record<string, string> = {
   custom: 'custom',
 };
 
-export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings }: OverviewProps) {
+export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onStartDemoMode }: OverviewProps) {
   const { t } = useTranslation();
   const [history, setHistory] = useState<DictationSession[]>([]);
   const [historyError, setHistoryError] = useState(false);
@@ -291,6 +292,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings }: O
           asrConfigured={creds.asrConfigured}
           llmConfigured={creds.llmConfigured}
           onConfigure={onOpenProvidersSettings}
+          onStartDemo={onStartDemoMode}
           onUseLocal={async () => {
             try {
               await setActiveAsrProvider('foundry-local-whisper');
@@ -393,16 +395,17 @@ interface QuickStartCardProps {
   asrConfigured: boolean;
   llmConfigured: boolean;
   onConfigure?: () => void;
+  onStartDemo?: () => void;
   onUseLocal?: () => void;
   onTestRecord?: () => void;
 }
 
-function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onUseLocal, onTestRecord }: QuickStartCardProps) {
+function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onStartDemo, onUseLocal, onTestRecord }: QuickStartCardProps) {
   const { t } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
   return (
-    <Card padding={0} style={{ marginBottom: 18, overflow: 'hidden' }}>
+    <Card padding={0} style={{ marginBottom: 18, overflow: 'hidden', flexShrink: 0 }}>
       <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '0.5px solid var(--ol-line)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--ol-blue-soft)', color: 'var(--ol-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -420,6 +423,9 @@ function QuickStartCard({ asrConfigured, llmConfigured, onConfigure, onUseLocal,
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {onConfigure && (
             <Btn size="sm" variant="blue" icon="settings" onClick={onConfigure}>{t('overview.quickStartConfigure')}</Btn>
+          )}
+          {onStartDemo && (
+            <Btn size="sm" variant="ghost" icon="sparkle" onClick={onStartDemo}>{t('overview.quickStartDemo')}</Btn>
           )}
           {!asrConfigured && onUseLocal && (
             <Btn size="sm" variant="ghost" icon="bolt" onClick={onUseLocal}>{t('overview.quickStartLocal')}</Btn>

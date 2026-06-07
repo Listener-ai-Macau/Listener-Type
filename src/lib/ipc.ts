@@ -469,6 +469,22 @@ const mockCredentialsStatus: CredentialsStatus = {
   arkConfigured: true,
 };
 
+function mockCredentialsStatusForBrowser(): CredentialsStatus {
+  const devState = typeof window === 'undefined'
+    ? null
+    : window.localStorage.getItem('ol.dev.credentialsState');
+  if (devState === 'missing') {
+    return {
+      ...mockCredentialsStatus,
+      asrConfigured: false,
+      llmConfigured: false,
+      volcengineConfigured: false,
+      arkConfigured: false,
+    };
+  }
+  return mockCredentialsStatus;
+}
+
 export interface ProviderCheckResult {
   ok: boolean;
 }
@@ -618,7 +634,7 @@ export function stopMicrophoneLevelMonitor(): Promise<void> {
 
 // ── Credentials ────────────────────────────────────────────────────────
 export function getCredentials(): Promise<CredentialsStatus> {
-  return invokeOrMock('get_credentials', undefined, () => mockCredentialsStatus);
+  return invokeOrMock('get_credentials', undefined, () => mockCredentialsStatusForBrowser());
 }
 
 export function setCredential(account: string, value: string): Promise<void> {
