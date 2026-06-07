@@ -37,7 +37,8 @@ param(
     [switch]$SkipCapsuleVisibleGate,
     [switch]$KeepPlaybackVolume,
     [switch]$VerifyInsertion,
-    [switch]$VerifyHistory
+    [switch]$VerifyHistory,
+    [switch]$SkipAccuracyGate
 )
 
 $ErrorActionPreference = "Stop"
@@ -2290,7 +2291,7 @@ try {
     $accuracyReport = Measure-TranscriptAccuracy -Expected $ExpectedText -Transcript $finalText
     $accuracyWarning = $false
     $accuracyWarningMessage = $null
-    if (-not $ExpectNoText -and -not [string]::IsNullOrWhiteSpace($ExpectedText)) {
+    if (-not $ExpectNoText -and -not $SkipAccuracyGate -and -not [string]::IsNullOrWhiteSpace($ExpectedText)) {
         $accuracyThreshold = [double]$AudioProfileConfig.minimum_accuracy
         if ([double]$accuracyReport.accuracy -lt $accuracyThreshold) {
             $accuracyWarningMessage = "transcript accuracy below threshold: accuracy={0:0.######} threshold={1:0.######}" -f ([double]$accuracyReport.accuracy), $accuracyThreshold
@@ -2338,6 +2339,7 @@ try {
         accuracy = $accuracyReport.accuracy
         accuracy_threshold = [double]$AudioProfileConfig.minimum_accuracy
         accuracy_warning_only = [bool]$AudioProfileConfig.warning_only
+        accuracy_gate_skipped = [bool]$SkipAccuracyGate
         accuracy_warning = [bool]$accuracyWarning
         accuracy_warning_message = $accuracyWarningMessage
         wav_path = $WavPath
@@ -2446,6 +2448,7 @@ try {
         accuracy = $accuracyReport.accuracy
         accuracy_threshold = [double]$AudioProfileConfig.minimum_accuracy
         accuracy_warning_only = [bool]$AudioProfileConfig.warning_only
+        accuracy_gate_skipped = [bool]$SkipAccuracyGate
         wav_path = $WavPath
         tts_rate = $TtsRate
         tts_gain = $TtsGain
