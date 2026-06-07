@@ -82,8 +82,10 @@ export const ko: typeof zhCN = {
     providerPrompt: {
       title: '음성 공급자 설정',
       body: 'ASR 또는 LLM 공급자가 설정되지 않아 음성 입력과 정리가 일시적으로 작동하지 않습니다.',
+      demoHint: '먼저 Demo 모드나 마이크 테스트를 사용할 수 있습니다. 실제 API Key 설정은 변경되지 않습니다.',
       later: '나중에',
       testAudio: '오디오 테스트',
+      demoMode: 'Demo 모드',
       openSettings: '설정 열기',
     },
     hotkeyModePrompt: {
@@ -95,9 +97,29 @@ export const ko: typeof zhCN = {
     blePairingPrompt: {
       title: 'Listener 장치 페어링',
       body: '하드웨어 음성 키를 사용하려면 Windows Bluetooth 에서 Listener 장치를 연결한 뒤 Listener Type 이 BLE 오디오 알림을 확인하게 하세요. 마이크 경로도 계속 사용할 수 있습니다.',
+      demoHint: '장치가 없어도 Demo 또는 마이크 테스트를 먼저 사용할 수 있습니다. 실제 페어링 상태는 장치 패널에 계속 표시됩니다.',
       later: '나중에',
       useMicrophone: '마이크 사용',
+      demoMode: 'Demo 모드',
       openPairing: '페어링 시작',
+    },
+    demoMode: {
+      providerTitle: 'Demo 모드가 켜졌습니다',
+      providerBody: '실제 ASR / LLM 공급자는 아직 설정되지 않았습니다. 앱을 확인하거나 오디오를 테스트하고, 언제든 API Key 를 추가할 수 있습니다.',
+      deviceTitle: '장치 Demo 모드가 켜졌습니다',
+      deviceBody: '실제 Listener 장치는 아직 연결되지 않았습니다. 마이크로 오디오를 테스트하거나 녹음 설정에서 페어링하세요.',
+      configureProvider: 'API Key 설정',
+      testAudio: '오디오 테스트',
+      pairDevice: '장치 페어링',
+      close: 'Demo 알림 닫기',
+      copy: {
+        missingSetup: '필수 설정이 없습니다. 실제 설정을 바꾸지 않고 Demo 또는 마이크 테스트를 먼저 사용할 수 있습니다.',
+        invalidKey: 'API Key 가 거부되었습니다. 실제 오류는 보이게 둔 채 Demo 를 계속 사용할 수 있습니다.',
+        offline: '네트워크 또는 공급자 서비스를 사용할 수 없습니다. Demo 또는 오디오 테스트로 로컬 경로를 확인하세요.',
+        noDevice: 'Listener 장치를 찾을 수 없습니다. 먼저 마이크로 테스트한 뒤 페어링하세요.',
+        deviceRecoverable: '장치 경로를 일시적으로 사용할 수 없습니다. 다시 시도하거나 마이크로 테스트를 완료하세요.',
+        generic: '서비스를 사용할 수 없습니다. 오디오 테스트 또는 Demo 를 사용한 뒤 설정으로 돌아가 복구하세요.',
+      },
     },
   },
   onboarding: {
@@ -190,6 +212,7 @@ export const ko: typeof zhCN = {
     quickStartTitle: '빠른 시작',
     quickStartDesc: '아직 프로바이더가 설정되지 않았습니다. 시작할 방법을 선택하세요:',
     quickStartConfigure: 'API Key 설정',
+    quickStartDemo: 'Demo 모드',
     quickStartLocal: '로컬 인식 사용 (Key 불필요)',
     quickStartTest: '마이크 녹음 시도',
     quickStartDismiss: '닫기',

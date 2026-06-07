@@ -124,8 +124,10 @@ export const zhTW: typeof zhCN = {
     providerPrompt: {
       title: '設置語音提供商',
       body: '還沒有配置 ASR 或 LLM 提供商，語音輸入和潤色暫時無法正常工作。',
+      demoHint: '也可以先進入 Demo 模式或測試麥克風；這不會修改真實 API Key 設定。',
       later: '稍後',
       testAudio: '測試裝置',
+      demoMode: 'Demo 模式',
       openSettings: '去設置',
     },
     hotkeyModePrompt: {
@@ -137,9 +139,29 @@ export const zhTW: typeof zhCN = {
     blePairingPrompt: {
       title: '配對 Listener 裝置',
       body: '如果要用硬體語音鍵，請先在 Windows 藍牙裡連接 Listener 裝置，再讓 Listener Type 檢查 BLE 音訊訂閱。你也可以先走麥克風體驗。',
+      demoHint: '沒有裝置時可以先用 Demo 或麥克風試錄；真實配對狀態仍會保留在設備面板。',
       later: '稍後',
       useMicrophone: '先用麥克風',
+      demoMode: 'Demo 模式',
       openPairing: '開始配對',
+    },
+    demoMode: {
+      providerTitle: 'Demo 模式已開啟',
+      providerBody: '真實 ASR / LLM 仍未配置；可以繼續查看介面、測試音訊，或隨時去設定 API Key。',
+      deviceTitle: '設備 Demo 模式已開啟',
+      deviceBody: '真實 Listener 裝置仍未連接；可以先用麥克風測試音訊，或打開錄音設定配對設備。',
+      configureProvider: '配置 API Key',
+      testAudio: '測試音訊',
+      pairDevice: '配對設備',
+      close: '關閉 Demo 提示',
+      copy: {
+        missingSetup: '缺少必要設定。先用 Demo 或麥克風測試，不會改動真實配置。',
+        invalidKey: 'API Key 被拒絕。可以先用 Demo 繼續，真實錯誤仍保留供修復。',
+        offline: '目前網路或服務不可用。可以先用 Demo / 測試音訊確認本機路徑。',
+        noDevice: '未找到 Listener 裝置。可以先用麥克風測試，再回來配對。',
+        deviceRecoverable: '設備通路暫時不可用。先重試，或用麥克風完成測試。',
+        generic: '目前服務不可用。先測試音訊或進入 Demo，再回到設定修復。',
+      },
     },
   },
   onboarding: {
@@ -232,6 +254,7 @@ export const zhTW: typeof zhCN = {
     quickStartTitle: '快速開始',
     quickStartDesc: '還沒有配置服務提供商。選擇一個方式開始使用：',
     quickStartConfigure: '配置 API Key',
+    quickStartDemo: 'Demo 模式',
     quickStartLocal: '使用本地識別（無需 Key）',
     quickStartTest: '用麥克風試錄',
     quickStartDismiss: '關閉',

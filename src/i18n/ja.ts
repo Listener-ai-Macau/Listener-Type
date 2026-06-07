@@ -82,8 +82,10 @@ export const ja: typeof zhCN = {
     providerPrompt: {
       title: '音声プロバイダーを設定',
       body: 'ASR または LLM プロバイダーが未設定のため、音声入力と整文が一時的に利用できません。',
+      demoHint: '先に Demo モードやマイクテストを使えます。実際の API Key 設定は変更されません。',
       later: '後で',
       testAudio: '音声をテスト',
+      demoMode: 'Demo モード',
       openSettings: '設定を開く',
     },
     hotkeyModePrompt: {
@@ -95,9 +97,29 @@ export const ja: typeof zhCN = {
     blePairingPrompt: {
       title: 'Listener デバイスをペアリング',
       body: 'ハードウェア音声キーを使うには、Windows Bluetooth で Listener デバイスを接続し、Listener Type で BLE 音声通知を確認してください。マイク入力も引き続き使用できます。',
+      demoHint: 'デバイスがなくても Demo またはマイクテストを先に使えます。実際のペアリング状態はデバイスパネルに残ります。',
       later: '後で',
       useMicrophone: 'マイクを使う',
+      demoMode: 'Demo モード',
       openPairing: 'ペアリング開始',
+    },
+    demoMode: {
+      providerTitle: 'Demo モードが有効です',
+      providerBody: '実際の ASR / LLM はまだ未設定です。アプリ確認、音声テスト、API Key 設定をいつでも行えます。',
+      deviceTitle: 'デバイス Demo モードが有効です',
+      deviceBody: '実際の Listener デバイスはまだ接続されていません。マイクで音声をテストするか、録音設定でペアリングしてください。',
+      configureProvider: 'API Key を設定',
+      testAudio: '音声をテスト',
+      pairDevice: 'デバイスをペアリング',
+      close: 'Demo 通知を閉じる',
+      copy: {
+        missingSetup: '必要な設定がありません。実設定を変えずに Demo またはマイクテストを先に使えます。',
+        invalidKey: 'API Key が拒否されました。実際のエラーを残したまま Demo を続けられます。',
+        offline: 'ネットワークまたはプロバイダーが利用できません。Demo または音声テストでローカル経路を確認できます。',
+        noDevice: 'Listener デバイスが見つかりません。先にマイクでテストし、その後ペアリングしてください。',
+        deviceRecoverable: 'デバイス経路が一時的に利用できません。再試行するか、マイクでテストを完了してください。',
+        generic: 'サービスを利用できません。音声テストまたは Demo を使い、後で設定に戻って修復してください。',
+      },
     },
   },
   onboarding: {
@@ -190,6 +212,7 @@ export const ja: typeof zhCN = {
     quickStartTitle: 'クイックスタート',
     quickStartDesc: 'プロバイダーがまだ設定されていません。以下の方法でお試しください：',
     quickStartConfigure: 'API Key を設定',
+    quickStartDemo: 'Demo モード',
     quickStartLocal: 'ローカル認識を使う（Key 不要）',
     quickStartTest: 'マイク録音を試す',
     quickStartDismiss: '閉じる',

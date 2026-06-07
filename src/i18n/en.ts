@@ -124,8 +124,10 @@ export const en: typeof zhCN = {
     providerPrompt: {
       title: 'Set up speech providers',
       body: 'No ASR or LLM provider is configured yet. Voice input and polishing will not work until you add credentials.',
+      demoHint: 'You can enter Demo mode or test the microphone first. This will not change real API key settings.',
       later: 'Later',
       testAudio: 'Test audio',
+      demoMode: 'Demo mode',
       openSettings: 'Open Settings',
     },
     hotkeyModePrompt: {
@@ -137,9 +139,29 @@ export const en: typeof zhCN = {
     blePairingPrompt: {
       title: 'Pair your Listener device',
       body: 'For the hardware voice key, connect the Listener device in Windows Bluetooth, then let Listener Type check device status. You can still use the microphone path.',
+      demoHint: 'No device yet? Use Demo or microphone test first. Real pairing status stays visible in the device panel.',
       later: 'Later',
       useMicrophone: 'Use microphone',
+      demoMode: 'Demo mode',
       openPairing: 'Start pairing',
+    },
+    demoMode: {
+      providerTitle: 'Demo mode is on',
+      providerBody: 'Real ASR / LLM providers are still not configured. You can inspect the app, test audio, or add API keys anytime.',
+      deviceTitle: 'Device demo mode is on',
+      deviceBody: 'The real Listener device is still not connected. Test audio with the microphone, or open Recording settings to pair it.',
+      configureProvider: 'Configure API Key',
+      testAudio: 'Test audio',
+      pairDevice: 'Pair device',
+      close: 'Close Demo notice',
+      copy: {
+        missingSetup: 'Required setup is missing. Use Demo or microphone test first without changing real configuration.',
+        invalidKey: 'The API Key was rejected. Continue in Demo while the real error remains visible for repair.',
+        offline: 'Network or provider service is unavailable. Use Demo or test audio to confirm the local path.',
+        noDevice: 'Listener device was not found. Test with the microphone first, then return to pairing.',
+        deviceRecoverable: 'The device path is temporarily unavailable. Retry, or use the microphone to finish testing.',
+        generic: 'The service is unavailable. Test audio or enter Demo, then return to settings to repair it.',
+      },
     },
   },
   onboarding: {
@@ -232,6 +254,7 @@ export const en: typeof zhCN = {
     quickStartTitle: 'Quick start',
     quickStartDesc: 'No providers configured yet. Choose a way to get started:',
     quickStartConfigure: 'Configure API Key',
+    quickStartDemo: 'Demo mode',
     quickStartLocal: 'Use local recognition (no key needed)',
     quickStartTest: 'Try microphone recording',
     quickStartDismiss: 'Dismiss',

@@ -20,6 +20,7 @@ import { SelectionAsk } from '../pages/SelectionAsk';
 // LocalAsr 不再作为主 nav tab——本地 ASR 模型管理已合并到 Settings → Advanced 中
 // 通过 Settings -> Advanced 内的 <LocalAsr /> 渲染。这里之前的 import 与 NAV_BASE 条目都已移除。
 import { APP_VERSION_LABEL, IS_BETA_BUILD } from '../lib/appVersion';
+import { createDemoModeSession, type DemoModeSession } from '../lib/demoMode';
 import { applyFontScale, readFontScale } from '../lib/fontScale';
 import { getCredentials, isMainWindowStartHidden } from '../lib/ipc';
 import type { DeviceCustomKeyAppPage } from '../lib/types';
@@ -72,6 +73,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId | undefined>();
   const [providerPromptOpen, setProviderPromptOpen] = useState(false);
   const [blePairingPromptOpen, setBlePairingPromptOpen] = useState(false);
+  const [demoModeSession, setDemoModeSession] = useState<DemoModeSession | null>(null);
 
   // displayTab 是实际渲染的 tab，currentTab 是用户点中的目标 tab。
   const [displayTab, setDisplayTab] = useState<AppTab>(initialTab);
@@ -238,6 +240,31 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     openSettings('recording');
   };
 
+  const startDemoMode = (source: DemoModeSession['source']) => {
+    setProviderPromptOpen(false);
+    setBlePairingPromptOpen(false);
+    setDemoModeSession(createDemoModeSession(source));
+    setCurrentTab('overview');
+  };
+
+  const startProviderDemoMode = () => {
+    startDemoMode('provider');
+  };
+
+  const startDeviceDemoMode = () => {
+    startDemoMode('device');
+  };
+
+  const openDemoProviderSettings = () => {
+    setDemoModeSession(null);
+    openSettings('providers');
+  };
+
+  const openDemoRecordingSettings = () => {
+    setDemoModeSession(null);
+    openSettings('recording');
+  };
+
 
   const openBlePairingSettings = () => {
     window.localStorage.setItem(BLE_PAIRING_PROMPT_ACK_KEY, '1');
@@ -398,10 +425,19 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
                 flexDirection: 'column',
               }}
             >
+              {demoModeSession ? (
+                <DemoModeBanner
+                  source={demoModeSession.source}
+                  onClose={() => setDemoModeSession(null)}
+                  onOpenProviders={openDemoProviderSettings}
+                  onOpenRecording={openDemoRecordingSettings}
+                />
+              ) : null}
               {displayTab === 'overview' ? (
                 <Overview
                   onOpenProvidersSettings={() => openSettings('providers')}
                   onOpenRecordingSettings={() => openSettings('recording')}
+                  onStartDemoMode={startProviderDemoMode}
                 />
               ) : (
                 <Page />
@@ -460,12 +496,14 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           onLater={rememberProviderPrompt}
           onOpenSettings={openProviderSettings}
           onOpenRecording={openRecordingSettingsFromProviderPrompt}
+          onStartDemo={startProviderDemoMode}
         />
       ) : blePairingPromptOpen ? (
         <BlePairingPrompt
           onLater={deferBlePairingPrompt}
           onUseMicrophone={keepMicrophoneFromBlePrompt}
           onOpenPairing={openBlePairingSettings}
+          onStartDemo={startDeviceDemoMode}
         />
       ) : null}
 
@@ -510,14 +548,110 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   );
 }
 
+function DemoModeBanner({
+  source,
+  onClose,
+  onOpenProviders,
+  onOpenRecording,
+}: {
+  source: DemoModeSession['source'];
+  onClose: () => void;
+  onOpenProviders: () => void;
+  onOpenRecording: () => void;
+}) {
+  const { t } = useTranslation();
+  const providerDemo = source === 'provider';
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 12,
+        padding: '10px 12px',
+        marginBottom: 12,
+        borderRadius: 8,
+        border: '0.5px solid rgba(101,123,112,0.22)',
+        background: 'rgba(101,123,112,0.08)',
+        color: 'var(--ol-ink)',
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 260px' }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 7,
+            background: 'var(--ol-surface)',
+            color: 'var(--ol-blue)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <Icon name={providerDemo ? 'sparkle' : 'mic'} size={14} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)', lineHeight: 1.35 }}>
+            {t(providerDemo ? 'shell.demoMode.providerTitle' : 'shell.demoMode.deviceTitle')}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-3)', lineHeight: 1.45 }}>
+            {t(providerDemo ? 'shell.demoMode.providerBody' : 'shell.demoMode.deviceBody')}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap', flex: '0 1 auto' }}>
+        {providerDemo ? (
+          <button onClick={onOpenProviders} style={promptPrimaryButtonStyle}>
+            {t('shell.demoMode.configureProvider')}
+          </button>
+        ) : (
+          <button onClick={onOpenRecording} style={promptPrimaryButtonStyle}>
+            {t('shell.demoMode.testAudio')}
+          </button>
+        )}
+        <button onClick={onOpenRecording} style={promptSoftButtonStyle}>
+          {t(providerDemo ? 'shell.demoMode.testAudio' : 'shell.demoMode.pairDevice')}
+        </button>
+        <button
+          onClick={onClose}
+          aria-label={t('shell.demoMode.close')}
+          title={t('shell.demoMode.close')}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 7,
+            border: '0.5px solid var(--ol-line-strong)',
+            background: 'var(--ol-surface)',
+            color: 'var(--ol-ink-3)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'default',
+          }}
+        >
+          <Icon name="close" size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function BlePairingPrompt({
   onLater,
   onUseMicrophone,
   onOpenPairing,
+  onStartDemo,
 }: {
   onLater: () => void;
   onUseMicrophone: () => void;
   onOpenPairing: () => void;
+  onStartDemo: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -568,7 +702,10 @@ function BlePairingPrompt({
         <div style={{ fontSize: 12.5, color: 'var(--ol-ink-3)', lineHeight: 1.55 }}>
           {t('shell.blePairingPrompt.body')}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+        <div style={{ fontSize: 12, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 8 }}>
+          {t('shell.blePairingPrompt.demoHint')}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <button
             onClick={onLater}
             style={promptSecondaryButtonStyle}
@@ -580,6 +717,12 @@ function BlePairingPrompt({
             style={promptSoftButtonStyle}
           >
             {t('shell.blePairingPrompt.useMicrophone')}
+          </button>
+          <button
+            onClick={onStartDemo}
+            style={promptSoftButtonStyle}
+          >
+            {t('shell.blePairingPrompt.demoMode')}
           </button>
           <button
             onClick={onOpenPairing}
@@ -597,10 +740,12 @@ function ProviderSetupPrompt({
   onLater,
   onOpenSettings,
   onOpenRecording,
+  onStartDemo,
 }: {
   onLater: () => void;
   onOpenSettings: () => void;
   onOpenRecording: () => void;
+  onStartDemo: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -651,58 +796,31 @@ function ProviderSetupPrompt({
         <div style={{ fontSize: 12.5, color: 'var(--ol-ink-3)', lineHeight: 1.55 }}>
           {t('shell.providerPrompt.body')}
         </div>
+        <div style={{ fontSize: 12, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 8 }}>
+          {t('shell.providerPrompt.demoHint')}
+        </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <button
             onClick={onLater}
-            style={{
-              height: 32,
-              padding: '0 13px',
-              borderRadius: 8,
-              border: '0.5px solid var(--ol-line-strong)',
-              background: 'var(--ol-surface)',
-              color: 'var(--ol-ink-3)',
-              fontFamily: 'inherit',
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: 'default',
-              transition: 'background 0.16s var(--ol-motion-quick), border-color 0.16s var(--ol-motion-quick)',
-            }}
+            style={promptSecondaryButtonStyle}
           >
             {t('shell.providerPrompt.later')}
           </button>
           <button
+            onClick={onStartDemo}
+            style={promptSoftButtonStyle}
+          >
+            {t('shell.providerPrompt.demoMode')}
+          </button>
+          <button
             onClick={onOpenRecording}
-            style={{
-              height: 32,
-              padding: '0 14px',
-              borderRadius: 8,
-              border: '0.5px solid var(--ol-line-strong)',
-              background: 'rgba(101,123,112,0.08)',
-              color: 'var(--ol-ink)',
-              fontFamily: 'inherit',
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: 'default',
-              transition: 'background 0.16s var(--ol-motion-quick), transform 0.12s var(--ol-motion-quick)',
-            }}
+            style={promptSoftButtonStyle}
           >
             {t('shell.providerPrompt.testAudio')}
           </button>
           <button
             onClick={onOpenSettings}
-            style={{
-              height: 32,
-              padding: '0 14px',
-              borderRadius: 8,
-              border: 0,
-              background: 'var(--ol-ink)',
-              color: '#fff',
-              fontFamily: 'inherit',
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: 'default',
-              transition: 'background 0.16s var(--ol-motion-quick), transform 0.12s var(--ol-motion-quick)',
-            }}
+            style={promptPrimaryButtonStyle}
           >
             {t('shell.providerPrompt.openSettings')}
           </button>

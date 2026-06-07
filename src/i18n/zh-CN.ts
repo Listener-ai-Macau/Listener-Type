@@ -122,8 +122,10 @@ export const zhCN = {
     providerPrompt: {
       title: '设置语音提供商',
       body: '还没有配置 ASR 或 LLM 提供商，语音输入和润色暂时无法正常工作。',
+      demoHint: '也可以先进入 Demo 模式或测试麦克风；这不会修改真实 API Key 设置。',
       later: '稍后',
       testAudio: '测试设备',
+      demoMode: 'Demo 模式',
       openSettings: '去设置',
     },
     hotkeyModePrompt: {
@@ -135,9 +137,29 @@ export const zhCN = {
     blePairingPrompt: {
       title: '配对 Listener 设备',
       body: '如果要用硬件语音键，请先在 Windows 蓝牙里连接 Listener 设备，再让 Listener Type 检查设备状态。你也可以先走麦克风体验。',
+      demoHint: '没有设备时可以先用 Demo 或麦克风试录；真实配对状态仍会保留在设备面板。',
       later: '稍后',
       useMicrophone: '先用麦克风',
+      demoMode: 'Demo 模式',
       openPairing: '开始配对',
+    },
+    demoMode: {
+      providerTitle: 'Demo 模式已开启',
+      providerBody: '真实 ASR / LLM 仍未配置；可以继续查看界面、测试音频，或随时去设置 API Key。',
+      deviceTitle: '设备 Demo 模式已开启',
+      deviceBody: '真实 Listener 设备仍未连接；可以先用麦克风测试音频，或打开录音设置配对设备。',
+      configureProvider: '配置 API Key',
+      testAudio: '测试音频',
+      pairDevice: '配对设备',
+      close: '关闭 Demo 提示',
+      copy: {
+        missingSetup: '缺少必要设置。先用 Demo 或麦克风测试，不会改动真实配置。',
+        invalidKey: 'API Key 被拒绝。可以先用 Demo 继续，真实错误仍保留供修复。',
+        offline: '当前网络或服务不可用。可以先用 Demo / 测试音频确认本机路径。',
+        noDevice: '未找到 Listener 设备。可以先用麦克风测试，再回来配对。',
+        deviceRecoverable: '设备通路暂时不可用。先重试，或用麦克风完成测试。',
+        generic: '当前服务不可用。先测试音频或进入 Demo，再回到设置修复。',
+      },
     },
   },
   onboarding: {
@@ -230,6 +252,7 @@ export const zhCN = {
     quickStartTitle: '快速开始',
     quickStartDesc: '还没有配置服务提供商。选择一个方式开始使用：',
     quickStartConfigure: '配置 API Key',
+    quickStartDemo: 'Demo 模式',
     quickStartLocal: '使用本地识别（无需 Key）',
     quickStartTest: '用麦克风试录',
     quickStartDismiss: '关闭',
