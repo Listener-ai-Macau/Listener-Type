@@ -34,6 +34,8 @@ const baseRuntime: EmbeddedBleRuntimeStatus = {
     recentDisconnectReason: null,
     reconnectAttempts: 1,
     notifySubscriptionState: 'subscribed',
+    usbPowered: null,
+    batteryPercent: null,
     firmwareWakePolicy: {
       policy: 'key4_only',
       wakeCapableKeys: 'KEY4',
@@ -215,6 +217,7 @@ assert.equal(
     runtime: {
       ...baseRuntime,
       backgroundListenerLastError: 'Windows GATT disconnect reason=546 after low-power idle; transport_not_ready',
+      wakeRecovery: { ...baseRuntime.wakeRecovery, usbPowered: false },
     },
   })),
   'reconnecting',
@@ -225,9 +228,21 @@ assert.equal(
     runtime: {
       ...baseRuntime,
       backgroundListenerLastError: 'Stale cached GATT path after reason=546 returned transport_not_ready',
+      wakeRecovery: { ...baseRuntime.wakeRecovery, usbPowered: false },
     },
   })),
-  'reconnecting',
+  'needsRePair',
+);
+
+assert.equal(
+  selectBleRecoveryUiState(input({
+    runtime: {
+      ...baseRuntime,
+      backgroundListenerLastError: 'Windows GATT disconnect reason=546 after low-power idle; transport_not_ready',
+      wakeRecovery: { ...baseRuntime.wakeRecovery, usbPowered: true },
+    },
+  })),
+  'ready',
 );
 
 assert.equal(

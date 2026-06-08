@@ -874,6 +874,8 @@ export function repairEmbeddedBleConnection(timeoutMs?: number): Promise<Embedde
           recentDisconnectReason: null,
           reconnectAttempts: 1,
           notifySubscriptionState: 'subscribed',
+          usbPowered: null,
+          batteryPercent: null,
           firmwareWakePolicy: {
             policy: 'key4_only',
             wakeCapableKeys: 'KEY4/GPIO21',
@@ -923,6 +925,8 @@ export function recoverEmbeddedBleDevice(timeoutMs?: number): Promise<EmbeddedBl
           recentDisconnectReason: null,
           reconnectAttempts: 1,
           notifySubscriptionState: 'subscribed',
+          usbPowered: null,
+          batteryPercent: null,
           firmwareWakePolicy: {
             policy: 'key4_only',
             wakeCapableKeys: 'KEY4/GPIO21',
@@ -964,6 +968,8 @@ export function getEmbeddedBleRuntimeStatus(): Promise<EmbeddedBleRuntimeStatus>
         recentDisconnectReason: null,
         reconnectAttempts: 1,
         notifySubscriptionState: 'subscribed',
+        usbPowered: null,
+        batteryPercent: null,
         firmwareWakePolicy: {
           policy: 'key4_only',
           wakeCapableKeys: 'KEY4/GPIO21',

@@ -276,6 +276,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             coordinator.bind_app(app_handle);
             coordinator.start_hotkey_listener();
+            coordinator.auto_select_embedded_ble_input_source_in_background();
             coordinator.refresh_embedded_ble_listener();
             // QA / custom combo hotkeys use `global-hotkey` (Carbon on macOS).
             // Start those after RunEvent::Ready, when the AppKit event loop is live.

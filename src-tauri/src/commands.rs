@@ -1826,14 +1826,8 @@ fn runtime_suggests_embedded_ble_auto_unpair(
     .join(" ")
     .to_ascii_lowercase();
 
-    let low_power_idle = combined.contains("reason=546")
-        || combined.contains("reason: 546")
-        || combined.contains("reason 546")
-        || combined.contains("low-power idle")
-        || combined.contains("low power idle")
-        || combined.contains("idle disconnect")
-        || combined.contains("transport_not_ready")
-        || combined.contains("transport not ready");
+    let low_power_idle = wake_recovery.usb_powered == Some(false)
+        && runtime_error_text_suggests_low_power_idle(&combined);
     let notify_or_gatt_failure = combined.contains("cccd")
         || combined.contains("notify write")
         || combined.contains("notify subscription")
@@ -1848,6 +1842,22 @@ fn runtime_suggests_embedded_ble_auto_unpair(
         || combined.contains("disconnected");
 
     notify_or_gatt_failure && timeout_like && !low_power_idle
+}
+
+fn runtime_error_text_suggests_low_power_idle(combined: &str) -> bool {
+    let reason_546 = combined.contains("reason=546")
+        || combined.contains("reason: 546")
+        || combined.contains("reason 546");
+    let idle_label = combined.contains("low-power idle")
+        || combined.contains("low power idle")
+        || combined.contains("idle disconnect");
+    let transport_not_ready =
+        combined.contains("transport_not_ready") || combined.contains("transport not ready");
+    let link_loss = combined.contains("connection status changed")
+        || combined.contains("gatt session status changed")
+        || combined.contains("disconnected");
+
+    reason_546 || idle_label || (transport_not_ready && link_loss)
 }
 
 fn embedded_ble_recovery_message(
@@ -1897,6 +1907,11 @@ async fn embedded_ble_runtime_and_firmware(
     ),
     String,
 > {
+    let firmware =
+        tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
+            .await
+            .map_err(|err| format!("Listener BLE repair snapshot task failed: {err}"))?;
+    coord.record_embedded_ble_firmware_power_snapshot(&firmware, "runtime_and_firmware");
     let runtime = EmbeddedBleRuntimeStatus {
         background_listener_disabled_by_env: std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
             .ok()
@@ -1907,10 +1922,6 @@ async fn embedded_ble_runtime_and_firmware(
         background_listener_last_error: coord.embedded_ble_listener_last_error(),
         wake_recovery: coord.embedded_ble_wake_recovery_snapshot(),
     };
-    let firmware =
-        tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
-            .await
-            .map_err(|err| format!("Listener BLE repair snapshot task failed: {err}"))?;
     Ok((runtime, firmware))
 }
 
@@ -5158,12 +5169,23 @@ mod tests {
             reconnect_attempts: 6,
             notify_subscription_state:
                 crate::coordinator::EmbeddedBleNotifySubscriptionState::Opening,
+            usb_powered: Some(false),
             ..wake_recovery
         };
         assert!(!super::runtime_suggests_embedded_ble_auto_unpair(
             "Listener BLE notify subscription did not recover within 15000 ms after foreground probe",
             None,
             &idle_recovery,
+        ));
+
+        let powered_idle_recovery = crate::coordinator::EmbeddedBleWakeRecoverySnapshot {
+            usb_powered: Some(true),
+            ..idle_recovery
+        };
+        assert!(super::runtime_suggests_embedded_ble_auto_unpair(
+            "Listener BLE notify subscription did not recover within 15000 ms after foreground probe",
+            None,
+            &powered_idle_recovery,
         ));
     }
 

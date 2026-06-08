@@ -107,6 +107,8 @@ export interface EmbeddedBleWakeRecoverySnapshot {
   recentDisconnectReason: string | null;
   reconnectAttempts: number;
   notifySubscriptionState: EmbeddedBleNotifySubscriptionState;
+  usbPowered?: boolean | null;
+  batteryPercent?: number | null;
   firmwareWakePolicy: FirmwareWakePolicySnapshot;
   lastAttemptAt: string | null;
   lastReadyAt: string | null;

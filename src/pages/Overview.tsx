@@ -143,6 +143,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onS
       backgroundListenerReady: bleRuntimeStatus?.backgroundListenerReady ?? false,
       backgroundListenerError: bleRuntimeStatus?.backgroundListenerLastError ?? null,
       wakeRecoveryStatus: bleRuntimeStatus?.wakeRecovery?.status ?? null,
+      usbPowered: bleRuntimeStatus?.wakeRecovery?.usbPowered ?? null,
       historyError,
     }),
     [
@@ -151,6 +152,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onS
       bleRuntimeStatus?.backgroundListenerLastError,
       bleRuntimeStatus?.backgroundListenerReady,
       bleRuntimeStatus?.wakeRecovery?.status,
+      bleRuntimeStatus?.wakeRecovery?.usbPowered,
       history,
       historyError,
       prefs?.dictationInputSource,

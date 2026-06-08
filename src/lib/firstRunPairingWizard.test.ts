@@ -52,6 +52,8 @@ const readyRuntime: EmbeddedBleRuntimeStatus = {
     recentDisconnectReason: null,
     reconnectAttempts: 1,
     notifySubscriptionState: 'subscribed',
+    usbPowered: null,
+    batteryPercent: null,
     firmwareWakePolicy: {
       policy: 'key4_only',
       wakeCapableKeys: 'KEY4',

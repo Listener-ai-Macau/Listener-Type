@@ -48,6 +48,7 @@ export interface ListenerDeviceHealthInput {
   backgroundListenerReady?: boolean;
   backgroundListenerError?: string | null;
   wakeRecoveryStatus?: 'idle' | 'reconnecting' | 'ready' | 'needsWakeKey' | 'failed' | null;
+  usbPowered?: boolean | null;
   historyError?: boolean;
   now?: Date;
 }
@@ -63,6 +64,7 @@ export function summarizeListenerDeviceHealth({
   backgroundListenerReady = false,
   backgroundListenerError = null,
   wakeRecoveryStatus = null,
+  usbPowered = null,
   historyError = false,
   now = new Date(),
 }: ListenerDeviceHealthInput): ListenerDeviceHealthSnapshot {
@@ -92,7 +94,7 @@ export function summarizeListenerDeviceHealth({
     return snapshot('error', 'wakeRecovery');
   }
 
-  const listenerFailureReason = classifyBleSetupFailure(backgroundListenerError);
+  const listenerFailureReason = classifyBleSetupFailure(backgroundListenerError, usbPowered);
   if (listenerFailureReason) {
     return snapshot('error', listenerFailureReason);
   }
@@ -112,7 +114,7 @@ export function summarizeListenerDeviceHealth({
     return snapshot('disconnected', 'staleBleEvidence', latestSession, stats, ageMinutes);
   }
 
-  const setupFailureReason = classifyBleSetupFailure(latestSession.errorCode);
+  const setupFailureReason = classifyBleSetupFailure(latestSession.errorCode, usbPowered);
   if (setupFailureReason) {
     return snapshot('error', setupFailureReason, latestSession, stats, ageMinutes);
   }
@@ -170,7 +172,10 @@ function sessionAgeMinutes(session: DictationSession, now: Date): number | null 
   return Math.max(0, Math.floor((now.getTime() - createdAt.getTime()) / 60000));
 }
 
-function classifyBleSetupFailure(errorCode: string | null): ListenerDeviceHealthReason | null {
+function classifyBleSetupFailure(
+  errorCode: string | null,
+  usbPowered: boolean | null,
+): ListenerDeviceHealthReason | null {
   if (!errorCode) return null;
   const code = errorCode.toLowerCase();
   if (code.includes('no paired') || code.includes('not paired') || code.includes('missing pairing')) {
@@ -179,18 +184,11 @@ function classifyBleSetupFailure(errorCode: string | null): ListenerDeviceHealth
   if (code.includes('bluetooth service') || code.includes('radio') || code.includes('adapter') || code.includes('access denied')) {
     return 'bluetoothUnavailable';
   }
-  if (code.includes('reason=546')
-    || code.includes('reason: 546')
-    || code.includes('reason 546')
-    || code.includes('low-power idle')
-    || code.includes('low power idle')
-    || code.includes('idle disconnect')
-    || code.includes('transport_not_ready')
-    || code.includes('transport not ready')) {
-    return 'lowPowerIdleDisconnect';
-  }
   if (code.includes('stale') || code.includes('gatt cache') || code.includes('unknown gatt')) {
     return 'staleGattCache';
+  }
+  if (usbPowered === false && bleSetupErrorSuggestsLowPowerIdle(code)) {
+    return 'lowPowerIdleDisconnect';
   }
   if (code.includes('deep sleep')
     || code.includes('asleep')
@@ -204,6 +202,22 @@ function classifyBleSetupFailure(errorCode: string | null): ListenerDeviceHealth
     return 'bleSubscriptionTimeout';
   }
   return null;
+}
+
+function bleSetupErrorSuggestsLowPowerIdle(code: string): boolean {
+  const reason546 = code.includes('reason=546')
+    || code.includes('reason: 546')
+    || code.includes('reason 546');
+  const idleLabel = code.includes('low-power idle')
+    || code.includes('low power idle')
+    || code.includes('idle disconnect');
+  const transportNotReady = code.includes('transport_not_ready')
+    || code.includes('transport not ready');
+  const linkLoss = code.includes('connection status changed')
+    || code.includes('gatt session status changed')
+    || code.includes('disconnected');
+
+  return reason546 || idleLabel || (transportNotReady && linkLoss);
 }
 
 function isCompleteAudioWithEmptyTranscript(

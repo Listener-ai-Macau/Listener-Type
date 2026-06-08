@@ -236,6 +236,8 @@ pub struct EmbeddedBleWakeRecoverySnapshot {
     pub recent_disconnect_reason: Option<String>,
     pub reconnect_attempts: u32,
     pub notify_subscription_state: EmbeddedBleNotifySubscriptionState,
+    pub usb_powered: Option<bool>,
+    pub battery_percent: Option<u8>,
     pub firmware_wake_policy: FirmwareWakePolicySnapshot,
     pub last_attempt_at: Option<String>,
     pub last_ready_at: Option<String>,
@@ -348,6 +350,8 @@ impl Default for EmbeddedBleWakeRecoverySnapshot {
             recent_disconnect_reason: None,
             reconnect_attempts: 0,
             notify_subscription_state: EmbeddedBleNotifySubscriptionState::Unknown,
+            usb_powered: None,
+            battery_percent: None,
             firmware_wake_policy: FirmwareWakePolicySnapshot::current_v1(),
             last_attempt_at: None,
             last_ready_at: None,
@@ -574,6 +578,26 @@ impl Coordinator {
 
     pub fn bind_app(&self, handle: AppHandle) {
         *self.inner.app.lock() = Some(handle);
+    }
+
+    pub fn auto_select_embedded_ble_input_source_in_background(&self) {
+        if embedded_ble_background_listener_disabled_by_env() {
+            log::info!(
+                "[embedded-ble] auto input source selection skipped because background BLE is disabled"
+            );
+            return;
+        }
+
+        let inner = Arc::clone(&self.inner);
+        async_runtime::spawn_blocking(move || {
+            let firmware = crate::embedded_ble::firmware_ota_device_snapshot();
+            record_embedded_ble_firmware_power_snapshot(
+                &inner,
+                &firmware,
+                "auto_input_source_probe",
+            );
+            auto_select_embedded_ble_input_source_from_snapshot(&inner, &firmware);
+        });
     }
 
     /// 让所有 hotkey supervisor loop（dictation / qa / combo / translation /
@@ -1041,6 +1065,14 @@ impl Coordinator {
 
     pub fn embedded_ble_wake_recovery_snapshot(&self) -> EmbeddedBleWakeRecoverySnapshot {
         embedded_ble_wake_recovery_snapshot(&self.inner)
+    }
+
+    pub fn record_embedded_ble_firmware_power_snapshot(
+        &self,
+        snapshot: &crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+        reason: &'static str,
+    ) {
+        record_embedded_ble_firmware_power_snapshot(&self.inner, snapshot, reason);
     }
 
     pub fn embedded_ble_session_actor_diagnostics(
@@ -2774,6 +2806,7 @@ fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
         return;
     }
 
+    refresh_embedded_ble_firmware_power_snapshot_async(inner, "background_listener_start");
     let inner = Arc::clone(inner);
     async_runtime::spawn(async move {
         embedded_ble_background_listener_loop(inner, generation).await;
@@ -2782,6 +2815,90 @@ fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
 
 fn embedded_ble_wake_recovery_snapshot(inner: &Arc<Inner>) -> EmbeddedBleWakeRecoverySnapshot {
     inner.embedded_ble_wake_recovery.lock().clone()
+}
+
+fn embedded_ble_background_listener_disabled_by_env() -> bool {
+    std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
+        .ok()
+        .is_some_and(|value| value == "1")
+}
+
+fn should_auto_select_embedded_ble_input_source(
+    prefs: &crate::types::UserPreferences,
+    firmware: &crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+) -> bool {
+    prefs.dictation_input_source != DictationInputSource::EmbeddedBle && firmware.connected
+}
+
+fn auto_select_embedded_ble_input_source_from_snapshot(
+    inner: &Arc<Inner>,
+    firmware: &crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+) -> bool {
+    let mut prefs = inner.prefs.get();
+    if !should_auto_select_embedded_ble_input_source(&prefs, firmware) {
+        log::info!(
+            "[embedded-ble] auto input source selection skipped source={:?} connected={} detail={:?}",
+            prefs.dictation_input_source,
+            firmware.connected,
+            firmware.detail.as_deref()
+        );
+        return false;
+    }
+
+    prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+    if let Err(err) = inner.prefs.set(prefs.clone()) {
+        log::warn!("[embedded-ble] auto input source selection persist failed: {err}");
+        return false;
+    }
+
+    log::info!(
+        "[embedded-ble] auto selected Listener BLE input source hardware={:?} firmware={:?}",
+        firmware.hardware_revision,
+        firmware.firmware_version
+    );
+    if let Some(app) = inner.app.lock().clone() {
+        let _ = app.emit("prefs:changed", &prefs);
+        let _ = app.emit_to("main", "prefs:changed", &prefs);
+        let app_for_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Err(err) = crate::refresh_tray_microphone_menu(&app_for_main) {
+                log::warn!(
+                    "[tray] refresh after embedded BLE auto input source selection failed: {err}"
+                );
+            }
+        });
+    }
+    refresh_embedded_ble_listener(inner);
+    sync_device_knob_rotation_action_to_firmware(inner, "auto_embedded_ble_input_source");
+    true
+}
+
+fn record_embedded_ble_firmware_power_snapshot(
+    inner: &Arc<Inner>,
+    firmware: &crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+    reason: &'static str,
+) {
+    let mut snapshot = inner.embedded_ble_wake_recovery.lock();
+    if firmware.usb_powered.is_some() {
+        snapshot.usb_powered = firmware.usb_powered;
+    }
+    if firmware.battery_percent.is_some() {
+        snapshot.battery_percent = firmware.battery_percent;
+    }
+    log::info!(
+        "[embedded-ble] cached firmware power state reason={reason} usb_powered={:?} battery_percent={:?} detail={:?}",
+        snapshot.usb_powered,
+        snapshot.battery_percent,
+        firmware.detail.as_deref(),
+    );
+}
+
+fn refresh_embedded_ble_firmware_power_snapshot_async(inner: &Arc<Inner>, reason: &'static str) {
+    let inner = Arc::clone(inner);
+    async_runtime::spawn_blocking(move || {
+        let firmware = crate::embedded_ble::firmware_ota_device_snapshot();
+        record_embedded_ble_firmware_power_snapshot(&inner, &firmware, reason);
+    });
 }
 
 fn record_embedded_ble_reconnect_attempt(inner: &Arc<Inner>, reason: &str) {
@@ -2800,11 +2917,19 @@ fn record_embedded_ble_reconnect_attempt(inner: &Arc<Inner>, reason: &str) {
 
 fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) -> bool {
     let mut snapshot = inner.embedded_ble_wake_recovery.lock();
-    let recovered = snapshot.recent_disconnect_reason.is_some()
-        || matches!(
-            snapshot.notify_subscription_state,
-            EmbeddedBleNotifySubscriptionState::Lost | EmbeddedBleNotifySubscriptionState::Failed
-        );
+    let recent_disconnect_reason = snapshot.recent_disconnect_reason.clone();
+    let notify_was_recovering = matches!(
+        snapshot.notify_subscription_state,
+        EmbeddedBleNotifySubscriptionState::Lost | EmbeddedBleNotifySubscriptionState::Failed
+    );
+    let recovered = recent_disconnect_reason.is_some() || notify_was_recovering;
+    let emit_recovered_capsule = recovered
+        && recent_disconnect_reason
+            .as_deref()
+            .map(|reason| {
+                should_emit_embedded_ble_recovered_capsule_for_reason(reason, snapshot.usb_powered)
+            })
+            .unwrap_or(true);
     snapshot.status = EmbeddedBleWakeRecoveryStatus::Ready;
     snapshot.user_guidance = "Listener BLE 已连接，音频 notify 已订阅。".to_string();
     snapshot.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Subscribed;
@@ -2812,7 +2937,7 @@ fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) -> bool {
     if recovered {
         snapshot.recent_disconnect_reason = None;
     }
-    recovered
+    emit_recovered_capsule
 }
 
 fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationAction) -> &'static str {
@@ -2862,7 +2987,8 @@ fn record_embedded_ble_recovery_failure(inner: &Arc<Inner>, err: &str) {
         }
         _ => EmbeddedBleWakeRecoveryStatus::Failed,
     };
-    snapshot.user_guidance = embedded_ble_wake_guidance_for_error(err);
+    snapshot.user_guidance =
+        embedded_ble_wake_guidance_for_error_with_power(err, snapshot.usb_powered);
     snapshot.recent_disconnect_reason = Some(err.to_string());
     snapshot.notify_subscription_state = if is_embedded_ble_cancelled_error(err) {
         EmbeddedBleNotifySubscriptionState::Cancelled
@@ -2897,13 +3023,22 @@ fn emit_embedded_ble_recovery_capsule(
 }
 
 fn embedded_ble_wake_guidance_for_error(err: &str) -> String {
+    embedded_ble_wake_guidance_for_error_with_power(err, None)
+}
+
+fn embedded_ble_wake_guidance_for_error_with_power(err: &str, usb_powered: Option<bool>) -> String {
     if is_embedded_ble_cancelled_error(err) {
         return "Listener BLE 连接已暂停；请稍后重试。".to_string();
     }
     let failure = crate::embedded_ble::classify_ble_failure(err);
     match failure.kind {
-        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect => {
+        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
+            if embedded_ble_usb_power_allows_low_power_idle(usb_powered) =>
+        {
             return "Listener BLE 因低功耗空闲断开，正在重连音频 notify；若设备已睡眠，请按 KEY4/唤醒键。".to_string();
+        }
+        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect => {
+            return "Listener BLE 连接已断开，正在重连音频 notify；当前未确认处于电池低功耗场景，若持续断开请重新连接或导出诊断。".to_string();
         }
         crate::embedded_ble::BleFailureKind::MissingPairing
         | crate::embedded_ble::BleFailureKind::StaleGattService => {
@@ -3035,12 +3170,16 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 } else {
                     record_embedded_ble_listener_last_error(&inner, &err);
                     record_embedded_ble_recovery_failure(&inner, &err);
-                    if is_embedded_ble_automatic_recovery_error(&err) {
+                    if should_emit_embedded_ble_background_recovery_capsule(&inner, &err) {
                         emit_embedded_ble_recovery_capsule(
                             &inner,
                             "reconnecting",
                             "Listener BLE 已断开，正在自动重连音频通道...",
                             None,
+                        );
+                    } else if is_embedded_ble_automatic_recovery_error(&err) {
+                        log::info!(
+                            "[embedded-ble] background recovery capsule suppressed for battery low-power idle"
                         );
                     }
                 }
@@ -3081,6 +3220,34 @@ fn next_embedded_ble_background_retry_delay(err: &str, current: Duration) -> Dur
 fn is_embedded_ble_automatic_recovery_error(err: &str) -> bool {
     is_embedded_ble_link_loss_error(err)
         || crate::embedded_ble::classify_ble_failure(err).automatic_recovery
+}
+
+fn embedded_ble_usb_power_allows_low_power_idle(usb_powered: Option<bool>) -> bool {
+    usb_powered == Some(false)
+}
+
+fn is_embedded_ble_low_power_idle_candidate(err: &str) -> bool {
+    matches!(
+        crate::embedded_ble::classify_ble_failure(err).kind,
+        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
+    )
+}
+
+fn should_emit_embedded_ble_background_recovery_capsule(inner: &Arc<Inner>, err: &str) -> bool {
+    if !is_embedded_ble_automatic_recovery_error(err) {
+        return false;
+    }
+    let usb_powered = inner.embedded_ble_wake_recovery.lock().usb_powered;
+    !is_embedded_ble_low_power_idle_candidate(err)
+        || !embedded_ble_usb_power_allows_low_power_idle(usb_powered)
+}
+
+fn should_emit_embedded_ble_recovered_capsule_for_reason(
+    reason: &str,
+    usb_powered: Option<bool>,
+) -> bool {
+    !is_embedded_ble_low_power_idle_candidate(reason)
+        || !embedded_ble_usb_power_allows_low_power_idle(usb_powered)
 }
 
 fn is_embedded_ble_link_loss_error(err: &str) -> bool {
@@ -3208,6 +3375,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             "background notify subscription ready",
         );
         sync_device_knob_rotation_action_to_firmware(inner, "ble_ready");
+        refresh_embedded_ble_firmware_power_snapshot_async(inner, "ble_notify_ready");
         if recovered {
             emit_embedded_ble_recovery_capsule(
                 inner,
@@ -4932,6 +5100,46 @@ mod tests {
         coordinator.inner.prefs.replace_for_tests(prefs);
     }
 
+    fn firmware_snapshot_for_auto_input_test(
+        connected: bool,
+    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+            connected,
+            hardware_revision: connected.then(|| "keyboard-v2".to_string()),
+            firmware_version: connected.then(|| "v-test".to_string()),
+            capabilities: connected
+                .then(|| vec!["firmware_ota_v1".to_string()])
+                .unwrap_or_default(),
+            battery_percent: connected.then_some(91),
+            usb_powered: connected.then_some(true),
+            detail: (!connected).then(|| "No paired Listener device".to_string()),
+        }
+    }
+
+    #[test]
+    fn embedded_ble_auto_input_source_prefers_connected_device() {
+        let mut prefs = crate::types::UserPreferences {
+            dictation_input_source: DictationInputSource::Microphone,
+            ..crate::types::UserPreferences::default()
+        };
+        assert!(should_auto_select_embedded_ble_input_source(
+            &prefs,
+            &firmware_snapshot_for_auto_input_test(true)
+        ));
+
+        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+        assert!(!should_auto_select_embedded_ble_input_source(
+            &prefs,
+            &firmware_snapshot_for_auto_input_test(true)
+        ));
+
+        prefs.dictation_input_source = DictationInputSource::Microphone;
+        assert!(!should_auto_select_embedded_ble_input_source(
+            &prefs,
+            &firmware_snapshot_for_auto_input_test(false)
+        ));
+    }
+
     #[test]
     fn device_key_dictation_debounce_matches_hotkey_edge_debounce() {
         let coordinator = Coordinator::new();
@@ -5259,6 +5467,11 @@ mod tests {
     #[test]
     fn embedded_ble_wake_recovery_tracks_idle_disconnect_as_reconnecting() {
         let coordinator = Coordinator::new();
+        coordinator
+            .inner
+            .embedded_ble_wake_recovery
+            .lock()
+            .usb_powered = Some(false);
 
         record_embedded_ble_recovery_failure(
             &coordinator.inner,
@@ -5280,14 +5493,19 @@ mod tests {
     }
 
     #[test]
-    fn embedded_ble_notify_ready_reports_recovered_after_disconnect() {
+    fn embedded_ble_notify_ready_suppresses_battery_idle_recovery_capsule() {
         let coordinator = Coordinator::new();
+        coordinator
+            .inner
+            .embedded_ble_wake_recovery
+            .lock()
+            .usb_powered = Some(false);
 
         record_embedded_ble_recovery_failure(
             &coordinator.inner,
             "Windows BLE disconnected; reason=546; audio path returned transport_not_ready",
         );
-        assert!(record_embedded_ble_notify_ready(&coordinator.inner));
+        assert!(!record_embedded_ble_notify_ready(&coordinator.inner));
         let snapshot = coordinator.embedded_ble_wake_recovery_snapshot();
 
         assert_eq!(snapshot.status, EmbeddedBleWakeRecoveryStatus::Ready);
@@ -5296,6 +5514,52 @@ mod tests {
             EmbeddedBleNotifySubscriptionState::Subscribed
         );
         assert!(snapshot.recent_disconnect_reason.is_none());
+    }
+
+    #[test]
+    fn embedded_ble_notify_ready_reports_recovered_for_powered_disconnect() {
+        let coordinator = Coordinator::new();
+        coordinator
+            .inner
+            .embedded_ble_wake_recovery
+            .lock()
+            .usb_powered = Some(true);
+
+        record_embedded_ble_recovery_failure(
+            &coordinator.inner,
+            "Windows BLE disconnected; reason=546; audio path returned transport_not_ready",
+        );
+        assert!(record_embedded_ble_notify_ready(&coordinator.inner));
+    }
+
+    #[test]
+    fn embedded_ble_background_recovery_capsule_respects_power_state() {
+        let coordinator = Coordinator::new();
+
+        coordinator
+            .inner
+            .embedded_ble_wake_recovery
+            .lock()
+            .usb_powered = Some(false);
+        assert!(!should_emit_embedded_ble_background_recovery_capsule(
+            &coordinator.inner,
+            "BLE device connection status changed to Disconnected; transport_not_ready",
+        ));
+
+        coordinator
+            .inner
+            .embedded_ble_wake_recovery
+            .lock()
+            .usb_powered = Some(true);
+        assert!(should_emit_embedded_ble_background_recovery_capsule(
+            &coordinator.inner,
+            "BLE device connection status changed to Disconnected; transport_not_ready",
+        ));
+
+        assert!(should_emit_embedded_ble_background_recovery_capsule(
+            &coordinator.inner,
+            "BLE CCCD write timed out after 8000 ms",
+        ));
     }
 
     #[test]
