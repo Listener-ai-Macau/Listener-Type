@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageHeader } from './_atoms';
 import { RecordingSection } from './settings/RecordingSection';
+import { DeviceSection } from './settings/DeviceSection';
 import { ProvidersSection } from './settings/ProvidersSection';
 import { AdvancedSection } from './settings/AdvancedSection';
 import { ShortcutsSection } from './settings/ShortcutsSection';
@@ -20,12 +21,12 @@ interface SettingsProps {
   initialSection?: SettingsSectionId;
 }
 // "关于" tab 已移除（内容并入外层 SettingsModal 的 About 页，避免设置内外重复入口）。
-export type SettingsSectionId = 'recording' | 'providers' | 'shortcuts' | 'permissions' | 'language' | 'advanced';
+export type SettingsSectionId = 'recording' | 'device' | 'providers' | 'shortcuts' | 'permissions' | 'language' | 'advanced';
 
 // 「高级」放最末——本地推理 / 实验性开关都集中到这一栏，避免新手用户在主流程
 // 里误开 CPU 推理（之前提案：把 local-qwen3 / foundry-local-whisper 从主 ASR
 // 下拉藏进高级）。位置末尾也是「实验性」语义在 macOS 系统偏好里的惯用位置。
-const SECTION_ORDER: SettingsSectionId[] = ['recording', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
+const SECTION_ORDER: SettingsSectionId[] = ['recording', 'device', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
 
 export function Settings({ embedded = false, initialSection = 'recording' }: SettingsProps) {
   const { t } = useTranslation();
@@ -38,12 +39,25 @@ export function Settings({ embedded = false, initialSection = 'recording' }: Set
   // 跟 sidebar / SettingsModal 同款滑动 pill：测当前 active section 的 offsetTop/height
   // → 用 absolute pill 平滑滑过去；--ol-motion-spring 是项目里的 Apple 风格 ease-out-quint。
   const sectionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const [pillRect, setPillRect] = useState<{ top: number; height: number } | null>(null);
   useLayoutEffect(() => {
     const idx = SECTION_ORDER.indexOf(section);
     const el = sectionRefs.current[idx];
     if (!el) return;
     setPillRect({ top: el.offsetTop, height: el.offsetHeight });
+  }, [section]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const rawScroll = new URLSearchParams(window.location.search).get('settingsScroll');
+    if (!rawScroll) return;
+    const top = Number(rawScroll);
+    if (!Number.isFinite(top)) return;
+    const id = window.setTimeout(() => {
+      contentRef.current?.scrollTo({ top, behavior: 'auto' });
+    }, 250);
+    return () => window.clearTimeout(id);
   }, [section]);
 
   return (
@@ -110,6 +124,7 @@ export function Settings({ embedded = false, initialSection = 'recording' }: Set
           })}
         </div>
         <div
+          ref={contentRef}
           className={embedded ? 'ol-thinscroll' : undefined}
           style={{
             display: 'flex',
@@ -122,6 +137,7 @@ export function Settings({ embedded = false, initialSection = 'recording' }: Set
           }}
         >
           {section === 'recording' && <RecordingSection />}
+          {section === 'device' && <DeviceSection />}
           {section === 'providers' && <ProvidersSection />}
           {section === 'shortcuts' && <ShortcutsSection />}
           {section === 'permissions' && <PermissionsSection />}

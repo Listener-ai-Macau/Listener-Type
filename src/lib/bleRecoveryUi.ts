@@ -243,18 +243,11 @@ function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRe
   if (combined.includes('bluetooth service') || combined.includes('radio') || combined.includes('adapter') || combined.includes('access denied')) {
     return 'needsBluetooth';
   }
-  if (combined.includes('reason=546')
-    || combined.includes('reason: 546')
-    || combined.includes('reason 546')
-    || combined.includes('low-power idle')
-    || combined.includes('low power idle')
-    || combined.includes('idle disconnect')
-    || combined.includes('transport_not_ready')
-    || combined.includes('transport not ready')) {
-    return 'reconnecting';
-  }
-  if (combined.includes('stale') || combined.includes('gatt cache') || combined.includes('unknown gatt')) {
+  if (isStaleGattText(combined)) {
     return 'needsRePair';
+  }
+  if (runtimeAllowsLowPowerIdle(runtime) && runtimeTextSuggestsLowPowerIdle(combined)) {
+    return 'reconnecting';
   }
   if (combined.includes('sleep') || combined.includes('wake') || combined.includes('not found')) {
     return 'needsWakeKey';
@@ -281,15 +274,7 @@ function stateForHighConfidenceRuntimeFailure(
     return 'diagnosticsAvailable';
   }
 
-  const lowPowerIdle = combined.includes('reason=546')
-    || combined.includes('reason: 546')
-    || combined.includes('reason 546')
-    || combined.includes('low-power idle')
-    || combined.includes('low power idle')
-    || combined.includes('idle disconnect')
-    || combined.includes('transport_not_ready')
-    || combined.includes('transport not ready');
-  if (!lowPowerIdle && (combined.includes('stale') || combined.includes('gatt cache') || combined.includes('unknown gatt'))) {
+  if (isStaleGattText(combined)) {
     return 'needsRePair';
   }
 
@@ -300,9 +285,36 @@ function stateForHighConfidenceRuntimeFailure(
   return null;
 }
 
+function runtimeAllowsLowPowerIdle(runtime: EmbeddedBleRuntimeStatus): boolean {
+  return runtime.wakeRecovery?.usbPowered === false;
+}
+
+function isStaleGattText(combined: string): boolean {
+  return combined.includes('stale')
+    || combined.includes('gatt cache')
+    || combined.includes('unknown gatt');
+}
+
+function runtimeTextSuggestsLowPowerIdle(combined: string): boolean {
+  const reason546 = combined.includes('reason=546')
+    || combined.includes('reason: 546')
+    || combined.includes('reason 546');
+  const idleLabel = combined.includes('low-power idle')
+    || combined.includes('low power idle')
+    || combined.includes('idle disconnect');
+  const transportNotReady = combined.includes('transport_not_ready')
+    || combined.includes('transport not ready');
+  const linkLoss = combined.includes('connection status changed')
+    || combined.includes('gatt session status changed')
+    || combined.includes('disconnected');
+
+  return reason546 || idleLabel || (transportNotReady && linkLoss);
+}
+
 function repeatedNotifySetupFailure(runtime: EmbeddedBleRuntimeStatus, combined: string): boolean {
   const attempts = runtime.wakeRecovery?.reconnectAttempts ?? 0;
   if (attempts < 3) return false;
+  if (runtimeAllowsLowPowerIdle(runtime) && runtimeTextSuggestsLowPowerIdle(combined)) return false;
 
   const notifyState = runtime.wakeRecovery?.notifySubscriptionState ?? 'unknown';
   const notifySetupStillUnavailable =

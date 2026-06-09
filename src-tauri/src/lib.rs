@@ -276,6 +276,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             coordinator.bind_app(app_handle);
             coordinator.start_hotkey_listener();
+            coordinator.auto_select_embedded_ble_input_source_in_background();
             coordinator.refresh_embedded_ble_listener();
             // QA / custom combo hotkeys use `global-hotkey` (Carbon on macOS).
             // Start those after RunEvent::Ready, when the AppKit event loop is live.
@@ -355,6 +356,8 @@ pub fn run() {
             commands::repair_embedded_ble_connection,
             commands::recover_embedded_ble_device,
             commands::get_embedded_ble_runtime_status,
+            commands::get_device_settings,
+            commands::set_device_settings,
             commands::get_firmware_ota_preflight_snapshot,
             commands::load_firmware_ota_package,
             commands::transfer_firmware_ota_ble,
@@ -778,6 +781,7 @@ fn handle_input_source_tray_menu_event(app: &AppHandle, id: &str) -> bool {
     let coord = app.state::<Arc<coordinator::Coordinator>>();
     let mut prefs = coord.prefs().get();
     prefs.dictation_input_source = source;
+    prefs.dictation_input_source_user_overridden = true;
     if let Err(err) = coord.prefs().set(prefs.clone()) {
         log::warn!("[tray] save input source preference failed: {err}");
         return true;

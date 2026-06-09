@@ -59,6 +59,7 @@ const NAV_BASE: Array<Omit<NavItem, 'name'>> = [
 
 const BLE_PAIRING_PROMPT_ACK_KEY = 'ol.blePairingPromptAck';
 const BLE_PAIRING_PROMPT_DEFERRED_KEY = 'ol.blePairingPromptDeferredThisSession';
+const DEV_SETTINGS_SECTIONS: SettingsSectionId[] = ['recording', 'device', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
 
 interface FloatingShellProps {
   os?: OS;
@@ -149,7 +150,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         !cancelled &&
         acknowledgedValue !== '1' &&
         deferredValue !== '1' &&
-        (prefs.dictationInputSource ?? 'microphone') !== 'embeddedBle'
+        (prefs.dictationInputSource ?? 'embeddedBle') !== 'embeddedBle'
       ) {
         setBlePairingPromptOpen(true);
       }
@@ -184,9 +185,18 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     setSettingsOpen(true);
   };
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const section = new URLSearchParams(window.location.search).get('openSettings');
+    if (section && DEV_SETTINGS_SECTIONS.includes(section as SettingsSectionId)) {
+      openSettings(section as SettingsSectionId);
+    }
+  }, []);
+
   const openDeviceKeyAppPage = (page: DeviceCustomKeyAppPage) => {
     const settingsPages: Partial<Record<DeviceCustomKeyAppPage, SettingsSectionId>> = {
       settingsRecording: 'recording',
+      settingsDevice: 'device',
       settingsProviders: 'providers',
       settingsShortcuts: 'shortcuts',
       settingsPermissions: 'permissions',
@@ -276,8 +286,12 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
 
 
   const enableEmbeddedBleInputFromPrompt = async () => {
-    if (prefs && (prefs.dictationInputSource ?? 'microphone') !== 'embeddedBle') {
-      await updatePrefs({ ...prefs, dictationInputSource: 'embeddedBle' }).catch(error => {
+    if (prefs && (prefs.dictationInputSource ?? 'embeddedBle') !== 'embeddedBle') {
+      await updatePrefs({
+        ...prefs,
+        dictationInputSource: 'embeddedBle',
+        dictationInputSourceUserOverridden: true,
+      }).catch(error => {
         console.warn('[ble-pairing] failed to switch input source', error);
       });
     }

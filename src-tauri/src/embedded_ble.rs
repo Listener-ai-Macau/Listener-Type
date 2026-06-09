@@ -273,8 +273,6 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
         BleFailureKind::AccessDenied
     } else if ble_error_suggests_missing_pairing(&lower) {
         BleFailureKind::MissingPairing
-    } else if ble_error_suggests_low_power_idle_disconnect(&lower) {
-        BleFailureKind::LowPowerIdleDisconnect
     } else if ble_error_suggests_device_asleep(&lower) {
         BleFailureKind::DeviceAsleep
     } else if lower.contains("stale")
@@ -284,6 +282,8 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
         || lower.contains("service changed")
     {
         BleFailureKind::StaleGattService
+    } else if ble_error_suggests_low_power_idle_disconnect(&lower) {
+        BleFailureKind::LowPowerIdleDisconnect
     } else if lower.contains("unreachable")
         || lower.contains("disconnected")
         || lower.contains("timed out")
@@ -404,18 +404,23 @@ fn ble_error_suggests_device_asleep(lower: &str) -> bool {
 }
 
 fn ble_error_suggests_low_power_idle_disconnect(lower: &str) -> bool {
-    lower.contains("reason=546")
+    let reason_546 = lower.contains("reason=546")
         || lower.contains("reason: 546")
         || lower.contains("reason 546")
         || lower.contains("reason=0x222")
-        || lower.contains("reason: 0x222")
-        || lower.contains("low-power idle")
+        || lower.contains("reason: 0x222");
+    let idle_label = lower.contains("low-power idle")
         || lower.contains("low power idle")
         || lower.contains("idle disconnect")
         || lower.contains("idle-disconnect")
-        || lower.contains("intentional idle")
-        || lower.contains("transport_not_ready")
-        || lower.contains("transport not ready")
+        || lower.contains("intentional idle");
+    let transport_not_ready =
+        lower.contains("transport_not_ready") || lower.contains("transport not ready");
+    let link_loss = lower.contains("connection status changed")
+        || lower.contains("gatt session status changed")
+        || lower.contains("disconnected");
+
+    reason_546 || idle_label || (transport_not_ready && link_loss)
 }
 
 fn utc_now_rfc3339() -> String {
@@ -1439,6 +1444,45 @@ mod windows_ble {
         Ok(())
     }
 
+    pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<(), String> {
+        let trimmed = command.trim();
+        if trimmed.is_empty() {
+            return Err("Listener device settings command is empty.".to_string());
+        }
+        if trimmed.chars().any(|ch| matches!(ch, '\0' | '\r' | '\n')) {
+            return Err(
+                "Listener device settings command cannot contain control characters.".to_string(),
+            );
+        }
+
+        let mut bytes = trimmed.as_bytes().to_vec();
+        bytes.push(b'\n');
+        if bytes.len() >= 64 {
+            return Err(format!(
+                "Listener device settings command is too long for BLE audio control: {} bytes",
+                bytes.len()
+            ));
+        }
+
+        if let Some(result) =
+            send_audio_control_via_active_capture(&bytes, timeout, "device settings")
+        {
+            result?;
+            log::info!("[embedded-ble] device settings command sent via active capture");
+            return Ok(());
+        }
+        let target = open_audio_control_target()?;
+        write_gatt_value_with_timeout(
+            &target.control,
+            &bytes,
+            GattWriteOption::WriteWithResponse,
+            timeout,
+            "device settings",
+        )?;
+        log::info!("[embedded-ble] device settings command sent");
+        Ok(())
+    }
+
     fn send_audio_control_via_active_capture(
         bytes: &[u8],
         timeout: Duration,
@@ -2146,6 +2190,15 @@ mod windows_ble {
                     readiness_field(&readiness, "model").or(snapshot.hardware_revision);
                 snapshot.firmware_version =
                     readiness_field(&readiness, "fw_version").or(snapshot.firmware_version);
+                snapshot.usb_powered = readiness_bool(&readiness, "external_power_present")
+                    .or_else(|| readiness_bool(&readiness, "usb_power_present"))
+                    .or_else(|| readiness_bool(&readiness, "charging"))
+                    .or(snapshot.usb_powered);
+                if snapshot.battery_percent.is_none()
+                    && readiness_bool(&readiness, "battery_valid") != Some(false)
+                {
+                    snapshot.battery_percent = readiness_u8(&readiness, "battery_level");
+                }
             } else {
                 log::info!(
                     "[embedded-ble] OTA readiness identity not readable from current OTA service"
@@ -2495,6 +2548,20 @@ mod windows_ble {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned)
+    }
+
+    fn readiness_bool(readiness: &str, key: &str) -> Option<bool> {
+        readiness_field(readiness, key).and_then(|value| match value.as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        })
+    }
+
+    fn readiness_u8(readiness: &str, key: &str) -> Option<u8> {
+        readiness_field(readiness, key)
+            .and_then(|value| value.parse::<u8>().ok())
+            .filter(|value| *value <= 100)
     }
 
     fn split_capability_tokens(capabilities: &str) -> Vec<String> {
@@ -4660,6 +4727,11 @@ pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), Stri
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<(), String> {
+    windows_ble::send_device_settings_command(command, timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn capture_notification_events(
     timeout: Duration,
     on_event: &mut BleNotificationHandler<'_>,
@@ -4784,6 +4856,11 @@ pub fn send_recording_control_toggle(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_ec11_rotation_mode(_mode: &str, _timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE EC11 rotation control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_device_settings_command(_command: &str, _timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE device settings control is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -5036,7 +5113,7 @@ mod tests {
             ),
             (
                 "stale cached GATT path after BLE reason=546 returned transport_not_ready",
-                BleFailureKind::LowPowerIdleDisconnect,
+                BleFailureKind::StaleGattService,
                 true,
             ),
             (

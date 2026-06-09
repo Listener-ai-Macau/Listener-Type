@@ -107,6 +107,8 @@ export interface EmbeddedBleWakeRecoverySnapshot {
   recentDisconnectReason: string | null;
   reconnectAttempts: number;
   notifySubscriptionState: EmbeddedBleNotifySubscriptionState;
+  usbPowered?: boolean | null;
+  batteryPercent?: number | null;
   firmwareWakePolicy: FirmwareWakePolicySnapshot;
   lastAttemptAt: string | null;
   lastReadyAt: string | null;
@@ -375,8 +377,10 @@ export interface UserPreferences {
   muteDuringRecording: boolean;
   /** 录音输入设备名称。空字符串 = 使用系统默认麦克风。 */
   microphoneDeviceName: string;
-  /** 听写输入源。默认麦克风；embeddedBle 用于嵌入式 VKA1 BLE 音频入口。 */
+  /** 听写输入源。默认 embeddedBle；用户手动改过后才保留 microphone。 */
   dictationInputSource: DictationInputSource;
+  /** 输入源是否已经由用户显式改过。false 表示沿用产品默认 embeddedBle。 */
+  dictationInputSourceUserOverridden: boolean;
   activeAsrProvider: string;
   activeLlmProvider: string;
   /** LLM 思考模式开关。默认关闭，保持既有尽量关闭思考的行为。详见 issue #402。 */
@@ -496,6 +500,7 @@ export type DeviceCustomKeyAppPage =
   | 'translation'
   | 'selectionAsk'
   | 'settingsRecording'
+  | 'settingsDevice'
   | 'settingsProviders'
   | 'settingsShortcuts'
   | 'settingsPermissions'
@@ -524,6 +529,33 @@ export interface DeviceCustomKeys {
 }
 
 export type DeviceKnobRotationAction = 'systemVolume' | 'screenBrightness' | 'disabled';
+
+export type DeviceSettingsSource = 'firmware' | 'lastKnown' | 'defaults' | 'mock' | 'unavailable';
+export type DeviceSettingsPowerSource = 'plugged' | 'battery' | 'unknown';
+
+export interface DeviceSettingsSnapshot {
+  schema: 'listener.device_settings.v1';
+  connected: boolean;
+  writeSupported: boolean;
+  source: DeviceSettingsSource;
+  pluggedBrightnessPercent: number;
+  batteryBrightnessPercent: number;
+  activeBrightnessPercent: number | null;
+  batteryAutoShutdownMs: number;
+  bleName: string;
+  bleNamePendingRestart: boolean;
+  activePowerSource: DeviceSettingsPowerSource;
+  batteryPercent: number | null;
+  detail: string | null;
+  lastUpdatedAt: string | null;
+}
+
+export interface DeviceSettingsUpdateRequest {
+  pluggedBrightnessPercent: number;
+  batteryBrightnessPercent: number;
+  batteryAutoShutdownMinutes: number;
+  bleName: string;
+}
 
 export interface MarketplaceListItem {
   id: string;

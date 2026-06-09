@@ -63,8 +63,8 @@ pub enum PasteShortcut {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum DictationInputSource {
-    #[default]
     Microphone,
+    #[default]
     EmbeddedBle,
 }
 
@@ -589,6 +589,7 @@ pub enum DeviceCustomKeyAppPage {
     Translation,
     SelectionAsk,
     SettingsRecording,
+    SettingsDevice,
     SettingsProviders,
     SettingsShortcuts,
     SettingsPermissions,
@@ -598,7 +599,7 @@ pub enum DeviceCustomKeyAppPage {
 
 impl Default for DeviceCustomKeyAppPage {
     fn default() -> Self {
-        Self::SettingsShortcuts
+        Self::SettingsDevice
     }
 }
 
@@ -721,6 +722,35 @@ fn legacy_device_custom_keys_default_with_external_app_path(
     }
 }
 
+fn previous_shortcuts_device_custom_keys_default_with_external_app_path(
+    external_app_path: String,
+) -> DeviceCustomKeys {
+    let shortcuts_page = DeviceCustomKeyAppPage::SettingsShortcuts;
+    DeviceCustomKeys {
+        key1: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenApp,
+            app_page: shortcuts_page,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key2: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::PasteShortcut,
+            app_page: shortcuts_page,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key3: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::Dictation,
+            app_page: shortcuts_page,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key4: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenExternalApp,
+            app_page: shortcuts_page,
+            external_app_path,
+            ..DeviceCustomKeyMapping::default()
+        },
+    }
+}
+
 fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
     keys == &legacy_device_custom_keys_default()
         || keys == &legacy_device_custom_keys_default_with_external_app_path("code".into())
@@ -728,7 +758,12 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
             .into_iter()
             .any(|path| {
                 keys == &legacy_device_custom_keys_default_with_external_app_path(path.clone())
-                    || keys == &current_device_custom_keys_default_with_external_app_path(path)
+                    || keys
+                        == &current_device_custom_keys_default_with_external_app_path(path.clone())
+                    || keys
+                        == &previous_shortcuts_device_custom_keys_default_with_external_app_path(
+                            path,
+                        )
             })
 }
 
@@ -892,9 +927,12 @@ pub struct UserPreferences {
     /// 录音输入设备名称。空字符串 = 使用系统默认麦克风。
     #[serde(default)]
     pub microphone_device_name: String,
-    /// 听写输入源。v1 默认麦克风；EmbeddedBle 用于嵌入式 VKA1 BLE 音频入口。
+    /// 听写输入源。默认使用嵌入式 VKA1 BLE 键盘/音频入口；用户手动改过后才保留麦克风。
     #[serde(default)]
     pub dictation_input_source: DictationInputSource,
+    /// 输入源是否已经由用户显式改过。false 表示沿用产品默认 embeddedBle。
+    #[serde(default)]
+    pub dictation_input_source_user_overridden: bool,
     pub active_asr_provider: String, // "volcengine" | "apple-speech" | ...
     pub active_llm_provider: String, // "ark" | "openai" | ...
     /// LLM 思考模式开关。默认 false 以保持既有「尽量关闭思考」行为；
@@ -1128,6 +1166,8 @@ struct UserPreferencesWire {
     microphone_device_name: String,
     #[serde(default)]
     dictation_input_source: DictationInputSource,
+    #[serde(default)]
+    dictation_input_source_user_overridden: bool,
     active_asr_provider: String,
     active_llm_provider: String,
     #[serde(default)]
@@ -1217,6 +1257,7 @@ impl Default for UserPreferencesWire {
             mute_during_recording: prefs.mute_during_recording,
             microphone_device_name: prefs.microphone_device_name,
             dictation_input_source: prefs.dictation_input_source,
+            dictation_input_source_user_overridden: prefs.dictation_input_source_user_overridden,
             active_asr_provider: prefs.active_asr_provider,
             active_llm_provider: prefs.active_llm_provider,
             llm_thinking_enabled: prefs.llm_thinking_enabled,
@@ -1282,6 +1323,11 @@ impl<'de> Deserialize<'de> for UserPreferences {
         } else {
             true
         };
+        let dictation_input_source = if wire.dictation_input_source_user_overridden {
+            wire.dictation_input_source
+        } else {
+            DictationInputSource::EmbeddedBle
+        };
         let device_custom_key_double_clicks = wire.device_custom_key_double_clicks;
         let device_custom_key_long_presses = wire.device_custom_key_long_presses;
         let mut device_custom_keys = wire.device_custom_keys;
@@ -1315,7 +1361,8 @@ impl<'de> Deserialize<'de> for UserPreferences {
             show_capsule: wire.show_capsule,
             mute_during_recording: wire.mute_during_recording,
             microphone_device_name: wire.microphone_device_name,
-            dictation_input_source: wire.dictation_input_source,
+            dictation_input_source,
+            dictation_input_source_user_overridden: wire.dictation_input_source_user_overridden,
             active_asr_provider: wire.active_asr_provider,
             active_llm_provider: wire.active_llm_provider,
             llm_thinking_enabled: wire.llm_thinking_enabled,
@@ -1722,7 +1769,8 @@ impl Default for UserPreferences {
             show_capsule: true,
             mute_during_recording: false,
             microphone_device_name: String::new(),
-            dictation_input_source: DictationInputSource::Microphone,
+            dictation_input_source: DictationInputSource::EmbeddedBle,
+            dictation_input_source_user_overridden: false,
             active_asr_provider: default_active_asr_provider(),
             active_llm_provider: "ark".into(),
             llm_thinking_enabled: false,
@@ -2474,7 +2522,49 @@ mod tests {
     }
 
     #[test]
-    fn device_custom_keys_default_to_shortcuts_page_paste_dictation_and_external_app() {
+    fn dictation_input_source_defaults_to_embedded_ble_until_user_override() {
+        let prefs = UserPreferences::default();
+        assert_eq!(
+            prefs.dictation_input_source,
+            DictationInputSource::EmbeddedBle
+        );
+        assert!(!prefs.dictation_input_source_user_overridden);
+
+        let from_empty: UserPreferences = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            from_empty.dictation_input_source,
+            DictationInputSource::EmbeddedBle
+        );
+        assert!(!from_empty.dictation_input_source_user_overridden);
+
+        let from_legacy_microphone: UserPreferences = serde_json::from_str(
+            r#"{
+                "dictationInputSource": "microphone"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            from_legacy_microphone.dictation_input_source,
+            DictationInputSource::EmbeddedBle
+        );
+        assert!(!from_legacy_microphone.dictation_input_source_user_overridden);
+
+        let from_manual_microphone: UserPreferences = serde_json::from_str(
+            r#"{
+                "dictationInputSource": "microphone",
+                "dictationInputSourceUserOverridden": true
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            from_manual_microphone.dictation_input_source,
+            DictationInputSource::Microphone
+        );
+        assert!(from_manual_microphone.dictation_input_source_user_overridden);
+    }
+
+    #[test]
+    fn device_custom_keys_default_to_device_page_paste_dictation_and_external_app() {
         let prefs = UserPreferences::default();
 
         assert_eq!(
@@ -2483,7 +2573,7 @@ mod tests {
         );
         assert_eq!(
             prefs.device_custom_keys.key1.app_page,
-            DeviceCustomKeyAppPage::SettingsShortcuts
+            DeviceCustomKeyAppPage::SettingsDevice
         );
         assert_eq!(
             prefs.device_custom_keys.key2.action,
@@ -2520,7 +2610,7 @@ mod tests {
         );
         assert_eq!(
             prefs.device_custom_keys.key1.app_page,
-            DeviceCustomKeyAppPage::SettingsShortcuts
+            DeviceCustomKeyAppPage::SettingsDevice
         );
         assert_eq!(
             prefs.device_custom_keys.key2.action,

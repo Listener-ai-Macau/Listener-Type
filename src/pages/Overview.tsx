@@ -143,6 +143,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onS
       backgroundListenerReady: bleRuntimeStatus?.backgroundListenerReady ?? false,
       backgroundListenerError: bleRuntimeStatus?.backgroundListenerLastError ?? null,
       wakeRecoveryStatus: bleRuntimeStatus?.wakeRecovery?.status ?? null,
+      usbPowered: bleRuntimeStatus?.wakeRecovery?.usbPowered ?? null,
       historyError,
     }),
     [
@@ -151,6 +152,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onS
       bleRuntimeStatus?.backgroundListenerLastError,
       bleRuntimeStatus?.backgroundListenerReady,
       bleRuntimeStatus?.wakeRecovery?.status,
+      bleRuntimeStatus?.wakeRecovery?.usbPowered,
       history,
       historyError,
       prefs?.dictationInputSource,
@@ -158,7 +160,7 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onS
   );
   const embeddedBleSupported = detectOS() === 'win';
   useEffect(() => {
-    if (!embeddedBleSupported || (prefs?.dictationInputSource ?? 'microphone') !== 'embeddedBle') {
+    if (!embeddedBleSupported || (prefs?.dictationInputSource ?? 'embeddedBle') !== 'embeddedBle') {
       return;
     }
     const interval = window.setInterval(refreshBleRuntimeStatus, 3000);
@@ -190,7 +192,11 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onS
     });
   }, []);
   const useMicrophoneInput = useCallback(() => {
-    void updatePrefs(current => ({ ...current, dictationInputSource: 'microphone' })).catch(err => {
+    void updatePrefs(current => ({
+      ...current,
+      dictationInputSource: 'microphone',
+      dictationInputSourceUserOverridden: true,
+    })).catch(err => {
       console.warn('[overview] switch to microphone failed', err);
     });
   }, [updatePrefs]);

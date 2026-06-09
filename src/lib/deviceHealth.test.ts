@@ -147,6 +147,7 @@ expectHealth(
     os: 'win',
     history: [],
     backgroundListenerError: 'Windows GATT disconnect reason=546 after low-power idle; transport_not_ready',
+    usbPowered: false,
   },
   'error',
   'lowPowerIdleDisconnect',
@@ -158,9 +159,22 @@ expectHealth(
     os: 'win',
     history: [],
     backgroundListenerError: 'Stale cached GATT path after reason=546 returned transport_not_ready',
+    usbPowered: false,
   },
   'error',
-  'lowPowerIdleDisconnect',
+  'staleGattCache',
+);
+
+expectHealth(
+  {
+    dictationInputSource: 'embeddedBle',
+    os: 'win',
+    history: [],
+    backgroundListenerError: 'Windows GATT disconnect reason=546 after low-power idle; transport_not_ready',
+    usbPowered: true,
+  },
+  'disconnected',
+  'noBleEvidence',
 );
 
 expectHealth(

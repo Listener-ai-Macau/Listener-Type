@@ -12,7 +12,7 @@ interface SettingRowProps {
 
 export function SettingRow({ label, desc, children, controlWidth }: SettingRowProps) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 180px) minmax(0, 1fr)', gap: 16, padding: '14px 0', borderTop: '0.5px solid var(--ol-line-soft)' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 180px) minmax(140px, 1fr)', gap: 16, padding: '14px 0', borderTop: '0.5px solid var(--ol-line-soft)' }}>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ol-ink)' }}>{label}</div>
         {desc && <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, lineHeight: 1.5 }}>{desc}</div>}
@@ -46,6 +46,7 @@ export function Toggle({ on, onToggle }: { on: boolean; onToggle?: (next: boolea
 
 export const inputStyle: CSSProperties = {
   flex: 1, height: 32, padding: '0 10px',
+  boxSizing: 'border-box',
   border: '0.5px solid var(--ol-line-strong)',
   borderRadius: 8, fontSize: 12.5,
   fontFamily: 'inherit', outline: 'none',

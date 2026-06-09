@@ -921,7 +921,7 @@ export function RecordingSection() {
   const onMicrophoneDeviceChange = (microphoneDeviceName: string) =>
     savePrefs({ ...prefs, microphoneDeviceName });
   const onDictationInputSourceChange = (dictationInputSource: DictationInputSource) =>
-    savePrefs({ ...prefs, dictationInputSource });
+    savePrefs({ ...prefs, dictationInputSource, dictationInputSourceUserOverridden: true });
   const onRestoreClipboardChange = (restoreClipboardAfterPaste: boolean) =>
     savePrefs({ ...prefs, restoreClipboardAfterPaste });
   const onPasteShortcutChange = (pasteShortcut: PasteShortcut) =>
@@ -986,7 +986,7 @@ export function RecordingSection() {
   const selectedMicrophoneLabel = effectiveMicrophoneDeviceName
     ? effectiveMicrophoneDeviceName
     : t('settings.recording.microphoneDefault');
-  const selectedInputSource = prefs.dictationInputSource ?? 'microphone';
+  const selectedInputSource = prefs.dictationInputSource ?? 'embeddedBle';
 
   return (
     <>
