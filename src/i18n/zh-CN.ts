@@ -679,7 +679,7 @@ export const zhCN = {
       minutes: '分钟',
       errorBrightness: '亮度必须在 0-100 之间。',
       errorAutoShutdown: '自动关机时间必须在 1-1440 分钟之间。',
-      errorBleName: '蓝牙名称必须是 1-32 个 ASCII 字符，不能包含引号、分号、等号或反斜杠。',
+      errorBleName: '蓝牙名称必须是 1-32 个可打印 ASCII 字符，不能包含空格、引号、分号、等号或反斜杠。',
       powerPlugged: '插电',
       powerBattery: '电池',
       powerUnknown: '供电未知',

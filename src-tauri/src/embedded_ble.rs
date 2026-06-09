@@ -1444,6 +1444,45 @@ mod windows_ble {
         Ok(())
     }
 
+    pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<(), String> {
+        let trimmed = command.trim();
+        if trimmed.is_empty() {
+            return Err("Listener device settings command is empty.".to_string());
+        }
+        if trimmed.chars().any(|ch| matches!(ch, '\0' | '\r' | '\n')) {
+            return Err(
+                "Listener device settings command cannot contain control characters.".to_string(),
+            );
+        }
+
+        let mut bytes = trimmed.as_bytes().to_vec();
+        bytes.push(b'\n');
+        if bytes.len() >= 64 {
+            return Err(format!(
+                "Listener device settings command is too long for BLE audio control: {} bytes",
+                bytes.len()
+            ));
+        }
+
+        if let Some(result) =
+            send_audio_control_via_active_capture(&bytes, timeout, "device settings")
+        {
+            result?;
+            log::info!("[embedded-ble] device settings command sent via active capture");
+            return Ok(());
+        }
+        let target = open_audio_control_target()?;
+        write_gatt_value_with_timeout(
+            &target.control,
+            &bytes,
+            GattWriteOption::WriteWithResponse,
+            timeout,
+            "device settings",
+        )?;
+        log::info!("[embedded-ble] device settings command sent");
+        Ok(())
+    }
+
     fn send_audio_control_via_active_capture(
         bytes: &[u8],
         timeout: Duration,
@@ -4688,6 +4727,11 @@ pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), Stri
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<(), String> {
+    windows_ble::send_device_settings_command(command, timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn capture_notification_events(
     timeout: Duration,
     on_event: &mut BleNotificationHandler<'_>,
@@ -4812,6 +4856,11 @@ pub fn send_recording_control_toggle(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_ec11_rotation_mode(_mode: &str, _timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE EC11 rotation control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_device_settings_command(_command: &str, _timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE device settings control is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

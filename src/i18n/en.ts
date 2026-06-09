@@ -681,7 +681,7 @@ export const en: typeof zhCN = {
       minutes: 'min',
       errorBrightness: 'Brightness must be between 0 and 100.',
       errorAutoShutdown: 'Auto-shutdown must be between 1 and 1440 minutes.',
-      errorBleName: 'Bluetooth name must be 1-32 ASCII characters and cannot contain quotes, semicolons, equals signs, or backslashes.',
+      errorBleName: 'Bluetooth name must be 1-32 printable ASCII characters and cannot contain spaces, quotes, semicolons, equals signs, or backslashes.',
       powerPlugged: 'Plugged',
       powerBattery: 'Battery',
       powerUnknown: 'Unknown power',

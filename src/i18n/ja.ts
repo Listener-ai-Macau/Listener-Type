@@ -639,7 +639,7 @@ export const ja: typeof zhCN = {
       minutes: '分',
       errorBrightness: '明るさは 0-100 の範囲で指定してください。',
       errorAutoShutdown: '自動電源オフは 1-1440 分の範囲で指定してください。',
-      errorBleName: 'Bluetooth 名は 1-32 文字の ASCII で、引用符、セミコロン、等号、バックスラッシュは使えません。',
+      errorBleName: 'Bluetooth 名は 1-32 文字の印字可能 ASCII で、スペース、引用符、セミコロン、等号、バックスラッシュは使えません。',
       powerPlugged: '接続中',
       powerBattery: 'バッテリー',
       powerUnknown: '電源不明',

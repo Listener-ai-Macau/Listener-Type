@@ -2,17 +2,12 @@
   "shortcutPath": "C:\\Users\\Billy\\Desktop\\Listener Type.lnk",
   "shortcutTarget": "C:\\Users\\Billy\\Desktop\\listener\\Listener-Type-wt-claude-listener-device-settings-panel-1.2\\src-tauri\\target\\release\\listener-type.exe",
   "releaseExeExists": true,
-  "stoppedProcesses": [
-    {
-      "Id": 22916,
-      "Path": "C:\\Users\\Billy\\Desktop\\listener\\Listener-Type\\src-tauri\\target\\release\\listener-type.exe"
-    }
-  ],
-  "launchedPid": 17716,
+  "stoppedProcesses": [],
+  "launchedPid": 24404,
   "runningProcesses": {
-    "Id": 17716,
+    "Id": 24404,
     "Path": "C:\\Users\\Billy\\Desktop\\listener\\Listener-Type-wt-claude-listener-device-settings-panel-1.2\\src-tauri\\target\\release\\listener-type.exe",
-    "StartTime": "2026-06-10T01:14:26.7361869+08:00"
+    "StartTime": "2026-06-10T01:37:06.8684955+08:00"
   },
-  "recordedAt": "2026-06-10T01:14:28.7792489+08:00"
+  "recordedAt": "2026-06-10T01:37:08.9183661+08:00"
 }

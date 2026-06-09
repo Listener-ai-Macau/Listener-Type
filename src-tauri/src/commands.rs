@@ -2153,6 +2153,8 @@ const DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS: u32 = 30 * 60 * 1000;
 const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 1;
 const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
 const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
+const DEVICE_SETTINGS_BLE_WRITE_TIMEOUT: Duration = Duration::from_secs(4);
+const DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES: usize = 63;
 
 #[tauri::command]
 pub async fn get_device_settings() -> Result<DeviceSettingsSnapshot, String> {
@@ -2168,13 +2170,22 @@ pub async fn set_device_settings(
     request: DeviceSettingsUpdateRequest,
 ) -> Result<DeviceSettingsSnapshot, String> {
     validate_device_settings_request(&request)?;
-    let snapshot = get_device_settings().await?;
-    if !snapshot.write_supported {
-        return Err(snapshot.detail.unwrap_or_else(|| {
-            "Listener firmware supports ~DEVICE settings, but this Type build has no confirmed read/write transport yet.".to_string()
-        }));
+    let previous_snapshot = get_device_settings().await.ok();
+    let commands = device_settings_update_commands(&request)?;
+    for command in commands {
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::send_device_settings_command(
+                &command,
+                DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
+            )
+        })
+        .await
+        .map_err(|err| format!("Listener device settings write task failed: {err}"))??;
     }
-    Err("Listener device settings write path is not enabled in this build.".to_string())
+    Ok(device_settings_snapshot_from_request(
+        &request,
+        previous_snapshot,
+    ))
 }
 
 fn device_settings_snapshot_from_device(
@@ -2187,7 +2198,7 @@ fn device_settings_snapshot_from_device(
     };
     let detail = if device.connected {
         Some(
-            "Firmware contract is ~DEVICE:SETTINGS / ~DEVICE:SET. Type is showing defaults until the DEVICE read/write transport passes hardware smoke.".to_string(),
+            "Type can send DEVICE:SET over Listener BLE audio control. Current values are defaults until DEVICE readback is added to the BLE path.".to_string(),
         )
     } else {
         device.detail.or_else(|| {
@@ -2197,7 +2208,7 @@ fn device_settings_snapshot_from_device(
     DeviceSettingsSnapshot {
         schema: DEVICE_SETTINGS_SCHEMA,
         connected: device.connected,
-        write_supported: false,
+        write_supported: device.connected,
         source: if device.connected {
             "defaults"
         } else {
@@ -2216,6 +2227,72 @@ fn device_settings_snapshot_from_device(
     }
 }
 
+fn device_settings_snapshot_from_request(
+    request: &DeviceSettingsUpdateRequest,
+    previous: Option<DeviceSettingsSnapshot>,
+) -> DeviceSettingsSnapshot {
+    let mut snapshot = previous.unwrap_or(DeviceSettingsSnapshot {
+        schema: DEVICE_SETTINGS_SCHEMA,
+        connected: true,
+        write_supported: true,
+        source: "lastKnown",
+        plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
+        battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
+        active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
+        ble_name: DEVICE_SETTINGS_DEFAULT_BLE_NAME.to_string(),
+        ble_name_pending_restart: false,
+        active_power_source: "unknown",
+        battery_percent: None,
+        detail: None,
+        last_updated_at: None,
+    });
+    let old_name = snapshot.ble_name.clone();
+    snapshot.connected = true;
+    snapshot.write_supported = true;
+    snapshot.source = "lastKnown";
+    snapshot.plugged_brightness_percent = request.plugged_brightness_percent;
+    snapshot.battery_brightness_percent = request.battery_brightness_percent;
+    snapshot.battery_auto_shutdown_ms =
+        request.battery_auto_shutdown_minutes.saturating_mul(60_000);
+    snapshot.ble_name = request.ble_name.clone();
+    snapshot.ble_name_pending_restart = old_name != request.ble_name;
+    snapshot.active_brightness_percent = match snapshot.active_power_source {
+        "battery" => Some(request.battery_brightness_percent),
+        "plugged" => Some(request.plugged_brightness_percent),
+        _ => None,
+    };
+    snapshot.detail = Some(
+        "Device settings were sent over Listener BLE audio control; displayed values are last-known until firmware DEVICE readback is available over BLE.".to_string(),
+    );
+    snapshot
+}
+
+fn device_settings_update_commands(
+    request: &DeviceSettingsUpdateRequest,
+) -> Result<Vec<String>, String> {
+    let commands = vec![
+        format!(
+            "DEVICE:SET plugged_brightness={} battery_brightness={}",
+            request.plugged_brightness_percent, request.battery_brightness_percent
+        ),
+        format!(
+            "DEVICE:SET auto_shutdown_minutes={}",
+            request.battery_auto_shutdown_minutes
+        ),
+        format!("DEVICE:SET ble_name={}", request.ble_name),
+    ];
+    for command in &commands {
+        let bytes_with_newline = command.as_bytes().len() + 1;
+        if bytes_with_newline > DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES {
+            return Err(format!(
+                "Device settings command is too long for BLE audio control: {bytes_with_newline} bytes."
+            ));
+        }
+    }
+    Ok(commands)
+}
+
 fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Result<(), String> {
     if request.plugged_brightness_percent > 100 || request.battery_brightness_percent > 100 {
         return Err("Device brightness must be between 0 and 100 percent.".to_string());
@@ -2232,15 +2309,18 @@ fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Re
 
 fn validate_device_settings_ble_name(name: &str) -> Result<(), String> {
     if name.is_empty() || name.len() > 32 {
-        return Err("BLE name must be 1-32 ASCII characters.".to_string());
+        return Err("BLE name must be 1-32 printable ASCII characters without spaces.".to_string());
     }
     for ch in name.chars() {
-        if !ch.is_ascii_graphic() && ch != ' ' {
-            return Err("BLE name must contain printable ASCII characters only.".to_string());
+        if !ch.is_ascii_graphic() {
+            return Err(
+                "BLE name must contain printable ASCII characters without spaces only.".to_string(),
+            );
         }
         if matches!(ch, '"' | '\'' | ';' | '=' | '\\') {
             return Err(
-                "BLE name cannot contain quotes, semicolon, equals sign, or backslash.".to_string(),
+                "BLE name cannot contain spaces, quotes, semicolon, equals sign, or backslash."
+                    .to_string(),
             );
         }
     }
@@ -5125,15 +5205,16 @@ mod tests {
     use super::release_foundry_runtime_if_inactive;
     use super::{
         active_asr_is_keyless_for_validation, active_foundry_model_from_prefs,
-        asr_configured_for_provider, asr_transcriptions_url, diagnostic_recent_errors,
-        fetch_provider_models, fetch_provider_models_cached, firmware_ota_snapshot_version,
-        firmware_ota_versions_match, is_diagnostic_error_line, is_gemini_base_url,
-        is_valid_local_pack_id, is_valid_session_id, llm_configured_for_provider,
-        load_firmware_ota_package, local_asr_release_plan_for_provider, models_url,
-        normalize_foundry_language_hint, parse_gemini_model_ids, parse_latest_beta_from_atom,
-        parse_model_ids, persist_settings, provider_models_cache, sanitize_diagnostic_log_line,
-        validate_device_settings_request, validate_foundry_model_alias,
-        DeviceSettingsUpdateRequest, ProviderConfig, SettingsWriter,
+        asr_configured_for_provider, asr_transcriptions_url, device_settings_update_commands,
+        diagnostic_recent_errors, fetch_provider_models, fetch_provider_models_cached,
+        firmware_ota_snapshot_version, firmware_ota_versions_match, is_diagnostic_error_line,
+        is_gemini_base_url, is_valid_local_pack_id, is_valid_session_id,
+        llm_configured_for_provider, load_firmware_ota_package,
+        local_asr_release_plan_for_provider, models_url, normalize_foundry_language_hint,
+        parse_gemini_model_ids, parse_latest_beta_from_atom, parse_model_ids, persist_settings,
+        provider_models_cache, sanitize_diagnostic_log_line, validate_device_settings_request,
+        validate_foundry_model_alias, DeviceSettingsUpdateRequest, ProviderConfig, SettingsWriter,
+        DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES,
     };
     use crate::coordinator::Coordinator;
     use crate::embedded_audio::{SessionEndReason, SessionErrorCode, SessionStats};
@@ -5217,6 +5298,34 @@ mod tests {
         };
 
         assert!(validate_device_settings_request(&request).is_err());
+    }
+
+    #[test]
+    fn device_settings_request_rejects_ble_name_spaces() {
+        let request = DeviceSettingsUpdateRequest {
+            plugged_brightness_percent: 80,
+            battery_brightness_percent: 45,
+            battery_auto_shutdown_minutes: 30,
+            ble_name: "listener dev".to_string(),
+        };
+
+        assert!(validate_device_settings_request(&request).is_err());
+    }
+
+    #[test]
+    fn device_settings_update_commands_fit_ble_audio_control() {
+        let request = DeviceSettingsUpdateRequest {
+            plugged_brightness_percent: 100,
+            battery_brightness_percent: 100,
+            battery_auto_shutdown_minutes: 1440,
+            ble_name: "listener-12345678901234567890123".to_string(),
+        };
+        let commands = device_settings_update_commands(&request).expect("commands");
+
+        assert_eq!(commands.len(), 3);
+        assert!(commands.iter().all(|command| {
+            command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
+        }));
     }
 
     #[test]

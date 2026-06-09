@@ -681,7 +681,7 @@ export const zhTW: typeof zhCN = {
       minutes: '分鐘',
       errorBrightness: '亮度必須在 0-100 之間。',
       errorAutoShutdown: '自動關機時間必須在 1-1440 分鐘之間。',
-      errorBleName: '藍牙名稱必須是 1-32 個 ASCII 字元，且不能包含引號、分號、等號或反斜線。',
+      errorBleName: '藍牙名稱必須是 1-32 個可列印 ASCII 字元，且不能包含空格、引號、分號、等號或反斜線。',
       powerPlugged: '插電',
       powerBattery: '電池',
       powerUnknown: '供電未知',

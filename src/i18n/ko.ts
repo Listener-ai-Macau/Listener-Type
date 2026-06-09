@@ -639,7 +639,7 @@ export const ko: typeof zhCN = {
       minutes: '분',
       errorBrightness: '밝기는 0-100 사이여야 합니다.',
       errorAutoShutdown: '자동 전원 끄기 시간은 1-1440분 사이여야 합니다.',
-      errorBleName: 'Bluetooth 이름은 1-32자의 ASCII여야 하며 따옴표, 세미콜론, 등호, 백슬래시를 포함할 수 없습니다.',
+      errorBleName: 'Bluetooth 이름은 1-32자의 출력 가능한 ASCII여야 하며 공백, 따옴표, 세미콜론, 등호, 백슬래시를 포함할 수 없습니다.',
       powerPlugged: '연결됨',
       powerBattery: '배터리',
       powerUnknown: '전원 알 수 없음',
