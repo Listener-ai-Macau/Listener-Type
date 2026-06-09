@@ -3278,13 +3278,21 @@ pub(super) fn cancel_session(inner: &Arc<Inner>) {
 
 fn cancel_embedded_ble_session_through_actor(inner: &Arc<Inner>) {
     let session_id = inner.state.lock().session_id;
-    let cancelled = dispatch_embedded_ble_session_actor_command(
+    record_embedded_ble_session_actor_command(
         inner,
         EmbeddedBleSessionActorCommand::CancelCommand,
         Some(session_id),
         "cancel command applied to embedded BLE session",
-        |_| begin_cancel_session_transition(inner),
     );
+    let cancelled = begin_cancel_session_transition(inner);
+    if cancelled.is_none() {
+        if request_embedded_ble_capture_cancel_flag(inner) {
+            log::info!("[coord] embedded BLE capture cancel requested without active session");
+        }
+        if inner.state.lock().phase == SessionPhase::Idle {
+            emit_capsule(inner, CapsuleState::Idle, 0.0, 0, None, None);
+        }
+    }
     finish_cancel_session_after_transition(inner, cancelled, true);
 }
 
@@ -3488,6 +3496,22 @@ mod tests {
         cancel_session(&coordinator.inner);
 
         assert!(cancel_flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn cancel_session_requests_embedded_ble_capture_cancel_even_when_idle() {
+        let coordinator = Coordinator::new();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        register_embedded_ble_cancel_flag(&coordinator.inner, &cancel_flag);
+        coordinator.inner.state.lock().phase = SessionPhase::Idle;
+
+        cancel_session(&coordinator.inner);
+
+        assert!(cancel_flag.load(Ordering::SeqCst));
+        let history = embedded_ble_session_actor_history(&coordinator.inner);
+        assert!(history
+            .iter()
+            .any(|record| record.command == EmbeddedBleSessionActorCommand::CancelCommand));
     }
 
     #[test]
