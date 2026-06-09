@@ -149,10 +149,6 @@ export function ShortcutsSection() {
     [t('settings.shortcuts.confirm'), t('settings.shortcuts.confirmHint')],
   ];
   const knobRotationAction = prefs.deviceKnobRotationAction ?? 'systemVolume';
-  const knobRotationActionOptions = KNOB_ROTATION_ACTIONS.map(action => ({
-    value: action,
-    label: t(`settings.deviceKeys.knob.actions.${action}`),
-  }));
   const updateKnobRotationAction = async (value: string) => {
     await savePrefs(current => ({
       ...current,
@@ -192,7 +188,6 @@ export function ShortcutsSection() {
 
       <KnobActionsPanel
         knobRotationAction={knobRotationAction}
-        knobRotationActionOptions={knobRotationActionOptions}
         onKnobRotationActionChange={updateKnobRotationAction}
       />
 
@@ -290,11 +285,9 @@ export function ShortcutsSection() {
 
 function KnobActionsPanel({
   knobRotationAction,
-  knobRotationActionOptions,
   onKnobRotationActionChange,
 }: {
   knobRotationAction: DeviceKnobRotationAction;
-  knobRotationActionOptions: Array<{ value: string; label: string }>;
   onKnobRotationActionChange: (value: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -322,73 +315,41 @@ function KnobActionsPanel({
             <div style={{ fontSize: 12.5, fontWeight: 600, color: item.locked ? 'var(--ol-ink-3)' : 'var(--ol-ink)' }}>
               {t(`settings.deviceKeys.knob.gestures.${item.gesture}`)}
             </div>
-            <div
-              aria-disabled={item.locked}
-              style={{
-                minHeight: 32,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '0 10px',
-                borderRadius: 6,
-                background: 'var(--ol-surface-2)',
-                border: '0.5px solid var(--ol-line-strong)',
-                color: item.locked ? 'var(--ol-ink-4)' : 'var(--ol-ink-2)',
-                fontSize: 12,
-              }}
-            >
-              {item.gesture === 'rotate' ? (
-                <div
-                  role="radiogroup"
-                  aria-label={t('settings.deviceKeys.knob.rotationActionSelectAria')}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                    gap: 4,
-                    width: '100%',
-                  }}
-                >
-                  {knobRotationActionOptions.map(option => {
-                    const selected = option.value === knobRotationAction;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        role="radio"
-                        aria-checked={selected}
-                        onClick={() => void onKnobRotationActionChange(option.value)}
-                        style={{
-                          minWidth: 0,
-                          minHeight: 28,
-                          padding: '0 8px',
-                          borderRadius: 6,
-                          border: selected ? '0.5px solid var(--ol-blue)' : '0.5px solid transparent',
-                          background: selected ? 'rgba(79, 139, 255, 0.16)' : 'transparent',
-                          color: selected ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
-                          fontSize: 12,
-                          fontFamily: 'inherit',
-                          fontWeight: selected ? 600 : 500,
-                          textAlign: 'center',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          cursor: 'default',
-                        }}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
+            {item.gesture === 'rotate' ? (
+              <SelectLite
+                value={knobRotationAction}
+                onChange={value => void onKnobRotationActionChange(value)}
+                options={KNOB_ROTATION_ACTIONS.map(action => ({
+                  value: action,
+                  label: t(`settings.deviceKeys.knob.actions.${action}`),
+                }))}
+                style={{ ...inputStyle, maxWidth: 'none', minWidth: 0 }}
+                ariaLabel={t('settings.deviceKeys.knob.rotationActionSelectAria')}
+              />
+            ) : (
+              <div
+                aria-disabled
+                style={{
+                  minHeight: 32,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '0 10px',
+                  borderRadius: 6,
+                  background: 'var(--ol-surface-2)',
+                  border: '0.5px solid var(--ol-line-strong)',
+                  color: 'var(--ol-ink-4)',
+                  fontSize: 12,
+                }}
+              >
                 <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {t(`settings.deviceKeys.knob.actions.${item.action}`)}
                 </span>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
