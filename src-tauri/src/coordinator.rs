@@ -2827,7 +2827,9 @@ fn should_auto_select_embedded_ble_input_source(
     prefs: &crate::types::UserPreferences,
     firmware: &crate::embedded_ble::FirmwareOtaDeviceSnapshot,
 ) -> bool {
-    prefs.dictation_input_source != DictationInputSource::EmbeddedBle && firmware.connected
+    !prefs.dictation_input_source_user_overridden
+        && prefs.dictation_input_source != DictationInputSource::EmbeddedBle
+        && firmware.connected
 }
 
 fn auto_select_embedded_ble_input_source_from_snapshot(
@@ -5137,6 +5139,12 @@ mod tests {
         assert!(!should_auto_select_embedded_ble_input_source(
             &prefs,
             &firmware_snapshot_for_auto_input_test(false)
+        ));
+
+        prefs.dictation_input_source_user_overridden = true;
+        assert!(!should_auto_select_embedded_ble_input_source(
+            &prefs,
+            &firmware_snapshot_for_auto_input_test(true)
         ));
     }
 

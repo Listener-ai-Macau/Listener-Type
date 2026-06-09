@@ -72,7 +72,7 @@ export function summarizeListenerDeviceHealth({
     return snapshot('unknown', 'historyUnavailable');
   }
 
-  if ((dictationInputSource ?? 'microphone') !== 'embeddedBle') {
+  if ((dictationInputSource ?? 'embeddedBle') !== 'embeddedBle') {
     return snapshot('disconnected', 'microphoneFallback');
   }
 

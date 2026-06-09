@@ -779,6 +779,7 @@ fn handle_input_source_tray_menu_event(app: &AppHandle, id: &str) -> bool {
     let coord = app.state::<Arc<coordinator::Coordinator>>();
     let mut prefs = coord.prefs().get();
     prefs.dictation_input_source = source;
+    prefs.dictation_input_source_user_overridden = true;
     if let Err(err) = coord.prefs().set(prefs.clone()) {
         log::warn!("[tray] save input source preference failed: {err}");
         return true;

@@ -149,7 +149,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         !cancelled &&
         acknowledgedValue !== '1' &&
         deferredValue !== '1' &&
-        (prefs.dictationInputSource ?? 'microphone') !== 'embeddedBle'
+        (prefs.dictationInputSource ?? 'embeddedBle') !== 'embeddedBle'
       ) {
         setBlePairingPromptOpen(true);
       }
@@ -276,8 +276,12 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
 
 
   const enableEmbeddedBleInputFromPrompt = async () => {
-    if (prefs && (prefs.dictationInputSource ?? 'microphone') !== 'embeddedBle') {
-      await updatePrefs({ ...prefs, dictationInputSource: 'embeddedBle' }).catch(error => {
+    if (prefs && (prefs.dictationInputSource ?? 'embeddedBle') !== 'embeddedBle') {
+      await updatePrefs({
+        ...prefs,
+        dictationInputSource: 'embeddedBle',
+        dictationInputSourceUserOverridden: true,
+      }).catch(error => {
         console.warn('[ble-pairing] failed to switch input source', error);
       });
     }

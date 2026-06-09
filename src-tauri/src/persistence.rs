@@ -305,22 +305,27 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
     // issue #440：老版本可能已把旧默认 `streamingInsert:false` 写进 preferences.json。
     // 反序列化会在内存里迁到 true，但还必须把迁移标记落盘，否则每次启动都停留在
     // “旧文件”状态，无法表达用户后续手动关闭后的 durable opt-out。
-    let streaming_default_migrated = serde_json::from_slice::<serde_json::Value>(&bytes)
-        .ok()
+    let raw_prefs = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+    let streaming_default_migrated = raw_prefs
+        .as_ref()
         .and_then(|value| {
             value
                 .get("streamingInsertDefaultMigrated")
                 .and_then(|flag| flag.as_bool())
         })
         .unwrap_or(false);
-    if !streaming_default_migrated {
+    let dictation_input_source_has_user_override_marker = raw_prefs
+        .as_ref()
+        .and_then(|value| value.get("dictationInputSourceUserOverridden"))
+        .is_some();
+    if !streaming_default_migrated || !dictation_input_source_has_user_override_marker {
         match serde_json::to_vec_pretty(&prefs)
             .context("encode prefs failed")
             .and_then(|json| atomic_write(path, &json))
         {
-            Ok(()) => log::info!("[prefs] migrated streamingInsert default marker"),
+            Ok(()) => log::info!("[prefs] migrated default preference markers"),
             Err(err) => log::warn!(
-                "[prefs] failed to persist streamingInsert migration marker for {}: {}",
+                "[prefs] failed to persist default preference markers for {}: {}",
                 path.display(),
                 err
             ),

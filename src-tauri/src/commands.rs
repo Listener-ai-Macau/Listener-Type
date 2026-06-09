@@ -374,6 +374,9 @@ fn persist_settings<T: SettingsWriter>(
     coord: &T,
     mut prefs: UserPreferences,
 ) -> Result<(), String> {
+    if !prefs.dictation_input_source_user_overridden {
+        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+    }
     sync_dictation_hotkey_legacy_fields(&mut prefs);
     prefs.device_custom_keys_default_migrated = true;
     reject_hotkey_collisions(&prefs)?;
@@ -401,7 +404,14 @@ pub fn set_settings(
     let packs = coord.style_packs().list().map_err(|e| e.to_string())?;
     sync_style_pack_preferences(&mut prefs, &packs);
     let _settings_guard = settings_update_lock().lock();
-    let previous_knob_rotation_action = coord.prefs().get().device_knob_rotation_action;
+    let previous_prefs = coord.prefs().get();
+    if prefs.dictation_input_source != previous_prefs.dictation_input_source {
+        prefs.dictation_input_source_user_overridden = true;
+    }
+    if !prefs.dictation_input_source_user_overridden {
+        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+    }
+    let previous_knob_rotation_action = previous_prefs.device_knob_rotation_action;
     let next_knob_rotation_action = prefs.device_knob_rotation_action;
     let next_input_source = prefs.dictation_input_source;
     // 广播给所有 webview。issue #205：QaPanel 跑在独立 webview，

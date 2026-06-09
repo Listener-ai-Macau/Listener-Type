@@ -90,7 +90,8 @@ let mockSettings: UserPreferences = {
   showCapsule: true,
   muteDuringRecording: false,
   microphoneDeviceName: '',
-  dictationInputSource: 'microphone',
+  dictationInputSource: 'embeddedBle',
+  dictationInputSourceUserOverridden: false,
   activeAsrProvider: 'foundry-local-whisper',
   activeLlmProvider: 'ark',
   llmThinkingEnabled: false,
@@ -180,6 +181,8 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
       ...prefs.hotkey,
       mode: 'toggle',
     },
+    dictationInputSource: prefs.dictationInputSource ?? 'embeddedBle',
+    dictationInputSourceUserOverridden: prefs.dictationInputSourceUserOverridden ?? false,
     deviceCustomKeys: {
       key1: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeys?.key1, fallbackDeviceKeys.key1),
       key2: normalizeDeviceCustomKeyMapping(prefs.deviceCustomKeys?.key2, fallbackDeviceKeys.key2),

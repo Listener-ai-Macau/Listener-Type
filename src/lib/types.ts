@@ -377,8 +377,10 @@ export interface UserPreferences {
   muteDuringRecording: boolean;
   /** 录音输入设备名称。空字符串 = 使用系统默认麦克风。 */
   microphoneDeviceName: string;
-  /** 听写输入源。默认麦克风；embeddedBle 用于嵌入式 VKA1 BLE 音频入口。 */
+  /** 听写输入源。默认 embeddedBle；用户手动改过后才保留 microphone。 */
   dictationInputSource: DictationInputSource;
+  /** 输入源是否已经由用户显式改过。false 表示沿用产品默认 embeddedBle。 */
+  dictationInputSourceUserOverridden: boolean;
   activeAsrProvider: string;
   activeLlmProvider: string;
   /** LLM 思考模式开关。默认关闭，保持既有尽量关闭思考的行为。详见 issue #402。 */
