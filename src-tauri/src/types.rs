@@ -589,6 +589,7 @@ pub enum DeviceCustomKeyAppPage {
     Translation,
     SelectionAsk,
     SettingsRecording,
+    SettingsDevice,
     SettingsProviders,
     SettingsShortcuts,
     SettingsPermissions,
@@ -598,7 +599,7 @@ pub enum DeviceCustomKeyAppPage {
 
 impl Default for DeviceCustomKeyAppPage {
     fn default() -> Self {
-        Self::SettingsShortcuts
+        Self::SettingsDevice
     }
 }
 
@@ -721,6 +722,35 @@ fn legacy_device_custom_keys_default_with_external_app_path(
     }
 }
 
+fn previous_shortcuts_device_custom_keys_default_with_external_app_path(
+    external_app_path: String,
+) -> DeviceCustomKeys {
+    let shortcuts_page = DeviceCustomKeyAppPage::SettingsShortcuts;
+    DeviceCustomKeys {
+        key1: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenApp,
+            app_page: shortcuts_page,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key2: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::PasteShortcut,
+            app_page: shortcuts_page,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key3: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::Dictation,
+            app_page: shortcuts_page,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key4: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenExternalApp,
+            app_page: shortcuts_page,
+            external_app_path,
+            ..DeviceCustomKeyMapping::default()
+        },
+    }
+}
+
 fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
     keys == &legacy_device_custom_keys_default()
         || keys == &legacy_device_custom_keys_default_with_external_app_path("code".into())
@@ -728,7 +758,12 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
             .into_iter()
             .any(|path| {
                 keys == &legacy_device_custom_keys_default_with_external_app_path(path.clone())
-                    || keys == &current_device_custom_keys_default_with_external_app_path(path)
+                    || keys
+                        == &current_device_custom_keys_default_with_external_app_path(path.clone())
+                    || keys
+                        == &previous_shortcuts_device_custom_keys_default_with_external_app_path(
+                            path,
+                        )
             })
 }
 
@@ -2529,7 +2564,7 @@ mod tests {
     }
 
     #[test]
-    fn device_custom_keys_default_to_shortcuts_page_paste_dictation_and_external_app() {
+    fn device_custom_keys_default_to_device_page_paste_dictation_and_external_app() {
         let prefs = UserPreferences::default();
 
         assert_eq!(
@@ -2538,7 +2573,7 @@ mod tests {
         );
         assert_eq!(
             prefs.device_custom_keys.key1.app_page,
-            DeviceCustomKeyAppPage::SettingsShortcuts
+            DeviceCustomKeyAppPage::SettingsDevice
         );
         assert_eq!(
             prefs.device_custom_keys.key2.action,
@@ -2575,7 +2610,7 @@ mod tests {
         );
         assert_eq!(
             prefs.device_custom_keys.key1.app_page,
-            DeviceCustomKeyAppPage::SettingsShortcuts
+            DeviceCustomKeyAppPage::SettingsDevice
         );
         assert_eq!(
             prefs.device_custom_keys.key2.action,

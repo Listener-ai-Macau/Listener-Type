@@ -2119,6 +2119,134 @@ pub fn get_embedded_ble_runtime_status(coord: CoordinatorState<'_>) -> EmbeddedB
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSettingsSnapshot {
+    schema: &'static str,
+    connected: bool,
+    write_supported: bool,
+    source: &'static str,
+    plugged_brightness_percent: u8,
+    battery_brightness_percent: u8,
+    active_brightness_percent: Option<u8>,
+    battery_auto_shutdown_ms: u32,
+    ble_name: String,
+    ble_name_pending_restart: bool,
+    active_power_source: &'static str,
+    battery_percent: Option<u8>,
+    detail: Option<String>,
+    last_updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSettingsUpdateRequest {
+    plugged_brightness_percent: u8,
+    battery_brightness_percent: u8,
+    battery_auto_shutdown_minutes: u32,
+    ble_name: String,
+}
+
+const DEVICE_SETTINGS_SCHEMA: &str = "listener.device_settings.v1";
+const DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT: u8 = 100;
+const DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS: u32 = 30 * 60 * 1000;
+const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 1;
+const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
+const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
+
+#[tauri::command]
+pub async fn get_device_settings() -> Result<DeviceSettingsSnapshot, String> {
+    let device =
+        tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
+            .await
+            .map_err(|err| format!("Listener BLE device settings probe task failed: {err}"))?;
+    Ok(device_settings_snapshot_from_device(device))
+}
+
+#[tauri::command]
+pub async fn set_device_settings(
+    request: DeviceSettingsUpdateRequest,
+) -> Result<DeviceSettingsSnapshot, String> {
+    validate_device_settings_request(&request)?;
+    let snapshot = get_device_settings().await?;
+    if !snapshot.write_supported {
+        return Err(snapshot.detail.unwrap_or_else(|| {
+            "Listener firmware supports ~DEVICE settings, but this Type build has no confirmed read/write transport yet.".to_string()
+        }));
+    }
+    Err("Listener device settings write path is not enabled in this build.".to_string())
+}
+
+fn device_settings_snapshot_from_device(
+    device: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+) -> DeviceSettingsSnapshot {
+    let active_power_source = match device.usb_powered {
+        Some(true) => "plugged",
+        Some(false) => "battery",
+        None => "unknown",
+    };
+    let detail = if device.connected {
+        Some(
+            "Firmware contract is ~DEVICE:SETTINGS / ~DEVICE:SET. Type is showing defaults until the DEVICE read/write transport passes hardware smoke.".to_string(),
+        )
+    } else {
+        device.detail.or_else(|| {
+            Some("Listener BLE is not connected; showing firmware defaults.".to_string())
+        })
+    };
+    DeviceSettingsSnapshot {
+        schema: DEVICE_SETTINGS_SCHEMA,
+        connected: device.connected,
+        write_supported: false,
+        source: if device.connected {
+            "defaults"
+        } else {
+            "unavailable"
+        },
+        plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
+        battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
+        active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
+        ble_name: DEVICE_SETTINGS_DEFAULT_BLE_NAME.to_string(),
+        ble_name_pending_restart: false,
+        active_power_source,
+        battery_percent: device.battery_percent,
+        detail,
+        last_updated_at: None,
+    }
+}
+
+fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Result<(), String> {
+    if request.plugged_brightness_percent > 100 || request.battery_brightness_percent > 100 {
+        return Err("Device brightness must be between 0 and 100 percent.".to_string());
+    }
+    if request.battery_auto_shutdown_minutes < DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES
+        || request.battery_auto_shutdown_minutes > DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES
+    {
+        return Err(format!(
+            "Battery auto-shutdown must be between {DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES} and {DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES} minutes."
+        ));
+    }
+    validate_device_settings_ble_name(&request.ble_name)
+}
+
+fn validate_device_settings_ble_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.len() > 32 {
+        return Err("BLE name must be 1-32 ASCII characters.".to_string());
+    }
+    for ch in name.chars() {
+        if !ch.is_ascii_graphic() && ch != ' ' {
+            return Err("BLE name must contain printable ASCII characters only.".to_string());
+        }
+        if matches!(ch, '"' | '\'' | ';' | '=' | '\\') {
+            return Err(
+                "BLE name cannot contain quotes, semicolon, equals sign, or backslash.".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FirmwareOtaPreflightSnapshot {
@@ -5004,7 +5132,8 @@ mod tests {
         load_firmware_ota_package, local_asr_release_plan_for_provider, models_url,
         normalize_foundry_language_hint, parse_gemini_model_ids, parse_latest_beta_from_atom,
         parse_model_ids, persist_settings, provider_models_cache, sanitize_diagnostic_log_line,
-        validate_foundry_model_alias, ProviderConfig, SettingsWriter,
+        validate_device_settings_request, validate_foundry_model_alias,
+        DeviceSettingsUpdateRequest, ProviderConfig, SettingsWriter,
     };
     use crate::coordinator::Coordinator;
     use crate::embedded_audio::{SessionEndReason, SessionErrorCode, SessionStats};
@@ -5064,6 +5193,30 @@ mod tests {
             firmware_ota_snapshot_version(&ota_snapshot_with_version(None)),
             None
         );
+    }
+
+    #[test]
+    fn device_settings_request_accepts_safe_values() {
+        let request = DeviceSettingsUpdateRequest {
+            plugged_brightness_percent: 80,
+            battery_brightness_percent: 45,
+            battery_auto_shutdown_minutes: 30,
+            ble_name: "listener-dev".to_string(),
+        };
+
+        assert!(validate_device_settings_request(&request).is_ok());
+    }
+
+    #[test]
+    fn device_settings_request_rejects_unsafe_ble_name() {
+        let request = DeviceSettingsUpdateRequest {
+            plugged_brightness_percent: 80,
+            battery_brightness_percent: 45,
+            battery_auto_shutdown_minutes: 30,
+            ble_name: "listener=bad".to_string(),
+        };
+
+        assert!(validate_device_settings_request(&request).is_err());
     }
 
     #[test]

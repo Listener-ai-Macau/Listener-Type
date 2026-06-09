@@ -500,6 +500,7 @@ export type DeviceCustomKeyAppPage =
   | 'translation'
   | 'selectionAsk'
   | 'settingsRecording'
+  | 'settingsDevice'
   | 'settingsProviders'
   | 'settingsShortcuts'
   | 'settingsPermissions'
@@ -528,6 +529,33 @@ export interface DeviceCustomKeys {
 }
 
 export type DeviceKnobRotationAction = 'systemVolume' | 'screenBrightness' | 'disabled';
+
+export type DeviceSettingsSource = 'firmware' | 'lastKnown' | 'defaults' | 'mock' | 'unavailable';
+export type DeviceSettingsPowerSource = 'plugged' | 'battery' | 'unknown';
+
+export interface DeviceSettingsSnapshot {
+  schema: 'listener.device_settings.v1';
+  connected: boolean;
+  writeSupported: boolean;
+  source: DeviceSettingsSource;
+  pluggedBrightnessPercent: number;
+  batteryBrightnessPercent: number;
+  activeBrightnessPercent: number | null;
+  batteryAutoShutdownMs: number;
+  bleName: string;
+  bleNamePendingRestart: boolean;
+  activePowerSource: DeviceSettingsPowerSource;
+  batteryPercent: number | null;
+  detail: string | null;
+  lastUpdatedAt: string | null;
+}
+
+export interface DeviceSettingsUpdateRequest {
+  pluggedBrightnessPercent: number;
+  batteryBrightnessPercent: number;
+  batteryAutoShutdownMinutes: number;
+  bleName: string;
+}
 
 export interface MarketplaceListItem {
   id: string;

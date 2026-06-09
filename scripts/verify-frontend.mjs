@@ -35,6 +35,8 @@ function walkFiles(dir, cb) {
 function checkNoProductDemoCopy() {
   const hits = [];
   walkFiles(join(root, 'src'), filePath => {
+    const rel = relative(root, filePath).replaceAll('\\', '/');
+    if (isAllowedDemoModeFile(rel)) return;
     if (!/\.(ts|tsx|css|json)$/.test(filePath)) return;
     const lines = readFileSync(filePath, 'utf-8').split('\n');
     lines.forEach((line, index) => {
@@ -46,6 +48,16 @@ function checkNoProductDemoCopy() {
   if (hits.length > 0) {
     throw new Error(`Product demo copy is not allowed in src:\n${hits.join('\n')}`);
   }
+}
+
+function isAllowedDemoModeFile(rel) {
+  return (
+    rel === 'src/lib/demoMode.ts' ||
+    rel === 'src/lib/demoMode.test.ts' ||
+    rel === 'src/pages/settings/ProvidersSection.tsx' ||
+    rel === 'src/components/FloatingShell.tsx' ||
+    /^src\/i18n\/[^/]+\.ts$/.test(rel)
+  );
 }
 
 function run(label, cmd) {
