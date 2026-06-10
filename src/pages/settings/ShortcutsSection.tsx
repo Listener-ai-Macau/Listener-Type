@@ -20,7 +20,6 @@ import type {
   DeviceCustomKeyId,
   DeviceCustomKeys,
   DeviceCustomKeyMapping,
-  DeviceKnobRotationAction,
   InstalledApplication,
   ShortcutBinding,
 } from '../../lib/types';
@@ -92,15 +91,6 @@ const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
   'settingsAdvanced',
 ];
 
-const KNOB_ROTATION_ACTIONS: DeviceKnobRotationAction[] = ['systemVolume', 'screenBrightness', 'disabled'];
-
-const KNOB_ACTION_ROWS = [
-  { gesture: 'rotate', action: 'systemVolume', locked: false },
-  { gesture: 'shortPress', action: 'recording', locked: true },
-  { gesture: 'doubleClick', action: 'bluetoothReset', locked: true },
-  { gesture: 'longPress', action: 'powerOff', locked: true },
-] as const;
-
 const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
 
 const fallbackShortcut = (): ShortcutBinding => ({
@@ -148,14 +138,6 @@ export function ShortcutsSection() {
     [t('settings.shortcuts.cancel'), 'Esc'],
     [t('settings.shortcuts.confirm'), t('settings.shortcuts.confirmHint')],
   ];
-  const knobRotationAction = prefs.deviceKnobRotationAction ?? 'systemVolume';
-  const updateKnobRotationAction = async (value: string) => {
-    await savePrefs(current => ({
-      ...current,
-      deviceKnobRotationAction: value as DeviceKnobRotationAction,
-    }));
-  };
-
   return (
     <Card>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
@@ -185,11 +167,6 @@ export function ShortcutsSection() {
           />
         ))}
       </div>
-
-      <KnobActionsPanel
-        knobRotationAction={knobRotationAction}
-        onKnobRotationActionChange={updateKnobRotationAction}
-      />
 
       <div style={{ fontSize: 13, fontWeight: 600, marginTop: 18, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
         {t('settings.shortcuts.title')}
@@ -280,80 +257,6 @@ export function ShortcutsSection() {
         </SettingRow>
       ))}
     </Card>
-  );
-}
-
-function KnobActionsPanel({
-  knobRotationAction,
-  onKnobRotationActionChange,
-}: {
-  knobRotationAction: DeviceKnobRotationAction;
-  onKnobRotationActionChange: (value: string) => Promise<void>;
-}) {
-  const { t } = useTranslation();
-
-  return (
-    <>
-      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 18, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
-        {t('settings.deviceKeys.knob.title')}
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 8 }}>
-        {t('settings.deviceKeys.knob.desc')}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {KNOB_ACTION_ROWS.map(item => (
-          <div
-            key={item.gesture}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
-              gap: 12,
-              alignItems: 'center',
-              opacity: item.locked ? 0.66 : 1,
-            }}
-          >
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: item.locked ? 'var(--ol-ink-3)' : 'var(--ol-ink)' }}>
-              {t(`settings.deviceKeys.knob.gestures.${item.gesture}`)}
-            </div>
-            {item.gesture === 'rotate' ? (
-              <SelectLite
-                value={knobRotationAction}
-                onChange={value => void onKnobRotationActionChange(value)}
-                options={KNOB_ROTATION_ACTIONS.map(action => ({
-                  value: action,
-                  label: t(`settings.deviceKeys.knob.actions.${action}`),
-                }))}
-                style={{ ...inputStyle, maxWidth: 'none', minWidth: 0 }}
-                ariaLabel={t('settings.deviceKeys.knob.rotationActionSelectAria')}
-              />
-            ) : (
-              <div
-                aria-disabled
-                style={{
-                  minHeight: 32,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  padding: '0 10px',
-                  borderRadius: 6,
-                  background: 'var(--ol-surface-2)',
-                  border: '0.5px solid var(--ol-line-strong)',
-                  color: 'var(--ol-ink-4)',
-                  fontSize: 12,
-                }}
-              >
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {t(`settings.deviceKeys.knob.actions.${item.action}`)}
-                </span>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </>
   );
 }
 

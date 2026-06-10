@@ -128,6 +128,10 @@ let mockSettings: UserPreferences = {
   },
   deviceCustomKeysDefaultMigrated: true,
   deviceKnobRotationAction: 'systemVolume',
+  devicePluggedBrightnessPercent: 100,
+  deviceBatteryBrightnessPercent: 100,
+  deviceBatteryAutoShutdownMinutes: 30,
+  deviceBleName: 'listener',
   localAsrActiveModel: 'qwen3-asr-0.6b',
   localAsrMirror: 'huggingface',
   localAsrKeepLoadedSecs: 300,
@@ -172,6 +176,24 @@ function normalizeDeviceCustomKeyMapping(
   };
 }
 
+const clampNumber = (value: unknown, fallback: number, min: number, max: number) => {
+  const num = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return Math.min(max, Math.max(min, Math.round(num)));
+};
+
+const normalizeDeviceBleName = (value: unknown) => {
+  const name = typeof value === 'string' ? value.trim() : '';
+  if (
+    name.length >= 1 &&
+    name.length <= 32 &&
+    /^[\x21-\x7e]+$/.test(name) &&
+    !/["';=\\]/.test(name)
+  ) {
+    return name;
+  }
+  return mockSettings.deviceBleName;
+};
+
 function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
   const fallbackDeviceKeys = mockSettings.deviceCustomKeys;
   const fallbackDisabledDeviceKeys = mockSettings.deviceCustomKeyDoubleClicks;
@@ -203,6 +225,10 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     },
     deviceCustomKeysDefaultMigrated: prefs.deviceCustomKeysDefaultMigrated ?? true,
     deviceKnobRotationAction: prefs.deviceKnobRotationAction ?? 'systemVolume',
+    devicePluggedBrightnessPercent: clampNumber(prefs.devicePluggedBrightnessPercent, 100, 0, 100),
+    deviceBatteryBrightnessPercent: clampNumber(prefs.deviceBatteryBrightnessPercent, 100, 0, 100),
+    deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 30, 1, 1440),
+    deviceBleName: normalizeDeviceBleName(prefs.deviceBleName),
   };
 }
 

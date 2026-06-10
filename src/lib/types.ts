@@ -422,6 +422,14 @@ export interface UserPreferences {
   deviceCustomKeysDefaultMigrated: boolean;
   /** EC11 旋钮旋转动作。默认调电脑音量；可切换为屏幕亮度或禁用。 */
   deviceKnobRotationAction: DeviceKnobRotationAction;
+  /** 插电/充电时的设备灯效亮度上限，0-100。 */
+  devicePluggedBrightnessPercent: number;
+  /** 电池供电时的设备灯效亮度上限，0-100。 */
+  deviceBatteryBrightnessPercent: number;
+  /** 电池供电空闲自动关机时间，单位分钟。插电时不进入该策略。 */
+  deviceBatteryAutoShutdownMinutes: number;
+  /** 设备 BLE 广播名，写入固件后下次重新广播/重启生效。 */
+  deviceBleName: string;
   /** 本地 Qwen3-ASR 当前激活的模型 id。仅在 activeAsrProvider === 'local-qwen3' 时有意义。 */
   localAsrActiveModel: string;
   /** 本地模型下载源镜像（'huggingface' / 'hf-mirror'）。 */

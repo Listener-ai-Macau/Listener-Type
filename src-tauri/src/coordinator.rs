@@ -3040,7 +3040,7 @@ fn embedded_ble_wake_guidance_for_error_with_power(err: &str, usb_powered: Optio
             return "Listener BLE 因低功耗空闲断开，正在重连音频 notify；若设备已睡眠，请按 KEY4/唤醒键。".to_string();
         }
         crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect => {
-            return "Listener BLE 连接已断开，正在重连音频 notify；当前未确认处于电池低功耗场景，若持续断开请重新连接或导出诊断。".to_string();
+            return "Listener BLE 正在重连音频 notify；当前未确认处于电池低功耗场景，若持续失败请重新连接或导出诊断。".to_string();
         }
         crate::embedded_ble::BleFailureKind::MissingPairing
         | crate::embedded_ble::BleFailureKind::StaleGattService => {
@@ -3176,8 +3176,8 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                         emit_embedded_ble_recovery_capsule(
                             &inner,
                             "reconnecting",
-                            "Listener BLE 已断开，正在自动重连音频通道...",
-                            None,
+                            "Listener BLE 正在自动重连音频通道...",
+                            Some(1800),
                         );
                     } else if is_embedded_ble_automatic_recovery_error(&err) {
                         log::info!(

@@ -482,6 +482,50 @@ fn default_true() -> bool {
     true
 }
 
+pub const DEFAULT_DEVICE_BRIGHTNESS_PERCENT: u8 = 100;
+pub const DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 30;
+pub const DEFAULT_DEVICE_BLE_NAME: &str = "listener";
+pub const MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 24 * 60;
+
+fn default_device_brightness_percent() -> u8 {
+    DEFAULT_DEVICE_BRIGHTNESS_PERCENT
+}
+
+fn default_device_battery_auto_shutdown_minutes() -> u32 {
+    DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES
+}
+
+fn default_device_ble_name() -> String {
+    DEFAULT_DEVICE_BLE_NAME.to_string()
+}
+
+pub fn clamp_device_brightness_percent(value: u8) -> u8 {
+    value.min(100)
+}
+
+pub fn clamp_device_battery_auto_shutdown_minutes(value: u32) -> u32 {
+    value.clamp(1, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES)
+}
+
+pub fn device_ble_name_is_valid(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 32
+        && bytes.iter().all(|byte| {
+            let byte = *byte;
+            (0x21..=0x7e).contains(&byte) && !matches!(byte, b'"' | b'\'' | b';' | b'=' | b'\\')
+        })
+}
+
+pub fn normalize_device_ble_name(name: String) -> String {
+    let trimmed = name.trim().to_string();
+    if device_ble_name_is_valid(&trimmed) {
+        trimmed
+    } else {
+        default_device_ble_name()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum DeviceCustomKeyId {
@@ -970,6 +1014,18 @@ pub struct UserPreferences {
     /// syncs this preference over the BLE audio control characteristic.
     #[serde(default)]
     pub device_knob_rotation_action: DeviceKnobRotationAction,
+    /// Plugged/charging LED brightness ceiling, 0-100.
+    #[serde(default = "default_device_brightness_percent")]
+    pub device_plugged_brightness_percent: u8,
+    /// Battery LED brightness ceiling, 0-100.
+    #[serde(default = "default_device_brightness_percent")]
+    pub device_battery_brightness_percent: u8,
+    /// Battery-only idle shutdown timeout in minutes. Plugged power stays awake.
+    #[serde(default = "default_device_battery_auto_shutdown_minutes")]
+    pub device_battery_auto_shutdown_minutes: u32,
+    /// BLE advertising/device name written to firmware device settings.
+    #[serde(default = "default_device_ble_name")]
+    pub device_ble_name: String,
     /// 本地 Qwen3-ASR 当前激活的模型 id（"qwen3-asr-0.6b" / "qwen3-asr-1.7b"）。
     /// 仅在 active_asr_provider == "local-qwen3" 时有意义。
     #[serde(default = "default_local_asr_model")]
@@ -1162,6 +1218,14 @@ struct UserPreferencesWire {
     device_custom_keys_default_migrated: bool,
     #[serde(default)]
     device_knob_rotation_action: DeviceKnobRotationAction,
+    #[serde(default = "default_device_brightness_percent")]
+    device_plugged_brightness_percent: u8,
+    #[serde(default = "default_device_brightness_percent")]
+    device_battery_brightness_percent: u8,
+    #[serde(default = "default_device_battery_auto_shutdown_minutes")]
+    device_battery_auto_shutdown_minutes: u32,
+    #[serde(default = "default_device_ble_name")]
+    device_ble_name: String,
     #[serde(default = "default_local_asr_model")]
     local_asr_active_model: String,
     #[serde(default = "default_local_asr_mirror")]
@@ -1244,6 +1308,10 @@ impl Default for UserPreferencesWire {
             device_custom_key_long_presses: prefs.device_custom_key_long_presses,
             device_custom_keys_default_migrated: prefs.device_custom_keys_default_migrated,
             device_knob_rotation_action: prefs.device_knob_rotation_action,
+            device_plugged_brightness_percent: prefs.device_plugged_brightness_percent,
+            device_battery_brightness_percent: prefs.device_battery_brightness_percent,
+            device_battery_auto_shutdown_minutes: prefs.device_battery_auto_shutdown_minutes,
+            device_ble_name: prefs.device_ble_name,
             local_asr_active_model: prefs.local_asr_active_model,
             local_asr_mirror: prefs.local_asr_mirror,
             local_asr_keep_loaded_secs: prefs.local_asr_keep_loaded_secs,
@@ -1353,6 +1421,16 @@ impl<'de> Deserialize<'de> for UserPreferences {
             device_custom_key_long_presses,
             device_custom_keys_default_migrated: true,
             device_knob_rotation_action: wire.device_knob_rotation_action,
+            device_plugged_brightness_percent: clamp_device_brightness_percent(
+                wire.device_plugged_brightness_percent,
+            ),
+            device_battery_brightness_percent: clamp_device_brightness_percent(
+                wire.device_battery_brightness_percent,
+            ),
+            device_battery_auto_shutdown_minutes: clamp_device_battery_auto_shutdown_minutes(
+                wire.device_battery_auto_shutdown_minutes,
+            ),
+            device_ble_name: normalize_device_ble_name(wire.device_ble_name),
             local_asr_active_model: wire.local_asr_active_model,
             local_asr_mirror: wire.local_asr_mirror,
             local_asr_keep_loaded_secs: wire.local_asr_keep_loaded_secs,
@@ -1757,6 +1835,10 @@ impl Default for UserPreferences {
             device_custom_key_long_presses: DeviceCustomKeys::disabled(),
             device_custom_keys_default_migrated: true,
             device_knob_rotation_action: DeviceKnobRotationAction::default(),
+            device_plugged_brightness_percent: default_device_brightness_percent(),
+            device_battery_brightness_percent: default_device_brightness_percent(),
+            device_battery_auto_shutdown_minutes: default_device_battery_auto_shutdown_minutes(),
+            device_ble_name: default_device_ble_name(),
             local_asr_active_model: default_local_asr_model(),
             local_asr_mirror: default_local_asr_mirror(),
             local_asr_keep_loaded_secs: default_local_asr_keep_loaded_secs(),

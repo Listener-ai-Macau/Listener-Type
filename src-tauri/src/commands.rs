@@ -43,12 +43,13 @@ use crate::polish::{
 };
 use crate::recorder::{AudioConsumer, Recorder};
 use crate::types::{
-    builtin_style_pack_id, default_active_style_pack_id, ChineseScriptPreference, ComboBinding,
-    CorrectionRule, CredentialsStatus, DeviceCustomKeyAction, DeviceCustomKeyMapping,
-    DeviceCustomKeys, DictationInputSource, DictationSession, DictionaryEntry, HotkeyCapability,
-    HotkeyStatus, OutputLanguagePreference, PolishMode, ShortcutBinding, StylePack, StylePackKind,
+    builtin_style_pack_id, default_active_style_pack_id, device_ble_name_is_valid,
+    ChineseScriptPreference, ComboBinding, CorrectionRule, CredentialsStatus,
+    DeviceCustomKeyAction, DeviceCustomKeyMapping, DeviceCustomKeys, DeviceKnobRotationAction,
+    DictationInputSource, DictationSession, DictionaryEntry, HotkeyCapability, HotkeyStatus,
+    OutputLanguagePreference, PolishMode, ShortcutBinding, StylePack, StylePackKind,
     StylePackRuntimeDiagnostics, StyleSystemPrompts, UpdateChannel, UserPreferences,
-    VocabPresetStore, WindowsImeStatus,
+    VocabPresetStore, WindowsImeStatus, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
 };
 
 type CoordinatorState<'a> = State<'a, Arc<Coordinator>>;
@@ -394,6 +395,85 @@ fn persist_settings<T: SettingsWriter>(
     Ok(())
 }
 
+fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPreferences) -> bool {
+    previous.device_knob_rotation_action != next.device_knob_rotation_action
+        || previous.device_plugged_brightness_percent != next.device_plugged_brightness_percent
+        || previous.device_battery_brightness_percent != next.device_battery_brightness_percent
+        || previous.device_battery_auto_shutdown_minutes
+            != next.device_battery_auto_shutdown_minutes
+        || previous.device_ble_name != next.device_ble_name
+}
+
+fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), String> {
+    if prefs.device_plugged_brightness_percent > 100 {
+        return Err("插电亮度必须在 0-100 之间。".to_string());
+    }
+    if prefs.device_battery_brightness_percent > 100 {
+        return Err("电池亮度必须在 0-100 之间。".to_string());
+    }
+    if prefs.device_battery_auto_shutdown_minutes == 0
+        || prefs.device_battery_auto_shutdown_minutes > MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES
+    {
+        return Err(format!(
+            "电池自动关机时间必须在 1-{} 分钟之间。",
+            MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES
+        ));
+    }
+    if !device_ble_name_is_valid(&prefs.device_ble_name) {
+        return Err(
+            "蓝牙名称只支持 1-32 个可见 ASCII 字符，不能包含空格、引号、分号、等号或反斜杠。"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationAction) -> &'static str {
+    match action {
+        DeviceKnobRotationAction::SystemVolume => "system_volume",
+        DeviceKnobRotationAction::ScreenBrightness => "screen_brightness",
+        DeviceKnobRotationAction::Disabled => "disabled",
+    }
+}
+
+fn sync_device_command_to_firmware(command: String) -> Result<(), String> {
+    crate::embedded_ble::send_device_settings_command(&command, Duration::from_secs(2))
+        .map_err(|err| format!("设备设置写入固件失败：{err}"))
+}
+
+fn sync_device_firmware_preferences(
+    previous: &UserPreferences,
+    next: &UserPreferences,
+) -> Result<(), String> {
+    if previous.device_knob_rotation_action != next.device_knob_rotation_action {
+        let mode = firmware_mode_for_device_knob_rotation_action(next.device_knob_rotation_action);
+        crate::embedded_ble::send_ec11_rotation_mode(mode, Duration::from_secs(2))
+            .map_err(|err| format!("旋钮动作写入固件失败：{err}"))?;
+    }
+    if previous.device_plugged_brightness_percent != next.device_plugged_brightness_percent {
+        sync_device_command_to_firmware(format!(
+            "DEVICE:SET plugged_brightness={}",
+            next.device_plugged_brightness_percent
+        ))?;
+    }
+    if previous.device_battery_brightness_percent != next.device_battery_brightness_percent {
+        sync_device_command_to_firmware(format!(
+            "DEVICE:SET battery_brightness={}",
+            next.device_battery_brightness_percent
+        ))?;
+    }
+    if previous.device_battery_auto_shutdown_minutes != next.device_battery_auto_shutdown_minutes {
+        sync_device_command_to_firmware(format!(
+            "DEVICE:SET auto_shutdown_minutes={}",
+            next.device_battery_auto_shutdown_minutes
+        ))?;
+    }
+    if previous.device_ble_name != next.device_ble_name {
+        sync_device_command_to_firmware(format!("DEVICE:SET ble_name={}", next.device_ble_name))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn set_settings(
     coord: CoordinatorState<'_>,
@@ -411,17 +491,18 @@ pub fn set_settings(
     if !prefs.dictation_input_source_user_overridden {
         prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
     }
-    let previous_knob_rotation_action = previous_prefs.device_knob_rotation_action;
-    let next_knob_rotation_action = prefs.device_knob_rotation_action;
     let next_input_source = prefs.dictation_input_source;
+    let should_sync_device_firmware = device_firmware_settings_changed(&previous_prefs, &prefs);
+    if should_sync_device_firmware {
+        validate_device_firmware_preferences(&prefs)?;
+        sync_device_firmware_preferences(&previous_prefs, &prefs)?;
+    }
     // 广播给所有 webview。issue #205：QaPanel 跑在独立 webview，
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
     persist_settings(&*coord, prefs.clone())?;
     coord.refresh_embedded_ble_listener();
-    if next_input_source == DictationInputSource::EmbeddedBle
-        || previous_knob_rotation_action != next_knob_rotation_action
-    {
+    if next_input_source == DictationInputSource::EmbeddedBle && !should_sync_device_firmware {
         coord.sync_device_knob_rotation_action_to_firmware("settings_save");
     }
     // refresh_tray_microphone_menu 内部会调用 NSStatusItem.set_menu，必须在主线程上跑。
