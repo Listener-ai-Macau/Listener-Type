@@ -482,13 +482,18 @@ fn default_true() -> bool {
     true
 }
 
-pub const DEFAULT_DEVICE_BRIGHTNESS_PERCENT: u8 = 100;
+pub const DEFAULT_DEVICE_PLUGGED_BRIGHTNESS_PERCENT: u8 = 80;
+pub const DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT: u8 = 50;
 pub const DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 30;
 pub const DEFAULT_DEVICE_BLE_NAME: &str = "listener";
 pub const MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 24 * 60;
 
-fn default_device_brightness_percent() -> u8 {
-    DEFAULT_DEVICE_BRIGHTNESS_PERCENT
+fn default_device_plugged_brightness_percent() -> u8 {
+    DEFAULT_DEVICE_PLUGGED_BRIGHTNESS_PERCENT
+}
+
+fn default_device_battery_brightness_percent() -> u8 {
+    DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT
 }
 
 fn default_device_battery_auto_shutdown_minutes() -> u32 {
@@ -1015,10 +1020,10 @@ pub struct UserPreferences {
     #[serde(default)]
     pub device_knob_rotation_action: DeviceKnobRotationAction,
     /// Plugged/charging LED brightness ceiling, 0-100.
-    #[serde(default = "default_device_brightness_percent")]
+    #[serde(default = "default_device_plugged_brightness_percent")]
     pub device_plugged_brightness_percent: u8,
     /// Battery LED brightness ceiling, 0-100.
-    #[serde(default = "default_device_brightness_percent")]
+    #[serde(default = "default_device_battery_brightness_percent")]
     pub device_battery_brightness_percent: u8,
     /// Battery-only idle shutdown timeout in minutes. Plugged power stays awake.
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
@@ -1218,9 +1223,9 @@ struct UserPreferencesWire {
     device_custom_keys_default_migrated: bool,
     #[serde(default)]
     device_knob_rotation_action: DeviceKnobRotationAction,
-    #[serde(default = "default_device_brightness_percent")]
+    #[serde(default = "default_device_plugged_brightness_percent")]
     device_plugged_brightness_percent: u8,
-    #[serde(default = "default_device_brightness_percent")]
+    #[serde(default = "default_device_battery_brightness_percent")]
     device_battery_brightness_percent: u8,
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
     device_battery_auto_shutdown_minutes: u32,
@@ -1835,8 +1840,8 @@ impl Default for UserPreferences {
             device_custom_key_long_presses: DeviceCustomKeys::disabled(),
             device_custom_keys_default_migrated: true,
             device_knob_rotation_action: DeviceKnobRotationAction::default(),
-            device_plugged_brightness_percent: default_device_brightness_percent(),
-            device_battery_brightness_percent: default_device_brightness_percent(),
+            device_plugged_brightness_percent: default_device_plugged_brightness_percent(),
+            device_battery_brightness_percent: default_device_battery_brightness_percent(),
             device_battery_auto_shutdown_minutes: default_device_battery_auto_shutdown_minutes(),
             device_ble_name: default_device_ble_name(),
             local_asr_active_model: default_local_asr_model(),

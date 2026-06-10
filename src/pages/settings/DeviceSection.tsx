@@ -25,8 +25,8 @@ const bleNameIsValid = (name: string) =>
 export function DeviceSection() {
   const { t } = useTranslation();
   const { prefs, error, updatePrefs: savePrefs } = useHotkeySettings();
-  const [pluggedBrightness, setPluggedBrightness] = useState('100');
-  const [batteryBrightness, setBatteryBrightness] = useState('100');
+  const [pluggedBrightness, setPluggedBrightness] = useState('80');
+  const [batteryBrightness, setBatteryBrightness] = useState('50');
   const [autoShutdownMinutes, setAutoShutdownMinutes] = useState('30');
   const [bleName, setBleName] = useState('listener');
   const [bleNameError, setBleNameError] = useState<string | null>(null);
@@ -37,8 +37,8 @@ export function DeviceSection() {
 
   useEffect(() => {
     if (!prefs) return;
-    setPluggedBrightness(String(prefs.devicePluggedBrightnessPercent ?? 100));
-    setBatteryBrightness(String(prefs.deviceBatteryBrightnessPercent ?? 100));
+    setPluggedBrightness(String(prefs.devicePluggedBrightnessPercent ?? 80));
+    setBatteryBrightness(String(prefs.deviceBatteryBrightnessPercent ?? 50));
     setAutoShutdownMinutes(String(prefs.deviceBatteryAutoShutdownMinutes ?? 30));
     setBleName(prefs.deviceBleName || 'listener');
   }, [
@@ -207,7 +207,7 @@ export function DeviceSection() {
           onCommit={() =>
             void commitNumber(
               pluggedBrightness,
-              prefs.devicePluggedBrightnessPercent ?? 100,
+              prefs.devicePluggedBrightnessPercent ?? 80,
               0,
               100,
               'devicePluggedBrightnessPercent',
@@ -226,7 +226,7 @@ export function DeviceSection() {
           onCommit={() =>
             void commitNumber(
               batteryBrightness,
-              prefs.deviceBatteryBrightnessPercent ?? 100,
+              prefs.deviceBatteryBrightnessPercent ?? 50,
               0,
               100,
               'deviceBatteryBrightnessPercent',

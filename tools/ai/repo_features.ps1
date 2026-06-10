@@ -38,7 +38,7 @@ function New-FeatureSnapshot {
             "ASR providers: Volcengine streaming, OpenAI batch, Apple Speech, Bailian realtime, macOS Qwen local, and Windows Foundry Local Whisper.",
             "Text pipeline: coordinator-driven dictation, correction, polish, vocabulary hotwords, translation, QA selection ask, and insertion.",
             "Windows insertion: direct/clipboard fallback paths are default; optional native TSF IME bridge remains available for explicit validation.",
-            "Device controls: Listener keyboard KEY1-KEY4 fallback shortcuts map to configurable safe actions; EC11 rotation can be set to system volume, screen brightness, or disabled and is synced to firmware over BLE.",
+            "Device controls: Listener keyboard KEY1-KEY4 fallback shortcuts map to configurable safe actions; EC11 rotation can be set to system volume, screen brightness, or disabled and is synced to firmware over BLE. Fresh device-setting defaults are plugged brightness 80%, battery brightness 50%, and BLE name listener.",
             "Release shell: Tauri updater, background update gate, tray menu, autostart, single-instance behavior, and package metadata.",
             "Settings and diagnostics: shortcuts, provider credentials in OS keyring/local storage, language, permissions, advanced logs, diagnostic export, dark mode, and device health.",
             "Developer/product tools: embedded audio file/BLE CLI replay, firmware OTA package/preflight validation, BLE stream smoke, Foundry runtime probes, and updater manifest checks."
@@ -136,6 +136,19 @@ function Test-FeatureSnapshot {
     $jsonText = $Snapshot | ConvertTo-Json -Depth 10
     $scriptText = Get-Content -Path $PSCommandPath -Raw
 
+    function Test-RepoText {
+        param([string]$RelativePath, [string]$Pattern, [string]$Label)
+        $path = Join-Path $resolvedRepoRoot $RelativePath
+        if (-not (Test-Path -LiteralPath $path)) {
+            return @("missing file for $($Label): $RelativePath")
+        }
+        $text = Get-Content -LiteralPath $path -Raw
+        if ($text -notmatch $Pattern) {
+            return @("missing $($Label) in $($RelativePath): $Pattern")
+        }
+        return @()
+    }
+
     foreach ($term in @("Tauri", "Rust", "React", "BLE", "embedded audio", "ASR", "diagnostics", "settings")) {
         if ($jsonText -notmatch [regex]::Escape($term)) {
             $errors += "missing required Listener-Type feature term: $term"
@@ -151,7 +164,14 @@ function Test-FeatureSnapshot {
     if (@($Snapshot["validation_commands"]).Count -lt 4) {
         $errors += "validation_commands must contain at least 4 entries"
     }
-    if ($scriptText.Length -gt 16000) {
+    $errors += @(Test-RepoText "src-tauri/src/types.rs" 'DEFAULT_DEVICE_PLUGGED_BRIGHTNESS_PERCENT:\s*u8\s*=\s*80' 'plugged brightness default')
+    $errors += @(Test-RepoText "src-tauri/src/types.rs" 'DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT:\s*u8\s*=\s*50' 'battery brightness default')
+    $errors += @(Test-RepoText "src-tauri/src/types.rs" 'DEFAULT_DEVICE_BLE_NAME:\s*&str\s*=\s*"listener"' 'BLE name default')
+    $errors += @(Test-RepoText "src/lib/ipc.ts" 'devicePluggedBrightnessPercent:\s*80' 'mock plugged brightness default')
+    $errors += @(Test-RepoText "src/lib/ipc.ts" 'deviceBatteryBrightnessPercent:\s*50' 'mock battery brightness default')
+    $errors += @(Test-RepoText "src/pages/settings/DeviceSection.tsx" 'devicePluggedBrightnessPercent\s*\?\?\s*80' 'settings plugged brightness fallback')
+    $errors += @(Test-RepoText "src/pages/settings/DeviceSection.tsx" 'deviceBatteryBrightnessPercent\s*\?\?\s*50' 'settings battery brightness fallback')
+    if ($scriptText.Length -gt 17500) {
         $errors += "script is too long: $($scriptText.Length) characters"
     }
 
