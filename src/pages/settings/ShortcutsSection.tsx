@@ -20,6 +20,7 @@ import type {
   DeviceCustomKeyId,
   DeviceCustomKeys,
   DeviceCustomKeyMapping,
+  DeviceKnobRotationAction,
   InstalledApplication,
   ShortcutBinding,
 } from '../../lib/types';
@@ -92,6 +93,12 @@ const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
 ];
 
 const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
+
+const KNOB_ROTATION_ACTIONS: DeviceKnobRotationAction[] = [
+  'systemVolume',
+  'screenBrightness',
+  'disabled',
+];
 
 const fallbackShortcut = (): ShortcutBinding => ({
   primary: 'K',
@@ -253,6 +260,16 @@ export function DeviceKeysPanel() {
         {t('settings.deviceKeys.desc')}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+        <DeviceKnobControls
+          rotationAction={prefs.deviceKnobRotationAction}
+          onRotationChange={async action => {
+            if (action === prefs.deviceKnobRotationAction) return;
+            await savePrefs(current => ({
+              ...current,
+              deviceKnobRotationAction: action,
+            }));
+          }}
+        />
         {DEVICE_GESTURES.map(gesture => (
           <DeviceKeyGestureGroup
             key={gesture.id}
@@ -274,6 +291,127 @@ export function DeviceKeysPanel() {
         ))}
       </div>
     </Card>
+  );
+}
+
+function DeviceKnobControls({
+  rotationAction,
+  onRotationChange,
+}: {
+  rotationAction: DeviceKnobRotationAction;
+  onRotationChange: (action: DeviceKnobRotationAction) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div style={{ borderTop: '0.5px solid var(--ol-line-soft)', paddingTop: 12 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)', marginBottom: 8 }}>
+        {t('settings.deviceKeys.knobTitle', '旋钮')}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
+            gap: 12,
+            alignItems: 'start',
+          }}
+        >
+          <div style={{ minWidth: 0, paddingTop: 6 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
+              {t('settings.device.knobRotationLabel', '旋钮旋转')}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
+              {t('settings.device.knobRotationDesc', '旋转动作同步到设备。')}
+            </div>
+          </div>
+          <SelectLite
+            value={rotationAction}
+            onChange={value => void onRotationChange(value as DeviceKnobRotationAction)}
+            options={KNOB_ROTATION_ACTIONS.map(action => ({
+              value: action,
+              label: t(`settings.device.knobActions.${action}`, knobActionFallback(action)),
+            }))}
+            ariaLabel={t('settings.device.knobRotationAria', '选择旋钮旋转动作')}
+            style={{ ...inputStyle, maxWidth: 360 }}
+          />
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
+            gap: 12,
+            alignItems: 'start',
+          }}
+        >
+          <div style={{ minWidth: 0, paddingTop: 6 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
+              {t('settings.device.knobPressLabel', '旋钮按压')}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
+              {t('settings.device.knobPressDesc', '按压类手势由固件固定。')}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 360 }}>
+            <KnobPressAction
+              label={t('settings.device.knobPress.single', '单击')}
+              value={t('settings.device.knobPress.record', '开始 / 停止录音')}
+              muted={false}
+            />
+            <KnobPressAction
+              label={t('settings.device.knobPress.double', '双击')}
+              value={t('settings.device.knobPress.bluetooth', '重置蓝牙 / 重新配对')}
+              muted
+            />
+            <KnobPressAction
+              label={t('settings.device.knobPress.long', '长按')}
+              value={t('settings.device.knobPress.powerOff', '关机')}
+              muted
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KnobPressAction({
+  label,
+  value,
+  muted,
+}: {
+  label: string;
+  value: string;
+  muted: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(64px, 92px) minmax(0, 1fr)',
+        gap: 8,
+        alignItems: 'center',
+      }}
+    >
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: muted ? 'var(--ol-ink-4)' : 'var(--ol-ink)' }}>
+        {label}
+      </div>
+      <span
+        style={{
+          display: 'inline-flex',
+          minHeight: 32,
+          alignItems: 'center',
+          padding: '0 10px',
+          borderRadius: 6,
+          background: muted ? 'var(--ol-control-track)' : 'var(--ol-surface-2)',
+          border: '0.5px solid var(--ol-line-strong)',
+          fontSize: 12,
+          color: muted ? 'var(--ol-ink-4)' : 'var(--ol-ink)',
+          opacity: muted ? 0.72 : 1,
+        }}
+      >
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -329,6 +467,18 @@ function DeviceKeyGestureGroup({
       </div>
     </div>
   );
+}
+
+function knobActionFallback(action: DeviceKnobRotationAction) {
+  switch (action) {
+    case 'screenBrightness':
+      return '屏幕亮度';
+    case 'disabled':
+      return '禁用';
+    case 'systemVolume':
+    default:
+      return '电脑音量';
+  }
 }
 
 function DeviceKeyMappingControl({

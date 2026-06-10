@@ -11,6 +11,7 @@ import type {
   EmbeddedAudioInputFormat,
   EmbeddedBleRepairResult,
   EmbeddedBleRuntimeStatus,
+  DeviceFirmwareSettingsStatus,
   DictionaryEntry,
   EmbeddedAudioSubmissionResult,
   HotkeyCapability,
@@ -605,6 +606,28 @@ export function setSettings(prefs: UserPreferences): Promise<void> {
     syncMockSettingsFromStylePacks();
     return undefined;
   });
+}
+
+export function refreshDeviceSettingsStatus(): Promise<DeviceFirmwareSettingsStatus> {
+  return invokeOrMock('refresh_device_settings_status', undefined, () => ({
+    pluggedBrightnessPercent: mockSettings.devicePluggedBrightnessPercent,
+    batteryBrightnessPercent: mockSettings.deviceBatteryBrightnessPercent,
+    activeBrightnessPercent: mockSettings.devicePluggedBrightnessPercent,
+    batteryAutoShutdownMinutes: mockSettings.deviceBatteryAutoShutdownMinutes,
+    knobRotationAction:
+      mockSettings.deviceKnobRotationAction === 'screenBrightness'
+        ? 'screen_brightness'
+        : mockSettings.deviceKnobRotationAction === 'disabled'
+          ? 'disabled'
+          : 'system_volume',
+    bleName: mockSettings.deviceBleName,
+    bleNamePendingRestart: false,
+    externalPowerPresent: true,
+    usbPowerPresent: true,
+    charging: false,
+    chargeFull: false,
+    rawLine: '~DEVICE:SETTINGS mock=1 result=OK',
+  }));
 }
 
 // ── Release channel (Beta opt-in) ──────────────────────────────────────

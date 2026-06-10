@@ -559,6 +559,16 @@ pub fn set_settings(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn refresh_device_settings_status(
+) -> Result<crate::embedded_ble::DeviceSettingsStatus, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::embedded_ble::read_device_settings_status(Duration::from_secs(4))
+    })
+    .await
+    .map_err(|err| format!("device settings refresh task failed: {err}"))?
+}
+
 fn refresh_tray_menu_async(app: &AppHandle) {
     let app_for_main = app.clone();
     let _ = app.run_on_main_thread(move || {

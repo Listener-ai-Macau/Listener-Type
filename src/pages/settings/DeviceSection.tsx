@@ -1,18 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Icon } from '../../components/Icon';
 import { detectOS } from '../../components/WindowChrome';
 import type { DeviceKnobRotationAction, UserPreferences } from '../../lib/types';
+import { refreshDeviceSettingsStatus } from '../../lib/ipc';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Card } from '../_atoms';
 import { FirmwareOtaPanel } from './FirmwareOtaPanel';
 import { DeviceKeysPanel } from './ShortcutsSection';
 import { inputStyle, SettingRow } from './shared';
-
-const KNOB_ROTATION_ACTIONS: DeviceKnobRotationAction[] = [
-  'systemVolume',
-  'screenBrightness',
-  'disabled',
-];
 
 const clampNumber = (value: string, fallback: number, min: number, max: number) => {
   const parsed = Number(value);
@@ -34,6 +30,9 @@ export function DeviceSection() {
   const [autoShutdownMinutes, setAutoShutdownMinutes] = useState('30');
   const [bleName, setBleName] = useState('listener');
   const [bleNameError, setBleNameError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!prefs) return;
@@ -97,23 +96,69 @@ export function DeviceSection() {
     }));
   };
 
-  const setKnobRotationAction = async (action: DeviceKnobRotationAction) => {
-    if (action === prefs.deviceKnobRotationAction) return;
-    await savePrefs(current => ({
-      ...current,
-      deviceKnobRotationAction: action,
-    }));
+  const refreshFromDevice = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setRefreshError(null);
+    setRefreshStatus(null);
+    try {
+      const status = await refreshDeviceSettingsStatus();
+      const knobRotationAction = firmwareKnobActionToUi(status.knobRotationAction);
+      await savePrefs(current => ({
+        ...current,
+        devicePluggedBrightnessPercent: status.pluggedBrightnessPercent,
+        deviceBatteryBrightnessPercent: status.batteryBrightnessPercent,
+        deviceBatteryAutoShutdownMinutes: status.batteryAutoShutdownMinutes,
+        deviceBleName: status.bleName,
+        deviceKnobRotationAction: knobRotationAction,
+      }));
+      setRefreshStatus(
+        t(
+          'settings.device.refreshOk',
+          '已读取设备当前设置',
+        ),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRefreshError(message);
+    } finally {
+      setRefreshing(false);
+    }
   };
   const bleSupported = detectOS() === 'win';
 
   return (
     <>
     <Card>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-        {t('settings.device.title', '设备')}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>
+          {t('settings.device.title', '设备')}
+        </div>
+        <button
+          type="button"
+          onClick={() => void refreshFromDevice()}
+          disabled={refreshing}
+          title={t('settings.device.refresh', '刷新设备状态')}
+          aria-label={t('settings.device.refresh', '刷新设备状态')}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            border: '0.5px solid var(--ol-line-strong)',
+            background: refreshing ? 'var(--ol-control-track)' : 'var(--ol-surface-2)',
+            color: refreshing ? 'var(--ol-ink-4)' : 'var(--ol-ink)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'default',
+            opacity: refreshing ? 0.75 : 1,
+          }}
+        >
+          <Icon name="refresh" size={15} />
+        </button>
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 2 }}>
-        {t('settings.device.desc', '设备亮度、低功耗、蓝牙名称和旋钮动作会同步写入已连接的 Listener。')}
+        {t('settings.device.desc', '设备亮度、低功耗和蓝牙名称会同步写入已连接的 Listener。')}
       </div>
       {error && (
         <div
@@ -128,6 +173,26 @@ export function DeviceSection() {
           }}
         >
           {error}
+        </div>
+      )}
+      {refreshError && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: '8px 10px',
+            borderRadius: 8,
+            background: 'rgba(189, 98, 89, 0.12)',
+            color: 'var(--ol-err)',
+            fontSize: 11.5,
+            lineHeight: 1.45,
+          }}
+        >
+          {refreshError}
+        </div>
+      )}
+      {refreshStatus && !refreshError && (
+        <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--ol-ink-4)' }}>
+          {refreshStatus}
         </div>
       )}
       <SettingRow
@@ -218,58 +283,23 @@ export function DeviceSection() {
           )}
         </div>
       </SettingRow>
-      <SettingRow
-        label={t('settings.device.knobRotationLabel', '旋钮旋转')}
-        desc={t('settings.device.knobRotationDesc', '旋转动作同步到设备；按压类手势仍由固件固定。')}
-      >
-        <div
-          role="group"
-          aria-label={t('settings.device.knobRotationAria', '选择旋钮旋转动作')}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            width: '100%',
-            maxWidth: 360,
-            padding: 3,
-            borderRadius: 10,
-            background: 'var(--ol-control-track)',
-            border: '0.5px solid var(--ol-line-strong)',
-            gap: 2,
-          }}
-        >
-          {KNOB_ROTATION_ACTIONS.map(action => {
-            const active = prefs.deviceKnobRotationAction === action;
-            return (
-              <button
-                key={action}
-                type="button"
-                aria-pressed={active}
-                onClick={() => void setKnobRotationAction(action)}
-                style={{
-                  minHeight: 32,
-                  padding: '0 10px',
-                  border: '0.5px solid',
-                  borderColor: active ? 'var(--ol-blue)' : 'transparent',
-                  borderRadius: 8,
-                  background: active ? 'var(--ol-control-active)' : 'transparent',
-                  color: active ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
-                  fontFamily: 'inherit',
-                  fontSize: 12,
-                  fontWeight: active ? 600 : 500,
-                  cursor: 'default',
-                }}
-              >
-                {t(`settings.device.knobActions.${action}`, knobActionFallback(action))}
-              </button>
-            );
-          })}
-        </div>
-      </SettingRow>
     </Card>
     <DeviceKeysPanel />
     <FirmwareOtaPanel supported={bleSupported} bleStatus="idle" />
     </>
   );
+}
+
+function firmwareKnobActionToUi(value: string): DeviceKnobRotationAction {
+  switch (value) {
+    case 'screen_brightness':
+      return 'screenBrightness';
+    case 'disabled':
+      return 'disabled';
+    case 'system_volume':
+    default:
+      return 'systemVolume';
+  }
 }
 
 function PercentInput({
@@ -327,16 +357,4 @@ function NumberInput({
       <span style={{ fontSize: 12, color: 'var(--ol-ink-4)', minWidth: 28 }}>{suffix}</span>
     </div>
   );
-}
-
-function knobActionFallback(action: DeviceKnobRotationAction) {
-  switch (action) {
-    case 'screenBrightness':
-      return '屏幕亮度';
-    case 'disabled':
-      return '禁用';
-    case 'systemVolume':
-    default:
-      return '电脑音量';
-  }
 }

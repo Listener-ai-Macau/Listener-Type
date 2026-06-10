@@ -214,6 +214,54 @@ fn embedded_audio_stop_feedback_latched(inner: &Arc<Inner>) -> bool {
         .load(Ordering::SeqCst)
 }
 
+fn should_sync_device_ai_processing(inner: &Arc<Inner>) -> bool {
+    inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle
+        || embedded_ble_actor_context_active(inner)
+}
+
+fn set_device_ai_processing_async(inner: &Arc<Inner>, active: bool, reason: &'static str) {
+    if !should_sync_device_ai_processing(inner) {
+        return;
+    }
+    let session_id = inner.state.lock().session_id;
+    async_runtime::spawn_blocking(move || {
+        match crate::embedded_ble::send_recording_processing_state(active, Duration::from_secs(2)) {
+            Ok(()) => log::info!(
+                "[embedded-ble] device AI processing LED synced active={active} reason={reason} session_id={session_id}"
+            ),
+            Err(err) => log::warn!(
+                "[embedded-ble] device AI processing LED sync failed active={active} reason={reason} session_id={session_id}: {err}"
+            ),
+        }
+    });
+}
+
+struct DeviceAiProcessingGuard {
+    inner: Arc<Inner>,
+    active: bool,
+}
+
+impl DeviceAiProcessingGuard {
+    fn start(inner: &Arc<Inner>, reason: &'static str) -> Self {
+        let active = should_sync_device_ai_processing(inner);
+        if active {
+            set_device_ai_processing_async(inner, true, reason);
+        }
+        Self {
+            inner: Arc::clone(inner),
+            active,
+        }
+    }
+}
+
+impl Drop for DeviceAiProcessingGuard {
+    fn drop(&mut self) {
+        if self.active {
+            set_device_ai_processing_async(&self.inner, false, "dictation_processing_end");
+        }
+    }
+}
+
 fn register_embedded_ble_cancel_flag(inner: &Arc<Inner>, flag: &Arc<AtomicBool>) {
     *inner.embedded_ble_cancel_flag.lock() = Some(Arc::clone(flag));
 }
@@ -2077,6 +2125,7 @@ impl EmbeddedStreamingDictation {
     }
 
     fn abort_active_session(&mut self, inner: &Arc<Inner>, message: &str) {
+        set_device_ai_processing_async(inner, false, "embedded_stream_abort");
         let event_session_id = self.session.as_ref().map(|session| session.session_id);
         if let Some(session) = self.session.take() {
             cancel_asr_for_session(inner, session.session_id);
@@ -2100,6 +2149,7 @@ impl EmbeddedStreamingDictation {
     fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
         if let Some(session) = self.session.as_ref() {
             latch_embedded_audio_stop_feedback(inner);
+            set_device_ai_processing_async(inner, true, "embedded_stop_boundary");
             emit_embedded_audio_transcribing_if_active(
                 inner,
                 session.session_id,
@@ -2604,6 +2654,10 @@ async fn finish_end_session_after_stop_transition(
         0.0,
         current_embedded_audio_partial_preview(inner),
         None,
+    );
+    let _device_ai_processing = DeviceAiProcessingGuard::start(
+        inner,
+        "dictation_processing_start",
     );
     if let Some(rec) = take_recorder_for_session(inner, current_session_id) {
         rec.stop();
@@ -3277,6 +3331,7 @@ pub(super) fn cancel_session(inner: &Arc<Inner>) {
 }
 
 fn cancel_embedded_ble_session_through_actor(inner: &Arc<Inner>) {
+    set_device_ai_processing_async(inner, false, "embedded_session_cancel");
     let session_id = inner.state.lock().session_id;
     record_embedded_ble_session_actor_command(
         inner,

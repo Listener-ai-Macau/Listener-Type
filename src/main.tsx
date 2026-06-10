@@ -16,6 +16,8 @@ const isLocalAsrVisual =
   import.meta.env.DEV && params.get("visual") === "local-asr";
 const isSettingsShortcutsVisual =
   import.meta.env.DEV && params.get("visual") === "settings-shortcuts";
+const isSettingsDeviceVisual =
+  import.meta.env.DEV && params.get("visual") === "settings-device";
 
 if (import.meta.env.DEV && params.get("theme") === "dark") {
   document.documentElement.setAttribute("data-theme", "dark");
@@ -38,6 +40,12 @@ const renderApp = () => {
           <HotkeySettingsProvider>
             <div style={{ width: "100%", height: "100%", padding: 24, overflow: "auto", background: "var(--ol-window-bg)" }}>
               <Settings embedded initialSection="shortcuts" />
+            </div>
+          </HotkeySettingsProvider>
+        ) : isSettingsDeviceVisual ? (
+          <HotkeySettingsProvider>
+            <div style={{ width: "100%", height: "100%", padding: 24, overflow: "auto", background: "var(--ol-window-bg)" }}>
+              <Settings embedded initialSection="device" />
             </div>
           </HotkeySettingsProvider>
         ) : (

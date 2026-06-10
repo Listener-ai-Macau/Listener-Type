@@ -42,6 +42,23 @@ pub struct FirmwareOtaDeviceSnapshot {
     pub detail: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSettingsStatus {
+    pub plugged_brightness_percent: u8,
+    pub battery_brightness_percent: u8,
+    pub active_brightness_percent: u8,
+    pub battery_auto_shutdown_minutes: u32,
+    pub knob_rotation_action: String,
+    pub ble_name: String,
+    pub ble_name_pending_restart: bool,
+    pub external_power_present: bool,
+    pub usb_power_present: bool,
+    pub charging: bool,
+    pub charge_full: bool,
+    pub raw_line: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BleFailureKind {
@@ -1408,24 +1425,44 @@ mod windows_ble {
         Ok(())
     }
 
-    pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
-        if let Some(result) =
-            send_audio_control_via_active_capture(b"VREC:TOGGLE\n", timeout, "audio control toggle")
-        {
+    fn send_recording_control_command(
+        command: &[u8],
+        timeout: Duration,
+        label: &'static str,
+    ) -> Result<(), String> {
+        if let Some(result) = send_audio_control_via_active_capture(command, timeout, label) {
             result?;
-            log::info!("[embedded-ble] audio control toggle sent via active capture");
+            log::info!("[embedded-ble] {label} sent via active capture");
             return Ok(());
         }
         let target = open_audio_control_target()?;
         write_gatt_value_with_timeout(
             &target.control,
-            b"VREC:TOGGLE\n",
+            command,
             GattWriteOption::WriteWithResponse,
             timeout,
-            "audio control toggle",
+            label,
         )?;
-        log::info!("[embedded-ble] audio control toggle sent");
+        log::info!("[embedded-ble] {label} sent");
         Ok(())
+    }
+
+    pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
+        send_recording_control_command(b"VREC:TOGGLE\n", timeout, "audio control toggle")
+    }
+
+    pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
+        let command = if active {
+            b"VREC:PROCESSING:START\n".as_slice()
+        } else {
+            b"VREC:PROCESSING:STOP\n".as_slice()
+        };
+        let label = if active {
+            "audio processing start"
+        } else {
+            "audio processing stop"
+        };
+        send_recording_control_command(command, timeout, label)
     }
 
     pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), String> {
@@ -1468,12 +1505,6 @@ mod windows_ble {
             return Err("device settings command must be a single line".to_string());
         }
         let payload = format!("{command}\n");
-        if payload.as_bytes().len() >= 64 {
-            return Err(format!(
-                "device settings command is too long for BLE control characteristic: {} bytes (max 63 including newline)",
-                payload.as_bytes().len()
-            ));
-        }
 
         let serial_result = send_device_settings_via_usb_serial(command, timeout);
         match &serial_result {
@@ -1487,6 +1518,18 @@ mod windows_ble {
                     "[embedded-ble] device settings USB serial path unavailable; trying BLE control: {err}"
                 );
             }
+        }
+
+        if payload.as_bytes().len() >= 64 {
+            return Err(format!(
+                "device settings command is too long for BLE control characteristic: {} bytes (max 63 including newline); USB serial fallback failed: {}",
+                payload.as_bytes().len(),
+                serial_result
+                    .as_ref()
+                    .err()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "not attempted".to_string())
+            ));
         }
 
         if let Some(result) =
@@ -1536,6 +1579,14 @@ mod windows_ble {
         Ok(())
     }
 
+    pub fn read_device_settings_status(
+        timeout: Duration,
+    ) -> Result<crate::embedded_ble::DeviceSettingsStatus, String> {
+        let line = exchange_device_settings_via_usb_serial("DEVICE:SETTINGS", timeout)
+            .map_err(|err| format!("USB serial device settings refresh failed: {err}"))?;
+        parse_device_settings_status_line(&line)
+    }
+
     #[derive(Debug, Clone)]
     enum DeviceSettingsSerialError {
         Unavailable(String),
@@ -1563,6 +1614,13 @@ mod windows_ble {
         command: &str,
         timeout: Duration,
     ) -> Result<(), DeviceSettingsSerialError> {
+        exchange_device_settings_via_usb_serial(command, timeout).map(|_| ())
+    }
+
+    fn exchange_device_settings_via_usb_serial(
+        command: &str,
+        timeout: Duration,
+    ) -> Result<String, DeviceSettingsSerialError> {
         let ports = serialport::available_ports().map_err(|err| {
             DeviceSettingsSerialError::Unavailable(format!(
                 "USB serial port enumeration failed: {err}"
@@ -1577,8 +1635,8 @@ mod windows_ble {
 
         let mut errors = Vec::new();
         for port in candidates {
-            match send_device_settings_via_serial_port(&port.port_name, command, timeout) {
-                Ok(()) => return Ok(()),
+            match exchange_device_settings_via_serial_port(&port.port_name, command, timeout) {
+                Ok(line) => return Ok(line),
                 Err(err) if err.is_firmware_rejection() => return Err(err),
                 Err(err) => errors.push(format!("{}: {err}", port.port_name)),
             }
@@ -1626,11 +1684,11 @@ mod windows_ble {
             || text.contains("cp210")
     }
 
-    fn send_device_settings_via_serial_port(
+    fn exchange_device_settings_via_serial_port(
         port_name: &str,
         command: &str,
         timeout: Duration,
-    ) -> Result<(), DeviceSettingsSerialError> {
+    ) -> Result<String, DeviceSettingsSerialError> {
         let serial_timeout = Duration::from_millis(120);
         let mut port = serialport::new(port_name, DEVICE_SETTINGS_SERIAL_BAUD_RATE)
             .timeout(serial_timeout)
@@ -1663,11 +1721,8 @@ mod windows_ble {
                             "firmware rejected device settings command: {line}"
                         )));
                     }
-                    if response
-                        .lines()
-                        .any(|line| line.contains("~DEVICE:SETTINGS") && line.contains(" result=OK"))
-                    {
-                        return Ok(());
+                    if let Some(line) = complete_device_settings_ok_line(&response) {
+                        return Ok(line);
                     }
                 }
                 Ok(_) => {}
@@ -1703,6 +1758,128 @@ mod windows_ble {
         let mut tail: Vec<char> = response.chars().rev().take(max_chars).collect();
         tail.reverse();
         tail.into_iter().collect()
+    }
+
+    fn complete_device_settings_ok_line(response: &str) -> Option<String> {
+        let mut lines: Vec<&str> = response.split('\n').collect();
+        if !response.ends_with('\n') {
+            let _ = lines.pop();
+        }
+        lines
+            .into_iter()
+            .map(str::trim)
+            .find(|line| line.contains("~DEVICE:SETTINGS") && line.contains(" result=OK"))
+            .map(ToString::to_string)
+    }
+
+    pub(super) fn parse_device_settings_status_line(
+        line: &str,
+    ) -> Result<crate::embedded_ble::DeviceSettingsStatus, String> {
+        if !line.contains("~DEVICE:SETTINGS") {
+            return Err(format!("device settings refresh returned unexpected line: {line}"));
+        }
+        let fields = parse_device_settings_fields(line);
+        let plugged_brightness_percent = parse_u8_field(&fields, "plugged_brightness")?;
+        let battery_brightness_percent = parse_u8_field(&fields, "battery_brightness")?;
+        let active_brightness_percent = parse_u8_field(&fields, "active_brightness")?;
+        let auto_shutdown_ms = parse_u32_field(&fields, "auto_shutdown_ms")?;
+        let battery_auto_shutdown_minutes = (auto_shutdown_ms / 60_000).max(1);
+        Ok(crate::embedded_ble::DeviceSettingsStatus {
+            plugged_brightness_percent,
+            battery_brightness_percent,
+            active_brightness_percent,
+            battery_auto_shutdown_minutes,
+            knob_rotation_action: require_field(&fields, "knob_rotation")?.to_string(),
+            ble_name: require_field(&fields, "ble_name")?.to_string(),
+            ble_name_pending_restart: parse_bool_field(&fields, "ble_name_pending")?,
+            external_power_present: parse_bool_field(&fields, "external_power_present")?,
+            usb_power_present: parse_bool_field(&fields, "usb_power_present")?,
+            charging: parse_bool_field(&fields, "charging")?,
+            charge_full: parse_bool_field(&fields, "charge_full")?,
+            raw_line: line.trim().to_string(),
+        })
+    }
+
+    fn parse_device_settings_fields(line: &str) -> std::collections::HashMap<String, String> {
+        let mut fields = std::collections::HashMap::new();
+        let mut cursor = 0;
+        let chars: Vec<char> = line.chars().collect();
+        while cursor < chars.len() {
+            while cursor < chars.len() && chars[cursor].is_whitespace() {
+                cursor += 1;
+            }
+            let key_start = cursor;
+            while cursor < chars.len()
+                && (chars[cursor].is_ascii_alphanumeric() || chars[cursor] == '_')
+            {
+                cursor += 1;
+            }
+            if key_start == cursor || cursor >= chars.len() || chars[cursor] != '=' {
+                cursor += 1;
+                continue;
+            }
+            let key: String = chars[key_start..cursor].iter().collect();
+            cursor += 1;
+            let value = if cursor < chars.len() && chars[cursor] == '"' {
+                cursor += 1;
+                let value_start = cursor;
+                while cursor < chars.len() && chars[cursor] != '"' {
+                    cursor += 1;
+                }
+                let value: String = chars[value_start..cursor].iter().collect();
+                if cursor < chars.len() {
+                    cursor += 1;
+                }
+                value
+            } else {
+                let value_start = cursor;
+                while cursor < chars.len() && !chars[cursor].is_whitespace() {
+                    cursor += 1;
+                }
+                chars[value_start..cursor].iter().collect()
+            };
+            fields.insert(key, value);
+        }
+        fields
+    }
+
+    fn require_field<'a>(
+        fields: &'a std::collections::HashMap<String, String>,
+        key: &str,
+    ) -> Result<&'a str, String> {
+        fields
+            .get(key)
+            .map(String::as_str)
+            .ok_or_else(|| format!("device settings status missing {key}"))
+    }
+
+    fn parse_u8_field(
+        fields: &std::collections::HashMap<String, String>,
+        key: &str,
+    ) -> Result<u8, String> {
+        require_field(fields, key)?
+            .parse::<u8>()
+            .map_err(|err| format!("device settings field {key} is not u8: {err}"))
+    }
+
+    fn parse_u32_field(
+        fields: &std::collections::HashMap<String, String>,
+        key: &str,
+    ) -> Result<u32, String> {
+        require_field(fields, key)?
+            .parse::<u32>()
+            .map_err(|err| format!("device settings field {key} is not u32: {err}"))
+    }
+
+    fn parse_bool_field(
+        fields: &std::collections::HashMap<String, String>,
+        key: &str,
+    ) -> Result<bool, String> {
+        match require_field(fields, key)? {
+            "0" => Ok(false),
+            "1" => Ok(true),
+            value => Err(format!("device settings field {key} is not bool: {value}")),
+        }
     }
 
     fn send_audio_control_via_active_capture(
@@ -4967,6 +5144,11 @@ pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_processing_state(active, timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), String> {
     windows_ble::send_ec11_rotation_mode(mode, timeout)
 }
@@ -4974,6 +5156,11 @@ pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), Stri
 #[cfg(target_os = "windows")]
 pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<(), String> {
     windows_ble::send_device_settings_command(command, timeout)
+}
+
+#[cfg(target_os = "windows")]
+pub fn read_device_settings_status(timeout: Duration) -> Result<DeviceSettingsStatus, String> {
+    windows_ble::read_device_settings_status(timeout)
 }
 
 #[cfg(target_os = "windows")]
@@ -5099,6 +5286,11 @@ pub fn send_recording_control_toggle(_timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn send_recording_processing_state(_active: bool, _timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE recording processing control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn send_ec11_rotation_mode(_mode: &str, _timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE EC11 rotation control is only supported on Windows".to_string())
 }
@@ -5106,6 +5298,11 @@ pub fn send_ec11_rotation_mode(_mode: &str, _timeout: Duration) -> Result<(), St
 #[cfg(not(target_os = "windows"))]
 pub fn send_device_settings_command(_command: &str, _timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE device settings control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_device_settings_status(_timeout: Duration) -> Result<DeviceSettingsStatus, String> {
+    Err("Listener device settings refresh is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -5234,6 +5431,9 @@ mod tests {
         build_session_error_notification, build_session_start_notification,
         build_session_stop_notification, SessionCollector, SessionErrorCode,
     };
+
+    #[cfg(target_os = "windows")]
+    static DEVICE_SETTINGS_HARDWARE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn terminal_detection_only_matches_stop_cancel_error() {
@@ -5490,10 +5690,47 @@ mod tests {
     #[test]
     #[ignore = "requires a paired or USB-connected Listener device"]
     fn device_settings_command_hardware_smoke() {
+        let _guard = DEVICE_SETTINGS_HARDWARE_TEST_LOCK
+            .lock()
+            .expect("device settings hardware test mutex poisoned");
         let command = std::env::var("LISTENER_DEVICE_SETTINGS_COMMAND")
             .unwrap_or_else(|_| "DEVICE:SET knob_rotation=system_volume".to_string());
         super::windows_ble::send_device_settings_command(&command, Duration::from_secs(4))
             .expect("device settings command should be acknowledged by firmware");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_device_settings_status_line() {
+        let status = super::windows_ble::parse_device_settings_status_line(
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 auto_shutdown_ms=1800000 auto_shutdown_mode=battery_only knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100"
+        )
+        .expect("parse device settings");
+        assert_eq!(status.plugged_brightness_percent, 80);
+        assert_eq!(status.battery_brightness_percent, 50);
+        assert_eq!(status.active_brightness_percent, 80);
+        assert_eq!(status.battery_auto_shutdown_minutes, 30);
+        assert_eq!(status.knob_rotation_action, "screen_brightness");
+        assert_eq!(status.ble_name, "listener-dev");
+        assert!(status.ble_name_pending_restart);
+        assert!(status.external_power_present);
+        assert!(status.usb_power_present);
+        assert!(!status.charging);
+        assert!(status.charge_full);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires a USB-connected Listener device"]
+    fn device_settings_status_refresh_hardware_smoke() {
+        let _guard = DEVICE_SETTINGS_HARDWARE_TEST_LOCK
+            .lock()
+            .expect("device settings hardware test mutex poisoned");
+        let status = super::windows_ble::read_device_settings_status(Duration::from_secs(4))
+            .expect("device settings status should be read from firmware");
+        assert!(!status.ble_name.is_empty());
+        assert!(status.plugged_brightness_percent <= 100);
+        assert!(status.battery_brightness_percent <= 100);
     }
 
     #[test]

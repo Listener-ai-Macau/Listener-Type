@@ -308,6 +308,7 @@ pub fn run() {
             commands::list_installed_applications,
             commands::record_ui_timeline_event,
             commands::set_settings,
+            commands::refresh_device_settings_status,
             commands::get_update_channel,
             commands::set_update_channel,
             commands::fetch_latest_beta_release,

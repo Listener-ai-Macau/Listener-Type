@@ -537,6 +537,21 @@ export interface DeviceCustomKeys {
 
 export type DeviceKnobRotationAction = 'systemVolume' | 'screenBrightness' | 'disabled';
 
+export interface DeviceFirmwareSettingsStatus {
+  pluggedBrightnessPercent: number;
+  batteryBrightnessPercent: number;
+  activeBrightnessPercent: number;
+  batteryAutoShutdownMinutes: number;
+  knobRotationAction: string;
+  bleName: string;
+  bleNamePendingRestart: boolean;
+  externalPowerPresent: boolean;
+  usbPowerPresent: boolean;
+  charging: boolean;
+  chargeFull: boolean;
+  rawLine: string;
+}
+
 export interface MarketplaceListItem {
   id: string;
   slug: string;
