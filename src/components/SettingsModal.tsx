@@ -25,8 +25,6 @@ import {
   type UpdateChannel,
 } from '../lib/ipc';
 import type { OS } from './WindowChrome';
-import { detectOS } from './WindowChrome';
-import { FirmwareOtaPanel } from '../pages/settings/FirmwareOtaPanel';
 
 
 interface SettingsModalProps {
@@ -317,7 +315,6 @@ function AboutMini() {
   const qqCopiedRef = useRef<number | null>(null);
   const [exportStatus, setExportStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
   const [exportMessage, setExportMessage] = useState<string>('');
-  const bleSupported = detectOS() === 'win';
 
   useEffect(() => () => {
     if (qqCopiedRef.current) clearTimeout(qqCopiedRef.current);
@@ -454,12 +451,6 @@ function AboutMini() {
         <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 999, background: 'var(--ol-blue-soft)', color: 'var(--ol-blue)', fontWeight: 500 }}>{t('modal.about.localFirst')}</span>
       </Row>
       <BetaChannelControl />
-      <div style={{ marginTop: 16 }}>
-        <FirmwareOtaPanel
-          supported={bleSupported}
-          bleStatus="idle"
-        />
-      </div>
     </div>
   );
 }

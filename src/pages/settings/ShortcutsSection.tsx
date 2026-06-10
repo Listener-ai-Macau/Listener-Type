@@ -101,30 +101,6 @@ const fallbackShortcut = (): ShortcutBinding => ({
 export function ShortcutsSection() {
   const { t } = useTranslation();
   const { prefs, hotkey, capability, updatePrefs: savePrefs } = useHotkeySettings();
-  const [installedApps, setInstalledApps] = useState<InstalledApplication[]>([]);
-  const [installedAppsLoading, setInstalledAppsLoading] = useState(false);
-  const autoOpenDeviceKeyActionMenu =
-    import.meta.env.DEV &&
-    new URLSearchParams(window.location.search).get('openDeviceKeyActionMenu') === '1';
-
-  useEffect(() => {
-    let cancelled = false;
-    setInstalledAppsLoading(true);
-    listInstalledApplications()
-      .then(apps => {
-        if (!cancelled) setInstalledApps(apps);
-      })
-      .catch(error => {
-        console.warn('[device-key] list installed applications failed', error);
-        if (!cancelled) setInstalledApps([]);
-      })
-      .finally(() => {
-        if (!cancelled) setInstalledAppsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   if (!prefs || !hotkey || !capability) {
     return (
@@ -141,34 +117,6 @@ export function ShortcutsSection() {
   return (
     <Card>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-        {t('settings.deviceKeys.title')}
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 2 }}>
-        {t('settings.deviceKeys.desc')}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
-        {DEVICE_GESTURES.map(gesture => (
-          <DeviceKeyGestureGroup
-            key={gesture.id}
-            gesture={gesture}
-            keys={prefs[gesture.mapKey]}
-            installedApps={installedApps}
-            installedAppsLoading={installedAppsLoading}
-            autoOpenDeviceKeyActionMenu={autoOpenDeviceKeyActionMenu}
-            onChange={async (id, mapping) => {
-              await savePrefs(current => ({
-                ...current,
-                [gesture.mapKey]: {
-                  ...current[gesture.mapKey],
-                  [id]: mapping,
-                },
-              }));
-            }}
-          />
-        ))}
-      </div>
-
-      <div style={{ fontSize: 13, fontWeight: 600, marginTop: 18, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
         {t('settings.shortcuts.title')}
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 6 }}>
@@ -256,6 +204,75 @@ export function ShortcutsSection() {
           }}>{v}</kbd>
         </SettingRow>
       ))}
+    </Card>
+  );
+}
+
+export function DeviceKeysPanel() {
+  const { t } = useTranslation();
+  const { prefs, updatePrefs: savePrefs } = useHotkeySettings();
+  const [installedApps, setInstalledApps] = useState<InstalledApplication[]>([]);
+  const [installedAppsLoading, setInstalledAppsLoading] = useState(false);
+  const autoOpenDeviceKeyActionMenu =
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).get('openDeviceKeyActionMenu') === '1';
+
+  useEffect(() => {
+    let cancelled = false;
+    setInstalledAppsLoading(true);
+    listInstalledApplications()
+      .then(apps => {
+        if (!cancelled) setInstalledApps(apps);
+      })
+      .catch(error => {
+        console.warn('[device-key] list installed applications failed', error);
+        if (!cancelled) setInstalledApps([]);
+      })
+      .finally(() => {
+        if (!cancelled) setInstalledAppsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!prefs) {
+    return (
+      <Card>
+        <div style={{ fontSize: 12, color: 'var(--ol-ink-4)' }}>{t('common.loading')}</div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+        {t('settings.deviceKeys.title')}
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 2 }}>
+        {t('settings.deviceKeys.desc')}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+        {DEVICE_GESTURES.map(gesture => (
+          <DeviceKeyGestureGroup
+            key={gesture.id}
+            gesture={gesture}
+            keys={prefs[gesture.mapKey]}
+            installedApps={installedApps}
+            installedAppsLoading={installedAppsLoading}
+            autoOpenDeviceKeyActionMenu={autoOpenDeviceKeyActionMenu}
+            onChange={async (id, mapping) => {
+              await savePrefs(current => ({
+                ...current,
+                [gesture.mapKey]: {
+                  ...current[gesture.mapKey],
+                  [id]: mapping,
+                },
+              }));
+            }}
+          />
+        ))}
+      </div>
     </Card>
   );
 }

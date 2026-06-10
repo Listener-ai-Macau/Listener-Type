@@ -436,40 +436,70 @@ fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationActio
     }
 }
 
-fn sync_device_command_to_firmware(command: String) -> Result<(), String> {
-    crate::embedded_ble::send_device_settings_command(&command, Duration::from_secs(2))
-        .map_err(|err| format!("设备设置写入固件失败：{err}"))
+struct DeviceSettingPacket {
+    id: &'static str,
+    command: String,
+}
+
+fn sync_device_setting_packet_to_firmware(packet: DeviceSettingPacket) -> Result<(), String> {
+    crate::embedded_ble::send_device_settings_command(&packet.command, Duration::from_secs(2))
+        .map_err(|err| format!("设备设置写入固件失败（{}）：{err}", packet.id))
+}
+
+fn device_setting_packets_for_changes(
+    previous: &UserPreferences,
+    next: &UserPreferences,
+) -> Vec<DeviceSettingPacket> {
+    let mut packets = Vec::new();
+    if previous.device_knob_rotation_action != next.device_knob_rotation_action {
+        let mode = firmware_mode_for_device_knob_rotation_action(next.device_knob_rotation_action);
+        packets.push(DeviceSettingPacket {
+            id: "knob_rotation",
+            command: format!("DEVICE:SET knob_rotation={mode}"),
+        });
+    }
+    if previous.device_plugged_brightness_percent != next.device_plugged_brightness_percent {
+        packets.push(DeviceSettingPacket {
+            id: "plugged_brightness",
+            command: format!(
+                "DEVICE:SET plugged_brightness={}",
+                next.device_plugged_brightness_percent
+            ),
+        });
+    }
+    if previous.device_battery_brightness_percent != next.device_battery_brightness_percent {
+        packets.push(DeviceSettingPacket {
+            id: "battery_brightness",
+            command: format!(
+                "DEVICE:SET battery_brightness={}",
+                next.device_battery_brightness_percent
+            ),
+        });
+    }
+    if previous.device_battery_auto_shutdown_minutes != next.device_battery_auto_shutdown_minutes {
+        packets.push(DeviceSettingPacket {
+            id: "auto_shutdown_minutes",
+            command: format!(
+                "DEVICE:SET auto_shutdown_minutes={}",
+                next.device_battery_auto_shutdown_minutes
+            ),
+        });
+    }
+    if previous.device_ble_name != next.device_ble_name {
+        packets.push(DeviceSettingPacket {
+            id: "ble_name",
+            command: format!("DEVICE:SET ble_name={}", next.device_ble_name),
+        });
+    }
+    packets
 }
 
 fn sync_device_firmware_preferences(
     previous: &UserPreferences,
     next: &UserPreferences,
 ) -> Result<(), String> {
-    if previous.device_knob_rotation_action != next.device_knob_rotation_action {
-        let mode = firmware_mode_for_device_knob_rotation_action(next.device_knob_rotation_action);
-        crate::embedded_ble::send_ec11_rotation_mode(mode, Duration::from_secs(2))
-            .map_err(|err| format!("旋钮动作写入固件失败：{err}"))?;
-    }
-    if previous.device_plugged_brightness_percent != next.device_plugged_brightness_percent {
-        sync_device_command_to_firmware(format!(
-            "DEVICE:SET plugged_brightness={}",
-            next.device_plugged_brightness_percent
-        ))?;
-    }
-    if previous.device_battery_brightness_percent != next.device_battery_brightness_percent {
-        sync_device_command_to_firmware(format!(
-            "DEVICE:SET battery_brightness={}",
-            next.device_battery_brightness_percent
-        ))?;
-    }
-    if previous.device_battery_auto_shutdown_minutes != next.device_battery_auto_shutdown_minutes {
-        sync_device_command_to_firmware(format!(
-            "DEVICE:SET auto_shutdown_minutes={}",
-            next.device_battery_auto_shutdown_minutes
-        ))?;
-    }
-    if previous.device_ble_name != next.device_ble_name {
-        sync_device_command_to_firmware(format!("DEVICE:SET ble_name={}", next.device_ble_name))?;
+    for packet in device_setting_packets_for_changes(previous, next) {
+        sync_device_setting_packet_to_firmware(packet)?;
     }
     Ok(())
 }

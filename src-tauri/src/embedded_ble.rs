@@ -1428,9 +1428,20 @@ mod windows_ble {
         if let Some(result) =
             send_audio_control_via_active_capture(command.as_bytes(), timeout, "EC11 rotation mode")
         {
-            result?;
-            log::info!("[embedded-ble] EC11 rotation mode sent via active capture mode={mode}");
-            return Ok(());
+            match result {
+                Ok(()) => {
+                    log::info!(
+                        "[embedded-ble] EC11 rotation mode sent via active capture mode={mode}"
+                    );
+                    return Ok(());
+                }
+                Err(err) if is_transient_audio_control_write_error(&err) => {
+                    log::warn!(
+                        "[embedded-ble] active EC11 rotation write failed with transient error; retrying fresh GATT path: {err}"
+                    );
+                }
+                Err(err) => return Err(err),
+            }
         }
         let target = open_audio_control_target()?;
         write_gatt_value_with_timeout(
@@ -1452,18 +1463,27 @@ mod windows_ble {
             return Err("device settings command must be a single line".to_string());
         }
         let payload = format!("{command}\n");
-        if payload.as_bytes().len() > 64 {
+        if payload.as_bytes().len() >= 64 {
             return Err(format!(
-                "device settings command is too long for BLE control characteristic: {} bytes",
+                "device settings command is too long for BLE control characteristic: {} bytes (max 63 including newline)",
                 payload.as_bytes().len()
             ));
         }
         if let Some(result) =
             send_audio_control_via_active_capture(payload.as_bytes(), timeout, "device settings")
         {
-            result?;
-            log::info!("[embedded-ble] device settings command sent via active capture");
-            return Ok(());
+            match result {
+                Ok(()) => {
+                    log::info!("[embedded-ble] device settings command sent via active capture");
+                    return Ok(());
+                }
+                Err(err) if is_transient_audio_control_write_error(&err) => {
+                    log::warn!(
+                        "[embedded-ble] active device settings write failed with transient error; retrying fresh GATT path: {err}"
+                    );
+                }
+                Err(err) => return Err(err),
+            }
         }
         let target = open_audio_control_target()?;
         write_gatt_value_with_timeout(
@@ -1498,16 +1518,20 @@ mod windows_ble {
             clear_active_audio_control_sender(active.capture_id);
             return None;
         }
-        Some(
-            result_rx
-                .recv_timeout(timeout + Duration::from_secs(1))
-                .unwrap_or_else(|_| {
-                    Err(format!(
-                        "active Listener BLE audio control timed out after {} ms",
-                        timeout.as_millis()
-                    ))
-                }),
-        )
+        let result = result_rx
+            .recv_timeout(timeout + Duration::from_secs(1))
+            .unwrap_or_else(|_| {
+                Err(format!(
+                    "active Listener BLE audio control timed out after {} ms",
+                    timeout.as_millis()
+                ))
+            });
+        if let Err(err) = &result {
+            if is_transient_audio_control_write_error(err) {
+                clear_active_audio_control_sender(active.capture_id);
+            }
+        }
+        Some(result)
     }
 
     pub fn capture_notification_events(
@@ -2432,6 +2456,20 @@ mod windows_ble {
             || err.contains("GATT session did not become active")
             || err.contains("device open by address")
             || err.contains("device open by id")
+    }
+
+    fn is_transient_audio_control_write_error(err: &str) -> bool {
+        err.contains("GattCommunicationStatus(2)")
+            || err.contains("GattCommunicationStatus(3)")
+            || err.contains("ProtocolError")
+            || err.contains("protocol_error")
+            || err.contains("Unreachable")
+            || err.contains("unreachable")
+            || err.contains("disconnected")
+            || err.contains("timed out")
+            || err.contains("timeout")
+            || err.contains("stale")
+            || err.contains("GATT session did not become active")
     }
 
     fn open_audio_control_target() -> Result<OpenAudioControlTarget, String> {
@@ -4064,7 +4102,12 @@ mod windows_ble {
             log::warn!("[embedded-ble] {label} write protocol_error={protocol_error}");
         }
         if status != GattCommunicationStatus::Success {
-            return Err(format!("BLE {label} write returned status={status:?}"));
+            let protocol_suffix = protocol_error
+                .map(|value| format!(" protocol_error={value}"))
+                .unwrap_or_default();
+            return Err(format!(
+                "BLE {label} write returned status={status:?}{protocol_suffix}"
+            ));
         }
         Ok(status)
     }

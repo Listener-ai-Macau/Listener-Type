@@ -2944,6 +2944,14 @@ fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) -> bool {
 
 fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationAction) -> &'static str {
     match action {
+        DeviceKnobRotationAction::SystemVolume => "system_volume",
+        DeviceKnobRotationAction::ScreenBrightness => "screen_brightness",
+        DeviceKnobRotationAction::Disabled => "disabled",
+    }
+}
+
+fn legacy_ec11_mode_for_device_knob_rotation_action(action: DeviceKnobRotationAction) -> &'static str {
+    match action {
         DeviceKnobRotationAction::SystemVolume => "VOLUME",
         DeviceKnobRotationAction::ScreenBrightness => "BRIGHTNESS",
         DeviceKnobRotationAction::Disabled => "DISABLED",
@@ -2951,14 +2959,27 @@ fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationActio
 }
 
 fn sync_device_knob_rotation_action_to_firmware(inner: &Arc<Inner>, reason: &'static str) {
-    let mode = firmware_mode_for_device_knob_rotation_action(
-        inner.prefs.get().device_knob_rotation_action,
-    );
+    let action = inner.prefs.get().device_knob_rotation_action;
+    let mode = firmware_mode_for_device_knob_rotation_action(action);
+    let legacy_mode = legacy_ec11_mode_for_device_knob_rotation_action(action);
     async_runtime::spawn_blocking(move || {
-        match crate::embedded_ble::send_ec11_rotation_mode(mode, Duration::from_secs(2)) {
-            Ok(()) => log::info!("[device-knob] synced EC11 rotation mode={mode} reason={reason}"),
+        let command = format!("DEVICE:SET knob_rotation={mode}");
+        match crate::embedded_ble::send_device_settings_command(&command, Duration::from_secs(2)) {
+            Ok(()) => log::info!(
+                "[device-knob] synced knob_rotation setting mode={mode} reason={reason}"
+            ),
             Err(err) => {
-                log::warn!("[device-knob] EC11 rotation mode sync skipped reason={reason}: {err}")
+                log::warn!(
+                    "[device-knob] knob_rotation setting sync failed reason={reason}: {err}; trying legacy EC11 control"
+                );
+                match crate::embedded_ble::send_ec11_rotation_mode(legacy_mode, Duration::from_secs(2)) {
+                    Ok(()) => log::info!(
+                        "[device-knob] synced legacy EC11 rotation mode={legacy_mode} reason={reason}"
+                    ),
+                    Err(legacy_err) => log::warn!(
+                        "[device-knob] EC11 rotation mode sync skipped reason={reason}: {legacy_err}"
+                    ),
+                }
             }
         }
     });

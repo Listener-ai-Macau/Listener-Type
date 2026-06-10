@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { detectOS } from '../../components/WindowChrome';
 import type { DeviceKnobRotationAction, UserPreferences } from '../../lib/types';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Card } from '../_atoms';
+import { FirmwareOtaPanel } from './FirmwareOtaPanel';
+import { DeviceKeysPanel } from './ShortcutsSection';
 import { inputStyle, SettingRow } from './shared';
 
 const KNOB_ROTATION_ACTIONS: DeviceKnobRotationAction[] = [
@@ -101,8 +104,10 @@ export function DeviceSection() {
       deviceKnobRotationAction: action,
     }));
   };
+  const bleSupported = detectOS() === 'win';
 
   return (
+    <>
     <Card>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
         {t('settings.device.title', '设备')}
@@ -261,6 +266,9 @@ export function DeviceSection() {
         </div>
       </SettingRow>
     </Card>
+    <DeviceKeysPanel />
+    <FirmwareOtaPanel supported={bleSupported} bleStatus="idle" />
+    </>
   );
 }
 
