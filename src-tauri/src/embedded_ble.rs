@@ -477,11 +477,14 @@ fn stop_drain_timeout_reason(stats: &crate::embedded_audio::SessionStats) -> Str
 
 #[cfg(target_os = "windows")]
 mod windows_ble {
+    use std::fmt;
+    use std::io::{Read, Write};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
     use std::time::{Duration, Instant};
 
+    use serialport::{SerialPortInfo, SerialPortType};
     use windows::core::{IInspectable, GUID, HSTRING, PCWSTR};
     use windows::Devices::Bluetooth::GenericAttributeProfile::{
         GattCharacteristic, GattCharacteristicProperties,
@@ -547,6 +550,8 @@ mod windows_ble {
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
     const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
+    const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
+    const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
     const ATT_WRITE_HEADER_BYTES: usize = 3;
     const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
     const SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091a";
@@ -1469,6 +1474,21 @@ mod windows_ble {
                 payload.as_bytes().len()
             ));
         }
+
+        let serial_result = send_device_settings_via_usb_serial(command, timeout);
+        match &serial_result {
+            Ok(()) => {
+                log::info!("[embedded-ble] device settings command acknowledged via USB serial");
+                return Ok(());
+            }
+            Err(err) if err.is_firmware_rejection() => return Err(err.to_string()),
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] device settings USB serial path unavailable; trying BLE control: {err}"
+                );
+            }
+        }
+
         if let Some(result) =
             send_audio_control_via_active_capture(payload.as_bytes(), timeout, "device settings")
         {
@@ -1485,16 +1505,204 @@ mod windows_ble {
                 Err(err) => return Err(err),
             }
         }
-        let target = open_audio_control_target()?;
+        let target = open_audio_control_target().map_err(|err| {
+            format!(
+                "{err}; USB serial fallback failed: {}",
+                serial_result
+                    .as_ref()
+                    .err()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "not attempted".to_string())
+            )
+        })?;
         write_gatt_value_with_timeout(
             &target.control,
             payload.as_bytes(),
             GattWriteOption::WriteWithResponse,
             timeout,
             "device settings",
-        )?;
+        )
+        .map_err(|err| {
+            format!(
+                "{err}; USB serial fallback failed: {}",
+                serial_result
+                    .as_ref()
+                    .err()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "not attempted".to_string())
+            )
+        })?;
         log::info!("[embedded-ble] device settings command sent");
         Ok(())
+    }
+
+    #[derive(Debug, Clone)]
+    enum DeviceSettingsSerialError {
+        Unavailable(String),
+        Transport(String),
+        FirmwareRejected(String),
+    }
+
+    impl DeviceSettingsSerialError {
+        fn is_firmware_rejection(&self) -> bool {
+            matches!(self, Self::FirmwareRejected(_))
+        }
+    }
+
+    impl fmt::Display for DeviceSettingsSerialError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::Unavailable(message)
+                | Self::Transport(message)
+                | Self::FirmwareRejected(message) => formatter.write_str(message),
+            }
+        }
+    }
+
+    fn send_device_settings_via_usb_serial(
+        command: &str,
+        timeout: Duration,
+    ) -> Result<(), DeviceSettingsSerialError> {
+        let ports = serialport::available_ports().map_err(|err| {
+            DeviceSettingsSerialError::Unavailable(format!(
+                "USB serial port enumeration failed: {err}"
+            ))
+        })?;
+        let candidates = listener_usb_serial_candidates(&ports);
+        if candidates.is_empty() {
+            return Err(DeviceSettingsSerialError::Unavailable(
+                "no Listener USB serial port found".to_string(),
+            ));
+        }
+
+        let mut errors = Vec::new();
+        for port in candidates {
+            match send_device_settings_via_serial_port(&port.port_name, command, timeout) {
+                Ok(()) => return Ok(()),
+                Err(err) if err.is_firmware_rejection() => return Err(err),
+                Err(err) => errors.push(format!("{}: {err}", port.port_name)),
+            }
+        }
+
+        Err(DeviceSettingsSerialError::Transport(format!(
+            "all Listener USB serial candidates failed: {}",
+            errors.join("; ")
+        )))
+    }
+
+    fn listener_usb_serial_candidates(ports: &[SerialPortInfo]) -> Vec<SerialPortInfo> {
+        let mut candidates: Vec<SerialPortInfo> = ports
+            .iter()
+            .filter(|port| is_listener_usb_serial_candidate(port))
+            .cloned()
+            .collect();
+        if candidates.is_empty() && ports.len() == 1 {
+            candidates.push(ports[0].clone());
+        }
+        candidates.sort_by(|left, right| left.port_name.cmp(&right.port_name));
+        candidates
+    }
+
+    fn is_listener_usb_serial_candidate(port: &SerialPortInfo) -> bool {
+        let SerialPortType::UsbPort(usb) = &port.port_type else {
+            return false;
+        };
+        if usb.vid == 0x303a || usb.vid == 0x10c4 || usb.vid == 0x1a86 {
+            return true;
+        }
+        let text = format!(
+            "{} {} {} {}",
+            port.port_name,
+            usb.manufacturer.as_deref().unwrap_or_default(),
+            usb.product.as_deref().unwrap_or_default(),
+            usb.serial_number.as_deref().unwrap_or_default()
+        )
+        .to_ascii_lowercase();
+        text.contains("listener")
+            || text.contains("espressif")
+            || text.contains("esp32")
+            || text.contains("usb jtag")
+            || text.contains("usb-serial")
+            || text.contains("cp210")
+    }
+
+    fn send_device_settings_via_serial_port(
+        port_name: &str,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<(), DeviceSettingsSerialError> {
+        let serial_timeout = Duration::from_millis(120);
+        let mut port = serialport::new(port_name, DEVICE_SETTINGS_SERIAL_BAUD_RATE)
+            .timeout(serial_timeout)
+            .open()
+            .map_err(|err| {
+                DeviceSettingsSerialError::Transport(format!("open failed: {err}"))
+            })?;
+        let _ = port.write_data_terminal_ready(false);
+        let _ = port.write_request_to_send(false);
+
+        drain_serial_input(&mut *port, Duration::from_millis(180));
+        let payload = format!("~{command}\n");
+        port.write_all(payload.as_bytes()).map_err(|err| {
+            DeviceSettingsSerialError::Transport(format!("write failed: {err}"))
+        })?;
+        port.flush().map_err(|err| {
+            DeviceSettingsSerialError::Transport(format!("flush failed: {err}"))
+        })?;
+
+        let deadline = Instant::now() + timeout.max(Duration::from_secs(2));
+        let mut response = String::new();
+        let mut read_buf = [0_u8; DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES];
+        while Instant::now() < deadline {
+            match port.read(&mut read_buf) {
+                Ok(count) if count > 0 => {
+                    response.push_str(&String::from_utf8_lossy(&read_buf[..count]));
+                    if let Some(line) = response.lines().find(|line| line.contains("~DEVICE:ERROR"))
+                    {
+                        return Err(DeviceSettingsSerialError::FirmwareRejected(format!(
+                            "firmware rejected device settings command: {line}"
+                        )));
+                    }
+                    if response
+                        .lines()
+                        .any(|line| line.contains("~DEVICE:SETTINGS") && line.contains(" result=OK"))
+                    {
+                        return Ok(());
+                    }
+                }
+                Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(err) => {
+                    return Err(DeviceSettingsSerialError::Transport(format!(
+                        "read failed: {err}"
+                    )));
+                }
+            }
+        }
+
+        let tail = response_tail(&response, 320);
+        Err(DeviceSettingsSerialError::Transport(format!(
+            "timed out waiting for ~DEVICE:SETTINGS result=OK; received={tail:?}"
+        )))
+    }
+
+    fn drain_serial_input(port: &mut dyn serialport::SerialPort, duration: Duration) {
+        let deadline = Instant::now() + duration;
+        let mut read_buf = [0_u8; DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES];
+        while Instant::now() < deadline {
+            match port.read(&mut read_buf) {
+                Ok(0) => {}
+                Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(_) => break,
+            }
+        }
+    }
+
+    fn response_tail(response: &str, max_chars: usize) -> String {
+        let mut tail: Vec<char> = response.chars().rev().take(max_chars).collect();
+        tail.reverse();
+        tail.into_iter().collect()
     }
 
     fn send_audio_control_via_active_capture(
@@ -5276,6 +5484,16 @@ mod tests {
         );
         assert!(super::windows_ble::ota_transfer_chunk_bytes(499, 500).is_err());
         assert!(super::windows_ble::ota_transfer_chunk_bytes(514, 499).is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires a paired or USB-connected Listener device"]
+    fn device_settings_command_hardware_smoke() {
+        let command = std::env::var("LISTENER_DEVICE_SETTINGS_COMMAND")
+            .unwrap_or_else(|_| "DEVICE:SET knob_rotation=system_volume".to_string());
+        super::windows_ble::send_device_settings_command(&command, Duration::from_secs(4))
+            .expect("device settings command should be acknowledged by firmware");
     }
 
     #[test]
