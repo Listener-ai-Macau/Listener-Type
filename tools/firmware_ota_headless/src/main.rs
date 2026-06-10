@@ -36,6 +36,40 @@ mod embedded_ble {
         )
     }
 
+    pub struct PreparedFirmwareOtaTransfer {
+        snapshot: FirmwareOtaDeviceSnapshot,
+    }
+
+    impl PreparedFirmwareOtaTransfer {
+        pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+            &self.snapshot
+        }
+
+        pub fn transfer(
+            self,
+            version: &str,
+            firmware_sha256: &str,
+            firmware_bytes: &[u8],
+            manifest_chunk_bytes: usize,
+            on_progress: Option<&dyn Fn(usize, usize)>,
+        ) -> Result<FirmwareOtaTransferStats, String> {
+            transfer_firmware_ota(
+                version,
+                firmware_sha256,
+                firmware_bytes,
+                manifest_chunk_bytes,
+                on_progress,
+            )
+        }
+    }
+
+    pub fn prepare_firmware_ota_transfer() -> Result<PreparedFirmwareOtaTransfer, String> {
+        Err(
+            "Firmware OTA over Listener BLE is only available from the Tauri app on Windows."
+                .to_string(),
+        )
+    }
+
     pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
         FirmwareOtaDeviceSnapshot {
             connected: false,
@@ -68,7 +102,7 @@ Options:
   --manifest <file>              OTA manifest path.
   --firmware <file>              OTA binary path.
   --desktop-version <version>    Listener Type version. Defaults to CARGO_PKG_VERSION.
-  --hardware <revision>          Expected hardware revision. Defaults to keyboard-v1.
+  --hardware <revision>          Expected hardware revision. Defaults to keyboard-v2-n16r8.
   --current-version <version>    Optional connected/current firmware version for warning checks.
   --preflight                    Include a device preflight snapshot. Standalone helper reports unsupported BLE.
   --json-out <file>              Write pretty JSON report to this file.
@@ -133,7 +167,7 @@ fn parse_args(args: Vec<String>) -> Result<Option<Args>, String> {
     let mut manifest_path = None;
     let mut firmware_path = None;
     let mut desktop_version = env!("CARGO_PKG_VERSION").to_string();
-    let mut expected_hardware_revision = "keyboard-v1".to_string();
+    let mut expected_hardware_revision = "keyboard-v2-n16r8".to_string();
     let mut current_firmware_version = None;
     let mut preflight = false;
     let mut json_out = None;
@@ -184,7 +218,7 @@ mod tests {
     fn validation_context() -> firmware_ota::FirmwareOtaValidationContext {
         firmware_ota::FirmwareOtaValidationContext {
             desktop_version: "1.3.3".to_string(),
-            expected_hardware_revision: "keyboard-v1".to_string(),
+            expected_hardware_revision: "keyboard-v2-n16r8".to_string(),
             current_firmware_version: None,
         }
     }
@@ -206,7 +240,7 @@ mod tests {
     "sha256": "{FIRMWARE_SHA256}"
   }},
   "requirements": {{
-    "hardware_revision": "keyboard-v1",
+    "hardware_revision": "keyboard-v2-n16r8",
     "protocol_version": 1,
     "min_desktop_version": "1.3.3"
   }},
@@ -214,8 +248,8 @@ mod tests {
     "name": "listener",
     "appearance": "0x03C1",
     "dis": {{
-      "model": "keyboard-v1",
-      "hardware_revision": "esp32s3-devkit",
+      "model": "keyboard-v2",
+      "hardware_revision": "esp32s3-wroom-1-n16r8",
       "firmware_revision": "1.2.0"
     }}
   }},
@@ -272,7 +306,7 @@ mod tests {
             "--desktop-version".into(),
             "1.3.3".into(),
             "--hardware".into(),
-            "keyboard-v1".into(),
+            "keyboard-v2-n16r8".into(),
             "--current-version".into(),
             "1.2.0".into(),
             "--preflight".into(),
@@ -283,7 +317,7 @@ mod tests {
         assert_eq!(args.manifest_path, PathBuf::from("ota_manifest.json"));
         assert_eq!(args.firmware_path, PathBuf::from("firmware_ota.bin"));
         assert_eq!(args.desktop_version, "1.3.3");
-        assert_eq!(args.expected_hardware_revision, "keyboard-v1");
+        assert_eq!(args.expected_hardware_revision, "keyboard-v2-n16r8");
         assert_eq!(args.current_firmware_version.as_deref(), Some("1.2.0"));
         assert!(args.preflight);
     }
@@ -340,7 +374,7 @@ mod tests {
             preflight_only: true,
             transfer: false,
             desktop_version: "1.3.3".to_string(),
-            expected_hardware_revision: "keyboard-v1".to_string(),
+            expected_hardware_revision: "keyboard-v2-n16r8".to_string(),
             current_firmware_version: None,
             recording_active: false,
             dictation_phase: Some("HeadlessTest".to_string()),

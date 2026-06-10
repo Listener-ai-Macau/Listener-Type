@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../components/Icon';
 import { detectOS } from '../../components/WindowChrome';
-import type { DeviceKnobRotationAction, UserPreferences } from '../../lib/types';
+import type { DeviceFirmwareSettingsStatus, DeviceKnobRotationAction, UserPreferences } from '../../lib/types';
 import { refreshDeviceSettingsStatus } from '../../lib/ipc';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Card } from '../_atoms';
@@ -33,6 +33,7 @@ export function DeviceSection() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
+  const [deviceStatus, setDeviceStatus] = useState<DeviceFirmwareSettingsStatus | null>(null);
 
   useEffect(() => {
     if (!prefs) return;
@@ -103,6 +104,7 @@ export function DeviceSection() {
     setRefreshStatus(null);
     try {
       const status = await refreshDeviceSettingsStatus();
+      setDeviceStatus(status);
       const knobRotationAction = firmwareKnobActionToUi(status.knobRotationAction);
       await savePrefs(current => ({
         ...current,
@@ -279,6 +281,16 @@ export function DeviceSection() {
           {bleNameError && (
             <div style={{ fontSize: 11, color: 'var(--ol-err)', lineHeight: 1.45 }}>
               {bleNameError}
+            </div>
+          )}
+          {deviceStatus && (
+            <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', lineHeight: 1.45 }}>
+              {deviceStatus.bleNamePendingRestart
+                ? t(
+                    'settings.device.bleNamePending',
+                    '设备已保存新名称；系统列表可能要重启蓝牙或重新配对后更新。',
+                  )
+                : t('settings.device.bleNameActive', '设备当前广播名称已是最新。')}
             </div>
           )}
         </div>

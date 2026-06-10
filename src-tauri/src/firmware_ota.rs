@@ -13,6 +13,7 @@ pub const OTA_CONTROL_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092b";
 pub const OTA_DATA_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092c";
 pub const OTA_MAX_CHUNK_BYTES: u64 = 500;
 pub const OTA_CHUNK_BYTES: u64 = OTA_MAX_CHUNK_BYTES;
+pub const OTA_MAX_VERSION_CHARS: usize = 31;
 pub const DEFAULT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 pub const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -408,6 +409,11 @@ pub fn validate_package(
         errors.push(format!(
             "Listener Type {} is older than required {}.",
             context.desktop_version, manifest.min_desktop_version
+        ));
+    }
+    if manifest.version.len() > OTA_MAX_VERSION_CHARS {
+        errors.push(format!(
+            "Firmware version is too long for BLE OTA control; expected <= {OTA_MAX_VERSION_CHARS} characters."
         ));
     }
     if manifest.hardware_revision != context.expected_hardware_revision {
@@ -1136,6 +1142,17 @@ mod tests {
             .iter()
             .any(|item| item.contains("size mismatch")));
         assert!(result.errors.iter().any(|item| item.contains("SHA256")));
+    }
+
+    #[test]
+    fn rejects_version_too_long_for_ble_ota_control() {
+        let manifest = manifest_v2(
+            r#","firmware":{"project":"voice-keyboard-firmware","version":"v1002.0.0-ota-test-226-g99934ff-dirty","git_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","git_dirty":true,"target":"esp32s3","file":"firmware_ota.bin","size_bytes":6,"sha256":"6d3841935f58db1c3efa67022f2d770184be6fdef93c087bca10c30e70157e84"}"#,
+        );
+        let result = validate_package(&manifest, FIRMWARE_BYTES, &context());
+
+        assert!(!result.ok);
+        assert!(result.errors.iter().any(|item| item.contains("too long")));
     }
 
     #[test]

@@ -2590,7 +2590,7 @@ mod windows_ble {
             });
             if let Some(readiness) = ota_readiness {
                 snapshot.hardware_revision =
-                    readiness_field(&readiness, "model").or(snapshot.hardware_revision);
+                    readiness_hardware_revision(&readiness).or(snapshot.hardware_revision);
                 snapshot.firmware_version =
                     readiness_field(&readiness, "fw_version").or(snapshot.firmware_version);
                 snapshot.usb_powered = readiness_bool(&readiness, "external_power_present")
@@ -2638,7 +2638,8 @@ mod windows_ble {
         let (dis_model, dis_hardware, dis_firmware, dis_battery) =
             read_dis_metadata_from_discovered_services(target.bluetooth_address);
         if snapshot.hardware_revision.is_none() {
-            snapshot.hardware_revision = dis_model.or(dis_hardware);
+            snapshot.hardware_revision =
+                normalize_optional_hardware_revision(dis_hardware).or(dis_model);
         }
         if snapshot.firmware_version.is_none() {
             snapshot.firmware_version = dis_firmware;
@@ -2657,7 +2658,8 @@ mod windows_ble {
                     DIS_SERVICE_UUID,
                     DIS_HARDWARE_REVISION_UUID,
                 );
-                snapshot.hardware_revision = model.or(hardware);
+                snapshot.hardware_revision =
+                    normalize_optional_hardware_revision(hardware).or(model);
             }
             if snapshot.firmware_version.is_none() {
                 snapshot.firmware_version = read_optional_string_characteristic(
@@ -2965,6 +2967,29 @@ mod windows_ble {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned)
+    }
+
+    fn readiness_hardware_revision(readiness: &str) -> Option<String> {
+        for key in ["hardware_revision", "board", "model"] {
+            if let Some(value) = readiness_field(readiness, key) {
+                return Some(normalize_listener_hardware_revision(&value).unwrap_or(value));
+            }
+        }
+        None
+    }
+
+    fn normalize_optional_hardware_revision(value: Option<String>) -> Option<String> {
+        value.map(|raw| normalize_listener_hardware_revision(&raw).unwrap_or(raw))
+    }
+
+    fn normalize_listener_hardware_revision(value: &str) -> Option<String> {
+        let normalized = value.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "keyboard-v2-n16r8" | "voice-keyboard-v2-n16r8" | "esp32s3-wroom-1-n16r8" => {
+                Some("keyboard-v2-n16r8".to_string())
+            }
+            _ => None,
+        }
     }
 
     fn readiness_bool(readiness: &str, key: &str) -> Option<bool> {

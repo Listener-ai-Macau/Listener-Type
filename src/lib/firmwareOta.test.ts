@@ -71,7 +71,7 @@ function manifestV2(overrides: Record<string, unknown> = {}): string {
       sha256: firmwareSha256,
     },
     requirements: {
-      hardware_revision: 'keyboard-v1',
+      hardware_revision: 'keyboard-v2-n16r8',
       protocol_version: 1,
       min_desktop_version: '1.3.3',
     },
@@ -85,8 +85,8 @@ function manifestV2(overrides: Record<string, unknown> = {}): string {
       capabilities_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3091e',
       dis: {
         manufacturer: 'Listener',
-        model: 'keyboard-v1',
-        hardware_revision: 'esp32s3-devkit',
+        model: 'keyboard-v2',
+        hardware_revision: 'esp32s3-wroom-1-n16r8',
         firmware_revision: '1.2.0',
         software_revision_protocol: '1',
       },
@@ -111,7 +111,7 @@ const context = {
 
 const contextV2 = {
   desktopVersion: '1.3.3',
-  expectedHardwareRevision: 'keyboard-v1',
+  expectedHardwareRevision: 'keyboard-v2-n16r8',
 };
 
 const valid = await validateFirmwareOtaPackage(manifest(), firmwareBytes, context);
@@ -123,7 +123,7 @@ const validV2 = await validateFirmwareOtaPackage(manifestV2(), firmwareBytes, co
 assert.equal(validV2.ok, true);
 assert.equal(validV2.firmwareSha256, firmwareSha256);
 assert.equal(validV2.manifest?.schemaVersion, 2);
-assert.equal(validV2.manifest?.hardwareRevision, 'keyboard-v1');
+assert.equal(validV2.manifest?.hardwareRevision, 'keyboard-v2-n16r8');
 assert.equal(validV2.manifest?.fileName, 'firmware_ota.bin');
 assert.equal(validV2.manifest?.gattChunkBytes, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes);
 assert.equal(validV2.manifest?.recoveryInstructions.length, 2);
@@ -131,7 +131,7 @@ assert.equal(validV2.manifest?.recoveryInstructions.length, 2);
 const validV2FastChunk = await validateFirmwareOtaPackage(
   manifestV2({
     requirements: {
-      hardware_revision: 'keyboard-v1',
+      hardware_revision: 'keyboard-v2-n16r8',
       protocol_version: 1,
       min_desktop_version: '1.3.3',
       gatt_chunk_bytes: 500,
@@ -168,6 +168,25 @@ const badV2Recovery = await validateFirmwareOtaPackage(
 );
 assert.equal(badV2Recovery.ok, false);
 assert.ok(badV2Recovery.errors.some(error => error.includes('recovery.serial_commands')));
+
+const tooLongV2Version = await validateFirmwareOtaPackage(
+  manifestV2({
+    firmware: {
+      project: 'voice-keyboard-firmware',
+      version: 'v1002.0.0-ota-test-226-g99934ff-dirty',
+      git_commit: 'a'.repeat(40),
+      git_dirty: true,
+      target: 'esp32s3',
+      file: 'firmware_ota.bin',
+      size_bytes: firmwareBytes.byteLength,
+      sha256: firmwareSha256,
+    },
+  }),
+  firmwareBytes,
+  contextV2,
+);
+assert.equal(tooLongV2Version.ok, false);
+assert.ok(tooLongV2Version.errors.some(error => error.includes('too long')));
 
 const badHash = await validateFirmwareOtaPackage(
   manifest({ file: { name: 'firmware_ota.bin', size_bytes: firmwareBytes.byteLength, sha256: '0'.repeat(64) } }),

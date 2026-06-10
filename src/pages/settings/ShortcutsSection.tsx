@@ -1,6 +1,6 @@
 // 快捷键设置：开始/停止、翻译、问答、切风格、唤起 App、以及只读取消/确认提示。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
 import { SelectLite } from '../../components/ui/SelectLite';
@@ -307,23 +307,11 @@ function DeviceKnobControls({
       <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)', marginBottom: 8 }}>
         {t('settings.deviceKeys.knobTitle', '旋钮')}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
-            gap: 12,
-            alignItems: 'start',
-          }}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <DeviceKnobRow
+          label={t('settings.device.knobRotationLabel', '旋钮旋转')}
+          fallback={t('settings.device.knobRotationDesc', '旋转动作同步到设备。')}
         >
-          <div style={{ minWidth: 0, paddingTop: 6 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
-              {t('settings.device.knobRotationLabel', '旋钮旋转')}
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
-              {t('settings.device.knobRotationDesc', '旋转动作同步到设备。')}
-            </div>
-          </div>
           <SelectLite
             value={rotationAction}
             onChange={value => void onRotationChange(value as DeviceKnobRotationAction)}
@@ -332,86 +320,95 @@ function DeviceKnobControls({
               label: t(`settings.device.knobActions.${action}`, knobActionFallback(action)),
             }))}
             ariaLabel={t('settings.device.knobRotationAria', '选择旋钮旋转动作')}
-            style={{ ...inputStyle, maxWidth: 360 }}
+            style={{ ...inputStyle, maxWidth: 'none', minWidth: 0 }}
           />
-        </div>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
-            gap: 12,
-            alignItems: 'start',
-          }}
+        </DeviceKnobRow>
+        <DeviceKnobRow
+          label={t('settings.device.knobPress.single', '旋钮单击')}
+          fallback={t('settings.device.knobPress.fixed', '固件固定')}
         >
-          <div style={{ minWidth: 0, paddingTop: 6 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
-              {t('settings.device.knobPressLabel', '旋钮按压')}
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
-              {t('settings.device.knobPressDesc', '按压类手势由固件固定。')}
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 360 }}>
-            <KnobPressAction
-              label={t('settings.device.knobPress.single', '单击')}
-              value={t('settings.device.knobPress.record', '开始 / 停止录音')}
-              muted={false}
-            />
-            <KnobPressAction
-              label={t('settings.device.knobPress.double', '双击')}
-              value={t('settings.device.knobPress.bluetooth', '重置蓝牙 / 重新配对')}
-              muted
-            />
-            <KnobPressAction
-              label={t('settings.device.knobPress.long', '长按')}
-              value={t('settings.device.knobPress.powerOff', '关机')}
-              muted
-            />
-          </div>
-        </div>
+          <ReadOnlyDeviceAction>
+            {t('settings.device.knobPress.record', '开始 / 停止录音')}
+          </ReadOnlyDeviceAction>
+        </DeviceKnobRow>
+        <DeviceKnobRow
+          label={t('settings.device.knobPress.double', '旋钮双击')}
+          fallback={t('settings.device.knobPress.fixed', '固件固定')}
+        >
+          <ReadOnlyDeviceAction muted>
+            {t('settings.device.knobPress.bluetooth', '重置蓝牙 / 重新配对')}
+          </ReadOnlyDeviceAction>
+        </DeviceKnobRow>
+        <DeviceKnobRow
+          label={t('settings.device.knobPress.long', '旋钮长按')}
+          fallback={t('settings.device.knobPress.fixed', '固件固定')}
+        >
+          <ReadOnlyDeviceAction muted>
+            {t('settings.device.knobPress.powerOff', '关机')}
+          </ReadOnlyDeviceAction>
+        </DeviceKnobRow>
       </div>
     </div>
   );
 }
 
-function KnobPressAction({
+function DeviceKnobRow({
   label,
-  value,
-  muted,
+  fallback,
+  children,
 }: {
   label: string;
-  value: string;
-  muted: boolean;
+  fallback: string;
+  children: ReactNode;
 }) {
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(64px, 92px) minmax(0, 1fr)',
-        gap: 8,
-        alignItems: 'center',
+        gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
+        gap: 12,
+        alignItems: 'start',
       }}
     >
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: muted ? 'var(--ol-ink-4)' : 'var(--ol-ink)' }}>
-        {label}
+      <div style={{ minWidth: 0, paddingTop: 6 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
+          {fallback}
+        </div>
       </div>
-      <span
-        style={{
-          display: 'inline-flex',
-          minHeight: 32,
-          alignItems: 'center',
-          padding: '0 10px',
-          borderRadius: 6,
-          background: muted ? 'var(--ol-control-track)' : 'var(--ol-surface-2)',
-          border: '0.5px solid var(--ol-line-strong)',
-          fontSize: 12,
-          color: muted ? 'var(--ol-ink-4)' : 'var(--ol-ink)',
-          opacity: muted ? 0.72 : 1,
-        }}
-      >
-        {value}
-      </span>
+      <div style={{ minWidth: 0 }}>{children}</div>
     </div>
+  );
+}
+
+function ReadOnlyDeviceAction({
+  children,
+  muted = false,
+}: {
+  children: ReactNode;
+  muted?: boolean;
+}) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        minHeight: 32,
+        width: '100%',
+        maxWidth: 360,
+        alignItems: 'center',
+        padding: '0 10px',
+        borderRadius: 6,
+        background: muted ? 'var(--ol-control-track)' : 'var(--ol-surface-2)',
+        border: '0.5px solid var(--ol-line-strong)',
+        fontSize: 12,
+        color: muted ? 'var(--ol-ink-4)' : 'var(--ol-ink)',
+        opacity: muted ? 0.72 : 1,
+      }}
+    >
+      {children}
+    </span>
   );
 }
 

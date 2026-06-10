@@ -1,5 +1,7 @@
 export type FirmwareOtaChannel = 'stable' | 'beta' | 'internal-test';
 
+const FIRMWARE_OTA_MAX_VERSION_CHARS = 31;
+
 export type FirmwareOtaUserState =
   | 'idle'
   | 'checking'
@@ -178,6 +180,9 @@ export async function validateFirmwareOtaPackage(
   }
   if (!versionsCompatible(context.desktopVersion, manifest.minDesktopVersion)) {
     errors.push(`Listener Type ${context.desktopVersion} is older than required ${manifest.minDesktopVersion}.`);
+  }
+  if (manifest.version.length > FIRMWARE_OTA_MAX_VERSION_CHARS) {
+    errors.push(`Firmware version is too long for BLE OTA control; expected <= ${FIRMWARE_OTA_MAX_VERSION_CHARS} characters.`);
   }
   if (manifest.hardwareRevision !== context.expectedHardwareRevision) {
     errors.push(`Hardware revision mismatch: package=${manifest.hardwareRevision}, expected=${context.expectedHardwareRevision}.`);
