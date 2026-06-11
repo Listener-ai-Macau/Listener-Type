@@ -426,6 +426,8 @@ export interface UserPreferences {
   devicePluggedBrightnessPercent: number;
   /** 电池供电时的设备灯效亮度上限，0-100。 */
   deviceBatteryBrightnessPercent: number;
+  /** 进入低功耗 idle 的等待时间，单位分钟。 */
+  deviceLowPowerIdleMinutes: number;
   /** 电池供电空闲自动关机时间，单位分钟。插电时不进入该策略。 */
   deviceBatteryAutoShutdownMinutes: number;
   /** 设备 BLE 广播名，写入固件后下次重新广播/重启生效。 */
@@ -542,6 +544,7 @@ export interface DeviceFirmwareSettingsStatus {
   pluggedBrightnessPercent: number;
   batteryBrightnessPercent: number;
   activeBrightnessPercent: number;
+  lowPowerIdleMinutes: number;
   batteryAutoShutdownMinutes: number;
   knobRotationAction: string;
   bleName: string;

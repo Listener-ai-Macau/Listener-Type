@@ -50,7 +50,7 @@ use crate::types::{
     DictionaryEntry, HotkeyCapability, HotkeyStatus, OutputLanguagePreference, PolishMode,
     ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics, StyleSystemPrompts,
     UpdateChannel, UserPreferences, VocabPresetStore, WindowsImeStatus,
-    MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
+    MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES, MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
 };
 
 type CoordinatorState<'a> = State<'a, Arc<Coordinator>>;
@@ -407,6 +407,7 @@ fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPrefe
     previous.device_knob_rotation_action != next.device_knob_rotation_action
         || previous.device_plugged_brightness_percent != next.device_plugged_brightness_percent
         || previous.device_battery_brightness_percent != next.device_battery_brightness_percent
+        || previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes
         || previous.device_battery_auto_shutdown_minutes
             != next.device_battery_auto_shutdown_minutes
         || previous.device_ble_name != next.device_ble_name
@@ -418,6 +419,14 @@ fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), S
     }
     if prefs.device_battery_brightness_percent > 100 {
         return Err("电池亮度必须在 0-100 之间。".to_string());
+    }
+    if prefs.device_low_power_idle_minutes == 0
+        || prefs.device_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
+    {
+        return Err(format!(
+            "低功耗等待时间必须在 1-{} 分钟之间。",
+            MAX_DEVICE_LOW_POWER_IDLE_MINUTES
+        ));
     }
     if prefs.device_battery_auto_shutdown_minutes == 0
         || prefs.device_battery_auto_shutdown_minutes > MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES
@@ -481,6 +490,15 @@ fn device_setting_packets_for_changes(
             command: format!(
                 "DEVICE:SET battery_brightness={}",
                 next.device_battery_brightness_percent
+            ),
+        });
+    }
+    if previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes {
+        packets.push(DeviceSettingPacket {
+            id: "low_power_idle_minutes",
+            command: format!(
+                "DEVICE:SET low_power_idle_minutes={}",
+                next.device_low_power_idle_minutes
             ),
         });
     }

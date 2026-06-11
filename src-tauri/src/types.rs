@@ -484,8 +484,10 @@ fn default_true() -> bool {
 
 pub const DEFAULT_DEVICE_PLUGGED_BRIGHTNESS_PERCENT: u8 = 80;
 pub const DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT: u8 = 50;
+pub const DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 1;
 pub const DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 30;
 pub const DEFAULT_DEVICE_BLE_NAME: &str = "listener";
+pub const MAX_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 24 * 60;
 pub const MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 24 * 60;
 
 fn default_device_plugged_brightness_percent() -> u8 {
@@ -494,6 +496,10 @@ fn default_device_plugged_brightness_percent() -> u8 {
 
 fn default_device_battery_brightness_percent() -> u8 {
     DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT
+}
+
+fn default_device_low_power_idle_minutes() -> u32 {
+    DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES
 }
 
 fn default_device_battery_auto_shutdown_minutes() -> u32 {
@@ -506,6 +512,10 @@ fn default_device_ble_name() -> String {
 
 pub fn clamp_device_brightness_percent(value: u8) -> u8 {
     value.min(100)
+}
+
+pub fn clamp_device_low_power_idle_minutes(value: u32) -> u32 {
+    value.clamp(1, MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
 }
 
 pub fn clamp_device_battery_auto_shutdown_minutes(value: u32) -> u32 {
@@ -1071,6 +1081,9 @@ pub struct UserPreferences {
     /// Battery LED brightness ceiling, 0-100.
     #[serde(default = "default_device_battery_brightness_percent")]
     pub device_battery_brightness_percent: u8,
+    /// Runtime low-power idle timeout in minutes. Applies before battery-only shutdown.
+    #[serde(default = "default_device_low_power_idle_minutes")]
+    pub device_low_power_idle_minutes: u32,
     /// Battery-only idle shutdown timeout in minutes. Plugged power stays awake.
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
     pub device_battery_auto_shutdown_minutes: u32,
@@ -1273,6 +1286,8 @@ struct UserPreferencesWire {
     device_plugged_brightness_percent: u8,
     #[serde(default = "default_device_battery_brightness_percent")]
     device_battery_brightness_percent: u8,
+    #[serde(default = "default_device_low_power_idle_minutes")]
+    device_low_power_idle_minutes: u32,
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
     device_battery_auto_shutdown_minutes: u32,
     #[serde(default = "default_device_ble_name")]
@@ -1361,6 +1376,7 @@ impl Default for UserPreferencesWire {
             device_knob_rotation_action: prefs.device_knob_rotation_action,
             device_plugged_brightness_percent: prefs.device_plugged_brightness_percent,
             device_battery_brightness_percent: prefs.device_battery_brightness_percent,
+            device_low_power_idle_minutes: prefs.device_low_power_idle_minutes,
             device_battery_auto_shutdown_minutes: prefs.device_battery_auto_shutdown_minutes,
             device_ble_name: prefs.device_ble_name,
             local_asr_active_model: prefs.local_asr_active_model,
@@ -1477,6 +1493,9 @@ impl<'de> Deserialize<'de> for UserPreferences {
             ),
             device_battery_brightness_percent: clamp_device_brightness_percent(
                 wire.device_battery_brightness_percent,
+            ),
+            device_low_power_idle_minutes: clamp_device_low_power_idle_minutes(
+                wire.device_low_power_idle_minutes,
             ),
             device_battery_auto_shutdown_minutes: clamp_device_battery_auto_shutdown_minutes(
                 wire.device_battery_auto_shutdown_minutes,
@@ -1888,6 +1907,7 @@ impl Default for UserPreferences {
             device_knob_rotation_action: DeviceKnobRotationAction::default(),
             device_plugged_brightness_percent: default_device_plugged_brightness_percent(),
             device_battery_brightness_percent: default_device_battery_brightness_percent(),
+            device_low_power_idle_minutes: default_device_low_power_idle_minutes(),
             device_battery_auto_shutdown_minutes: default_device_battery_auto_shutdown_minutes(),
             device_ble_name: default_device_ble_name(),
             local_asr_active_model: default_local_asr_model(),

@@ -446,6 +446,8 @@ export const ko: typeof zhCN = {
       pluggedBrightnessDesc: 'USB 전원 또는 충전 중 LED 밝기 상한입니다.',
       batteryBrightnessLabel: '배터리 밝기',
       batteryBrightnessDesc: '배터리로 동작할 때의 LED 밝기 상한입니다.',
+      lowPowerIdleLabel: '저전력 모드',
+      lowPowerIdleDesc: '유휴 후 상시 상태 LED를 끄고 BLE/오디오 유휴 전력을 낮춥니다.',
       autoShutdownLabel: '배터리 자동 전원 끄기',
       autoShutdownDesc: '배터리 전원에서만 적용되며, 전원 연결 중에는 깨어 있습니다.',
       minuteSuffix: '분',

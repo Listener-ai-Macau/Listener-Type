@@ -48,6 +48,7 @@ pub struct DeviceSettingsStatus {
     pub plugged_brightness_percent: u8,
     pub battery_brightness_percent: u8,
     pub active_brightness_percent: u8,
+    pub low_power_idle_minutes: u32,
     pub battery_auto_shutdown_minutes: u32,
     pub knob_rotation_action: String,
     pub ble_name: String,
@@ -1788,12 +1789,19 @@ mod windows_ble {
         let plugged_brightness_percent = parse_u8_field(&fields, "plugged_brightness")?;
         let battery_brightness_percent = parse_u8_field(&fields, "battery_brightness")?;
         let active_brightness_percent = parse_u8_field(&fields, "active_brightness")?;
+        let low_power_idle_minutes = fields
+            .get("low_power_idle_ms")
+            .and_then(|value| value.parse::<u32>().ok())
+            .map(|ms| ms.saturating_add(59_999) / 60_000)
+            .map(|minutes| minutes.clamp(1, crate::types::MAX_DEVICE_LOW_POWER_IDLE_MINUTES))
+            .unwrap_or(crate::types::DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES);
         let auto_shutdown_ms = parse_u32_field(&fields, "auto_shutdown_ms")?;
         let battery_auto_shutdown_minutes = (auto_shutdown_ms / 60_000).max(1);
         Ok(crate::embedded_ble::DeviceSettingsStatus {
             plugged_brightness_percent,
             battery_brightness_percent,
             active_brightness_percent,
+            low_power_idle_minutes,
             battery_auto_shutdown_minutes,
             knob_rotation_action: require_field(&fields, "knob_rotation")?.to_string(),
             ble_name: require_field(&fields, "ble_name")?.to_string(),
@@ -5770,12 +5778,13 @@ mod tests {
     #[test]
     fn parses_device_settings_status_line() {
         let status = super::windows_ble::parse_device_settings_status_line(
-            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 auto_shutdown_ms=1800000 auto_shutdown_mode=battery_only knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100"
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 low_power_idle_ms=60000 low_power_idle_mode=connected_and_disconnected auto_shutdown_ms=1800000 auto_shutdown_mode=battery_only knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,low_power_idle_ms_60000_86400000"
         )
         .expect("parse device settings");
         assert_eq!(status.plugged_brightness_percent, 80);
         assert_eq!(status.battery_brightness_percent, 50);
         assert_eq!(status.active_brightness_percent, 80);
+        assert_eq!(status.low_power_idle_minutes, 1);
         assert_eq!(status.battery_auto_shutdown_minutes, 30);
         assert_eq!(status.knob_rotation_action, "screen_brightness");
         assert_eq!(status.ble_name, "listener-dev");

@@ -486,6 +486,8 @@ export const zhCN = {
       pluggedBrightnessDesc: 'USB/充电时的灯效亮度上限。',
       batteryBrightnessLabel: '电池亮度',
       batteryBrightnessDesc: '拔电后使用的灯效亮度上限。',
+      lowPowerIdleLabel: '低功耗模式',
+      lowPowerIdleDesc: '空闲后关闭常驻状态灯并降低 BLE/音频空闲功耗。',
       autoShutdownLabel: '电池自动关机',
       autoShutdownDesc: '仅电池供电时生效，插电时保持唤醒。',
       minuteSuffix: '分钟',

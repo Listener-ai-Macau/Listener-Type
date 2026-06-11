@@ -134,6 +134,7 @@ let mockSettings: UserPreferences = {
   deviceKnobRotationAction: 'systemVolume',
   devicePluggedBrightnessPercent: 80,
   deviceBatteryBrightnessPercent: 50,
+  deviceLowPowerIdleMinutes: 1,
   deviceBatteryAutoShutdownMinutes: 30,
   deviceBleName: 'listener',
   localAsrActiveModel: 'qwen3-asr-0.6b',
@@ -234,6 +235,7 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     deviceKnobRotationAction: prefs.deviceKnobRotationAction ?? 'systemVolume',
     devicePluggedBrightnessPercent: clampNumber(prefs.devicePluggedBrightnessPercent, 80, 0, 100),
     deviceBatteryBrightnessPercent: clampNumber(prefs.deviceBatteryBrightnessPercent, 50, 0, 100),
+    deviceLowPowerIdleMinutes: clampNumber(prefs.deviceLowPowerIdleMinutes, 1, 1, 1440),
     deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 30, 1, 1440),
     deviceBleName: normalizeDeviceBleName(prefs.deviceBleName),
   };
@@ -619,6 +621,7 @@ export function refreshDeviceSettingsStatus(): Promise<DeviceFirmwareSettingsSta
     pluggedBrightnessPercent: mockSettings.devicePluggedBrightnessPercent,
     batteryBrightnessPercent: mockSettings.deviceBatteryBrightnessPercent,
     activeBrightnessPercent: mockSettings.devicePluggedBrightnessPercent,
+    lowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
     batteryAutoShutdownMinutes: mockSettings.deviceBatteryAutoShutdownMinutes,
     knobRotationAction:
       mockSettings.deviceKnobRotationAction === 'screenBrightness'

@@ -488,6 +488,8 @@ export const en: typeof zhCN = {
       pluggedBrightnessDesc: 'LED brightness ceiling while USB power or charging is present.',
       batteryBrightnessLabel: 'Battery brightness',
       batteryBrightnessDesc: 'LED brightness ceiling while running on battery.',
+      lowPowerIdleLabel: 'Low-power mode',
+      lowPowerIdleDesc: 'Turns off routine status LEDs and reduces BLE/audio idle power after inactivity.',
       autoShutdownLabel: 'Battery auto power-off',
       autoShutdownDesc: 'Only applies on battery; plugged power stays awake.',
       minuteSuffix: 'min',

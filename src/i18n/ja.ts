@@ -446,6 +446,8 @@ export const ja: typeof zhCN = {
       pluggedBrightnessDesc: 'USB 給電または充電中の LED 明るさ上限。',
       batteryBrightnessLabel: 'バッテリー時の明るさ',
       batteryBrightnessDesc: 'バッテリー動作中の LED 明るさ上限。',
+      lowPowerIdleLabel: '省電力モード',
+      lowPowerIdleDesc: 'アイドル後に常時ステータス LED を消灯し、BLE/音声の待機電力を下げます。',
       autoShutdownLabel: 'バッテリー自動電源オフ',
       autoShutdownDesc: 'バッテリー動作時のみ有効で、給電中は起動状態を維持します。',
       minuteSuffix: '分',

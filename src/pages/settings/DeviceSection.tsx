@@ -27,6 +27,7 @@ export function DeviceSection() {
   const { prefs, error, updatePrefs: savePrefs } = useHotkeySettings();
   const [pluggedBrightness, setPluggedBrightness] = useState('80');
   const [batteryBrightness, setBatteryBrightness] = useState('50');
+  const [lowPowerIdleMinutes, setLowPowerIdleMinutes] = useState('1');
   const [autoShutdownMinutes, setAutoShutdownMinutes] = useState('30');
   const [bleName, setBleName] = useState('listener');
   const [bleNameError, setBleNameError] = useState<string | null>(null);
@@ -39,11 +40,13 @@ export function DeviceSection() {
     if (!prefs) return;
     setPluggedBrightness(String(prefs.devicePluggedBrightnessPercent ?? 80));
     setBatteryBrightness(String(prefs.deviceBatteryBrightnessPercent ?? 50));
+    setLowPowerIdleMinutes(String(prefs.deviceLowPowerIdleMinutes ?? 1));
     setAutoShutdownMinutes(String(prefs.deviceBatteryAutoShutdownMinutes ?? 30));
     setBleName(prefs.deviceBleName || 'listener');
   }, [
     prefs?.devicePluggedBrightnessPercent,
     prefs?.deviceBatteryBrightnessPercent,
+    prefs?.deviceLowPowerIdleMinutes,
     prefs?.deviceBatteryAutoShutdownMinutes,
     prefs?.deviceBleName,
   ]);
@@ -65,6 +68,7 @@ export function DeviceSection() {
       UserPreferences,
       | 'devicePluggedBrightnessPercent'
       | 'deviceBatteryBrightnessPercent'
+      | 'deviceLowPowerIdleMinutes'
       | 'deviceBatteryAutoShutdownMinutes'
     >,
     setDraft: (value: string) => void,
@@ -110,6 +114,7 @@ export function DeviceSection() {
         ...current,
         devicePluggedBrightnessPercent: status.pluggedBrightnessPercent,
         deviceBatteryBrightnessPercent: status.batteryBrightnessPercent,
+        deviceLowPowerIdleMinutes: status.lowPowerIdleMinutes,
         deviceBatteryAutoShutdownMinutes: status.batteryAutoShutdownMinutes,
         deviceBleName: status.bleName,
         deviceKnobRotationAction: knobRotationAction,
@@ -231,6 +236,28 @@ export function DeviceSection() {
               100,
               'deviceBatteryBrightnessPercent',
               setBatteryBrightness,
+            )
+          }
+        />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.device.lowPowerIdleLabel', '低功耗模式')}
+        desc={t('settings.device.lowPowerIdleDesc', '空闲后关闭常驻状态灯并降低 BLE/音频空闲功耗。')}
+      >
+        <NumberInput
+          value={lowPowerIdleMinutes}
+          suffix={t('settings.device.minuteSuffix', '分钟')}
+          min={1}
+          max={1440}
+          onChange={setLowPowerIdleMinutes}
+          onCommit={() =>
+            void commitNumber(
+              lowPowerIdleMinutes,
+              prefs.deviceLowPowerIdleMinutes ?? 1,
+              1,
+              1440,
+              'deviceLowPowerIdleMinutes',
+              setLowPowerIdleMinutes,
             )
           }
         />
