@@ -3331,6 +3331,9 @@ fn cancel_embedded_ble_session_through_actor(inner: &Arc<Inner>) {
         "cancel command applied to embedded BLE session",
     );
     let cancelled = begin_cancel_session_transition(inner);
+    if let Some((session_id, phase, _)) = cancelled.as_ref() {
+        request_embedded_ble_firmware_cancel_on_active_recording(*session_id, *phase);
+    }
     if cancelled.is_none() {
         if request_embedded_ble_capture_cancel_flag(inner) {
             log::info!("[coord] embedded BLE capture cancel requested without active session");
@@ -3340,6 +3343,65 @@ fn cancel_embedded_ble_session_through_actor(inner: &Arc<Inner>) {
         }
     }
     finish_cancel_session_after_transition(inner, cancelled, true);
+}
+
+fn request_embedded_ble_firmware_cancel_on_active_recording(
+    session_id: SessionId,
+    phase: SessionPhase,
+) {
+    if !matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
+        return;
+    }
+
+    #[cfg(test)]
+    {
+        crate::timeline::mark(
+            "backend.embedded_ble_session_actor",
+            "firmware_cancel_skipped_test",
+            format!("session_id={session_id} phase={phase:?}"),
+        );
+    }
+
+    #[cfg(not(test))]
+    {
+        crate::timeline::mark(
+            "backend.embedded_ble_session_actor",
+            "firmware_cancel_requested",
+            format!("session_id={session_id} phase={phase:?}"),
+        );
+        async_runtime::spawn(async move {
+            let result = async_runtime::spawn_blocking(move || {
+                crate::embedded_ble::send_recording_control_cancel(
+                    EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                )
+            })
+            .await
+            .map_err(|err| err.to_string())
+            .and_then(|value| value);
+            match result {
+                Ok(()) => {
+                    crate::timeline::mark(
+                        "backend.embedded_ble_session_actor",
+                        "firmware_cancel_sent",
+                        format!("session_id={session_id} phase={phase:?}"),
+                    );
+                    log::info!(
+                        "[coord] embedded BLE firmware cancel sent session_id={session_id} phase={phase:?}"
+                    );
+                }
+                Err(err) => {
+                    crate::timeline::mark(
+                        "backend.embedded_ble_session_actor",
+                        "firmware_cancel_failed",
+                        format!("session_id={session_id} phase={phase:?} error={err}"),
+                    );
+                    log::warn!(
+                        "[coord] embedded BLE firmware cancel failed session_id={session_id} phase={phase:?}: {err}"
+                    );
+                }
+            }
+        });
+    }
 }
 
 fn cancel_session_direct(inner: &Arc<Inner>) {

@@ -643,6 +643,7 @@ export const SUPPORTED_LANGUAGES: readonly string[] = [
 
 export type CapsuleState =
   | 'idle'
+  | 'reconnecting'
   | 'recording'
   | 'transcribing'
   | 'polishing'

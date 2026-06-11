@@ -11,7 +11,7 @@ export interface CapsuleOrderingDecision {
   reason?: string;
 }
 
-const ACTIVE_STATES: ReadonlySet<CapsuleState> = new Set(['recording', 'transcribing', 'polishing']);
+const ACTIVE_STATES: ReadonlySet<CapsuleState> = new Set(['reconnecting', 'recording', 'transcribing', 'polishing']);
 const TERMINAL_STATES: ReadonlySet<CapsuleState> = new Set(['idle', 'done', 'cancelled', 'error']);
 
 export function createCapsuleOrderingTracker(): CapsuleOrderingTracker {

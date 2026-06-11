@@ -1451,6 +1451,10 @@ mod windows_ble {
         send_recording_control_command(b"VREC:TOGGLE\n", timeout, "audio control toggle")
     }
 
+    pub fn send_recording_control_cancel(timeout: Duration) -> Result<(), String> {
+        send_recording_control_command(b"VREC:CANCEL\n", timeout, "audio control cancel")
+    }
+
     pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
         let command = if active {
             b"VREC:PROCESSING:START\n".as_slice()
@@ -5183,6 +5187,11 @@ pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_cancel(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_control_cancel(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_processing_state(active, timeout)
 }
@@ -5322,6 +5331,11 @@ pub fn probe_notify_subscription(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_toggle(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_cancel(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE recording cancel is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

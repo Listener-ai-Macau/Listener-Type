@@ -67,6 +67,7 @@ export const PREVIEW_FINAL_TRANSITION = {
 
 export type StopFeedbackCapsuleState =
   | 'idle'
+  | 'reconnecting'
   | 'recording'
   | 'transcribing'
   | 'polishing'

@@ -129,4 +129,19 @@ function payload(seq: number, sessionId: string | null, state: CapsuleState): Ca
   assert.equal(applyCapsulePayloadOrdering(tracker, payload(2, null, 'idle')).accepted, true);
 }
 
+{
+  const tracker = createCapsuleOrderingTracker();
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, null, 'reconnecting')).accepted, true);
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(2, null, 'done')).accepted, true);
+}
+
+{
+  const tracker = createCapsuleOrderingTracker();
+  assert.equal(applyCapsulePayloadOrdering(tracker, payload(1, 's1', 'recording')).accepted, true);
+
+  const recovery = applyCapsulePayloadOrdering(tracker, payload(2, null, 'reconnecting'));
+  assert.equal(recovery.accepted, false);
+  assert.equal(recovery.reason, 'non-session-active-while-session-active');
+}
+
 console.log('capsuleEventOrdering: all assertions passed');

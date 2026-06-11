@@ -256,6 +256,9 @@ function Pill({
     );
   };
   switch (state) {
+    case 'reconnecting':
+      center = renderProcessingCenter(message || t('capsule.thinking'));
+      break;
     case 'recording':
       center = stopPending
         ? renderProcessingCenter(message || t('capsule.thinking'))

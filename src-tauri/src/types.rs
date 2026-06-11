@@ -2440,6 +2440,7 @@ impl Default for HotkeyBinding {
 #[serde(rename_all = "camelCase")]
 pub enum CapsuleState {
     Idle,
+    Reconnecting,
     Recording,
     Transcribing,
     Polishing,

@@ -274,6 +274,13 @@ pub struct UiTimelineEvent {
 
 #[tauri::command]
 pub fn record_ui_timeline_event(payload: UiTimelineEvent) {
+    crate::capsule_log::record_ui_event(
+        &payload.source,
+        &payload.event,
+        payload.state.as_deref(),
+        payload.elapsed_ms,
+        payload.detail.as_ref(),
+    );
     crate::timeline::mark(
         &payload.source,
         &payload.event,

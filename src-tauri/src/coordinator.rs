@@ -587,6 +587,17 @@ impl Coordinator {
             );
             return;
         }
+        let prefs = self.inner.prefs.get();
+        if prefs.dictation_input_source_user_overridden
+            || prefs.dictation_input_source == DictationInputSource::EmbeddedBle
+        {
+            log::info!(
+                "[embedded-ble] auto input source selection skipped before firmware probe source={:?} user_overridden={}",
+                prefs.dictation_input_source,
+                prefs.dictation_input_source_user_overridden
+            );
+            return;
+        }
 
         let inner = Arc::clone(&self.inner);
         async_runtime::spawn_blocking(move || {
@@ -2421,7 +2432,7 @@ async fn handle_device_dictation_action(
             refresh_embedded_ble_listener(&inner);
             emit_capsule(
                 &inner,
-                CapsuleState::Recording,
+                CapsuleState::Reconnecting,
                 0.0,
                 0,
                 Some("设备键已触发，正在恢复 Listener BLE 音频通道...".to_string()),
@@ -2460,12 +2471,17 @@ async fn handle_device_dictation_action(
             return;
         }
 
+        let waiting_message = if matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
+            "正在发送设备录音停止控制..."
+        } else {
+            "正在发送设备录音控制，等待 Listener 音频..."
+        };
         emit_capsule(
             &inner,
-            CapsuleState::Recording,
+            CapsuleState::Reconnecting,
             0.0,
             0,
-            Some("正在发送设备录音控制，等待 Listener 音频...".to_string()),
+            Some(waiting_message.to_string()),
             None,
         );
         let result = async_runtime::spawn_blocking(move || {
@@ -2484,12 +2500,18 @@ async fn handle_device_dictation_action(
                     "ble_recording_control_sent",
                     format!("key={} gesture={}", key.label(), gesture.label()),
                 );
+                let sent_message =
+                    if matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
+                        "设备录音停止控制已发送，等待结束标志..."
+                    } else {
+                        "设备录音控制已发送，等待 Listener 音频..."
+                    };
                 emit_capsule(
                     &inner,
-                    CapsuleState::Recording,
+                    CapsuleState::Reconnecting,
                     0.0,
                     0,
-                    Some("设备录音控制已发送，等待 Listener 音频...".to_string()),
+                    Some(sent_message.to_string()),
                     None,
                 );
             }
@@ -2823,7 +2845,6 @@ fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
         return;
     }
 
-    refresh_embedded_ble_firmware_power_snapshot_async(inner, "background_listener_start");
     let inner = Arc::clone(inner);
     async_runtime::spawn(async move {
         embedded_ble_background_listener_loop(inner, generation).await;
@@ -2910,14 +2931,6 @@ fn record_embedded_ble_firmware_power_snapshot(
         snapshot.battery_percent,
         firmware.detail.as_deref(),
     );
-}
-
-fn refresh_embedded_ble_firmware_power_snapshot_async(inner: &Arc<Inner>, reason: &'static str) {
-    let inner = Arc::clone(inner);
-    async_runtime::spawn_blocking(move || {
-        let firmware = crate::embedded_ble::firmware_ota_device_snapshot();
-        record_embedded_ble_firmware_power_snapshot(&inner, &firmware, reason);
-    });
 }
 
 fn record_embedded_ble_reconnect_attempt(inner: &Arc<Inner>, reason: &str) {
@@ -3050,14 +3063,12 @@ fn emit_embedded_ble_recovery_capsule(
     message: impl Into<String>,
     idle_after_ms: Option<u64>,
 ) {
-    emit_capsule(
-        inner,
-        CapsuleState::Recording,
-        0.0,
-        0,
-        Some(message.into()),
-        None,
-    );
+    let state = if state_label == "reconnected" {
+        CapsuleState::Done
+    } else {
+        CapsuleState::Reconnecting
+    };
+    emit_capsule(inner, state, 0.0, 0, Some(message.into()), None);
     log::info!("[embedded-ble] recovery capsule state={state_label} emitted=true");
     if let Some(delay_ms) = idle_after_ms {
         schedule_capsule_idle(inner, delay_ms, None);
@@ -3288,6 +3299,13 @@ fn should_emit_embedded_ble_recovered_capsule_for_reason(
     reason: &str,
     usb_powered: Option<bool>,
 ) -> bool {
+    let normalized = reason.trim().to_ascii_lowercase();
+    if matches!(
+        normalized.as_str(),
+        "refresh" | "shutdown" | "test" | "test cleanup"
+    ) {
+        return false;
+    }
     !is_embedded_ble_low_power_idle_candidate(reason)
         || !embedded_ble_usb_power_allows_low_power_idle(usb_powered)
 }
@@ -3416,8 +3434,6 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             None,
             "background notify subscription ready",
         );
-        sync_device_knob_rotation_action_to_firmware(inner, "ble_ready");
-        refresh_embedded_ble_firmware_power_snapshot_async(inner, "ble_notify_ready");
         if recovered {
             emit_embedded_ble_recovery_capsule(
                 inner,
@@ -5584,6 +5600,15 @@ mod tests {
     }
 
     #[test]
+    fn embedded_ble_notify_ready_suppresses_internal_refresh_capsule() {
+        let coordinator = Coordinator::new();
+
+        record_embedded_ble_listener_cancelled(&coordinator.inner, "refresh");
+
+        assert!(!record_embedded_ble_notify_ready(&coordinator.inner));
+    }
+
+    #[test]
     fn embedded_ble_background_recovery_capsule_respects_power_state() {
         let coordinator = Coordinator::new();
 
@@ -6874,6 +6899,7 @@ fn emit_capsule_with_session(
 
     let visible = !matches!(state, CapsuleState::Idle);
     let show_capsule = inner.prefs.get().show_capsule;
+    crate::capsule_log::record_backend_emit(&payload, visible, show_capsule);
     let should_trace_emit = !matches!(state, CapsuleState::Recording)
         || elapsed_ms == 0
         || payload.message.is_some()

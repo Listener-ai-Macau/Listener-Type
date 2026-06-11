@@ -14,6 +14,7 @@
 
 mod asr;
 mod audio_mute;
+mod capsule_log;
 mod cli;
 mod combo_hotkey;
 mod commands;
