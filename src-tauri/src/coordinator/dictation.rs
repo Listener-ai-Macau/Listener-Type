@@ -465,9 +465,18 @@ struct EmbeddedAudioDictationSession {
     max_gain: f64,
     clipped_samples: usize,
     asr_preroll_sent: bool,
+    device_ai_processing_started: bool,
 }
 
 impl EmbeddedAudioDictationSession {
+    fn start_device_ai_processing_if_needed(&mut self, inner: &Arc<Inner>, reason: &'static str) {
+        if self.device_ai_processing_started || !should_sync_device_ai_processing(inner) {
+            return;
+        }
+        self.device_ai_processing_started = true;
+        set_device_ai_processing_async(inner, true, reason);
+    }
+
     fn consume_streaming_pcm(&mut self, inner: &Arc<Inner>, pcm: &[u8]) -> Result<(), String> {
         if pcm.is_empty() {
             return Ok(());
@@ -508,6 +517,7 @@ impl EmbeddedAudioDictationSession {
             self.clipped_samples += gain_stats.clipped_samples;
         }
 
+        self.start_device_ai_processing_if_needed(inner, "embedded_streaming_asr_start");
         feed_embedded_asr_preroll_if_needed(self);
         for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
             self.consumer.consume_pcm_chunk(chunk);
@@ -2184,7 +2194,7 @@ impl EmbeddedStreamingDictation {
                 session.session_id,
                 current_embedded_audio_partial_preview(inner),
             );
-            if !already_latched && emitted {
+            if !already_latched && emitted && !session.device_ai_processing_started {
                 set_device_ai_processing_async(inner, true, "dictation_stop_processing_start");
             }
         }
@@ -2308,6 +2318,7 @@ async fn begin_embedded_audio_dictation_session(
         max_gain: 1.0,
         clipped_samples: 0,
         asr_preroll_sent: false,
+        device_ai_processing_started: false,
     })
 }
 
@@ -3566,6 +3577,7 @@ mod tests {
             max_gain: 1.0,
             clipped_samples: 0,
             asr_preroll_sent: false,
+            device_ai_processing_started: false,
         }
     }
 
@@ -4008,6 +4020,7 @@ mod tests {
 
         assert_eq!(session.streamed_pcm_bytes, 0);
         assert_eq!(session.normalized_pcm_bytes, 0);
+        assert!(!session.device_ai_processing_started);
         assert!(session.archive_pcm.as_ref().expect("archive").is_empty());
         assert_eq!(consumer.bytes.load(Ordering::SeqCst), 0);
     }
@@ -4033,6 +4046,7 @@ mod tests {
 
         assert_eq!(session.streamed_pcm_bytes, pcm.len());
         assert_eq!(session.normalized_pcm_bytes, pcm.len());
+        assert!(session.device_ai_processing_started);
         assert_eq!(session.archive_pcm.as_ref().expect("archive"), &pcm);
         assert_eq!(consumer.bytes.load(Ordering::SeqCst), pcm.len());
     }

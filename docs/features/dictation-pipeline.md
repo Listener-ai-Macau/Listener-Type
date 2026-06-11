@@ -33,6 +33,7 @@ flowchart LR
 - Clipboard fallback must preserve the generated result when direct insertion fails.
 - Debug audio recording is opt-in and bounded by retention settings.
 - Embedded audio keeps the firmware VKA1 packet model intact. Batch debug paths reconstruct a complete PCM session before ASR; streaming paths create the normal ASR consumer on `session_start`, feed each `audio_data` PCM chunk immediately, and finalize through the same `end_session` path on `session_stop`.
+- Embedded streaming starts the device AI processing LED when Type accepts the first valid PCM chunk for ASR. The stop boundary only switches the capsule into transcribing feedback; it must not delay the purple AI processing signal until the end.
 - Embedded streaming cancel/error/link-loss paths must cancel ASR, restore prepared IME state, return coordinator state to Idle, and show an error capsule.
 - Local ASR providers use the same coordinator path as cloud providers after the provider is selected and prepared.
 - Windows insertion may use the TSF IME bridge; clipboard/direct insertion fallback remains required so text is not lost.
