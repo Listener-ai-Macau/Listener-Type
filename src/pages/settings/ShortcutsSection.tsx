@@ -34,6 +34,10 @@ const DEVICE_KEYS: Array<{ id: DeviceCustomKeyId }> = [
   { id: 'key3' },
   { id: 'key4' },
 ];
+const DEVICE_SINGLE_CLICK_KEYS: Array<{ id: DeviceCustomKeyId }> = [
+  ...DEVICE_KEYS,
+  { id: 'knob' },
+];
 
 type DeviceKeyMapKey =
   | 'deviceCustomKeys'
@@ -43,21 +47,25 @@ type DeviceKeyMapKey =
 const DEVICE_GESTURES: Array<{
   id: DeviceCustomKeyGesture;
   mapKey: DeviceKeyMapKey;
-  fallbacks: Record<DeviceCustomKeyId, string>;
+  keys: Array<{ id: DeviceCustomKeyId }>;
+  fallbacks: Partial<Record<DeviceCustomKeyId, string>>;
 }> = [
   {
     id: 'singleClick',
     mapKey: 'deviceCustomKeys',
-    fallbacks: { key1: 'F13', key2: 'F14', key3: 'F15', key4: 'F16' },
+    keys: DEVICE_SINGLE_CLICK_KEYS,
+    fallbacks: { key1: 'F13', key2: 'F14', key3: 'F15', key4: 'F16', knob: 'Shift+F13' },
   },
   {
     id: 'doubleClick',
     mapKey: 'deviceCustomKeyDoubleClicks',
+    keys: DEVICE_KEYS,
     fallbacks: { key1: 'F17', key2: 'F18', key3: 'F19', key4: 'F20' },
   },
   {
     id: 'longPress',
     mapKey: 'deviceCustomKeyLongPresses',
+    keys: DEVICE_KEYS,
     fallbacks: { key1: 'F21', key2: 'F22', key3: 'F23', key4: 'F24' },
   },
 ];
@@ -324,19 +332,11 @@ function DeviceKnobControls({
           />
         </DeviceKnobRow>
         <DeviceKnobRow
-          label={t('settings.device.knobPress.single', '旋钮单击')}
-          fallback={t('settings.device.knobPress.fixed', '固件固定')}
-        >
-          <ReadOnlyDeviceAction>
-            {t('settings.device.knobPress.record', '开始 / 停止录音')}
-          </ReadOnlyDeviceAction>
-        </DeviceKnobRow>
-        <DeviceKnobRow
           label={t('settings.device.knobPress.double', '旋钮双击')}
           fallback={t('settings.device.knobPress.fixed', '固件固定')}
         >
           <ReadOnlyDeviceAction muted>
-            {t('settings.device.knobPress.bluetooth', '重置蓝牙 / 重新配对')}
+            {t('settings.deviceKeys.knob.actions.bluetoothReset', '重置蓝牙 / 重新配对')}
           </ReadOnlyDeviceAction>
         </DeviceKnobRow>
         <DeviceKnobRow
@@ -344,7 +344,7 @@ function DeviceKnobControls({
           fallback={t('settings.device.knobPress.fixed', '固件固定')}
         >
           <ReadOnlyDeviceAction muted>
-            {t('settings.device.knobPress.powerOff', '关机')}
+            {t('settings.deviceKeys.knob.actions.powerOff', '关机')}
           </ReadOnlyDeviceAction>
         </DeviceKnobRow>
       </div>
@@ -434,7 +434,7 @@ function DeviceKeyGestureGroup({
         {t(`settings.deviceKeys.gestures.${gesture.id}`)}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {DEVICE_KEYS.map(({ id }) => (
+        {gesture.keys.map(({ id }) => (
           <div
             key={`${gesture.id}-${id}`}
             style={{
@@ -446,10 +446,10 @@ function DeviceKeyGestureGroup({
           >
             <div style={{ minWidth: 0, paddingTop: 6 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
-                {t('settings.deviceKeys.keyLabel', { key: id.toUpperCase() })}
+                {t('settings.deviceKeys.keyLabel', { key: deviceKeyDisplayLabel(id) })}
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
-                {t('settings.deviceKeys.fallback', { fallback: gesture.fallbacks[id] })}
+                {t('settings.deviceKeys.fallback', { fallback: gesture.fallbacks[id] ?? '' })}
               </div>
             </div>
             <DeviceKeyMappingControl
@@ -476,6 +476,10 @@ function knobActionFallback(action: DeviceKnobRotationAction) {
     default:
       return '电脑音量';
   }
+}
+
+function deviceKeyDisplayLabel(id: DeviceCustomKeyId) {
+  return id === 'knob' ? 'EC11' : id.toUpperCase();
 }
 
 function DeviceKeyMappingControl({

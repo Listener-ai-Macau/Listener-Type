@@ -493,7 +493,7 @@ export const zhCN = {
       bleNameDesc: '写入固件后，重新广播或重启后显示新名称。',
       bleNameError: '只能使用 1-32 个可见 ASCII 字符，不能包含空格、引号、分号、等号或反斜杠。',
       knobRotationLabel: '旋钮旋转',
-      knobRotationDesc: '旋转动作同步到设备；按压类手势仍由固件固定。',
+      knobRotationDesc: '旋转动作同步到设备；EC11 单击在设备自定义键里设置，双击/长按由固件固定。',
       knobRotationAria: '选择旋钮旋转动作',
       knobActions: {
         systemVolume: '电脑音量',
@@ -797,7 +797,7 @@ export const zhCN = {
     },
       deviceKeys: {
         title: '设备自定义键',
-        desc: 'KEY1-KEY4 使用固件 F13-F24 入口，按单击、双击、长按分别映射为安全动作。',
+        desc: 'KEY1-KEY4 与 EC11 单击使用设备 fallback 入口映射为安全动作；KEY3 默认录音。',
         keyLabel: '{{key}}',
         fallback: '设备入口 {{fallback}}',
         noop: '不执行动作',
@@ -832,7 +832,7 @@ export const zhCN = {
         },
         knob: {
           title: '旋钮动作',
-          desc: '旋转动作可同步到设备：调电脑音量、调屏幕亮度或禁用。按压类手势仍由固件固定。',
+          desc: '旋转动作可同步到设备：调电脑音量、调屏幕亮度或禁用。旋钮单击在设备自定义键里配置。',
           gestures: {
             rotate: '旋钮旋转',
             shortPress: '旋钮单击',
@@ -843,7 +843,6 @@ export const zhCN = {
             systemVolume: '电脑音量',
             screenBrightness: '屏幕亮度',
             disabled: '禁用',
-            recording: '开始 / 停止录音',
             bluetoothReset: '重置蓝牙 / 重新配对',
             powerOff: '关机',
           },

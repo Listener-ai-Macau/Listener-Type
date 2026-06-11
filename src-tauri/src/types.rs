@@ -538,14 +538,16 @@ pub enum DeviceCustomKeyId {
     Key2,
     Key3,
     Key4,
+    Knob,
 }
 
 impl DeviceCustomKeyId {
-    pub const ALL: [DeviceCustomKeyId; 4] = [
+    pub const ALL: [DeviceCustomKeyId; 5] = [
         DeviceCustomKeyId::Key1,
         DeviceCustomKeyId::Key2,
         DeviceCustomKeyId::Key3,
         DeviceCustomKeyId::Key4,
+        DeviceCustomKeyId::Knob,
     ];
 
     pub fn label(self) -> &'static str {
@@ -554,6 +556,7 @@ impl DeviceCustomKeyId {
             DeviceCustomKeyId::Key2 => "KEY2",
             DeviceCustomKeyId::Key3 => "KEY3",
             DeviceCustomKeyId::Key4 => "KEY4",
+            DeviceCustomKeyId::Knob => "EC11",
         }
     }
 
@@ -583,7 +586,12 @@ impl DeviceCustomKeyId {
                 DeviceCustomKeyGesture::DoubleClick => "F20",
                 DeviceCustomKeyGesture::LongPress => "F24",
             },
+            DeviceCustomKeyId::Knob => "F13",
         }
+    }
+
+    pub fn supports_gesture(self, gesture: DeviceCustomKeyGesture) -> bool {
+        self != DeviceCustomKeyId::Knob || gesture == DeviceCustomKeyGesture::SingleClick
     }
 }
 
@@ -680,6 +688,7 @@ pub struct DeviceCustomKeys {
     pub key2: DeviceCustomKeyMapping,
     pub key3: DeviceCustomKeyMapping,
     pub key4: DeviceCustomKeyMapping,
+    pub knob: DeviceCustomKeyMapping,
 }
 
 impl DeviceCustomKeys {
@@ -689,6 +698,7 @@ impl DeviceCustomKeys {
             DeviceCustomKeyId::Key2 => &self.key2,
             DeviceCustomKeyId::Key3 => &self.key3,
             DeviceCustomKeyId::Key4 => &self.key4,
+            DeviceCustomKeyId::Knob => &self.knob,
         }
     }
 
@@ -698,11 +708,12 @@ impl DeviceCustomKeys {
             key2: DeviceCustomKeyMapping::default(),
             key3: DeviceCustomKeyMapping::default(),
             key4: DeviceCustomKeyMapping::default(),
+            knob: DeviceCustomKeyMapping::default(),
         }
     }
 
     pub fn is_all_disabled(&self) -> bool {
-        [&self.key1, &self.key2, &self.key3, &self.key4]
+        [&self.key1, &self.key2, &self.key3, &self.key4, &self.knob]
             .iter()
             .all(|mapping| mapping.action == DeviceCustomKeyAction::Disabled)
     }
@@ -743,6 +754,10 @@ fn current_device_custom_keys_default_with_external_app_path(
             external_app_path,
             ..DeviceCustomKeyMapping::default()
         },
+        knob: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SwitchStyle,
+            ..DeviceCustomKeyMapping::default()
+        },
     }
 }
 
@@ -767,18 +782,49 @@ fn legacy_device_custom_keys_default_with_external_app_path(
             action: DeviceCustomKeyAction::UndoShortcut,
             ..DeviceCustomKeyMapping::default()
         },
+        knob: DeviceCustomKeyMapping::default(),
     }
 }
 
 fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
     keys == &legacy_device_custom_keys_default()
+        || device_custom_key_defaults_match(keys, &legacy_device_custom_keys_default(), true)
         || keys == &legacy_device_custom_keys_default_with_external_app_path("code".into())
+        || device_custom_key_defaults_match(
+            keys,
+            &legacy_device_custom_keys_default_with_external_app_path("code".into()),
+            true,
+        )
         || previous_device_custom_key_external_app_paths()
             .into_iter()
             .any(|path| {
-                keys == &legacy_device_custom_keys_default_with_external_app_path(path.clone())
-                    || keys == &current_device_custom_keys_default_with_external_app_path(path)
+                let legacy_default =
+                    legacy_device_custom_keys_default_with_external_app_path(path.clone());
+                let current_default =
+                    current_device_custom_keys_default_with_external_app_path(path.clone());
+                keys == &legacy_default
+                    || device_custom_key_defaults_match(keys, &legacy_default, true)
+                    || keys == &current_default
+                    || device_custom_key_defaults_match(keys, &current_default, false)
             })
+}
+
+fn device_custom_key_defaults_match(
+    left: &DeviceCustomKeys,
+    right: &DeviceCustomKeys,
+    allow_missing_knob_default: bool,
+) -> bool {
+    left.key1 == right.key1
+        && left.key2 == right.key2
+        && left.key3 == right.key3
+        && left.key4 == right.key4
+        && (left.knob == right.knob
+            || (allow_missing_knob_default
+                && left.knob
+                    == current_device_custom_keys_default_with_external_app_path(
+                        default_device_external_app_path(),
+                    )
+                    .knob))
 }
 
 fn previous_device_custom_key_external_app_paths() -> Vec<String> {
@@ -2639,6 +2685,10 @@ mod tests {
             prefs.device_custom_keys.key4.action,
             DeviceCustomKeyAction::OpenExternalApp
         );
+        assert_eq!(
+            prefs.device_custom_keys.knob.action,
+            DeviceCustomKeyAction::SwitchStyle
+        );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
     }
@@ -2676,6 +2726,10 @@ mod tests {
             prefs.device_custom_keys.key4.action,
             DeviceCustomKeyAction::OpenExternalApp
         );
+        assert_eq!(
+            prefs.device_custom_keys.knob.action,
+            DeviceCustomKeyAction::SwitchStyle
+        );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
     }
@@ -2701,6 +2755,10 @@ mod tests {
         assert_ne!(
             prefs.device_custom_keys.key4.external_app_path,
             old_code_path
+        );
+        assert_eq!(
+            prefs.device_custom_keys.knob.action,
+            DeviceCustomKeyAction::SwitchStyle
         );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());

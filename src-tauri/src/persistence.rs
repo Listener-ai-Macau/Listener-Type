@@ -40,6 +40,7 @@ const VOCAB_FILE: &str = "dictionary.json";
 const CORRECTION_RULES_FILE: &str = "correction-rules.json";
 const CORRECTION_NUM_TOKEN: &str = "{num}";
 const VOCAB_PRESETS_FILE: &str = "vocab-presets.json";
+const ATOMIC_WRITE_RETRY_DELAYS_MS: [u64; 6] = [20, 50, 100, 200, 350, 500];
 
 /// 旧版 plaintext JSON 凭据路径。仅作为迁移来源；成功写入系统凭据库后会删除。
 const LEGACY_CREDS_DIR: &str = ".listener-type";
@@ -260,7 +261,8 @@ pub fn foundry_logs_root() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Atomic write: write to `*.tmp` first, then rename onto the target path.
+/// Atomic write: write to `*.tmp` first, then replace the target path.
+/// Windows falls back to copy-over when an existing file blocks rename.
 fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         ensure_dir(parent)?;
@@ -272,11 +274,53 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
     let tmp_path = path.with_file_name(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
     fs::write(&tmp_path, contents)
         .with_context(|| format!("write tmp failed: {}", tmp_path.display()))?;
-    fs::rename(&tmp_path, path).with_context(|| {
-        let _ = fs::remove_file(&tmp_path);
-        format!("rename failed: {}", path.display())
-    })?;
-    Ok(())
+    let attempt_count = ATOMIC_WRITE_RETRY_DELAYS_MS.len() + 1;
+    let mut last_error = String::new();
+    for attempt in 0..attempt_count {
+        match replace_tmp_file(&tmp_path, path) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                last_error = err.to_string();
+                if attempt < ATOMIC_WRITE_RETRY_DELAYS_MS.len() {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        ATOMIC_WRITE_RETRY_DELAYS_MS[attempt],
+                    ));
+                }
+            }
+        }
+    }
+    let _ = fs::remove_file(&tmp_path);
+    Err(anyhow!(
+        "replace failed after {attempt_count} attempts: {last_error}"
+    ))
+    .with_context(|| format!("replace failed: {}", path.display()))
+}
+
+fn replace_tmp_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    match fs::rename(tmp_path, path) {
+        Ok(()) => Ok(()),
+        Err(rename_err) => {
+            #[cfg(target_os = "windows")]
+            {
+                match fs::copy(tmp_path, path) {
+                    Ok(_) => {
+                        let _ = fs::remove_file(tmp_path);
+                        Ok(())
+                    }
+                    Err(copy_err) => {
+                        log::debug!(
+                            "[persistence] tmp replace failed: rename={rename_err}; copy_fallback={copy_err}"
+                        );
+                        Err(copy_err)
+                    }
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Err(rename_err)
+            }
+        }
+    }
 }
 
 fn read_or_default<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> Result<T> {

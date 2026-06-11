@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Port,
-    [ValidateSet("generated-key3", "generated-ec11")]
+    [ValidateSet("generated-key3")]
     [string]$TriggerMode = "generated-key3",
     [string]$DeviceName = "listener",
     [string]$BluetoothAddress = "",
@@ -237,7 +237,7 @@ function Invoke-GeneratedRecordingStop {
 
     $stopPattern = "recording stop source=|record session stop requested|stream session stop queued"
     $readyPattern = "audio transport state: .* -> stream_ready|audio notify subscription changed: .* notify=1|audio notify subscription restored before connect|connection established"
-    $maxAttempts = if ($TriggerMode -eq "generated-key3") { 3 } else { 1 }
+    $maxAttempts = 3
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         if ($attempt -gt 1) {
             $Lines.Add("# retry generated stop attempt=$attempt")
@@ -250,9 +250,6 @@ function Invoke-GeneratedRecordingStop {
             -Pattern $stopPattern
         if ($stopLine) {
             return $stopLine
-        }
-        if ($TriggerMode -ne "generated-key3") {
-            break
         }
         [void](Read-SerialUntil `
             -Serial $Serial `
@@ -272,37 +269,21 @@ function Get-GeneratedButtonEvidence {
         [string]$TriggerMode
     )
 
-    $logical = if ($TriggerMode -eq "generated-ec11") { "EC11" } else { "KEY3" }
+    $logical = "KEY3"
     $ackPattern = "~KEY:GENERATED logical=$logical gesture=single result=ESP_OK"
     $ackCount = @($Lines | Where-Object { $_ -like "*$ackPattern*" }).Count
-    $timingPatterns = if ($logical -eq "KEY3") {
-        @(
-            "custom key generated single-click queued: logical=KEY3",
-            "custom key generated single-click armed: logical=KEY3",
-            "custom key generated single-click completed: logical=KEY3",
-            "custom key raw transition: logical=KEY3",
-            "custom key stable transition: logical=KEY3",
-            "custom key release: logical=KEY3"
-        )
-    } else {
-        @(
-            "recording gesture key generated single-click queued",
-            "recording gesture key generated single-click armed",
-            "recording gesture key generated single-click completed",
-            "recording gesture key level changed: source=ec11_key.gpio18"
-        )
-    }
-    $singlePatterns = if ($logical -eq "KEY3") {
-        @(
-            "custom key single pending: logical=KEY3",
-            "custom key fallback queued: logical=KEY3"
-        )
-    } else {
-        @(
-            "ec11_key.gpio18 single click pending for double-click window",
-            "ec11_key.gpio18 single-click toggle detected"
-        )
-    }
+    $timingPatterns = @(
+        "custom key generated single-click queued: logical=KEY3",
+        "custom key generated single-click armed: logical=KEY3",
+        "custom key generated single-click completed: logical=KEY3",
+        "custom key raw transition: logical=KEY3",
+        "custom key stable transition: logical=KEY3",
+        "custom key release: logical=KEY3"
+    )
+    $singlePatterns = @(
+        "custom key single pending: logical=KEY3",
+        "custom key fallback queued: logical=KEY3"
+    )
     $timingSeen = [bool](@($Lines | Where-Object {
         $line = $_
         @($timingPatterns | Where-Object { $line -like "*$_*" }).Count -gt 0
@@ -318,11 +299,7 @@ function Get-GeneratedButtonEvidence {
         start_stop_ack_seen = $ackCount -ge 2
         timing_seen = $timingSeen
         single_seen = $singleSeen
-        summary = if ($logical -eq "KEY3") {
-            "KEY3 generated press/release -> custom key debounce/single-click/F15 path"
-        } else {
-            "EC11 generated press/release -> voice-key debounce/single-click toggle path"
-        }
+        summary = "KEY3 generated press/release -> custom key debounce/single-click/F15 path"
     }
 }
 
@@ -619,7 +596,7 @@ $scriptFailure = $null
 $allSerialLines = [System.Collections.Generic.List[string]]::new()
 $previousHiddenAt = $null
 $startedAt = Get-Date
-$triggerCommand = if ($TriggerMode -eq "generated-ec11") { "~KEY:EC11:SINGLE" } else { "~KEY:KEY3:SINGLE" }
+$triggerCommand = "~KEY:KEY3:SINGLE"
 try {
     if ($hadPrefs) {
         Copy-Item -LiteralPath $prefsPath -Destination $prefsBackup -Force

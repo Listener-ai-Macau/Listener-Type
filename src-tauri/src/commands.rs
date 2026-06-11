@@ -45,11 +45,12 @@ use crate::recorder::{AudioConsumer, Recorder};
 use crate::types::{
     builtin_style_pack_id, default_active_style_pack_id, device_ble_name_is_valid,
     ChineseScriptPreference, ComboBinding, CorrectionRule, CredentialsStatus,
-    DeviceCustomKeyAction, DeviceCustomKeyMapping, DeviceCustomKeys, DeviceKnobRotationAction,
-    DictationInputSource, DictationSession, DictionaryEntry, HotkeyCapability, HotkeyStatus,
-    OutputLanguagePreference, PolishMode, ShortcutBinding, StylePack, StylePackKind,
-    StylePackRuntimeDiagnostics, StyleSystemPrompts, UpdateChannel, UserPreferences,
-    VocabPresetStore, WindowsImeStatus, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
+    DeviceCustomKeyAction, DeviceCustomKeyGesture, DeviceCustomKeyId, DeviceCustomKeyMapping,
+    DeviceCustomKeys, DeviceKnobRotationAction, DictationInputSource, DictationSession,
+    DictionaryEntry, HotkeyCapability, HotkeyStatus, OutputLanguagePreference, PolishMode,
+    ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics, StyleSystemPrompts,
+    UpdateChannel, UserPreferences, VocabPresetStore, WindowsImeStatus,
+    MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
 };
 
 type CoordinatorState<'a> = State<'a, Arc<Coordinator>>;
@@ -3085,29 +3086,33 @@ fn reject_bare_shift_dictation_shortcut(binding: &ShortcutBinding) -> Result<(),
 }
 
 fn is_device_fallback_reserved_hotkey(binding: &ShortcutBinding) -> bool {
-    binding.modifiers.is_empty()
-        && matches!(
-            binding.primary.trim().to_ascii_uppercase().as_str(),
-            "F13"
-                | "F14"
-                | "F15"
-                | "F16"
-                | "F17"
-                | "F18"
-                | "F19"
-                | "F20"
-                | "F21"
-                | "F22"
-                | "F23"
-                | "F24"
-        )
+    DeviceCustomKeyGesture::ALL.into_iter().any(|gesture| {
+        DeviceCustomKeyId::ALL.into_iter().any(|key| {
+            key.supports_gesture(gesture)
+                && shortcut_bindings_overlap(binding, &device_fallback_shortcut(key, gesture))
+        })
+    })
 }
 
 fn reject_device_fallback_reserved_hotkey(binding: &ShortcutBinding) -> Result<(), String> {
     if is_device_fallback_reserved_hotkey(binding) {
-        return Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into());
+        return Err("设备 fallback 快捷键已保留给 KEY1-KEY4 和 EC11 单击入口".into());
     }
     Ok(())
+}
+
+fn device_fallback_shortcut(
+    key: DeviceCustomKeyId,
+    gesture: DeviceCustomKeyGesture,
+) -> ShortcutBinding {
+    ShortcutBinding {
+        primary: key.fallback_primary_for(gesture).into(),
+        modifiers: if key == DeviceCustomKeyId::Knob {
+            vec!["shift".into()]
+        } else {
+            Vec::new()
+        },
+    }
 }
 
 fn sync_dictation_hotkey_legacy_fields(prefs: &mut UserPreferences) {
@@ -3184,7 +3189,7 @@ fn reject_hotkey_collisions(prefs: &UserPreferences) -> Result<(), String> {
 }
 
 fn validate_device_custom_keys(keys: &DeviceCustomKeys) -> Result<(), String> {
-    for mapping in [&keys.key1, &keys.key2, &keys.key3, &keys.key4] {
+    for mapping in [&keys.key1, &keys.key2, &keys.key3, &keys.key4, &keys.knob] {
         validate_device_custom_key_mapping(mapping)?;
     }
     Ok(())
@@ -3201,7 +3206,7 @@ fn validate_device_custom_key_mapping(mapping: &DeviceCustomKeyMapping) -> Resul
     crate::shortcut_binding::validate_binding(shortcut).map_err(|e| e.to_string())?;
     reject_modifier_only_action_shortcut(shortcut)?;
     if is_device_fallback_reserved_hotkey(shortcut) {
-        return Err("设备自定义键不能转发为 F13-F24，避免重复触发自身".into());
+        return Err("设备自定义键不能转发为设备 fallback 快捷键，避免重复触发自身".into());
     }
     Ok(())
 }
@@ -6195,7 +6200,24 @@ mod tests {
 
         assert_eq!(
             super::validate_device_custom_key_mapping(&mapping),
-            Err("设备自定义键不能转发为 F13-F24，避免重复触发自身".into())
+            Err("设备自定义键不能转发为设备 fallback 快捷键，避免重复触发自身".into())
+        );
+    }
+
+    #[test]
+    fn validate_device_shortcut_rejects_ec11_fallback_combo() {
+        let mapping = DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SendShortcut,
+            shortcut: Some(ShortcutBinding {
+                primary: "F13".into(),
+                modifiers: vec!["shift".into()],
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            super::validate_device_custom_key_mapping(&mapping),
+            Err("设备自定义键不能转发为设备 fallback 快捷键，避免重复触发自身".into())
         );
     }
 
@@ -6222,7 +6244,20 @@ mod tests {
 
         assert_eq!(
             super::validate_shortcut_binding(binding),
-            Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into())
+            Err("设备 fallback 快捷键已保留给 KEY1-KEY4 和 EC11 单击入口".into())
+        );
+    }
+
+    #[test]
+    fn validate_shortcut_binding_rejects_ec11_fallback_hotkey() {
+        let binding = ShortcutBinding {
+            primary: "F13".into(),
+            modifiers: vec!["shift".into()],
+        };
+
+        assert_eq!(
+            super::validate_shortcut_binding(binding),
+            Err("设备 fallback 快捷键已保留给 KEY1-KEY4 和 EC11 单击入口".into())
         );
     }
 
@@ -6351,7 +6386,20 @@ mod tests {
 
         assert_eq!(
             result,
-            Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into())
+            Err("设备 fallback 快捷键已保留给 KEY1-KEY4 和 EC11 单击入口".into())
+        );
+    }
+
+    #[test]
+    fn validate_combo_hotkey_rejects_ec11_fallback_hotkey() {
+        let result = super::validate_combo_hotkey(ComboBinding {
+            primary: "F13".into(),
+            modifiers: vec!["shift".into()],
+        });
+
+        assert_eq!(
+            result,
+            Err("设备 fallback 快捷键已保留给 KEY1-KEY4 和 EC11 单击入口".into())
         );
     }
 
@@ -6531,7 +6579,7 @@ mod tests {
 
         assert_eq!(
             persist_settings(&writer, prefs),
-            Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into())
+            Err("设备 fallback 快捷键已保留给 KEY1-KEY4 和 EC11 单击入口".into())
         );
         assert!(writer.saved.lock().unwrap().is_none());
     }
@@ -6549,7 +6597,7 @@ mod tests {
 
         assert_eq!(
             persist_settings(&writer, prefs),
-            Err("F13-F24 已保留给设备 KEY1-KEY4 的单击/双击/长按入口".into())
+            Err("设备 fallback 快捷键已保留给 KEY1-KEY4 和 EC11 单击入口".into())
         );
         assert!(writer.saved.lock().unwrap().is_none());
     }

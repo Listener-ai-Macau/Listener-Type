@@ -453,7 +453,7 @@ export const ko: typeof zhCN = {
       bleNameDesc: '펌웨어에 쓴 뒤 다시 광고하거나 재시작하면 새 이름이 표시됩니다.',
       bleNameError: '1-32자의 표시 가능한 ASCII 문자만 사용할 수 있으며 공백, 따옴표, 세미콜론, 등호, 백슬래시는 사용할 수 없습니다.',
       knobRotationLabel: '노브 회전',
-      knobRotationDesc: '회전 동작은 장치에 동기화됩니다. 누르기 제스처는 펌웨어에 고정되어 있습니다.',
+      knobRotationDesc: '회전 동작은 장치에 동기화됩니다. EC11 단일 클릭은 장치 사용자 지정 키에서 설정하고, 두 번 클릭과 길게 누르기는 펌웨어에 고정됩니다.',
       knobRotationAria: '노브 회전 동작 선택',
       knobActions: {
         systemVolume: '컴퓨터 볼륨',
@@ -757,7 +757,7 @@ export const ko: typeof zhCN = {
     },
     deviceKeys: {
       title: '장치 사용자 지정 키',
-      desc: 'KEY1-KEY4 는 펌웨어 F13-F24 입력을 사용하며 단일 클릭, 더블 클릭, 길게 누르기별로 매핑합니다.',
+      desc: 'KEY1-KEY4 와 EC11 클릭은 장치 fallback 입력으로 안전한 동작에 매핑됩니다. KEY3 는 기본 녹음 키입니다.',
       keyLabel: '{{key}}',
       fallback: '장치 입력 {{fallback}}',
       noop: '동작 없음',
@@ -792,7 +792,7 @@ export const ko: typeof zhCN = {
       },
       knob: {
         title: '노브 동작',
-        desc: '회전 동작은 장치로 동기화할 수 있습니다. 컴퓨터 볼륨, 화면 밝기, 비활성화 중에서 선택하세요. 클릭 제스처는 펌웨어에 고정되어 있습니다.',
+        desc: '회전 동작은 장치로 동기화할 수 있습니다. 컴퓨터 볼륨, 화면 밝기, 비활성화 중에서 선택하세요. 노브 클릭은 장치 사용자 지정 키에서 설정합니다.',
         gestures: {
           rotate: '노브 회전',
           shortPress: '노브 클릭',
@@ -803,7 +803,6 @@ export const ko: typeof zhCN = {
           systemVolume: '컴퓨터 볼륨',
           screenBrightness: '화면 밝기',
           disabled: '비활성화',
-          recording: '녹음 시작 / 중지',
           bluetoothReset: 'Bluetooth 재설정 / 다시 페어링',
           powerOff: '전원 끄기',
         },

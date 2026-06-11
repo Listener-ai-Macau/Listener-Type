@@ -413,7 +413,7 @@ export interface UserPreferences {
   switchStyleHotkey: ShortcutBinding;
   /** 打开 Listener Type 主窗口的全局快捷键。 */
   openAppHotkey: ShortcutBinding;
-  /** 设备 KEY1-KEY4 的单击动作映射。固件 fallback 入口为 F13-F16。 */
+  /** 设备 KEY1-KEY4 与 EC11 的单击动作映射。固件 fallback 入口为 F13-F16 与 Shift+F13。 */
   deviceCustomKeys: DeviceCustomKeys;
   /** 设备 KEY1-KEY4 的双击动作映射。固件 fallback 入口为 F17-F20。 */
   deviceCustomKeyDoubleClicks: DeviceCustomKeys;
@@ -483,7 +483,7 @@ export interface UserPreferences {
   marketplaceDevLogin: string;
 }
 
-export type DeviceCustomKeyId = 'key1' | 'key2' | 'key3' | 'key4';
+export type DeviceCustomKeyId = 'key1' | 'key2' | 'key3' | 'key4' | 'knob';
 export type DeviceCustomKeyGesture = 'singleClick' | 'doubleClick' | 'longPress';
 
 export type DeviceCustomKeyAction =
@@ -533,6 +533,7 @@ export interface DeviceCustomKeys {
   key2: DeviceCustomKeyMapping;
   key3: DeviceCustomKeyMapping;
   key4: DeviceCustomKeyMapping;
+  knob: DeviceCustomKeyMapping;
 }
 
 export type DeviceKnobRotationAction = 'systemVolume' | 'screenBrightness' | 'disabled';

@@ -191,7 +191,7 @@ struct Inner {
     translation_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
     switch_style_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
     open_app_hotkey: Mutex<Option<ComboHotkeyMonitor>>,
-    device_key_hotkeys: [Mutex<Option<ComboHotkeyMonitor>>; 12],
+    device_key_hotkeys: [Mutex<Option<ComboHotkeyMonitor>>; 13],
     device_key_last_dispatch_at:
         Mutex<HashMap<(DeviceCustomKeyGesture, DeviceCustomKeyId), Instant>>,
     /// 翻译模式触发标志。每次 begin_session 重置为 false；hotkey 监听器在
@@ -704,6 +704,9 @@ impl Coordinator {
     pub fn start_device_custom_key_hotkey_listeners(&self) {
         for gesture in DeviceCustomKeyGesture::ALL {
             for key in DeviceCustomKeyId::ALL {
+                if !key.supports_gesture(gesture) {
+                    continue;
+                }
                 let inner = Arc::clone(&self.inner);
                 let name = format!(
                     "listener-type-{}-{}-hotkey-supervisor",
@@ -726,6 +729,9 @@ impl Coordinator {
     pub fn stop_device_custom_key_hotkey_listeners(&self) {
         for gesture in DeviceCustomKeyGesture::ALL {
             for key in DeviceCustomKeyId::ALL {
+                if !key.supports_gesture(gesture) {
+                    continue;
+                }
                 take_action_hotkey_on_main_thread(
                     &self.inner,
                     ActionHotkeyKind::DeviceKey { key, gesture },
@@ -902,6 +908,9 @@ impl Coordinator {
     pub fn update_device_custom_key_hotkey_bindings(&self) {
         for gesture in DeviceCustomKeyGesture::ALL {
             for key in DeviceCustomKeyId::ALL {
+                if !key.supports_gesture(gesture) {
+                    continue;
+                }
                 self.update_action_hotkey_binding(ActionHotkeyKind::DeviceKey { key, gesture });
             }
         }
@@ -2632,6 +2641,9 @@ fn action_hotkey_slot(
 }
 
 fn device_key_hotkey_index(key: DeviceCustomKeyId, gesture: DeviceCustomKeyGesture) -> usize {
+    if key == DeviceCustomKeyId::Knob {
+        return 12;
+    }
     let gesture_offset = match gesture {
         DeviceCustomKeyGesture::SingleClick => 0,
         DeviceCustomKeyGesture::DoubleClick => 4,
@@ -2642,6 +2654,7 @@ fn device_key_hotkey_index(key: DeviceCustomKeyId, gesture: DeviceCustomKeyGestu
         DeviceCustomKeyId::Key2 => 1,
         DeviceCustomKeyId::Key3 => 2,
         DeviceCustomKeyId::Key4 => 3,
+        DeviceCustomKeyId::Knob => 0,
     };
     gesture_offset + key_offset
 }
@@ -2656,7 +2669,11 @@ fn action_hotkey_binding(
         ActionHotkeyKind::OpenApp => prefs.open_app_hotkey,
         ActionHotkeyKind::DeviceKey { key, gesture } => crate::types::ShortcutBinding {
             primary: key.fallback_primary_for(gesture).into(),
-            modifiers: Vec::new(),
+            modifiers: if key == DeviceCustomKeyId::Knob {
+                vec!["shift".into()]
+            } else {
+                Vec::new()
+            },
         },
     }
 }
@@ -3545,6 +3562,9 @@ fn reset_shortcut_held_state(inner: &Arc<Inner>) {
     }
     for gesture in DeviceCustomKeyGesture::ALL {
         for key in DeviceCustomKeyId::ALL {
+            if !key.supports_gesture(gesture) {
+                continue;
+            }
             let kind = ActionHotkeyKind::DeviceKey { key, gesture };
             if let Some(monitor) = action_hotkey_slot(inner, kind).lock().as_ref() {
                 let binding = action_hotkey_binding(inner, kind);

@@ -495,7 +495,7 @@ export const en: typeof zhCN = {
       bleNameDesc: 'The new name appears after the device advertises again or restarts.',
       bleNameError: 'Use 1-32 visible ASCII characters, without spaces, quotes, semicolons, equals signs, or backslashes.',
       knobRotationLabel: 'Knob rotation',
-      knobRotationDesc: 'Rotation syncs to the device; press gestures remain fixed in firmware.',
+      knobRotationDesc: 'Rotation syncs to the device; configure EC11 single click under device custom keys, while double click and long press stay fixed in firmware.',
       knobRotationAria: 'Choose knob rotation action',
       knobActions: {
         systemVolume: 'Computer volume',
@@ -799,7 +799,7 @@ export const en: typeof zhCN = {
     },
       deviceKeys: {
         title: 'Device custom keys',
-        desc: 'KEY1-KEY4 use the firmware F13-F24 entries, grouped by single click, double click, and long press.',
+        desc: 'KEY1-KEY4 and the EC11 click use device fallback entries for safe actions; KEY3 records by default.',
         keyLabel: '{{key}}',
         fallback: 'Device entry {{fallback}}',
         noop: 'No action',
@@ -834,7 +834,7 @@ export const en: typeof zhCN = {
         },
         knob: {
           title: 'Knob actions',
-          desc: 'Rotation can be sent to the device as volume, brightness, or disabled. Click gestures stay fixed in firmware.',
+          desc: 'Rotation can be sent to the device as volume, brightness, or disabled. Knob click is configured in device custom keys.',
           gestures: {
             rotate: 'Knob rotation',
             shortPress: 'Knob click',
@@ -845,7 +845,6 @@ export const en: typeof zhCN = {
             systemVolume: 'Computer volume',
             screenBrightness: 'Screen brightness',
             disabled: 'Disabled',
-            recording: 'Start / stop recording',
             bluetoothReset: 'Reset Bluetooth / re-pair',
             powerOff: 'Power off',
           },

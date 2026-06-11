@@ -453,7 +453,7 @@ export const ja: typeof zhCN = {
       bleNameDesc: '書き込み後、再広告または再起動後に新しい名前が表示されます。',
       bleNameError: '1-32 個の表示可能な ASCII 文字を使用してください。スペース、引用符、セミコロン、等号、バックスラッシュは使えません。',
       knobRotationLabel: 'ノブ回転',
-      knobRotationDesc: '回転動作はデバイスに同期されます。押下ジェスチャーはファームウェア固定です。',
+      knobRotationDesc: '回転動作はデバイスに同期されます。EC11 のシングルクリックはデバイスカスタムキーで設定し、ダブルクリックと長押しはファームウェア固定です。',
       knobRotationAria: 'ノブ回転動作を選択',
       knobActions: {
         systemVolume: 'PC 音量',
@@ -757,7 +757,7 @@ export const ja: typeof zhCN = {
     },
     deviceKeys: {
       title: 'デバイスカスタムキー',
-      desc: 'KEY1-KEY4 はファームウェアの F13-F24 入口を使い、シングルクリック、ダブルクリック、長押しごとに割り当てます。',
+      desc: 'KEY1-KEY4 と EC11 クリックはデバイス fallback 入口で安全な動作に割り当てます。KEY3 は既定で録音です。',
       keyLabel: '{{key}}',
       fallback: 'デバイス入口 {{fallback}}',
       noop: '何もしない',
@@ -792,7 +792,7 @@ export const ja: typeof zhCN = {
       },
       knob: {
         title: 'ノブの動作',
-        desc: '回転動作はデバイスへ同期できます。音量、画面の明るさ、無効から選べます。クリック系ジェスチャーはファームウェア固定です。',
+        desc: '回転動作はデバイスへ同期できます。音量、画面の明るさ、無効から選べます。ノブクリックはデバイスカスタムキーで設定します。',
         gestures: {
           rotate: 'ノブ回転',
           shortPress: 'ノブクリック',
@@ -803,7 +803,6 @@ export const ja: typeof zhCN = {
           systemVolume: 'コンピューター音量',
           screenBrightness: '画面の明るさ',
           disabled: '無効',
-          recording: '録音開始 / 停止',
           bluetoothReset: 'Bluetooth リセット / 再ペアリング',
           powerOff: '電源オフ',
         },

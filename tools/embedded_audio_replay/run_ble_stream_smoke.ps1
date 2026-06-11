@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("serial-toggle", "serial-cancel", "desktop-cancel", "manual-key", "generated-key3", "generated-ec11")]
+    [ValidateSet("serial-toggle", "serial-cancel", "desktop-cancel", "manual-key", "generated-key3")]
     [string]$TriggerMode = "serial-toggle",
     [string]$Port = "COM3",
     [string]$DeviceName = "listener",
@@ -1583,8 +1583,6 @@ def generated_logical_for_command(command):
         return None
     if "KEY3" in upper or ":3:" in upper:
         return "KEY3"
-    if "EC11" in upper or "VOICE" in upper:
-        return "EC11"
     return None
 
 def latest_audio_transport_state_entry():
@@ -1769,18 +1767,6 @@ if generated_button_logical == "KEY3":
         "custom key fallback queued: logical=KEY3",
     )
     generated_button_evidence_summary = "KEY3 generated press/release -> custom key debounce/single-click/F15 path"
-elif generated_button_logical == "EC11":
-    generated_button_timing_seen = any_contains(
-        "recording gesture key generated single-click queued",
-        "recording gesture key generated single-click armed",
-        "recording gesture key generated single-click completed",
-        "recording gesture key level changed: source=ec11_key.gpio18",
-    )
-    generated_button_single_seen = any_contains(
-        "ec11_key.gpio18 single click pending for double-click window",
-        "ec11_key.gpio18 single-click toggle detected",
-    )
-    generated_button_evidence_summary = "EC11 generated press/release -> voice-key debounce/single-click toggle path"
 
 summary = {
     "serial_log_path": str(log_path),
@@ -2251,10 +2237,9 @@ $timeline = [ordered]@{
 $scriptExitCode = 0
 $generatedKeyCommand = switch ($TriggerMode) {
     "generated-key3" { "~KEY:KEY3:SINGLE" }
-    "generated-ec11" { "~KEY:EC11:SINGLE" }
     default { $null }
 }
-$usesSerialSignal = @("serial-toggle", "serial-cancel", "desktop-cancel", "generated-key3", "generated-ec11") -contains $TriggerMode
+$usesSerialSignal = @("serial-toggle", "serial-cancel", "desktop-cancel", "generated-key3") -contains $TriggerMode
 $serialStartCommand = if ($generatedKeyCommand) { $generatedKeyCommand } else { "~VREC:TOGGLE" }
 $serialEndCommand = if (@("serial-cancel", "desktop-cancel") -contains $TriggerMode) { "~VREC:CANCEL" } else { $serialStartCommand }
 $usesDesktopCancel = $TriggerMode -eq "desktop-cancel"
@@ -2379,12 +2364,12 @@ try {
                 Write-SmokeTrace "firmware_recording_start_seen"
             } else {
                 Write-Output "manual_trigger_ready=1"
-                Write-Output "manual_trigger_hint=press EC11 knob once to start recording; playback begins after the capsule appears"
+                Write-Output "manual_trigger_hint=press configured recording key once, default KEY3; playback begins after the capsule appears"
                 $timeline["manual_start_ready_at_utc"] = Get-SmokeUtcNow
                 if (-not $SkipCapsuleVisibleGate) {
                     if (-not (Wait-CapsuleWindowVisible -TimeoutMs $ManualTriggerReadyDelayMs -ProcessId $process.Id)) {
                         $timeline["capsule_visible_failed_at_utc"] = Get-SmokeUtcNow
-                        throw "Recording capsule did not become visible after manual EC11 start; aborting before audio playback"
+                        throw "Recording capsule did not become visible after manual recording-key start; aborting before audio playback"
                     }
                     $timeline["manual_start_capsule_visible_at_utc"] = Get-SmokeUtcNow
                     Write-SmokeTrace "manual_start_capsule_visible"
@@ -2454,7 +2439,7 @@ try {
                 }
             } else {
                 Write-Output "manual_trigger_playback_done=1"
-                Write-Output "manual_trigger_stop_hint=press EC11 knob once to stop recording now"
+                Write-Output "manual_trigger_stop_hint=press configured recording key once, default KEY3, to stop recording now"
                 $timeline["manual_stop_ready_at_utc"] = Get-SmokeUtcNow
             }
         } elseif ($index -lt $PlaybackCount) {

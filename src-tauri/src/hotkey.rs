@@ -756,6 +756,7 @@ mod platform {
 
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
         TranslateMessage, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG,
@@ -942,6 +943,9 @@ mod platform {
     }
 
     fn device_fallback_vk_label(vk_code: u32) -> Option<&'static str> {
+        if vk_code == 0x7C && shift_key_down() {
+            return Some("EC11 singleClick Shift+F13");
+        }
         match vk_code {
             0x7C => Some("KEY1 singleClick F13"),
             0x7D => Some("KEY2 singleClick F14"),
@@ -957,6 +961,10 @@ mod platform {
             0x87 => Some("KEY4 longPress F24"),
             _ => None,
         }
+    }
+
+    fn shift_key_down() -> bool {
+        unsafe { (GetKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0 }
     }
 
     unsafe fn callback_context<'a>() -> Option<&'a CallbackContext> {

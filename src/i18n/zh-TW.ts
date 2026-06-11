@@ -495,7 +495,7 @@ export const zhTW: typeof zhCN = {
       bleNameDesc: '寫入韌體後，重新廣播或重啟後顯示新名稱。',
       bleNameError: '只能使用 1-32 個可見 ASCII 字元，不能包含空格、引號、分號、等號或反斜線。',
       knobRotationLabel: '旋鈕旋轉',
-      knobRotationDesc: '旋轉動作同步到設備；按壓類手勢仍由韌體固定。',
+      knobRotationDesc: '旋轉動作同步到設備；EC11 單擊在設備自訂鍵中設定，雙擊/長按由韌體固定。',
       knobRotationAria: '選擇旋鈕旋轉動作',
       knobActions: {
         systemVolume: '電腦音量',
@@ -799,7 +799,7 @@ export const zhTW: typeof zhCN = {
     },
     deviceKeys: {
       title: '設備自定義鍵',
-      desc: 'KEY1-KEY4 使用韌體 F13-F24 入口，依單擊、雙擊、長按分別映射為安全動作。',
+      desc: 'KEY1-KEY4 與 EC11 單擊使用裝置 fallback 入口映射為安全動作；KEY3 預設錄音。',
       keyLabel: '{{key}}',
       fallback: '設備入口 {{fallback}}',
       noop: '不執行動作',
@@ -834,7 +834,7 @@ export const zhTW: typeof zhCN = {
       },
       knob: {
         title: '旋鈕動作',
-        desc: '旋轉動作可同步到裝置：調整電腦音量、調整螢幕亮度或停用。按壓類手勢仍由韌體固定。',
+        desc: '旋轉動作可同步到裝置：調整電腦音量、調整螢幕亮度或停用。旋鈕單擊在裝置自訂鍵裡配置。',
         gestures: {
           rotate: '旋鈕旋轉',
           shortPress: '旋鈕單擊',
@@ -845,7 +845,6 @@ export const zhTW: typeof zhCN = {
           systemVolume: '電腦音量',
           screenBrightness: '螢幕亮度',
           disabled: '停用',
-          recording: '開始 / 停止錄音',
           bluetoothReset: '重置藍牙 / 重新配對',
           powerOff: '關機',
         },
