@@ -102,7 +102,7 @@ const DEFAULT_MESSAGES: Record<RecoveryCopyKey, string> = {
   checking: 'Checking Listener BLE and letting automatic recovery run.',
   ready: 'Listener BLE is ready for voice input.',
   reconnecting: 'Listener Type is reconnecting in the background. Wait a moment, then retry if it does not recover.',
-  needsWakeKey: 'The device may be asleep. Press KEY4 or the wake key, then retry Listener BLE.',
+  needsWakeKey: 'The device may be offline. Press KEY4 or the wake key, then retry Listener BLE.',
   needsBluetooth: 'Turn on Windows Bluetooth, reconnect the Listener device, then retry.',
   needsRepair: 'Run One-click repair. If it still fails, export diagnostics.',
   needsRePair: 'Windows may have a stale Bluetooth pairing. Remove the Listener device in Windows Bluetooth, then pair it again.',

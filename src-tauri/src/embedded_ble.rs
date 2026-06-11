@@ -329,7 +329,7 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
         BleFailureKind::DeviceAsleep => (
             true,
             false,
-            "Press KEY4 or the wake key, wait for the device to reconnect, then retry.",
+            "Press KEY4 or the wake key, wait for the device to return online, then retry.",
         ),
         BleFailureKind::MissingPairing => (
             true,
@@ -339,7 +339,7 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
         BleFailureKind::LowPowerIdleDisconnect => (
             true,
             true,
-            "Listener BLE entered low-power idle; retrying will reconnect, or press KEY4 if the device is asleep.",
+            "Listener BLE entered offline state; retrying will reconnect, or press KEY4 if it is offline.",
         ),
         BleFailureKind::PairedButDisconnected => (
             true,
@@ -1693,20 +1693,16 @@ mod windows_ble {
         let mut port = serialport::new(port_name, DEVICE_SETTINGS_SERIAL_BAUD_RATE)
             .timeout(serial_timeout)
             .open()
-            .map_err(|err| {
-                DeviceSettingsSerialError::Transport(format!("open failed: {err}"))
-            })?;
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("open failed: {err}")))?;
         let _ = port.write_data_terminal_ready(false);
         let _ = port.write_request_to_send(false);
 
         drain_serial_input(&mut *port, Duration::from_millis(180));
         let payload = format!("~{command}\n");
-        port.write_all(payload.as_bytes()).map_err(|err| {
-            DeviceSettingsSerialError::Transport(format!("write failed: {err}"))
-        })?;
-        port.flush().map_err(|err| {
-            DeviceSettingsSerialError::Transport(format!("flush failed: {err}"))
-        })?;
+        port.write_all(payload.as_bytes())
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("write failed: {err}")))?;
+        port.flush()
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("flush failed: {err}")))?;
 
         let deadline = Instant::now() + timeout.max(Duration::from_secs(2));
         let mut response = String::new();
@@ -1776,7 +1772,9 @@ mod windows_ble {
         line: &str,
     ) -> Result<crate::embedded_ble::DeviceSettingsStatus, String> {
         if !line.contains("~DEVICE:SETTINGS") {
-            return Err(format!("device settings refresh returned unexpected line: {line}"));
+            return Err(format!(
+                "device settings refresh returned unexpected line: {line}"
+            ));
         }
         let fields = parse_device_settings_fields(line);
         let plugged_brightness_percent = parse_u8_field(&fields, "plugged_brightness")?;
@@ -2568,6 +2566,7 @@ mod windows_ble {
             usb_powered: None,
             detail: None,
         };
+        let mut ota_readiness_snapshot: Option<String> = None;
         if let Some(service) = target.service.as_ref() {
             let ota_readiness = read_optional_string_characteristic_from_service(
                 service,
@@ -2602,6 +2601,7 @@ mod windows_ble {
                 {
                     snapshot.battery_percent = readiness_u8(&readiness, "battery_level");
                 }
+                ota_readiness_snapshot = Some(readiness);
             } else {
                 log::info!(
                     "[embedded-ble] OTA readiness identity not readable from current OTA service"
@@ -2644,7 +2644,21 @@ mod windows_ble {
         if snapshot.firmware_version.is_none() {
             snapshot.firmware_version = dis_firmware;
         }
-        snapshot.battery_percent = dis_battery;
+        let readiness_charging = ota_readiness_snapshot
+            .as_deref()
+            .and_then(|readiness| readiness_bool(readiness, "charging"));
+        let readiness_charge_full = ota_readiness_snapshot
+            .as_deref()
+            .and_then(|readiness| readiness_bool(readiness, "charge_full"));
+        if snapshot.battery_percent.is_none() {
+            snapshot.battery_percent = dis_battery;
+        }
+        if snapshot.battery_percent == Some(100)
+            && readiness_charging == Some(true)
+            && readiness_charge_full != Some(true)
+        {
+            snapshot.battery_percent = Some(99);
+        }
 
         if let Some(device) = target.device.as_ref() {
             if snapshot.hardware_revision.is_none() {

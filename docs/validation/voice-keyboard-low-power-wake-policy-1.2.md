@@ -20,7 +20,7 @@ Implemented Listener desktop idle wake and reconnect UX for the accepted firmwar
 
 - Idle, low-power, or host-disconnect start path: covered by coordinator wake-recovery state, bounded wait, capsule guidance, and frontend health messages.
 - BLE reconnect path: covered by listener refresh, readiness wait, notify-ready tracking, reconnect attempt accounting, and tests around wake recovery state.
-- Deep-sleep voice-key limitation: represented in the firmware wake policy snapshot as `key4_only`, `KEY4/GPIO21`, `GPIO35`, and `voiceKeyDeepSleepWake=false`; user guidance tells users to press KEY4/wake key.
+- Offline-state wake handling: represented in the firmware wake policy snapshot as `key4_only`, `KEY4/GPIO21`, `GPIO35`, and `voiceKeyDeepSleepWake=false`; user guidance tells users to press KEY4/wake key.
 - Diagnostics: exported BLE diagnostics include recent disconnect reason, reconnect attempts, notify subscription state, background listener readiness, and wake policy snapshot. The diagnostic package test checks schema/privacy fields.
 
 ## Validation

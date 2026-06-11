@@ -395,10 +395,7 @@ fn emit_embedded_audio_transcribing_if_active(
             EmbeddedBleSessionActorCommand::BlePacket,
             session_id,
             "transcribing feedback after stop boundary",
-            DictationEvent::AsrPartial {
-                session_id,
-                after_stop: true,
-            },
+            DictationEvent::BleStop { session_id },
             0.0,
             message,
             None,
@@ -406,10 +403,7 @@ fn emit_embedded_audio_transcribing_if_active(
     } else {
         apply_and_publish_dictation_event(
             inner,
-            DictationEvent::AsrPartial {
-                session_id,
-                after_stop: true,
-            },
+            DictationEvent::BleStop { session_id },
             0.0,
             message,
             None,
@@ -2655,10 +2649,7 @@ async fn finish_end_session_after_stop_transition(
         current_embedded_audio_partial_preview(inner),
         None,
     );
-    let _device_ai_processing = DeviceAiProcessingGuard::start(
-        inner,
-        "dictation_processing_start",
-    );
+    let _device_ai_processing = DeviceAiProcessingGuard::start(inner, "dictation_processing_start");
     if let Some(rec) = take_recorder_for_session(inner, current_session_id) {
         rec.stop();
         release_recording_mute(inner, "dictation");
@@ -3418,7 +3409,8 @@ mod tests {
         clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview,
         default_done_message, dictation_error_code, embedded_ble_listener_capture_ready,
         embedded_ble_session_actor_history, embedded_ble_stream_idle_timeout,
-        embedded_pcm_rms_and_peak, embedded_streaming_chunk_is_asr_input, end_embedded_ble_session,
+        embedded_pcm_rms_and_peak, embedded_streaming_chunk_is_asr_input,
+        emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
         finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
         install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
         normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
@@ -3739,6 +3731,35 @@ mod tests {
             record.command == EmbeddedBleSessionActorCommand::BlePacket
                 && record.detail.contains("pcm_capsule")
         }));
+    }
+
+    #[test]
+    fn embedded_audio_stop_feedback_is_ble_stop_boundary() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+
+        assert!(emit_embedded_audio_transcribing_if_active(
+            &coordinator.inner,
+            session_id,
+            Some("partial preview".to_string()),
+        ));
+        {
+            let state = coordinator.inner.state.lock();
+            assert_eq!(state.phase, SessionPhase::Listening);
+        }
+
+        coordinator.inner.state.lock().phase = SessionPhase::Processing;
+        assert!(!emit_embedded_audio_transcribing_if_active(
+            &coordinator.inner,
+            session_id,
+            Some("late preview".to_string()),
+        ));
     }
 
     #[tokio::test]

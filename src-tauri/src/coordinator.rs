@@ -75,7 +75,7 @@ const EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(12);
 const EMBEDDED_BLE_RECORDING_CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
-    "Listener BLE 正在重连。若设备已深度睡眠，请按 KEY4/唤醒键，再重试；仍失败可导出诊断。";
+    "Listener BLE 正在重连。若设备处于离线状态，请按 KEY4/唤醒键，再重试；仍失败可导出诊断。";
 
 #[cfg(test)]
 use dictation::dictation_error_code;
@@ -345,7 +345,7 @@ impl Default for EmbeddedBleWakeRecoverySnapshot {
         Self {
             status: EmbeddedBleWakeRecoveryStatus::Idle,
             user_guidance:
-                "Listener BLE 空闲。按设备语音键开始录音；若设备睡眠，请先按 KEY4/唤醒键。"
+                "Listener BLE 空闲。按设备语音键开始录音；若设备离线，请先按 KEY4/唤醒键。"
                     .to_string(),
             recent_disconnect_reason: None,
             reconnect_attempts: 0,
@@ -1108,7 +1108,7 @@ impl Coordinator {
                 CapsuleState::Recording,
                 0.0,
                 0,
-                Some("正在重连 Listener BLE；若设备睡眠，请按 KEY4/唤醒键。".to_string()),
+                Some("正在重连 Listener BLE；若设备离线，请按 KEY4/唤醒键。".to_string()),
                 None,
             );
             match wait_for_embedded_ble_listener_ready(
@@ -1583,7 +1583,7 @@ fn qa_hotkey_supervisor_loop(inner: Arc<Inner>) {
         if inner.shutdown.load(Ordering::SeqCst) {
             return;
         }
-        // 用户已经把 QA 关掉就睡着等 prefs 改动；改动通过 update_qa_hotkey_binding 唤醒。
+        // 用户已将 QA 关闭时会先进入待激活状态，prefs 改动通过 update_qa_hotkey_binding 唤醒逻辑恢复。
         let binding = match inner.prefs.get().qa_hotkey.clone() {
             Some(b) => b,
             None => {
@@ -1696,7 +1696,7 @@ fn combo_hotkey_supervisor_loop(inner: Arc<Inner>) {
         // 读当前 prefs
         let prefs = inner.prefs.get();
         if crate::shortcut_binding::legacy_modifier_trigger(&prefs.dictation_hotkey).is_some() {
-            // 不是 Custom → 睡着等 prefs 改动
+            // 不是 Custom → 待唤醒状态，等待 prefs 改动触发。
             take_combo_hotkey_on_main_thread(&inner);
             std::thread::sleep(std::time::Duration::from_secs(5));
             continue;
@@ -2907,7 +2907,7 @@ fn record_embedded_ble_reconnect_attempt(inner: &Arc<Inner>, reason: &str) {
     let mut snapshot = inner.embedded_ble_wake_recovery.lock();
     snapshot.status = EmbeddedBleWakeRecoveryStatus::Reconnecting;
     snapshot.user_guidance =
-        "正在重连 Listener BLE 并恢复音频 notify；如果设备睡着，请按 KEY4/唤醒键。".to_string();
+        "正在重连 Listener BLE 并恢复音频 notify；如果设备离线，请按 KEY4/唤醒键。".to_string();
     snapshot.reconnect_attempts = snapshot.reconnect_attempts.saturating_add(1);
     snapshot.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Opening;
     snapshot.last_attempt_at = Some(now_rfc3339());
@@ -2950,7 +2950,9 @@ fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationActio
     }
 }
 
-fn legacy_ec11_mode_for_device_knob_rotation_action(action: DeviceKnobRotationAction) -> &'static str {
+fn legacy_ec11_mode_for_device_knob_rotation_action(
+    action: DeviceKnobRotationAction,
+) -> &'static str {
     match action {
         DeviceKnobRotationAction::SystemVolume => "VOLUME",
         DeviceKnobRotationAction::ScreenBrightness => "BRIGHTNESS",
@@ -2965,9 +2967,9 @@ fn sync_device_knob_rotation_action_to_firmware(inner: &Arc<Inner>, reason: &'st
     async_runtime::spawn_blocking(move || {
         let command = format!("DEVICE:SET knob_rotation={mode}");
         match crate::embedded_ble::send_device_settings_command(&command, Duration::from_secs(2)) {
-            Ok(()) => log::info!(
-                "[device-knob] synced knob_rotation setting mode={mode} reason={reason}"
-            ),
+            Ok(()) => {
+                log::info!("[device-knob] synced knob_rotation setting mode={mode} reason={reason}")
+            }
             Err(err) => {
                 log::warn!(
                     "[device-knob] knob_rotation setting sync failed reason={reason}: {err}; trying legacy EC11 control"
@@ -3058,10 +3060,10 @@ fn embedded_ble_wake_guidance_for_error_with_power(err: &str, usb_powered: Optio
         crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
             if embedded_ble_usb_power_allows_low_power_idle(usb_powered) =>
         {
-            return "Listener BLE 因低功耗空闲断开，正在重连音频 notify；若设备已睡眠，请按 KEY4/唤醒键。".to_string();
+            return "Listener BLE 因离线状态断开，正在重连音频 notify；若设备离线，请按 KEY4/唤醒键。".to_string();
         }
         crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect => {
-            return "Listener BLE 正在重连音频 notify；当前未确认处于电池低功耗场景，若持续失败请重新连接或导出诊断。".to_string();
+            return "Listener BLE 正在重连音频 notify；当前未确认处于离线状态场景，若持续失败请重新连接或导出诊断。".to_string();
         }
         crate::embedded_ble::BleFailureKind::MissingPairing
         | crate::embedded_ble::BleFailureKind::StaleGattService => {
@@ -5458,7 +5460,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_ble_wake_recovery_snapshot_guides_deep_sleep_recovery() {
+    fn embedded_ble_wake_recovery_snapshot_guides_idle_recovery() {
         let coordinator = Coordinator::new();
 
         record_embedded_ble_reconnect_attempt(&coordinator.inner, "test");
@@ -5513,7 +5515,7 @@ mod tests {
             snapshot.notify_subscription_state,
             EmbeddedBleNotifySubscriptionState::Lost
         );
-        assert!(snapshot.user_guidance.contains("低功耗空闲断开"));
+        assert!(snapshot.user_guidance.contains("离线状态断开"));
         assert!(snapshot
             .recent_disconnect_reason
             .as_deref()

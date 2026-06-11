@@ -27,13 +27,13 @@ export function embeddedBleProbeErrorMessage(error: unknown, t: TFunction): stri
   switch (classifyEmbeddedBleProbeError(error)) {
     case 'noDevice':
       return t('settings.recording.embeddedBleWakeGuidance', {
-        defaultValue: '没找到 Listener 设备。若设备已深度睡眠，请按 KEY4/唤醒键后重试；仍失败时重新连接或导出诊断包。',
+        defaultValue: '没找到 Listener 设备。若设备离线，请按 KEY4/唤醒键后重试；仍失败时重新连接或导出诊断包。',
       });
     case 'accessDenied':
       return t('settings.recording.embeddedBleAccessDenied');
     case 'timeout':
       return t('settings.recording.embeddedBleWakeGuidance', {
-        defaultValue: 'BLE 音频通路检查超时。若设备睡着，请按 KEY4/唤醒键后重试；仍失败时导出诊断包。',
+        defaultValue: 'BLE 音频通路检查超时。若设备离线，请按 KEY4/唤醒键后重试；仍失败时导出诊断包。',
       });
     case 'notify':
       return t('settings.recording.embeddedBleNotifyFailed');
