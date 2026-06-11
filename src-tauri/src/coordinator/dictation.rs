@@ -236,27 +236,62 @@ fn set_device_ai_processing_async(inner: &Arc<Inner>, active: bool, reason: &'st
     });
 }
 
+fn set_device_ai_processing_done_async(inner: &Arc<Inner>, reason: &'static str) {
+    if !should_sync_device_ai_processing(inner) {
+        return;
+    }
+    let session_id = inner.state.lock().session_id;
+    async_runtime::spawn_blocking(move || {
+        match crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2)) {
+            Ok(()) => log::info!(
+                "[embedded-ble] device AI processing LED completed reason={reason} session_id={session_id}"
+            ),
+            Err(err) => log::warn!(
+                "[embedded-ble] device AI processing LED completion sync failed reason={reason} session_id={session_id}: {err}"
+            ),
+        }
+    });
+}
+
 struct DeviceAiProcessingGuard {
     inner: Arc<Inner>,
     active: bool,
+    completed: bool,
 }
 
 impl DeviceAiProcessingGuard {
     fn start(inner: &Arc<Inner>, reason: &'static str) -> Self {
+        Self::start_with_send(inner, reason, true)
+    }
+
+    fn track_existing_start(inner: &Arc<Inner>) -> Self {
+        Self::start_with_send(inner, "dictation_processing_already_started", false)
+    }
+
+    fn start_with_send(inner: &Arc<Inner>, reason: &'static str, send_start: bool) -> Self {
         let active = should_sync_device_ai_processing(inner);
-        if active {
+        if active && send_start {
             set_device_ai_processing_async(inner, true, reason);
         }
         Self {
             inner: Arc::clone(inner),
             active,
+            completed: false,
+        }
+    }
+
+    fn complete_success(&mut self, reason: &'static str) {
+        if self.active && !self.completed {
+            set_device_ai_processing_done_async(&self.inner, reason);
+            self.completed = true;
+            self.active = false;
         }
     }
 }
 
 impl Drop for DeviceAiProcessingGuard {
     fn drop(&mut self) {
-        if self.active {
+        if self.active && !self.completed {
             set_device_ai_processing_async(&self.inner, false, "dictation_processing_end");
         }
     }
@@ -2142,13 +2177,16 @@ impl EmbeddedStreamingDictation {
 
     fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
         if let Some(session) = self.session.as_ref() {
+            let already_latched = embedded_audio_stop_feedback_latched(inner);
             latch_embedded_audio_stop_feedback(inner);
-            set_device_ai_processing_async(inner, true, "embedded_stop_boundary");
-            emit_embedded_audio_transcribing_if_active(
+            let emitted = emit_embedded_audio_transcribing_if_active(
                 inner,
                 session.session_id,
                 current_embedded_audio_partial_preview(inner),
             );
+            if !already_latched && emitted {
+                set_device_ai_processing_async(inner, true, "dictation_stop_processing_start");
+            }
         }
     }
 
@@ -2649,7 +2687,6 @@ async fn finish_end_session_after_stop_transition(
         current_embedded_audio_partial_preview(inner),
         None,
     );
-    let _device_ai_processing = DeviceAiProcessingGuard::start(inner, "dictation_processing_start");
     if let Some(rec) = take_recorder_for_session(inner, current_session_id) {
         rec.stop();
         release_recording_mute(inner, "dictation");
@@ -2661,9 +2698,15 @@ async fn finish_end_session_after_stop_transition(
         None => {
             restore_prepared_windows_ime_session(inner, current_session_id);
             clear_embedded_audio_stats(inner);
+            set_device_ai_processing_async(inner, false, "dictation_processing_no_asr");
             set_phase_idle_if_session_matches(inner, current_session_id);
             return Ok(());
         }
+    };
+    let mut device_ai_processing = if embedded_audio_stop_feedback_latched(inner) {
+        DeviceAiProcessingGuard::track_existing_start(inner)
+    } else {
+        DeviceAiProcessingGuard::start(inner, "dictation_processing_start")
     };
 
     let uses_global_timeout = asr_transcribe_uses_global_timeout(&asr);
@@ -3228,6 +3271,7 @@ async fn finish_end_session_after_stop_transition(
     )
     .map(str::to_string);
     let tsf_required_insert_failed = error_code.as_deref() == Some("windowsImeTsfRequired");
+    let device_processing_succeeded = status != InsertStatus::Failed && error_code.is_none();
 
     // 与 coordinator 内部 SessionId 对齐：方便 recorder 旁路写盘的 `<session_id>.wav`
     // 跟 history 这条 DictationSession.id 同名，前端凭 id 就能找到对应录音文件。
@@ -3283,6 +3327,9 @@ async fn finish_end_session_after_stop_transition(
         done_message,
         Some(inserted_chars),
     );
+    if device_processing_succeeded {
+        device_ai_processing.complete_success("dictation_processing_done");
+    }
 
     schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
 

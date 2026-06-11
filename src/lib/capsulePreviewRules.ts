@@ -46,9 +46,11 @@ export const PREVIEW_DEDUP_POLICY = 'exact-match' as const;
  *   → Polishing(message=partialPreview) → Done(message=finalInsertion)
  *
  * On the Recording → Transcribing edge, the capsule shows a short stop
- * acknowledgement before returning to the preview. The preview text then
- * stays visible through transcribing/polishing so the user sees continuity.
- * Done state replaces it with insertion info.
+ * acknowledgement and enters the processing spinner as soon as the stop action
+ * is accepted. The hardware AI LED follows that accepted-stop edge and remains
+ * active through ASR/polish/insert work; host completion then drives the OK LED.
+ * The preview text stays visible through transcribing/polishing so the user sees
+ * continuity. Done state replaces it with insertion info.
  * After Done, the capsule lingers ~1.5s (schedule_capsule_idle) then
  * fades to Idle with EXIT_ANIM_MS = 140ms.
  */

@@ -1469,6 +1469,10 @@ mod windows_ble {
         send_recording_control_command(command, timeout, label)
     }
 
+    pub fn send_recording_processing_done(timeout: Duration) -> Result<(), String> {
+        send_recording_control_command(b"VREC:PROCESSING:DONE\n", timeout, "audio processing done")
+    }
+
     pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), String> {
         let command = format!("EC11:MODE:{mode}\n");
         if let Some(result) =
@@ -5197,6 +5201,11 @@ pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Resul
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_processing_done(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_processing_done(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), String> {
     windows_ble::send_ec11_rotation_mode(mode, timeout)
 }
@@ -5340,6 +5349,11 @@ pub fn send_recording_control_cancel(_timeout: Duration) -> Result<(), String> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_processing_state(_active: bool, _timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE recording processing control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_processing_done(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording processing control is only supported on Windows".to_string())
 }
 
