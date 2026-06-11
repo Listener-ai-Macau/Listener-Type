@@ -78,7 +78,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\embedded_audio_replay\
 3. 以隐藏主窗口模式启动 `listener-type --submit-embedded-audio-ble-stream 45000`，避免测试时把主界面弹到前台。
 4. 提前打开串口日志监听，等到 Listener-Type 日志出现 `ValueChanged handler registered`，并记录固件侧 notify/transport 状态。
 5. 播放第一遍随机中文 TTS 作为预热。
-6. 在第二遍播放前向串口 helper 发信号，由 helper 通过 COM3 发送 `~VREC:TOGGLE` 开始录音，播放后自动发送一次停止，并保存固件串口日志。
+6. 在第二遍播放前向串口 helper 发信号。产品验收用 `generated-key3` 或 `generated-ec11`，分别发送 `~KEY:KEY3:SINGLE` / `~KEY:EC11:SINGLE` 生成真实按键按下/释放时序；`serial-toggle` 仅保留为底层 `~VREC:TOGGLE` 诊断。
 7. 若第二遍播放后 20 秒内没有看到 `embedded audio streaming dictation started`，直接失败并输出 Listener-Type 日志和固件串口日志路径，避免长时间空等。
 8. 开启 `-VerifyHistory` 时，脚本会检查 `history.json` 中本次记录带有 `embeddedAudioStats`；需要自动打开临时 Notepad 做光标落字检查时再加 `-VerifyInsertion`，人工观察当前光标时不需要。
 9. 输出 `ble_stream_smoke_result_json=...`，包含原句、识别文本、插入目标、历史记录、PCM 字节数、缺包数、Listener-Type 日志和串口日志路径。
@@ -94,7 +94,7 @@ Required fields are stable across PASS, WARNING, and FAIL reports:
 | Field | Meaning |
 | --- | --- |
 | `status` | `PASS`, `WARNING`, or `FAIL`. |
-| `trigger` | Trigger mode: `serial-toggle`, `serial-cancel`, or `manual-key`. |
+| `trigger` | Trigger mode: `generated-key3`, `generated-ec11`, `serial-toggle`, `serial-cancel`, `desktop-cancel`, or `manual-key`. A1/A2 acceptance uses the generated button modes; A3 owns ASR accuracy gating. |
 | `audio_profile` | TTS/audio profile used for the run. |
 | `expected_text` | Text the run intended ASR to produce. |
 | `transcript` | Best transcript available after log/history fallback. |

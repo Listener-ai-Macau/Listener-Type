@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Port,
+    [ValidateSet("generated-key3", "generated-ec11")]
+    [string]$TriggerMode = "generated-key3",
     [string]$DeviceName = "listener",
     [string]$BluetoothAddress = "",
     [string]$ListenerExe = "",
@@ -159,21 +161,31 @@ function Wait-CapsuleHidden {
 
 function Open-SerialPort {
     param([Parameter(Mandatory = $true)][string]$PortName)
-    $serial = [System.IO.Ports.SerialPort]::new(
-        $PortName,
-        115200,
-        [System.IO.Ports.Parity]::None,
-        8,
-        [System.IO.Ports.StopBits]::One
-    )
-    $serial.ReadTimeout = 100
-    $serial.WriteTimeout = 3000
-    $serial.DtrEnable = $false
-    $serial.RtsEnable = $false
-    $serial.Open()
-    $serial.DtrEnable = $false
-    $serial.RtsEnable = $false
-    return $serial
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+        $serial = [System.IO.Ports.SerialPort]::new(
+            $PortName,
+            115200,
+            [System.IO.Ports.Parity]::None,
+            8,
+            [System.IO.Ports.StopBits]::One
+        )
+        $serial.ReadTimeout = 100
+        $serial.WriteTimeout = 3000
+        $serial.DtrEnable = $false
+        $serial.RtsEnable = $false
+        try {
+            $serial.Open()
+            $serial.DtrEnable = $false
+            $serial.RtsEnable = $false
+            return $serial
+        } catch {
+            $lastError = $_
+            try { $serial.Dispose() } catch {}
+            Start-Sleep -Milliseconds (200 * $attempt)
+        }
+    }
+    throw "Unable to open serial port $PortName after retries: $($lastError.Exception.Message)"
 }
 
 function Read-SerialUntil {
@@ -211,6 +223,107 @@ function Send-SerialCommand {
     $Lines.Add("> $Command")
     $Serial.Write("$Command`n")
     $Serial.BaseStream.Flush()
+}
+
+function Invoke-GeneratedRecordingStop {
+    param(
+        [Parameter(Mandatory = $true)]$Serial,
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][string]$TriggerMode,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [System.Collections.Generic.List[string]]$Lines
+    )
+
+    $stopPattern = "recording stop source=|record session stop requested|stream session stop queued"
+    $readyPattern = "audio transport state: .* -> stream_ready|audio notify subscription changed: .* notify=1|audio notify subscription restored before connect|connection established"
+    $maxAttempts = if ($TriggerMode -eq "generated-key3") { 3 } else { 1 }
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        if ($attempt -gt 1) {
+            $Lines.Add("# retry generated stop attempt=$attempt")
+        }
+        Send-SerialCommand -Serial $Serial -Command $Command -Lines $Lines
+        $stopLine = Read-SerialUntil `
+            -Serial $Serial `
+            -Deadline (Get-Date).AddMilliseconds(3500) `
+            -Lines $Lines `
+            -Pattern $stopPattern
+        if ($stopLine) {
+            return $stopLine
+        }
+        if ($TriggerMode -ne "generated-key3") {
+            break
+        }
+        [void](Read-SerialUntil `
+            -Serial $Serial `
+            -Deadline (Get-Date).AddMilliseconds(6500) `
+            -Lines $Lines `
+            -Pattern $readyPattern)
+    }
+    return $null
+}
+
+function Get-GeneratedButtonEvidence {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Lines,
+        [Parameter(Mandatory = $true)]
+        [string]$TriggerMode
+    )
+
+    $logical = if ($TriggerMode -eq "generated-ec11") { "EC11" } else { "KEY3" }
+    $ackPattern = "~KEY:GENERATED logical=$logical gesture=single result=ESP_OK"
+    $ackCount = @($Lines | Where-Object { $_ -like "*$ackPattern*" }).Count
+    $timingPatterns = if ($logical -eq "KEY3") {
+        @(
+            "custom key generated single-click queued: logical=KEY3",
+            "custom key generated single-click armed: logical=KEY3",
+            "custom key generated single-click completed: logical=KEY3",
+            "custom key raw transition: logical=KEY3",
+            "custom key stable transition: logical=KEY3",
+            "custom key release: logical=KEY3"
+        )
+    } else {
+        @(
+            "recording gesture key generated single-click queued",
+            "recording gesture key generated single-click armed",
+            "recording gesture key generated single-click completed",
+            "recording gesture key level changed: source=ec11_key.gpio18"
+        )
+    }
+    $singlePatterns = if ($logical -eq "KEY3") {
+        @(
+            "custom key single pending: logical=KEY3",
+            "custom key fallback queued: logical=KEY3"
+        )
+    } else {
+        @(
+            "ec11_key.gpio18 single click pending for double-click window",
+            "ec11_key.gpio18 single-click toggle detected"
+        )
+    }
+    $timingSeen = [bool](@($Lines | Where-Object {
+        $line = $_
+        @($timingPatterns | Where-Object { $line -like "*$_*" }).Count -gt 0
+    }).Count -gt 0)
+    $singleSeen = [bool](@($Lines | Where-Object {
+        $line = $_
+        @($singlePatterns | Where-Object { $line -like "*$_*" }).Count -gt 0
+    }).Count -gt 0)
+
+    return [ordered]@{
+        logical = $logical
+        ack_count = $ackCount
+        start_stop_ack_seen = $ackCount -ge 2
+        timing_seen = $timingSeen
+        single_seen = $singleSeen
+        summary = if ($logical -eq "KEY3") {
+            "KEY3 generated press/release -> custom key debounce/single-click/F15 path"
+        } else {
+            "EC11 generated press/release -> voice-key debounce/single-click toggle path"
+        }
+    }
 }
 
 function Get-HistoryPath {
@@ -281,40 +394,53 @@ function Set-JsonBoolField {
     return Add-TopLevelJsonField -Json $Json -Name $Name -ValueJson $valueJson
 }
 
+function Ensure-JsonObjectProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    if ($null -eq $Object.PSObject.Properties[$Name] -or $null -eq $Object.$Name) {
+        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+    return $Object.$Name
+}
+
 function Set-BackgroundRoundPreferences {
     param([Parameter(Mandatory = $true)][string]$Path)
     $dir = Split-Path -Parent $Path
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     if (Test-Path $Path) {
-        $json = Get-Content -LiteralPath $Path -Raw
-        if (-not [string]::IsNullOrWhiteSpace($json)) {
-            $json = Set-JsonStringField -Json $json -Name "dictationInputSource" -Value "embeddedBle"
-            $json = Set-JsonBoolField -Json $json -Name "showCapsule" -Value $true
-            $json = Set-JsonBoolField -Json $json -Name "recordAudioForDebug" -Value $true
-            $json = Set-JsonBoolField -Json $json -Name "streamingInsert" -Value $true
-            $json = Set-JsonBoolField -Json $json -Name "streamingInsertDefaultMigrated" -Value $true
-            Write-Utf8NoBomText -Path $Path -Text $json
-        } else {
-            $json = $null
-        }
+        $raw = Get-Content -LiteralPath $Path -Raw
+        $prefs = if ([string]::IsNullOrWhiteSpace($raw)) { [pscustomobject]@{} } else { $raw | ConvertFrom-Json }
     } else {
-        $json = $null
+        $prefs = [pscustomobject]@{}
     }
 
-    if ($null -eq $json) {
-        $prefs = [pscustomobject]@{
-            dictationInputSource = "embeddedBle"
-            showCapsule = $true
-            recordAudioForDebug = $true
-            streamingInsert = $true
-            streamingInsertDefaultMigrated = $true
-        }
-        $json = $prefs | ConvertTo-Json -Depth 20
-        Write-Utf8NoBomText -Path $Path -Text $json
-    }
+    $prefs | Add-Member -NotePropertyName "dictationInputSource" -NotePropertyValue "embeddedBle" -Force
+    $prefs | Add-Member -NotePropertyName "dictationInputSourceUserOverridden" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "showCapsule" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "recordAudioForDebug" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "streamingInsert" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "streamingInsertDefaultMigrated" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "deviceCustomKeysDefaultMigrated" -NotePropertyValue $true -Force
+
+    $keys = Ensure-JsonObjectProperty -Object $prefs -Name "deviceCustomKeys"
+    $key3 = Ensure-JsonObjectProperty -Object $keys -Name "key3"
+    $key3 | Add-Member -NotePropertyName "action" -NotePropertyValue "dictation" -Force
+    $key3 | Add-Member -NotePropertyName "appPage" -NotePropertyValue "settingsShortcuts" -Force
+    $key3 | Add-Member -NotePropertyName "externalAppPath" -NotePropertyValue "" -Force
+    $key3 | Add-Member -NotePropertyName "pasteTemplate" -NotePropertyValue "" -Force
+    $key3 | Add-Member -NotePropertyName "shortcut" -NotePropertyValue $null -Force
+
+    $json = $prefs | ConvertTo-Json -Depth 32
+    Write-Utf8NoBomText -Path $Path -Text $json
 
     $saved = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    if ([string]$saved.dictationInputSource -ne "embeddedBle" -or -not [bool]$saved.showCapsule) {
+    if (
+        [string]$saved.dictationInputSource -ne "embeddedBle" -or
+        -not [bool]$saved.showCapsule -or
+        [string]$saved.deviceCustomKeys.key3.action -ne "dictation"
+    ) {
         throw "Failed to persist background round preferences to $Path."
     }
 }
@@ -493,6 +619,7 @@ $scriptFailure = $null
 $allSerialLines = [System.Collections.Generic.List[string]]::new()
 $previousHiddenAt = $null
 $startedAt = Get-Date
+$triggerCommand = if ($TriggerMode -eq "generated-ec11") { "~KEY:EC11:SINGLE" } else { "~KEY:KEY3:SINGLE" }
 try {
     if ($hadPrefs) {
         Copy-Item -LiteralPath $prefsPath -Destination $prefsBackup -Force
@@ -559,7 +686,7 @@ try {
         }
 
         $roundStartedAt = Get-Date
-        Send-SerialCommand -Serial $serial -Command "~VREC:TOGGLE" -Lines $roundSerialLines
+        Send-SerialCommand -Serial $serial -Command $triggerCommand -Lines $roundSerialLines
         $startLine = Read-SerialUntil `
             -Serial $serial `
             -Deadline (Get-Date).AddMilliseconds($RecordingStartTimeoutMs) `
@@ -576,8 +703,11 @@ try {
         $playbackDoneAt = Get-Date
         Start-Sleep -Milliseconds $PostPlaybackRecordMs
         $stopLines = [System.Collections.Generic.List[string]]::new()
-        Send-SerialCommand -Serial $serial -Command "~VREC:TOGGLE" -Lines $stopLines
-        [void](Read-SerialUntil -Serial $serial -Deadline (Get-Date).AddMilliseconds(1800) -Lines $stopLines)
+        $stopLine = Invoke-GeneratedRecordingStop `
+            -Serial $serial `
+            -Command $triggerCommand `
+            -TriggerMode $TriggerMode `
+            -Lines $stopLines
         foreach ($line in $stopLines) { $allSerialLines.Add("[${label}] $line") }
 
         $historyResult = Wait-HistorySession -StartedAt $roundStartedAt -TimeoutSeconds 20
@@ -600,6 +730,7 @@ try {
         $roundFailures = @()
         $roundWarnings = @()
         if (-not $startLine) { $roundFailures += "firmware_recording_start_not_seen" }
+        if (-not $stopLine) { $roundFailures += "firmware_recording_stop_not_seen" }
         if (-not $capsuleVisibleAt) { $roundFailures += "capsule_not_visible" }
         if (-not $session) { $roundFailures += "history_session_missing" }
         if ($session -and -not $stats) { $roundFailures += "embedded_audio_stats_missing" }
@@ -614,15 +745,31 @@ try {
         if ($hiddenToVisibleSeconds -ne $null -and $hiddenToVisibleSeconds -gt $MaxHiddenToVisibleSeconds) {
             $roundFailures += "hidden_to_visible_seconds=$hiddenToVisibleSeconds"
         }
-        $serialText = (($roundSerialLines + $stopLines) -join "`n")
+        $roundSerialEvidenceLines = @($roundSerialLines + $stopLines)
+        $serialText = ($roundSerialEvidenceLines -join "`n")
+        $generatedEvidence = Get-GeneratedButtonEvidence -Lines $roundSerialEvidenceLines -TriggerMode $TriggerMode
+        if (-not [bool]$generatedEvidence.start_stop_ack_seen) {
+            $roundFailures += "generated_button_ack_missing"
+        }
+        if (-not [bool]$generatedEvidence.timing_seen) {
+            $roundFailures += "generated_button_timing_missing"
+        }
+        if (-not [bool]$generatedEvidence.single_seen) {
+            $roundFailures += "generated_button_single_missing"
+        }
         $errorText = ($serialText + "`n" + $roundLogText)
-        if ($errorText -match "transport_not_ready|QueueFull|SessionError|session storm") {
+        if ($errorText -match "QueueFull|SessionError|session storm") {
             $roundFailures += "error_marker"
+        }
+        if (-not $startLine -and $errorText -match "transport_not_ready") {
+            $roundFailures += "transport_not_ready"
         }
 
         $roundResults += [ordered]@{
             round = $roundIndex
             label = $label
+            trigger = $TriggerMode
+            trigger_command = $triggerCommand
             status = if ($roundFailures.Count -eq 0) { "PASS" } else { "FAIL" }
             failures = @($roundFailures)
             warnings = @($roundWarnings)
@@ -644,6 +791,8 @@ try {
             missing_packet_count = $missingPackets
             duplicate_packet_count = $duplicatePackets
             serial_start_line = $startLine
+            serial_stop_line = $stopLine
+            generated_button_evidence = $generatedEvidence
             listener_log_excerpt_chars = [Math]::Min(4000, $roundLogText.Length)
             hidden_probe = $hiddenProbe
             wav_path = $wavPath
@@ -685,6 +834,8 @@ $payload = [ordered]@{
     started_at_utc = $startedAt.ToUniversalTime().ToString("o")
     finished_at_utc = Get-UtcNow
     port = $Port
+    trigger = $TriggerMode
+    trigger_command = $triggerCommand
     device_name = $DeviceName
     bluetooth_address = $BluetoothAddress
     listener_exe = $ListenerExe
@@ -699,6 +850,7 @@ $payload = [ordered]@{
         backup_path = if ($hadPrefs) { $prefsBackup } else { $null }
         active_snapshot_path = $prefsActiveSnapshot
         dictation_input_source = "embeddedBle"
+        key3_single_click_action = "dictation"
         restored_after_run = $true
     }
     max_hidden_to_visible_seconds = $MaxHiddenToVisibleSeconds

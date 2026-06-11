@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("serial-toggle", "serial-cancel", "desktop-cancel", "manual-key")]
+    [ValidateSet("serial-toggle", "serial-cancel", "desktop-cancel", "manual-key", "generated-key3", "generated-ec11")]
     [string]$TriggerMode = "serial-toggle",
     [string]$Port = "COM3",
     [string]$DeviceName = "listener",
@@ -567,6 +567,78 @@ function Get-WavDurationMilliseconds {
     } finally {
         $reader.Dispose()
         $stream.Dispose()
+    }
+}
+
+function Get-SmokePreferencesPath {
+    if (-not $env:APPDATA) {
+        throw "APPDATA is not set; cannot locate Listener Type preferences."
+    }
+    return Join-Path $env:APPDATA "Listener Type\preferences.json"
+}
+
+function Write-Utf8NoBomText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Text
+    )
+    $encoding = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($Path, $Text, $encoding)
+}
+
+function Ensure-JsonObjectProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    if ($null -eq $Object.PSObject.Properties[$Name] -or $null -eq $Object.$Name) {
+        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+    return $Object.$Name
+}
+
+function Set-SmokeDeviceKeyPreferences {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $dir = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    if (Test-Path $Path) {
+        $raw = Get-Content -LiteralPath $Path -Raw
+        $prefs = if ([string]::IsNullOrWhiteSpace($raw)) { [pscustomobject]@{} } else { $raw | ConvertFrom-Json }
+    } else {
+        $prefs = [pscustomobject]@{}
+    }
+
+    $prefs | Add-Member -NotePropertyName "dictationInputSource" -NotePropertyValue "embeddedBle" -Force
+    $prefs | Add-Member -NotePropertyName "dictationInputSourceUserOverridden" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "showCapsule" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "recordAudioForDebug" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "streamingInsert" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "streamingInsertDefaultMigrated" -NotePropertyValue $true -Force
+    $prefs | Add-Member -NotePropertyName "deviceCustomKeysDefaultMigrated" -NotePropertyValue $true -Force
+
+    $keys = Ensure-JsonObjectProperty -Object $prefs -Name "deviceCustomKeys"
+    $key3 = Ensure-JsonObjectProperty -Object $keys -Name "key3"
+    $key3 | Add-Member -NotePropertyName "action" -NotePropertyValue "dictation" -Force
+    $key3 | Add-Member -NotePropertyName "appPage" -NotePropertyValue "settingsShortcuts" -Force
+    $key3 | Add-Member -NotePropertyName "externalAppPath" -NotePropertyValue "" -Force
+    $key3 | Add-Member -NotePropertyName "pasteTemplate" -NotePropertyValue "" -Force
+    $key3 | Add-Member -NotePropertyName "shortcut" -NotePropertyValue $null -Force
+
+    $json = $prefs | ConvertTo-Json -Depth 32
+    Write-Utf8NoBomText -Path $Path -Text $json
+}
+
+function Restore-SmokePreferences {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$BackupPath,
+        [Parameter(Mandatory = $true)][bool]$HadOriginal
+    )
+    if ($HadOriginal -and (Test-Path $BackupPath)) {
+        Copy-Item -LiteralPath $BackupPath -Destination $Path -Force
+    } elseif (Test-Path $Path) {
+        Remove-Item -LiteralPath $Path -Force
     }
 }
 
@@ -1272,6 +1344,13 @@ function Convert-SerialReportForJson {
         recording_cancel_seen = [bool]$Report.recording_cancel_seen
         cancel_requested = [bool]$Report.cancel_requested
         cancel_completed = [bool]$Report.cancel_completed
+        generated_button_logical = if ($Report.generated_button_logical) { [string]$Report.generated_button_logical } else { $null }
+        generated_button_command = if ($Report.generated_button_command) { [string]$Report.generated_button_command } else { $null }
+        generated_button_ack_count = [int]$Report.generated_button_ack_count
+        generated_button_start_stop_ack_seen = [bool]$Report.generated_button_start_stop_ack_seen
+        generated_button_timing_seen = [bool]$Report.generated_button_timing_seen
+        generated_button_single_seen = [bool]$Report.generated_button_single_seen
+        generated_button_evidence_summary = if ($Report.generated_button_evidence_summary) { [string]$Report.generated_button_evidence_summary } else { $null }
     }
 }
 
@@ -1406,8 +1485,8 @@ function Start-SerialRecordingWindow {
         [string]$StopSignalPath,
         [string]$RecordingStartedSignalPath,
         [int]$RecordingStartTimeoutMs,
-        [ValidateSet("toggle", "cancel")]
-        [string]$EndCommand = "toggle",
+        [string]$StartCommand = "~VREC:TOGGLE",
+        [string]$EndCommand = "~VREC:TOGGLE",
         [int]$MaxWaitSeconds = 120
     )
 
@@ -1425,8 +1504,9 @@ start_signal_path = pathlib.Path(sys.argv[4])
 stop_signal_path = pathlib.Path(sys.argv[5])
 recording_started_signal_path = pathlib.Path(sys.argv[6])
 recording_start_timeout_ms = int(sys.argv[7])
-end_command = sys.argv[8]
-max_wait_seconds = int(sys.argv[9])
+start_command = sys.argv[8]
+end_command = sys.argv[9]
+max_wait_seconds = int(sys.argv[10])
 lines = []
 buffer = bytearray()
 stream_ready_wait_count = 0
@@ -1490,6 +1570,22 @@ def wait_for_start_signal(ser):
 
 def contains(text):
     return any(text in line for line in lines)
+
+def count_contains(text):
+    return sum(1 for line in lines if text in line)
+
+def any_contains(*needles):
+    return any(any(needle in line for needle in needles) for line in lines)
+
+def generated_logical_for_command(command):
+    upper = command.upper()
+    if not upper.startswith("~KEY:") and not upper.startswith("KEY:"):
+        return None
+    if "KEY3" in upper or ":3:" in upper:
+        return "KEY3"
+    if "EC11" in upper or "VOICE" in upper:
+        return "EC11"
+    return None
 
 def latest_audio_transport_state_entry():
     for index in range(len(lines) - 1, -1, -1):
@@ -1586,7 +1682,7 @@ def start_recording_with_retry(ser):
         stream_ready_confirmed_before_toggle = True
         stream_ready_confirmed_line_index = ready_index
         rejection_start_index = len(lines)
-        send_command(ser, "~VREC:TOGGLE")
+        send_command(ser, start_command)
         recording_started, rejection_index = wait_for_recording_start(ser, rejection_start_index)
         if recording_started:
             return
@@ -1631,10 +1727,7 @@ try:
     wait_for_start_signal(ser)
     start_recording_with_retry(ser)
     wait_for_stop_signal(ser)
-    if end_command == "cancel":
-        send_command(ser, "~VREC:CANCEL")
-    else:
-        send_command(ser, "~VREC:TOGGLE")
+    send_command(ser, end_command)
     poll_until(ser, time.monotonic() + 1.5)
 finally:
     try:
@@ -1651,6 +1744,43 @@ notify_enabled = any(
     or ("audio transport state:" in line and "notify=1" in line)
     for line in lines
 )
+
+generated_button_logical = generated_logical_for_command(start_command)
+generated_button_command = start_command if generated_button_logical else None
+generated_button_ack_count = (
+    count_contains(f"~KEY:GENERATED logical={generated_button_logical} gesture=single result=ESP_OK")
+    if generated_button_logical
+    else 0
+)
+generated_button_timing_seen = False
+generated_button_single_seen = False
+generated_button_evidence_summary = None
+if generated_button_logical == "KEY3":
+    generated_button_timing_seen = any_contains(
+        "custom key generated single-click queued: logical=KEY3",
+        "custom key generated single-click armed: logical=KEY3",
+        "custom key generated single-click completed: logical=KEY3",
+        "custom key raw transition: logical=KEY3",
+        "custom key stable transition: logical=KEY3",
+        "custom key release: logical=KEY3",
+    )
+    generated_button_single_seen = any_contains(
+        "custom key single pending: logical=KEY3",
+        "custom key fallback queued: logical=KEY3",
+    )
+    generated_button_evidence_summary = "KEY3 generated press/release -> custom key debounce/single-click/F15 path"
+elif generated_button_logical == "EC11":
+    generated_button_timing_seen = any_contains(
+        "recording gesture key generated single-click queued",
+        "recording gesture key generated single-click armed",
+        "recording gesture key generated single-click completed",
+        "recording gesture key level changed: source=ec11_key.gpio18",
+    )
+    generated_button_single_seen = any_contains(
+        "ec11_key.gpio18 single click pending for double-click window",
+        "ec11_key.gpio18 single-click toggle detected",
+    )
+    generated_button_evidence_summary = "EC11 generated press/release -> voice-key debounce/single-click toggle path"
 
 summary = {
     "serial_log_path": str(log_path),
@@ -1674,6 +1804,15 @@ summary = {
         or contains("recording cancel source=")
         or contains("record session canceled before activation")
     ),
+    "generated_button_logical": generated_button_logical,
+    "generated_button_command": generated_button_command,
+    "generated_button_ack_count": generated_button_ack_count,
+    "generated_button_start_stop_ack_seen": (
+        generated_button_ack_count >= 2 if generated_button_logical else False
+    ),
+    "generated_button_timing_seen": generated_button_timing_seen,
+    "generated_button_single_seen": generated_button_single_seen,
+    "generated_button_evidence_summary": generated_button_evidence_summary,
 }
 print(json.dumps(summary, ensure_ascii=False), flush=True)
 '@
@@ -1692,6 +1831,7 @@ print(json.dumps(summary, ensure_ascii=False), flush=True)
         Quote-ProcessArgument $StopSignalPath
         Quote-ProcessArgument $RecordingStartedSignalPath
         Quote-ProcessArgument ([string]$RecordingStartTimeoutMs)
+        Quote-ProcessArgument $StartCommand
         Quote-ProcessArgument $EndCommand
         Quote-ProcessArgument ([string]$MaxWaitSeconds)
     ) -join " "
@@ -2074,6 +2214,15 @@ $logDir = Split-Path -Parent $logPath
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 Get-Process listener-type -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 300
+$prefsPath = Get-SmokePreferencesPath
+$prefsBackup = Join-Path $OutDir "preferences-before-ble-stream-smoke-$RunStamp.json"
+$prefsActiveSnapshot = Join-Path $OutDir "preferences-active-ble-stream-smoke-$RunStamp.json"
+$hadPrefs = Test-Path $prefsPath
+if ($hadPrefs) {
+    Copy-Item -LiteralPath $prefsPath -Destination $prefsBackup -Force
+}
+Set-SmokeDeviceKeyPreferences -Path $prefsPath
+Copy-Item -LiteralPath $prefsPath -Destination $prefsActiveSnapshot -Force
 $logOffsetValue = if (Test-Path $logPath) { (Get-Item $logPath).Length } else { 0 }
 $logOffset = [ref]$logOffsetValue
 $capturedLog = ""
@@ -2100,8 +2249,14 @@ $timeline = [ordered]@{
     smoke_started_at_utc = $smokeStartedAt.ToUniversalTime().ToString("o")
 }
 $scriptExitCode = 0
-$usesSerialSignal = @("serial-toggle", "serial-cancel", "desktop-cancel") -contains $TriggerMode
-$serialEndCommand = if (@("serial-cancel", "desktop-cancel") -contains $TriggerMode) { "cancel" } else { "toggle" }
+$generatedKeyCommand = switch ($TriggerMode) {
+    "generated-key3" { "~KEY:KEY3:SINGLE" }
+    "generated-ec11" { "~KEY:EC11:SINGLE" }
+    default { $null }
+}
+$usesSerialSignal = @("serial-toggle", "serial-cancel", "desktop-cancel", "generated-key3", "generated-ec11") -contains $TriggerMode
+$serialStartCommand = if ($generatedKeyCommand) { $generatedKeyCommand } else { "~VREC:TOGGLE" }
+$serialEndCommand = if (@("serial-cancel", "desktop-cancel") -contains $TriggerMode) { "~VREC:CANCEL" } else { $serialStartCommand }
 $usesDesktopCancel = $TriggerMode -eq "desktop-cancel"
 $expectedStreamFailure = $null
 $playbackVolumeSnapshot = $null
@@ -2121,6 +2276,7 @@ try {
             -StopSignalPath $serialStopSignalPath `
             -RecordingStartedSignalPath $serialRecordingStartedSignalPath `
             -RecordingStartTimeoutMs $RecordingStartTimeoutMs `
+            -StartCommand $serialStartCommand `
             -EndCommand $serialEndCommand
         Write-SmokeTrace "serial_window_started path=$serialLogPath"
     }
@@ -2435,6 +2591,17 @@ try {
         if (-not $serialReport) {
             $verificationErrors += "serial recording report missing"
         } else {
+            if ($generatedKeyCommand) {
+                if (-not [bool]$serialReport.generated_button_start_stop_ack_seen) {
+                    $verificationErrors += "generated button start/stop ACK was not confirmed by firmware"
+                }
+                if (-not [bool]$serialReport.generated_button_timing_seen) {
+                    $verificationErrors += "generated button press/release timing evidence was not seen in firmware log"
+                }
+                if (-not [bool]$serialReport.generated_button_single_seen) {
+                    $verificationErrors += "generated button single-click evidence was not seen in firmware log"
+                }
+            }
             if (-not [bool]$serialReport.recording_start_seen) {
                 $verificationErrors += "firmware recording start was not confirmed before playback"
             }
@@ -2541,6 +2708,8 @@ try {
         report_schema = Get-SmokeReportSchema
         status = $status
         trigger = $TriggerMode
+        trigger_start_command = $serialStartCommand
+        trigger_end_command = $serialEndCommand
         port = $Port
         audio_profile = $AudioProfile
         sentence = $Sentence
@@ -2599,6 +2768,14 @@ try {
         history_session = $historySessionJson
         verification_errors = $verificationErrors
         timeline = $timeline
+        temporary_preferences = [ordered]@{
+            path = $prefsPath
+            backup_path = if ($hadPrefs) { $prefsBackup } else { $null }
+            active_snapshot_path = $prefsActiveSnapshot
+            key3_single_click_action = "dictation"
+            dictation_input_source = "embeddedBle"
+            restored_after_run = $true
+        }
         started_at_utc = $smokeStartedAt.ToUniversalTime().ToString("o")
         log_path = $logPath
     }
@@ -2651,6 +2828,8 @@ try {
         report_schema = Get-SmokeReportSchema
         status = "FAIL"
         trigger = $TriggerMode
+        trigger_start_command = $serialStartCommand
+        trigger_end_command = $serialEndCommand
         port = $Port
         audio_profile = $AudioProfile
         sentence = $Sentence
@@ -2700,6 +2879,14 @@ try {
         recording_archive_path = $recordingArchivePath
         error = $caughtError.Exception.Message
         timeline = $timeline
+        temporary_preferences = [ordered]@{
+            path = $prefsPath
+            backup_path = if ($hadPrefs) { $prefsBackup } else { $null }
+            active_snapshot_path = $prefsActiveSnapshot
+            key3_single_click_action = "dictation"
+            dictation_input_source = "embeddedBle"
+            restored_after_run = $true
+        }
         started_at_utc = $smokeStartedAt.ToUniversalTime().ToString("o")
         log_path = $logPath
     }
@@ -2726,6 +2913,9 @@ try {
         }
     }
     if ($process) { try { $process.Dispose() } catch {} }
+    if ($prefsPath) {
+        Restore-SmokePreferences -Path $prefsPath -BackupPath $prefsBackup -HadOriginal $hadPrefs
+    }
     Write-SmokeTrace "finally_done"
 }
 
