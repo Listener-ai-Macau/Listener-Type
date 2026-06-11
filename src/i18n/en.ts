@@ -497,12 +497,18 @@ export const en: typeof zhCN = {
       bleNameDesc: 'The new name appears after the device advertises again or restarts.',
       bleNameError: 'Use 1-32 visible ASCII characters, without spaces, quotes, semicolons, equals signs, or backslashes.',
       knobRotationLabel: 'Knob rotation',
-      knobRotationDesc: 'Rotation syncs to the device; configure EC11 single click under device custom keys, while double click and long press stay fixed in firmware.',
+      knobRotationDesc: 'Rotation syncs to the device.',
       knobRotationAria: 'Choose knob rotation action',
       knobActions: {
         systemVolume: 'Computer volume',
         screenBrightness: 'Screen brightness',
         disabled: 'Disabled',
+      },
+      knobPress: {
+        single: 'Click',
+        double: 'Double click',
+        long: 'Long press',
+        fixed: 'Fixed in firmware',
       },
     },
     recording: {
@@ -801,9 +807,8 @@ export const en: typeof zhCN = {
     },
       deviceKeys: {
         title: 'Device custom keys',
-        desc: 'KEY1-KEY4 and the EC11 click use device fallback entries for safe actions; KEY3 records by default.',
+        desc: 'KEY1-KEY4 and the EC11 click can be mapped to safe actions; KEY3 records by default.',
         keyLabel: '{{key}}',
-        fallback: 'Device entry {{fallback}}',
         noop: 'No action',
         actionReady: 'Runs on press',
         actionSelectAria: 'Select device key action',
@@ -816,9 +821,9 @@ export const en: typeof zhCN = {
         installedAppManualHint: 'Using a manual app path.',
         appPageSelectAria: 'Choose app page',
         gestures: {
-          singleClick: 'Single click group',
-          doubleClick: 'Double click group',
-          longPress: 'Long press group',
+          singleClick: 'Single click',
+          doubleClick: 'Double click',
+          longPress: 'Long press',
         },
         appPages: {
           overview: 'Overview',
@@ -836,12 +841,12 @@ export const en: typeof zhCN = {
         },
         knob: {
           title: 'Knob actions',
-          desc: 'Rotation can be sent to the device as volume, brightness, or disabled. Knob click is configured in device custom keys.',
+          desc: 'Knob click and rotation can sync to the device; double click and long press are fixed by firmware.',
           gestures: {
             rotate: 'Knob rotation',
-            shortPress: 'Knob click',
-            doubleClick: 'Knob double click',
-            longPress: 'Knob long press',
+            shortPress: 'Click',
+            doubleClick: 'Double click',
+            longPress: 'Long press',
           },
           actions: {
             systemVolume: 'Computer volume',

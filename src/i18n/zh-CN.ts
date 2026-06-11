@@ -495,12 +495,18 @@ export const zhCN = {
       bleNameDesc: '写入固件后，重新广播或重启后显示新名称。',
       bleNameError: '只能使用 1-32 个可见 ASCII 字符，不能包含空格、引号、分号、等号或反斜杠。',
       knobRotationLabel: '旋钮旋转',
-      knobRotationDesc: '旋转动作同步到设备；EC11 单击在设备自定义键里设置，双击/长按由固件固定。',
+      knobRotationDesc: '旋转动作同步到设备。',
       knobRotationAria: '选择旋钮旋转动作',
       knobActions: {
         systemVolume: '电脑音量',
         screenBrightness: '屏幕亮度',
         disabled: '禁用',
+      },
+      knobPress: {
+        single: '单击',
+        double: '双击',
+        long: '长按',
+        fixed: '固件固定',
       },
     },
     recording: {
@@ -799,9 +805,8 @@ export const zhCN = {
     },
       deviceKeys: {
         title: '设备自定义键',
-        desc: 'KEY1-KEY4 与 EC11 单击使用设备 fallback 入口映射为安全动作；KEY3 默认录音。',
+        desc: 'KEY1-KEY4 与 EC11 单击可映射为安全动作；KEY3 默认录音。',
         keyLabel: '{{key}}',
-        fallback: '设备入口 {{fallback}}',
         noop: '不执行动作',
         actionReady: '按下后执行',
         actionSelectAria: '选择设备键动作',
@@ -814,9 +819,9 @@ export const zhCN = {
         installedAppManualHint: '当前使用手动应用路径。',
         appPageSelectAria: '选择软件页面',
         gestures: {
-          singleClick: '单击一组',
-          doubleClick: '双击一组',
-          longPress: '长按一组',
+          singleClick: '单击',
+          doubleClick: '双击',
+          longPress: '长按',
         },
         appPages: {
           overview: '总览',
@@ -834,12 +839,12 @@ export const zhCN = {
         },
         knob: {
           title: '旋钮动作',
-          desc: '旋转动作可同步到设备：调电脑音量、调屏幕亮度或禁用。旋钮单击在设备自定义键里配置。',
+          desc: '旋钮单击和旋转动作可同步到设备；双击和长按由固件固定。',
           gestures: {
             rotate: '旋钮旋转',
-            shortPress: '旋钮单击',
-            doubleClick: '双击旋钮',
-            longPress: '长按旋钮',
+            shortPress: '单击',
+            doubleClick: '双击',
+            longPress: '长按',
           },
           actions: {
             systemVolume: '电脑音量',

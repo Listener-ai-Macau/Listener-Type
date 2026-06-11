@@ -455,12 +455,18 @@ export const ja: typeof zhCN = {
       bleNameDesc: '書き込み後、再広告または再起動後に新しい名前が表示されます。',
       bleNameError: '1-32 個の表示可能な ASCII 文字を使用してください。スペース、引用符、セミコロン、等号、バックスラッシュは使えません。',
       knobRotationLabel: 'ノブ回転',
-      knobRotationDesc: '回転動作はデバイスに同期されます。EC11 のシングルクリックはデバイスカスタムキーで設定し、ダブルクリックと長押しはファームウェア固定です。',
+      knobRotationDesc: '回転動作はデバイスに同期されます。',
       knobRotationAria: 'ノブ回転動作を選択',
       knobActions: {
         systemVolume: 'PC 音量',
         screenBrightness: '画面輝度',
         disabled: '無効',
+      },
+      knobPress: {
+        single: 'クリック',
+        double: 'ダブルクリック',
+        long: '長押し',
+        fixed: 'ファームウェア固定',
       },
     },
     recording: {
@@ -759,9 +765,8 @@ export const ja: typeof zhCN = {
     },
     deviceKeys: {
       title: 'デバイスカスタムキー',
-      desc: 'KEY1-KEY4 と EC11 クリックはデバイス fallback 入口で安全な動作に割り当てます。KEY3 は既定で録音です。',
+      desc: 'KEY1-KEY4 と EC11 クリックは安全な動作に割り当てられます。KEY3 は既定で録音です。',
       keyLabel: '{{key}}',
-      fallback: 'デバイス入口 {{fallback}}',
       noop: '何もしない',
       actionReady: '押すと実行',
       actionSelectAria: 'デバイスキー動作を選択',
@@ -794,12 +799,12 @@ export const ja: typeof zhCN = {
       },
       knob: {
         title: 'ノブの動作',
-        desc: '回転動作はデバイスへ同期できます。音量、画面の明るさ、無効から選べます。ノブクリックはデバイスカスタムキーで設定します。',
+        desc: 'ノブクリックと回転動作はデバイスへ同期できます。ダブルクリックと長押しはファームウェア固定です。',
         gestures: {
           rotate: 'ノブ回転',
-          shortPress: 'ノブクリック',
-          doubleClick: 'ノブダブルクリック',
-          longPress: 'ノブ長押し',
+          shortPress: 'クリック',
+          doubleClick: 'ダブルクリック',
+          longPress: '長押し',
         },
         actions: {
           systemVolume: 'コンピューター音量',

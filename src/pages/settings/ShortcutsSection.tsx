@@ -34,10 +34,6 @@ const DEVICE_KEYS: Array<{ id: DeviceCustomKeyId }> = [
   { id: 'key3' },
   { id: 'key4' },
 ];
-const DEVICE_SINGLE_CLICK_KEYS: Array<{ id: DeviceCustomKeyId }> = [
-  ...DEVICE_KEYS,
-  { id: 'knob' },
-];
 
 type DeviceKeyMapKey =
   | 'deviceCustomKeys'
@@ -48,25 +44,21 @@ const DEVICE_GESTURES: Array<{
   id: DeviceCustomKeyGesture;
   mapKey: DeviceKeyMapKey;
   keys: Array<{ id: DeviceCustomKeyId }>;
-  fallbacks: Partial<Record<DeviceCustomKeyId, string>>;
 }> = [
   {
     id: 'singleClick',
     mapKey: 'deviceCustomKeys',
-    keys: DEVICE_SINGLE_CLICK_KEYS,
-    fallbacks: { key1: 'F13', key2: 'F14', key3: 'F15', key4: 'F16', knob: 'Shift+F13' },
+    keys: DEVICE_KEYS,
   },
   {
     id: 'doubleClick',
     mapKey: 'deviceCustomKeyDoubleClicks',
     keys: DEVICE_KEYS,
-    fallbacks: { key1: 'F17', key2: 'F18', key3: 'F19', key4: 'F20' },
   },
   {
     id: 'longPress',
     mapKey: 'deviceCustomKeyLongPresses',
     keys: DEVICE_KEYS,
-    fallbacks: { key1: 'F21', key2: 'F22', key3: 'F23', key4: 'F24' },
   },
 ];
 
@@ -269,7 +261,19 @@ export function DeviceKeysPanel() {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
         <DeviceKnobControls
+          clickMapping={prefs.deviceCustomKeys.knob}
           rotationAction={prefs.deviceKnobRotationAction}
+          installedApps={installedApps}
+          installedAppsLoading={installedAppsLoading}
+          onClickChange={async mapping => {
+            await savePrefs(current => ({
+              ...current,
+              deviceCustomKeys: {
+                ...current.deviceCustomKeys,
+                knob: mapping,
+              },
+            }));
+          }}
           onRotationChange={async action => {
             if (action === prefs.deviceKnobRotationAction) return;
             await savePrefs(current => ({
@@ -303,10 +307,18 @@ export function DeviceKeysPanel() {
 }
 
 function DeviceKnobControls({
+  clickMapping,
   rotationAction,
+  installedApps,
+  installedAppsLoading,
+  onClickChange,
   onRotationChange,
 }: {
+  clickMapping: DeviceCustomKeyMapping;
   rotationAction: DeviceKnobRotationAction;
+  installedApps: InstalledApplication[];
+  installedAppsLoading: boolean;
+  onClickChange: (mapping: DeviceCustomKeyMapping) => Promise<void>;
   onRotationChange: (action: DeviceKnobRotationAction) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -316,6 +328,16 @@ function DeviceKnobControls({
         {t('settings.deviceKeys.knobTitle', '旋钮')}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <DeviceKnobRow
+          label={t('settings.device.knobPress.single', '单击')}
+        >
+          <DeviceKeyMappingControl
+            mapping={clickMapping}
+            installedApps={installedApps}
+            installedAppsLoading={installedAppsLoading}
+            onChange={onClickChange}
+          />
+        </DeviceKnobRow>
         <DeviceKnobRow
           label={t('settings.device.knobRotationLabel', '旋钮旋转')}
           fallback={t('settings.device.knobRotationDesc', '旋转动作同步到设备。')}
@@ -332,7 +354,7 @@ function DeviceKnobControls({
           />
         </DeviceKnobRow>
         <DeviceKnobRow
-          label={t('settings.device.knobPress.double', '旋钮双击')}
+          label={t('settings.device.knobPress.double', '双击')}
           fallback={t('settings.device.knobPress.fixed', '固件固定')}
         >
           <ReadOnlyDeviceAction muted>
@@ -340,7 +362,7 @@ function DeviceKnobControls({
           </ReadOnlyDeviceAction>
         </DeviceKnobRow>
         <DeviceKnobRow
-          label={t('settings.device.knobPress.long', '旋钮长按')}
+          label={t('settings.device.knobPress.long', '长按')}
           fallback={t('settings.device.knobPress.fixed', '固件固定')}
         >
           <ReadOnlyDeviceAction muted>
@@ -358,7 +380,7 @@ function DeviceKnobRow({
   children,
 }: {
   label: string;
-  fallback: string;
+  fallback?: string;
   children: ReactNode;
 }) {
   return (
@@ -374,9 +396,11 @@ function DeviceKnobRow({
         <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
           {label}
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
-          {fallback}
-        </div>
+        {fallback && (
+          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
+            {fallback}
+          </div>
+        )}
       </div>
       <div style={{ minWidth: 0 }}>{children}</div>
     </div>
@@ -447,9 +471,6 @@ function DeviceKeyGestureGroup({
             <div style={{ minWidth: 0, paddingTop: 6 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
                 {t('settings.deviceKeys.keyLabel', { key: deviceKeyDisplayLabel(id) })}
-              </div>
-              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
-                {t('settings.deviceKeys.fallback', { fallback: gesture.fallbacks[id] ?? '' })}
               </div>
             </div>
             <DeviceKeyMappingControl

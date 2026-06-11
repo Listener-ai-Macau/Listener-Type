@@ -455,12 +455,18 @@ export const ko: typeof zhCN = {
       bleNameDesc: '펌웨어에 쓴 뒤 다시 광고하거나 재시작하면 새 이름이 표시됩니다.',
       bleNameError: '1-32자의 표시 가능한 ASCII 문자만 사용할 수 있으며 공백, 따옴표, 세미콜론, 등호, 백슬래시는 사용할 수 없습니다.',
       knobRotationLabel: '노브 회전',
-      knobRotationDesc: '회전 동작은 장치에 동기화됩니다. EC11 단일 클릭은 장치 사용자 지정 키에서 설정하고, 두 번 클릭과 길게 누르기는 펌웨어에 고정됩니다.',
+      knobRotationDesc: '회전 동작은 장치에 동기화됩니다.',
       knobRotationAria: '노브 회전 동작 선택',
       knobActions: {
         systemVolume: '컴퓨터 볼륨',
         screenBrightness: '화면 밝기',
         disabled: '사용 안 함',
+      },
+      knobPress: {
+        single: '클릭',
+        double: '더블 클릭',
+        long: '길게 누르기',
+        fixed: '펌웨어 고정',
       },
     },
     recording: {
@@ -759,9 +765,8 @@ export const ko: typeof zhCN = {
     },
     deviceKeys: {
       title: '장치 사용자 지정 키',
-      desc: 'KEY1-KEY4 와 EC11 클릭은 장치 fallback 입력으로 안전한 동작에 매핑됩니다. KEY3 는 기본 녹음 키입니다.',
+      desc: 'KEY1-KEY4 와 EC11 클릭은 안전한 동작에 매핑할 수 있습니다. KEY3 는 기본 녹음 키입니다.',
       keyLabel: '{{key}}',
-      fallback: '장치 입력 {{fallback}}',
       noop: '동작 없음',
       actionReady: '누르면 실행',
       actionSelectAria: '장치 키 동작 선택',
@@ -774,9 +779,9 @@ export const ko: typeof zhCN = {
       installedAppManualHint: '수동 앱 경로를 사용 중입니다.',
       appPageSelectAria: '앱 페이지 선택',
       gestures: {
-        singleClick: '단일 클릭 그룹',
-        doubleClick: '더블 클릭 그룹',
-        longPress: '길게 누르기 그룹',
+        singleClick: '단일 클릭',
+        doubleClick: '더블 클릭',
+        longPress: '길게 누르기',
       },
       appPages: {
         overview: '개요',
@@ -794,12 +799,12 @@ export const ko: typeof zhCN = {
       },
       knob: {
         title: '노브 동작',
-        desc: '회전 동작은 장치로 동기화할 수 있습니다. 컴퓨터 볼륨, 화면 밝기, 비활성화 중에서 선택하세요. 노브 클릭은 장치 사용자 지정 키에서 설정합니다.',
+        desc: '노브 클릭과 회전 동작은 장치로 동기화할 수 있습니다. 더블 클릭과 길게 누르기는 펌웨어에서 고정됩니다.',
         gestures: {
           rotate: '노브 회전',
-          shortPress: '노브 클릭',
-          doubleClick: '노브 더블 클릭',
-          longPress: '노브 길게 누르기',
+          shortPress: '클릭',
+          doubleClick: '더블 클릭',
+          longPress: '길게 누르기',
         },
         actions: {
           systemVolume: '컴퓨터 볼륨',

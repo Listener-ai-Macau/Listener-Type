@@ -497,12 +497,18 @@ export const zhTW: typeof zhCN = {
       bleNameDesc: '寫入韌體後，重新廣播或重啟後顯示新名稱。',
       bleNameError: '只能使用 1-32 個可見 ASCII 字元，不能包含空格、引號、分號、等號或反斜線。',
       knobRotationLabel: '旋鈕旋轉',
-      knobRotationDesc: '旋轉動作同步到設備；EC11 單擊在設備自訂鍵中設定，雙擊/長按由韌體固定。',
+      knobRotationDesc: '旋轉動作同步到設備。',
       knobRotationAria: '選擇旋鈕旋轉動作',
       knobActions: {
         systemVolume: '電腦音量',
         screenBrightness: '螢幕亮度',
         disabled: '停用',
+      },
+      knobPress: {
+        single: '單擊',
+        double: '雙擊',
+        long: '長按',
+        fixed: '韌體固定',
       },
     },
     recording: {
@@ -801,9 +807,8 @@ export const zhTW: typeof zhCN = {
     },
     deviceKeys: {
       title: '設備自定義鍵',
-      desc: 'KEY1-KEY4 與 EC11 單擊使用裝置 fallback 入口映射為安全動作；KEY3 預設錄音。',
+      desc: 'KEY1-KEY4 與 EC11 單擊可映射為安全動作；KEY3 預設錄音。',
       keyLabel: '{{key}}',
-      fallback: '設備入口 {{fallback}}',
       noop: '不執行動作',
       actionReady: '按下後執行',
       actionSelectAria: '選擇設備鍵動作',
@@ -816,9 +821,9 @@ export const zhTW: typeof zhCN = {
       installedAppManualHint: '目前使用手動應用路徑。',
       appPageSelectAria: '選擇軟體頁面',
       gestures: {
-        singleClick: '單擊一組',
-        doubleClick: '雙擊一組',
-        longPress: '長按一組',
+        singleClick: '單擊',
+        doubleClick: '雙擊',
+        longPress: '長按',
       },
       appPages: {
         overview: '總覽',
@@ -836,12 +841,12 @@ export const zhTW: typeof zhCN = {
       },
       knob: {
         title: '旋鈕動作',
-        desc: '旋轉動作可同步到裝置：調整電腦音量、調整螢幕亮度或停用。旋鈕單擊在裝置自訂鍵裡配置。',
+        desc: '旋鈕單擊和旋轉動作可同步到裝置；雙擊和長按由韌體固定。',
         gestures: {
           rotate: '旋鈕旋轉',
-          shortPress: '旋鈕單擊',
-          doubleClick: '雙擊旋鈕',
-          longPress: '長按旋鈕',
+          shortPress: '單擊',
+          doubleClick: '雙擊',
+          longPress: '長按',
         },
         actions: {
           systemVolume: '電腦音量',
