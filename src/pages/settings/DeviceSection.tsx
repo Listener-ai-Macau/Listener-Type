@@ -232,7 +232,9 @@ function DeviceFirmwareSettingsCard() {
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
     pluggedBrightnessPercent: 100,
     batteryBrightnessPercent: 100,
+    lowPowerIdleMinutes: 1,
     pluggedLowPowerEnabled: true,
+    batteryLowPowerEnabled: true,
     batteryAutoShutdownMinutes: 30,
     bleName: 'listener',
   });
@@ -291,7 +293,7 @@ function DeviceFirmwareSettingsCard() {
             {t('settings.device.configTitle', '设备设置')}
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, lineHeight: 1.5 }}>
-            {t('settings.device.configDesc', '亮度按供电状态分开保存；自动关机只在拔电后的电池模式生效。')}
+            {t('settings.device.configDesc', '亮度按供电状态分开保存。')}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -307,6 +309,19 @@ function DeviceFirmwareSettingsCard() {
           {snapshot.detail}
         </div>
       )}
+
+      <SettingRow
+        label={t('settings.device.bleNameLabel', '蓝牙名称')}
+        desc={t('settings.device.bleNameDesc', '1-32 个 ASCII 字符；部分 Windows 设备名变更需要重连或重新配对后才显示。')}
+      >
+        <input
+          value={form.bleName}
+          maxLength={32}
+          disabled={!snapshot?.writeSupported || status === 'saving'}
+          onChange={event => setForm(current => ({ ...current, bleName: event.target.value }))}
+          style={{ ...inputStyle, maxWidth: 'none' }}
+        />
+      </SettingRow>
 
       <SettingRow
         label={t('settings.device.pluggedBrightnessLabel', '插电亮度')}
@@ -328,51 +343,59 @@ function DeviceFirmwareSettingsCard() {
           onChange={value => setForm(current => ({ ...current, batteryBrightnessPercent: value }))}
         />
       </SettingRow>
-      <SettingRow
-        label={t('settings.device.pluggedLowPowerLabel', '插电自动低功耗')}
-        desc={t('settings.device.pluggedLowPowerDesc', '开启后，USB / 充电 / 外部供电空闲也会进入设备低功耗；关闭后插电空闲保持唤醒，电池模式不受影响。')}
-      >
-        <Toggle
-          on={form.pluggedLowPowerEnabled}
-          onToggle={!snapshot?.writeSupported || status === 'saving'
-            ? undefined
-            : next => setForm(current => ({ ...current, pluggedLowPowerEnabled: next }))}
-        />
-      </SettingRow>
-      <SettingRow
-        label={t('settings.device.autoShutdownLabel', '电池自动关机')}
-        desc={t('settings.device.autoShutdownDesc', '仅电池供电且长时间空闲时生效；插电、充电或外部供电会阻止自动关机。')}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', flexWrap: 'wrap' }}>
-          <input
-            type="number"
-            min={1}
-            max={1440}
+
+      <div style={{ borderTop: '0.5px solid var(--ol-line-soft)', paddingTop: 14, marginTop: 2 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>
+          {t('settings.device.lowPowerManagementTitle', '低功耗管理')}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, lineHeight: 1.5 }}>
+          {t('settings.device.lowPowerManagementDesc', '插电和电池共用同一个进入低功耗等待时间；电池自动关机只在拔电后的电池模式生效。')}
+        </div>
+        <SettingRow
+          label={t('settings.device.pluggedLowPowerLabel', '插电自动进入低功耗')}
+          desc={t('settings.device.pluggedLowPowerDesc', '开启后，USB / 充电 / 外部供电空闲也会进入设备低功耗；关闭后插电空闲保持唤醒。')}
+        >
+          <Toggle
+            on={form.pluggedLowPowerEnabled}
+            onToggle={!snapshot?.writeSupported || status === 'saving'
+              ? undefined
+              : next => setForm(current => ({ ...current, pluggedLowPowerEnabled: next }))}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t('settings.device.batteryLowPowerLabel', '电池自动进入低功耗')}
+          desc={t('settings.device.batteryLowPowerDesc', '开启后，拔电后的电池模式空闲会进入设备低功耗；关闭后电池模式保持唤醒直到自动关机。')}
+        >
+          <Toggle
+            on={form.batteryLowPowerEnabled}
+            onToggle={!snapshot?.writeSupported || status === 'saving'
+              ? undefined
+              : next => setForm(current => ({ ...current, batteryLowPowerEnabled: next }))}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t('settings.device.lowPowerIdleLabel', '进入低功耗时间')}
+          desc={t('settings.device.lowPowerIdleDesc', '插电和电池模式共用这个等待时间，范围 1-1440 分钟。')}
+        >
+          <MinutesInput
+            value={form.lowPowerIdleMinutes}
+            disabled={!snapshot?.writeSupported || status === 'saving'}
+            onChange={value => setForm(current => ({ ...current, lowPowerIdleMinutes: value }))}
+            unitLabel={t('settings.device.minutes', '分钟')}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t('settings.device.autoShutdownLabel', '电池自动关机')}
+          desc={t('settings.device.autoShutdownDesc', '自动关机只在拔电后的电池模式生效；插电、充电或外部供电会阻止自动关机。')}
+        >
+          <MinutesInput
             value={form.batteryAutoShutdownMinutes}
             disabled={!snapshot?.writeSupported || status === 'saving'}
-            onChange={event => {
-              const value = Number(event.target.value);
-              setForm(current => ({ ...current, batteryAutoShutdownMinutes: Number.isFinite(value) ? value : current.batteryAutoShutdownMinutes }));
-            }}
-            style={{ ...inputStyle, flex: '0 1 96px', maxWidth: 120 }}
+            onChange={value => setForm(current => ({ ...current, batteryAutoShutdownMinutes: value }))}
+            unitLabel={t('settings.device.minutes', '分钟')}
           />
-          <span style={{ fontSize: 12, color: 'var(--ol-ink-4)' }}>
-            {t('settings.device.minutes', '分钟')}
-          </span>
-        </div>
-      </SettingRow>
-      <SettingRow
-        label={t('settings.device.bleNameLabel', '蓝牙名称')}
-        desc={t('settings.device.bleNameDesc', '1-32 个 ASCII 字符；部分 Windows 设备名变更需要重连或重新配对后才显示。')}
-      >
-        <input
-          value={form.bleName}
-          maxLength={32}
-          disabled={!snapshot?.writeSupported || status === 'saving'}
-          onChange={event => setForm(current => ({ ...current, bleName: event.target.value }))}
-          style={{ ...inputStyle, maxWidth: 'none' }}
-        />
-      </SettingRow>
+        </SettingRow>
+      </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)', flexWrap: 'wrap' }}>
         <div style={{ fontSize: 11.5, color: validationError || status === 'error' ? 'var(--ol-err)' : status === 'saved' ? 'var(--ol-ok)' : 'var(--ol-ink-4)', lineHeight: 1.45, minWidth: 0, flex: '1 1 220px' }}>
@@ -419,6 +442,40 @@ function PercentSlider({
         style={{ ...inputStyle, flex: '0 1 68px', maxWidth: 76, textAlign: 'right' }}
       />
       <span style={{ fontSize: 12, color: 'var(--ol-ink-4)', width: 16 }}>%</span>
+    </div>
+  );
+}
+
+function MinutesInput({
+  value,
+  disabled,
+  onChange,
+  unitLabel,
+}: {
+  value: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+  unitLabel: string;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', flexWrap: 'wrap' }}>
+      <input
+        type="number"
+        min={1}
+        max={1440}
+        value={value}
+        disabled={disabled}
+        onChange={event => {
+          const next = Number(event.target.value);
+          if (Number.isFinite(next)) {
+            onChange(next);
+          }
+        }}
+        style={{ ...inputStyle, flex: '0 1 96px', maxWidth: 120 }}
+      />
+      <span style={{ fontSize: 12, color: 'var(--ol-ink-4)' }}>
+        {unitLabel}
+      </span>
     </div>
   );
 }
@@ -693,7 +750,9 @@ function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateR
   return {
     pluggedBrightnessPercent: snapshot.pluggedBrightnessPercent,
     batteryBrightnessPercent: snapshot.batteryBrightnessPercent,
+    lowPowerIdleMinutes: snapshot.lowPowerIdleMinutes,
     pluggedLowPowerEnabled: snapshot.pluggedLowPowerEnabled,
+    batteryLowPowerEnabled: snapshot.batteryLowPowerEnabled,
     batteryAutoShutdownMinutes: Math.max(1, Math.round(snapshot.batteryAutoShutdownMs / 60000)),
     bleName: snapshot.bleName,
   };
@@ -708,6 +767,9 @@ function validateDeviceSettingsForm(
   }
   if (!Number.isFinite(form.batteryBrightnessPercent) || form.batteryBrightnessPercent < 0 || form.batteryBrightnessPercent > 100) {
     return t('settings.device.errorBrightness', '亮度必须在 0-100 之间。');
+  }
+  if (!Number.isFinite(form.lowPowerIdleMinutes) || form.lowPowerIdleMinutes < 1 || form.lowPowerIdleMinutes > 1440) {
+    return t('settings.device.errorLowPowerIdle', '进入低功耗时间必须在 1-1440 分钟之间。');
   }
   if (!Number.isFinite(form.batteryAutoShutdownMinutes) || form.batteryAutoShutdownMinutes < 1 || form.batteryAutoShutdownMinutes > 1440) {
     return t('settings.device.errorAutoShutdown', '自动关机时间必须在 1-1440 分钟之间。');
@@ -751,6 +813,9 @@ function formatDeviceSnapshotSummary(
   const pluggedLowPower = snapshot.pluggedLowPowerEnabled
     ? t('settings.device.pluggedLowPowerOn', '插电低功耗开')
     : t('settings.device.pluggedLowPowerOff', '插电低功耗关');
+  const batteryLowPower = snapshot.batteryLowPowerEnabled
+    ? t('settings.device.batteryLowPowerOn', '电池低功耗开')
+    : t('settings.device.batteryLowPowerOff', '电池低功耗关');
   const source = snapshot.source === 'mock'
     ? t('settings.device.sourceMock', '浏览器预览模拟')
     : snapshot.source === 'defaults'
@@ -760,5 +825,5 @@ function formatDeviceSnapshotSummary(
         : snapshot.source === 'unavailable'
           ? t('settings.device.sourceUnavailable', '设备不可用')
           : t('settings.device.sourceFirmware', '固件');
-  return [source, power, pluggedLowPower, active].filter(Boolean).join(' · ');
+  return [source, power, pluggedLowPower, batteryLowPower, active].filter(Boolean).join(' · ');
 }

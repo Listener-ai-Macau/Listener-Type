@@ -486,6 +486,7 @@ pub const DEFAULT_DEVICE_PLUGGED_BRIGHTNESS_PERCENT: u8 = 80;
 pub const DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT: u8 = 50;
 pub const DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 1;
 pub const DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED: bool = true;
+pub const DEFAULT_DEVICE_BATTERY_LOW_POWER_ENABLED: bool = true;
 pub const DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 30;
 pub const DEFAULT_DEVICE_BLE_NAME: &str = "listener";
 pub const MAX_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 24 * 60;
@@ -505,6 +506,10 @@ fn default_device_low_power_idle_minutes() -> u32 {
 
 fn default_device_plugged_low_power_enabled() -> bool {
     DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED
+}
+
+fn default_device_battery_low_power_enabled() -> bool {
+    DEFAULT_DEVICE_BATTERY_LOW_POWER_ENABLED
 }
 
 fn default_device_battery_auto_shutdown_minutes() -> u32 {
@@ -1187,6 +1192,9 @@ pub struct UserPreferences {
     /// Whether external-power idle may enter connected/disconnected low-power.
     #[serde(default = "default_device_plugged_low_power_enabled")]
     pub device_plugged_low_power_enabled: bool,
+    /// Whether battery idle may enter connected/disconnected low-power.
+    #[serde(default = "default_device_battery_low_power_enabled")]
+    pub device_battery_low_power_enabled: bool,
     /// Battery-only idle shutdown timeout in minutes. Plugged power stays awake.
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
     pub device_battery_auto_shutdown_minutes: u32,
@@ -1393,6 +1401,8 @@ struct UserPreferencesWire {
     device_low_power_idle_minutes: u32,
     #[serde(default = "default_device_plugged_low_power_enabled")]
     device_plugged_low_power_enabled: bool,
+    #[serde(default = "default_device_battery_low_power_enabled")]
+    device_battery_low_power_enabled: bool,
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
     device_battery_auto_shutdown_minutes: u32,
     #[serde(default = "default_device_ble_name")]
@@ -1483,6 +1493,7 @@ impl Default for UserPreferencesWire {
             device_battery_brightness_percent: prefs.device_battery_brightness_percent,
             device_low_power_idle_minutes: prefs.device_low_power_idle_minutes,
             device_plugged_low_power_enabled: prefs.device_plugged_low_power_enabled,
+            device_battery_low_power_enabled: prefs.device_battery_low_power_enabled,
             device_battery_auto_shutdown_minutes: prefs.device_battery_auto_shutdown_minutes,
             device_ble_name: prefs.device_ble_name,
             local_asr_active_model: prefs.local_asr_active_model,
@@ -1604,6 +1615,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
                 wire.device_low_power_idle_minutes,
             ),
             device_plugged_low_power_enabled: wire.device_plugged_low_power_enabled,
+            device_battery_low_power_enabled: wire.device_battery_low_power_enabled,
             device_battery_auto_shutdown_minutes: clamp_device_battery_auto_shutdown_minutes(
                 wire.device_battery_auto_shutdown_minutes,
             ),
@@ -2016,6 +2028,7 @@ impl Default for UserPreferences {
             device_battery_brightness_percent: default_device_battery_brightness_percent(),
             device_low_power_idle_minutes: default_device_low_power_idle_minutes(),
             device_plugged_low_power_enabled: default_device_plugged_low_power_enabled(),
+            device_battery_low_power_enabled: default_device_battery_low_power_enabled(),
             device_battery_auto_shutdown_minutes: default_device_battery_auto_shutdown_minutes(),
             device_ble_name: default_device_ble_name(),
             local_asr_active_model: default_local_asr_model(),

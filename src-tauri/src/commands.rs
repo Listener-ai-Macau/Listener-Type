@@ -409,6 +409,7 @@ fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPrefe
         || previous.device_battery_brightness_percent != next.device_battery_brightness_percent
         || previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes
         || previous.device_plugged_low_power_enabled != next.device_plugged_low_power_enabled
+        || previous.device_battery_low_power_enabled != next.device_battery_low_power_enabled
         || previous.device_battery_auto_shutdown_minutes
             != next.device_battery_auto_shutdown_minutes
         || previous.device_ble_name != next.device_ble_name
@@ -509,6 +510,15 @@ fn device_setting_packets_for_changes(
             command: format!(
                 "DEVICE:SET plugged_low_power_enabled={}",
                 if next.device_plugged_low_power_enabled { 1 } else { 0 }
+            ),
+        });
+    }
+    if previous.device_battery_low_power_enabled != next.device_battery_low_power_enabled {
+        packets.push(DeviceSettingPacket {
+            id: "battery_low_power_enabled",
+            command: format!(
+                "DEVICE:SET battery_low_power_enabled={}",
+                if next.device_battery_low_power_enabled { 1 } else { 0 }
             ),
         });
     }
@@ -2286,7 +2296,9 @@ pub struct DeviceSettingsSnapshot {
     plugged_brightness_percent: u8,
     battery_brightness_percent: u8,
     active_brightness_percent: Option<u8>,
+    low_power_idle_minutes: u32,
     plugged_low_power_enabled: bool,
+    battery_low_power_enabled: bool,
     battery_auto_shutdown_ms: u32,
     ble_name: String,
     ble_name_pending_restart: bool,
@@ -2301,15 +2313,20 @@ pub struct DeviceSettingsSnapshot {
 pub struct DeviceSettingsUpdateRequest {
     plugged_brightness_percent: u8,
     battery_brightness_percent: u8,
+    low_power_idle_minutes: u32,
     plugged_low_power_enabled: bool,
+    battery_low_power_enabled: bool,
     battery_auto_shutdown_minutes: u32,
     ble_name: String,
 }
 
 const DEVICE_SETTINGS_SCHEMA: &str = "listener.device_settings.v1";
 const DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT: u8 = 100;
+const DEVICE_SETTINGS_DEFAULT_LOW_POWER_IDLE_MINUTES: u32 = 1;
 const DEVICE_SETTINGS_DEFAULT_PLUGGED_LOW_POWER_ENABLED: bool = true;
+const DEVICE_SETTINGS_DEFAULT_BATTERY_LOW_POWER_ENABLED: bool = true;
 const DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS: u32 = 30 * 60 * 1000;
+const DEVICE_SETTINGS_MIN_LOW_POWER_IDLE_MINUTES: u32 = 1;
 const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 1;
 const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
 const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
@@ -2386,7 +2403,9 @@ fn device_settings_snapshot_from_device(
         plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        low_power_idle_minutes: DEVICE_SETTINGS_DEFAULT_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_enabled: DEVICE_SETTINGS_DEFAULT_PLUGGED_LOW_POWER_ENABLED,
+        battery_low_power_enabled: DEVICE_SETTINGS_DEFAULT_BATTERY_LOW_POWER_ENABLED,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         ble_name: DEVICE_SETTINGS_DEFAULT_BLE_NAME.to_string(),
         ble_name_pending_restart: false,
@@ -2409,7 +2428,9 @@ fn device_settings_snapshot_from_status(
         plugged_brightness_percent: status.plugged_brightness_percent,
         battery_brightness_percent: status.battery_brightness_percent,
         active_brightness_percent: Some(status.active_brightness_percent),
+        low_power_idle_minutes: status.low_power_idle_minutes,
         plugged_low_power_enabled: status.plugged_low_power_enabled,
+        battery_low_power_enabled: status.battery_low_power_enabled,
         battery_auto_shutdown_ms: status.battery_auto_shutdown_minutes.saturating_mul(60_000),
         ble_name: status.ble_name,
         ble_name_pending_restart: status.ble_name_pending_restart,
@@ -2436,7 +2457,9 @@ fn device_settings_snapshot_from_request(
         plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        low_power_idle_minutes: DEVICE_SETTINGS_DEFAULT_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_enabled: DEVICE_SETTINGS_DEFAULT_PLUGGED_LOW_POWER_ENABLED,
+        battery_low_power_enabled: DEVICE_SETTINGS_DEFAULT_BATTERY_LOW_POWER_ENABLED,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         ble_name: DEVICE_SETTINGS_DEFAULT_BLE_NAME.to_string(),
         ble_name_pending_restart: false,
@@ -2451,7 +2474,9 @@ fn device_settings_snapshot_from_request(
     snapshot.source = "lastKnown";
     snapshot.plugged_brightness_percent = request.plugged_brightness_percent;
     snapshot.battery_brightness_percent = request.battery_brightness_percent;
+    snapshot.low_power_idle_minutes = request.low_power_idle_minutes;
     snapshot.plugged_low_power_enabled = request.plugged_low_power_enabled;
+    snapshot.battery_low_power_enabled = request.battery_low_power_enabled;
     snapshot.battery_auto_shutdown_ms =
         request.battery_auto_shutdown_minutes.saturating_mul(60_000);
     snapshot.ble_name = request.ble_name.clone();
@@ -2480,8 +2505,16 @@ fn device_settings_update_commands(
             request.battery_auto_shutdown_minutes
         ),
         format!(
+            "DEVICE:SET low_power_idle_minutes={}",
+            request.low_power_idle_minutes
+        ),
+        format!(
             "DEVICE:SET plugged_low_power_enabled={}",
             if request.plugged_low_power_enabled { 1 } else { 0 }
+        ),
+        format!(
+            "DEVICE:SET battery_low_power_enabled={}",
+            if request.battery_low_power_enabled { 1 } else { 0 }
         ),
         format!("DEVICE:SET ble_name={}", request.ble_name),
     ];
@@ -2499,6 +2532,13 @@ fn device_settings_update_commands(
 fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Result<(), String> {
     if request.plugged_brightness_percent > 100 || request.battery_brightness_percent > 100 {
         return Err("Device brightness must be between 0 and 100 percent.".to_string());
+    }
+    if request.low_power_idle_minutes < DEVICE_SETTINGS_MIN_LOW_POWER_IDLE_MINUTES
+        || request.low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
+    {
+        return Err(format!(
+            "Low-power idle time must be between {DEVICE_SETTINGS_MIN_LOW_POWER_IDLE_MINUTES} and {MAX_DEVICE_LOW_POWER_IDLE_MINUTES} minutes."
+        ));
     }
     if request.battery_auto_shutdown_minutes < DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES
         || request.battery_auto_shutdown_minutes > DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES
@@ -5488,7 +5528,9 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 80,
             battery_brightness_percent: 45,
+            low_power_idle_minutes: 1,
             plugged_low_power_enabled: true,
+            battery_low_power_enabled: true,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
         };
@@ -5501,7 +5543,9 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 80,
             battery_brightness_percent: 45,
+            low_power_idle_minutes: 1,
             plugged_low_power_enabled: true,
+            battery_low_power_enabled: true,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener=bad".to_string(),
         };
@@ -5514,7 +5558,9 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 80,
             battery_brightness_percent: 45,
+            low_power_idle_minutes: 1,
             plugged_low_power_enabled: true,
+            battery_low_power_enabled: true,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener dev".to_string(),
         };
@@ -5527,15 +5573,20 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 100,
             battery_brightness_percent: 100,
+            low_power_idle_minutes: 1440,
             plugged_low_power_enabled: false,
+            battery_low_power_enabled: false,
             battery_auto_shutdown_minutes: 1440,
             ble_name: "listener-12345678901234567890123".to_string(),
         };
         let commands = device_settings_update_commands(&request).expect("commands");
 
-        assert_eq!(commands.len(), 4);
+        assert_eq!(commands.len(), 6);
         assert!(commands.iter().any(|command| {
             command == "DEVICE:SET plugged_low_power_enabled=0"
+        }));
+        assert!(commands.iter().any(|command| {
+            command == "DEVICE:SET battery_low_power_enabled=0"
         }));
         assert!(commands.iter().all(|command| {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
