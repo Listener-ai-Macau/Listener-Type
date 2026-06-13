@@ -485,6 +485,7 @@ fn default_true() -> bool {
 pub const DEFAULT_DEVICE_PLUGGED_BRIGHTNESS_PERCENT: u8 = 80;
 pub const DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT: u8 = 50;
 pub const DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 1;
+pub const DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED: bool = true;
 pub const DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 30;
 pub const DEFAULT_DEVICE_BLE_NAME: &str = "listener";
 pub const MAX_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 24 * 60;
@@ -500,6 +501,10 @@ fn default_device_battery_brightness_percent() -> u8 {
 
 fn default_device_low_power_idle_minutes() -> u32 {
     DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES
+}
+
+fn default_device_plugged_low_power_enabled() -> bool {
+    DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED
 }
 
 fn default_device_battery_auto_shutdown_minutes() -> u32 {
@@ -856,15 +861,33 @@ fn previous_shortcuts_device_custom_keys_default_with_external_app_path(
     }
 }
 
+fn previous_shortcuts_dictation_knob_device_custom_keys_default_with_external_app_path(
+    external_app_path: String,
+) -> DeviceCustomKeys {
+    let mut keys =
+        previous_shortcuts_device_custom_keys_default_with_external_app_path(external_app_path);
+    keys.knob = DeviceCustomKeyMapping {
+        action: DeviceCustomKeyAction::Dictation,
+        app_page: DeviceCustomKeyAppPage::SettingsShortcuts,
+        ..DeviceCustomKeyMapping::default()
+    };
+    keys
+}
+
 fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
     let previous_current_default =
         previous_current_device_custom_keys_default_with_external_app_path(
+            default_device_external_app_path(),
+        );
+    let previous_shortcuts_dictation_knob_default =
+        previous_shortcuts_dictation_knob_device_custom_keys_default_with_external_app_path(
             default_device_external_app_path(),
         );
     keys == &legacy_device_custom_keys_default()
         || device_custom_key_defaults_match(keys, &legacy_device_custom_keys_default(), true)
         || keys == &previous_current_default
         || device_custom_key_defaults_match(keys, &previous_current_default, false)
+        || keys == &previous_shortcuts_dictation_knob_default
         || keys == &legacy_device_custom_keys_default_with_external_app_path("code".into())
         || device_custom_key_defaults_match(
             keys,
@@ -881,13 +904,18 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
                         path.clone(),
                     );
                 let previous_shortcuts_default =
-                    previous_shortcuts_device_custom_keys_default_with_external_app_path(path);
+                    previous_shortcuts_device_custom_keys_default_with_external_app_path(
+                        path.clone(),
+                    );
+                let previous_shortcuts_dictation_knob_default =
+                    previous_shortcuts_dictation_knob_device_custom_keys_default_with_external_app_path(path);
                 keys == &legacy_default
                     || device_custom_key_defaults_match(keys, &legacy_default, true)
                     || keys == &previous_current_default
                     || device_custom_key_defaults_match(keys, &previous_current_default, false)
                     || keys == &previous_shortcuts_default
                     || device_custom_key_defaults_match(keys, &previous_shortcuts_default, true)
+                    || keys == &previous_shortcuts_dictation_knob_default
             })
 }
 
@@ -1156,6 +1184,9 @@ pub struct UserPreferences {
     /// Runtime low-power idle timeout in minutes. Applies before battery-only shutdown.
     #[serde(default = "default_device_low_power_idle_minutes")]
     pub device_low_power_idle_minutes: u32,
+    /// Whether external-power idle may enter connected/disconnected low-power.
+    #[serde(default = "default_device_plugged_low_power_enabled")]
+    pub device_plugged_low_power_enabled: bool,
     /// Battery-only idle shutdown timeout in minutes. Plugged power stays awake.
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
     pub device_battery_auto_shutdown_minutes: u32,
@@ -1360,6 +1391,8 @@ struct UserPreferencesWire {
     device_battery_brightness_percent: u8,
     #[serde(default = "default_device_low_power_idle_minutes")]
     device_low_power_idle_minutes: u32,
+    #[serde(default = "default_device_plugged_low_power_enabled")]
+    device_plugged_low_power_enabled: bool,
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
     device_battery_auto_shutdown_minutes: u32,
     #[serde(default = "default_device_ble_name")]
@@ -1449,6 +1482,7 @@ impl Default for UserPreferencesWire {
             device_plugged_brightness_percent: prefs.device_plugged_brightness_percent,
             device_battery_brightness_percent: prefs.device_battery_brightness_percent,
             device_low_power_idle_minutes: prefs.device_low_power_idle_minutes,
+            device_plugged_low_power_enabled: prefs.device_plugged_low_power_enabled,
             device_battery_auto_shutdown_minutes: prefs.device_battery_auto_shutdown_minutes,
             device_ble_name: prefs.device_ble_name,
             local_asr_active_model: prefs.local_asr_active_model,
@@ -1569,6 +1603,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             device_low_power_idle_minutes: clamp_device_low_power_idle_minutes(
                 wire.device_low_power_idle_minutes,
             ),
+            device_plugged_low_power_enabled: wire.device_plugged_low_power_enabled,
             device_battery_auto_shutdown_minutes: clamp_device_battery_auto_shutdown_minutes(
                 wire.device_battery_auto_shutdown_minutes,
             ),
@@ -1980,6 +2015,7 @@ impl Default for UserPreferences {
             device_plugged_brightness_percent: default_device_plugged_brightness_percent(),
             device_battery_brightness_percent: default_device_battery_brightness_percent(),
             device_low_power_idle_minutes: default_device_low_power_idle_minutes(),
+            device_plugged_low_power_enabled: default_device_plugged_low_power_enabled(),
             device_battery_auto_shutdown_minutes: default_device_battery_auto_shutdown_minutes(),
             device_ble_name: default_device_ble_name(),
             local_asr_active_model: default_local_asr_model(),
@@ -2871,6 +2907,61 @@ mod tests {
         );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
+    }
+
+    #[test]
+    fn previous_shortcuts_default_with_dictation_knob_migrates_to_current_defaults() {
+        let external_path = default_device_external_app_path();
+        let raw = serde_json::json!({
+            "deviceCustomKeysDefaultMigrated": true,
+            "deviceCustomKeys": {
+                "key1": { "action": "openApp", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "pasteShortcut", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "dictation", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "openExternalApp", "appPage": "settingsShortcuts", "externalAppPath": external_path, "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "dictation", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            },
+            "deviceCustomKeyDoubleClicks": {
+                "key1": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            },
+            "deviceCustomKeyLongPresses": {
+                "key1": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            }
+        });
+        let prefs: UserPreferences = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(
+            prefs.device_custom_keys.key1.action,
+            DeviceCustomKeyAction::Dictation
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key2.action,
+            DeviceCustomKeyAction::OpenApp
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key2.app_page,
+            DeviceCustomKeyAppPage::SettingsDevice
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key3.action,
+            DeviceCustomKeyAction::PasteShortcut
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key4.action,
+            DeviceCustomKeyAction::OpenExternalApp
+        );
+        assert_eq!(
+            prefs.device_custom_keys.knob.action,
+            DeviceCustomKeyAction::SwitchStyle
+        );
     }
 
     #[cfg(target_os = "windows")]

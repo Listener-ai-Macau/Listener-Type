@@ -26,7 +26,7 @@ import type {
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Btn, Card, Pill, type PillTone } from '../_atoms';
 import { FirmwareOtaPanel } from './FirmwareOtaPanel';
-import { inputStyle, SettingRow } from './shared';
+import { inputStyle, SettingRow, Toggle } from './shared';
 import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusPanel';
 
 const DEVICE_KEYS = [
@@ -35,7 +35,6 @@ const DEVICE_KEYS = [
   { id: 'key3' },
   { id: 'key4' },
 ] as const satisfies ReadonlyArray<{ id: DeviceCustomKeyId }>;
-type DevicePhysicalKeyId = (typeof DEVICE_KEYS)[number]['id'];
 
 type DeviceKeyMapKey =
   | 'deviceCustomKeys'
@@ -45,22 +44,18 @@ type DeviceKeyMapKey =
 const DEVICE_GESTURES: Array<{
   id: DeviceCustomKeyGesture;
   mapKey: DeviceKeyMapKey;
-  fallbacks: Record<DevicePhysicalKeyId, string>;
 }> = [
   {
     id: 'singleClick',
     mapKey: 'deviceCustomKeys',
-    fallbacks: { key1: 'F13', key2: 'F14', key3: 'F15', key4: 'F16' },
   },
   {
     id: 'doubleClick',
     mapKey: 'deviceCustomKeyDoubleClicks',
-    fallbacks: { key1: 'F17', key2: 'F18', key3: 'F19', key4: 'F20' },
   },
   {
     id: 'longPress',
     mapKey: 'deviceCustomKeyLongPresses',
-    fallbacks: { key1: 'F21', key2: 'F22', key3: 'F23', key4: 'F24' },
   },
 ];
 
@@ -237,6 +232,7 @@ function DeviceFirmwareSettingsCard() {
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
     pluggedBrightnessPercent: 100,
     batteryBrightnessPercent: 100,
+    pluggedLowPowerEnabled: true,
     batteryAutoShutdownMinutes: 30,
     bleName: 'listener',
   });
@@ -330,6 +326,17 @@ function DeviceFirmwareSettingsCard() {
           value={form.batteryBrightnessPercent}
           disabled={!snapshot?.writeSupported || status === 'saving'}
           onChange={value => setForm(current => ({ ...current, batteryBrightnessPercent: value }))}
+        />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.device.pluggedLowPowerLabel', '插电自动低功耗')}
+        desc={t('settings.device.pluggedLowPowerDesc', '开启后，USB / 充电 / 外部供电空闲也会进入设备低功耗；关闭后插电空闲保持唤醒，电池模式不受影响。')}
+      >
+        <Toggle
+          on={form.pluggedLowPowerEnabled}
+          onToggle={!snapshot?.writeSupported || status === 'saving'
+            ? undefined
+            : next => setForm(current => ({ ...current, pluggedLowPowerEnabled: next }))}
         />
       </SettingRow>
       <SettingRow
@@ -526,9 +533,6 @@ function DeviceKeyGestureGroup({
               <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
                 {t('settings.deviceKeys.keyLabel', { key: id.toUpperCase() })}
               </div>
-              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
-                {t('settings.deviceKeys.fallback', { fallback: gesture.fallbacks[id] })}
-              </div>
             </div>
             <DeviceKeyMappingControl
               mapping={keys[id]}
@@ -689,6 +693,7 @@ function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateR
   return {
     pluggedBrightnessPercent: snapshot.pluggedBrightnessPercent,
     batteryBrightnessPercent: snapshot.batteryBrightnessPercent,
+    pluggedLowPowerEnabled: snapshot.pluggedLowPowerEnabled,
     batteryAutoShutdownMinutes: Math.max(1, Math.round(snapshot.batteryAutoShutdownMs / 60000)),
     bleName: snapshot.bleName,
   };
@@ -743,6 +748,9 @@ function formatDeviceSnapshotSummary(
   const active = snapshot.activeBrightnessPercent == null
     ? ''
     : t('settings.device.activeBrightness', '当前上限 {{value}}%', { value: snapshot.activeBrightnessPercent });
+  const pluggedLowPower = snapshot.pluggedLowPowerEnabled
+    ? t('settings.device.pluggedLowPowerOn', '插电低功耗开')
+    : t('settings.device.pluggedLowPowerOff', '插电低功耗关');
   const source = snapshot.source === 'mock'
     ? t('settings.device.sourceMock', '浏览器预览模拟')
     : snapshot.source === 'defaults'
@@ -752,5 +760,5 @@ function formatDeviceSnapshotSummary(
         : snapshot.source === 'unavailable'
           ? t('settings.device.sourceUnavailable', '设备不可用')
           : t('settings.device.sourceFirmware', '固件');
-  return [source, power, active].filter(Boolean).join(' · ');
+  return [source, power, pluggedLowPower, active].filter(Boolean).join(' · ');
 }

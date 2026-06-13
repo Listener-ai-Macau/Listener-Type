@@ -428,6 +428,8 @@ export interface UserPreferences {
   deviceBatteryBrightnessPercent: number;
   /** 进入低功耗 idle 的等待时间，单位分钟。 */
   deviceLowPowerIdleMinutes: number;
+  /** 插电/外部供电时是否允许空闲后进入设备低功耗 idle。 */
+  devicePluggedLowPowerEnabled: boolean;
   /** 电池供电空闲自动关机时间，单位分钟。插电时不进入该策略。 */
   deviceBatteryAutoShutdownMinutes: number;
   /** 设备 BLE 广播名，写入固件后下次重新广播/重启生效。 */
@@ -546,6 +548,7 @@ export interface DeviceFirmwareSettingsStatus {
   batteryBrightnessPercent: number;
   activeBrightnessPercent: number;
   lowPowerIdleMinutes: number;
+  pluggedLowPowerEnabled: boolean;
   batteryAutoShutdownMinutes: number;
   knobRotationAction: string;
   bleName: string;
@@ -568,6 +571,7 @@ export interface DeviceSettingsSnapshot {
   pluggedBrightnessPercent: number;
   batteryBrightnessPercent: number;
   activeBrightnessPercent: number | null;
+  pluggedLowPowerEnabled: boolean;
   batteryAutoShutdownMs: number;
   bleName: string;
   bleNamePendingRestart: boolean;
@@ -580,6 +584,7 @@ export interface DeviceSettingsSnapshot {
 export interface DeviceSettingsUpdateRequest {
   pluggedBrightnessPercent: number;
   batteryBrightnessPercent: number;
+  pluggedLowPowerEnabled: boolean;
   batteryAutoShutdownMinutes: number;
   bleName: string;
 }

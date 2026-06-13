@@ -408,6 +408,7 @@ fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPrefe
         || previous.device_plugged_brightness_percent != next.device_plugged_brightness_percent
         || previous.device_battery_brightness_percent != next.device_battery_brightness_percent
         || previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes
+        || previous.device_plugged_low_power_enabled != next.device_plugged_low_power_enabled
         || previous.device_battery_auto_shutdown_minutes
             != next.device_battery_auto_shutdown_minutes
         || previous.device_ble_name != next.device_ble_name
@@ -499,6 +500,15 @@ fn device_setting_packets_for_changes(
             command: format!(
                 "DEVICE:SET low_power_idle_minutes={}",
                 next.device_low_power_idle_minutes
+            ),
+        });
+    }
+    if previous.device_plugged_low_power_enabled != next.device_plugged_low_power_enabled {
+        packets.push(DeviceSettingPacket {
+            id: "plugged_low_power_enabled",
+            command: format!(
+                "DEVICE:SET plugged_low_power_enabled={}",
+                if next.device_plugged_low_power_enabled { 1 } else { 0 }
             ),
         });
     }
@@ -2276,6 +2286,7 @@ pub struct DeviceSettingsSnapshot {
     plugged_brightness_percent: u8,
     battery_brightness_percent: u8,
     active_brightness_percent: Option<u8>,
+    plugged_low_power_enabled: bool,
     battery_auto_shutdown_ms: u32,
     ble_name: String,
     ble_name_pending_restart: bool,
@@ -2290,12 +2301,14 @@ pub struct DeviceSettingsSnapshot {
 pub struct DeviceSettingsUpdateRequest {
     plugged_brightness_percent: u8,
     battery_brightness_percent: u8,
+    plugged_low_power_enabled: bool,
     battery_auto_shutdown_minutes: u32,
     ble_name: String,
 }
 
 const DEVICE_SETTINGS_SCHEMA: &str = "listener.device_settings.v1";
 const DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT: u8 = 100;
+const DEVICE_SETTINGS_DEFAULT_PLUGGED_LOW_POWER_ENABLED: bool = true;
 const DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS: u32 = 30 * 60 * 1000;
 const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 1;
 const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
@@ -2309,6 +2322,15 @@ pub async fn get_device_settings() -> Result<DeviceSettingsSnapshot, String> {
         tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
             .await
             .map_err(|err| format!("Listener BLE device settings probe task failed: {err}"))?;
+    if device.connected {
+        if let Ok(Ok(status)) = tauri::async_runtime::spawn_blocking(|| {
+            crate::embedded_ble::read_device_settings_status(Duration::from_secs(2))
+        })
+        .await
+        {
+            return Ok(device_settings_snapshot_from_status(status, device));
+        }
+    }
     Ok(device_settings_snapshot_from_device(device))
 }
 
@@ -2345,7 +2367,7 @@ fn device_settings_snapshot_from_device(
     };
     let detail = if device.connected {
         Some(
-            "Type can send DEVICE:SET over Listener BLE audio control. Current values are defaults until DEVICE readback is added to the BLE path.".to_string(),
+            "Type can send DEVICE:SET over Listener BLE audio control. Current values fall back to defaults when firmware DEVICE readback is unavailable.".to_string(),
         )
     } else {
         device.detail.or_else(|| {
@@ -2364,6 +2386,7 @@ fn device_settings_snapshot_from_device(
         plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        plugged_low_power_enabled: DEVICE_SETTINGS_DEFAULT_PLUGGED_LOW_POWER_ENABLED,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         ble_name: DEVICE_SETTINGS_DEFAULT_BLE_NAME.to_string(),
         ble_name_pending_restart: false,
@@ -2371,6 +2394,33 @@ fn device_settings_snapshot_from_device(
         battery_percent: device.battery_percent,
         detail,
         last_updated_at: None,
+    }
+}
+
+fn device_settings_snapshot_from_status(
+    status: crate::embedded_ble::DeviceSettingsStatus,
+    device: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+) -> DeviceSettingsSnapshot {
+    DeviceSettingsSnapshot {
+        schema: DEVICE_SETTINGS_SCHEMA,
+        connected: true,
+        write_supported: true,
+        source: "firmware",
+        plugged_brightness_percent: status.plugged_brightness_percent,
+        battery_brightness_percent: status.battery_brightness_percent,
+        active_brightness_percent: Some(status.active_brightness_percent),
+        plugged_low_power_enabled: status.plugged_low_power_enabled,
+        battery_auto_shutdown_ms: status.battery_auto_shutdown_minutes.saturating_mul(60_000),
+        ble_name: status.ble_name,
+        ble_name_pending_restart: status.ble_name_pending_restart,
+        active_power_source: if status.external_power_present {
+            "plugged"
+        } else {
+            "battery"
+        },
+        battery_percent: device.battery_percent,
+        detail: Some("Device settings read from firmware DEVICE:SETTINGS.".to_string()),
+        last_updated_at: Some(chrono::Utc::now().to_rfc3339()),
     }
 }
 
@@ -2386,6 +2436,7 @@ fn device_settings_snapshot_from_request(
         plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        plugged_low_power_enabled: DEVICE_SETTINGS_DEFAULT_PLUGGED_LOW_POWER_ENABLED,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         ble_name: DEVICE_SETTINGS_DEFAULT_BLE_NAME.to_string(),
         ble_name_pending_restart: false,
@@ -2400,6 +2451,7 @@ fn device_settings_snapshot_from_request(
     snapshot.source = "lastKnown";
     snapshot.plugged_brightness_percent = request.plugged_brightness_percent;
     snapshot.battery_brightness_percent = request.battery_brightness_percent;
+    snapshot.plugged_low_power_enabled = request.plugged_low_power_enabled;
     snapshot.battery_auto_shutdown_ms =
         request.battery_auto_shutdown_minutes.saturating_mul(60_000);
     snapshot.ble_name = request.ble_name.clone();
@@ -2426,6 +2478,10 @@ fn device_settings_update_commands(
         format!(
             "DEVICE:SET auto_shutdown_minutes={}",
             request.battery_auto_shutdown_minutes
+        ),
+        format!(
+            "DEVICE:SET plugged_low_power_enabled={}",
+            if request.plugged_low_power_enabled { 1 } else { 0 }
         ),
         format!("DEVICE:SET ble_name={}", request.ble_name),
     ];
@@ -5432,6 +5488,7 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 80,
             battery_brightness_percent: 45,
+            plugged_low_power_enabled: true,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
         };
@@ -5444,6 +5501,7 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 80,
             battery_brightness_percent: 45,
+            plugged_low_power_enabled: true,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener=bad".to_string(),
         };
@@ -5456,6 +5514,7 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 80,
             battery_brightness_percent: 45,
+            plugged_low_power_enabled: true,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener dev".to_string(),
         };
@@ -5468,12 +5527,16 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 100,
             battery_brightness_percent: 100,
+            plugged_low_power_enabled: false,
             battery_auto_shutdown_minutes: 1440,
             ble_name: "listener-12345678901234567890123".to_string(),
         };
         let commands = device_settings_update_commands(&request).expect("commands");
 
-        assert_eq!(commands.len(), 3);
+        assert_eq!(commands.len(), 4);
+        assert!(commands.iter().any(|command| {
+            command == "DEVICE:SET plugged_low_power_enabled=0"
+        }));
         assert!(commands.iter().all(|command| {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
         }));
