@@ -186,6 +186,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
 
   const openDeviceKeyAppPage = (page: DeviceCustomKeyAppPage) => {
     const settingsPages: Partial<Record<DeviceCustomKeyAppPage, SettingsSectionId>> = {
+      settingsDevice: 'device',
       settingsRecording: 'recording',
       settingsProviders: 'providers',
       settingsShortcuts: 'shortcuts',

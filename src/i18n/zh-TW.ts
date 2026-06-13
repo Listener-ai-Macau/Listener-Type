@@ -832,6 +832,7 @@ export const zhTW: typeof zhCN = {
         style: '風格',
         translation: '翻譯',
         selectionAsk: '劃詞問答',
+        settingsDevice: '裝置設定',
         settingsRecording: '錄音設定',
         settingsProviders: '供應商設定',
         settingsShortcuts: '快捷鍵設定',

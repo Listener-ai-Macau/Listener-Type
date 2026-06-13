@@ -509,6 +509,7 @@ export type DeviceCustomKeyAppPage =
   | 'style'
   | 'translation'
   | 'selectionAsk'
+  | 'settingsDevice'
   | 'settingsRecording'
   | 'settingsProviders'
   | 'settingsShortcuts'

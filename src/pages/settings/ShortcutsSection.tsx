@@ -84,6 +84,7 @@ const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
   'style',
   'translation',
   'selectionAsk',
+  'settingsDevice',
   'settingsRecording',
   'settingsProviders',
   'settingsShortcuts',

@@ -655,6 +655,7 @@ pub enum DeviceCustomKeyAppPage {
     Style,
     Translation,
     SelectionAsk,
+    SettingsDevice,
     SettingsRecording,
     SettingsProviders,
     SettingsShortcuts,
@@ -748,6 +749,35 @@ fn current_device_custom_keys_default_with_external_app_path(
 ) -> DeviceCustomKeys {
     DeviceCustomKeys {
         key1: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::Dictation,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key2: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenApp,
+            app_page: DeviceCustomKeyAppPage::SettingsDevice,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key3: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::PasteShortcut,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key4: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenExternalApp,
+            external_app_path,
+            ..DeviceCustomKeyMapping::default()
+        },
+        knob: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SwitchStyle,
+            ..DeviceCustomKeyMapping::default()
+        },
+    }
+}
+
+fn previous_current_device_custom_keys_default_with_external_app_path(
+    external_app_path: String,
+) -> DeviceCustomKeys {
+    DeviceCustomKeys {
+        key1: DeviceCustomKeyMapping {
             action: DeviceCustomKeyAction::OpenApp,
             ..DeviceCustomKeyMapping::default()
         },
@@ -797,8 +827,14 @@ fn legacy_device_custom_keys_default_with_external_app_path(
 }
 
 fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
+    let previous_current_default =
+        previous_current_device_custom_keys_default_with_external_app_path(
+            default_device_external_app_path(),
+        );
     keys == &legacy_device_custom_keys_default()
         || device_custom_key_defaults_match(keys, &legacy_device_custom_keys_default(), true)
+        || keys == &previous_current_default
+        || device_custom_key_defaults_match(keys, &previous_current_default, false)
         || keys == &legacy_device_custom_keys_default_with_external_app_path("code".into())
         || device_custom_key_defaults_match(
             keys,
@@ -810,12 +846,14 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
             .any(|path| {
                 let legacy_default =
                     legacy_device_custom_keys_default_with_external_app_path(path.clone());
-                let current_default =
-                    current_device_custom_keys_default_with_external_app_path(path.clone());
+                let previous_current_default =
+                    previous_current_device_custom_keys_default_with_external_app_path(
+                        path.clone(),
+                    );
                 keys == &legacy_default
                     || device_custom_key_defaults_match(keys, &legacy_default, true)
-                    || keys == &current_default
-                    || device_custom_key_defaults_match(keys, &current_default, false)
+                    || keys == &previous_current_default
+                    || device_custom_key_defaults_match(keys, &previous_current_default, false)
             })
 }
 
@@ -2683,24 +2721,24 @@ mod tests {
     }
 
     #[test]
-    fn device_custom_keys_default_to_shortcuts_page_paste_dictation_and_external_app() {
+    fn device_custom_keys_default_to_dictation_device_page_paste_and_external_app() {
         let prefs = UserPreferences::default();
 
         assert_eq!(
             prefs.device_custom_keys.key1.action,
-            DeviceCustomKeyAction::OpenApp
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key1.app_page,
-            DeviceCustomKeyAppPage::SettingsShortcuts
+            DeviceCustomKeyAction::Dictation
         );
         assert_eq!(
             prefs.device_custom_keys.key2.action,
-            DeviceCustomKeyAction::PasteShortcut
+            DeviceCustomKeyAction::OpenApp
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key2.app_page,
+            DeviceCustomKeyAppPage::SettingsDevice
         );
         assert_eq!(
             prefs.device_custom_keys.key3.action,
-            DeviceCustomKeyAction::Dictation
+            DeviceCustomKeyAction::PasteShortcut
         );
         assert_eq!(
             prefs.device_custom_keys.key4.action,
@@ -2729,19 +2767,19 @@ mod tests {
 
         assert_eq!(
             prefs.device_custom_keys.key1.action,
-            DeviceCustomKeyAction::OpenApp
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key1.app_page,
-            DeviceCustomKeyAppPage::SettingsShortcuts
+            DeviceCustomKeyAction::Dictation
         );
         assert_eq!(
             prefs.device_custom_keys.key2.action,
-            DeviceCustomKeyAction::PasteShortcut
+            DeviceCustomKeyAction::OpenApp
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key2.app_page,
+            DeviceCustomKeyAppPage::SettingsDevice
         );
         assert_eq!(
             prefs.device_custom_keys.key3.action,
-            DeviceCustomKeyAction::Dictation
+            DeviceCustomKeyAction::PasteShortcut
         );
         assert_eq!(
             prefs.device_custom_keys.key4.action,
@@ -2769,6 +2807,22 @@ mod tests {
         });
         let prefs: UserPreferences = serde_json::from_value(raw).unwrap();
 
+        assert_eq!(
+            prefs.device_custom_keys.key1.action,
+            DeviceCustomKeyAction::Dictation
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key2.action,
+            DeviceCustomKeyAction::OpenApp
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key2.app_page,
+            DeviceCustomKeyAppPage::SettingsDevice
+        );
+        assert_eq!(
+            prefs.device_custom_keys.key3.action,
+            DeviceCustomKeyAction::PasteShortcut
+        );
         assert_eq!(
             prefs.device_custom_keys.key4.action,
             DeviceCustomKeyAction::OpenExternalApp

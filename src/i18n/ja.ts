@@ -790,6 +790,7 @@ export const ja: typeof zhCN = {
         style: 'スタイル',
         translation: '翻訳',
         selectionAsk: '選択質問',
+        settingsDevice: 'デバイス設定',
         settingsRecording: '録音設定',
         settingsProviders: 'プロバイダー設定',
         settingsShortcuts: 'ショートカット設定',

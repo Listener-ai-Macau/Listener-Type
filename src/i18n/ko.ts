@@ -790,6 +790,7 @@ export const ko: typeof zhCN = {
         style: '스타일',
         translation: '번역',
         selectionAsk: '선택 질문',
+        settingsDevice: '장치 설정',
         settingsRecording: '녹음 설정',
         settingsProviders: '공급자 설정',
         settingsShortcuts: '단축키 설정',

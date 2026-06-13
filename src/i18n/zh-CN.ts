@@ -830,6 +830,7 @@ export const zhCN = {
           style: '风格',
           translation: '翻译',
           selectionAsk: '划词问答',
+          settingsDevice: '设备设置',
           settingsRecording: '录音设置',
           settingsProviders: '供应商设置',
           settingsShortcuts: '快捷键设置',

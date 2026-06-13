@@ -110,9 +110,9 @@ let mockSettings: UserPreferences = {
   switchStyleHotkey: { primary: 'S', modifiers: defaultAppShortcutModifiers() },
   openAppHotkey: { primary: 'O', modifiers: defaultAppShortcutModifiers() },
   deviceCustomKeys: {
-    key1: { action: 'openApp', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key2: { action: 'pasteShortcut', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key3: { action: 'dictation', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key1: { action: 'dictation', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key2: { action: 'openApp', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key3: { action: 'pasteShortcut', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
     key4: { action: 'openExternalApp', appPage: 'settingsShortcuts', externalAppPath: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\微信\\微信.lnk', pasteTemplate: '', shortcut: null },
     knob: { action: 'switchStyle', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
   },

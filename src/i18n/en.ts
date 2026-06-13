@@ -832,6 +832,7 @@ export const en: typeof zhCN = {
           style: 'Style',
           translation: 'Translation',
           selectionAsk: 'Selection Ask',
+          settingsDevice: 'Device settings',
           settingsRecording: 'Recording settings',
           settingsProviders: 'Provider settings',
           settingsShortcuts: 'Shortcut settings',
