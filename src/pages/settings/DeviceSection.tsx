@@ -267,6 +267,12 @@ function DeviceFirmwareSettingsCard() {
       ? t('settings.device.configSourceWritable', '可写')
       : t('settings.device.configSourceReadOnly', '只读')
     : t('common.loading');
+  const statusMessage = validationError || message;
+  const statusTone = validationError || status === 'error'
+    ? 'var(--ol-err)'
+    : status === 'saved'
+      ? 'var(--ol-ok)'
+      : 'var(--ol-ink-4)';
 
   const save = async () => {
     if (writeDisabled) return;
@@ -296,10 +302,22 @@ function DeviceFirmwareSettingsCard() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <Pill tone={sourceTone} size="sm">{sourceLabel}</Pill>
           <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refresh()} disabled={status === 'loading' || status === 'saving'} style={{ whiteSpace: 'nowrap' }}>
-            {status === 'loading' ? t('common.loading') : t('common.refresh')}
+            {status === 'loading'
+              ? t('settings.device.readingButton', '读取中')
+              : t('settings.device.readButton', '读取')}
+          </Btn>
+          <Btn variant="blue" size="sm" icon="check" disabled={writeDisabled} onClick={() => void save()} style={{ whiteSpace: 'nowrap' }}>
+            {status === 'saving'
+              ? t('settings.device.writingButton', '写入中')
+              : t('settings.device.writeButton', '写入')}
           </Btn>
         </div>
       </div>
+      {statusMessage && (
+        <div style={{ fontSize: 11.5, color: statusTone, lineHeight: 1.45, marginBottom: 2 }}>
+          {statusMessage}
+        </div>
+      )}
 
       <SettingRow
         label={t('settings.device.bleNameLabel', '蓝牙名称')}
@@ -379,17 +397,6 @@ function DeviceFirmwareSettingsCard() {
             unitLabel={t('settings.device.minutes', '分钟')}
           />
         </SettingRow>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 11.5, color: validationError || status === 'error' ? 'var(--ol-err)' : status === 'saved' ? 'var(--ol-ok)' : 'var(--ol-ink-4)', lineHeight: 1.45, minWidth: 0, flex: '1 1 220px' }}>
-          {validationError || message || formatDeviceSnapshotSummary(snapshot, t)}
-        </div>
-        <Btn variant="blue" size="sm" icon="check" disabled={writeDisabled} onClick={() => void save()} style={{ whiteSpace: 'nowrap' }}>
-          {status === 'saving'
-            ? t('common.saving', '保存中')
-            : t('common.save', '保存')}
-        </Btn>
       </div>
     </Card>
   );
@@ -777,37 +784,4 @@ function isValidBleName(value: string): boolean {
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function formatDeviceSnapshotSummary(
-  snapshot: DeviceSettingsSnapshot | null,
-  t: ReturnType<typeof useTranslation>['t'],
-): string {
-  if (!snapshot) {
-    return t('settings.device.configLoading', '正在读取设备设置...');
-  }
-  const power = snapshot.activePowerSource === 'plugged'
-    ? t('settings.device.powerPlugged', '插电')
-    : snapshot.activePowerSource === 'battery'
-      ? t('settings.device.powerBattery', '电池')
-      : t('settings.device.powerUnknown', '供电未知');
-  const active = snapshot.activeBrightnessPercent == null
-    ? ''
-    : t('settings.device.activeBrightness', '当前上限 {{value}}%', { value: snapshot.activeBrightnessPercent });
-  const pluggedLowPower = snapshot.pluggedLowPowerEnabled
-    ? t('settings.device.pluggedLowPowerOn', '插电低功耗开')
-    : t('settings.device.pluggedLowPowerOff', '插电低功耗关');
-  const batteryLowPower = snapshot.batteryLowPowerEnabled
-    ? t('settings.device.batteryLowPowerOn', '电池低功耗开')
-    : t('settings.device.batteryLowPowerOff', '电池低功耗关');
-  const source = snapshot.source === 'mock'
-    ? t('settings.device.sourceMock', '浏览器预览模拟')
-    : snapshot.source === 'defaults'
-      ? t('settings.device.sourceDefaults', '默认值')
-      : snapshot.source === 'lastKnown'
-        ? t('settings.device.sourceLastKnown', '上次已知值')
-        : snapshot.source === 'unavailable'
-          ? t('settings.device.sourceUnavailable', '设备不可用')
-          : t('settings.device.sourceFirmware', '固件');
-  return [source, power, pluggedLowPower, batteryLowPower, active].filter(Boolean).join(' · ');
 }
