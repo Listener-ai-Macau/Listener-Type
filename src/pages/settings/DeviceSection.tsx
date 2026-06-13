@@ -183,11 +183,6 @@ export function DeviceSection() {
     <>
       <DeviceFirmwareSettingsCard />
 
-      <FirmwareOtaPanel
-        supported={bleSupported}
-        bleStatus={bleStatus}
-      />
-
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
           {t('settings.deviceKeys.title')}
@@ -222,6 +217,11 @@ export function DeviceSection() {
           onKnobRotationActionChange={updateKnobRotationAction}
         />
       </Card>
+
+      <FirmwareOtaPanel
+        supported={bleSupported}
+        bleStatus={bleStatus}
+      />
     </>
   );
 }
@@ -292,9 +292,6 @@ function DeviceFirmwareSettingsCard() {
           <div style={{ fontSize: 13, fontWeight: 600 }}>
             {t('settings.device.configTitle', '设备设置')}
           </div>
-          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, lineHeight: 1.5 }}>
-            {t('settings.device.configDesc', '亮度按供电状态分开保存。')}
-          </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <Pill tone={sourceTone} size="sm">{sourceLabel}</Pill>
@@ -303,12 +300,6 @@ function DeviceFirmwareSettingsCard() {
           </Btn>
         </div>
       </div>
-
-      {snapshot?.detail && (
-        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginBottom: 2 }}>
-          {snapshot.detail}
-        </div>
-      )}
 
       <SettingRow
         label={t('settings.device.bleNameLabel', '蓝牙名称')}
@@ -348,12 +339,8 @@ function DeviceFirmwareSettingsCard() {
         <div style={{ fontSize: 13, fontWeight: 600 }}>
           {t('settings.device.lowPowerManagementTitle', '低功耗管理')}
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, lineHeight: 1.5 }}>
-          {t('settings.device.lowPowerManagementDesc', '插电和电池共用同一个进入低功耗等待时间；电池自动关机只在拔电后的电池模式生效。')}
-        </div>
         <SettingRow
           label={t('settings.device.pluggedLowPowerLabel', '插电自动进入低功耗')}
-          desc={t('settings.device.pluggedLowPowerDesc', '开启后，USB / 充电 / 外部供电空闲也会进入设备低功耗；关闭后插电空闲保持唤醒。')}
         >
           <Toggle
             on={form.pluggedLowPowerEnabled}
@@ -364,7 +351,6 @@ function DeviceFirmwareSettingsCard() {
         </SettingRow>
         <SettingRow
           label={t('settings.device.batteryLowPowerLabel', '电池自动进入低功耗')}
-          desc={t('settings.device.batteryLowPowerDesc', '开启后，拔电后的电池模式空闲会进入设备低功耗；关闭后电池模式保持唤醒直到自动关机。')}
         >
           <Toggle
             on={form.batteryLowPowerEnabled}
@@ -375,7 +361,6 @@ function DeviceFirmwareSettingsCard() {
         </SettingRow>
         <SettingRow
           label={t('settings.device.lowPowerIdleLabel', '进入低功耗时间')}
-          desc={t('settings.device.lowPowerIdleDesc', '插电和电池模式共用这个等待时间，范围 1-1440 分钟。')}
         >
           <MinutesInput
             value={form.lowPowerIdleMinutes}
@@ -386,7 +371,6 @@ function DeviceFirmwareSettingsCard() {
         </SettingRow>
         <SettingRow
           label={t('settings.device.autoShutdownLabel', '电池自动关机')}
-          desc={t('settings.device.autoShutdownDesc', '自动关机只在拔电后的电池模式生效；插电、充电或外部供电会阻止自动关机。')}
         >
           <MinutesInput
             value={form.batteryAutoShutdownMinutes}
