@@ -353,51 +353,46 @@ function DeviceFirmwareSettingsCard() {
         />
       </SettingRow>
 
-      <div style={{ borderTop: '0.5px solid var(--ol-line-soft)', paddingTop: 14, marginTop: 2 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>
-          {t('settings.device.lowPowerManagementTitle', '低功耗管理')}
-        </div>
-        <SettingRow
-          label={t('settings.device.pluggedLowPowerLabel', '插电自动进入低功耗')}
-        >
-          <Toggle
-            on={form.pluggedLowPowerEnabled}
-            onToggle={!snapshot?.writeSupported || status === 'saving'
-              ? undefined
-              : next => setForm(current => ({ ...current, pluggedLowPowerEnabled: next }))}
-          />
-        </SettingRow>
-        <SettingRow
-          label={t('settings.device.batteryLowPowerLabel', '电池自动进入低功耗')}
-        >
-          <Toggle
-            on={form.batteryLowPowerEnabled}
-            onToggle={!snapshot?.writeSupported || status === 'saving'
-              ? undefined
-              : next => setForm(current => ({ ...current, batteryLowPowerEnabled: next }))}
-          />
-        </SettingRow>
-        <SettingRow
-          label={t('settings.device.lowPowerIdleLabel', '进入低功耗时间')}
-        >
-          <MinutesInput
-            value={form.lowPowerIdleMinutes}
-            disabled={!snapshot?.writeSupported || status === 'saving'}
-            onChange={value => setForm(current => ({ ...current, lowPowerIdleMinutes: value }))}
-            unitLabel={t('settings.device.minutes', '分钟')}
-          />
-        </SettingRow>
-        <SettingRow
-          label={t('settings.device.autoShutdownLabel', '电池自动关机')}
-        >
-          <MinutesInput
-            value={form.batteryAutoShutdownMinutes}
-            disabled={!snapshot?.writeSupported || status === 'saving'}
-            onChange={value => setForm(current => ({ ...current, batteryAutoShutdownMinutes: value }))}
-            unitLabel={t('settings.device.minutes', '分钟')}
-          />
-        </SettingRow>
-      </div>
+      <SettingRow
+        label={t('settings.device.pluggedLowPowerLabel', '插电自动进入低功耗')}
+      >
+        <Toggle
+          on={form.pluggedLowPowerEnabled}
+          onToggle={!snapshot?.writeSupported || status === 'saving'
+            ? undefined
+            : next => setForm(current => ({ ...current, pluggedLowPowerEnabled: next }))}
+        />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.device.batteryLowPowerLabel', '电池自动进入低功耗')}
+      >
+        <Toggle
+          on={form.batteryLowPowerEnabled}
+          onToggle={!snapshot?.writeSupported || status === 'saving'
+            ? undefined
+            : next => setForm(current => ({ ...current, batteryLowPowerEnabled: next }))}
+        />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.device.lowPowerIdleLabel', '进入低功耗时间')}
+      >
+        <MinutesInput
+          value={form.lowPowerIdleMinutes}
+          disabled={!snapshot?.writeSupported || status === 'saving'}
+          onChange={value => setForm(current => ({ ...current, lowPowerIdleMinutes: value }))}
+          unitLabel={t('settings.device.minutes', '分钟')}
+        />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.device.autoShutdownLabel', '电池自动关机')}
+      >
+        <MinutesInput
+          value={form.batteryAutoShutdownMinutes}
+          disabled={!snapshot?.writeSupported || status === 'saving'}
+          onChange={value => setForm(current => ({ ...current, batteryAutoShutdownMinutes: value }))}
+          unitLabel={t('settings.device.minutes', '分钟')}
+        />
+      </SettingRow>
     </Card>
   );
 }
