@@ -666,7 +666,7 @@ pub enum DeviceCustomKeyAppPage {
 
 impl Default for DeviceCustomKeyAppPage {
     fn default() -> Self {
-        Self::SettingsShortcuts
+        Self::SettingsDevice
     }
 }
 
@@ -826,6 +826,36 @@ fn legacy_device_custom_keys_default_with_external_app_path(
     }
 }
 
+fn previous_shortcuts_device_custom_keys_default_with_external_app_path(
+    external_app_path: String,
+) -> DeviceCustomKeys {
+    let shortcuts_page = DeviceCustomKeyAppPage::SettingsShortcuts;
+    DeviceCustomKeys {
+        key1: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenApp,
+            app_page: shortcuts_page,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key2: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::PasteShortcut,
+            app_page: shortcuts_page,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key3: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::Dictation,
+            app_page: shortcuts_page,
+            ..DeviceCustomKeyMapping::default()
+        },
+        key4: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::OpenExternalApp,
+            app_page: shortcuts_page,
+            external_app_path,
+            ..DeviceCustomKeyMapping::default()
+        },
+        knob: DeviceCustomKeyMapping::default(),
+    }
+}
+
 fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
     let previous_current_default =
         previous_current_device_custom_keys_default_with_external_app_path(
@@ -850,10 +880,14 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
                     previous_current_device_custom_keys_default_with_external_app_path(
                         path.clone(),
                     );
+                let previous_shortcuts_default =
+                    previous_shortcuts_device_custom_keys_default_with_external_app_path(path);
                 keys == &legacy_default
                     || device_custom_key_defaults_match(keys, &legacy_default, true)
                     || keys == &previous_current_default
                     || device_custom_key_defaults_match(keys, &previous_current_default, false)
+                    || keys == &previous_shortcuts_default
+                    || device_custom_key_defaults_match(keys, &previous_shortcuts_default, true)
             })
 }
 

@@ -7,6 +7,8 @@ import type {
   ComboBinding,
   CorrectionRule,
   CredentialsStatus,
+  DeviceSettingsSnapshot,
+  DeviceSettingsUpdateRequest,
   DictationSession,
   EmbeddedAudioInputFormat,
   EmbeddedBleRepairResult,
@@ -110,25 +112,25 @@ let mockSettings: UserPreferences = {
   switchStyleHotkey: { primary: 'S', modifiers: defaultAppShortcutModifiers() },
   openAppHotkey: { primary: 'O', modifiers: defaultAppShortcutModifiers() },
   deviceCustomKeys: {
-    key1: { action: 'dictation', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key1: { action: 'dictation', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
     key2: { action: 'openApp', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key3: { action: 'pasteShortcut', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key4: { action: 'openExternalApp', appPage: 'settingsShortcuts', externalAppPath: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\微信\\微信.lnk', pasteTemplate: '', shortcut: null },
-    knob: { action: 'switchStyle', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key3: { action: 'pasteShortcut', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key4: { action: 'openExternalApp', appPage: 'settingsDevice', externalAppPath: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\微信\\微信.lnk', pasteTemplate: '', shortcut: null },
+    knob: { action: 'switchStyle', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
   },
   deviceCustomKeyDoubleClicks: {
-    key1: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key2: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key3: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key4: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    knob: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key1: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key2: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key3: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key4: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    knob: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
   },
   deviceCustomKeyLongPresses: {
-    key1: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key2: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key3: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key4: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    knob: { action: 'disabled', appPage: 'settingsShortcuts', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key1: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key2: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key3: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    key4: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    knob: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
   },
   deviceCustomKeysDefaultMigrated: true,
   deviceKnobRotationAction: 'systemVolume',
@@ -166,6 +168,23 @@ const mockInstalledApplications: InstalledApplication[] = [
   { name: 'Notepad', path: 'C:\\Windows\\System32\\notepad.exe', source: 'mock' },
   { name: 'Windows Terminal', path: 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsTerminal\\wt.exe', source: 'mock' },
 ];
+
+let mockDeviceSettings: DeviceSettingsSnapshot = {
+  schema: 'listener.device_settings.v1',
+  connected: true,
+  writeSupported: true,
+  source: 'mock',
+  pluggedBrightnessPercent: 100,
+  batteryBrightnessPercent: 60,
+  activeBrightnessPercent: 100,
+  batteryAutoShutdownMs: 30 * 60 * 1000,
+  bleName: 'listener',
+  bleNamePendingRestart: false,
+  activePowerSource: 'plugged',
+  batteryPercent: 82,
+  detail: 'Browser preview mock. Tauri builds use the firmware DEVICE command contract.',
+  lastUpdatedAt: new Date().toISOString(),
+};
 
 function normalizeDeviceCustomKeyMapping(
   mapping: UserPreferences['deviceCustomKeys']['key1'] | undefined,
@@ -1043,6 +1062,39 @@ export function getEmbeddedBleRuntimeStatus(): Promise<EmbeddedBleRuntimeStatus>
         lastReadyAt: new Date().toISOString(),
       },
     }),
+  );
+}
+
+export function getDeviceSettings(): Promise<DeviceSettingsSnapshot> {
+  return invokeOrMock(
+    'get_device_settings',
+    undefined,
+    () => mockDeviceSettings,
+  );
+}
+
+export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise<DeviceSettingsSnapshot> {
+  return invokeOrMock(
+    'set_device_settings',
+    { request },
+    () => {
+      const batteryAutoShutdownMs = Math.round(request.batteryAutoShutdownMinutes * 60 * 1000);
+      mockDeviceSettings = {
+        ...mockDeviceSettings,
+        pluggedBrightnessPercent: request.pluggedBrightnessPercent,
+        batteryBrightnessPercent: request.batteryBrightnessPercent,
+        activeBrightnessPercent: mockDeviceSettings.activePowerSource === 'battery'
+          ? request.batteryBrightnessPercent
+          : request.pluggedBrightnessPercent,
+        batteryAutoShutdownMs,
+        bleName: request.bleName,
+        bleNamePendingRestart: mockDeviceSettings.bleName !== request.bleName,
+        source: 'mock',
+        detail: 'Browser preview mock. Tauri builds use the firmware DEVICE command contract.',
+        lastUpdatedAt: new Date().toISOString(),
+      };
+      return mockDeviceSettings;
+    },
   );
 }
 

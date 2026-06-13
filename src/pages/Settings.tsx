@@ -39,12 +39,25 @@ export function Settings({ embedded = false, initialSection = 'recording' }: Set
   // 跟 sidebar / SettingsModal 同款滑动 pill：测当前 active section 的 offsetTop/height
   // → 用 absolute pill 平滑滑过去；--ol-motion-spring 是项目里的 Apple 风格 ease-out-quint。
   const sectionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const [pillRect, setPillRect] = useState<{ top: number; height: number } | null>(null);
   useLayoutEffect(() => {
     const idx = SECTION_ORDER.indexOf(section);
     const el = sectionRefs.current[idx];
     if (!el) return;
     setPillRect({ top: el.offsetTop, height: el.offsetHeight });
+  }, [section]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const rawScroll = new URLSearchParams(window.location.search).get('settingsScroll');
+    if (!rawScroll) return;
+    const top = Number(rawScroll);
+    if (!Number.isFinite(top)) return;
+    const id = window.setTimeout(() => {
+      contentRef.current?.scrollTo({ top, behavior: 'auto' });
+    }, 250);
+    return () => window.clearTimeout(id);
   }, [section]);
 
   return (
@@ -111,6 +124,7 @@ export function Settings({ embedded = false, initialSection = 'recording' }: Set
           })}
         </div>
         <div
+          ref={contentRef}
           className={embedded ? 'ol-thinscroll' : undefined}
           style={{
             display: 'flex',

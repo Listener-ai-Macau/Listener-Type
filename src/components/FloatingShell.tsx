@@ -59,6 +59,7 @@ const NAV_BASE: Array<Omit<NavItem, 'name'>> = [
 
 const BLE_PAIRING_PROMPT_ACK_KEY = 'ol.blePairingPromptAck';
 const BLE_PAIRING_PROMPT_DEFERRED_KEY = 'ol.blePairingPromptDeferredThisSession';
+const DEV_SETTINGS_SECTIONS: SettingsSectionId[] = ['recording', 'device', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
 
 interface FloatingShellProps {
   os?: OS;
@@ -183,6 +184,14 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
     setSettingsInitialSection(section);
     setSettingsOpen(true);
   };
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const section = new URLSearchParams(window.location.search).get('openSettings');
+    if (section && DEV_SETTINGS_SECTIONS.includes(section as SettingsSectionId)) {
+      openSettings(section as SettingsSectionId);
+    }
+  }, []);
 
   const openDeviceKeyAppPage = (page: DeviceCustomKeyAppPage) => {
     const settingsPages: Partial<Record<DeviceCustomKeyAppPage, SettingsSectionId>> = {

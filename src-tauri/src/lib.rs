@@ -358,6 +358,8 @@ pub fn run() {
             commands::repair_embedded_ble_connection,
             commands::recover_embedded_ble_device,
             commands::get_embedded_ble_runtime_status,
+            commands::get_device_settings,
+            commands::set_device_settings,
             commands::get_firmware_ota_preflight_snapshot,
             commands::load_firmware_ota_package,
             commands::transfer_firmware_ota_ble,
