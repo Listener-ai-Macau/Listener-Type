@@ -446,6 +446,30 @@ fn emit_embedded_audio_transcribing_if_active(
     }
 }
 
+pub(super) fn request_embedded_audio_stop_feedback(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+) -> bool {
+    let session_id = {
+        let state = inner.state.lock();
+        if state.phase != SessionPhase::Listening {
+            return false;
+        }
+        state.session_id
+    };
+    let already_latched = embedded_audio_stop_feedback_latched(inner);
+    latch_embedded_audio_stop_feedback(inner);
+    let emitted = emit_embedded_audio_transcribing_if_active(
+        inner,
+        session_id,
+        current_embedded_audio_partial_preview(inner),
+    );
+    if !already_latched && emitted {
+        set_device_ai_processing_async(inner, true, reason);
+    }
+    emitted
+}
+
 fn store_embedded_audio_stats(inner: &Arc<Inner>, stats: crate::embedded_audio::SessionStats) {
     *inner.embedded_audio_stats.lock() = Some(stats);
 }
@@ -3527,17 +3551,18 @@ mod tests {
     use super::{
         append_typed_prefix, cancel_embedded_ble_listener_capture, cancel_session,
         clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview,
-        default_done_message, dictation_error_code, embedded_ble_listener_capture_ready,
-        embedded_ble_session_actor_history, embedded_ble_stream_idle_timeout,
-        embedded_pcm_rms_and_peak, embedded_streaming_chunk_is_asr_input,
-        emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
-        finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
-        install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
-        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
-        publish_embedded_ble_asr_final, record_embedded_ble_session_actor_command,
-        register_embedded_ble_cancel_flag, store_embedded_audio_stats, streaming_insert_eligible,
-        update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
-        EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
+        default_done_message, dictation_error_code, embedded_audio_stop_feedback_latched,
+        embedded_ble_listener_capture_ready, embedded_ble_session_actor_history,
+        embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak,
+        embedded_streaming_chunk_is_asr_input, emit_embedded_audio_transcribing_if_active,
+        end_embedded_ble_session, finalize_polished_text, finish_dictation_pipeline_error,
+        finish_dictation_timeout, install_embedded_ble_listener_cancel,
+        mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
+        prepare_embedded_streaming_pcm_for_asr, publish_embedded_ble_asr_final,
+        record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
+        request_embedded_audio_stop_feedback, store_embedded_audio_stats,
+        streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
+        EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
         EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
         EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
@@ -3547,7 +3572,9 @@ mod tests {
         build_audio_data_notification, build_session_start_notification,
         build_session_stop_notification, StreamingPcmChunk,
     };
-    use crate::types::{ChineseScriptPreference, CorrectionRule, InsertStatus, PolishMode};
+    use crate::types::{
+        ChineseScriptPreference, CorrectionRule, DictationInputSource, InsertStatus, PolishMode,
+    };
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -3881,6 +3908,31 @@ mod tests {
             session_id,
             Some("late preview".to_string()),
         ));
+    }
+
+    #[test]
+    fn key_stop_feedback_latches_transcribing_without_processing_phase() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        let mut prefs = crate::types::UserPreferences::default();
+        prefs.dictation_input_source = DictationInputSource::Microphone;
+        coordinator.inner.prefs.replace_for_tests(prefs);
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+
+        assert!(request_embedded_audio_stop_feedback(
+            &coordinator.inner,
+            "unit_test_stop_feedback"
+        ));
+        assert!(embedded_audio_stop_feedback_latched(&coordinator.inner));
+        {
+            let state = coordinator.inner.state.lock();
+            assert_eq!(state.phase, SessionPhase::Listening);
+        }
     }
 
     #[tokio::test]

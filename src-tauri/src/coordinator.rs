@@ -81,11 +81,11 @@ const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
 use dictation::dictation_error_code;
 use dictation::{
     begin_session, cancel_session, end_session, handle_pressed, handle_pressed_edge,
-    handle_released_edge, request_stop_during_starting, submit_embedded_audio_ble_once,
-    submit_embedded_audio_ble_stream, submit_embedded_audio_ble_stream_background,
-    submit_embedded_audio_file, submit_embedded_audio_notifications,
-    submit_embedded_audio_streaming_file, submit_embedded_audio_streaming_notifications,
-    HOTKEY_DEBOUNCE,
+    handle_released_edge, request_embedded_audio_stop_feedback, request_stop_during_starting,
+    submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
+    submit_embedded_audio_ble_stream_background, submit_embedded_audio_file,
+    submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,
+    submit_embedded_audio_streaming_notifications, HOTKEY_DEBOUNCE,
 };
 use qa::{close_qa_panel, handle_qa_hotkey_pressed, QaPhase, QaSessionState};
 #[cfg(test)]
@@ -2500,18 +2500,20 @@ async fn handle_device_dictation_action(
                     "ble_recording_control_sent",
                     format!("key={} gesture={}", key.label(), gesture.label()),
                 );
-                let sent_message =
-                    if matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
-                        "设备录音停止控制已发送，等待结束标志..."
-                    } else {
-                        "设备录音控制已发送，等待 Listener 音频..."
-                    };
+                if phase == SessionPhase::Listening
+                    && request_embedded_audio_stop_feedback(
+                        &inner,
+                        "device_key_stop_processing_start",
+                    )
+                {
+                    return;
+                }
                 emit_capsule(
                     &inner,
                     CapsuleState::Reconnecting,
                     0.0,
                     0,
-                    Some(sent_message.to_string()),
+                    Some("设备录音控制已发送，等待 Listener 音频...".to_string()),
                     None,
                 );
             }
