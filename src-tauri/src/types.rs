@@ -2873,6 +2873,40 @@ mod tests {
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
     }
 
+    #[test]
+    fn explicit_smoke_key3_dictation_profile_does_not_migrate_to_paste() {
+        let raw = serde_json::json!({
+            "deviceCustomKeysDefaultMigrated": true,
+            "deviceCustomKeys": {
+                "key1": { "action": "dictation", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "openApp", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "dictation", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "openExternalApp", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "switchStyle", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            },
+            "deviceCustomKeyDoubleClicks": {
+                "key1": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            },
+            "deviceCustomKeyLongPresses": {
+                "key1": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "disabled", "appPage": "settingsShortcuts", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            }
+        });
+        let prefs: UserPreferences = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(
+            prefs.device_custom_keys.key3.action,
+            DeviceCustomKeyAction::Dictation
+        );
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn default_external_app_shortcut_lookup_uses_exact_wechat_name() {

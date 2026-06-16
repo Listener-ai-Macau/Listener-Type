@@ -806,7 +806,7 @@ export const en: typeof zhCN = {
     },
       deviceKeys: {
         title: 'Device custom keys',
-        desc: 'KEY1-KEY4 and the EC11 click can be mapped to safe actions; KEY3 records by default.',
+        desc: 'Default: KEY1 records, KEY2 opens Device settings, KEY3 pastes, KEY4 opens WeChat; all are customizable.',
         keyLabel: '{{key}}',
         noop: 'No action',
         actionReady: 'Runs on press',

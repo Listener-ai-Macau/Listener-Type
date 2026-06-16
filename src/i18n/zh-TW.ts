@@ -806,7 +806,7 @@ export const zhTW: typeof zhCN = {
     },
     deviceKeys: {
       title: '設備自定義鍵',
-      desc: 'KEY1-KEY4 與 EC11 單擊可映射為安全動作；KEY3 預設錄音。',
+      desc: '預設：KEY1 錄音，KEY2 開啟裝置設定，KEY3 貼上，KEY4 開啟微信；都可自訂。',
       keyLabel: '{{key}}',
       noop: '不執行動作',
       actionReady: '按下後執行',

@@ -294,6 +294,11 @@ function Get-SmokeReportSchema {
             "tts_rate",
             "tts_gain",
             "random_sentence_count",
+            "serial_report.led_recording_active_seen",
+            "serial_report.led_recording_cleared_seen",
+            "serial_report.led_ai_active_seen",
+            "serial_report.led_ok_active_seen",
+            "serial_report.led_warn_active_seen",
             "pcm_bytes",
             "missing_packets",
             "verification_errors"
@@ -618,12 +623,45 @@ function Set-SmokeDeviceKeyPreferences {
     $prefs | Add-Member -NotePropertyName "deviceCustomKeysDefaultMigrated" -NotePropertyValue $true -Force
 
     $keys = Ensure-JsonObjectProperty -Object $prefs -Name "deviceCustomKeys"
+    # Write a complete non-default profile. If only key3 is changed, the app can
+    # recognize the remaining values as an old built-in default and migrate key3
+    # back to pasteShortcut before the generated-key3 smoke test runs.
+    $key1 = Ensure-JsonObjectProperty -Object $keys -Name "key1"
+    $key1 | Add-Member -NotePropertyName "action" -NotePropertyValue "dictation" -Force
+    $key1 | Add-Member -NotePropertyName "appPage" -NotePropertyValue "settingsDevice" -Force
+    $key1 | Add-Member -NotePropertyName "externalAppPath" -NotePropertyValue "" -Force
+    $key1 | Add-Member -NotePropertyName "pasteTemplate" -NotePropertyValue "" -Force
+    $key1 | Add-Member -NotePropertyName "shortcut" -NotePropertyValue $null -Force
+
+    $key2 = Ensure-JsonObjectProperty -Object $keys -Name "key2"
+    $key2 | Add-Member -NotePropertyName "action" -NotePropertyValue "openApp" -Force
+    $key2 | Add-Member -NotePropertyName "appPage" -NotePropertyValue "settingsDevice" -Force
+    $key2 | Add-Member -NotePropertyName "externalAppPath" -NotePropertyValue "" -Force
+    $key2 | Add-Member -NotePropertyName "pasteTemplate" -NotePropertyValue "" -Force
+    $key2 | Add-Member -NotePropertyName "shortcut" -NotePropertyValue $null -Force
+
     $key3 = Ensure-JsonObjectProperty -Object $keys -Name "key3"
     $key3 | Add-Member -NotePropertyName "action" -NotePropertyValue "dictation" -Force
     $key3 | Add-Member -NotePropertyName "appPage" -NotePropertyValue "settingsShortcuts" -Force
     $key3 | Add-Member -NotePropertyName "externalAppPath" -NotePropertyValue "" -Force
     $key3 | Add-Member -NotePropertyName "pasteTemplate" -NotePropertyValue "" -Force
     $key3 | Add-Member -NotePropertyName "shortcut" -NotePropertyValue $null -Force
+
+    $key4 = Ensure-JsonObjectProperty -Object $keys -Name "key4"
+    $key4 | Add-Member -NotePropertyName "action" -NotePropertyValue "openExternalApp" -Force
+    $key4 | Add-Member -NotePropertyName "appPage" -NotePropertyValue "settingsDevice" -Force
+    if ($null -eq $key4.PSObject.Properties["externalAppPath"] -or $null -eq $key4.externalAppPath) {
+        $key4 | Add-Member -NotePropertyName "externalAppPath" -NotePropertyValue "" -Force
+    }
+    $key4 | Add-Member -NotePropertyName "pasteTemplate" -NotePropertyValue "" -Force
+    $key4 | Add-Member -NotePropertyName "shortcut" -NotePropertyValue $null -Force
+
+    $knob = Ensure-JsonObjectProperty -Object $keys -Name "knob"
+    $knob | Add-Member -NotePropertyName "action" -NotePropertyValue "switchStyle" -Force
+    $knob | Add-Member -NotePropertyName "appPage" -NotePropertyValue "settingsDevice" -Force
+    $knob | Add-Member -NotePropertyName "externalAppPath" -NotePropertyValue "" -Force
+    $knob | Add-Member -NotePropertyName "pasteTemplate" -NotePropertyValue "" -Force
+    $knob | Add-Member -NotePropertyName "shortcut" -NotePropertyValue $null -Force
 
     $json = $prefs | ConvertTo-Json -Depth 32
     Write-Utf8NoBomText -Path $Path -Text $json
@@ -1326,6 +1364,17 @@ function Convert-SerialReportForJson {
     if (-not $Report) {
         return $null
     }
+    $ledStatusSampleRanges = $null
+    if ($Report.led_status_sample_ranges) {
+        $ledStatusSampleRanges = [ordered]@{}
+        foreach ($property in $Report.led_status_sample_ranges.PSObject.Properties) {
+            $ledStatusSampleRanges[$property.Name] = @(
+                @($property.Value) | ForEach-Object {
+                    if ($null -ne $_) { [int]$_ }
+                }
+            )
+        }
+    }
     return [ordered]@{
         serial_log_path = [string]$Report.serial_log_path
         serial_line_count = [int]$Report.serial_line_count
@@ -1351,6 +1400,21 @@ function Convert-SerialReportForJson {
         generated_button_timing_seen = [bool]$Report.generated_button_timing_seen
         generated_button_single_seen = [bool]$Report.generated_button_single_seen
         generated_button_evidence_summary = if ($Report.generated_button_evidence_summary) { [string]$Report.generated_button_evidence_summary } else { $null }
+        led_status_seen = [bool]$Report.led_status_seen
+        led_status_sample_ranges = $ledStatusSampleRanges
+        led_status_summary_count = [int]$Report.led_status_summary_count
+        led_status_recording_summary_count = [int]$Report.led_status_recording_summary_count
+        led_status_post_stop_summary_count = [int]$Report.led_status_post_stop_summary_count
+        led_recording_active_seen = [bool]$Report.led_recording_active_seen
+        led_recording_cleared_seen = [bool]$Report.led_recording_cleared_seen
+        led_ai_active_seen = [bool]$Report.led_ai_active_seen
+        led_ok_active_seen = [bool]$Report.led_ok_active_seen
+        led_warn_active_seen = [bool]$Report.led_warn_active_seen
+        led_diag_visual_state_seen = [bool]$Report.led_diag_visual_state_seen
+        led_diag_output_state_seen = [bool]$Report.led_diag_output_state_seen
+        led_diag_recording_active_seen = [bool]$Report.led_diag_recording_active_seen
+        led_diag_recording_cleared_seen = [bool]$Report.led_diag_recording_cleared_seen
+        led_status_evidence_summary = if ($Report.led_status_evidence_summary) { [string]$Report.led_status_evidence_summary } else { $null }
     }
 }
 
@@ -1388,6 +1452,7 @@ function Send-SerialCommand {
 
     $python = @'
 import serial
+import serial.tools.list_ports
 import sys
 import time
 
@@ -1395,7 +1460,12 @@ port = sys.argv[1]
 command = sys.argv[2]
 last_error = None
 
-for attempt in range(12):
+for attempt in range(60):
+    if port not in {item.device for item in serial.tools.list_ports.comports()}:
+        last_error = FileNotFoundError(f"{port} is not present")
+        time.sleep(0.5)
+        continue
+
     ser = serial.Serial()
     ser.port = port
     ser.baudrate = 115200
@@ -1493,6 +1563,7 @@ function Start-SerialRecordingWindow {
     $python = @'
 import json
 import pathlib
+import re
 import serial
 import sys
 import time
@@ -1515,12 +1586,25 @@ stream_ready_confirmed_before_toggle = False
 stream_ready_confirmed_line_index = None
 transport_not_ready_rejection_line_index = None
 pre_start_cancel_sent = False
+led_status_sample_ranges = {}
 
 AUDIO_TRANSPORT_STATE_MARKER = "audio transport state:"
 AUDIO_TRANSPORT_STREAM_READY_MARKER = "stream_ready"
 AUDIO_NOTIFY_ENABLED_MARKER = "notify=1"
 AUDIO_TRANSPORT_NOT_READY_REJECTION_MARKER = "record session start rejected: BLE audio transport not ready"
 STREAM_READY_START_WAIT_SECONDS = 12.0
+LED_STATUS_LINE_MARKER = "~LED:STATUS"
+LED_STATUS_SUMMARY_MARKER = "detail=summary"
+LED_ACTIVE_FLAG_BITS = {
+    "PWR": 1,
+    "BLE": 2,
+    "REC": 4,
+    "AI": 8,
+    "OK": 16,
+    "WARN": 32,
+    "KEY": 64,
+    "EDGE": 128,
+}
 
 def poll_lines(ser):
     waiting = ser.in_waiting
@@ -1554,6 +1638,13 @@ def send_pre_start_cancel(ser):
     pre_start_cancel_sent = True
     poll_until(ser, time.monotonic() + 0.75)
     print("serial_pre_start_cancel_sent=1", flush=True)
+
+def request_led_status(ser, phase):
+    start_index = len(lines)
+    send_command(ser, "~LED:STATUS")
+    poll_until(ser, time.monotonic() + 0.35)
+    led_status_sample_ranges[phase] = [start_index, len(lines)]
+    print(f"serial_led_status_{phase}=sampled", flush=True)
 
 def wait_for_start_signal(ser):
     deadline = time.monotonic() + max_wait_seconds
@@ -1724,9 +1815,12 @@ try:
     send_pre_start_cancel(ser)
     wait_for_start_signal(ser)
     start_recording_with_retry(ser)
+    request_led_status(ser, "recording")
     wait_for_stop_signal(ser)
     send_command(ser, end_command)
-    poll_until(ser, time.monotonic() + 1.5)
+    poll_until(ser, time.monotonic() + 0.5)
+    request_led_status(ser, "post_stop")
+    poll_until(ser, time.monotonic() + 1.0)
 finally:
     try:
         if ser.is_open:
@@ -1768,6 +1862,104 @@ if generated_button_logical == "KEY3":
     )
     generated_button_evidence_summary = "KEY3 generated press/release -> custom key debounce/single-click/F15 path"
 
+def led_status_summary_lines(phase=None):
+    if phase is not None and phase in led_status_sample_ranges:
+        start_index, end_index = led_status_sample_ranges[phase]
+        source = lines[start_index:end_index]
+    else:
+        source = lines
+    return [
+        line
+        for line in source
+        if LED_STATUS_LINE_MARKER in line and LED_STATUS_SUMMARY_MARKER in line
+    ]
+
+def led_summary_has_int(line, key, expected):
+    match = re.search(rf"\b{re.escape(key)}=(\d+)\b", line)
+    return bool(match and int(match.group(1)) == expected)
+
+def led_summary_has_flag(line, name, expected_active=True):
+    match = re.search(rf"\b{re.escape(name)}:(\d+)\b", line)
+    if not match:
+        return False
+    active = int(match.group(1)) != 0
+    return active == expected_active
+
+def status_led_diag_events():
+    events = []
+    for line in lines:
+        if "status_led" not in line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("src") == "status_led":
+            events.append(event)
+    return events
+
+def led_diag_flag_seen(name, expected_active=True, reason=None):
+    bit = LED_ACTIVE_FLAG_BITS[name]
+    for event in status_led_diag_events():
+        if reason is not None and int(event.get("a4") or 0) != reason:
+            continue
+        evt = int(event.get("evt") or 0)
+        if evt == 6:
+            flags = int(event.get("a1") or 0)
+        elif evt == 7:
+            flags = int(event.get("a3") or 0)
+        else:
+            continue
+        active = (flags & bit) != 0
+        if active == expected_active:
+            return True
+    return False
+
+led_summary_all = led_status_summary_lines()
+led_summary_recording = led_status_summary_lines("recording")
+led_summary_post_stop = led_status_summary_lines("post_stop")
+led_diag_events = status_led_diag_events()
+led_diag_visual_state_seen = any(int(event.get("evt") or 0) == 6 for event in led_diag_events)
+led_diag_output_state_seen = any(int(event.get("evt") or 0) == 7 for event in led_diag_events)
+led_diag_recording_active_seen = led_diag_flag_seen("REC", True, reason=4)
+led_diag_recording_cleared_seen = led_diag_flag_seen("REC", False, reason=5)
+led_recording_active_seen = (
+    any(
+        led_summary_has_int(line, "rec_active", 1)
+        or led_summary_has_flag(line, "REC", True)
+        for line in led_summary_recording
+    )
+    or led_diag_recording_active_seen
+)
+led_recording_cleared_seen = (
+    any(
+        led_summary_has_int(line, "rec_active", 0)
+        and led_summary_has_flag(line, "REC", False)
+        for line in led_summary_post_stop
+    )
+    or led_diag_recording_cleared_seen
+)
+led_ai_active_seen = (
+    any(
+        led_summary_has_int(line, "processing", 1)
+        or led_summary_has_flag(line, "AI", True)
+        for line in led_summary_all
+    )
+    or led_diag_flag_seen("AI", True)
+)
+led_ok_active_seen = (
+    any(led_summary_has_flag(line, "OK", True) for line in led_summary_all)
+    or led_diag_flag_seen("OK", True)
+)
+led_warn_active_seen = (
+    any(
+        led_summary_has_flag(line, "WARN", True)
+        or ("error_domain=none" not in line and "error_domain=" in line)
+        for line in led_summary_all
+    )
+    or led_diag_flag_seen("WARN", True)
+)
+
 summary = {
     "serial_log_path": str(log_path),
     "serial_line_count": len(lines),
@@ -1799,6 +1991,21 @@ summary = {
     "generated_button_timing_seen": generated_button_timing_seen,
     "generated_button_single_seen": generated_button_single_seen,
     "generated_button_evidence_summary": generated_button_evidence_summary,
+    "led_status_seen": bool(led_summary_all) or bool(led_diag_events),
+    "led_status_sample_ranges": led_status_sample_ranges,
+    "led_status_summary_count": len(led_summary_all),
+    "led_status_recording_summary_count": len(led_summary_recording),
+    "led_status_post_stop_summary_count": len(led_summary_post_stop),
+    "led_recording_active_seen": led_recording_active_seen,
+    "led_recording_cleared_seen": led_recording_cleared_seen,
+    "led_ai_active_seen": led_ai_active_seen,
+    "led_ok_active_seen": led_ok_active_seen,
+    "led_warn_active_seen": led_warn_active_seen,
+    "led_diag_visual_state_seen": led_diag_visual_state_seen,
+    "led_diag_output_state_seen": led_diag_output_state_seen,
+    "led_diag_recording_active_seen": led_diag_recording_active_seen,
+    "led_diag_recording_cleared_seen": led_diag_recording_cleared_seen,
+    "led_status_evidence_summary": "status LED REC active/clear sampled via ~LED:STATUS; AI/OK/WARN evidence is reported when host processing/error feedback is observed",
 }
 print(json.dumps(summary, ensure_ascii=False), flush=True)
 '@
@@ -2271,12 +2478,21 @@ try {
     $oldForceRaw = $env:LISTENER_TYPE_FORCE_RAW_OUTPUT
     $oldRecordEmbedded = $env:LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG
     $oldForegroundInsert = $env:LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK
+    $oldBleAddress = $env:LISTENER_TYPE_BLE_ADDRESS
+    $oldBluetoothAddress = $env:LISTENER_TYPE_BLUETOOTH_ADDRESS
+    $oldAcceptSyntheticHotkeys = $env:LISTENER_TYPE_ACCEPT_SYNTHETIC_HOTKEY_EVENTS
     try {
         $env:LISTENER_TYPE_HIDE_MAIN_ON_START = "1"
         $env:LISTENER_TYPE_DISABLE_BACKGROUND_BLE = "1"
         $env:LISTENER_TYPE_FORCE_RAW_OUTPUT = "1"
         $env:LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG = "1"
         $env:LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK = "1"
+        $env:LISTENER_TYPE_ACCEPT_SYNTHETIC_HOTKEY_EVENTS = "1"
+        $normalizedBluetoothAddress = ($BluetoothAddress -replace "[^0-9A-Fa-f]", "").ToUpperInvariant()
+        if (-not [string]::IsNullOrWhiteSpace($normalizedBluetoothAddress)) {
+            $env:LISTENER_TYPE_BLE_ADDRESS = $normalizedBluetoothAddress
+            $env:LISTENER_TYPE_BLUETOOTH_ADDRESS = $normalizedBluetoothAddress
+        }
         $process = Start-Process -FilePath (Resolve-Path $ListenerExe).Path `
             -ArgumentList @("--submit-embedded-audio-ble-stream", ([string]$TimeoutMs)) `
             -WorkingDirectory $RepoRoot `
@@ -2292,6 +2508,9 @@ try {
         if ($null -eq $oldForceRaw) { Remove-Item Env:LISTENER_TYPE_FORCE_RAW_OUTPUT -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_FORCE_RAW_OUTPUT = $oldForceRaw }
         if ($null -eq $oldRecordEmbedded) { Remove-Item Env:LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_RECORD_EMBEDDED_AUDIO_FOR_DEBUG = $oldRecordEmbedded }
         if ($null -eq $oldForegroundInsert) { Remove-Item Env:LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK = $oldForegroundInsert }
+        if ($null -eq $oldBleAddress) { Remove-Item Env:LISTENER_TYPE_BLE_ADDRESS -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_BLE_ADDRESS = $oldBleAddress }
+        if ($null -eq $oldBluetoothAddress) { Remove-Item Env:LISTENER_TYPE_BLUETOOTH_ADDRESS -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_BLUETOOTH_ADDRESS = $oldBluetoothAddress }
+        if ($null -eq $oldAcceptSyntheticHotkeys) { Remove-Item Env:LISTENER_TYPE_ACCEPT_SYNTHETIC_HOTKEY_EVENTS -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_ACCEPT_SYNTHETIC_HOTKEY_EVENTS = $oldAcceptSyntheticHotkeys }
     }
 
     $readyDeadline = (Get-Date).AddSeconds($NotifyReadyTimeoutSeconds)
@@ -2585,6 +2804,12 @@ try {
                 }
                 if (-not [bool]$serialReport.generated_button_single_seen) {
                     $verificationErrors += "generated button single-click evidence was not seen in firmware log"
+                }
+                if (-not [bool]$serialReport.led_recording_active_seen) {
+                    $verificationErrors += "status LED REC active evidence was not seen in firmware log"
+                }
+                if (-not [bool]$serialReport.led_recording_cleared_seen) {
+                    $verificationErrors += "status LED REC clear evidence was not seen after recording stop"
                 }
             }
             if (-not [bool]$serialReport.recording_start_seen) {

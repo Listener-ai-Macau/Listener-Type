@@ -764,7 +764,7 @@ export const ko: typeof zhCN = {
     },
     deviceKeys: {
       title: '장치 사용자 지정 키',
-      desc: 'KEY1-KEY4 와 EC11 클릭은 안전한 동작에 매핑할 수 있습니다. KEY3 는 기본 녹음 키입니다.',
+      desc: '기본값: KEY1 녹음, KEY2 장치 설정 열기, KEY3 붙여넣기, KEY4 WeChat 열기. 모두 사용자 지정할 수 있습니다.',
       keyLabel: '{{key}}',
       noop: '동작 없음',
       actionReady: '누르면 실행',

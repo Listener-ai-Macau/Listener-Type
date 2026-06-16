@@ -3536,6 +3536,9 @@ fn hotkey_bridge_loop(inner: Arc<Inner>, rx: mpsc::Receiver<HotkeyEvent>) {
             HotkeyEvent::QaShortcutPressed => {
                 async_runtime::spawn(async move { handle_qa_hotkey_pressed(&inner_cloned).await });
             }
+            HotkeyEvent::DeviceCustomKeyPressed { key, gesture } => {
+                handle_device_custom_key_pressed(&inner_cloned, key, gesture);
+            }
         }
     }
 }

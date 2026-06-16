@@ -804,7 +804,7 @@ export const zhCN = {
     },
       deviceKeys: {
         title: '设备自定义键',
-        desc: 'KEY1-KEY4 与 EC11 单击可映射为安全动作；KEY3 默认录音。',
+        desc: '默认：KEY1 录音，KEY2 打开设备设置，KEY3 粘贴，KEY4 打开微信；都可自定义。',
         keyLabel: '{{key}}',
         noop: '不执行动作',
         actionReady: '按下后执行',

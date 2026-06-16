@@ -764,7 +764,7 @@ export const ja: typeof zhCN = {
     },
     deviceKeys: {
       title: 'デバイスカスタムキー',
-      desc: 'KEY1-KEY4 と EC11 クリックは安全な動作に割り当てられます。KEY3 は既定で録音です。',
+      desc: '既定: KEY1 は録音、KEY2 はデバイス設定を開く、KEY3 は貼り付け、KEY4 は WeChat を開く。すべてカスタマイズできます。',
       keyLabel: '{{key}}',
       noop: '何もしない',
       actionReady: '押すと実行',

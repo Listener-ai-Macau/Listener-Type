@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 
-use crate::types::HotkeyTrigger;
+use crate::types::{DeviceCustomKeyGesture, DeviceCustomKeyId, HotkeyTrigger};
 use crate::types::{HotkeyAdapterKind, HotkeyBinding, HotkeyCapability, HotkeyInstallError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +29,10 @@ pub enum HotkeyEvent {
     /// 上层据此切换到翻译输出管线。详见 issue #4。
     TranslationModifierPressed,
     QaShortcutPressed,
+    DeviceCustomKeyPressed {
+        key: DeviceCustomKeyId,
+        gesture: DeviceCustomKeyGesture,
+    },
 }
 
 #[cfg(test)]
@@ -294,7 +298,10 @@ mod platform {
         update_shared_binding, update_shared_modifier_shortcuts, HotkeyAdapter, HotkeyEvent,
         Shared, StartupTx,
     };
-    use crate::types::{HotkeyAdapterKind, HotkeyBinding, HotkeyInstallError, HotkeyTrigger};
+    use crate::types::{
+        DeviceCustomKeyGesture, DeviceCustomKeyId, HotkeyAdapterKind, HotkeyBinding,
+        HotkeyInstallError, HotkeyTrigger,
+    };
 
     pub fn start_adapter(
         binding: HotkeyBinding,
@@ -768,7 +775,10 @@ mod platform {
         update_shared_binding, update_shared_modifier_shortcuts, HotkeyAdapter, HotkeyEvent,
         Shared, StartupTx,
     };
-    use crate::types::{HotkeyAdapterKind, HotkeyBinding, HotkeyInstallError, HotkeyTrigger};
+    use crate::types::{
+        DeviceCustomKeyGesture, DeviceCustomKeyId, HotkeyAdapterKind, HotkeyBinding,
+        HotkeyInstallError, HotkeyTrigger,
+    };
 
     const WM_KEYDOWN: usize = 0x0100;
     const WM_KEYUP: usize = 0x0101;
@@ -943,24 +953,61 @@ mod platform {
     }
 
     fn device_fallback_vk_label(vk_code: u32) -> Option<&'static str> {
+        let (key, gesture) = device_fallback_vk(vk_code)?;
+        Some(match (key, gesture) {
+            (DeviceCustomKeyId::Knob, DeviceCustomKeyGesture::SingleClick) => {
+                "EC11 singleClick Shift+F13"
+            }
+            (DeviceCustomKeyId::Key1, DeviceCustomKeyGesture::SingleClick) => {
+                "KEY1 singleClick F13"
+            }
+            (DeviceCustomKeyId::Key2, DeviceCustomKeyGesture::SingleClick) => {
+                "KEY2 singleClick F14"
+            }
+            (DeviceCustomKeyId::Key3, DeviceCustomKeyGesture::SingleClick) => {
+                "KEY3 singleClick F15"
+            }
+            (DeviceCustomKeyId::Key4, DeviceCustomKeyGesture::SingleClick) => {
+                "KEY4 singleClick F16"
+            }
+            (DeviceCustomKeyId::Key1, DeviceCustomKeyGesture::DoubleClick) => {
+                "KEY1 doubleClick F17"
+            }
+            (DeviceCustomKeyId::Key2, DeviceCustomKeyGesture::DoubleClick) => {
+                "KEY2 doubleClick F18"
+            }
+            (DeviceCustomKeyId::Key3, DeviceCustomKeyGesture::DoubleClick) => {
+                "KEY3 doubleClick F19"
+            }
+            (DeviceCustomKeyId::Key4, DeviceCustomKeyGesture::DoubleClick) => {
+                "KEY4 doubleClick F20"
+            }
+            (DeviceCustomKeyId::Key1, DeviceCustomKeyGesture::LongPress) => "KEY1 longPress F21",
+            (DeviceCustomKeyId::Key2, DeviceCustomKeyGesture::LongPress) => "KEY2 longPress F22",
+            (DeviceCustomKeyId::Key3, DeviceCustomKeyGesture::LongPress) => "KEY3 longPress F23",
+            (DeviceCustomKeyId::Key4, DeviceCustomKeyGesture::LongPress) => "KEY4 longPress F24",
+            _ => return None,
+        })
+    }
+
+    fn device_fallback_vk(vk_code: u32) -> Option<(DeviceCustomKeyId, DeviceCustomKeyGesture)> {
         if vk_code == 0x7C && shift_key_down() {
-            return Some("EC11 singleClick Shift+F13");
+            return Some((DeviceCustomKeyId::Knob, DeviceCustomKeyGesture::SingleClick));
         }
-        match vk_code {
-            0x7C => Some("KEY1 singleClick F13"),
-            0x7D => Some("KEY2 singleClick F14"),
-            0x7E => Some("KEY3 singleClick F15"),
-            0x7F => Some("KEY4 singleClick F16"),
-            0x80 => Some("KEY1 doubleClick F17"),
-            0x81 => Some("KEY2 doubleClick F18"),
-            0x82 => Some("KEY3 doubleClick F19"),
-            0x83 => Some("KEY4 doubleClick F20"),
-            0x84 => Some("KEY1 longPress F21"),
-            0x85 => Some("KEY2 longPress F22"),
-            0x86 => Some("KEY3 longPress F23"),
-            0x87 => Some("KEY4 longPress F24"),
-            _ => None,
-        }
+        let key = match vk_code {
+            0x7C | 0x80 | 0x84 => DeviceCustomKeyId::Key1,
+            0x7D | 0x81 | 0x85 => DeviceCustomKeyId::Key2,
+            0x7E | 0x82 | 0x86 => DeviceCustomKeyId::Key3,
+            0x7F | 0x83 | 0x87 => DeviceCustomKeyId::Key4,
+            _ => return None,
+        };
+        let gesture = match vk_code {
+            0x7C..=0x7F => DeviceCustomKeyGesture::SingleClick,
+            0x80..=0x83 => DeviceCustomKeyGesture::DoubleClick,
+            0x84..=0x87 => DeviceCustomKeyGesture::LongPress,
+            _ => return None,
+        };
+        Some((key, gesture))
     }
 
     fn shift_key_down() -> bool {
@@ -980,6 +1027,25 @@ mod platform {
         if vk_code == VK_ESCAPE && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) {
             send_or_log(&ctx.tx, HotkeyEvent::Cancelled);
             return false;
+        }
+
+        if let Some((key, gesture)) = device_fallback_vk(vk_code) {
+            match message {
+                WM_KEYDOWN | WM_SYSKEYDOWN => {
+                    log::info!(
+                        "[hotkey.device-fallback] {} {} pressed vk=0x{vk_code:02X}",
+                        key.label(),
+                        gesture.label()
+                    );
+                    send_or_log(
+                        &ctx.tx,
+                        HotkeyEvent::DeviceCustomKeyPressed { key, gesture },
+                    );
+                    return true;
+                }
+                WM_KEYUP | WM_SYSKEYUP => return true,
+                _ => {}
+            }
         }
 
         // Shift（任一侧）= 翻译模式修饰键。在录音过程中任意时刻按下都生效。详见 issue #4。
@@ -1195,6 +1261,22 @@ mod platform {
                     HotkeyEvent::TranslationModifierPressed,
                     HotkeyEvent::QaShortcutPressed,
                 ]
+            );
+        }
+
+        #[test]
+        fn windows_device_fallback_keys_emit_device_key_events() {
+            let shared = shared(HotkeyTrigger::RightControl);
+            let (ctx, rx) = callback_context(shared);
+
+            assert!(dispatch_keyboard_event(&ctx, 0x7E, WM_KEYDOWN));
+            assert!(dispatch_keyboard_event(&ctx, 0x7E, WM_KEYUP));
+            assert_eq!(
+                drain(&rx),
+                vec![HotkeyEvent::DeviceCustomKeyPressed {
+                    key: DeviceCustomKeyId::Key3,
+                    gesture: DeviceCustomKeyGesture::SingleClick,
+                }]
             );
         }
 
