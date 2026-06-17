@@ -181,4 +181,8 @@ a { color: inherit; text-decoration: none; }
     grid-template-columns: minmax(0, 1fr) !important;
     gap: 6px !important;
   }
+
+  .ol-device-key-control-line {
+    flex-wrap: wrap !important;
+  }
 }
