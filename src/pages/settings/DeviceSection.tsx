@@ -544,6 +544,7 @@ function DeviceKeyGestureGroup({
               gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
               gap: 12,
               alignItems: 'center',
+              minWidth: 0,
             }}
           >
             <div style={{ minWidth: 0 }}>
@@ -611,6 +612,10 @@ function DeviceKeyMappingControl({
     selectionAsk: 168,
     disabled: 120,
   };
+  const controlBaseStyle = {
+    ...inputStyle,
+    boxSizing: 'border-box' as const,
+  };
 
   const updateAction = async (action: DeviceCustomKeyAction) => {
     await onChange({
@@ -627,10 +632,13 @@ function DeviceKeyMappingControl({
       className="ol-device-key-control-line"
       style={{
         display: 'flex',
-        flexWrap: 'nowrap',
+        flexWrap: 'wrap',
         gap: 8,
         alignItems: 'center',
         width: '100%',
+        maxWidth: '100%',
+        minWidth: 0,
+        overflow: 'hidden',
       }}
     >
       <SelectLite
@@ -641,7 +649,7 @@ function DeviceKeyMappingControl({
           label: t(`settings.deviceKeys.actions.${action}`),
         }))}
         defaultOpen={autoOpen}
-        style={{ ...inputStyle, flex: '0 0 auto', width: actionWidth[mapping.action], maxWidth: '100%', minWidth: 0 }}
+        style={{ ...controlBaseStyle, flex: `0 1 ${actionWidth[mapping.action]}px`, width: actionWidth[mapping.action], maxWidth: '100%', minWidth: 0 }}
         ariaLabel={t('settings.deviceKeys.actionSelectAria')}
       />
       {mapping.action === 'openApp' && (
@@ -652,7 +660,7 @@ function DeviceKeyMappingControl({
             value: page,
             label: t(`settings.deviceKeys.appPages.${page}`),
           }))}
-          style={{ ...inputStyle, flex: '0 0 auto', width: 220, maxWidth: '100%', minWidth: 0 }}
+          style={{ ...controlBaseStyle, flex: '0 1 220px', width: 220, maxWidth: '100%', minWidth: 0 }}
           ariaLabel={t('settings.deviceKeys.appPageSelectAria')}
         />
       )}
@@ -665,7 +673,7 @@ function DeviceKeyMappingControl({
               void onChange({ ...mapping, externalAppPath: value });
             }}
             options={externalAppOptions}
-            style={{ ...inputStyle, flex: '0 0 auto', width: 210, maxWidth: '100%', minWidth: 0 }}
+            style={{ ...controlBaseStyle, flex: '0 1 210px', width: 210, maxWidth: '100%', minWidth: 0 }}
             ariaLabel={t('settings.deviceKeys.installedAppSelectAria')}
           />
           <input
@@ -679,7 +687,7 @@ function DeviceKeyMappingControl({
                 ? t('settings.deviceKeys.installedAppEmpty')
                 : t('settings.deviceKeys.externalAppPlaceholder')
             }
-            style={{ ...inputStyle, flex: '1 1 280px', maxWidth: 'none', minWidth: 220 }}
+            style={{ ...controlBaseStyle, flex: '1 1 240px', maxWidth: '100%', minWidth: 0 }}
           />
         </>
       )}
@@ -691,11 +699,11 @@ function DeviceKeyMappingControl({
             void onChange({ ...mapping, pasteTemplate });
           }}
           placeholder={t('settings.deviceKeys.templatePlaceholder')}
-          style={{ ...inputStyle, flex: '1 1 320px', maxWidth: 'none', minWidth: 220 }}
+          style={{ ...controlBaseStyle, flex: '1 1 240px', maxWidth: '100%', minWidth: 0 }}
         />
       )}
       {mapping.action === 'sendShortcut' && (
-        <div style={{ flex: '0 0 260px', minWidth: 0 }}>
+        <div style={{ flex: '0 1 260px', maxWidth: '100%', minWidth: 0 }}>
           <ShortcutRecorder
             value={mapping.shortcut ?? fallbackShortcut()}
             alignRecordButton
