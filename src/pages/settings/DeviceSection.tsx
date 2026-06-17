@@ -96,6 +96,10 @@ const KNOB_FIXED_ACTION_ROWS = [
   { gesture: 'doubleClick', action: 'bluetoothReset' },
   { gesture: 'longPress', action: 'powerOff' },
 ] as const;
+const DEVICE_KEY_CONTROL_GAP = 8;
+const DEVICE_KEY_MAIN_CONTROL_WIDTH = 208;
+const DEVICE_KEY_SECONDARY_CONTROL_WIDTH = 208;
+const DEVICE_KEY_DETAIL_WIDTH = DEVICE_KEY_MAIN_CONTROL_WIDTH + DEVICE_KEY_CONTROL_GAP + DEVICE_KEY_SECONDARY_CONTROL_WIDTH;
 const KNOB_CONTROL_WIDTH = 208;
 
 const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
@@ -661,21 +665,7 @@ function DeviceKeyMappingControl({
     })),
   ], [installedApps, installedAppsLoading, t]);
   const externalAppPickerValue = matchingInstalledApp?.path ?? EXTERNAL_APP_MANUAL_VALUE;
-  const actionWidth: Record<DeviceCustomKeyAction, number> = {
-    dictation: 208,
-    openApp: 180,
-    pasteShortcut: 150,
-    openExternalApp: 184,
-    copyShortcut: 150,
-    undoShortcut: 150,
-    sendShortcut: 150,
-    pasteTemplate: 176,
-    switchStyle: 170,
-    translation: 150,
-    selectionAsk: 150,
-    disabled: 112,
-  };
-  const mainActionWidth = actionWidthOverride ?? actionWidth[mapping.action];
+  const mainActionWidth = actionWidthOverride ?? DEVICE_KEY_MAIN_CONTROL_WIDTH;
   const controlBaseStyle = {
     ...inputStyle,
     height: 32,
@@ -722,7 +712,7 @@ function DeviceKeyMappingControl({
         style={{
           display: 'flex',
           flexWrap: 'wrap',
-          gap: 8,
+          gap: DEVICE_KEY_CONTROL_GAP,
           alignItems: 'center',
           width: '100%',
           maxWidth: '100%',
@@ -748,7 +738,7 @@ function DeviceKeyMappingControl({
               value: page,
               label: t(`settings.deviceKeys.appPages.${page}`),
             }))}
-            style={{ ...controlBaseStyle, flex: '0 1 180px', width: 180, maxWidth: '100%', minWidth: 0 }}
+            style={{ ...controlBaseStyle, flex: `0 1 ${DEVICE_KEY_SECONDARY_CONTROL_WIDTH}px`, width: DEVICE_KEY_SECONDARY_CONTROL_WIDTH, maxWidth: '100%', minWidth: 0 }}
             ariaLabel={t('settings.deviceKeys.appPageSelectAria')}
           />
         )}
@@ -760,7 +750,7 @@ function DeviceKeyMappingControl({
               void onChange({ ...mapping, externalAppPath: value });
             }}
             options={externalAppOptions}
-            style={{ ...controlBaseStyle, flex: '0 1 188px', width: 188, maxWidth: '100%', minWidth: 0 }}
+            style={{ ...controlBaseStyle, flex: `0 1 ${DEVICE_KEY_SECONDARY_CONTROL_WIDTH}px`, width: DEVICE_KEY_SECONDARY_CONTROL_WIDTH, maxWidth: '100%', minWidth: 0 }}
             ariaLabel={t('settings.deviceKeys.installedAppSelectAria')}
           />
         )}
@@ -778,7 +768,7 @@ function DeviceKeyMappingControl({
               : t('settings.deviceKeys.externalAppPlaceholder')
           }
           title={externalAppPath}
-          style={{ ...detailInputStyle, width: '100%', maxWidth: 460, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+          style={{ ...detailInputStyle, width: '100%', maxWidth: DEVICE_KEY_DETAIL_WIDTH, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
         />
       )}
       {mapping.action === 'pasteTemplate' && (
@@ -789,7 +779,7 @@ function DeviceKeyMappingControl({
             void onChange({ ...mapping, pasteTemplate });
           }}
           placeholder={t('settings.deviceKeys.templatePlaceholder')}
-          style={{ ...detailInputStyle, width: '100%', maxWidth: 420, minWidth: 0 }}
+          style={{ ...detailInputStyle, width: '100%', maxWidth: DEVICE_KEY_DETAIL_WIDTH, minWidth: 0 }}
         />
       )}
       {mapping.action === 'sendShortcut' && (
