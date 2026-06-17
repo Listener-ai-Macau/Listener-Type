@@ -50,7 +50,8 @@ use crate::types::{
     DictionaryEntry, HotkeyCapability, HotkeyStatus, OutputLanguagePreference, PolishMode,
     ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics, StyleSystemPrompts,
     UpdateChannel, UserPreferences, VocabPresetStore, WindowsImeStatus,
-    MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES, MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
+    DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
+    MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
 };
 
 type CoordinatorState<'a> = State<'a, Arc<Coordinator>>;
@@ -2276,7 +2277,9 @@ pub struct DeviceSettingsSnapshot {
     plugged_brightness_percent: u8,
     battery_brightness_percent: u8,
     active_brightness_percent: Option<u8>,
+    low_power_idle_minutes: u32,
     battery_auto_shutdown_ms: u32,
+    knob_rotation_action: String,
     ble_name: String,
     ble_name_pending_restart: bool,
     active_power_source: &'static str,
@@ -2290,6 +2293,7 @@ pub struct DeviceSettingsSnapshot {
 pub struct DeviceSettingsUpdateRequest {
     plugged_brightness_percent: u8,
     battery_brightness_percent: u8,
+    low_power_idle_minutes: u32,
     battery_auto_shutdown_minutes: u32,
     ble_name: String,
 }
@@ -2303,21 +2307,75 @@ const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
 const DEVICE_SETTINGS_BLE_WRITE_TIMEOUT: Duration = Duration::from_secs(4);
 const DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES: usize = 63;
 
+async fn read_device_settings_snapshot_from_firmware() -> Result<DeviceSettingsSnapshot, String> {
+    let status = tauri::async_runtime::spawn_blocking(|| {
+        crate::embedded_ble::read_device_settings_status(DEVICE_SETTINGS_BLE_WRITE_TIMEOUT)
+    })
+    .await
+    .map_err(|err| format!("Listener device settings readback task failed: {err}"))??;
+    Ok(device_settings_snapshot_from_status(status))
+}
+
 #[tauri::command]
 pub async fn get_device_settings() -> Result<DeviceSettingsSnapshot, String> {
-    let device =
-        tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
+    match read_device_settings_snapshot_from_firmware().await {
+        Ok(snapshot) => return Ok(snapshot),
+        Err(readback_error) => {
+            let device = tauri::async_runtime::spawn_blocking(
+                crate::embedded_ble::firmware_ota_device_snapshot,
+            )
             .await
             .map_err(|err| format!("Listener BLE device settings probe task failed: {err}"))?;
-    Ok(device_settings_snapshot_from_device(device))
+            let mut snapshot = device_settings_snapshot_from_device(device);
+            if snapshot.connected {
+                snapshot.detail =
+                    Some(device_settings_readback_unavailable_detail(&readback_error));
+            }
+            Ok(snapshot)
+        }
+    }
+}
+
+fn device_settings_readback_unavailable_detail(error: &str) -> String {
+    let mut chars = error.trim().chars();
+    let mut summary: String = chars.by_ref().take(180).collect();
+    if chars.next().is_some() {
+        summary.push_str("...");
+    }
+    if summary.is_empty() {
+        summary = "unknown error".to_string();
+    }
+    format!(
+        "Firmware DEVICE readback is unavailable ({summary}); showing defaults. Writes still use DEVICE:SET."
+    )
+}
+
+fn device_settings_sent_but_readback_unavailable_detail(error: &str) -> String {
+    let mut chars = error.trim().chars();
+    let mut summary: String = chars.by_ref().take(180).collect();
+    if chars.next().is_some() {
+        summary.push_str("...");
+    }
+    if summary.is_empty() {
+        summary = "unknown error".to_string();
+    }
+    format!(
+        "Device settings were sent, but firmware readback is unavailable ({summary}); displayed values are last-known."
+    )
 }
 
 #[tauri::command]
 pub async fn set_device_settings(
+    coord: CoordinatorState<'_>,
+    app: AppHandle,
     request: DeviceSettingsUpdateRequest,
 ) -> Result<DeviceSettingsSnapshot, String> {
     validate_device_settings_request(&request)?;
-    let previous_snapshot = get_device_settings().await.ok();
+    let previous_snapshot =
+        tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
+            .await
+            .ok()
+            .map(device_settings_snapshot_from_device);
     let commands = device_settings_update_commands(&request)?;
     for command in commands {
         tauri::async_runtime::spawn_blocking(move || {
@@ -2329,10 +2387,68 @@ pub async fn set_device_settings(
         .await
         .map_err(|err| format!("Listener device settings write task failed: {err}"))??;
     }
-    Ok(device_settings_snapshot_from_request(
-        &request,
-        previous_snapshot,
-    ))
+    {
+        let _settings_guard = settings_update_lock().lock();
+        let mut prefs = coord.prefs().get();
+        prefs.device_plugged_brightness_percent = request.plugged_brightness_percent;
+        prefs.device_battery_brightness_percent = request.battery_brightness_percent;
+        prefs.device_low_power_idle_minutes = request.low_power_idle_minutes;
+        prefs.device_battery_auto_shutdown_minutes = request.battery_auto_shutdown_minutes;
+        prefs.device_ble_name = request.ble_name.clone();
+        persist_settings(&*coord, prefs.clone())?;
+        emit_prefs_changed(&app, &prefs);
+    }
+    match read_device_settings_snapshot_from_firmware().await {
+        Ok(snapshot) => Ok(snapshot),
+        Err(readback_error) => {
+            let mut snapshot = device_settings_snapshot_from_request(&request, previous_snapshot);
+            snapshot.detail = Some(device_settings_sent_but_readback_unavailable_detail(
+                &readback_error,
+            ));
+            Ok(snapshot)
+        }
+    }
+}
+
+fn device_settings_snapshot_from_status(
+    status: crate::embedded_ble::DeviceSettingsStatus,
+) -> DeviceSettingsSnapshot {
+    let active_power_source = if status.external_power_present
+        || status.usb_power_present
+        || status.charging
+        || status.charge_full
+    {
+        "plugged"
+    } else {
+        "battery"
+    };
+    DeviceSettingsSnapshot {
+        schema: DEVICE_SETTINGS_SCHEMA,
+        connected: true,
+        write_supported: true,
+        source: "firmware",
+        plugged_brightness_percent: status.plugged_brightness_percent,
+        battery_brightness_percent: status.battery_brightness_percent,
+        active_brightness_percent: Some(status.active_brightness_percent),
+        low_power_idle_minutes: status.low_power_idle_minutes,
+        battery_auto_shutdown_ms: status.battery_auto_shutdown_minutes.saturating_mul(60_000),
+        knob_rotation_action: ui_knob_rotation_action_from_firmware(&status.knob_rotation_action),
+        ble_name: status.ble_name,
+        ble_name_pending_restart: status.ble_name_pending_restart,
+        active_power_source,
+        battery_percent: None,
+        detail: Some("Firmware DEVICE settings readback succeeded.".to_string()),
+        last_updated_at: None,
+    }
+}
+
+fn ui_knob_rotation_action_from_firmware(action: &str) -> String {
+    match action {
+        "system_volume" | "systemVolume" => "systemVolume".to_string(),
+        "screen_brightness" | "screenBrightness" => "screenBrightness".to_string(),
+        "disabled" => "disabled".to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn device_settings_snapshot_from_device(
@@ -2345,7 +2461,7 @@ fn device_settings_snapshot_from_device(
     };
     let detail = if device.connected {
         Some(
-            "Type can send DEVICE:SET over Listener BLE audio control. Current values are defaults until DEVICE readback is added to the BLE path.".to_string(),
+            "Type can send DEVICE:SET, but firmware DEVICE readback is not currently available; showing defaults.".to_string(),
         )
     } else {
         device.detail.or_else(|| {
@@ -2364,7 +2480,11 @@ fn device_settings_snapshot_from_device(
         plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
+        knob_rotation_action: ui_knob_rotation_action_from_firmware(
+            firmware_mode_for_device_knob_rotation_action(DeviceKnobRotationAction::default()),
+        ),
         ble_name: DEVICE_SETTINGS_DEFAULT_BLE_NAME.to_string(),
         ble_name_pending_restart: false,
         active_power_source,
@@ -2386,7 +2506,11 @@ fn device_settings_snapshot_from_request(
         plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
+        knob_rotation_action: ui_knob_rotation_action_from_firmware(
+            firmware_mode_for_device_knob_rotation_action(DeviceKnobRotationAction::default()),
+        ),
         ble_name: DEVICE_SETTINGS_DEFAULT_BLE_NAME.to_string(),
         ble_name_pending_restart: false,
         active_power_source: "unknown",
@@ -2400,6 +2524,7 @@ fn device_settings_snapshot_from_request(
     snapshot.source = "lastKnown";
     snapshot.plugged_brightness_percent = request.plugged_brightness_percent;
     snapshot.battery_brightness_percent = request.battery_brightness_percent;
+    snapshot.low_power_idle_minutes = request.low_power_idle_minutes;
     snapshot.battery_auto_shutdown_ms =
         request.battery_auto_shutdown_minutes.saturating_mul(60_000);
     snapshot.ble_name = request.ble_name.clone();
@@ -2410,7 +2535,7 @@ fn device_settings_snapshot_from_request(
         _ => None,
     };
     snapshot.detail = Some(
-        "Device settings were sent over Listener BLE audio control; displayed values are last-known until firmware DEVICE readback is available over BLE.".to_string(),
+        "Device settings were sent; displayed values are last-known until firmware DEVICE readback succeeds.".to_string(),
     );
     snapshot
 }
@@ -2422,6 +2547,10 @@ fn device_settings_update_commands(
         format!(
             "DEVICE:SET plugged_brightness={} battery_brightness={}",
             request.plugged_brightness_percent, request.battery_brightness_percent
+        ),
+        format!(
+            "DEVICE:SET low_power_idle_minutes={}",
+            request.low_power_idle_minutes
         ),
         format!(
             "DEVICE:SET auto_shutdown_minutes={}",
@@ -2449,6 +2578,13 @@ fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Re
     {
         return Err(format!(
             "Battery auto-shutdown must be between {DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES} and {DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES} minutes."
+        ));
+    }
+    if request.low_power_idle_minutes == 0
+        || request.low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
+    {
+        return Err(format!(
+            "Low-power idle must be between 1 and {MAX_DEVICE_LOW_POWER_IDLE_MINUTES} minutes."
         ));
     }
     validate_device_settings_ble_name(&request.ble_name)
@@ -5432,6 +5568,7 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 80,
             battery_brightness_percent: 45,
+            low_power_idle_minutes: 2,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
         };
@@ -5444,6 +5581,7 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 80,
             battery_brightness_percent: 45,
+            low_power_idle_minutes: 2,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener=bad".to_string(),
         };
@@ -5456,6 +5594,7 @@ mod tests {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 80,
             battery_brightness_percent: 45,
+            low_power_idle_minutes: 2,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener dev".to_string(),
         };
@@ -5464,16 +5603,62 @@ mod tests {
     }
 
     #[test]
+    fn device_settings_request_rejects_invalid_low_power_idle() {
+        let request = DeviceSettingsUpdateRequest {
+            plugged_brightness_percent: 80,
+            battery_brightness_percent: 45,
+            low_power_idle_minutes: 0,
+            battery_auto_shutdown_minutes: 30,
+            ble_name: "listener-dev".to_string(),
+        };
+
+        assert!(validate_device_settings_request(&request).is_err());
+    }
+
+    #[test]
+    fn device_settings_snapshot_uses_firmware_readback_values() {
+        let snapshot = super::device_settings_snapshot_from_status(
+            crate::embedded_ble::DeviceSettingsStatus {
+                plugged_brightness_percent: 80,
+                battery_brightness_percent: 45,
+                active_brightness_percent: 80,
+                low_power_idle_minutes: 3,
+                battery_auto_shutdown_minutes: 30,
+                knob_rotation_action: "screen_brightness".to_string(),
+                ble_name: "listener-dev".to_string(),
+                ble_name_pending_restart: true,
+                external_power_present: true,
+                usb_power_present: true,
+                charging: false,
+                charge_full: false,
+                raw_line: "~DEVICE:SETTINGS result=OK".to_string(),
+            },
+        );
+
+        assert_eq!(snapshot.source, "firmware");
+        assert_eq!(snapshot.plugged_brightness_percent, 80);
+        assert_eq!(snapshot.battery_brightness_percent, 45);
+        assert_eq!(snapshot.active_brightness_percent, Some(80));
+        assert_eq!(snapshot.low_power_idle_minutes, 3);
+        assert_eq!(snapshot.battery_auto_shutdown_ms, 30 * 60_000);
+        assert_eq!(snapshot.knob_rotation_action, "screenBrightness");
+        assert_eq!(snapshot.ble_name, "listener-dev");
+        assert!(snapshot.ble_name_pending_restart);
+        assert_eq!(snapshot.active_power_source, "plugged");
+    }
+
+    #[test]
     fn device_settings_update_commands_fit_ble_audio_control() {
         let request = DeviceSettingsUpdateRequest {
             plugged_brightness_percent: 100,
             battery_brightness_percent: 100,
+            low_power_idle_minutes: 1440,
             battery_auto_shutdown_minutes: 1440,
             ble_name: "listener-12345678901234567890123".to_string(),
         };
         let commands = device_settings_update_commands(&request).expect("commands");
 
-        assert_eq!(commands.len(), 3);
+        assert_eq!(commands.len(), 4);
         assert!(commands.iter().all(|command| {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
         }));

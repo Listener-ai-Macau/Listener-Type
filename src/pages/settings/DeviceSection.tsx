@@ -35,7 +35,6 @@ const DEVICE_KEYS = [
   { id: 'key3' },
   { id: 'key4' },
 ] as const satisfies ReadonlyArray<{ id: DeviceCustomKeyId }>;
-type DevicePhysicalKeyId = (typeof DEVICE_KEYS)[number]['id'];
 
 type DeviceKeyMapKey =
   | 'deviceCustomKeys'
@@ -45,38 +44,34 @@ type DeviceKeyMapKey =
 const DEVICE_GESTURES: Array<{
   id: DeviceCustomKeyGesture;
   mapKey: DeviceKeyMapKey;
-  fallbacks: Record<DevicePhysicalKeyId, string>;
 }> = [
   {
     id: 'singleClick',
     mapKey: 'deviceCustomKeys',
-    fallbacks: { key1: 'F13', key2: 'F14', key3: 'F15', key4: 'F16' },
   },
   {
     id: 'doubleClick',
     mapKey: 'deviceCustomKeyDoubleClicks',
-    fallbacks: { key1: 'F17', key2: 'F18', key3: 'F19', key4: 'F20' },
   },
   {
     id: 'longPress',
     mapKey: 'deviceCustomKeyLongPresses',
-    fallbacks: { key1: 'F21', key2: 'F22', key3: 'F23', key4: 'F24' },
   },
 ];
 
 const DEVICE_KEY_ACTIONS: DeviceCustomKeyAction[] = [
-  'disabled',
+  'dictation',
   'openApp',
+  'pasteShortcut',
   'openExternalApp',
+  'copyShortcut',
+  'undoShortcut',
+  'sendShortcut',
+  'pasteTemplate',
   'switchStyle',
   'translation',
   'selectionAsk',
-  'pasteTemplate',
-  'sendShortcut',
-  'dictation',
-  'copyShortcut',
-  'pasteShortcut',
-  'undoShortcut',
+  'disabled',
 ];
 
 const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
@@ -237,6 +232,7 @@ function DeviceFirmwareSettingsCard() {
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
     pluggedBrightnessPercent: 100,
     batteryBrightnessPercent: 100,
+    lowPowerIdleMinutes: 1,
     batteryAutoShutdownMinutes: 30,
     bleName: 'listener',
   });
@@ -263,6 +259,7 @@ function DeviceFirmwareSettingsCard() {
 
   const validationError = validateDeviceSettingsForm(form, t);
   const writeDisabled = status === 'loading' || status === 'saving' || !!validationError || !snapshot?.writeSupported;
+  const readDisabled = status === 'loading' || status === 'saving';
   const sourceTone: PillTone = snapshot?.connected ? (snapshot.writeSupported ? 'ok' : 'blue') : 'outline';
   const sourceLabel = snapshot
     ? snapshot.writeSupported
@@ -286,6 +283,7 @@ function DeviceFirmwareSettingsCard() {
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
+  const detailText = formatDeviceSnapshotDetail(snapshot, t);
 
   return (
     <Card>
@@ -300,15 +298,22 @@ function DeviceFirmwareSettingsCard() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <Pill tone={sourceTone} size="sm">{sourceLabel}</Pill>
-          <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refresh()} disabled={status === 'loading' || status === 'saving'} style={{ whiteSpace: 'nowrap' }}>
-            {status === 'loading' ? t('common.loading') : t('common.refresh')}
+          <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refresh()} disabled={readDisabled} style={{ whiteSpace: 'nowrap' }}>
+            {status === 'loading'
+              ? t('settings.device.reading', '读取中')
+              : t('settings.device.readFromDevice', '读取设备')}
+          </Btn>
+          <Btn variant="blue" size="sm" icon="check" disabled={writeDisabled} onClick={() => void save()} style={{ whiteSpace: 'nowrap' }}>
+            {status === 'saving'
+              ? t('settings.device.writing', '写入中')
+              : t('settings.device.writeToDevice', '写入设备')}
           </Btn>
         </div>
       </div>
 
-      {snapshot?.detail && (
+      {detailText && (
         <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginBottom: 2 }}>
-          {snapshot.detail}
+          {detailText}
         </div>
       )}
 
@@ -331,6 +336,28 @@ function DeviceFirmwareSettingsCard() {
           disabled={!snapshot?.writeSupported || status === 'saving'}
           onChange={value => setForm(current => ({ ...current, batteryBrightnessPercent: value }))}
         />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.device.lowPowerIdleLabel', '低功耗等待')}
+        desc={t('settings.device.lowPowerIdleDesc', '无操作多久后进入低功耗空闲；范围 1-1440 分钟。')}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', flexWrap: 'wrap' }}>
+          <input
+            type="number"
+            min={1}
+            max={1440}
+            value={form.lowPowerIdleMinutes}
+            disabled={!snapshot?.writeSupported || status === 'saving'}
+            onChange={event => {
+              const value = Number(event.target.value);
+              setForm(current => ({ ...current, lowPowerIdleMinutes: Number.isFinite(value) ? value : current.lowPowerIdleMinutes }));
+            }}
+            style={{ ...inputStyle, flex: '0 1 96px', maxWidth: 120 }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--ol-ink-4)' }}>
+            {t('settings.device.minutes', '分钟')}
+          </span>
+        </div>
       </SettingRow>
       <SettingRow
         label={t('settings.device.autoShutdownLabel', '电池自动关机')}
@@ -367,15 +394,8 @@ function DeviceFirmwareSettingsCard() {
         />
       </SettingRow>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 11.5, color: validationError || status === 'error' ? 'var(--ol-err)' : status === 'saved' ? 'var(--ol-ok)' : 'var(--ol-ink-4)', lineHeight: 1.45, minWidth: 0, flex: '1 1 220px' }}>
-          {validationError || message || formatDeviceSnapshotSummary(snapshot, t)}
-        </div>
-        <Btn variant="blue" size="sm" icon="check" disabled={writeDisabled} onClick={() => void save()} style={{ whiteSpace: 'nowrap' }}>
-          {status === 'saving'
-            ? t('common.saving', '保存中')
-            : t('common.save', '保存')}
-        </Btn>
+      <div style={{ fontSize: 11.5, color: validationError || status === 'error' ? 'var(--ol-err)' : status === 'saved' ? 'var(--ol-ok)' : 'var(--ol-ink-4)', lineHeight: 1.45, paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)' }}>
+        {validationError || message || formatDeviceSnapshotSummary(snapshot, t)}
       </div>
     </Card>
   );
@@ -526,9 +546,6 @@ function DeviceKeyGestureGroup({
               <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
                 {t('settings.deviceKeys.keyLabel', { key: id.toUpperCase() })}
               </div>
-              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2 }}>
-                {t('settings.deviceKeys.fallback', { fallback: gesture.fallbacks[id] })}
-              </div>
             </div>
             <DeviceKeyMappingControl
               mapping={keys[id]}
@@ -588,7 +605,7 @@ function DeviceKeyMappingControl({
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(130px, 165px) minmax(0, 1fr)', gap: 8, width: '100%', alignItems: 'start' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: 8, width: '100%', alignItems: 'start' }}>
       <SelectLite
         value={mapping.action}
         onChange={value => void updateAction(value as DeviceCustomKeyAction)}
@@ -665,16 +682,6 @@ function DeviceKeyMappingControl({
             }}
           />
         )}
-        {mapping.action !== 'pasteTemplate' &&
-          mapping.action !== 'sendShortcut' &&
-          mapping.action !== 'openApp' &&
-          mapping.action !== 'openExternalApp' && (
-          <span style={{ display: 'inline-flex', minHeight: 32, alignItems: 'center', padding: '0 10px', borderRadius: 6, background: 'var(--ol-surface-2)', border: '0.5px solid var(--ol-line-strong)', fontSize: 12, color: 'var(--ol-ink-3)' }}>
-            {mapping.action === 'disabled'
-              ? t('settings.deviceKeys.noop')
-              : t('settings.deviceKeys.actionReady')}
-          </span>
-        )}
         {mapping.action === 'sendShortcut' && mapping.shortcut && (
           <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', marginTop: 4 }}>
             {formatComboLabel(mapping.shortcut)}
@@ -689,6 +696,7 @@ function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateR
   return {
     pluggedBrightnessPercent: snapshot.pluggedBrightnessPercent,
     batteryBrightnessPercent: snapshot.batteryBrightnessPercent,
+    lowPowerIdleMinutes: snapshot.lowPowerIdleMinutes,
     batteryAutoShutdownMinutes: Math.max(1, Math.round(snapshot.batteryAutoShutdownMs / 60000)),
     bleName: snapshot.bleName,
   };
@@ -704,11 +712,31 @@ function validateDeviceSettingsForm(
   if (!Number.isFinite(form.batteryBrightnessPercent) || form.batteryBrightnessPercent < 0 || form.batteryBrightnessPercent > 100) {
     return t('settings.device.errorBrightness', '亮度必须在 0-100 之间。');
   }
+  if (!Number.isFinite(form.lowPowerIdleMinutes) || form.lowPowerIdleMinutes < 1 || form.lowPowerIdleMinutes > 1440) {
+    return t('settings.device.errorLowPowerIdle', '低功耗等待时间必须在 1-1440 分钟之间。');
+  }
   if (!Number.isFinite(form.batteryAutoShutdownMinutes) || form.batteryAutoShutdownMinutes < 1 || form.batteryAutoShutdownMinutes > 1440) {
     return t('settings.device.errorAutoShutdown', '自动关机时间必须在 1-1440 分钟之间。');
   }
   if (!isValidBleName(form.bleName)) {
     return t('settings.device.errorBleName', '蓝牙名称必须是 1-32 个可打印 ASCII 字符，不能包含空格、引号、分号、等号或反斜杠。');
+  }
+  return '';
+}
+
+function formatDeviceSnapshotDetail(
+  snapshot: DeviceSettingsSnapshot | null,
+  t: ReturnType<typeof useTranslation>['t'],
+): string {
+  if (!snapshot?.detail) return '';
+  if (snapshot.source === 'lastKnown') {
+    return t('settings.device.detailLastKnown', '已写入设备；本次读取回执暂时不可用，界面显示刚刚写入的值。');
+  }
+  if (snapshot.source === 'defaults' && snapshot.connected) {
+    return t('settings.device.detailDefaults', '设备已连接，但暂时读不到配置，当前显示默认值。');
+  }
+  if (snapshot.source === 'unavailable') {
+    return t('settings.device.detailUnavailable', '设备未连接；连接后可以读取和写入配置。');
   }
   return '';
 }
@@ -743,6 +771,7 @@ function formatDeviceSnapshotSummary(
   const active = snapshot.activeBrightnessPercent == null
     ? ''
     : t('settings.device.activeBrightness', '当前上限 {{value}}%', { value: snapshot.activeBrightnessPercent });
+  const lowPower = t('settings.device.lowPowerSummary', '低功耗 {{value}} 分钟', { value: snapshot.lowPowerIdleMinutes });
   const source = snapshot.source === 'mock'
     ? t('settings.device.sourceMock', '浏览器预览模拟')
     : snapshot.source === 'defaults'
@@ -752,5 +781,5 @@ function formatDeviceSnapshotSummary(
         : snapshot.source === 'unavailable'
           ? t('settings.device.sourceUnavailable', '设备不可用')
           : t('settings.device.sourceFirmware', '固件');
-  return [source, power, active].filter(Boolean).join(' · ');
+  return [source, power, active, lowPower].filter(Boolean).join(' · ');
 }

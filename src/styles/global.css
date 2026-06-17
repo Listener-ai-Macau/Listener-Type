@@ -127,3 +127,38 @@ a { color: inherit; text-decoration: none; }
     transform: translate3d(12px, 0, 0) scale(0.985);
   }
 }
+
+@media (max-width: 520px) {
+  .ol-settings-visual-root {
+    padding: 16px !important;
+  }
+
+  .ol-settings-layout {
+    grid-template-columns: 92px minmax(0, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .ol-settings-nav button {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .ol-setting-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .ol-setting-row-control {
+    width: 100% !important;
+  }
+
+  .ol-firmware-ota-header {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+
+  .ol-firmware-ota-actions {
+    justify-content: flex-start !important;
+    width: 100% !important;
+  }
+}
