@@ -345,14 +345,14 @@ export function FirmwareOtaPanel({
         onChange={event => void onFilesSelected(event.target.files)}
         style={{ display: 'none' }}
       />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <div className="ol-firmware-ota-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ol-ink)' }}>
             {t('settings.recording.firmwareOtaTitle', '设备固件')}
           </div>
           <Pill tone={statusTone} size="sm">{statusLabel}</Pill>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div className="ol-firmware-ota-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <Btn variant="ghost" size="sm" icon="doc" onClick={() => void chooseZipPackage()} disabled={transferActive}>
             {t('settings.recording.firmwareOtaChoosePackage', '选择 OTA zip')}
           </Btn>

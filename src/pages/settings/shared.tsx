@@ -12,12 +12,12 @@ interface SettingRowProps {
 
 export function SettingRow({ label, desc, children, controlWidth }: SettingRowProps) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 180px) minmax(140px, 1fr)', gap: 16, padding: '14px 0', borderTop: '0.5px solid var(--ol-line-soft)' }}>
+    <div className="ol-setting-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 180px) minmax(140px, 1fr)', gap: 16, padding: '14px 0', borderTop: '0.5px solid var(--ol-line-soft)' }}>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ol-ink)' }}>{label}</div>
         {desc && <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, lineHeight: 1.5 }}>{desc}</div>}
       </div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', minWidth: 0, width: controlWidth ?? 'auto' }}>{children}</div>
+      <div className="ol-setting-row-control" style={{ display: 'flex', alignItems: 'flex-start', minWidth: 0, width: controlWidth ?? 'auto' }}>{children}</div>
     </div>
   );
 }

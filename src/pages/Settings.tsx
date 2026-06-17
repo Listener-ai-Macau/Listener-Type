@@ -74,6 +74,7 @@ export function Settings({ embedded = false, initialSection = 'recording' }: Set
           强制行高等于容器高度，否则 grid 默认 auto rows 会跟内容长，右栏 overflow:auto
           就退化成"没东西需要 scroll"，于是大家照旧一起飘。 */}
       <div
+        className="ol-settings-layout"
         style={{
           display: 'grid',
           gridTemplateColumns: embedded ? '120px 1fr' : '160px 1fr',
@@ -81,7 +82,7 @@ export function Settings({ embedded = false, initialSection = 'recording' }: Set
           ...(embedded ? { flex: 1, minHeight: 0, gridTemplateRows: 'minmax(0, 1fr)' } : {}),
         }}
       >
-        <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div className="ol-settings-nav" style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {pillRect && (
             <div
               aria-hidden
