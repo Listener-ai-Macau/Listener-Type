@@ -183,11 +183,6 @@ export function DeviceSection() {
     <>
       <DeviceFirmwareSettingsCard />
 
-      <FirmwareOtaPanel
-        supported={bleSupported}
-        bleStatus={bleStatus}
-      />
-
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
           {t('settings.deviceKeys.title')}
@@ -222,6 +217,11 @@ export function DeviceSection() {
           onKnobRotationActionChange={updateKnobRotationAction}
         />
       </Card>
+
+      <FirmwareOtaPanel
+        supported={bleSupported}
+        bleStatus={bleStatus}
+      />
     </>
   );
 }
@@ -287,7 +287,7 @@ function DeviceFirmwareSettingsCard() {
 
   return (
     <Card>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+      <div className="ol-device-settings-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600 }}>
             {t('settings.device.configTitle', '设备设置')}
@@ -296,18 +296,20 @@ function DeviceFirmwareSettingsCard() {
             {t('settings.device.configDesc', '亮度按供电状态分开保存；自动关机只在拔电后的电池模式生效。')}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div className="ol-device-settings-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <Pill tone={sourceTone} size="sm">{sourceLabel}</Pill>
-          <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refresh()} disabled={readDisabled} style={{ whiteSpace: 'nowrap' }}>
-            {status === 'loading'
-              ? t('settings.device.reading', '读取中')
-              : t('settings.device.readFromDevice', '读取设备')}
-          </Btn>
-          <Btn variant="blue" size="sm" icon="check" disabled={writeDisabled} onClick={() => void save()} style={{ whiteSpace: 'nowrap' }}>
-            {status === 'saving'
-              ? t('settings.device.writing', '写入中')
-              : t('settings.device.writeToDevice', '写入设备')}
-          </Btn>
+          <div className="ol-device-readwrite-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: 'min(100%, 220px)' }}>
+            <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refresh()} disabled={readDisabled} style={{ justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
+              {status === 'loading'
+                ? t('settings.device.reading', '读取中')
+                : t('settings.device.readFromDevice', '读取设备')}
+            </Btn>
+            <Btn variant="blue" size="sm" icon="check" disabled={writeDisabled} onClick={() => void save()} style={{ justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
+              {status === 'saving'
+                ? t('settings.device.writing', '写入中')
+                : t('settings.device.writeToDevice', '写入设备')}
+            </Btn>
+          </div>
         </div>
       </div>
 
@@ -457,6 +459,7 @@ function KnobActionsPanel({
         {KNOB_ACTION_ROWS.map(item => (
           <div
             key={item.gesture}
+            className="ol-device-knob-row"
             style={{
               display: 'grid',
               gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
@@ -535,6 +538,7 @@ function DeviceKeyGestureGroup({
         {DEVICE_KEYS.map(({ id }) => (
           <div
             key={`${gesture.id}-${id}`}
+            className="ol-device-key-row"
             style={{
               display: 'grid',
               gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
@@ -605,7 +609,7 @@ function DeviceKeyMappingControl({
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: 8, width: '100%', alignItems: 'start' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', alignItems: 'stretch' }}>
       <SelectLite
         value={mapping.action}
         onChange={value => void updateAction(value as DeviceCustomKeyAction)}
@@ -631,7 +635,7 @@ function DeviceKeyMappingControl({
           />
         )}
         {mapping.action === 'openExternalApp' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8, width: '100%' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
             <SelectLite
               value={externalAppPickerValue}
               onChange={value => {

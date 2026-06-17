@@ -161,4 +161,24 @@ a { color: inherit; text-decoration: none; }
     justify-content: flex-start !important;
     width: 100% !important;
   }
+
+  .ol-device-settings-header {
+    align-items: stretch !important;
+    flex-direction: column !important;
+  }
+
+  .ol-device-settings-toolbar {
+    justify-content: flex-start !important;
+    width: 100% !important;
+  }
+
+  .ol-device-readwrite-row {
+    width: min(100%, 220px) !important;
+  }
+
+  .ol-device-key-row,
+  .ol-device-knob-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 6px !important;
+  }
 }
