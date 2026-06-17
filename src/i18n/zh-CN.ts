@@ -850,7 +850,7 @@ export const zhCN = {
           title: '旋钮动作',
           desc: '旋钮旋转可同步到设备；单击可作为功能键自定义，双击和长按由固件固定。',
           gestures: {
-            rotate: '旋钮旋转',
+            rotate: '旋转',
             shortPress: '单击',
             doubleClick: '双击',
             longPress: '长按',

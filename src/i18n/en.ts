@@ -852,7 +852,7 @@ export const en: typeof zhCN = {
           title: 'Knob actions',
           desc: 'Knob rotation syncs to the device; click is customizable as a function key, while double click and long press are fixed by firmware.',
           gestures: {
-            rotate: 'Knob rotation',
+            rotate: 'Rotation',
             shortPress: 'Click',
             doubleClick: 'Double click',
             longPress: 'Long press',

@@ -810,7 +810,7 @@ export const ko: typeof zhCN = {
         title: '노브 동작',
         desc: '노브 회전은 장치로 동기화됩니다. 클릭은 기능 키로 사용자 지정할 수 있으며, 더블 클릭과 길게 누르기는 펌웨어에서 고정됩니다.',
         gestures: {
-          rotate: '노브 회전',
+          rotate: '회전',
           shortPress: '클릭',
           doubleClick: '더블 클릭',
           longPress: '길게 누르기',

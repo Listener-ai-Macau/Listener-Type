@@ -810,7 +810,7 @@ export const ja: typeof zhCN = {
         title: 'ノブの動作',
         desc: 'ノブ回転はデバイスへ同期できます。クリックは機能キーとしてカスタマイズでき、ダブルクリックと長押しはファームウェア固定です。',
         gestures: {
-          rotate: 'ノブ回転',
+          rotate: '回転',
           shortPress: 'クリック',
           doubleClick: 'ダブルクリック',
           longPress: '長押し',

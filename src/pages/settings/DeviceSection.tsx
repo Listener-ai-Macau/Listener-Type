@@ -96,6 +96,9 @@ const KNOB_FIXED_ACTION_ROWS = [
   { gesture: 'doubleClick', action: 'bluetoothReset' },
   { gesture: 'longPress', action: 'powerOff' },
 ] as const;
+const DEVICE_KEY_LABEL_WIDTH = 50;
+const DEVICE_KEY_LABEL_GAP = 16;
+const DEVICE_KEY_ROW_TEMPLATE = `${DEVICE_KEY_LABEL_WIDTH}px minmax(0, 1fr)`;
 const DEVICE_KEY_CONTROL_GAP = 8;
 const DEVICE_KEY_MAIN_CONTROL_WIDTH = 208;
 const DEVICE_KEY_SECONDARY_CONTROL_WIDTH = 208;
@@ -476,8 +479,8 @@ function KnobActionsPanel({
           className="ol-device-knob-row"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
-            gap: 12,
+            gridTemplateColumns: DEVICE_KEY_ROW_TEMPLATE,
+            columnGap: DEVICE_KEY_LABEL_GAP,
             alignItems: 'center',
           }}
         >
@@ -499,8 +502,8 @@ function KnobActionsPanel({
           className="ol-device-knob-row"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
-            gap: 12,
+            gridTemplateColumns: DEVICE_KEY_ROW_TEMPLATE,
+            columnGap: DEVICE_KEY_LABEL_GAP,
             alignItems: 'start',
           }}
         >
@@ -521,8 +524,8 @@ function KnobActionsPanel({
             className="ol-device-knob-row"
             style={{
               display: 'grid',
-              gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
-              gap: 12,
+              gridTemplateColumns: DEVICE_KEY_ROW_TEMPLATE,
+              columnGap: DEVICE_KEY_LABEL_GAP,
               alignItems: 'center',
               opacity: 0.66,
             }}
@@ -588,8 +591,8 @@ function DeviceKeyGestureGroup({
             className="ol-device-key-row"
             style={{
               display: 'grid',
-              gridTemplateColumns: '50px minmax(0, 1fr)',
-              columnGap: 16,
+              gridTemplateColumns: DEVICE_KEY_ROW_TEMPLATE,
+              columnGap: DEVICE_KEY_LABEL_GAP,
               alignItems: 'start',
               minWidth: 0,
               padding: index === 0 ? '4px 0 8px' : '9px 0 8px',
