@@ -850,7 +850,7 @@ export const zhTW: typeof zhCN = {
       },
       knob: {
         title: '旋鈕動作',
-        desc: '旋鈕單擊和旋轉動作可同步到裝置；雙擊和長按由韌體固定。',
+        desc: '旋鈕旋轉可同步到裝置；單擊可作為功能鍵自訂，雙擊和長按由韌體固定。',
         gestures: {
           rotate: '旋鈕旋轉',
           shortPress: '單擊',

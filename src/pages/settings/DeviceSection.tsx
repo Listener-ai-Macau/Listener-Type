@@ -24,7 +24,7 @@ import type {
   ShortcutBinding,
 } from '../../lib/types';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
-import { Btn, Card, Pill, type PillTone } from '../_atoms';
+import { Btn, Card } from '../_atoms';
 import { FirmwareOtaPanel } from './FirmwareOtaPanel';
 import { inputStyle, SettingRow } from './shared';
 import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusPanel';
@@ -92,12 +92,11 @@ const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
 
 const KNOB_ROTATION_ACTIONS: DeviceKnobRotationAction[] = ['systemVolume', 'screenBrightness', 'disabled'];
 
-const KNOB_ACTION_ROWS = [
-  { gesture: 'rotate', action: 'systemVolume', locked: false },
-  { gesture: 'shortPress', action: 'recording', locked: true },
-  { gesture: 'doubleClick', action: 'bluetoothReset', locked: true },
-  { gesture: 'longPress', action: 'powerOff', locked: true },
+const KNOB_FIXED_ACTION_ROWS = [
+  { gesture: 'doubleClick', action: 'bluetoothReset' },
+  { gesture: 'longPress', action: 'powerOff' },
 ] as const;
+const KNOB_CONTROL_WIDTH = 208;
 
 const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
 const DEVICE_SETTINGS_REFRESH_MS = 8000;
@@ -213,7 +212,19 @@ export function DeviceSection() {
         </div>
 
         <KnobActionsPanel
+          knobClickMapping={prefs.deviceCustomKeys.knob}
           knobRotationAction={knobRotationAction}
+          installedApps={installedApps}
+          installedAppsLoading={installedAppsLoading}
+          onKnobClickMappingChange={async mapping => {
+            await savePrefs(current => ({
+              ...current,
+              deviceCustomKeys: {
+                ...current.deviceCustomKeys,
+                knob: mapping,
+              },
+            }));
+          }}
           onKnobRotationActionChange={updateKnobRotationAction}
         />
       </Card>
@@ -260,12 +271,6 @@ function DeviceFirmwareSettingsCard() {
   const validationError = validateDeviceSettingsForm(form, t);
   const writeDisabled = status === 'loading' || status === 'saving' || !!validationError || !snapshot?.writeSupported;
   const readDisabled = status === 'loading' || status === 'saving';
-  const sourceTone: PillTone = snapshot?.connected ? (snapshot.writeSupported ? 'ok' : 'blue') : 'outline';
-  const sourceLabel = snapshot
-    ? snapshot.writeSupported
-      ? t('settings.device.configSourceWritable', '可写')
-      : t('settings.device.configSourceReadOnly', '只读')
-    : t('common.loading');
 
   const save = async () => {
     if (writeDisabled) return;
@@ -297,7 +302,6 @@ function DeviceFirmwareSettingsCard() {
           </div>
         </div>
         <div className="ol-device-settings-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Pill tone={sourceTone} size="sm">{sourceLabel}</Pill>
           <div className="ol-device-readwrite-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: 'min(100%, 220px)' }}>
             <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refresh()} disabled={readDisabled} style={{ justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
               {status === 'loading'
@@ -439,10 +443,18 @@ function PercentSlider({
 }
 
 function KnobActionsPanel({
+  knobClickMapping,
   knobRotationAction,
+  installedApps,
+  installedAppsLoading,
+  onKnobClickMappingChange,
   onKnobRotationActionChange,
 }: {
+  knobClickMapping: DeviceCustomKeyMapping;
   knobRotationAction: DeviceKnobRotationAction;
+  installedApps: InstalledApplication[];
+  installedAppsLoading: boolean;
+  onKnobClickMappingChange: (mapping: DeviceCustomKeyMapping) => Promise<void>;
   onKnobRotationActionChange: (value: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -456,7 +468,50 @@ function KnobActionsPanel({
         {t('settings.deviceKeys.knob.desc')}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {KNOB_ACTION_ROWS.map(item => (
+        <div
+          className="ol-device-knob-row"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
+            gap: 12,
+            alignItems: 'center',
+          }}
+        >
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
+            {t('settings.deviceKeys.knob.gestures.rotate')}
+          </div>
+          <SelectLite
+            value={knobRotationAction}
+            onChange={value => void onKnobRotationActionChange(value)}
+            options={KNOB_ROTATION_ACTIONS.map(action => ({
+              value: action,
+              label: t(`settings.deviceKeys.knob.actions.${action}`),
+            }))}
+            style={{ ...inputStyle, flex: `0 1 ${KNOB_CONTROL_WIDTH}px`, width: KNOB_CONTROL_WIDTH, maxWidth: '100%', minWidth: 0 }}
+            ariaLabel={t('settings.deviceKeys.knob.rotationActionSelectAria')}
+          />
+        </div>
+        <div
+          className="ol-device-knob-row"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
+            gap: 12,
+            alignItems: 'start',
+          }}
+        >
+          <div style={{ height: 32, display: 'flex', alignItems: 'center', fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)' }}>
+            {t('settings.deviceKeys.knob.gestures.shortPress')}
+          </div>
+          <DeviceKeyMappingControl
+            mapping={knobClickMapping}
+            installedApps={installedApps}
+            installedAppsLoading={installedAppsLoading}
+            actionWidthOverride={KNOB_CONTROL_WIDTH}
+            onChange={onKnobClickMappingChange}
+          />
+        </div>
+        {KNOB_FIXED_ACTION_ROWS.map(item => (
           <div
             key={item.gesture}
             className="ol-device-knob-row"
@@ -465,47 +520,35 @@ function KnobActionsPanel({
               gridTemplateColumns: 'minmax(92px, 140px) minmax(0, 1fr)',
               gap: 12,
               alignItems: 'center',
-              opacity: item.locked ? 0.66 : 1,
+              opacity: 0.66,
             }}
           >
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: item.locked ? 'var(--ol-ink-3)' : 'var(--ol-ink)' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink-3)' }}>
               {t(`settings.deviceKeys.knob.gestures.${item.gesture}`)}
             </div>
-            {item.gesture === 'rotate' ? (
-              <SelectLite
-                value={knobRotationAction}
-                onChange={value => void onKnobRotationActionChange(value)}
-                options={KNOB_ROTATION_ACTIONS.map(action => ({
-                  value: action,
-                  label: t(`settings.deviceKeys.knob.actions.${action}`),
-                }))}
-                style={{ ...inputStyle, maxWidth: 'none', minWidth: 0 }}
-                ariaLabel={t('settings.deviceKeys.knob.rotationActionSelectAria')}
-              />
-            ) : (
-              <div
-                aria-disabled
-                style={{
-                  minHeight: 32,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  padding: '0 10px',
-                  borderRadius: 6,
-                  background: 'var(--ol-surface-2)',
-                  border: '0.5px solid var(--ol-line-strong)',
-                  color: 'var(--ol-ink-4)',
-                  fontSize: 12,
-                }}
-              >
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {t(`settings.deviceKeys.knob.actions.${item.action}`)}
-                </span>
-              </div>
-            )}
+            <div
+              aria-disabled
+              style={{
+                minHeight: 32,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                width: KNOB_CONTROL_WIDTH,
+                maxWidth: '100%',
+                boxSizing: 'border-box',
+                padding: '0 10px',
+                borderRadius: 6,
+                background: 'var(--ol-surface-2)',
+                border: '0.5px solid var(--ol-line-strong)',
+                color: 'var(--ol-ink-4)',
+                fontSize: 12,
+              }}
+            >
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {t(`settings.deviceKeys.knob.actions.${item.action}`)}
+              </span>
+            </div>
           </div>
         ))}
       </div>
@@ -589,12 +632,14 @@ function DeviceKeyMappingControl({
   installedApps,
   installedAppsLoading,
   autoOpen = false,
+  actionWidthOverride,
   onChange,
 }: {
   mapping: DeviceCustomKeyMapping;
   installedApps: InstalledApplication[];
   installedAppsLoading: boolean;
   autoOpen?: boolean;
+  actionWidthOverride?: number;
   onChange: (mapping: DeviceCustomKeyMapping) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -630,6 +675,7 @@ function DeviceKeyMappingControl({
     selectionAsk: 150,
     disabled: 112,
   };
+  const mainActionWidth = actionWidthOverride ?? actionWidth[mapping.action];
   const controlBaseStyle = {
     ...inputStyle,
     height: 32,
@@ -691,7 +737,7 @@ function DeviceKeyMappingControl({
             label: t(`settings.deviceKeys.actions.${action}`),
           }))}
           defaultOpen={autoOpen}
-          style={{ ...controlBaseStyle, flex: `0 1 ${actionWidth[mapping.action]}px`, width: actionWidth[mapping.action], maxWidth: '100%', minWidth: 0 }}
+          style={{ ...controlBaseStyle, flex: `0 1 ${mainActionWidth}px`, width: mainActionWidth, maxWidth: '100%', minWidth: 0 }}
           ariaLabel={t('settings.deviceKeys.actionSelectAria')}
         />
         {mapping.action === 'openApp' && (
