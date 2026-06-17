@@ -237,6 +237,7 @@ function DeviceFirmwareSettingsCard() {
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
     pluggedBrightnessPercent: 100,
     batteryBrightnessPercent: 100,
+    lowPowerIdleMinutes: 1,
     batteryAutoShutdownMinutes: 30,
     bleName: 'listener',
   });
@@ -331,6 +332,28 @@ function DeviceFirmwareSettingsCard() {
           disabled={!snapshot?.writeSupported || status === 'saving'}
           onChange={value => setForm(current => ({ ...current, batteryBrightnessPercent: value }))}
         />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.device.lowPowerIdleLabel', '低功耗等待')}
+        desc={t('settings.device.lowPowerIdleDesc', '无操作多久后进入低功耗空闲；范围 1-1440 分钟。')}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', flexWrap: 'wrap' }}>
+          <input
+            type="number"
+            min={1}
+            max={1440}
+            value={form.lowPowerIdleMinutes}
+            disabled={!snapshot?.writeSupported || status === 'saving'}
+            onChange={event => {
+              const value = Number(event.target.value);
+              setForm(current => ({ ...current, lowPowerIdleMinutes: Number.isFinite(value) ? value : current.lowPowerIdleMinutes }));
+            }}
+            style={{ ...inputStyle, flex: '0 1 96px', maxWidth: 120 }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--ol-ink-4)' }}>
+            {t('settings.device.minutes', '分钟')}
+          </span>
+        </div>
       </SettingRow>
       <SettingRow
         label={t('settings.device.autoShutdownLabel', '电池自动关机')}
@@ -689,6 +712,7 @@ function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateR
   return {
     pluggedBrightnessPercent: snapshot.pluggedBrightnessPercent,
     batteryBrightnessPercent: snapshot.batteryBrightnessPercent,
+    lowPowerIdleMinutes: snapshot.lowPowerIdleMinutes,
     batteryAutoShutdownMinutes: Math.max(1, Math.round(snapshot.batteryAutoShutdownMs / 60000)),
     bleName: snapshot.bleName,
   };
@@ -703,6 +727,9 @@ function validateDeviceSettingsForm(
   }
   if (!Number.isFinite(form.batteryBrightnessPercent) || form.batteryBrightnessPercent < 0 || form.batteryBrightnessPercent > 100) {
     return t('settings.device.errorBrightness', '亮度必须在 0-100 之间。');
+  }
+  if (!Number.isFinite(form.lowPowerIdleMinutes) || form.lowPowerIdleMinutes < 1 || form.lowPowerIdleMinutes > 1440) {
+    return t('settings.device.errorLowPowerIdle', '低功耗等待时间必须在 1-1440 分钟之间。');
   }
   if (!Number.isFinite(form.batteryAutoShutdownMinutes) || form.batteryAutoShutdownMinutes < 1 || form.batteryAutoShutdownMinutes > 1440) {
     return t('settings.device.errorAutoShutdown', '自动关机时间必须在 1-1440 分钟之间。');
@@ -743,6 +770,7 @@ function formatDeviceSnapshotSummary(
   const active = snapshot.activeBrightnessPercent == null
     ? ''
     : t('settings.device.activeBrightness', '当前上限 {{value}}%', { value: snapshot.activeBrightnessPercent });
+  const lowPower = t('settings.device.lowPowerSummary', '低功耗 {{value}} 分钟', { value: snapshot.lowPowerIdleMinutes });
   const source = snapshot.source === 'mock'
     ? t('settings.device.sourceMock', '浏览器预览模拟')
     : snapshot.source === 'defaults'
@@ -752,5 +780,5 @@ function formatDeviceSnapshotSummary(
         : snapshot.source === 'unavailable'
           ? t('settings.device.sourceUnavailable', '设备不可用')
           : t('settings.device.sourceFirmware', '固件');
-  return [source, power, active].filter(Boolean).join(' · ');
+  return [source, power, active, lowPower].filter(Boolean).join(' · ');
 }

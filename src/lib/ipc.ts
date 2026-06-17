@@ -177,7 +177,9 @@ let mockDeviceSettings: DeviceSettingsSnapshot = {
   pluggedBrightnessPercent: 100,
   batteryBrightnessPercent: 60,
   activeBrightnessPercent: 100,
+  lowPowerIdleMinutes: 1,
   batteryAutoShutdownMs: 30 * 60 * 1000,
+  knobRotationAction: 'systemVolume',
   bleName: 'listener',
   bleNamePendingRestart: false,
   activePowerSource: 'plugged',
@@ -620,6 +622,20 @@ export function setSettings(prefs: UserPreferences): Promise<void> {
   const nextPrefs = normalizeUserPreferences(prefs);
   return invokeOrMock('set_settings', { prefs: nextPrefs }, () => {
     mockSettings = { ...nextPrefs };
+    mockDeviceSettings = {
+      ...mockDeviceSettings,
+      pluggedBrightnessPercent: nextPrefs.devicePluggedBrightnessPercent,
+      batteryBrightnessPercent: nextPrefs.deviceBatteryBrightnessPercent,
+      activeBrightnessPercent: mockDeviceSettings.activePowerSource === 'battery'
+        ? nextPrefs.deviceBatteryBrightnessPercent
+        : nextPrefs.devicePluggedBrightnessPercent,
+      lowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
+      batteryAutoShutdownMs: nextPrefs.deviceBatteryAutoShutdownMinutes * 60 * 1000,
+      knobRotationAction: nextPrefs.deviceKnobRotationAction,
+      bleName: nextPrefs.deviceBleName,
+      source: 'mock',
+      lastUpdatedAt: new Date().toISOString(),
+    };
     mockStylePacks = mockStylePacks.map(pack => {
       if (pack.kind === 'builtin') {
         return {
@@ -1079,6 +1095,14 @@ export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise
     { request },
     () => {
       const batteryAutoShutdownMs = Math.round(request.batteryAutoShutdownMinutes * 60 * 1000);
+      mockSettings = {
+        ...mockSettings,
+        devicePluggedBrightnessPercent: request.pluggedBrightnessPercent,
+        deviceBatteryBrightnessPercent: request.batteryBrightnessPercent,
+        deviceLowPowerIdleMinutes: request.lowPowerIdleMinutes,
+        deviceBatteryAutoShutdownMinutes: request.batteryAutoShutdownMinutes,
+        deviceBleName: request.bleName,
+      };
       mockDeviceSettings = {
         ...mockDeviceSettings,
         pluggedBrightnessPercent: request.pluggedBrightnessPercent,
@@ -1086,6 +1110,7 @@ export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise
         activeBrightnessPercent: mockDeviceSettings.activePowerSource === 'battery'
           ? request.batteryBrightnessPercent
           : request.pluggedBrightnessPercent,
+        lowPowerIdleMinutes: request.lowPowerIdleMinutes,
         batteryAutoShutdownMs,
         bleName: request.bleName,
         bleNamePendingRestart: mockDeviceSettings.bleName !== request.bleName,

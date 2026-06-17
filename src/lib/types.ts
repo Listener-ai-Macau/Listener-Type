@@ -568,7 +568,9 @@ export interface DeviceSettingsSnapshot {
   pluggedBrightnessPercent: number;
   batteryBrightnessPercent: number;
   activeBrightnessPercent: number | null;
+  lowPowerIdleMinutes: number;
   batteryAutoShutdownMs: number;
+  knobRotationAction: DeviceKnobRotationAction | string;
   bleName: string;
   bleNamePendingRestart: boolean;
   activePowerSource: DeviceSettingsPowerSource;
@@ -580,6 +582,7 @@ export interface DeviceSettingsSnapshot {
 export interface DeviceSettingsUpdateRequest {
   pluggedBrightnessPercent: number;
   batteryBrightnessPercent: number;
+  lowPowerIdleMinutes: number;
   batteryAutoShutdownMinutes: number;
   bleName: string;
 }
