@@ -534,7 +534,7 @@ function DeviceKeyGestureGroup({
       <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ol-ink)', marginBottom: 8 }}>
         {t(`settings.deviceKeys.gestures.${gesture.id}`)}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {DEVICE_KEYS.map(({ id }) => (
           <div
             key={`${gesture.id}-${id}`}
@@ -545,6 +545,7 @@ function DeviceKeyGestureGroup({
               gap: 12,
               alignItems: 'center',
               minWidth: 0,
+              padding: '2px 0',
             }}
           >
             <div style={{ minWidth: 0 }}>
@@ -600,7 +601,7 @@ function DeviceKeyMappingControl({
   const externalAppPickerValue = matchingInstalledApp?.path ?? EXTERNAL_APP_MANUAL_VALUE;
   const actionWidth: Record<DeviceCustomKeyAction, number> = {
     dictation: 220,
-    openApp: 224,
+    openApp: 200,
     pasteShortcut: 168,
     openExternalApp: 184,
     copyShortcut: 168,
@@ -629,43 +630,53 @@ function DeviceKeyMappingControl({
 
   return (
     <div
-      className="ol-device-key-control-line"
+      className="ol-device-key-control-stack"
       style={{
         display: 'flex',
-        flexWrap: 'wrap',
-        gap: 8,
-        alignItems: 'center',
+        flexDirection: 'column',
+        gap: 7,
+        alignItems: 'flex-start',
         width: '100%',
         maxWidth: '100%',
         minWidth: 0,
-        overflow: 'hidden',
       }}
     >
-      <SelectLite
-        value={mapping.action}
-        onChange={value => void updateAction(value as DeviceCustomKeyAction)}
-        options={DEVICE_KEY_ACTIONS.map(action => ({
-          value: action,
-          label: t(`settings.deviceKeys.actions.${action}`),
-        }))}
-        defaultOpen={autoOpen}
-        style={{ ...controlBaseStyle, flex: `0 1 ${actionWidth[mapping.action]}px`, width: actionWidth[mapping.action], maxWidth: '100%', minWidth: 0 }}
-        ariaLabel={t('settings.deviceKeys.actionSelectAria')}
-      />
-      {mapping.action === 'openApp' && (
+      <div
+        className="ol-device-key-action-row"
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 8,
+          alignItems: 'center',
+          width: '100%',
+          maxWidth: '100%',
+          minWidth: 0,
+        }}
+      >
         <SelectLite
-          value={mapping.appPage ?? 'settingsDevice'}
-          onChange={value => void onChange({ ...mapping, appPage: value as DeviceCustomKeyAppPage })}
-          options={DEVICE_KEY_APP_PAGES.map(page => ({
-            value: page,
-            label: t(`settings.deviceKeys.appPages.${page}`),
+          value={mapping.action}
+          onChange={value => void updateAction(value as DeviceCustomKeyAction)}
+          options={DEVICE_KEY_ACTIONS.map(action => ({
+            value: action,
+            label: t(`settings.deviceKeys.actions.${action}`),
           }))}
-          style={{ ...controlBaseStyle, flex: '0 1 220px', width: 220, maxWidth: '100%', minWidth: 0 }}
-          ariaLabel={t('settings.deviceKeys.appPageSelectAria')}
+          defaultOpen={autoOpen}
+          style={{ ...controlBaseStyle, flex: `0 1 ${actionWidth[mapping.action]}px`, width: actionWidth[mapping.action], maxWidth: '100%', minWidth: 0 }}
+          ariaLabel={t('settings.deviceKeys.actionSelectAria')}
         />
-      )}
-      {mapping.action === 'openExternalApp' && (
-        <>
+        {mapping.action === 'openApp' && (
+          <SelectLite
+            value={mapping.appPage ?? 'settingsDevice'}
+            onChange={value => void onChange({ ...mapping, appPage: value as DeviceCustomKeyAppPage })}
+            options={DEVICE_KEY_APP_PAGES.map(page => ({
+              value: page,
+              label: t(`settings.deviceKeys.appPages.${page}`),
+            }))}
+            style={{ ...controlBaseStyle, flex: '0 1 188px', width: 188, maxWidth: '100%', minWidth: 0 }}
+            ariaLabel={t('settings.deviceKeys.appPageSelectAria')}
+          />
+        )}
+        {mapping.action === 'openExternalApp' && (
           <SelectLite
             value={externalAppPickerValue}
             onChange={value => {
@@ -676,20 +687,22 @@ function DeviceKeyMappingControl({
             style={{ ...controlBaseStyle, flex: '0 1 210px', width: 210, maxWidth: '100%', minWidth: 0 }}
             ariaLabel={t('settings.deviceKeys.installedAppSelectAria')}
           />
-          <input
-            value={externalAppPath}
-            onChange={event => {
-              const externalAppPath = event.target.value;
-              void onChange({ ...mapping, externalAppPath });
-            }}
-            placeholder={
-              installedApps.length === 0 && !installedAppsLoading
-                ? t('settings.deviceKeys.installedAppEmpty')
-                : t('settings.deviceKeys.externalAppPlaceholder')
-            }
-            style={{ ...controlBaseStyle, flex: '1 1 240px', maxWidth: '100%', minWidth: 0 }}
-          />
-        </>
+        )}
+      </div>
+      {mapping.action === 'openExternalApp' && (
+        <input
+          value={externalAppPath}
+          onChange={event => {
+            const externalAppPath = event.target.value;
+            void onChange({ ...mapping, externalAppPath });
+          }}
+          placeholder={
+            installedApps.length === 0 && !installedAppsLoading
+              ? t('settings.deviceKeys.installedAppEmpty')
+              : t('settings.deviceKeys.externalAppPlaceholder')
+          }
+          style={{ ...controlBaseStyle, width: '100%', maxWidth: 520, minWidth: 0 }}
+        />
       )}
       {mapping.action === 'pasteTemplate' && (
         <input
@@ -699,11 +712,11 @@ function DeviceKeyMappingControl({
             void onChange({ ...mapping, pasteTemplate });
           }}
           placeholder={t('settings.deviceKeys.templatePlaceholder')}
-          style={{ ...controlBaseStyle, flex: '1 1 240px', maxWidth: '100%', minWidth: 0 }}
+          style={{ ...controlBaseStyle, width: '100%', maxWidth: 420, minWidth: 0 }}
         />
       )}
       {mapping.action === 'sendShortcut' && (
-        <div style={{ flex: '0 1 260px', maxWidth: '100%', minWidth: 0 }}>
+        <div style={{ width: 260, maxWidth: '100%', minWidth: 0 }}>
           <ShortcutRecorder
             value={mapping.shortcut ?? fallbackShortcut()}
             alignRecordButton
