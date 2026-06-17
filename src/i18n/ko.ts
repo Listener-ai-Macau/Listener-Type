@@ -819,6 +819,7 @@ export const ko: typeof zhCN = {
           systemVolume: '컴퓨터 볼륨',
           screenBrightness: '화면 밝기',
           disabled: '비활성화',
+          recording: '녹음 시작 / 중지',
           bluetoothReset: 'Bluetooth 재설정 / 다시 페어링',
           powerOff: '전원 끄기',
         },

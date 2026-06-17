@@ -859,6 +859,7 @@ export const zhCN = {
             systemVolume: '电脑音量',
             screenBrightness: '屏幕亮度',
             disabled: '禁用',
+            recording: '开始 / 停止录音',
             bluetoothReset: '重置蓝牙 / 重新配对',
             powerOff: '关机',
           },

@@ -861,6 +861,7 @@ export const zhTW: typeof zhCN = {
           systemVolume: '電腦音量',
           screenBrightness: '螢幕亮度',
           disabled: '停用',
+          recording: '開始 / 停止錄音',
           bluetoothReset: '重置藍牙 / 重新配對',
           powerOff: '關機',
         },

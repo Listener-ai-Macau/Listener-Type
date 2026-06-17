@@ -861,6 +861,7 @@ export const en: typeof zhCN = {
             systemVolume: 'Computer volume',
             screenBrightness: 'Screen brightness',
             disabled: 'Disabled',
+            recording: 'Start / stop recording',
             bluetoothReset: 'Reset Bluetooth / re-pair',
             powerOff: 'Power off',
           },

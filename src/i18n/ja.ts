@@ -819,6 +819,7 @@ export const ja: typeof zhCN = {
           systemVolume: 'コンピューター音量',
           screenBrightness: '画面の明るさ',
           disabled: '無効',
+          recording: '録音の開始 / 停止',
           bluetoothReset: 'Bluetooth リセット / 再ペアリング',
           powerOff: '電源オフ',
         },
