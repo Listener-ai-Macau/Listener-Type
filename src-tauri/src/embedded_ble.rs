@@ -573,6 +573,9 @@ mod windows_ble {
     const DIAGNOSTIC_PULL_CANDIDATE_DELAY: Duration = Duration::from_millis(350);
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
     const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
+    const OTA_DATA_WRITE_OPTION_ENV: &str = "LISTENER_OTA_DATA_WRITE_OPTION";
+    const OTA_DATA_CHUNK_BYTES_ENV: &str = "LISTENER_OTA_DATA_CHUNK_BYTES";
+    const OTA_DATA_INTER_CHUNK_DELAY_MS_ENV: &str = "LISTENER_OTA_DATA_INTER_CHUNK_DELAY_MS";
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
@@ -2568,6 +2571,7 @@ mod windows_ble {
 
         let data_chunk_bytes =
             ota_transfer_chunk_bytes(target.data_chunk_bytes, manifest_chunk_bytes)?;
+        let inter_chunk_delay = ota_data_inter_chunk_delay()?;
         let total_chunks = firmware_bytes.len().div_ceil(data_chunk_bytes);
         log::info!(
             "[embedded-ble] ota #{transfer_id}: aborting previous OTA (if any) before begin"
@@ -2608,6 +2612,9 @@ mod windows_ble {
                 OTA_WRITE_TIMEOUT,
                 "OTA data",
             )?;
+            if !inter_chunk_delay.is_zero() {
+                std::thread::sleep(inter_chunk_delay);
+            }
             chunks_sent += 1;
             let bytes_sent = (chunks_sent * data_chunk_bytes).min(firmware_bytes.len());
             if chunks_sent % 10 == 0 || bytes_sent == firmware_bytes.len() {
@@ -4008,13 +4015,8 @@ mod windows_ble {
         let data_properties = data
             .CharacteristicProperties()
             .map_err(|err| format!("BLE OTA data characteristic properties read failed: {err}"))?;
-        if !data_properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
-            return Err(
-                "BLE OTA data characteristic must support WriteWithoutResponse.".to_string(),
-            );
-        }
-        let data_write_option = GattWriteOption::WriteWithoutResponse;
-        let data_chunk_bytes = ota_data_chunk_bytes(session.as_ref());
+        let data_write_option = ota_data_write_option(data_properties)?;
+        let data_chunk_bytes = ota_data_chunk_bytes(session.as_ref(), data_write_option);
         log::info!(
             "[embedded-ble] OTA data write option={data_write_option:?} chunk_bytes={data_chunk_bytes}"
         );
@@ -4090,12 +4092,76 @@ mod windows_ble {
         Ok(PreparedAudioControlCharacteristic { control, session })
     }
 
-    fn ota_data_chunk_bytes(session: Option<&GattSession>) -> usize {
+    fn ota_data_write_option(
+        data_properties: GattCharacteristicProperties,
+    ) -> Result<GattWriteOption, String> {
+        let requested = std::env::var(OTA_DATA_WRITE_OPTION_ENV)
+            .ok()
+            .and_then(ota_env_value);
+        ota_data_write_option_from_request(data_properties, requested.as_deref())
+    }
+
+    fn ota_data_write_option_from_request(
+        data_properties: GattCharacteristicProperties,
+        requested: Option<&str>,
+    ) -> Result<GattWriteOption, String> {
+        let supports_write = data_properties.contains(GattCharacteristicProperties::Write);
+        let supports_without_response =
+            data_properties.contains(GattCharacteristicProperties::WriteWithoutResponse);
+        let requested = requested
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "auto".to_string());
+        let option = match requested.as_str() {
+            "auto" => {
+                if supports_write {
+                    GattWriteOption::WriteWithResponse
+                } else if supports_without_response {
+                    GattWriteOption::WriteWithoutResponse
+                } else {
+                    return Err(
+                        "BLE OTA data characteristic must support Write or WriteWithoutResponse."
+                            .to_string(),
+                    );
+                }
+            }
+            "with-response" | "with_response" | "response" => {
+                if supports_write {
+                    GattWriteOption::WriteWithResponse
+                } else {
+                    return Err(format!(
+                        "{OTA_DATA_WRITE_OPTION_ENV}=with-response requested, but BLE OTA data characteristic does not support Write."
+                    ));
+                }
+            }
+            "without-response" | "without_response" | "no-response" | "no_response" => {
+                if supports_without_response {
+                    GattWriteOption::WriteWithoutResponse
+                } else {
+                    return Err(format!(
+                        "{OTA_DATA_WRITE_OPTION_ENV}=without-response requested, but BLE OTA data characteristic does not support WriteWithoutResponse."
+                    ));
+                }
+            }
+            other => {
+                return Err(format!(
+                    "Unsupported {OTA_DATA_WRITE_OPTION_ENV}={other}; use auto, with-response, or without-response."
+                ));
+            }
+        };
+        log::info!("[embedded-ble] OTA data write option request={requested} selected={option:?}");
+        Ok(option)
+    }
+
+    fn ota_data_chunk_bytes(session: Option<&GattSession>, write_option: GattWriteOption) -> usize {
         let payload_bytes = session
             .and_then(|session| session.MaxPduSize().ok())
             .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
             .filter(|payload_bytes| *payload_bytes > 0)
             .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
+        if write_option == GattWriteOption::WriteWithoutResponse {
+            return payload_bytes.min(ATT_DEFAULT_PAYLOAD_BYTES).max(1);
+        }
         payload_bytes.max(1)
     }
 
@@ -4108,12 +4174,84 @@ mod windows_ble {
                 "OTA manifest chunk size must be {OTA_REQUIRED_DATA_CHUNK_BYTES} bytes, got {manifest_chunk_bytes}."
             ));
         }
-        if transport_limit_bytes < OTA_REQUIRED_DATA_CHUNK_BYTES {
+        let test_chunk_bytes = ota_data_test_chunk_bytes_override()?;
+        ota_transfer_chunk_bytes_with_override(
+            transport_limit_bytes,
+            manifest_chunk_bytes,
+            test_chunk_bytes,
+        )
+    }
+
+    fn ota_transfer_chunk_bytes_with_override(
+        transport_limit_bytes: usize,
+        manifest_chunk_bytes: usize,
+        test_chunk_bytes: Option<usize>,
+    ) -> Result<usize, String> {
+        if transport_limit_bytes == 0 {
             return Err(format!(
-                "BLE transport payload limit is {transport_limit_bytes} bytes; OTA requires {OTA_REQUIRED_DATA_CHUNK_BYTES} bytes."
+                "BLE transport payload limit is {transport_limit_bytes} bytes; OTA requires a positive data chunk size."
             ));
         }
-        Ok(OTA_REQUIRED_DATA_CHUNK_BYTES)
+        let mut chunk_bytes = manifest_chunk_bytes.min(transport_limit_bytes);
+        if let Some(test_chunk_bytes) = test_chunk_bytes {
+            chunk_bytes = chunk_bytes.min(test_chunk_bytes);
+        }
+        if chunk_bytes == 0 {
+            return Err("BLE OTA data chunk size resolved to 0 bytes.".to_string());
+        }
+        Ok(chunk_bytes)
+    }
+
+    fn ota_data_test_chunk_bytes_override() -> Result<Option<usize>, String> {
+        let value = std::env::var(OTA_DATA_CHUNK_BYTES_ENV)
+            .ok()
+            .and_then(ota_env_value);
+        ota_data_test_chunk_bytes_override_from(value.as_deref())
+    }
+
+    fn ota_data_test_chunk_bytes_override_from(
+        value: Option<&str>,
+    ) -> Result<Option<usize>, String> {
+        match value.map(str::trim).filter(|value| !value.is_empty()) {
+            None => Ok(None),
+            Some(value) => value
+                .parse::<usize>()
+                .ok()
+                .filter(|chunk_bytes| *chunk_bytes > 0)
+                .map(Some)
+                .ok_or_else(|| {
+                    format!(
+                        "Unsupported {OTA_DATA_CHUNK_BYTES_ENV}={value}; use a positive byte count."
+                    )
+                }),
+        }
+    }
+
+    fn ota_data_inter_chunk_delay() -> Result<Duration, String> {
+        let value = std::env::var(OTA_DATA_INTER_CHUNK_DELAY_MS_ENV)
+            .ok()
+            .and_then(ota_env_value);
+        ota_data_inter_chunk_delay_from(value.as_deref())
+    }
+
+    fn ota_data_inter_chunk_delay_from(value: Option<&str>) -> Result<Duration, String> {
+        match value.map(str::trim).filter(|value| !value.is_empty()) {
+            None => Ok(Duration::ZERO),
+            Some(value) => value.parse::<u64>().map(Duration::from_millis).map_err(|_| {
+                format!(
+                    "Unsupported {OTA_DATA_INTER_CHUNK_DELAY_MS_ENV}={value}; use a non-negative millisecond count."
+                )
+            }),
+        }
+    }
+
+    fn ota_env_value(value: String) -> Option<String> {
+        let value = value.trim().to_string();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value)
+        }
     }
 
     fn open_write_characteristic_from_service(
@@ -5246,6 +5384,48 @@ mod windows_ble {
         }
 
         #[test]
+        fn ota_write_option_prefers_with_response_and_accepts_overrides() {
+            let both = GattCharacteristicProperties::Write
+                | GattCharacteristicProperties::WriteWithoutResponse;
+
+            assert_eq!(
+                ota_data_write_option_from_request(both, None),
+                Ok(GattWriteOption::WriteWithResponse)
+            );
+            assert_eq!(
+                ota_data_write_option_from_request(both, Some("without-response")),
+                Ok(GattWriteOption::WriteWithoutResponse)
+            );
+            assert!(ota_data_write_option_from_request(
+                GattCharacteristicProperties::WriteWithoutResponse,
+                Some("with-response")
+            )
+            .is_err());
+        }
+
+        #[test]
+        fn ota_transfer_chunk_selection_uses_transport_and_test_override() {
+            assert_eq!(
+                ota_transfer_chunk_bytes_with_override(514, 500, None),
+                Ok(500)
+            );
+            assert_eq!(
+                ota_transfer_chunk_bytes_with_override(244, 500, None),
+                Ok(244)
+            );
+            assert_eq!(
+                ota_transfer_chunk_bytes_with_override(514, 500, Some(244)),
+                Ok(244)
+            );
+            assert!(ota_transfer_chunk_bytes_with_override(0, 500, None).is_err());
+            assert!(ota_data_test_chunk_bytes_override_from(Some("0")).is_err());
+            assert_eq!(
+                ota_data_inter_chunk_delay_from(Some("25")),
+                Ok(Duration::from_millis(25))
+            );
+        }
+
+        #[test]
         fn active_audio_control_registration_only_clears_matching_capture() {
             let _guard = active_audio_control_test_lock().lock().unwrap();
             *active_audio_control_slot().lock().unwrap() = None;
@@ -5849,7 +6029,11 @@ mod tests {
             super::windows_ble::ota_transfer_chunk_bytes(514, 500),
             Ok(500)
         );
-        assert!(super::windows_ble::ota_transfer_chunk_bytes(499, 500).is_err());
+        assert_eq!(
+            super::windows_ble::ota_transfer_chunk_bytes(499, 500),
+            Ok(499)
+        );
+        assert!(super::windows_ble::ota_transfer_chunk_bytes(0, 500).is_err());
         assert!(super::windows_ble::ota_transfer_chunk_bytes(514, 499).is_err());
     }
 
