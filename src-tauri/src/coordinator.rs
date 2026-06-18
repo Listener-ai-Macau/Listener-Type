@@ -69,6 +69,7 @@ const EMBEDDED_BLE_RETRY_FAST_DELAY: Duration = Duration::from_millis(500);
 const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(3);
+const EMBEDDED_BLE_RETRY_OFFLINE_DELAY: Duration = Duration::from_secs(180);
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);
 const EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(12);
@@ -2956,14 +2957,43 @@ fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) -> bool {
         snapshot.notify_subscription_state,
         EmbeddedBleNotifySubscriptionState::Lost | EmbeddedBleNotifySubscriptionState::Failed
     );
+    let previous_status = snapshot.status.clone();
+    let previous_notify_state = snapshot.notify_subscription_state.clone();
+    let usb_powered = snapshot.usb_powered;
+    let battery_percent = snapshot.battery_percent;
+    let recent_disconnect_failure = recent_disconnect_reason
+        .as_deref()
+        .map(crate::embedded_ble::classify_ble_failure);
+    let recent_disconnect_low_power_idle = recent_disconnect_reason
+        .as_deref()
+        .is_some_and(is_embedded_ble_low_power_idle_candidate);
     let recovered = recent_disconnect_reason.is_some() || notify_was_recovering;
     let emit_recovered_capsule = recovered
         && recent_disconnect_reason
             .as_deref()
             .map(|reason| {
-                should_emit_embedded_ble_recovered_capsule_for_reason(reason, snapshot.usb_powered)
+                should_emit_embedded_ble_recovered_capsule_for_reason(reason, usb_powered)
             })
             .unwrap_or(true);
+    log::info!(
+        "[embedded-ble] notify ready recovery decision recovered={} emit_recovered_capsule={} previous_status={:?} previous_notify_state={:?} notify_was_recovering={} usb_powered={:?} battery_percent={:?} recent_disconnect_kind={:?} recent_disconnect_automatic_recovery={} recent_disconnect_low_power_idle={} recent_disconnect_reason={}",
+        recovered,
+        emit_recovered_capsule,
+        previous_status,
+        previous_notify_state,
+        notify_was_recovering,
+        usb_powered,
+        battery_percent,
+        recent_disconnect_failure.as_ref().map(|failure| failure.kind),
+        recent_disconnect_failure
+            .as_ref()
+            .is_some_and(|failure| failure.automatic_recovery),
+        recent_disconnect_low_power_idle,
+        recent_disconnect_reason
+            .as_deref()
+            .map(embedded_ble_log_preview)
+            .unwrap_or_else(|| "-".to_string()),
+    );
     snapshot.status = EmbeddedBleWakeRecoveryStatus::Ready;
     snapshot.user_guidance = "Listener BLE 已连接，音频 notify 已订阅。".to_string();
     snapshot.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Subscribed;
@@ -3057,6 +3087,18 @@ fn record_embedded_ble_recovery_failure(inner: &Arc<Inner>, err: &str) {
     } else {
         EmbeddedBleNotifySubscriptionState::Lost
     };
+    log::warn!(
+        "[embedded-ble] recovery failure recorded kind={:?} automatic_recovery={} retryable={} status={:?} notify_state={:?} usb_powered={:?} battery_percent={:?} guidance={} err={}",
+        failure.kind,
+        failure.automatic_recovery,
+        failure.retryable,
+        snapshot.status,
+        snapshot.notify_subscription_state,
+        snapshot.usb_powered,
+        snapshot.battery_percent,
+        snapshot.user_guidance,
+        embedded_ble_log_preview(err),
+    );
 }
 
 fn emit_embedded_ble_recovery_capsule(
@@ -3234,7 +3276,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                         );
                     } else if is_embedded_ble_automatic_recovery_error(&err) {
                         log::info!(
-                            "[embedded-ble] background recovery capsule suppressed for battery low-power idle"
+                            "[embedded-ble] background recovery capsule suppressed; see recovery decision log"
                         );
                     }
                 }
@@ -3261,6 +3303,10 @@ fn next_embedded_ble_background_retry_delay(err: &str, current: Duration) -> Dur
         return EMBEDDED_BLE_RETRY_FAST_DELAY;
     }
 
+    if is_embedded_ble_background_offline_backoff_error(err) {
+        return EMBEDDED_BLE_RETRY_OFFLINE_DELAY;
+    }
+
     if is_embedded_ble_transient_reopen_error(err) {
         return EMBEDDED_BLE_RETRY_LONG_DELAY
             .max(current)
@@ -3277,8 +3323,24 @@ fn is_embedded_ble_automatic_recovery_error(err: &str) -> bool {
         || crate::embedded_ble::classify_ble_failure(err).automatic_recovery
 }
 
+fn is_embedded_ble_background_offline_backoff_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("gatt session did not become active")
+        || lower.contains("paired device disconnected")
+        || lower.contains("stale gatt/cache")
+        || lower.contains("device is asleep")
+        || lower.contains("device asleep")
+        || lower.contains("wake key")
+        || lower.contains("not found from service selector")
+}
+
 fn embedded_ble_usb_power_allows_low_power_idle(usb_powered: Option<bool>) -> bool {
     usb_powered == Some(false)
+}
+
+fn embedded_ble_log_preview(value: &str) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    normalized.chars().take(240).collect()
 }
 
 fn is_embedded_ble_low_power_idle_candidate(err: &str) -> bool {
@@ -3289,12 +3351,48 @@ fn is_embedded_ble_low_power_idle_candidate(err: &str) -> bool {
 }
 
 fn should_emit_embedded_ble_background_recovery_capsule(inner: &Arc<Inner>, err: &str) -> bool {
-    if !is_embedded_ble_automatic_recovery_error(err) {
-        return false;
-    }
-    let usb_powered = inner.embedded_ble_wake_recovery.lock().usb_powered;
-    !is_embedded_ble_low_power_idle_candidate(err)
-        || !embedded_ble_usb_power_allows_low_power_idle(usb_powered)
+    let failure = crate::embedded_ble::classify_ble_failure(err);
+    let link_loss = is_embedded_ble_link_loss_error(err);
+    let automatic_recovery = link_loss || failure.automatic_recovery;
+    let offline_backoff = is_embedded_ble_background_offline_backoff_error(err);
+    let low_power_idle = matches!(
+        failure.kind,
+        crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect
+    );
+    let snapshot = inner.embedded_ble_wake_recovery.lock();
+    let reconnect_attempts = snapshot.reconnect_attempts;
+    let usb_powered = snapshot.usb_powered;
+    drop(snapshot);
+    let low_power_recovery_capsule_allowed = !low_power_idle || usb_powered == Some(true);
+    let decision = automatic_recovery
+        && !offline_backoff
+        && reconnect_attempts <= 1
+        && low_power_recovery_capsule_allowed;
+    let decision_reason = if !automatic_recovery {
+        "not_automatic_recovery"
+    } else if offline_backoff {
+        "offline_backoff"
+    } else if reconnect_attempts > 1 {
+        "repeat_attempt_suppressed"
+    } else if low_power_idle && usb_powered != Some(true) {
+        "low_power_idle_power_unknown_or_battery_suppressed"
+    } else {
+        "emit"
+    };
+    log::info!(
+        "[embedded-ble] background recovery capsule decision emit={} reason={} kind={:?} automatic_recovery={} link_loss={} offline_backoff={} reconnect_attempts={} usb_powered={:?} low_power_idle={} err={}",
+        decision,
+        decision_reason,
+        failure.kind,
+        failure.automatic_recovery,
+        link_loss,
+        offline_backoff,
+        reconnect_attempts,
+        usb_powered,
+        low_power_idle,
+        embedded_ble_log_preview(err),
+    );
+    decision
 }
 
 fn should_emit_embedded_ble_recovered_capsule_for_reason(
@@ -3308,8 +3406,7 @@ fn should_emit_embedded_ble_recovered_capsule_for_reason(
     ) {
         return false;
     }
-    !is_embedded_ble_low_power_idle_candidate(reason)
-        || !embedded_ble_usb_power_allows_low_power_idle(usb_powered)
+    !is_embedded_ble_low_power_idle_candidate(reason) || usb_powered == Some(true)
 }
 
 fn is_embedded_ble_link_loss_error(err: &str) -> bool {
@@ -5422,6 +5519,17 @@ mod tests {
     }
 
     #[test]
+    fn embedded_ble_background_retry_backs_off_for_offline_gatt_failures() {
+        let message = "Embedded audio BLE service not found from service selector; device-address fallback failed: BLE device notify path D3B1B3DAC206 failed: BluetoothCacheMode(0): BLE GATT session did not become active after 8000 ms initial=Some(GattSessionStatus(0)) current=Some(GattSessionStatus(0)); stale GATT/cache or paired device disconnected";
+
+        assert!(is_embedded_ble_background_offline_backoff_error(message));
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(message, EMBEDDED_BLE_RETRY_BASE_DELAY),
+            EMBEDDED_BLE_RETRY_OFFLINE_DELAY
+        );
+    }
+
+    #[test]
     fn embedded_ble_background_retry_caps_generic_errors() {
         assert_eq!(
             next_embedded_ble_background_retry_delay(
@@ -5589,6 +5697,17 @@ mod tests {
     }
 
     #[test]
+    fn embedded_ble_notify_ready_suppresses_unknown_power_idle_recovery_capsule() {
+        let coordinator = Coordinator::new();
+
+        record_embedded_ble_recovery_failure(
+            &coordinator.inner,
+            "Windows BLE disconnected; reason=546; audio path returned transport_not_ready",
+        );
+        assert!(!record_embedded_ble_notify_ready(&coordinator.inner));
+    }
+
+    #[test]
     fn embedded_ble_notify_ready_reports_recovered_for_powered_disconnect() {
         let coordinator = Coordinator::new();
         coordinator
@@ -5617,6 +5736,11 @@ mod tests {
     fn embedded_ble_background_recovery_capsule_respects_power_state() {
         let coordinator = Coordinator::new();
 
+        assert!(!should_emit_embedded_ble_background_recovery_capsule(
+            &coordinator.inner,
+            "BLE device connection status changed to Disconnected; transport_not_ready",
+        ));
+
         coordinator
             .inner
             .embedded_ble_wake_recovery
@@ -5640,6 +5764,18 @@ mod tests {
         assert!(should_emit_embedded_ble_background_recovery_capsule(
             &coordinator.inner,
             "BLE CCCD write timed out after 8000 ms",
+        ));
+
+        record_embedded_ble_reconnect_attempt(&coordinator.inner, "background_retry_test");
+        record_embedded_ble_reconnect_attempt(&coordinator.inner, "background_retry_test");
+        assert!(!should_emit_embedded_ble_background_recovery_capsule(
+            &coordinator.inner,
+            "BLE device connection status changed to Disconnected; transport_not_ready",
+        ));
+
+        assert!(!should_emit_embedded_ble_background_recovery_capsule(
+            &coordinator.inner,
+            "BLE GATT session did not become active after 8000 ms initial=Some(GattSessionStatus(0)) current=Some(GattSessionStatus(0)); stale GATT/cache or paired device disconnected",
         ));
     }
 

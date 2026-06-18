@@ -1706,6 +1706,7 @@ mod windows_ble {
     ) -> Result<String, DeviceSettingsSerialError> {
         let serial_timeout = Duration::from_millis(120);
         let mut port = serialport::new(port_name, DEVICE_SETTINGS_SERIAL_BAUD_RATE)
+            .dtr_on_open(false)
             .timeout(serial_timeout)
             .open()
             .map_err(|err| DeviceSettingsSerialError::Transport(format!("open failed: {err}")))?;
