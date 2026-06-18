@@ -719,6 +719,7 @@ export const zhTW: typeof zhCN = {
       powerBattery: '電池',
       powerUnknown: '供電未知',
       lowPowerSummary: '低功耗 {{value}} 分鐘',
+      lowPowerCompact: '{{value}} 分鐘',
       sourceMock: '瀏覽器預覽模擬',
       sourceDefaults: '預設值',
       sourceLastKnown: '上次已知值',

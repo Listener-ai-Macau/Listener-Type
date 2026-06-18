@@ -717,6 +717,7 @@ export const zhCN = {
       powerBattery: '电池',
       powerUnknown: '供电未知',
       lowPowerSummary: '低功耗 {{value}} 分钟',
+      lowPowerCompact: '{{value}} 分钟',
       sourceMock: '浏览器预览模拟',
       sourceDefaults: '默认值',
       sourceLastKnown: '上次已知值',

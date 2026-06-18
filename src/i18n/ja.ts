@@ -677,6 +677,7 @@ export const ja: typeof zhCN = {
       powerBattery: 'バッテリー',
       powerUnknown: '電源不明',
       lowPowerSummary: '低電力 {{value}} 分',
+      lowPowerCompact: '{{value}} 分',
       sourceMock: 'ブラウザプレビューのモック',
       sourceDefaults: 'デフォルト',
       sourceLastKnown: '前回値',

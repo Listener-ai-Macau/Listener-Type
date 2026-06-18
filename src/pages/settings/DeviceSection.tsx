@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
 import { detectOS } from '../../components/WindowChrome';
@@ -302,6 +302,7 @@ function DeviceFirmwareSettingsCard() {
     }
   };
   const detailText = formatDeviceSnapshotDetail(snapshot, t);
+  const footerText = validationError || message || formatDeviceSnapshotFooter(snapshot, t);
 
   return (
     <Card className="ol-device-settings-card" style={{ padding: 20 }}>
@@ -397,9 +398,11 @@ function DeviceFirmwareSettingsCard() {
         </SettingRow>
       </DeviceSettingsPanel>
 
-      <div style={{ fontSize: 11.5, color: validationError || status === 'error' ? 'var(--ol-err)' : status === 'saved' ? 'var(--ol-ok)' : 'var(--ol-ink-4)', lineHeight: 1.45, paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)' }}>
-        {validationError || message || formatDeviceSnapshotFooter(snapshot, t)}
-      </div>
+      {footerText && (
+        <div style={{ fontSize: 11.5, color: validationError || status === 'error' ? 'var(--ol-err)' : status === 'saved' ? 'var(--ol-ok)' : 'var(--ol-ink-4)', lineHeight: 1.45, paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)' }}>
+          {footerText}
+        </div>
+      )}
     </Card>
   );
 }
@@ -439,10 +442,10 @@ function DeviceSettingsStatusStrip({
   return (
     <div className="ol-device-status-strip">
       {items.map(item => (
-        <div key={item.label} className="ol-device-status-item">
-          <div className="ol-device-status-label">{item.label}</div>
-          <div className="ol-device-status-value">{item.value}</div>
-        </div>
+        <span key={item.label} className="ol-device-status-chip" title={`${item.label}: ${item.value}`}>
+          <span className="ol-device-status-label">{item.label}</span>
+          <span className="ol-device-status-value">{item.value}</span>
+        </span>
       ))}
     </div>
   );
@@ -598,7 +601,7 @@ function DeviceLedBrightnessGroup({
         ? t('settings.device.ledZoneDesc', '按灯区限制最大亮度，写入后同步到设备。')
         : t('settings.device.ledZoneUnsupported', '当前固件未回读四区亮度；更新固件后可写入。')}
     >
-      <div className="ol-device-led-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+      <div className="ol-device-led-grid">
         <LedBrightnessControl
           label={t('settings.device.statusLedBrightnessLabel', '状态灯')}
           desc={t('settings.device.statusLedBrightnessDesc', 'PWR / BLE / REC / AI / OK / WARN')}
@@ -646,17 +649,15 @@ function LedBrightnessControl({
   onChange: (value: number) => void;
 }) {
   return (
-    <div style={{ minWidth: 0, display: 'grid', gap: 8, border: '0.5px solid var(--ol-line-soft)', borderRadius: 8, background: 'color-mix(in srgb, var(--ol-surface-2) 54%, transparent)', padding: '9px 10px 10px' }}>
-      <div style={{ minWidth: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+    <div className="ol-device-led-row">
+      <div className="ol-device-led-meta">
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
           <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', marginTop: 1, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{desc}</div>
         </div>
-        <div style={{ flex: '0 0 auto' }}>
-          <PercentNumber value={value} disabled={disabled} onChange={onChange} />
-        </div>
       </div>
       <PercentSlider value={value} disabled={disabled} onChange={onChange} />
+      <PercentNumber value={value} disabled={disabled} onChange={onChange} />
     </div>
   );
 }
@@ -672,7 +673,7 @@ function PercentNumber({
 }) {
   const safeValue = clampPercent(value);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div className="ol-device-percent-number">
       <input
         type="number"
         min={0}
@@ -680,7 +681,7 @@ function PercentNumber({
         value={safeValue}
         disabled={disabled}
         onChange={event => onChange(clampPercent(Number(event.target.value)))}
-        style={{ ...inputStyle, width: 52, height: 28, flex: '0 0 52px', maxWidth: 52, padding: '0 6px', textAlign: 'right' }}
+        style={{ ...inputStyle, width: 56, height: 26, flex: '0 0 56px', maxWidth: 56, padding: '0 6px', textAlign: 'right' }}
       />
       <span style={{ fontSize: 11.5, color: 'var(--ol-ink-4)' }}>%</span>
     </div>
@@ -698,7 +699,7 @@ function PercentSlider({
 }) {
   const safeValue = clampPercent(value);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 }}>
+    <div className="ol-device-percent-slider" style={{ display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 }}>
       <input
         className="ol-device-percent-range"
         type="range"
@@ -707,7 +708,7 @@ function PercentSlider({
         value={safeValue}
         disabled={disabled}
         onChange={event => onChange(clampPercent(Number(event.target.value)))}
-        style={{ width: '100%', minWidth: 0, accentColor: 'var(--ol-blue)' }}
+        style={{ width: '100%', minWidth: 0, accentColor: 'var(--ol-blue)', '--ol-device-range-percent': `${safeValue}%` } as CSSProperties}
       />
     </div>
   );
@@ -1174,7 +1175,7 @@ function getDeviceSettingsStatusItems(
     : snapshot.activePowerSource === 'battery'
       ? snapshot.batteryLowPowerIdleMinutes
       : snapshot.lowPowerIdleMinutes;
-  const lowPower = t('settings.device.lowPowerSummary', '低功耗 {{value}} 分钟', { value: activeLowPower });
+  const lowPower = t('settings.device.lowPowerCompact', '{{value}} 分钟', { value: activeLowPower });
   const source = snapshot.source === 'mock'
     ? t('settings.device.sourceMock', '浏览器预览模拟')
     : snapshot.source === 'defaults'
@@ -1211,10 +1212,10 @@ function formatDeviceSnapshotFooter(
   t: ReturnType<typeof useTranslation>['t'],
 ): string {
   if (!snapshot) {
-    return t('settings.device.configLoading', '正在读取设备设置...');
+    return '';
   }
   if (!snapshot.writeSupported) {
     return t('settings.device.readOnlyHint', '当前设备状态只读；连接到可写固件后可以写入。');
   }
-  return t('settings.device.writeHint', '修改后点击写入同步到设备。');
+  return '';
 }

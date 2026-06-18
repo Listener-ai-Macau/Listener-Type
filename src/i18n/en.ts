@@ -719,6 +719,7 @@ export const en: typeof zhCN = {
       powerBattery: 'Battery',
       powerUnknown: 'Unknown power',
       lowPowerSummary: 'low-power {{value}} min',
+      lowPowerCompact: '{{value}} min',
       sourceMock: 'browser preview mock',
       sourceDefaults: 'defaults',
       sourceLastKnown: 'last known',

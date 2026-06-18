@@ -677,6 +677,7 @@ export const ko: typeof zhCN = {
       powerBattery: '배터리',
       powerUnknown: '전원 알 수 없음',
       lowPowerSummary: '저전력 {{value}}분',
+      lowPowerCompact: '{{value}}분',
       sourceMock: '브라우저 미리보기 모의값',
       sourceDefaults: '기본값',
       sourceLastKnown: '마지막으로 알려진 값',
