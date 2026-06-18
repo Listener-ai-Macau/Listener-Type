@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
 import { detectOS } from '../../components/WindowChrome';
@@ -305,7 +305,7 @@ function DeviceFirmwareSettingsCard() {
 
   return (
     <Card className="ol-device-settings-card" style={{ padding: 20 }}>
-      <div className="ol-device-settings-header" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+      <div className="ol-device-settings-header" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700 }}>
             {t('settings.device.configTitle', '设备设置')}
@@ -327,16 +327,18 @@ function DeviceFirmwareSettingsCard() {
         </div>
       </div>
 
+      <DeviceSettingsStatusStrip snapshot={snapshot} t={t} />
+
       {detailText && (
-        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginBottom: 2 }}>
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 8 }}>
           {detailText}
         </div>
       )}
 
-      <div style={{ paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>
-          {t('settings.device.powerTimingTitle', '电源时间')}
-        </div>
+      <DeviceSettingsPanel
+        title={t('settings.device.powerTimingTitle', '电源时间')}
+        desc={t('settings.device.powerTimingDesc', '插电和电池模式可分别设置低功耗等待与自动关机。')}
+      >
         <div className="ol-device-power-timing-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
           <PowerModeTimingGroup
             title={t('settings.device.pluggedModeTitle', '插电模式')}
@@ -367,7 +369,7 @@ function DeviceFirmwareSettingsCard() {
             t={t}
           />
         </div>
-      </div>
+      </DeviceSettingsPanel>
 
       <DeviceLedBrightnessGroup
         supported={snapshot?.ledZoneBrightnessSupported ?? false}
@@ -377,23 +379,72 @@ function DeviceFirmwareSettingsCard() {
         t={t}
       />
 
-      <SettingRow
-        label={t('settings.device.bleNameLabel', '蓝牙名称')}
-        desc={t('settings.device.bleNameDesc', '1-32 个 ASCII 字符；部分 Windows 设备名变更需要重连或重新配对后才显示。')}
+      <DeviceSettingsPanel
+        title={t('settings.device.identityTitle', '设备标识')}
+        desc={t('settings.device.identityDesc', '设备在系统蓝牙列表中的显示名称。')}
       >
-        <input
-          value={form.bleName}
-          maxLength={32}
-          disabled={controlsDisabled}
-          onChange={event => setForm(current => ({ ...current, bleName: event.target.value }))}
-          style={{ ...inputStyle, maxWidth: 'none' }}
-        />
-      </SettingRow>
+        <SettingRow
+          label={t('settings.device.bleNameLabel', '蓝牙名称')}
+          desc={t('settings.device.bleNameDesc', '1-32 个 ASCII 字符；部分 Windows 设备名变更需要重连或重新配对后才显示。')}
+        >
+          <input
+            value={form.bleName}
+            maxLength={32}
+            disabled={controlsDisabled}
+            onChange={event => setForm(current => ({ ...current, bleName: event.target.value }))}
+            style={{ ...inputStyle, maxWidth: 320 }}
+          />
+        </SettingRow>
+      </DeviceSettingsPanel>
 
       <div style={{ fontSize: 11.5, color: validationError || status === 'error' ? 'var(--ol-err)' : status === 'saved' ? 'var(--ol-ok)' : 'var(--ol-ink-4)', lineHeight: 1.45, paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)' }}>
-        {validationError || message || formatDeviceSnapshotSummary(snapshot, t)}
+        {validationError || message || formatDeviceSnapshotFooter(snapshot, t)}
       </div>
     </Card>
+  );
+}
+
+function DeviceSettingsPanel({
+  title,
+  desc,
+  children,
+}: {
+  title: string;
+  desc?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="ol-device-settings-panel">
+      <div className="ol-device-settings-panel-header">
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{title}</div>
+          {desc && (
+            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>
+          )}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function DeviceSettingsStatusStrip({
+  snapshot,
+  t,
+}: {
+  snapshot: DeviceSettingsSnapshot | null;
+  t: ReturnType<typeof useTranslation>['t'];
+}) {
+  const items = getDeviceSettingsStatusItems(snapshot, t);
+  return (
+    <div className="ol-device-status-strip">
+      {items.map(item => (
+        <div key={item.label} className="ol-device-status-item">
+          <div className="ol-device-status-label">{item.label}</div>
+          <div className="ol-device-status-value">{item.value}</div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -425,7 +476,7 @@ function PowerModeTimingGroup({
   t: ReturnType<typeof useTranslation>['t'];
 }) {
   return (
-    <div style={{ minWidth: 0, borderRadius: 8, border: '0.5px solid var(--ol-line-soft)', background: 'color-mix(in srgb, var(--ol-surface-2) 62%, transparent)', padding: '12px 12px 10px' }}>
+    <div className="ol-device-power-mode-card">
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>{title}</div>
@@ -496,7 +547,7 @@ function MinuteInput({
   t: ReturnType<typeof useTranslation>['t'];
 }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', flexWrap: 'wrap' }}>
+    <div className="ol-device-minute-input">
       <input
         type="number"
         min={min}
@@ -541,19 +592,12 @@ function DeviceLedBrightnessGroup({
   t: ReturnType<typeof useTranslation>['t'];
 }) {
   return (
-    <div style={{ paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)', marginTop: 4 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700 }}>
-            {t('settings.device.ledZoneTitle', '灯区亮度')}
-          </div>
-          {!supported && (
-            <div style={{ fontSize: 11.5, color: 'var(--ol-warn, var(--ol-ink-4))', marginTop: 2, lineHeight: 1.45 }}>
-              {t('settings.device.ledZoneUnsupported', '当前固件未回读四区亮度；更新固件后可写入。')}
-            </div>
-          )}
-        </div>
-      </div>
+    <DeviceSettingsPanel
+      title={t('settings.device.ledZoneTitle', '灯区亮度')}
+      desc={supported
+        ? t('settings.device.ledZoneDesc', '按灯区限制最大亮度，写入后同步到设备。')
+        : t('settings.device.ledZoneUnsupported', '当前固件未回读四区亮度；更新固件后可写入。')}
+    >
       <div className="ol-device-led-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
         <LedBrightnessControl
           label={t('settings.device.statusLedBrightnessLabel', '状态灯')}
@@ -584,7 +628,7 @@ function DeviceLedBrightnessGroup({
           onChange={value => onChange('edgeLedBrightnessPercent', value)}
         />
       </div>
-    </div>
+    </DeviceSettingsPanel>
   );
 }
 
@@ -1096,12 +1140,29 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function formatDeviceSnapshotSummary(
+function getDeviceSettingsStatusItems(
   snapshot: DeviceSettingsSnapshot | null,
   t: ReturnType<typeof useTranslation>['t'],
-): string {
+): Array<{ label: string; value: string }> {
   if (!snapshot) {
-    return t('settings.device.configLoading', '正在读取设备设置...');
+    return [
+      {
+        label: t('settings.device.statusSourceLabel', '来源'),
+        value: t('settings.device.configLoading', '正在读取设备设置...'),
+      },
+      {
+        label: t('settings.device.statusPowerLabel', '供电'),
+        value: '—',
+      },
+      {
+        label: t('settings.device.statusLowPowerLabel', '低功耗'),
+        value: '—',
+      },
+      {
+        label: t('settings.device.statusWriteLabel', '写入'),
+        value: '—',
+      },
+    ];
   }
   const power = snapshot.activePowerSource === 'plugged'
     ? t('settings.device.powerPlugged', '插电')
@@ -1123,5 +1184,37 @@ function formatDeviceSnapshotSummary(
         : snapshot.source === 'unavailable'
           ? t('settings.device.sourceUnavailable', '设备不可用')
           : t('settings.device.sourceFirmware', '固件');
-  return [source, power, lowPower].filter(Boolean).join(' · ');
+  return [
+    {
+      label: t('settings.device.statusSourceLabel', '来源'),
+      value: source,
+    },
+    {
+      label: t('settings.device.statusPowerLabel', '供电'),
+      value: power,
+    },
+    {
+      label: t('settings.device.statusLowPowerLabel', '低功耗'),
+      value: lowPower,
+    },
+    {
+      label: t('settings.device.statusWriteLabel', '写入'),
+      value: snapshot.writeSupported
+        ? t('settings.device.configSourceWritable', '可写')
+        : t('settings.device.configSourceReadOnly', '只读'),
+    },
+  ];
+}
+
+function formatDeviceSnapshotFooter(
+  snapshot: DeviceSettingsSnapshot | null,
+  t: ReturnType<typeof useTranslation>['t'],
+): string {
+  if (!snapshot) {
+    return t('settings.device.configLoading', '正在读取设备设置...');
+  }
+  if (!snapshot.writeSupported) {
+    return t('settings.device.readOnlyHint', '当前设备状态只读；连接到可写固件后可以写入。');
+  }
+  return t('settings.device.writeHint', '修改后点击写入同步到设备。');
 }
