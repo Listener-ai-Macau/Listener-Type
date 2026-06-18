@@ -519,7 +519,7 @@ pub fn clamp_device_low_power_idle_minutes(value: u32) -> u32 {
 }
 
 pub fn clamp_device_battery_auto_shutdown_minutes(value: u32) -> u32 {
-    value.clamp(1, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES)
+    value.clamp(0, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES)
 }
 
 pub fn device_ble_name_is_valid(name: &str) -> bool {

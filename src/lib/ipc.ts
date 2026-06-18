@@ -178,6 +178,10 @@ let mockDeviceSettings: DeviceSettingsSnapshot = {
   batteryBrightnessPercent: 60,
   activeBrightnessPercent: 100,
   lowPowerIdleMinutes: 1,
+  pluggedLowPowerIdleMinutes: 1,
+  batteryLowPowerIdleMinutes: 1,
+  pluggedLowPowerEnabled: true,
+  pluggedAutoShutdownMs: 0,
   batteryAutoShutdownMs: 30 * 60 * 1000,
   knobRotationAction: 'systemVolume',
   bleName: 'listener',
@@ -257,7 +261,7 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     devicePluggedBrightnessPercent: clampNumber(prefs.devicePluggedBrightnessPercent, 80, 0, 100),
     deviceBatteryBrightnessPercent: clampNumber(prefs.deviceBatteryBrightnessPercent, 50, 0, 100),
     deviceLowPowerIdleMinutes: clampNumber(prefs.deviceLowPowerIdleMinutes, 1, 1, 1440),
-    deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 30, 1, 1440),
+    deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 30, 0, 1440),
     deviceBleName: normalizeDeviceBleName(prefs.deviceBleName),
   };
 }
@@ -624,12 +628,11 @@ export function setSettings(prefs: UserPreferences): Promise<void> {
     mockSettings = { ...nextPrefs };
     mockDeviceSettings = {
       ...mockDeviceSettings,
-      pluggedBrightnessPercent: nextPrefs.devicePluggedBrightnessPercent,
-      batteryBrightnessPercent: nextPrefs.deviceBatteryBrightnessPercent,
-      activeBrightnessPercent: mockDeviceSettings.activePowerSource === 'battery'
-        ? nextPrefs.deviceBatteryBrightnessPercent
-        : nextPrefs.devicePluggedBrightnessPercent,
       lowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
+      pluggedLowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
+      batteryLowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
+      pluggedLowPowerEnabled: true,
+      pluggedAutoShutdownMs: 0,
       batteryAutoShutdownMs: nextPrefs.deviceBatteryAutoShutdownMinutes * 60 * 1000,
       knobRotationAction: nextPrefs.deviceKnobRotationAction,
       bleName: nextPrefs.deviceBleName,
@@ -657,6 +660,10 @@ export function refreshDeviceSettingsStatus(): Promise<DeviceFirmwareSettingsSta
     batteryBrightnessPercent: mockSettings.deviceBatteryBrightnessPercent,
     activeBrightnessPercent: mockSettings.devicePluggedBrightnessPercent,
     lowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
+    pluggedLowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
+    batteryLowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
+    pluggedLowPowerEnabled: true,
+    pluggedAutoShutdownMinutes: 0,
     batteryAutoShutdownMinutes: mockSettings.deviceBatteryAutoShutdownMinutes,
     knobRotationAction:
       mockSettings.deviceKnobRotationAction === 'screenBrightness'
@@ -1095,22 +1102,22 @@ export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise
     { request },
     () => {
       const batteryAutoShutdownMs = Math.round(request.batteryAutoShutdownMinutes * 60 * 1000);
+      const pluggedAutoShutdownMs = Math.round(request.pluggedAutoShutdownMinutes * 60 * 1000);
       mockSettings = {
         ...mockSettings,
-        devicePluggedBrightnessPercent: request.pluggedBrightnessPercent,
-        deviceBatteryBrightnessPercent: request.batteryBrightnessPercent,
-        deviceLowPowerIdleMinutes: request.lowPowerIdleMinutes,
+        deviceLowPowerIdleMinutes: request.batteryLowPowerIdleMinutes,
         deviceBatteryAutoShutdownMinutes: request.batteryAutoShutdownMinutes,
         deviceBleName: request.bleName,
       };
       mockDeviceSettings = {
         ...mockDeviceSettings,
-        pluggedBrightnessPercent: request.pluggedBrightnessPercent,
-        batteryBrightnessPercent: request.batteryBrightnessPercent,
-        activeBrightnessPercent: mockDeviceSettings.activePowerSource === 'battery'
-          ? request.batteryBrightnessPercent
-          : request.pluggedBrightnessPercent,
-        lowPowerIdleMinutes: request.lowPowerIdleMinutes,
+        lowPowerIdleMinutes: mockDeviceSettings.activePowerSource === 'plugged'
+          ? request.pluggedLowPowerIdleMinutes
+          : request.batteryLowPowerIdleMinutes,
+        pluggedLowPowerIdleMinutes: request.pluggedLowPowerIdleMinutes,
+        batteryLowPowerIdleMinutes: request.batteryLowPowerIdleMinutes,
+        pluggedLowPowerEnabled: true,
+        pluggedAutoShutdownMs,
         batteryAutoShutdownMs,
         bleName: request.bleName,
         bleNamePendingRestart: mockDeviceSettings.bleName !== request.bleName,

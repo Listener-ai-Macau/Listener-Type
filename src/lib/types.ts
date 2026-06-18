@@ -546,6 +546,10 @@ export interface DeviceFirmwareSettingsStatus {
   batteryBrightnessPercent: number;
   activeBrightnessPercent: number;
   lowPowerIdleMinutes: number;
+  pluggedLowPowerIdleMinutes: number;
+  batteryLowPowerIdleMinutes: number;
+  pluggedLowPowerEnabled: boolean;
+  pluggedAutoShutdownMinutes: number;
   batteryAutoShutdownMinutes: number;
   knobRotationAction: string;
   bleName: string;
@@ -569,6 +573,10 @@ export interface DeviceSettingsSnapshot {
   batteryBrightnessPercent: number;
   activeBrightnessPercent: number | null;
   lowPowerIdleMinutes: number;
+  pluggedLowPowerIdleMinutes: number;
+  batteryLowPowerIdleMinutes: number;
+  pluggedLowPowerEnabled: boolean;
+  pluggedAutoShutdownMs: number;
   batteryAutoShutdownMs: number;
   knobRotationAction: DeviceKnobRotationAction | string;
   bleName: string;
@@ -580,9 +588,9 @@ export interface DeviceSettingsSnapshot {
 }
 
 export interface DeviceSettingsUpdateRequest {
-  pluggedBrightnessPercent: number;
-  batteryBrightnessPercent: number;
-  lowPowerIdleMinutes: number;
+  pluggedLowPowerIdleMinutes: number;
+  batteryLowPowerIdleMinutes: number;
+  pluggedAutoShutdownMinutes: number;
   batteryAutoShutdownMinutes: number;
   bleName: string;
 }

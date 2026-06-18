@@ -49,6 +49,10 @@ pub struct DeviceSettingsStatus {
     pub battery_brightness_percent: u8,
     pub active_brightness_percent: u8,
     pub low_power_idle_minutes: u32,
+    pub plugged_low_power_idle_minutes: u32,
+    pub battery_low_power_idle_minutes: u32,
+    pub plugged_low_power_enabled: bool,
+    pub plugged_auto_shutdown_minutes: u32,
     pub battery_auto_shutdown_minutes: u32,
     pub knob_rotation_action: String,
     pub ble_name: String,
@@ -1789,19 +1793,44 @@ mod windows_ble {
         let plugged_brightness_percent = parse_u8_field(&fields, "plugged_brightness")?;
         let battery_brightness_percent = parse_u8_field(&fields, "battery_brightness")?;
         let active_brightness_percent = parse_u8_field(&fields, "active_brightness")?;
-        let low_power_idle_minutes = fields
-            .get("low_power_idle_ms")
-            .and_then(|value| value.parse::<u32>().ok())
-            .map(|ms| ms.saturating_add(59_999) / 60_000)
-            .map(|minutes| minutes.clamp(1, crate::types::MAX_DEVICE_LOW_POWER_IDLE_MINUTES))
+        let legacy_low_power_idle_minutes = optional_u32_field(&fields, "low_power_idle_ms")
+            .map(low_power_minutes_from_ms)
             .unwrap_or(crate::types::DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES);
-        let auto_shutdown_ms = parse_u32_field(&fields, "auto_shutdown_ms")?;
-        let battery_auto_shutdown_minutes = (auto_shutdown_ms / 60_000).max(1);
+        let plugged_low_power_idle_minutes = optional_u32_field(&fields, "plugged_low_power_idle_ms")
+            .or_else(|| optional_minutes_field(&fields, "plugged_low_power_idle_minutes"))
+            .map(low_power_minutes_from_ms)
+            .unwrap_or(legacy_low_power_idle_minutes);
+        let battery_low_power_idle_minutes = optional_u32_field(&fields, "battery_low_power_idle_ms")
+            .or_else(|| optional_minutes_field(&fields, "battery_low_power_idle_minutes"))
+            .map(low_power_minutes_from_ms)
+            .unwrap_or(legacy_low_power_idle_minutes);
+        let plugged_low_power_enabled =
+            optional_bool_field(&fields, "plugged_low_power_enabled").unwrap_or(true);
+        let legacy_auto_shutdown_minutes = optional_u32_field(&fields, "auto_shutdown_ms")
+            .map(auto_shutdown_minutes_from_ms)
+            .unwrap_or(crate::types::DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES);
+        let plugged_auto_shutdown_minutes = optional_u32_field(&fields, "plugged_auto_shutdown_ms")
+            .or_else(|| optional_minutes_field(&fields, "plugged_auto_shutdown_minutes"))
+            .map(auto_shutdown_minutes_from_ms)
+            .unwrap_or(0);
+        let battery_auto_shutdown_minutes = optional_u32_field(&fields, "battery_auto_shutdown_ms")
+            .or_else(|| optional_minutes_field(&fields, "battery_auto_shutdown_minutes"))
+            .map(auto_shutdown_minutes_from_ms)
+            .unwrap_or(legacy_auto_shutdown_minutes);
+        let low_power_idle_minutes = if require_field(&fields, "active_power").unwrap_or("battery") == "external" {
+            plugged_low_power_idle_minutes
+        } else {
+            battery_low_power_idle_minutes
+        };
         Ok(crate::embedded_ble::DeviceSettingsStatus {
             plugged_brightness_percent,
             battery_brightness_percent,
             active_brightness_percent,
             low_power_idle_minutes,
+            plugged_low_power_idle_minutes,
+            battery_low_power_idle_minutes,
+            plugged_low_power_enabled,
+            plugged_auto_shutdown_minutes,
             battery_auto_shutdown_minutes,
             knob_rotation_action: require_field(&fields, "knob_rotation")?.to_string(),
             ble_name: require_field(&fields, "ble_name")?.to_string(),
@@ -1885,6 +1914,38 @@ mod windows_ble {
             .map_err(|err| format!("device settings field {key} is not u32: {err}"))
     }
 
+    fn optional_u32_field(
+        fields: &std::collections::HashMap<String, String>,
+        key: &str,
+    ) -> Option<u32> {
+        fields.get(key)?.parse::<u32>().ok()
+    }
+
+    fn optional_minutes_field(
+        fields: &std::collections::HashMap<String, String>,
+        key: &str,
+    ) -> Option<u32> {
+        fields.get(key)?.parse::<u32>().ok().map(|minutes| minutes.saturating_mul(60_000))
+    }
+
+    fn low_power_minutes_from_ms(ms: u32) -> u32 {
+        ms.saturating_add(59_999)
+            .checked_div(60_000)
+            .unwrap_or(1)
+            .clamp(1, crate::types::MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
+    }
+
+    fn auto_shutdown_minutes_from_ms(ms: u32) -> u32 {
+        if ms == 0 {
+            0
+        } else {
+            ms.saturating_add(59_999)
+                .checked_div(60_000)
+                .unwrap_or(0)
+                .clamp(1, crate::types::MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES)
+        }
+    }
+
     fn parse_bool_field(
         fields: &std::collections::HashMap<String, String>,
         key: &str,
@@ -1893,6 +1954,17 @@ mod windows_ble {
             "0" => Ok(false),
             "1" => Ok(true),
             value => Err(format!("device settings field {key} is not bool: {value}")),
+        }
+    }
+
+    fn optional_bool_field(
+        fields: &std::collections::HashMap<String, String>,
+        key: &str,
+    ) -> Option<bool> {
+        match fields.get(key)?.as_str() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
         }
     }
 
@@ -5778,14 +5850,18 @@ mod tests {
     #[test]
     fn parses_device_settings_status_line() {
         let status = super::windows_ble::parse_device_settings_status_line(
-            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 low_power_idle_ms=60000 low_power_idle_mode=connected_and_disconnected auto_shutdown_ms=1800000 auto_shutdown_mode=battery_only knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,low_power_idle_ms_60000_86400000"
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,low_power_idle_ms_60000_86400000"
         )
         .expect("parse device settings");
         assert_eq!(status.plugged_brightness_percent, 80);
         assert_eq!(status.battery_brightness_percent, 50);
         assert_eq!(status.active_brightness_percent, 80);
-        assert_eq!(status.low_power_idle_minutes, 1);
-        assert_eq!(status.battery_auto_shutdown_minutes, 30);
+        assert_eq!(status.low_power_idle_minutes, 2);
+        assert_eq!(status.plugged_low_power_idle_minutes, 2);
+        assert_eq!(status.battery_low_power_idle_minutes, 3);
+        assert!(status.plugged_low_power_enabled);
+        assert_eq!(status.plugged_auto_shutdown_minutes, 0);
+        assert_eq!(status.battery_auto_shutdown_minutes, 45);
         assert_eq!(status.knob_rotation_action, "screen_brightness");
         assert_eq!(status.ble_name, "listener-dev");
         assert!(status.ble_name_pending_restart);

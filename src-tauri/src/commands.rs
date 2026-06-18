@@ -406,8 +406,6 @@ fn persist_settings<T: SettingsWriter>(
 
 fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPreferences) -> bool {
     previous.device_knob_rotation_action != next.device_knob_rotation_action
-        || previous.device_plugged_brightness_percent != next.device_plugged_brightness_percent
-        || previous.device_battery_brightness_percent != next.device_battery_brightness_percent
         || previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes
         || previous.device_battery_auto_shutdown_minutes
             != next.device_battery_auto_shutdown_minutes
@@ -415,12 +413,6 @@ fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPrefe
 }
 
 fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), String> {
-    if prefs.device_plugged_brightness_percent > 100 {
-        return Err("插电亮度必须在 0-100 之间。".to_string());
-    }
-    if prefs.device_battery_brightness_percent > 100 {
-        return Err("电池亮度必须在 0-100 之间。".to_string());
-    }
     if prefs.device_low_power_idle_minutes == 0
         || prefs.device_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
     {
@@ -429,11 +421,10 @@ fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), S
             MAX_DEVICE_LOW_POWER_IDLE_MINUTES
         ));
     }
-    if prefs.device_battery_auto_shutdown_minutes == 0
-        || prefs.device_battery_auto_shutdown_minutes > MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES
+    if prefs.device_battery_auto_shutdown_minutes > MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES
     {
         return Err(format!(
-            "电池自动关机时间必须在 1-{} 分钟之间。",
+            "电池自动关机时间必须在 0-{} 分钟之间。",
             MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES
         ));
     }
@@ -474,24 +465,6 @@ fn device_setting_packets_for_changes(
         packets.push(DeviceSettingPacket {
             id: "knob_rotation",
             command: format!("DEVICE:SET knob_rotation={mode}"),
-        });
-    }
-    if previous.device_plugged_brightness_percent != next.device_plugged_brightness_percent {
-        packets.push(DeviceSettingPacket {
-            id: "plugged_brightness",
-            command: format!(
-                "DEVICE:SET plugged_brightness={}",
-                next.device_plugged_brightness_percent
-            ),
-        });
-    }
-    if previous.device_battery_brightness_percent != next.device_battery_brightness_percent {
-        packets.push(DeviceSettingPacket {
-            id: "battery_brightness",
-            command: format!(
-                "DEVICE:SET battery_brightness={}",
-                next.device_battery_brightness_percent
-            ),
         });
     }
     if previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes {
@@ -2278,6 +2251,10 @@ pub struct DeviceSettingsSnapshot {
     battery_brightness_percent: u8,
     active_brightness_percent: Option<u8>,
     low_power_idle_minutes: u32,
+    plugged_low_power_idle_minutes: u32,
+    battery_low_power_idle_minutes: u32,
+    plugged_low_power_enabled: bool,
+    plugged_auto_shutdown_ms: u32,
     battery_auto_shutdown_ms: u32,
     knob_rotation_action: String,
     ble_name: String,
@@ -2291,17 +2268,18 @@ pub struct DeviceSettingsSnapshot {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSettingsUpdateRequest {
-    plugged_brightness_percent: u8,
-    battery_brightness_percent: u8,
-    low_power_idle_minutes: u32,
+    plugged_low_power_idle_minutes: u32,
+    battery_low_power_idle_minutes: u32,
+    plugged_auto_shutdown_minutes: u32,
     battery_auto_shutdown_minutes: u32,
     ble_name: String,
 }
 
 const DEVICE_SETTINGS_SCHEMA: &str = "listener.device_settings.v1";
 const DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT: u8 = 100;
+const DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS: u32 = 0;
 const DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS: u32 = 30 * 60 * 1000;
-const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 1;
+const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 0;
 const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
 const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
 const DEVICE_SETTINGS_BLE_WRITE_TIMEOUT: Duration = Duration::from_secs(4);
@@ -2390,9 +2368,7 @@ pub async fn set_device_settings(
     {
         let _settings_guard = settings_update_lock().lock();
         let mut prefs = coord.prefs().get();
-        prefs.device_plugged_brightness_percent = request.plugged_brightness_percent;
-        prefs.device_battery_brightness_percent = request.battery_brightness_percent;
-        prefs.device_low_power_idle_minutes = request.low_power_idle_minutes;
+        prefs.device_low_power_idle_minutes = request.battery_low_power_idle_minutes;
         prefs.device_battery_auto_shutdown_minutes = request.battery_auto_shutdown_minutes;
         prefs.device_ble_name = request.ble_name.clone();
         persist_settings(&*coord, prefs.clone())?;
@@ -2431,6 +2407,10 @@ fn device_settings_snapshot_from_status(
         battery_brightness_percent: status.battery_brightness_percent,
         active_brightness_percent: Some(status.active_brightness_percent),
         low_power_idle_minutes: status.low_power_idle_minutes,
+        plugged_low_power_idle_minutes: status.plugged_low_power_idle_minutes,
+        battery_low_power_idle_minutes: status.battery_low_power_idle_minutes,
+        plugged_low_power_enabled: status.plugged_low_power_enabled,
+        plugged_auto_shutdown_ms: status.plugged_auto_shutdown_minutes.saturating_mul(60_000),
         battery_auto_shutdown_ms: status.battery_auto_shutdown_minutes.saturating_mul(60_000),
         knob_rotation_action: ui_knob_rotation_action_from_firmware(&status.knob_rotation_action),
         ble_name: status.ble_name,
@@ -2481,6 +2461,10 @@ fn device_settings_snapshot_from_device(
         battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
         low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+        plugged_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+        battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+        plugged_low_power_enabled: true,
+        plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         knob_rotation_action: ui_knob_rotation_action_from_firmware(
             firmware_mode_for_device_knob_rotation_action(DeviceKnobRotationAction::default()),
@@ -2507,6 +2491,10 @@ fn device_settings_snapshot_from_request(
         battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
         active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
         low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+        plugged_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+        battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+        plugged_low_power_enabled: true,
+        plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         knob_rotation_action: ui_knob_rotation_action_from_firmware(
             firmware_mode_for_device_knob_rotation_action(DeviceKnobRotationAction::default()),
@@ -2522,18 +2510,20 @@ fn device_settings_snapshot_from_request(
     snapshot.connected = true;
     snapshot.write_supported = true;
     snapshot.source = "lastKnown";
-    snapshot.plugged_brightness_percent = request.plugged_brightness_percent;
-    snapshot.battery_brightness_percent = request.battery_brightness_percent;
-    snapshot.low_power_idle_minutes = request.low_power_idle_minutes;
+    snapshot.plugged_low_power_idle_minutes = request.plugged_low_power_idle_minutes;
+    snapshot.battery_low_power_idle_minutes = request.battery_low_power_idle_minutes;
+    snapshot.plugged_low_power_enabled = true;
+    snapshot.low_power_idle_minutes = match snapshot.active_power_source {
+        "plugged" => request.plugged_low_power_idle_minutes,
+        "battery" => request.battery_low_power_idle_minutes,
+        _ => request.battery_low_power_idle_minutes,
+    };
+    snapshot.plugged_auto_shutdown_ms =
+        request.plugged_auto_shutdown_minutes.saturating_mul(60_000);
     snapshot.battery_auto_shutdown_ms =
         request.battery_auto_shutdown_minutes.saturating_mul(60_000);
     snapshot.ble_name = request.ble_name.clone();
     snapshot.ble_name_pending_restart = old_name != request.ble_name;
-    snapshot.active_brightness_percent = match snapshot.active_power_source {
-        "battery" => Some(request.battery_brightness_percent),
-        "plugged" => Some(request.plugged_brightness_percent),
-        _ => None,
-    };
     snapshot.detail = Some(
         "Device settings were sent; displayed values are last-known until firmware DEVICE readback succeeds.".to_string(),
     );
@@ -2545,15 +2535,19 @@ fn device_settings_update_commands(
 ) -> Result<Vec<String>, String> {
     let commands = vec![
         format!(
-            "DEVICE:SET plugged_brightness={} battery_brightness={}",
-            request.plugged_brightness_percent, request.battery_brightness_percent
+            "DEVICE:SET plugged_low_power_idle_minutes={}",
+            request.plugged_low_power_idle_minutes
         ),
         format!(
-            "DEVICE:SET low_power_idle_minutes={}",
-            request.low_power_idle_minutes
+            "DEVICE:SET battery_low_power_idle_minutes={}",
+            request.battery_low_power_idle_minutes
         ),
         format!(
-            "DEVICE:SET auto_shutdown_minutes={}",
+            "DEVICE:SET plugged_auto_shutdown_minutes={}",
+            request.plugged_auto_shutdown_minutes
+        ),
+        format!(
+            "DEVICE:SET battery_auto_shutdown_minutes={}",
             request.battery_auto_shutdown_minutes
         ),
         format!("DEVICE:SET ble_name={}", request.ble_name),
@@ -2570,21 +2564,20 @@ fn device_settings_update_commands(
 }
 
 fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Result<(), String> {
-    if request.plugged_brightness_percent > 100 || request.battery_brightness_percent > 100 {
-        return Err("Device brightness must be between 0 and 100 percent.".to_string());
-    }
-    if request.battery_auto_shutdown_minutes < DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES
-        || request.battery_auto_shutdown_minutes > DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES
-    {
-        return Err(format!(
-            "Battery auto-shutdown must be between {DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES} and {DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES} minutes."
-        ));
-    }
-    if request.low_power_idle_minutes == 0
-        || request.low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
+    if request.plugged_low_power_idle_minutes == 0
+        || request.plugged_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
+        || request.battery_low_power_idle_minutes == 0
+        || request.battery_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
     {
         return Err(format!(
             "Low-power idle must be between 1 and {MAX_DEVICE_LOW_POWER_IDLE_MINUTES} minutes."
+        ));
+    }
+    if request.plugged_auto_shutdown_minutes > DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES
+        || request.battery_auto_shutdown_minutes > DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES
+    {
+        return Err(format!(
+            "Auto-shutdown must be between {DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES} and {DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES} minutes."
         ));
     }
     validate_device_settings_ble_name(&request.ble_name)
@@ -5566,9 +5559,9 @@ mod tests {
     #[test]
     fn device_settings_request_accepts_safe_values() {
         let request = DeviceSettingsUpdateRequest {
-            plugged_brightness_percent: 80,
-            battery_brightness_percent: 45,
-            low_power_idle_minutes: 2,
+            plugged_low_power_idle_minutes: 2,
+            battery_low_power_idle_minutes: 3,
+            plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
         };
@@ -5579,9 +5572,9 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_unsafe_ble_name() {
         let request = DeviceSettingsUpdateRequest {
-            plugged_brightness_percent: 80,
-            battery_brightness_percent: 45,
-            low_power_idle_minutes: 2,
+            plugged_low_power_idle_minutes: 2,
+            battery_low_power_idle_minutes: 3,
+            plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener=bad".to_string(),
         };
@@ -5592,9 +5585,9 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_ble_name_spaces() {
         let request = DeviceSettingsUpdateRequest {
-            plugged_brightness_percent: 80,
-            battery_brightness_percent: 45,
-            low_power_idle_minutes: 2,
+            plugged_low_power_idle_minutes: 2,
+            battery_low_power_idle_minutes: 3,
+            plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener dev".to_string(),
         };
@@ -5605,9 +5598,9 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_invalid_low_power_idle() {
         let request = DeviceSettingsUpdateRequest {
-            plugged_brightness_percent: 80,
-            battery_brightness_percent: 45,
-            low_power_idle_minutes: 0,
+            plugged_low_power_idle_minutes: 0,
+            battery_low_power_idle_minutes: 3,
+            plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
         };
@@ -5623,6 +5616,10 @@ mod tests {
                 battery_brightness_percent: 45,
                 active_brightness_percent: 80,
                 low_power_idle_minutes: 3,
+                plugged_low_power_idle_minutes: 2,
+                battery_low_power_idle_minutes: 3,
+                plugged_low_power_enabled: true,
+                plugged_auto_shutdown_minutes: 0,
                 battery_auto_shutdown_minutes: 30,
                 knob_rotation_action: "screen_brightness".to_string(),
                 ble_name: "listener-dev".to_string(),
@@ -5640,6 +5637,9 @@ mod tests {
         assert_eq!(snapshot.battery_brightness_percent, 45);
         assert_eq!(snapshot.active_brightness_percent, Some(80));
         assert_eq!(snapshot.low_power_idle_minutes, 3);
+        assert_eq!(snapshot.plugged_low_power_idle_minutes, 2);
+        assert_eq!(snapshot.battery_low_power_idle_minutes, 3);
+        assert_eq!(snapshot.plugged_auto_shutdown_ms, 0);
         assert_eq!(snapshot.battery_auto_shutdown_ms, 30 * 60_000);
         assert_eq!(snapshot.knob_rotation_action, "screenBrightness");
         assert_eq!(snapshot.ble_name, "listener-dev");
@@ -5650,15 +5650,15 @@ mod tests {
     #[test]
     fn device_settings_update_commands_fit_ble_audio_control() {
         let request = DeviceSettingsUpdateRequest {
-            plugged_brightness_percent: 100,
-            battery_brightness_percent: 100,
-            low_power_idle_minutes: 1440,
+            plugged_low_power_idle_minutes: 1440,
+            battery_low_power_idle_minutes: 1440,
+            plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 1440,
             ble_name: "listener-12345678901234567890123".to_string(),
         };
         let commands = device_settings_update_commands(&request).expect("commands");
 
-        assert_eq!(commands.len(), 4);
+        assert_eq!(commands.len(), 5);
         assert!(commands.iter().all(|command| {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
         }));
