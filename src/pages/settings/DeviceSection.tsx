@@ -652,8 +652,8 @@ function LedBrightnessControl({
     <div className="ol-device-led-row">
       <div className="ol-device-led-meta">
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
-          <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', marginTop: 1, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{desc}</div>
+          <div className="ol-device-led-title">{label}</div>
+          <div className="ol-device-led-desc">{desc}</div>
         </div>
       </div>
       <PercentSlider value={value} disabled={disabled} onChange={onChange} />
