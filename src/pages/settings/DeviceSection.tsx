@@ -304,27 +304,24 @@ function DeviceFirmwareSettingsCard() {
   const detailText = formatDeviceSnapshotDetail(snapshot, t);
 
   return (
-    <Card>
-      <div className="ol-device-settings-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+    <Card className="ol-device-settings-card" style={{ padding: 20 }}>
+      <div className="ol-device-settings-header" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: 12, marginBottom: 14 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>
             {t('settings.device.configTitle', '设备设置')}
           </div>
-          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, lineHeight: 1.5 }}>
-            {t('settings.device.configDesc', '低功耗等待和自动关机可按插电/电池模式分别设置；蓝牙名称写入后可能需要重连。')}
-          </div>
         </div>
-        <div className="ol-device-settings-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <div className="ol-device-readwrite-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: 'min(100%, 220px)' }}>
-            <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refresh()} disabled={readDisabled} style={{ justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
+        <div className="ol-device-settings-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div className="ol-device-readwrite-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: 'min(100%, 176px)' }}>
+            <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refresh()} disabled={readDisabled} style={{ height: 34, justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
               {status === 'loading'
                 ? t('settings.device.reading', '读取中')
-                : t('settings.device.readFromDevice', '读取设备')}
+                : t('settings.device.readFromDevice', '读取')}
             </Btn>
-            <Btn variant="blue" size="sm" icon="check" disabled={writeDisabled} onClick={() => void save()} style={{ justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
+            <Btn variant="blue" size="sm" icon="check" disabled={writeDisabled} onClick={() => void save()} style={{ height: 34, justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
               {status === 'saving'
                 ? t('settings.device.writing', '写入中')
-                : t('settings.device.writeToDevice', '写入设备')}
+                : t('settings.device.writeToDevice', '写入')}
             </Btn>
           </div>
         </div>
@@ -337,7 +334,7 @@ function DeviceFirmwareSettingsCard() {
       )}
 
       <div style={{ paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
-        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>
           {t('settings.device.powerTimingTitle', '电源时间')}
         </div>
         <div className="ol-device-power-timing-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
@@ -428,7 +425,7 @@ function PowerModeTimingGroup({
   t: ReturnType<typeof useTranslation>['t'];
 }) {
   return (
-    <div style={{ minWidth: 0, borderRadius: 8, background: 'color-mix(in srgb, var(--ol-surface-2) 72%, transparent)', padding: '12px 12px 10px' }}>
+    <div style={{ minWidth: 0, borderRadius: 8, border: '0.5px solid var(--ol-line-soft)', background: 'color-mix(in srgb, var(--ol-surface-2) 62%, transparent)', padding: '12px 12px 10px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>{title}</div>
@@ -543,9 +540,6 @@ function DeviceLedBrightnessGroup({
   onChange: (field: LedBrightnessField, value: number) => void;
   t: ReturnType<typeof useTranslation>['t'];
 }) {
-  const supportText = supported
-    ? t('settings.device.ledZoneSupported', '按灯区分别限制最大亮度。')
-    : t('settings.device.ledZoneUnsupported', '当前固件未回读四区亮度；更新固件后可写入。');
   return (
     <div style={{ paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)', marginTop: 4 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
@@ -553,12 +547,14 @@ function DeviceLedBrightnessGroup({
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>
             {t('settings.device.ledZoneTitle', '灯区亮度')}
           </div>
-          <div style={{ fontSize: 11.5, color: supported ? 'var(--ol-ink-4)' : 'var(--ol-warn, var(--ol-ink-4))', marginTop: 2, lineHeight: 1.45 }}>
-            {supportText}
-          </div>
+          {!supported && (
+            <div style={{ fontSize: 11.5, color: 'var(--ol-warn, var(--ol-ink-4))', marginTop: 2, lineHeight: 1.45 }}>
+              {t('settings.device.ledZoneUnsupported', '当前固件未回读四区亮度；更新固件后可写入。')}
+            </div>
+          )}
         </div>
       </div>
-      <div className="ol-device-led-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+      <div className="ol-device-led-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
         <LedBrightnessControl
           label={t('settings.device.statusLedBrightnessLabel', '状态灯')}
           desc={t('settings.device.statusLedBrightnessDesc', 'PWR / BLE / REC / AI / OK / WARN')}
@@ -606,12 +602,43 @@ function LedBrightnessControl({
   onChange: (value: number) => void;
 }) {
   return (
-    <div style={{ minWidth: 0, display: 'grid', gap: 7, padding: '10px 0' }}>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
-        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.35 }}>{desc}</div>
+    <div style={{ minWidth: 0, display: 'grid', gap: 8, border: '0.5px solid var(--ol-line-soft)', borderRadius: 8, background: 'color-mix(in srgb, var(--ol-surface-2) 54%, transparent)', padding: '9px 10px 10px' }}>
+      <div style={{ minWidth: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
+          <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', marginTop: 1, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{desc}</div>
+        </div>
+        <div style={{ flex: '0 0 auto' }}>
+          <PercentNumber value={value} disabled={disabled} onChange={onChange} />
+        </div>
       </div>
       <PercentSlider value={value} disabled={disabled} onChange={onChange} />
+    </div>
+  );
+}
+
+function PercentNumber({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  const safeValue = clampPercent(value);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <input
+        type="number"
+        min={0}
+        max={100}
+        value={safeValue}
+        disabled={disabled}
+        onChange={event => onChange(clampPercent(Number(event.target.value)))}
+        style={{ ...inputStyle, width: 52, height: 28, flex: '0 0 52px', maxWidth: 52, padding: '0 6px', textAlign: 'right' }}
+      />
+      <span style={{ fontSize: 11.5, color: 'var(--ol-ink-4)' }}>%</span>
     </div>
   );
 }
@@ -627,26 +654,17 @@ function PercentSlider({
 }) {
   const safeValue = clampPercent(value);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 }}>
       <input
+        className="ol-device-percent-range"
         type="range"
         min={0}
         max={100}
         value={safeValue}
         disabled={disabled}
         onChange={event => onChange(clampPercent(Number(event.target.value)))}
-        style={{ flex: '1 1 88px', minWidth: 72, accentColor: 'var(--ol-blue)' }}
+        style={{ width: '100%', minWidth: 0, accentColor: 'var(--ol-blue)' }}
       />
-      <input
-        type="number"
-        min={0}
-        max={100}
-        value={safeValue}
-        disabled={disabled}
-        onChange={event => onChange(clampPercent(Number(event.target.value)))}
-        style={{ ...inputStyle, flex: '0 1 64px', maxWidth: 72, textAlign: 'right' }}
-      />
-      <span style={{ fontSize: 12, color: 'var(--ol-ink-4)', flex: '0 0 auto' }}>%</span>
     </div>
   );
 }

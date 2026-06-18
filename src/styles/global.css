@@ -83,6 +83,37 @@ textarea {
 
 a { color: inherit; text-decoration: none; }
 
+.ol-device-percent-range {
+  height: 14px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+.ol-device-percent-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ol-device-percent-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ol-blue) 34%, var(--ol-control-track));
+}
+
+.ol-device-percent-range::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 999px;
+  border: 0.5px solid color-mix(in srgb, var(--ol-blue) 45%, var(--ol-line-strong));
+  background: color-mix(in srgb, var(--ol-blue) 72%, var(--ol-control-active));
+  box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 @keyframes ol-window-enter {
   from {
     opacity: 0;
@@ -168,12 +199,12 @@ a { color: inherit; text-decoration: none; }
   }
 
   .ol-device-settings-toolbar {
-    justify-content: flex-start !important;
+    justify-content: center !important;
     width: 100% !important;
   }
 
   .ol-device-readwrite-row {
-    width: min(100%, 220px) !important;
+    width: min(100%, 176px) !important;
   }
 
   .ol-device-power-timing-grid,
