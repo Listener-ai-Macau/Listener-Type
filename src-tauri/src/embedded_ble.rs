@@ -45,9 +45,11 @@ pub struct FirmwareOtaDeviceSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSettingsStatus {
-    pub plugged_brightness_percent: u8,
-    pub battery_brightness_percent: u8,
-    pub active_brightness_percent: u8,
+    pub status_led_brightness_percent: u8,
+    pub key_led_brightness_percent: u8,
+    pub knob_led_brightness_percent: u8,
+    pub edge_led_brightness_percent: u8,
+    pub led_zone_brightness_supported: bool,
     pub low_power_idle_minutes: u32,
     pub plugged_low_power_idle_minutes: u32,
     pub battery_low_power_idle_minutes: u32,
@@ -1790,20 +1792,32 @@ mod windows_ble {
             ));
         }
         let fields = parse_device_settings_fields(line);
-        let plugged_brightness_percent = parse_u8_field(&fields, "plugged_brightness")?;
-        let battery_brightness_percent = parse_u8_field(&fields, "battery_brightness")?;
-        let active_brightness_percent = parse_u8_field(&fields, "active_brightness")?;
+        let led_zone_brightness_supported = fields.contains_key("led_status")
+            || fields.contains_key("led_key")
+            || fields.contains_key("led_ec11")
+            || fields.contains_key("led_edge");
+        let default_zone_brightness = crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT;
+        let status_led_brightness_percent =
+            optional_u8_field(&fields, "led_status").unwrap_or(default_zone_brightness);
+        let key_led_brightness_percent =
+            optional_u8_field(&fields, "led_key").unwrap_or(default_zone_brightness);
+        let knob_led_brightness_percent =
+            optional_u8_field(&fields, "led_ec11").unwrap_or(default_zone_brightness);
+        let edge_led_brightness_percent =
+            optional_u8_field(&fields, "led_edge").unwrap_or(default_zone_brightness);
         let legacy_low_power_idle_minutes = optional_u32_field(&fields, "low_power_idle_ms")
             .map(low_power_minutes_from_ms)
             .unwrap_or(crate::types::DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES);
-        let plugged_low_power_idle_minutes = optional_u32_field(&fields, "plugged_low_power_idle_ms")
-            .or_else(|| optional_minutes_field(&fields, "plugged_low_power_idle_minutes"))
-            .map(low_power_minutes_from_ms)
-            .unwrap_or(legacy_low_power_idle_minutes);
-        let battery_low_power_idle_minutes = optional_u32_field(&fields, "battery_low_power_idle_ms")
-            .or_else(|| optional_minutes_field(&fields, "battery_low_power_idle_minutes"))
-            .map(low_power_minutes_from_ms)
-            .unwrap_or(legacy_low_power_idle_minutes);
+        let plugged_low_power_idle_minutes =
+            optional_u32_field(&fields, "plugged_low_power_idle_ms")
+                .or_else(|| optional_minutes_field(&fields, "plugged_low_power_idle_minutes"))
+                .map(low_power_minutes_from_ms)
+                .unwrap_or(legacy_low_power_idle_minutes);
+        let battery_low_power_idle_minutes =
+            optional_u32_field(&fields, "battery_low_power_idle_ms")
+                .or_else(|| optional_minutes_field(&fields, "battery_low_power_idle_minutes"))
+                .map(low_power_minutes_from_ms)
+                .unwrap_or(legacy_low_power_idle_minutes);
         let plugged_low_power_enabled =
             optional_bool_field(&fields, "plugged_low_power_enabled").unwrap_or(true);
         let legacy_auto_shutdown_minutes = optional_u32_field(&fields, "auto_shutdown_ms")
@@ -1817,15 +1831,18 @@ mod windows_ble {
             .or_else(|| optional_minutes_field(&fields, "battery_auto_shutdown_minutes"))
             .map(auto_shutdown_minutes_from_ms)
             .unwrap_or(legacy_auto_shutdown_minutes);
-        let low_power_idle_minutes = if require_field(&fields, "active_power").unwrap_or("battery") == "external" {
-            plugged_low_power_idle_minutes
-        } else {
-            battery_low_power_idle_minutes
-        };
+        let low_power_idle_minutes =
+            if require_field(&fields, "active_power").unwrap_or("battery") == "external" {
+                plugged_low_power_idle_minutes
+            } else {
+                battery_low_power_idle_minutes
+            };
         Ok(crate::embedded_ble::DeviceSettingsStatus {
-            plugged_brightness_percent,
-            battery_brightness_percent,
-            active_brightness_percent,
+            status_led_brightness_percent,
+            key_led_brightness_percent,
+            knob_led_brightness_percent,
+            edge_led_brightness_percent,
+            led_zone_brightness_supported,
             low_power_idle_minutes,
             plugged_low_power_idle_minutes,
             battery_low_power_idle_minutes,
@@ -1896,15 +1913,6 @@ mod windows_ble {
             .ok_or_else(|| format!("device settings status missing {key}"))
     }
 
-    fn parse_u8_field(
-        fields: &std::collections::HashMap<String, String>,
-        key: &str,
-    ) -> Result<u8, String> {
-        require_field(fields, key)?
-            .parse::<u8>()
-            .map_err(|err| format!("device settings field {key} is not u8: {err}"))
-    }
-
     fn parse_u32_field(
         fields: &std::collections::HashMap<String, String>,
         key: &str,
@@ -1912,6 +1920,13 @@ mod windows_ble {
         require_field(fields, key)?
             .parse::<u32>()
             .map_err(|err| format!("device settings field {key} is not u32: {err}"))
+    }
+
+    fn optional_u8_field(
+        fields: &std::collections::HashMap<String, String>,
+        key: &str,
+    ) -> Option<u8> {
+        fields.get(key)?.parse::<u8>().ok()
     }
 
     fn optional_u32_field(
@@ -1925,7 +1940,11 @@ mod windows_ble {
         fields: &std::collections::HashMap<String, String>,
         key: &str,
     ) -> Option<u32> {
-        fields.get(key)?.parse::<u32>().ok().map(|minutes| minutes.saturating_mul(60_000))
+        fields
+            .get(key)?
+            .parse::<u32>()
+            .ok()
+            .map(|minutes| minutes.saturating_mul(60_000))
     }
 
     fn low_power_minutes_from_ms(ms: u32) -> u32 {
@@ -5850,12 +5869,14 @@ mod tests {
     #[test]
     fn parses_device_settings_status_line() {
         let status = super::windows_ble::parse_device_settings_status_line(
-            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,low_power_idle_ms_60000_86400000"
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 led_status=70 led_key=65 led_ec11=60 led_edge=55 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,led_zone_brightness_0_100,low_power_idle_ms_60000_86400000"
         )
         .expect("parse device settings");
-        assert_eq!(status.plugged_brightness_percent, 80);
-        assert_eq!(status.battery_brightness_percent, 50);
-        assert_eq!(status.active_brightness_percent, 80);
+        assert_eq!(status.status_led_brightness_percent, 70);
+        assert_eq!(status.key_led_brightness_percent, 65);
+        assert_eq!(status.knob_led_brightness_percent, 60);
+        assert_eq!(status.edge_led_brightness_percent, 55);
+        assert!(status.led_zone_brightness_supported);
         assert_eq!(status.low_power_idle_minutes, 2);
         assert_eq!(status.plugged_low_power_idle_minutes, 2);
         assert_eq!(status.battery_low_power_idle_minutes, 3);
@@ -5873,6 +5894,20 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    fn parses_legacy_device_settings_status_without_led_zone_brightness() {
+        let status = super::windows_ble::parse_device_settings_status_line(
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK active_power=external low_power_idle_ms=60000 knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=0 external_power_present=1 usb_power_present=1 charging=0 charge_full=1"
+        )
+        .expect("parse legacy device settings");
+        assert_eq!(status.status_led_brightness_percent, 100);
+        assert_eq!(status.key_led_brightness_percent, 100);
+        assert_eq!(status.knob_led_brightness_percent, 100);
+        assert_eq!(status.edge_led_brightness_percent, 100);
+        assert!(!status.led_zone_brightness_supported);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
     #[ignore = "requires a USB-connected Listener device"]
     fn device_settings_status_refresh_hardware_smoke() {
         let _guard = DEVICE_SETTINGS_HARDWARE_TEST_LOCK
@@ -5881,8 +5916,10 @@ mod tests {
         let status = super::windows_ble::read_device_settings_status(Duration::from_secs(4))
             .expect("device settings status should be read from firmware");
         assert!(!status.ble_name.is_empty());
-        assert!(status.plugged_brightness_percent <= 100);
-        assert!(status.battery_brightness_percent <= 100);
+        assert!(status.status_led_brightness_percent <= 100);
+        assert!(status.key_led_brightness_percent <= 100);
+        assert!(status.knob_led_brightness_percent <= 100);
+        assert!(status.edge_led_brightness_percent <= 100);
     }
 
     #[test]

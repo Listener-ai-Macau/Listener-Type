@@ -422,10 +422,14 @@ export interface UserPreferences {
   deviceCustomKeysDefaultMigrated: boolean;
   /** EC11 旋钮旋转动作。默认调电脑音量；可切换为屏幕亮度或禁用。 */
   deviceKnobRotationAction: DeviceKnobRotationAction;
-  /** 插电/充电时的设备灯效亮度上限，0-100。 */
-  devicePluggedBrightnessPercent: number;
-  /** 电池供电时的设备灯效亮度上限，0-100。 */
-  deviceBatteryBrightnessPercent: number;
+  /** 状态灯区域最大亮度，0-100；需要支持 led_status 的固件。 */
+  deviceStatusLedBrightnessPercent: number;
+  /** 按键灯区域最大亮度，0-100；需要支持 led_key 的固件。 */
+  deviceKeyLedBrightnessPercent: number;
+  /** 旋钮灯区域最大亮度，0-100；需要支持 led_ec11 的固件。 */
+  deviceKnobLedBrightnessPercent: number;
+  /** 板框灯区域最大亮度，0-100；需要支持 led_edge 的固件。 */
+  deviceEdgeLedBrightnessPercent: number;
   /** 进入低功耗 idle 的等待时间，单位分钟。 */
   deviceLowPowerIdleMinutes: number;
   /** 电池供电空闲自动关机时间，单位分钟。插电时不进入该策略。 */
@@ -542,9 +546,11 @@ export interface DeviceCustomKeys {
 export type DeviceKnobRotationAction = 'systemVolume' | 'screenBrightness' | 'disabled';
 
 export interface DeviceFirmwareSettingsStatus {
-  pluggedBrightnessPercent: number;
-  batteryBrightnessPercent: number;
-  activeBrightnessPercent: number;
+  statusLedBrightnessPercent: number;
+  keyLedBrightnessPercent: number;
+  knobLedBrightnessPercent: number;
+  edgeLedBrightnessPercent: number;
+  ledZoneBrightnessSupported: boolean;
   lowPowerIdleMinutes: number;
   pluggedLowPowerIdleMinutes: number;
   batteryLowPowerIdleMinutes: number;
@@ -569,9 +575,11 @@ export interface DeviceSettingsSnapshot {
   connected: boolean;
   writeSupported: boolean;
   source: DeviceSettingsSource;
-  pluggedBrightnessPercent: number;
-  batteryBrightnessPercent: number;
-  activeBrightnessPercent: number | null;
+  statusLedBrightnessPercent: number;
+  keyLedBrightnessPercent: number;
+  knobLedBrightnessPercent: number;
+  edgeLedBrightnessPercent: number;
+  ledZoneBrightnessSupported: boolean;
   lowPowerIdleMinutes: number;
   pluggedLowPowerIdleMinutes: number;
   batteryLowPowerIdleMinutes: number;
@@ -588,6 +596,10 @@ export interface DeviceSettingsSnapshot {
 }
 
 export interface DeviceSettingsUpdateRequest {
+  statusLedBrightnessPercent: number;
+  keyLedBrightnessPercent: number;
+  knobLedBrightnessPercent: number;
+  edgeLedBrightnessPercent: number;
   pluggedLowPowerIdleMinutes: number;
   batteryLowPowerIdleMinutes: number;
   pluggedAutoShutdownMinutes: number;

@@ -421,8 +421,7 @@ fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), S
             MAX_DEVICE_LOW_POWER_IDLE_MINUTES
         ));
     }
-    if prefs.device_battery_auto_shutdown_minutes > MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES
-    {
+    if prefs.device_battery_auto_shutdown_minutes > MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES {
         return Err(format!(
             "电池自动关机时间必须在 0-{} 分钟之间。",
             MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES
@@ -2247,9 +2246,11 @@ pub struct DeviceSettingsSnapshot {
     connected: bool,
     write_supported: bool,
     source: &'static str,
-    plugged_brightness_percent: u8,
-    battery_brightness_percent: u8,
-    active_brightness_percent: Option<u8>,
+    status_led_brightness_percent: u8,
+    key_led_brightness_percent: u8,
+    knob_led_brightness_percent: u8,
+    edge_led_brightness_percent: u8,
+    led_zone_brightness_supported: bool,
     low_power_idle_minutes: u32,
     plugged_low_power_idle_minutes: u32,
     battery_low_power_idle_minutes: u32,
@@ -2268,6 +2269,10 @@ pub struct DeviceSettingsSnapshot {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSettingsUpdateRequest {
+    status_led_brightness_percent: u8,
+    key_led_brightness_percent: u8,
+    knob_led_brightness_percent: u8,
+    edge_led_brightness_percent: u8,
     plugged_low_power_idle_minutes: u32,
     battery_low_power_idle_minutes: u32,
     plugged_auto_shutdown_minutes: u32,
@@ -2276,7 +2281,6 @@ pub struct DeviceSettingsUpdateRequest {
 }
 
 const DEVICE_SETTINGS_SCHEMA: &str = "listener.device_settings.v1";
-const DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT: u8 = 100;
 const DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS: u32 = 0;
 const DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS: u32 = 30 * 60 * 1000;
 const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 0;
@@ -2349,12 +2353,19 @@ pub async fn set_device_settings(
     request: DeviceSettingsUpdateRequest,
 ) -> Result<DeviceSettingsSnapshot, String> {
     validate_device_settings_request(&request)?;
-    let previous_snapshot =
-        tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
-            .await
-            .ok()
-            .map(device_settings_snapshot_from_device);
-    let commands = device_settings_update_commands(&request)?;
+    let previous_snapshot = match read_device_settings_snapshot_from_firmware().await {
+        Ok(snapshot) => Some(snapshot),
+        Err(_) => {
+            tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
+                .await
+                .ok()
+                .map(device_settings_snapshot_from_device)
+        }
+    };
+    let led_zone_brightness_supported = previous_snapshot
+        .as_ref()
+        .is_some_and(|snapshot| snapshot.led_zone_brightness_supported);
+    let commands = device_settings_update_commands(&request, led_zone_brightness_supported)?;
     for command in commands {
         tauri::async_runtime::spawn_blocking(move || {
             crate::embedded_ble::send_device_settings_command(
@@ -2368,6 +2379,12 @@ pub async fn set_device_settings(
     {
         let _settings_guard = settings_update_lock().lock();
         let mut prefs = coord.prefs().get();
+        if led_zone_brightness_supported {
+            prefs.device_status_led_brightness_percent = request.status_led_brightness_percent;
+            prefs.device_key_led_brightness_percent = request.key_led_brightness_percent;
+            prefs.device_knob_led_brightness_percent = request.knob_led_brightness_percent;
+            prefs.device_edge_led_brightness_percent = request.edge_led_brightness_percent;
+        }
         prefs.device_low_power_idle_minutes = request.battery_low_power_idle_minutes;
         prefs.device_battery_auto_shutdown_minutes = request.battery_auto_shutdown_minutes;
         prefs.device_ble_name = request.ble_name.clone();
@@ -2403,9 +2420,11 @@ fn device_settings_snapshot_from_status(
         connected: true,
         write_supported: true,
         source: "firmware",
-        plugged_brightness_percent: status.plugged_brightness_percent,
-        battery_brightness_percent: status.battery_brightness_percent,
-        active_brightness_percent: Some(status.active_brightness_percent),
+        status_led_brightness_percent: status.status_led_brightness_percent,
+        key_led_brightness_percent: status.key_led_brightness_percent,
+        knob_led_brightness_percent: status.knob_led_brightness_percent,
+        edge_led_brightness_percent: status.edge_led_brightness_percent,
+        led_zone_brightness_supported: status.led_zone_brightness_supported,
         low_power_idle_minutes: status.low_power_idle_minutes,
         plugged_low_power_idle_minutes: status.plugged_low_power_idle_minutes,
         battery_low_power_idle_minutes: status.battery_low_power_idle_minutes,
@@ -2457,9 +2476,11 @@ fn device_settings_snapshot_from_device(
         } else {
             "unavailable"
         },
-        plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
-        battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
-        active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        status_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        key_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        knob_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        edge_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        led_zone_brightness_supported: false,
         low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
@@ -2487,9 +2508,11 @@ fn device_settings_snapshot_from_request(
         connected: true,
         write_supported: true,
         source: "lastKnown",
-        plugged_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
-        battery_brightness_percent: DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT,
-        active_brightness_percent: Some(DEVICE_SETTINGS_DEFAULT_BRIGHTNESS_PERCENT),
+        status_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        key_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        knob_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        edge_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        led_zone_brightness_supported: false,
         low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
@@ -2510,6 +2533,12 @@ fn device_settings_snapshot_from_request(
     snapshot.connected = true;
     snapshot.write_supported = true;
     snapshot.source = "lastKnown";
+    if snapshot.led_zone_brightness_supported {
+        snapshot.status_led_brightness_percent = request.status_led_brightness_percent;
+        snapshot.key_led_brightness_percent = request.key_led_brightness_percent;
+        snapshot.knob_led_brightness_percent = request.knob_led_brightness_percent;
+        snapshot.edge_led_brightness_percent = request.edge_led_brightness_percent;
+    }
     snapshot.plugged_low_power_idle_minutes = request.plugged_low_power_idle_minutes;
     snapshot.battery_low_power_idle_minutes = request.battery_low_power_idle_minutes;
     snapshot.plugged_low_power_enabled = true;
@@ -2532,8 +2561,20 @@ fn device_settings_snapshot_from_request(
 
 fn device_settings_update_commands(
     request: &DeviceSettingsUpdateRequest,
+    led_zone_brightness_supported: bool,
 ) -> Result<Vec<String>, String> {
-    let commands = vec![
+    let mut commands = Vec::new();
+    if led_zone_brightness_supported {
+        commands.push(format!(
+            "DEVICE:SET led_status={} led_key={}",
+            request.status_led_brightness_percent, request.key_led_brightness_percent
+        ));
+        commands.push(format!(
+            "DEVICE:SET led_ec11={} led_edge={}",
+            request.knob_led_brightness_percent, request.edge_led_brightness_percent
+        ));
+    }
+    commands.extend([
         format!(
             "DEVICE:SET plugged_low_power_idle_minutes={}",
             request.plugged_low_power_idle_minutes
@@ -2551,7 +2592,7 @@ fn device_settings_update_commands(
             request.battery_auto_shutdown_minutes
         ),
         format!("DEVICE:SET ble_name={}", request.ble_name),
-    ];
+    ]);
     for command in &commands {
         let bytes_with_newline = command.as_bytes().len() + 1;
         if bytes_with_newline > DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES {
@@ -2564,6 +2605,13 @@ fn device_settings_update_commands(
 }
 
 fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Result<(), String> {
+    if request.status_led_brightness_percent > 100
+        || request.key_led_brightness_percent > 100
+        || request.knob_led_brightness_percent > 100
+        || request.edge_led_brightness_percent > 100
+    {
+        return Err("Device LED zone brightness must be between 0 and 100 percent.".to_string());
+    }
     if request.plugged_low_power_idle_minutes == 0
         || request.plugged_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
         || request.battery_low_power_idle_minutes == 0
@@ -5559,6 +5607,10 @@ mod tests {
     #[test]
     fn device_settings_request_accepts_safe_values() {
         let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 70,
+            key_led_brightness_percent: 65,
+            knob_led_brightness_percent: 60,
+            edge_led_brightness_percent: 55,
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_auto_shutdown_minutes: 0,
@@ -5572,6 +5624,10 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_unsafe_ble_name() {
         let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 70,
+            key_led_brightness_percent: 65,
+            knob_led_brightness_percent: 60,
+            edge_led_brightness_percent: 55,
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_auto_shutdown_minutes: 0,
@@ -5585,6 +5641,10 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_ble_name_spaces() {
         let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 70,
+            key_led_brightness_percent: 65,
+            knob_led_brightness_percent: 60,
+            edge_led_brightness_percent: 55,
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_auto_shutdown_minutes: 0,
@@ -5598,6 +5658,10 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_invalid_low_power_idle() {
         let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 70,
+            key_led_brightness_percent: 65,
+            knob_led_brightness_percent: 60,
+            edge_led_brightness_percent: 55,
             plugged_low_power_idle_minutes: 0,
             battery_low_power_idle_minutes: 3,
             plugged_auto_shutdown_minutes: 0,
@@ -5612,9 +5676,11 @@ mod tests {
     fn device_settings_snapshot_uses_firmware_readback_values() {
         let snapshot = super::device_settings_snapshot_from_status(
             crate::embedded_ble::DeviceSettingsStatus {
-                plugged_brightness_percent: 80,
-                battery_brightness_percent: 45,
-                active_brightness_percent: 80,
+                status_led_brightness_percent: 70,
+                key_led_brightness_percent: 65,
+                knob_led_brightness_percent: 60,
+                edge_led_brightness_percent: 55,
+                led_zone_brightness_supported: true,
                 low_power_idle_minutes: 3,
                 plugged_low_power_idle_minutes: 2,
                 battery_low_power_idle_minutes: 3,
@@ -5633,9 +5699,11 @@ mod tests {
         );
 
         assert_eq!(snapshot.source, "firmware");
-        assert_eq!(snapshot.plugged_brightness_percent, 80);
-        assert_eq!(snapshot.battery_brightness_percent, 45);
-        assert_eq!(snapshot.active_brightness_percent, Some(80));
+        assert_eq!(snapshot.status_led_brightness_percent, 70);
+        assert_eq!(snapshot.key_led_brightness_percent, 65);
+        assert_eq!(snapshot.knob_led_brightness_percent, 60);
+        assert_eq!(snapshot.edge_led_brightness_percent, 55);
+        assert!(snapshot.led_zone_brightness_supported);
         assert_eq!(snapshot.low_power_idle_minutes, 3);
         assert_eq!(snapshot.plugged_low_power_idle_minutes, 2);
         assert_eq!(snapshot.battery_low_power_idle_minutes, 3);
@@ -5650,18 +5718,25 @@ mod tests {
     #[test]
     fn device_settings_update_commands_fit_ble_audio_control() {
         let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 100,
+            key_led_brightness_percent: 100,
+            knob_led_brightness_percent: 100,
+            edge_led_brightness_percent: 100,
             plugged_low_power_idle_minutes: 1440,
             battery_low_power_idle_minutes: 1440,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 1440,
             ble_name: "listener-12345678901234567890123".to_string(),
         };
-        let commands = device_settings_update_commands(&request).expect("commands");
+        let commands = device_settings_update_commands(&request, true).expect("commands");
 
-        assert_eq!(commands.len(), 5);
+        assert_eq!(commands.len(), 7);
         assert!(commands.iter().all(|command| {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
         }));
+
+        let legacy_commands = device_settings_update_commands(&request, false).expect("commands");
+        assert_eq!(legacy_commands.len(), 5);
     }
 
     #[test]

@@ -482,20 +482,15 @@ fn default_true() -> bool {
     true
 }
 
-pub const DEFAULT_DEVICE_PLUGGED_BRIGHTNESS_PERCENT: u8 = 80;
-pub const DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT: u8 = 50;
+pub const DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT: u8 = 100;
 pub const DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 1;
 pub const DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 30;
 pub const DEFAULT_DEVICE_BLE_NAME: &str = "listener";
 pub const MAX_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 24 * 60;
 pub const MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 24 * 60;
 
-fn default_device_plugged_brightness_percent() -> u8 {
-    DEFAULT_DEVICE_PLUGGED_BRIGHTNESS_PERCENT
-}
-
-fn default_device_battery_brightness_percent() -> u8 {
-    DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT
+fn default_device_led_zone_brightness_percent() -> u8 {
+    DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT
 }
 
 fn default_device_low_power_idle_minutes() -> u32 {
@@ -1147,12 +1142,18 @@ pub struct UserPreferences {
     /// syncs this preference over the BLE audio control characteristic.
     #[serde(default)]
     pub device_knob_rotation_action: DeviceKnobRotationAction,
-    /// Plugged/charging LED brightness ceiling, 0-100.
-    #[serde(default = "default_device_plugged_brightness_percent")]
-    pub device_plugged_brightness_percent: u8,
-    /// Battery LED brightness ceiling, 0-100.
-    #[serde(default = "default_device_battery_brightness_percent")]
-    pub device_battery_brightness_percent: u8,
+    /// Status LED zone brightness ceiling. Requires firmware led_status support.
+    #[serde(default = "default_device_led_zone_brightness_percent")]
+    pub device_status_led_brightness_percent: u8,
+    /// Key LED zone brightness ceiling. Requires firmware led_key support.
+    #[serde(default = "default_device_led_zone_brightness_percent")]
+    pub device_key_led_brightness_percent: u8,
+    /// EC11 knob LED zone brightness ceiling. Requires firmware led_ec11 support.
+    #[serde(default = "default_device_led_zone_brightness_percent")]
+    pub device_knob_led_brightness_percent: u8,
+    /// Edge/frame LED zone brightness ceiling. Requires firmware led_edge support.
+    #[serde(default = "default_device_led_zone_brightness_percent")]
+    pub device_edge_led_brightness_percent: u8,
     /// Runtime low-power idle timeout in minutes. Applies before battery-only shutdown.
     #[serde(default = "default_device_low_power_idle_minutes")]
     pub device_low_power_idle_minutes: u32,
@@ -1354,10 +1355,14 @@ struct UserPreferencesWire {
     device_custom_keys_default_migrated: bool,
     #[serde(default)]
     device_knob_rotation_action: DeviceKnobRotationAction,
-    #[serde(default = "default_device_plugged_brightness_percent")]
-    device_plugged_brightness_percent: u8,
-    #[serde(default = "default_device_battery_brightness_percent")]
-    device_battery_brightness_percent: u8,
+    #[serde(default = "default_device_led_zone_brightness_percent")]
+    device_status_led_brightness_percent: u8,
+    #[serde(default = "default_device_led_zone_brightness_percent")]
+    device_key_led_brightness_percent: u8,
+    #[serde(default = "default_device_led_zone_brightness_percent")]
+    device_knob_led_brightness_percent: u8,
+    #[serde(default = "default_device_led_zone_brightness_percent")]
+    device_edge_led_brightness_percent: u8,
     #[serde(default = "default_device_low_power_idle_minutes")]
     device_low_power_idle_minutes: u32,
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
@@ -1446,8 +1451,10 @@ impl Default for UserPreferencesWire {
             device_custom_key_long_presses: prefs.device_custom_key_long_presses,
             device_custom_keys_default_migrated: prefs.device_custom_keys_default_migrated,
             device_knob_rotation_action: prefs.device_knob_rotation_action,
-            device_plugged_brightness_percent: prefs.device_plugged_brightness_percent,
-            device_battery_brightness_percent: prefs.device_battery_brightness_percent,
+            device_status_led_brightness_percent: prefs.device_status_led_brightness_percent,
+            device_key_led_brightness_percent: prefs.device_key_led_brightness_percent,
+            device_knob_led_brightness_percent: prefs.device_knob_led_brightness_percent,
+            device_edge_led_brightness_percent: prefs.device_edge_led_brightness_percent,
             device_low_power_idle_minutes: prefs.device_low_power_idle_minutes,
             device_battery_auto_shutdown_minutes: prefs.device_battery_auto_shutdown_minutes,
             device_ble_name: prefs.device_ble_name,
@@ -1560,11 +1567,17 @@ impl<'de> Deserialize<'de> for UserPreferences {
             device_custom_key_long_presses,
             device_custom_keys_default_migrated: true,
             device_knob_rotation_action: wire.device_knob_rotation_action,
-            device_plugged_brightness_percent: clamp_device_brightness_percent(
-                wire.device_plugged_brightness_percent,
+            device_status_led_brightness_percent: clamp_device_brightness_percent(
+                wire.device_status_led_brightness_percent,
             ),
-            device_battery_brightness_percent: clamp_device_brightness_percent(
-                wire.device_battery_brightness_percent,
+            device_key_led_brightness_percent: clamp_device_brightness_percent(
+                wire.device_key_led_brightness_percent,
+            ),
+            device_knob_led_brightness_percent: clamp_device_brightness_percent(
+                wire.device_knob_led_brightness_percent,
+            ),
+            device_edge_led_brightness_percent: clamp_device_brightness_percent(
+                wire.device_edge_led_brightness_percent,
             ),
             device_low_power_idle_minutes: clamp_device_low_power_idle_minutes(
                 wire.device_low_power_idle_minutes,
@@ -1977,8 +1990,10 @@ impl Default for UserPreferences {
             device_custom_key_long_presses: DeviceCustomKeys::disabled(),
             device_custom_keys_default_migrated: true,
             device_knob_rotation_action: DeviceKnobRotationAction::default(),
-            device_plugged_brightness_percent: default_device_plugged_brightness_percent(),
-            device_battery_brightness_percent: default_device_battery_brightness_percent(),
+            device_status_led_brightness_percent: default_device_led_zone_brightness_percent(),
+            device_key_led_brightness_percent: default_device_led_zone_brightness_percent(),
+            device_knob_led_brightness_percent: default_device_led_zone_brightness_percent(),
+            device_edge_led_brightness_percent: default_device_led_zone_brightness_percent(),
             device_low_power_idle_minutes: default_device_low_power_idle_minutes(),
             device_battery_auto_shutdown_minutes: default_device_battery_auto_shutdown_minutes(),
             device_ble_name: default_device_ble_name(),

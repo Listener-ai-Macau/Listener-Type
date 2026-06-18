@@ -176,6 +176,12 @@ a { color: inherit; text-decoration: none; }
     width: min(100%, 220px) !important;
   }
 
+  .ol-device-power-timing-grid,
+  .ol-device-led-grid,
+  .ol-device-timing-control {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
   .ol-device-key-row,
   .ol-device-knob-row {
     grid-template-columns: minmax(0, 1fr) !important;

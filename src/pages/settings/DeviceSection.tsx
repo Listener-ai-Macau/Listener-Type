@@ -248,6 +248,10 @@ function DeviceFirmwareSettingsCard() {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<DeviceSettingsSnapshot | null>(null);
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
+    statusLedBrightnessPercent: 100,
+    keyLedBrightnessPercent: 100,
+    knobLedBrightnessPercent: 100,
+    edgeLedBrightnessPercent: 100,
     pluggedLowPowerIdleMinutes: 1,
     batteryLowPowerIdleMinutes: 1,
     pluggedAutoShutdownMinutes: 0,
@@ -278,6 +282,8 @@ function DeviceFirmwareSettingsCard() {
   const validationError = validateDeviceSettingsForm(form, t);
   const writeDisabled = status === 'loading' || status === 'saving' || !!validationError || !snapshot?.writeSupported;
   const readDisabled = status === 'loading' || status === 'saving';
+  const controlsDisabled = !snapshot?.writeSupported || status === 'saving';
+  const ledControlsDisabled = controlsDisabled || !(snapshot?.ledZoneBrightnessSupported ?? false);
 
   const save = async () => {
     if (writeDisabled) return;
@@ -330,32 +336,50 @@ function DeviceFirmwareSettingsCard() {
         </div>
       )}
 
-      <PowerModeTimingGroup
-        title={t('settings.device.pluggedModeTitle', '插电模式')}
-        lowPowerLabel={t('settings.device.pluggedLowPowerIdleLabel', '进入低功耗')}
-        lowPowerDesc={t('settings.device.pluggedLowPowerIdleDesc', '插电、充电或外部供电时，无操作多久后进入低功耗空闲。')}
-        lowPowerValue={form.pluggedLowPowerIdleMinutes}
-        autoShutdownLabel={t('settings.device.pluggedAutoShutdownLabel', '自动关机')}
-        autoShutdownDesc={t('settings.device.pluggedAutoShutdownDesc', '插电模式默认关闭；填 0 表示不自动关机。')}
-        autoShutdownValue={form.pluggedAutoShutdownMinutes}
-        disabled={!snapshot?.writeSupported || status === 'saving'}
-        onLowPowerChange={value => setForm(current => ({ ...current, pluggedLowPowerIdleMinutes: value }))}
-        onAutoShutdownChange={value => setForm(current => ({ ...current, pluggedAutoShutdownMinutes: value }))}
+      <div style={{ paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>
+          {t('settings.device.powerTimingTitle', '电源时间')}
+        </div>
+        <div className="ol-device-power-timing-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+          <PowerModeTimingGroup
+            title={t('settings.device.pluggedModeTitle', '插电模式')}
+            desc={t('settings.device.pluggedModeDesc', 'USB、充电或外部供电时使用。')}
+            lowPowerLabel={t('settings.device.pluggedLowPowerIdleLabel', '进入低功耗')}
+            lowPowerDesc={t('settings.device.pluggedLowPowerIdleDesc', '无操作多久后进入低功耗空闲。')}
+            lowPowerValue={form.pluggedLowPowerIdleMinutes}
+            autoShutdownLabel={t('settings.device.pluggedAutoShutdownLabel', '自动关机')}
+            autoShutdownDesc={t('settings.device.pluggedAutoShutdownDesc', '填 0 表示不自动关机。')}
+            autoShutdownValue={form.pluggedAutoShutdownMinutes}
+            disabled={controlsDisabled}
+            onLowPowerChange={value => setForm(current => ({ ...current, pluggedLowPowerIdleMinutes: value }))}
+            onAutoShutdownChange={value => setForm(current => ({ ...current, pluggedAutoShutdownMinutes: value }))}
+            t={t}
+          />
+          <PowerModeTimingGroup
+            title={t('settings.device.batteryModeTitle', '电池模式')}
+            desc={t('settings.device.batteryModeDesc', '拔电后使用；低功耗会灭灯。')}
+            lowPowerLabel={t('settings.device.batteryLowPowerIdleLabel', '进入低功耗')}
+            lowPowerDesc={t('settings.device.batteryLowPowerIdleDesc', '无操作多久进入低功耗空闲。')}
+            lowPowerValue={form.batteryLowPowerIdleMinutes}
+            autoShutdownLabel={t('settings.device.batteryAutoShutdownLabel', '自动关机')}
+            autoShutdownDesc={t('settings.device.batteryAutoShutdownDesc', '填 0 表示关闭。')}
+            autoShutdownValue={form.batteryAutoShutdownMinutes}
+            disabled={controlsDisabled}
+            onLowPowerChange={value => setForm(current => ({ ...current, batteryLowPowerIdleMinutes: value }))}
+            onAutoShutdownChange={value => setForm(current => ({ ...current, batteryAutoShutdownMinutes: value }))}
+            t={t}
+          />
+        </div>
+      </div>
+
+      <DeviceLedBrightnessGroup
+        supported={snapshot?.ledZoneBrightnessSupported ?? false}
+        disabled={ledControlsDisabled}
+        values={form}
+        onChange={(field, value) => setForm(current => ({ ...current, [field]: value }))}
         t={t}
       />
-      <PowerModeTimingGroup
-        title={t('settings.device.batteryModeTitle', '电池模式')}
-        lowPowerLabel={t('settings.device.batteryLowPowerIdleLabel', '进入低功耗')}
-        lowPowerDesc={t('settings.device.batteryLowPowerIdleDesc', '拔电后，无操作多久进入低功耗空闲并灭灯。')}
-        lowPowerValue={form.batteryLowPowerIdleMinutes}
-        autoShutdownLabel={t('settings.device.batteryAutoShutdownLabel', '自动关机')}
-        autoShutdownDesc={t('settings.device.batteryAutoShutdownDesc', '电池供电且长时间空闲时自动关机；填 0 表示关闭。')}
-        autoShutdownValue={form.batteryAutoShutdownMinutes}
-        disabled={!snapshot?.writeSupported || status === 'saving'}
-        onLowPowerChange={value => setForm(current => ({ ...current, batteryLowPowerIdleMinutes: value }))}
-        onAutoShutdownChange={value => setForm(current => ({ ...current, batteryAutoShutdownMinutes: value }))}
-        t={t}
-      />
+
       <SettingRow
         label={t('settings.device.bleNameLabel', '蓝牙名称')}
         desc={t('settings.device.bleNameDesc', '1-32 个 ASCII 字符；部分 Windows 设备名变更需要重连或重新配对后才显示。')}
@@ -363,7 +387,7 @@ function DeviceFirmwareSettingsCard() {
         <input
           value={form.bleName}
           maxLength={32}
-          disabled={!snapshot?.writeSupported || status === 'saving'}
+          disabled={controlsDisabled}
           onChange={event => setForm(current => ({ ...current, bleName: event.target.value }))}
           style={{ ...inputStyle, maxWidth: 'none' }}
         />
@@ -378,6 +402,7 @@ function DeviceFirmwareSettingsCard() {
 
 function PowerModeTimingGroup({
   title,
+  desc,
   lowPowerLabel,
   lowPowerDesc,
   lowPowerValue,
@@ -390,6 +415,7 @@ function PowerModeTimingGroup({
   t,
 }: {
   title: string;
+  desc: string;
   lowPowerLabel: string;
   lowPowerDesc: string;
   lowPowerValue: number;
@@ -402,28 +428,59 @@ function PowerModeTimingGroup({
   t: ReturnType<typeof useTranslation>['t'];
 }) {
   return (
-    <div style={{ paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)' }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 2 }}>
-        {title}
+    <div style={{ minWidth: 0, borderRadius: 8, background: 'color-mix(in srgb, var(--ol-surface-2) 72%, transparent)', padding: '12px 12px 10px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{title}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>
+        </div>
       </div>
-      <SettingRow label={lowPowerLabel} desc={lowPowerDesc}>
-        <MinuteInput
-          value={lowPowerValue}
-          min={1}
-          disabled={disabled}
-          onChange={onLowPowerChange}
-          t={t}
-        />
-      </SettingRow>
-      <SettingRow label={autoShutdownLabel} desc={autoShutdownDesc}>
-        <MinuteInput
-          value={autoShutdownValue}
-          min={0}
-          disabled={disabled}
-          onChange={onAutoShutdownChange}
-          t={t}
-        />
-      </SettingRow>
+      <TimingControl
+        label={lowPowerLabel}
+        desc={lowPowerDesc}
+        value={lowPowerValue}
+        min={1}
+        disabled={disabled}
+        onChange={onLowPowerChange}
+        t={t}
+      />
+      <TimingControl
+        label={autoShutdownLabel}
+        desc={autoShutdownDesc}
+        value={autoShutdownValue}
+        min={0}
+        disabled={disabled}
+        onChange={onAutoShutdownChange}
+        t={t}
+      />
+    </div>
+  );
+}
+
+function TimingControl({
+  label,
+  desc,
+  value,
+  min,
+  disabled,
+  onChange,
+  t,
+}: {
+  label: string;
+  desc: string;
+  value: number;
+  min: 0 | 1;
+  disabled: boolean;
+  onChange: (value: number) => void;
+  t: ReturnType<typeof useTranslation>['t'];
+}) {
+  return (
+    <div className="ol-device-timing-control" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(132px, 0.72fr)', gap: 12, alignItems: 'center', padding: '9px 0', borderTop: '0.5px solid var(--ol-line-soft)' }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.4 }}>{desc}</div>
+      </div>
+      <MinuteInput value={value} min={min} disabled={disabled} onChange={onChange} t={t} />
     </div>
   );
 }
@@ -463,6 +520,133 @@ function MinuteInput({
           {t('settings.device.zeroMeansOff', '0 = 关闭')}
         </span>
       )}
+    </div>
+  );
+}
+
+type LedBrightnessField =
+  | 'statusLedBrightnessPercent'
+  | 'keyLedBrightnessPercent'
+  | 'knobLedBrightnessPercent'
+  | 'edgeLedBrightnessPercent';
+
+function DeviceLedBrightnessGroup({
+  supported,
+  disabled,
+  values,
+  onChange,
+  t,
+}: {
+  supported: boolean;
+  disabled: boolean;
+  values: Pick<DeviceSettingsUpdateRequest, LedBrightnessField>;
+  onChange: (field: LedBrightnessField, value: number) => void;
+  t: ReturnType<typeof useTranslation>['t'];
+}) {
+  const supportText = supported
+    ? t('settings.device.ledZoneSupported', '按灯区分别限制最大亮度。')
+    : t('settings.device.ledZoneUnsupported', '当前固件未回读四区亮度；更新固件后可写入。');
+  return (
+    <div style={{ paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)', marginTop: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>
+            {t('settings.device.ledZoneTitle', '灯区亮度')}
+          </div>
+          <div style={{ fontSize: 11.5, color: supported ? 'var(--ol-ink-4)' : 'var(--ol-warn, var(--ol-ink-4))', marginTop: 2, lineHeight: 1.45 }}>
+            {supportText}
+          </div>
+        </div>
+      </div>
+      <div className="ol-device-led-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+        <LedBrightnessControl
+          label={t('settings.device.statusLedBrightnessLabel', '状态灯')}
+          desc={t('settings.device.statusLedBrightnessDesc', 'PWR / BLE / REC / AI / OK / WARN')}
+          value={values.statusLedBrightnessPercent}
+          disabled={disabled}
+          onChange={value => onChange('statusLedBrightnessPercent', value)}
+        />
+        <LedBrightnessControl
+          label={t('settings.device.keyLedBrightnessLabel', '按键灯')}
+          desc={t('settings.device.keyLedBrightnessDesc', 'KEY1-KEY4')}
+          value={values.keyLedBrightnessPercent}
+          disabled={disabled}
+          onChange={value => onChange('keyLedBrightnessPercent', value)}
+        />
+        <LedBrightnessControl
+          label={t('settings.device.knobLedBrightnessLabel', '旋钮灯')}
+          desc={t('settings.device.knobLedBrightnessDesc', 'EC11 环灯')}
+          value={values.knobLedBrightnessPercent}
+          disabled={disabled}
+          onChange={value => onChange('knobLedBrightnessPercent', value)}
+        />
+        <LedBrightnessControl
+          label={t('settings.device.edgeLedBrightnessLabel', '板框灯')}
+          desc={t('settings.device.edgeLedBrightnessDesc', '边框氛围灯')}
+          value={values.edgeLedBrightnessPercent}
+          disabled={disabled}
+          onChange={value => onChange('edgeLedBrightnessPercent', value)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function LedBrightnessControl({
+  label,
+  desc,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  desc: string;
+  value: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div style={{ minWidth: 0, display: 'grid', gap: 7, padding: '10px 0' }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.35 }}>{desc}</div>
+      </div>
+      <PercentSlider value={value} disabled={disabled} onChange={onChange} />
+    </div>
+  );
+}
+
+function PercentSlider({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  const safeValue = clampPercent(value);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0 }}>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={safeValue}
+        disabled={disabled}
+        onChange={event => onChange(clampPercent(Number(event.target.value)))}
+        style={{ flex: '1 1 88px', minWidth: 72, accentColor: 'var(--ol-blue)' }}
+      />
+      <input
+        type="number"
+        min={0}
+        max={100}
+        value={safeValue}
+        disabled={disabled}
+        onChange={event => onChange(clampPercent(Number(event.target.value)))}
+        style={{ ...inputStyle, flex: '0 1 64px', maxWidth: 72, textAlign: 'right' }}
+      />
+      <span style={{ fontSize: 12, color: 'var(--ol-ink-4)', flex: '0 0 auto' }}>%</span>
     </div>
   );
 }
@@ -820,6 +1004,10 @@ function DeviceKeyMappingControl({
 
 function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateRequest {
   return {
+    statusLedBrightnessPercent: snapshot.statusLedBrightnessPercent,
+    keyLedBrightnessPercent: snapshot.keyLedBrightnessPercent,
+    knobLedBrightnessPercent: snapshot.knobLedBrightnessPercent,
+    edgeLedBrightnessPercent: snapshot.edgeLedBrightnessPercent,
     pluggedLowPowerIdleMinutes: snapshot.pluggedLowPowerIdleMinutes,
     batteryLowPowerIdleMinutes: snapshot.batteryLowPowerIdleMinutes,
     pluggedAutoShutdownMinutes: Math.round(snapshot.pluggedAutoShutdownMs / 60000),
@@ -832,6 +1020,14 @@ function validateDeviceSettingsForm(
   form: DeviceSettingsUpdateRequest,
   t: ReturnType<typeof useTranslation>['t'],
 ): string {
+  if (
+    !Number.isFinite(form.statusLedBrightnessPercent) || form.statusLedBrightnessPercent < 0 || form.statusLedBrightnessPercent > 100 ||
+    !Number.isFinite(form.keyLedBrightnessPercent) || form.keyLedBrightnessPercent < 0 || form.keyLedBrightnessPercent > 100 ||
+    !Number.isFinite(form.knobLedBrightnessPercent) || form.knobLedBrightnessPercent < 0 || form.knobLedBrightnessPercent > 100 ||
+    !Number.isFinite(form.edgeLedBrightnessPercent) || form.edgeLedBrightnessPercent < 0 || form.edgeLedBrightnessPercent > 100
+  ) {
+    return t('settings.device.errorZoneBrightness', '灯区亮度必须在 0-100 之间。');
+  }
   if (!Number.isFinite(form.pluggedLowPowerIdleMinutes) || form.pluggedLowPowerIdleMinutes < 1 || form.pluggedLowPowerIdleMinutes > 1440) {
     return t('settings.device.errorLowPowerIdle', '低功耗等待时间必须在 1-1440 分钟之间。');
   }
@@ -875,6 +1071,11 @@ function isValidBleName(value: string): boolean {
     if (value[index] === '"' || value[index] === '\'' || value[index] === ';' || value[index] === '=' || value[index] === '\\') return false;
   }
   return true;
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 function formatDeviceSnapshotSummary(

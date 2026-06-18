@@ -164,16 +164,15 @@ function Test-FeatureSnapshot {
     if (@($Snapshot["validation_commands"]).Count -lt 4) {
         $errors += "validation_commands must contain at least 4 entries"
     }
-    $errors += @(Test-RepoText "src-tauri/src/types.rs" 'DEFAULT_DEVICE_PLUGGED_BRIGHTNESS_PERCENT:\s*u8\s*=\s*80' 'plugged brightness default')
-    $errors += @(Test-RepoText "src-tauri/src/types.rs" 'DEFAULT_DEVICE_BATTERY_BRIGHTNESS_PERCENT:\s*u8\s*=\s*50' 'battery brightness default')
+    $errors += @(Test-RepoText "src-tauri/src/types.rs" 'DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT:\s*u8\s*=\s*100' 'LED zone brightness default')
     $errors += @(Test-RepoText "src-tauri/src/types.rs" 'DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES:\s*u32\s*=\s*1' 'low-power idle default')
     $errors += @(Test-RepoText "src-tauri/src/types.rs" 'DEFAULT_DEVICE_BLE_NAME:\s*&str\s*=\s*"listener"' 'BLE name default')
-    $errors += @(Test-RepoText "src/lib/ipc.ts" 'devicePluggedBrightnessPercent:\s*80' 'mock plugged brightness default')
-    $errors += @(Test-RepoText "src/lib/ipc.ts" 'deviceBatteryBrightnessPercent:\s*50' 'mock battery brightness default')
+    $errors += @(Test-RepoText "src/lib/ipc.ts" 'deviceStatusLedBrightnessPercent:\s*100' 'mock status LED brightness default')
+    $errors += @(Test-RepoText "src/lib/ipc.ts" 'deviceEdgeLedBrightnessPercent:\s*100' 'mock edge LED brightness default')
     $errors += @(Test-RepoText "src/lib/ipc.ts" 'deviceLowPowerIdleMinutes:\s*1' 'mock low-power idle default')
-    $errors += @(Test-RepoText "src/pages/settings/DeviceSection.tsx" 'devicePluggedBrightnessPercent\s*\?\?\s*80' 'settings plugged brightness fallback')
-    $errors += @(Test-RepoText "src/pages/settings/DeviceSection.tsx" 'deviceBatteryBrightnessPercent\s*\?\?\s*50' 'settings battery brightness fallback')
-    $errors += @(Test-RepoText "src/pages/settings/DeviceSection.tsx" 'deviceLowPowerIdleMinutes\s*\?\?\s*1' 'settings low-power idle fallback')
+    $errors += @(Test-RepoText "src/pages/settings/DeviceSection.tsx" 'settings\.device\.ledZoneTitle' 'settings LED zone brightness section')
+    $errors += @(Test-RepoText "src/pages/settings/DeviceSection.tsx" 'pluggedLowPowerIdleMinutes:\s*1' 'settings plugged low-power fallback')
+    $errors += @(Test-RepoText "src/pages/settings/DeviceSection.tsx" 'batteryLowPowerIdleMinutes:\s*1' 'settings battery low-power fallback')
     if ($scriptText.Length -gt 17500) {
         $errors += "script is too long: $($scriptText.Length) characters"
     }

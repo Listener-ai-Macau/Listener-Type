@@ -134,8 +134,10 @@ let mockSettings: UserPreferences = {
   },
   deviceCustomKeysDefaultMigrated: true,
   deviceKnobRotationAction: 'systemVolume',
-  devicePluggedBrightnessPercent: 80,
-  deviceBatteryBrightnessPercent: 50,
+  deviceStatusLedBrightnessPercent: 100,
+  deviceKeyLedBrightnessPercent: 100,
+  deviceKnobLedBrightnessPercent: 100,
+  deviceEdgeLedBrightnessPercent: 100,
   deviceLowPowerIdleMinutes: 1,
   deviceBatteryAutoShutdownMinutes: 30,
   deviceBleName: 'listener',
@@ -174,9 +176,11 @@ let mockDeviceSettings: DeviceSettingsSnapshot = {
   connected: true,
   writeSupported: true,
   source: 'mock',
-  pluggedBrightnessPercent: 100,
-  batteryBrightnessPercent: 60,
-  activeBrightnessPercent: 100,
+  statusLedBrightnessPercent: 100,
+  keyLedBrightnessPercent: 100,
+  knobLedBrightnessPercent: 100,
+  edgeLedBrightnessPercent: 100,
+  ledZoneBrightnessSupported: true,
   lowPowerIdleMinutes: 1,
   pluggedLowPowerIdleMinutes: 1,
   batteryLowPowerIdleMinutes: 1,
@@ -258,8 +262,10 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     },
     deviceCustomKeysDefaultMigrated: prefs.deviceCustomKeysDefaultMigrated ?? true,
     deviceKnobRotationAction: prefs.deviceKnobRotationAction ?? 'systemVolume',
-    devicePluggedBrightnessPercent: clampNumber(prefs.devicePluggedBrightnessPercent, 80, 0, 100),
-    deviceBatteryBrightnessPercent: clampNumber(prefs.deviceBatteryBrightnessPercent, 50, 0, 100),
+    deviceStatusLedBrightnessPercent: clampNumber(prefs.deviceStatusLedBrightnessPercent, 100, 0, 100),
+    deviceKeyLedBrightnessPercent: clampNumber(prefs.deviceKeyLedBrightnessPercent, 100, 0, 100),
+    deviceKnobLedBrightnessPercent: clampNumber(prefs.deviceKnobLedBrightnessPercent, 100, 0, 100),
+    deviceEdgeLedBrightnessPercent: clampNumber(prefs.deviceEdgeLedBrightnessPercent, 100, 0, 100),
     deviceLowPowerIdleMinutes: clampNumber(prefs.deviceLowPowerIdleMinutes, 1, 1, 1440),
     deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 30, 0, 1440),
     deviceBleName: normalizeDeviceBleName(prefs.deviceBleName),
@@ -628,6 +634,10 @@ export function setSettings(prefs: UserPreferences): Promise<void> {
     mockSettings = { ...nextPrefs };
     mockDeviceSettings = {
       ...mockDeviceSettings,
+      statusLedBrightnessPercent: nextPrefs.deviceStatusLedBrightnessPercent,
+      keyLedBrightnessPercent: nextPrefs.deviceKeyLedBrightnessPercent,
+      knobLedBrightnessPercent: nextPrefs.deviceKnobLedBrightnessPercent,
+      edgeLedBrightnessPercent: nextPrefs.deviceEdgeLedBrightnessPercent,
       lowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
       pluggedLowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
       batteryLowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
@@ -656,9 +666,11 @@ export function setSettings(prefs: UserPreferences): Promise<void> {
 
 export function refreshDeviceSettingsStatus(): Promise<DeviceFirmwareSettingsStatus> {
   return invokeOrMock('refresh_device_settings_status', undefined, () => ({
-    pluggedBrightnessPercent: mockSettings.devicePluggedBrightnessPercent,
-    batteryBrightnessPercent: mockSettings.deviceBatteryBrightnessPercent,
-    activeBrightnessPercent: mockSettings.devicePluggedBrightnessPercent,
+    statusLedBrightnessPercent: mockSettings.deviceStatusLedBrightnessPercent,
+    keyLedBrightnessPercent: mockSettings.deviceKeyLedBrightnessPercent,
+    knobLedBrightnessPercent: mockSettings.deviceKnobLedBrightnessPercent,
+    edgeLedBrightnessPercent: mockSettings.deviceEdgeLedBrightnessPercent,
+    ledZoneBrightnessSupported: true,
     lowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
     pluggedLowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
     batteryLowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
@@ -1105,12 +1117,21 @@ export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise
       const pluggedAutoShutdownMs = Math.round(request.pluggedAutoShutdownMinutes * 60 * 1000);
       mockSettings = {
         ...mockSettings,
+        deviceStatusLedBrightnessPercent: request.statusLedBrightnessPercent,
+        deviceKeyLedBrightnessPercent: request.keyLedBrightnessPercent,
+        deviceKnobLedBrightnessPercent: request.knobLedBrightnessPercent,
+        deviceEdgeLedBrightnessPercent: request.edgeLedBrightnessPercent,
         deviceLowPowerIdleMinutes: request.batteryLowPowerIdleMinutes,
         deviceBatteryAutoShutdownMinutes: request.batteryAutoShutdownMinutes,
         deviceBleName: request.bleName,
       };
       mockDeviceSettings = {
         ...mockDeviceSettings,
+        statusLedBrightnessPercent: request.statusLedBrightnessPercent,
+        keyLedBrightnessPercent: request.keyLedBrightnessPercent,
+        knobLedBrightnessPercent: request.knobLedBrightnessPercent,
+        edgeLedBrightnessPercent: request.edgeLedBrightnessPercent,
+        ledZoneBrightnessSupported: true,
         lowPowerIdleMinutes: mockDeviceSettings.activePowerSource === 'plugged'
           ? request.pluggedLowPowerIdleMinutes
           : request.batteryLowPowerIdleMinutes,
