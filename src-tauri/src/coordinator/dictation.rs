@@ -58,6 +58,23 @@ fn embedded_ble_actor_context_active(inner: &Arc<Inner>) -> bool {
     inner.embedded_ble_cancel_flag.lock().is_some() || inner.embedded_audio_stats.lock().is_some()
 }
 
+fn embedded_ble_host_recording_control_context_active(inner: &Arc<Inner>) -> bool {
+    embedded_ble_actor_context_active(inner)
+        || inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle
+}
+
+fn embedded_ble_host_cancel_context_active(inner: &Arc<Inner>) -> bool {
+    if embedded_ble_actor_context_active(inner) {
+        return true;
+    }
+    let phase = inner.state.lock().phase;
+    inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle
+        && matches!(
+            phase,
+            SessionPhase::Starting | SessionPhase::Listening | SessionPhase::Processing
+        )
+}
+
 fn publish_dictation_pipeline_error(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -217,8 +234,7 @@ fn embedded_audio_stop_feedback_latched(inner: &Arc<Inner>) -> bool {
 }
 
 fn should_sync_device_ai_processing(inner: &Arc<Inner>) -> bool {
-    inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle
-        || embedded_ble_actor_context_active(inner)
+    embedded_ble_host_recording_control_context_active(inner)
 }
 
 fn set_device_ai_processing_async(inner: &Arc<Inner>, active: bool, reason: &'static str) {
@@ -501,7 +517,7 @@ pub(super) async fn request_embedded_ble_recording_stop_from_host(
     inner: &Arc<Inner>,
     reason: &'static str,
 ) -> Result<bool, String> {
-    if !embedded_ble_actor_context_active(inner) {
+    if !embedded_ble_host_recording_control_context_active(inner) {
         return Ok(false);
     }
     let (session_id, phase) = {
@@ -3513,7 +3529,7 @@ pub(super) fn dictation_error_code(
 }
 
 pub(super) fn cancel_session(inner: &Arc<Inner>) {
-    if embedded_ble_actor_context_active(inner) {
+    if embedded_ble_host_cancel_context_active(inner) {
         cancel_embedded_ble_session_through_actor(inner);
         return;
     }
@@ -3828,6 +3844,34 @@ mod tests {
     }
 
     #[test]
+    fn idle_cancel_without_capture_flag_does_not_route_by_default_embedded_pref() {
+        let coordinator = Coordinator::new();
+        coordinator.inner.state.lock().phase = SessionPhase::Idle;
+
+        cancel_session(&coordinator.inner);
+
+        let history = embedded_ble_session_actor_history(&coordinator.inner);
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn capsule_cancel_routes_by_embedded_ble_preference_without_capture_flag() {
+        let coordinator = Coordinator::new();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+
+        cancel_session(&coordinator.inner);
+
+        let history = embedded_ble_session_actor_history(&coordinator.inner);
+        assert!(history
+            .iter()
+            .any(|record| record.command == EmbeddedBleSessionActorCommand::CancelCommand));
+    }
+
+    #[test]
     fn embedded_ble_cancel_registration_only_clears_matching_flag() {
         let coordinator = Coordinator::new();
         let first = Arc::new(AtomicBool::new(false));
@@ -4084,6 +4128,37 @@ mod tests {
         assert!(history.iter().any(|record| {
             record.command == EmbeddedBleSessionActorCommand::StopCommand
                 && record.detail.contains("unit_test_host_stop")
+        }));
+    }
+
+    #[tokio::test]
+    async fn host_stop_request_routes_by_embedded_ble_preference_without_capture_flag() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+
+        let handled = request_embedded_ble_recording_stop_from_host(
+            &coordinator.inner,
+            "unit_test_host_stop_pref",
+        )
+        .await
+        .expect("test stop request does not touch BLE transport");
+
+        assert!(handled);
+        assert!(embedded_audio_stop_feedback_latched(&coordinator.inner));
+        {
+            let state = coordinator.inner.state.lock();
+            assert_eq!(state.phase, SessionPhase::Listening);
+        }
+        let history = embedded_ble_session_actor_history(&coordinator.inner);
+        assert!(history.iter().any(|record| {
+            record.command == EmbeddedBleSessionActorCommand::StopCommand
+                && record.detail.contains("unit_test_host_stop_pref")
         }));
     }
 
