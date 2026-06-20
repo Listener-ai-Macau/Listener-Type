@@ -1402,6 +1402,9 @@ function Convert-SerialReportForJson {
         generated_button_evidence_summary = if ($Report.generated_button_evidence_summary) { [string]$Report.generated_button_evidence_summary } else { $null }
         led_status_seen = [bool]$Report.led_status_seen
         led_status_sample_ranges = $ledStatusSampleRanges
+        led_status_line_count = if ($null -ne $Report.led_status_line_count) { [int]$Report.led_status_line_count } else { 0 }
+        led_status_recording_line_count = if ($null -ne $Report.led_status_recording_line_count) { [int]$Report.led_status_recording_line_count } else { 0 }
+        led_status_post_stop_line_count = if ($null -ne $Report.led_status_post_stop_line_count) { [int]$Report.led_status_post_stop_line_count } else { 0 }
         led_status_summary_count = [int]$Report.led_status_summary_count
         led_status_recording_summary_count = [int]$Report.led_status_recording_summary_count
         led_status_post_stop_summary_count = [int]$Report.led_status_post_stop_summary_count
@@ -1642,7 +1645,14 @@ def send_pre_start_cancel(ser):
 def request_led_status(ser, phase):
     start_index = len(lines)
     send_command(ser, "~LED:STATUS")
-    poll_until(ser, time.monotonic() + 0.35)
+    deadline = time.monotonic() + 0.85
+    while time.monotonic() < deadline:
+        poll_lines(ser)
+        sample = lines[start_index:]
+        if any(LED_STATUS_LINE_MARKER in line and LED_STATUS_SUMMARY_MARKER in line for line in sample):
+            break
+        time.sleep(0.05)
+    poll_until(ser, time.monotonic() + 0.10)
     led_status_sample_ranges[phase] = [start_index, len(lines)]
     print(f"serial_led_status_{phase}=sampled", flush=True)
 
