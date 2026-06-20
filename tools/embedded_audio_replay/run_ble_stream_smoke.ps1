@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("serial-toggle", "serial-cancel", "desktop-cancel", "manual-key", "generated-key3")]
+    [ValidateSet("serial-toggle", "serial-cancel", "desktop-cancel", "desktop-confirm", "manual-key", "generated-key3")]
     [string]$TriggerMode = "serial-toggle",
     [string]$Port = "COM3",
     [string]$DeviceName = "listener",
@@ -879,7 +879,9 @@ function Get-CapsuleWindowSnapshot {
 function Invoke-CapsuleCancelClick {
     param(
         [int]$ProcessId = 0,
-        [int]$TimeoutMs = 2200
+        [int]$TimeoutMs = 2200,
+        [ValidateSet("cancel", "confirm")]
+        [string]$Button = "cancel"
     )
 
     Ensure-WindowInterop
@@ -888,7 +890,12 @@ function Invoke-CapsuleCancelClick {
         $snapshot = Get-CapsuleWindowSnapshot -ProcessId $ProcessId
         if ($snapshot) {
             $handle = [IntPtr]$snapshot.handle_value
-            $buttonX = [int]($snapshot.left + [Math]::Min(48, [Math]::Max(28, [Math]::Round($snapshot.width * 0.11))))
+            $buttonInset = [Math]::Min(48, [Math]::Max(28, [Math]::Round($snapshot.width * 0.11)))
+            $buttonX = if ($Button -eq "confirm") {
+                [int]($snapshot.right - $buttonInset)
+            } else {
+                [int]($snapshot.left + $buttonInset)
+            }
             $buttonY = [int]($snapshot.top + [Math]::Round($snapshot.height / 2.0))
             $screenshotPath = $null
             $screenScreenshotPath = $null
@@ -944,10 +951,11 @@ function Invoke-CapsuleCancelClick {
             [ListenerSmokeWindow]::mouse_event([ListenerSmokeWindow]::MOUSEEVENTF_LEFTDOWN, [uint32]0, [uint32]0, [uint32]0, [UIntPtr]::Zero)
             Start-Sleep -Milliseconds 80
             [ListenerSmokeWindow]::mouse_event([ListenerSmokeWindow]::MOUSEEVENTF_LEFTUP, [uint32]0, [uint32]0, [uint32]0, [UIntPtr]::Zero)
-            Write-SmokeTrace "desktop_cancel_clicked x=$buttonX y=$buttonY rect=$($snapshot.left),$($snapshot.top),$($snapshot.width),$($snapshot.height)"
+            Write-SmokeTrace "desktop_${Button}_clicked x=$buttonX y=$buttonY rect=$($snapshot.left),$($snapshot.top),$($snapshot.width),$($snapshot.height)"
             $snapshot.Remove("handle_value")
             return [ordered]@{
                 clicked = $true
+                button = $Button
                 x = $buttonX
                 y = $buttonY
                 screenshot_path = $screenshotPath
@@ -960,6 +968,7 @@ function Invoke-CapsuleCancelClick {
 
     return [ordered]@{
         clicked = $false
+        button = $Button
         error = "Capsule window was not visible before desktop cancel click."
     }
 }
@@ -1390,7 +1399,15 @@ function Convert-SerialReportForJson {
         record_start_rejected = [bool]$Report.record_start_rejected
         recording_start_seen = [bool]$Report.recording_start_seen
         recording_stop_seen = [bool]$Report.recording_stop_seen
+        recording_stop_ble_control_seen = [bool]$Report.recording_stop_ble_control_seen
         recording_cancel_seen = [bool]$Report.recording_cancel_seen
+        recording_cancel_ble_control_seen = [bool]$Report.recording_cancel_ble_control_seen
+        recording_cancel_usb_seen = [bool]$Report.recording_cancel_usb_seen
+        audio_control_stop_write_seen = [bool]$Report.audio_control_stop_write_seen
+        audio_control_cancel_write_seen = [bool]$Report.audio_control_cancel_write_seen
+        audio_control_processing_start_seen = [bool]$Report.audio_control_processing_start_seen
+        audio_control_processing_done_seen = [bool]$Report.audio_control_processing_done_seen
+        audio_control_processing_warning_seen = [bool]$Report.audio_control_processing_warning_seen
         cancel_requested = [bool]$Report.cancel_requested
         cancel_completed = [bool]$Report.cancel_completed
         generated_button_logical = if ($Report.generated_button_logical) { [string]$Report.generated_button_logical } else { $null }
@@ -1404,9 +1421,11 @@ function Convert-SerialReportForJson {
         led_status_sample_ranges = $ledStatusSampleRanges
         led_status_line_count = if ($null -ne $Report.led_status_line_count) { [int]$Report.led_status_line_count } else { 0 }
         led_status_recording_line_count = if ($null -ne $Report.led_status_recording_line_count) { [int]$Report.led_status_recording_line_count } else { 0 }
+        led_status_processing_line_count = if ($null -ne $Report.led_status_processing_line_count) { [int]$Report.led_status_processing_line_count } else { 0 }
         led_status_post_stop_line_count = if ($null -ne $Report.led_status_post_stop_line_count) { [int]$Report.led_status_post_stop_line_count } else { 0 }
         led_status_summary_count = [int]$Report.led_status_summary_count
         led_status_recording_summary_count = [int]$Report.led_status_recording_summary_count
+        led_status_processing_summary_count = [int]$Report.led_status_processing_summary_count
         led_status_post_stop_summary_count = [int]$Report.led_status_post_stop_summary_count
         led_recording_active_seen = [bool]$Report.led_recording_active_seen
         led_recording_cleared_seen = [bool]$Report.led_recording_cleared_seen
@@ -1590,6 +1609,7 @@ stream_ready_confirmed_line_index = None
 transport_not_ready_rejection_line_index = None
 pre_start_cancel_sent = False
 led_status_sample_ranges = {}
+processing_status_sampled = False
 
 AUDIO_TRANSPORT_STATE_MARKER = "audio transport state:"
 AUDIO_TRANSPORT_STREAM_READY_MARKER = "stream_ready"
@@ -1794,10 +1814,24 @@ def start_recording_with_retry(ser):
         break
     raise RuntimeError("firmware rejected recording start because BLE audio transport was not ready")
 
+def maybe_request_processing_led_status(ser):
+    global processing_status_sampled
+    if processing_status_sampled:
+        return
+    if any(
+        "audio control write handled: payload=VREC:PROCESSING:START" in line
+        or "host processing start source=ble_audio_control" in line
+        for line in lines
+    ):
+        processing_status_sampled = True
+        time.sleep(0.15)
+        request_led_status(ser, "processing")
+
 def wait_for_stop_signal(ser):
     deadline = time.monotonic() + (max_record_ms / 1000.0)
     while time.monotonic() < deadline:
         poll_lines(ser)
+        maybe_request_processing_led_status(ser)
         if stop_signal_path.exists():
             try:
                 stop_signal_path.unlink()
@@ -1826,8 +1860,10 @@ try:
     wait_for_start_signal(ser)
     start_recording_with_retry(ser)
     request_led_status(ser, "recording")
+    maybe_request_processing_led_status(ser)
     wait_for_stop_signal(ser)
-    send_command(ser, end_command)
+    if end_command:
+        send_command(ser, end_command)
     poll_until(ser, time.monotonic() + 0.5)
     request_led_status(ser, "post_stop")
     poll_until(ser, time.monotonic() + 1.0)
@@ -1934,9 +1970,11 @@ def led_diag_flag_seen(name, expected_active=True, reason=None):
 
 led_status_all = led_status_lines()
 led_status_recording = led_status_lines("recording")
+led_status_processing = led_status_lines("processing")
 led_status_post_stop = led_status_lines("post_stop")
 led_summary_all = led_status_summary_lines()
 led_summary_recording = led_status_summary_lines("recording")
+led_summary_processing = led_status_summary_lines("processing")
 led_summary_post_stop = led_status_summary_lines("post_stop")
 led_diag_events = status_led_diag_events()
 led_diag_visual_state_seen = any(int(event.get("evt") or 0) == 6 for event in led_diag_events)
@@ -1994,7 +2032,15 @@ summary = {
     "record_start_rejected": contains("record session start rejected"),
     "recording_start_seen": contains("recording start source="),
     "recording_stop_seen": contains("recording stop source="),
+    "recording_stop_ble_control_seen": contains("recording stop source=ble_audio_control"),
     "recording_cancel_seen": contains("recording cancel source="),
+    "recording_cancel_ble_control_seen": contains("recording cancel source=ble_audio_control"),
+    "recording_cancel_usb_seen": contains("recording cancel source=usb"),
+    "audio_control_stop_write_seen": contains("audio control write handled: payload=VREC:STOP"),
+    "audio_control_cancel_write_seen": contains("audio control write handled: payload=VREC:CANCEL"),
+    "audio_control_processing_start_seen": contains("audio control write handled: payload=VREC:PROCESSING:START"),
+    "audio_control_processing_done_seen": contains("audio control write handled: payload=VREC:PROCESSING:DONE"),
+    "audio_control_processing_warning_seen": contains("audio control write handled: payload=VREC:PROCESSING:WARN"),
     "cancel_requested": contains("record session cancel requested"),
     "cancel_completed": (
         contains("record session canceled")
@@ -2014,9 +2060,11 @@ summary = {
     "led_status_sample_ranges": led_status_sample_ranges,
     "led_status_line_count": len(led_status_all),
     "led_status_recording_line_count": len(led_status_recording),
+    "led_status_processing_line_count": len(led_status_processing),
     "led_status_post_stop_line_count": len(led_status_post_stop),
     "led_status_summary_count": len(led_summary_all),
     "led_status_recording_summary_count": len(led_summary_recording),
+    "led_status_processing_summary_count": len(led_summary_processing),
     "led_status_post_stop_summary_count": len(led_summary_post_stop),
     "led_recording_active_seen": led_recording_active_seen,
     "led_recording_cleared_seen": led_recording_cleared_seen,
@@ -2334,7 +2382,7 @@ if ($NoNotificationTimeoutSeconds -lt 1) {
 
 $RunStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $script:TraceLogPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.trace.log"
-$script:DesktopCancelScreenshotPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.desktop-cancel.png"
+$script:DesktopCancelScreenshotPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.$TriggerMode.png"
 Write-SmokeTrace "start trigger=$TriggerMode port=$Port timeout_ms=$TimeoutMs"
 $AudioProfileConfig = Get-SmokeAudioProfile -Name $AudioProfile
 if (-not $PSBoundParameters.ContainsKey("TtsRate")) {
@@ -2468,10 +2516,18 @@ $generatedKeyCommand = switch ($TriggerMode) {
     "generated-key3" { "~KEY:KEY3:SINGLE" }
     default { $null }
 }
-$usesSerialSignal = @("serial-toggle", "serial-cancel", "desktop-cancel", "generated-key3") -contains $TriggerMode
+$usesSerialSignal = @("serial-toggle", "serial-cancel", "desktop-cancel", "desktop-confirm", "generated-key3") -contains $TriggerMode
 $serialStartCommand = if ($generatedKeyCommand) { $generatedKeyCommand } else { "~VREC:TOGGLE" }
-$serialEndCommand = if (@("serial-cancel", "desktop-cancel") -contains $TriggerMode) { "~VREC:CANCEL" } else { $serialStartCommand }
+$serialEndCommand = if ($TriggerMode -eq "serial-cancel") {
+    "~VREC:CANCEL"
+} elseif (@("desktop-cancel", "desktop-confirm") -contains $TriggerMode) {
+    ""
+} else {
+    $serialStartCommand
+}
 $usesDesktopCancel = $TriggerMode -eq "desktop-cancel"
+$usesDesktopConfirm = $TriggerMode -eq "desktop-confirm"
+$usesDesktopAction = $usesDesktopCancel -or $usesDesktopConfirm
 $expectedStreamFailure = $null
 $playbackVolumeSnapshot = $null
 try {
@@ -2656,14 +2712,15 @@ try {
         Write-SmokeTrace "playback_done index=$index actual_ms=$playbackElapsedMs"
         if ($index -eq $RecordPlaybackIndex) {
             $recordPlaybackDurationMs = $playbackElapsedMs
-            if ($usesDesktopCancel) {
+            if ($usesDesktopAction) {
                 Start-Sleep -Milliseconds $PostPlaybackRecordMs
-                $desktopCancelReport = Invoke-CapsuleCancelClick -ProcessId $process.Id
-                $timeline["desktop_cancel_clicked_at_utc"] = Get-SmokeUtcNow
+                $desktopButton = if ($usesDesktopConfirm) { "confirm" } else { "cancel" }
+                $desktopCancelReport = Invoke-CapsuleCancelClick -ProcessId $process.Id -Button $desktopButton
+                $timeline["desktop_${desktopButton}_clicked_at_utc"] = Get-SmokeUtcNow
                 if (-not [bool]$desktopCancelReport.clicked) {
                     throw ([string]$desktopCancelReport.error)
                 }
-                Write-SmokeTrace "desktop_cancel_requested"
+                Write-SmokeTrace "desktop_${desktopButton}_requested"
             } elseif ($usesSerialSignal) {
                 Start-Sleep -Milliseconds $PostPlaybackRecordMs
                 Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
@@ -2740,15 +2797,15 @@ try {
     if ((-not $doneMatch -or -not $doneMatch.Success) -and -not $expectedStreamFailure) {
         throw "Timed out waiting for Listener-Type BLE stream completion"
     }
-    if ($usesDesktopCancel -and $serialWindow) {
+    if ($usesDesktopAction -and $serialWindow) {
         Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
         $timeline["serial_cleanup_signal_at_utc"] = Get-SmokeUtcNow
-        Write-SmokeTrace "desktop_cancel_serial_cleanup_signal_written"
+        Write-SmokeTrace "desktop_action_serial_cleanup_signal_written"
         $serialReport = Wait-SerialRecordingWindow -Window $serialWindow
         $serialWindow = $null
         $recordingStarted = $false
         $timeline["serial_cleanup_done_at_utc"] = Get-SmokeUtcNow
-        Write-SmokeTrace "desktop_cancel_serial_cleanup_done"
+        Write-SmokeTrace "desktop_action_serial_cleanup_done"
     }
     Start-Sleep -Milliseconds 200
     $capturedLog += Read-NewLogText -Path $logPath -Offset $logOffset
@@ -2852,11 +2909,51 @@ try {
         if (-not $desktopCancelReport -or -not [bool]$desktopCancelReport.clicked) {
             $verificationErrors += "desktop capsule cancel click was not executed"
         }
-        if (-not [string]::IsNullOrWhiteSpace($expectedStreamFailure)) {
+        if ($capturedLog -match "firmware_cancel_failed") {
+            $verificationErrors += "Listener-Type firmware cancel sync failed after desktop capsule cancel"
+        }
+        if ($capturedLog -notmatch "firmware_cancel_sent") {
+            $verificationErrors += "Listener-Type did not confirm firmware cancel sync after desktop capsule cancel"
+        }
+        if ($serialReport -and -not [bool]$serialReport.recording_cancel_ble_control_seen) {
+            $verificationErrors += "firmware cancel after desktop capsule cancel was not sourced from BLE audio control"
+        }
+        if ($serialReport -and -not [bool]$serialReport.audio_control_cancel_write_seen) {
+            $verificationErrors += "firmware audio control write did not log VREC:CANCEL after desktop capsule cancel"
+        }
+        $expectedDesktopCancelFailure = -not [string]::IsNullOrWhiteSpace($expectedStreamFailure) -and
+            $expectedStreamFailure.Contains("已取消")
+        if (-not [string]::IsNullOrWhiteSpace($expectedStreamFailure) -and -not $expectedDesktopCancelFailure) {
             $verificationErrors += "Listener-Type BLE stream failed instead of returning Ok after desktop cancel: $expectedStreamFailure"
         }
-        if ($capturedLog -notmatch "\[embedded-ble\] streaming capture stopped after dictation cancel") {
+        if ((-not $expectedDesktopCancelFailure) -and $capturedLog -notmatch "\[embedded-ble\] streaming capture stopped after dictation cancel") {
             $verificationErrors += "Listener-Type did not log BLE capture stop after dictation cancel"
+        }
+    }
+    if ($usesDesktopConfirm) {
+        if (-not $desktopCancelReport -or -not [bool]$desktopCancelReport.clicked) {
+            $verificationErrors += "desktop capsule confirm click was not executed"
+        }
+        if ($capturedLog -match "firmware_stop_failed") {
+            $verificationErrors += "Listener-Type firmware stop sync failed after desktop capsule confirm"
+        }
+        if ($capturedLog -notmatch "firmware_stop_sent") {
+            $verificationErrors += "Listener-Type did not confirm firmware stop sync after desktop capsule confirm"
+        }
+        if ($serialReport -and -not [bool]$serialReport.recording_stop_ble_control_seen) {
+            $verificationErrors += "firmware stop after desktop capsule confirm was not sourced from BLE audio control"
+        }
+        if ($serialReport -and -not [bool]$serialReport.audio_control_stop_write_seen) {
+            $verificationErrors += "firmware audio control write did not log VREC:STOP after desktop capsule confirm"
+        }
+        if ($serialReport -and -not [bool]$serialReport.audio_control_processing_start_seen) {
+            $verificationErrors += "firmware audio control write did not log VREC:PROCESSING:START after desktop capsule confirm"
+        }
+        if ($serialReport -and -not [bool]$serialReport.audio_control_processing_done_seen) {
+            $verificationErrors += "firmware audio control write did not log VREC:PROCESSING:DONE after desktop capsule confirm"
+        }
+        if ($serialReport -and -not [bool]$serialReport.led_ok_active_seen) {
+            $verificationErrors += "status LED OK active evidence was not seen after desktop capsule confirm"
         }
     }
     $insertionVerified = $false
