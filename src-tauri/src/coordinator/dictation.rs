@@ -1069,6 +1069,13 @@ fn default_done_message(status: InsertStatus, polish_failed: bool) -> Option<Str
     }
 }
 
+fn device_processing_final_succeeded(status: InsertStatus, error_code: Option<&str>) -> bool {
+    if status == InsertStatus::Failed {
+        return false;
+    }
+    matches!(error_code, None | Some("polishFailed"))
+}
+
 pub(super) async fn handle_pressed_edge(inner: &Arc<Inner>) {
     let was_held = inner.hotkey_trigger_held.swap(true, Ordering::SeqCst);
     if !was_held {
@@ -3437,7 +3444,13 @@ async fn finish_end_session_after_stop_transition(
     )
     .map(str::to_string);
     let tsf_required_insert_failed = error_code.as_deref() == Some("windowsImeTsfRequired");
-    let device_processing_succeeded = status != InsertStatus::Failed && error_code.is_none();
+    let device_processing_succeeded =
+        device_processing_final_succeeded(status, error_code.as_deref());
+    let device_processing_success_reason = if error_code.as_deref() == Some("polishFailed") {
+        "dictation_processing_done_raw_inserted"
+    } else {
+        "dictation_processing_done"
+    };
 
     // 与 coordinator 内部 SessionId 对齐：方便 recorder 旁路写盘的 `<session_id>.wav`
     // 跟 history 这条 DictationSession.id 同名，前端凭 id 就能找到对应录音文件。
@@ -3494,7 +3507,7 @@ async fn finish_end_session_after_stop_transition(
         Some(inserted_chars),
     );
     if device_processing_succeeded {
-        device_ai_processing.complete_success("dictation_processing_done");
+        device_ai_processing.complete_success(device_processing_success_reason);
     } else {
         device_ai_processing.complete_warning("dictation_processing_warning");
     }
@@ -3683,19 +3696,19 @@ mod tests {
     use super::{
         append_typed_prefix, cancel_embedded_ble_listener_capture, cancel_session,
         clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview,
-        default_done_message, dictation_error_code, embedded_audio_stop_feedback_latched,
-        embedded_ble_listener_capture_ready, embedded_ble_session_actor_history,
-        embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak,
-        embedded_streaming_chunk_is_asr_input, emit_embedded_audio_transcribing_if_active,
-        end_embedded_ble_session, finalize_polished_text, finish_dictation_pipeline_error,
-        finish_dictation_timeout, install_embedded_ble_listener_cancel,
-        mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
-        prepare_embedded_streaming_pcm_for_asr, publish_embedded_ble_asr_final,
-        record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
-        request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
-        store_embedded_audio_stats, streaming_insert_eligible,
-        update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
-        EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
+        default_done_message, device_processing_final_succeeded, dictation_error_code,
+        embedded_audio_stop_feedback_latched, embedded_ble_listener_capture_ready,
+        embedded_ble_session_actor_history, embedded_ble_stream_idle_timeout,
+        embedded_pcm_rms_and_peak, embedded_streaming_chunk_is_asr_input,
+        emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
+        finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
+        install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
+        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
+        publish_embedded_ble_asr_final, record_embedded_ble_session_actor_command,
+        register_embedded_ble_cancel_flag, request_embedded_audio_stop_feedback,
+        request_embedded_ble_recording_stop_from_host, store_embedded_audio_stats,
+        streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
+        EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
         EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
         EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
@@ -4522,6 +4535,30 @@ mod tests {
             default_done_message(InsertStatus::Inserted, true),
             Some("润色失败，已插入原文".to_string())
         );
+    }
+
+    #[test]
+    fn device_processing_treats_raw_insert_after_polish_failure_as_success() {
+        assert!(device_processing_final_succeeded(
+            InsertStatus::Inserted,
+            Some("polishFailed")
+        ));
+        assert!(device_processing_final_succeeded(
+            InsertStatus::PasteSent,
+            Some("polishFailed")
+        ));
+        assert!(device_processing_final_succeeded(
+            InsertStatus::CopiedFallback,
+            Some("polishFailed")
+        ));
+        assert!(!device_processing_final_succeeded(
+            InsertStatus::Failed,
+            Some("polishFailed")
+        ));
+        assert!(!device_processing_final_succeeded(
+            InsertStatus::Inserted,
+            Some("windowsImeTsfRequired")
+        ));
     }
 
     #[test]
