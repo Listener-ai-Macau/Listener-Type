@@ -1441,9 +1441,18 @@ mod windows_ble {
         label: &'static str,
     ) -> Result<(), String> {
         if let Some(result) = send_audio_control_via_active_capture(command, timeout, label) {
-            result?;
-            log::info!("[embedded-ble] {label} sent via active capture");
-            return Ok(());
+            match result {
+                Ok(()) => {
+                    log::info!("[embedded-ble] {label} sent via active capture");
+                    return Ok(());
+                }
+                Err(err) if is_transient_audio_control_write_error(&err) => {
+                    log::warn!(
+                        "[embedded-ble] active {label} write failed with transient error; retrying fresh GATT path: {err}"
+                    );
+                }
+                Err(err) => return Err(err),
+            }
         }
         let target = open_audio_control_target()?;
         write_gatt_value_with_timeout(

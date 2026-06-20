@@ -2949,11 +2949,20 @@ try {
         if ($serialReport -and -not [bool]$serialReport.audio_control_processing_start_seen) {
             $verificationErrors += "firmware audio control write did not log VREC:PROCESSING:START after desktop capsule confirm"
         }
-        if ($serialReport -and -not [bool]$serialReport.audio_control_processing_done_seen) {
-            $verificationErrors += "firmware audio control write did not log VREC:PROCESSING:DONE after desktop capsule confirm"
-        }
-        if ($serialReport -and -not [bool]$serialReport.led_ok_active_seen) {
-            $verificationErrors += "status LED OK active evidence was not seen after desktop capsule confirm"
+        if ($ExpectNoText) {
+            if ($serialReport -and -not [bool]$serialReport.audio_control_processing_warning_seen) {
+                $verificationErrors += "firmware audio control write did not log VREC:PROCESSING:WARN after desktop capsule confirm with no transcript"
+            }
+            if ($serialReport -and -not [bool]$serialReport.led_warn_active_seen) {
+                $verificationErrors += "status LED warning active evidence was not seen after desktop capsule confirm with no transcript"
+            }
+        } else {
+            if ($serialReport -and -not [bool]$serialReport.audio_control_processing_done_seen) {
+                $verificationErrors += "firmware audio control write did not log VREC:PROCESSING:DONE after desktop capsule confirm"
+            }
+            if ($serialReport -and -not [bool]$serialReport.led_ok_active_seen) {
+                $verificationErrors += "status LED OK active evidence was not seen after desktop capsule confirm"
+            }
         }
     }
     $insertionVerified = $false
