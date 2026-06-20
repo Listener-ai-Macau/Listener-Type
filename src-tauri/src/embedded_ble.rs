@@ -1465,6 +1465,10 @@ mod windows_ble {
         send_recording_control_command(b"VREC:CANCEL\n", timeout, "audio control cancel")
     }
 
+    pub fn send_recording_control_stop(timeout: Duration) -> Result<(), String> {
+        send_recording_control_command(b"VREC:STOP\n", timeout, "audio control stop")
+    }
+
     pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
         let command = if active {
             b"VREC:PROCESSING:START\n".as_slice()
@@ -1481,6 +1485,14 @@ mod windows_ble {
 
     pub fn send_recording_processing_done(timeout: Duration) -> Result<(), String> {
         send_recording_control_command(b"VREC:PROCESSING:DONE\n", timeout, "audio processing done")
+    }
+
+    pub fn send_recording_processing_warning(timeout: Duration) -> Result<(), String> {
+        send_recording_control_command(
+            b"VREC:PROCESSING:WARN\n",
+            timeout,
+            "audio processing warning",
+        )
     }
 
     pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), String> {
@@ -5476,6 +5488,11 @@ pub fn send_recording_control_cancel(timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_stop(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_control_stop(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_processing_state(active, timeout)
 }
@@ -5483,6 +5500,11 @@ pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Resul
 #[cfg(target_os = "windows")]
 pub fn send_recording_processing_done(timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_processing_done(timeout)
+}
+
+#[cfg(target_os = "windows")]
+pub fn send_recording_processing_warning(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_processing_warning(timeout)
 }
 
 #[cfg(target_os = "windows")]
@@ -5628,12 +5650,22 @@ pub fn send_recording_control_cancel(_timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_stop(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE recording stop is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn send_recording_processing_state(_active: bool, _timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording processing control is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_processing_done(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE recording processing control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_processing_warning(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording processing control is only supported on Windows".to_string())
 }
 

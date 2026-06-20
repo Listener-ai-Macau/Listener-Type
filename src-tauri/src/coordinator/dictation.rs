@@ -130,6 +130,7 @@ fn finish_dictation_pipeline_error(
     session_id: SessionId,
     message: String,
 ) -> bool {
+    set_device_ai_processing_warning_async(inner, "dictation_pipeline_error");
     if !publish_dictation_pipeline_error(inner, session_id, message)
         && cleanup_cancelled_processing_session(inner, session_id)
     {
@@ -141,6 +142,7 @@ fn finish_dictation_pipeline_error(
 }
 
 fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: String) -> bool {
+    set_device_ai_processing_warning_async(inner, "dictation_timeout");
     let published = if embedded_ble_actor_context_active(inner) {
         apply_embedded_ble_session_actor_dictation_event(
             inner,
@@ -253,6 +255,23 @@ fn set_device_ai_processing_done_async(inner: &Arc<Inner>, reason: &'static str)
     });
 }
 
+fn set_device_ai_processing_warning_async(inner: &Arc<Inner>, reason: &'static str) {
+    if !should_sync_device_ai_processing(inner) {
+        return;
+    }
+    let session_id = inner.state.lock().session_id;
+    async_runtime::spawn_blocking(move || {
+        match crate::embedded_ble::send_recording_processing_warning(Duration::from_secs(2)) {
+            Ok(()) => log::info!(
+                "[embedded-ble] device AI processing LED warning reason={reason} session_id={session_id}"
+            ),
+            Err(err) => log::warn!(
+                "[embedded-ble] device AI processing LED warning sync failed reason={reason} session_id={session_id}: {err}"
+            ),
+        }
+    });
+}
+
 struct DeviceAiProcessingGuard {
     inner: Arc<Inner>,
     active: bool,
@@ -283,6 +302,14 @@ impl DeviceAiProcessingGuard {
     fn complete_success(&mut self, reason: &'static str) {
         if self.active && !self.completed {
             set_device_ai_processing_done_async(&self.inner, reason);
+            self.completed = true;
+            self.active = false;
+        }
+    }
+
+    fn complete_warning(&mut self, reason: &'static str) {
+        if self.active && !self.completed {
+            set_device_ai_processing_warning_async(&self.inner, reason);
             self.completed = true;
             self.active = false;
         }
@@ -468,6 +495,93 @@ pub(super) fn request_embedded_audio_stop_feedback(
         set_device_ai_processing_async(inner, true, reason);
     }
     emitted
+}
+
+pub(super) async fn request_embedded_ble_recording_stop_from_host(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+) -> Result<bool, String> {
+    if !embedded_ble_actor_context_active(inner) {
+        return Ok(false);
+    }
+    let (session_id, phase) = {
+        let state = inner.state.lock();
+        (state.session_id, state.phase)
+    };
+    if !matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
+        return Ok(false);
+    }
+
+    record_embedded_ble_session_actor_command(
+        inner,
+        EmbeddedBleSessionActorCommand::StopCommand,
+        Some(session_id),
+        format!("host stop requested reason={reason} phase={phase:?}"),
+    );
+    match phase {
+        SessionPhase::Starting => request_stop_during_starting(inner, reason),
+        SessionPhase::Listening => {
+            let _ = request_embedded_audio_stop_feedback(inner, reason);
+        }
+        _ => {}
+    }
+
+    #[cfg(test)]
+    {
+        crate::timeline::mark(
+            "backend.embedded_ble_session_actor",
+            "firmware_stop_skipped_test",
+            format!("session_id={session_id} phase={phase:?} reason={reason}"),
+        );
+        return Ok(true);
+    }
+
+    #[cfg(not(test))]
+    {
+        let result = async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::send_recording_control_stop(
+                EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+            )
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|value| value);
+
+        match result {
+            Ok(()) => {
+                crate::timeline::mark(
+                    "backend.embedded_ble_session_actor",
+                    "firmware_stop_sent",
+                    format!("session_id={session_id} phase={phase:?} reason={reason}"),
+                );
+                log::info!(
+                    "[coord] embedded BLE firmware stop sent session_id={session_id} phase={phase:?} reason={reason}"
+                );
+                Ok(true)
+            }
+            Err(err) => {
+                set_device_ai_processing_async(inner, false, "host_stop_failed");
+                crate::timeline::mark(
+                    "backend.embedded_ble_session_actor",
+                    "firmware_stop_failed",
+                    format!("session_id={session_id} phase={phase:?} reason={reason} error={err}"),
+                );
+                log::warn!(
+                    "[coord] embedded BLE firmware stop failed session_id={session_id} phase={phase:?} reason={reason}: {err}"
+                );
+                emit_capsule(
+                    inner,
+                    CapsuleState::Error,
+                    0.0,
+                    0,
+                    Some(format!("Listener 录音停止控制发送失败: {err}")),
+                    None,
+                );
+                schedule_capsule_idle(inner, 6000, Some(session_id));
+                Err(err)
+            }
+        }
+    }
 }
 
 fn store_embedded_audio_stats(inner: &Arc<Inner>, stats: crate::embedded_audio::SessionStats) {
@@ -2971,6 +3085,7 @@ async fn finish_end_session_after_stop_transition(
         ) {
             log::error!("[coord] history append failed: {e}");
         }
+        device_ai_processing.complete_warning("dictation_empty_transcript");
         publish_embedded_ble_asr_final(
             inner,
             current_session_id,
@@ -3364,6 +3479,8 @@ async fn finish_end_session_after_stop_transition(
     );
     if device_processing_succeeded {
         device_ai_processing.complete_success("dictation_processing_done");
+    } else {
+        device_ai_processing.complete_warning("dictation_processing_warning");
     }
 
     schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
@@ -3560,9 +3677,10 @@ mod tests {
         mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
         prepare_embedded_streaming_pcm_for_asr, publish_embedded_ble_asr_final,
         record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
-        request_embedded_audio_stop_feedback, store_embedded_audio_stats,
-        streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
-        EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
+        request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
+        store_embedded_audio_stats, streaming_insert_eligible,
+        update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
+        EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
         EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
         EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
@@ -3933,6 +4051,40 @@ mod tests {
             let state = coordinator.inner.state.lock();
             assert_eq!(state.phase, SessionPhase::Listening);
         }
+    }
+
+    #[tokio::test]
+    async fn host_stop_request_to_firmware_latches_feedback_without_local_finish() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        register_embedded_ble_cancel_flag(&coordinator.inner, &cancel_flag);
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+
+        let handled = request_embedded_ble_recording_stop_from_host(
+            &coordinator.inner,
+            "unit_test_host_stop",
+        )
+        .await
+        .expect("test stop request does not touch BLE transport");
+
+        assert!(handled);
+        assert!(!cancel_flag.load(Ordering::SeqCst));
+        assert!(embedded_audio_stop_feedback_latched(&coordinator.inner));
+        {
+            let state = coordinator.inner.state.lock();
+            assert_eq!(state.phase, SessionPhase::Listening);
+        }
+        let history = embedded_ble_session_actor_history(&coordinator.inner);
+        assert!(history.iter().any(|record| {
+            record.command == EmbeddedBleSessionActorCommand::StopCommand
+                && record.detail.contains("unit_test_host_stop")
+        }));
     }
 
     #[tokio::test]

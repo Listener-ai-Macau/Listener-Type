@@ -82,7 +82,8 @@ const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
 use dictation::dictation_error_code;
 use dictation::{
     begin_session, cancel_session, end_session, handle_pressed, handle_pressed_edge,
-    handle_released_edge, request_embedded_audio_stop_feedback, request_stop_during_starting,
+    handle_released_edge, request_embedded_audio_stop_feedback,
+    request_embedded_ble_recording_stop_from_host, request_stop_during_starting,
     submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
     submit_embedded_audio_ble_stream_background, submit_embedded_audio_file,
     submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,
@@ -1173,6 +1174,14 @@ impl Coordinator {
     }
 
     pub async fn stop_dictation(&self) -> Result<(), String> {
+        if request_embedded_ble_recording_stop_from_host(
+            &self.inner,
+            "capsule_confirm_stop_processing_start",
+        )
+        .await?
+        {
+            return Ok(());
+        }
         if self.inner.state.lock().phase == SessionPhase::Starting {
             request_stop_during_starting(&self.inner, "manual stop");
             return Ok(());
