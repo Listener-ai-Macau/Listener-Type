@@ -1862,7 +1862,7 @@ if generated_button_logical == "KEY3":
     )
     generated_button_evidence_summary = "KEY3 generated press/release -> custom key debounce/single-click/F15 path"
 
-def led_status_summary_lines(phase=None):
+def led_status_lines(phase=None):
     if phase is not None and phase in led_status_sample_ranges:
         start_index, end_index = led_status_sample_ranges[phase]
         source = lines[start_index:end_index]
@@ -1871,7 +1871,14 @@ def led_status_summary_lines(phase=None):
     return [
         line
         for line in source
-        if LED_STATUS_LINE_MARKER in line and LED_STATUS_SUMMARY_MARKER in line
+        if LED_STATUS_LINE_MARKER in line
+    ]
+
+def led_status_summary_lines(phase=None):
+    return [
+        line
+        for line in led_status_lines(phase)
+        if LED_STATUS_SUMMARY_MARKER in line
     ]
 
 def led_summary_has_int(line, key, expected):
@@ -1915,6 +1922,9 @@ def led_diag_flag_seen(name, expected_active=True, reason=None):
             return True
     return False
 
+led_status_all = led_status_lines()
+led_status_recording = led_status_lines("recording")
+led_status_post_stop = led_status_lines("post_stop")
 led_summary_all = led_status_summary_lines()
 led_summary_recording = led_status_summary_lines("recording")
 led_summary_post_stop = led_status_summary_lines("post_stop")
@@ -1927,15 +1937,14 @@ led_recording_active_seen = (
     any(
         led_summary_has_int(line, "rec_active", 1)
         or led_summary_has_flag(line, "REC", True)
-        for line in led_summary_recording
+        for line in led_status_recording
     )
     or led_diag_recording_active_seen
 )
 led_recording_cleared_seen = (
-    any(
-        led_summary_has_int(line, "rec_active", 0)
-        and led_summary_has_flag(line, "REC", False)
-        for line in led_summary_post_stop
+    (
+        any(led_summary_has_int(line, "rec_active", 0) for line in led_status_post_stop)
+        and any(led_summary_has_flag(line, "REC", False) for line in led_status_post_stop)
     )
     or led_diag_recording_cleared_seen
 )
@@ -1943,19 +1952,19 @@ led_ai_active_seen = (
     any(
         led_summary_has_int(line, "processing", 1)
         or led_summary_has_flag(line, "AI", True)
-        for line in led_summary_all
+        for line in led_status_all
     )
     or led_diag_flag_seen("AI", True)
 )
 led_ok_active_seen = (
-    any(led_summary_has_flag(line, "OK", True) for line in led_summary_all)
+    any(led_summary_has_flag(line, "OK", True) for line in led_status_all)
     or led_diag_flag_seen("OK", True)
 )
 led_warn_active_seen = (
     any(
         led_summary_has_flag(line, "WARN", True)
         or ("error_domain=none" not in line and "error_domain=" in line)
-        for line in led_summary_all
+        for line in led_status_all
     )
     or led_diag_flag_seen("WARN", True)
 )
@@ -1991,8 +2000,11 @@ summary = {
     "generated_button_timing_seen": generated_button_timing_seen,
     "generated_button_single_seen": generated_button_single_seen,
     "generated_button_evidence_summary": generated_button_evidence_summary,
-    "led_status_seen": bool(led_summary_all) or bool(led_diag_events),
+    "led_status_seen": bool(led_status_all) or bool(led_diag_events),
     "led_status_sample_ranges": led_status_sample_ranges,
+    "led_status_line_count": len(led_status_all),
+    "led_status_recording_line_count": len(led_status_recording),
+    "led_status_post_stop_line_count": len(led_status_post_stop),
     "led_status_summary_count": len(led_summary_all),
     "led_status_recording_summary_count": len(led_summary_recording),
     "led_status_post_stop_summary_count": len(led_summary_post_stop),
