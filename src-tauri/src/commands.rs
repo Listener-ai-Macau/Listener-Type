@@ -407,6 +407,7 @@ fn persist_settings<T: SettingsWriter>(
 fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPreferences) -> bool {
     previous.device_knob_rotation_action != next.device_knob_rotation_action
         || previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes
+        || previous.device_plugged_low_power_enabled != next.device_plugged_low_power_enabled
         || previous.device_battery_auto_shutdown_minutes
             != next.device_battery_auto_shutdown_minutes
         || previous.device_ble_name != next.device_ble_name
@@ -472,6 +473,15 @@ fn device_setting_packets_for_changes(
             command: format!(
                 "DEVICE:SET low_power_idle_minutes={}",
                 next.device_low_power_idle_minutes
+            ),
+        });
+    }
+    if previous.device_plugged_low_power_enabled != next.device_plugged_low_power_enabled {
+        packets.push(DeviceSettingPacket {
+            id: "plugged_low_power_enabled",
+            command: format!(
+                "DEVICE:SET plugged_low_power_enabled={}",
+                if next.device_plugged_low_power_enabled { 1 } else { 0 }
             ),
         });
     }
@@ -2275,6 +2285,7 @@ pub struct DeviceSettingsUpdateRequest {
     edge_led_brightness_percent: u8,
     plugged_low_power_idle_minutes: u32,
     battery_low_power_idle_minutes: u32,
+    plugged_low_power_enabled: bool,
     plugged_auto_shutdown_minutes: u32,
     battery_auto_shutdown_minutes: u32,
     ble_name: String,
@@ -2386,6 +2397,7 @@ pub async fn set_device_settings(
             prefs.device_edge_led_brightness_percent = request.edge_led_brightness_percent;
         }
         prefs.device_low_power_idle_minutes = request.battery_low_power_idle_minutes;
+        prefs.device_plugged_low_power_enabled = request.plugged_low_power_enabled;
         prefs.device_battery_auto_shutdown_minutes = request.battery_auto_shutdown_minutes;
         prefs.device_ble_name = request.ble_name.clone();
         persist_settings(&*coord, prefs.clone())?;
@@ -2541,7 +2553,7 @@ fn device_settings_snapshot_from_request(
     }
     snapshot.plugged_low_power_idle_minutes = request.plugged_low_power_idle_minutes;
     snapshot.battery_low_power_idle_minutes = request.battery_low_power_idle_minutes;
-    snapshot.plugged_low_power_enabled = true;
+    snapshot.plugged_low_power_enabled = request.plugged_low_power_enabled;
     snapshot.low_power_idle_minutes = match snapshot.active_power_source {
         "plugged" => request.plugged_low_power_idle_minutes,
         "battery" => request.battery_low_power_idle_minutes,
@@ -2582,6 +2594,10 @@ fn device_settings_update_commands(
         format!(
             "DEVICE:SET battery_low_power_idle_minutes={}",
             request.battery_low_power_idle_minutes
+        ),
+        format!(
+            "DEVICE:SET plugged_low_power_enabled={}",
+            if request.plugged_low_power_enabled { 1 } else { 0 }
         ),
         format!(
             "DEVICE:SET plugged_auto_shutdown_minutes={}",
@@ -5613,6 +5629,7 @@ mod tests {
             edge_led_brightness_percent: 55,
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
+            plugged_low_power_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
@@ -5630,6 +5647,7 @@ mod tests {
             edge_led_brightness_percent: 55,
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
+            plugged_low_power_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener=bad".to_string(),
@@ -5647,6 +5665,7 @@ mod tests {
             edge_led_brightness_percent: 55,
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
+            plugged_low_power_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener dev".to_string(),
@@ -5664,6 +5683,7 @@ mod tests {
             edge_led_brightness_percent: 55,
             plugged_low_power_idle_minutes: 0,
             battery_low_power_idle_minutes: 3,
+            plugged_low_power_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
@@ -5724,19 +5744,23 @@ mod tests {
             edge_led_brightness_percent: 100,
             plugged_low_power_idle_minutes: 1440,
             battery_low_power_idle_minutes: 1440,
+            plugged_low_power_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 1440,
             ble_name: "listener-12345678901234567890123".to_string(),
         };
         let commands = device_settings_update_commands(&request, true).expect("commands");
 
-        assert_eq!(commands.len(), 7);
+        assert_eq!(commands.len(), 8);
+        assert!(commands.iter().any(|command| {
+            command == "DEVICE:SET plugged_low_power_enabled=0"
+        }));
         assert!(commands.iter().all(|command| {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
         }));
 
         let legacy_commands = device_settings_update_commands(&request, false).expect("commands");
-        assert_eq!(legacy_commands.len(), 5);
+        assert_eq!(legacy_commands.len(), 6);
     }
 
     #[test]

@@ -254,6 +254,7 @@ function DeviceFirmwareSettingsCard() {
     edgeLedBrightnessPercent: 100,
     pluggedLowPowerIdleMinutes: 1,
     batteryLowPowerIdleMinutes: 1,
+    pluggedLowPowerEnabled: true,
     pluggedAutoShutdownMinutes: 0,
     batteryAutoShutdownMinutes: 30,
     bleName: 'listener',
@@ -347,10 +348,14 @@ function DeviceFirmwareSettingsCard() {
             lowPowerLabel={t('settings.device.pluggedLowPowerIdleLabel', '进入低功耗')}
             lowPowerDesc={t('settings.device.pluggedLowPowerIdleDesc', '无操作多久后进入低功耗空闲。')}
             lowPowerValue={form.pluggedLowPowerIdleMinutes}
+            lowPowerEnabledLabel={t('settings.device.pluggedLowPowerEnabledLabel', '允许低功耗')}
+            lowPowerEnabledDesc={t('settings.device.pluggedLowPowerEnabledDesc', '关闭后，插电、充电或外部供电时保持活跃连接和灯状态。')}
+            lowPowerEnabled={form.pluggedLowPowerEnabled}
             autoShutdownLabel={t('settings.device.pluggedAutoShutdownLabel', '自动关机')}
             autoShutdownDesc={t('settings.device.pluggedAutoShutdownDesc', '填 0 表示不自动关机。')}
             autoShutdownValue={form.pluggedAutoShutdownMinutes}
             disabled={controlsDisabled}
+            onLowPowerEnabledChange={value => setForm(current => ({ ...current, pluggedLowPowerEnabled: value }))}
             onLowPowerChange={value => setForm(current => ({ ...current, pluggedLowPowerIdleMinutes: value }))}
             onAutoShutdownChange={value => setForm(current => ({ ...current, pluggedAutoShutdownMinutes: value }))}
             t={t}
@@ -457,10 +462,14 @@ function PowerModeTimingGroup({
   lowPowerLabel,
   lowPowerDesc,
   lowPowerValue,
+  lowPowerEnabledLabel,
+  lowPowerEnabledDesc,
+  lowPowerEnabled,
   autoShutdownLabel,
   autoShutdownDesc,
   autoShutdownValue,
   disabled,
+  onLowPowerEnabledChange,
   onLowPowerChange,
   onAutoShutdownChange,
   t,
@@ -470,10 +479,14 @@ function PowerModeTimingGroup({
   lowPowerLabel: string;
   lowPowerDesc: string;
   lowPowerValue: number;
+  lowPowerEnabledLabel?: string;
+  lowPowerEnabledDesc?: string;
+  lowPowerEnabled?: boolean;
   autoShutdownLabel: string;
   autoShutdownDesc: string;
   autoShutdownValue: number;
   disabled: boolean;
+  onLowPowerEnabledChange?: (value: boolean) => void;
   onLowPowerChange: (value: number) => void;
   onAutoShutdownChange: (value: number) => void;
   t: ReturnType<typeof useTranslation>['t'];
@@ -486,6 +499,15 @@ function PowerModeTimingGroup({
           <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>
         </div>
       </div>
+      {typeof lowPowerEnabled === 'boolean' && onLowPowerEnabledChange && lowPowerEnabledLabel && (
+        <ToggleControl
+          label={lowPowerEnabledLabel}
+          desc={lowPowerEnabledDesc ?? ''}
+          checked={lowPowerEnabled}
+          disabled={disabled}
+          onChange={onLowPowerEnabledChange}
+        />
+      )}
       <TimingControl
         label={lowPowerLabel}
         desc={lowPowerDesc}
@@ -505,6 +527,38 @@ function PowerModeTimingGroup({
         t={t}
       />
     </div>
+  );
+}
+
+function ToggleControl({
+  label,
+  desc,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  desc: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="ol-device-toggle-control" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', padding: '9px 0', borderTop: '0.5px solid var(--ol-line-soft)' }}>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600 }}>{label}</span>
+        {desc && (
+          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.4 }}>{desc}</span>
+        )}
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={event => onChange(event.target.checked)}
+        style={{ width: 18, height: 18 }}
+      />
+    </label>
   );
 }
 
@@ -1073,6 +1127,7 @@ function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateR
     edgeLedBrightnessPercent: snapshot.edgeLedBrightnessPercent,
     pluggedLowPowerIdleMinutes: snapshot.pluggedLowPowerIdleMinutes,
     batteryLowPowerIdleMinutes: snapshot.batteryLowPowerIdleMinutes,
+    pluggedLowPowerEnabled: snapshot.pluggedLowPowerEnabled,
     pluggedAutoShutdownMinutes: Math.round(snapshot.pluggedAutoShutdownMs / 60000),
     batteryAutoShutdownMinutes: Math.round(snapshot.batteryAutoShutdownMs / 60000),
     bleName: snapshot.bleName,
@@ -1175,7 +1230,9 @@ function getDeviceSettingsStatusItems(
     : snapshot.activePowerSource === 'battery'
       ? snapshot.batteryLowPowerIdleMinutes
       : snapshot.lowPowerIdleMinutes;
-  const lowPower = t('settings.device.lowPowerCompact', '{{value}} 分钟', { value: activeLowPower });
+  const lowPower = snapshot.activePowerSource === 'plugged' && !snapshot.pluggedLowPowerEnabled
+    ? t('settings.device.lowPowerOff', '关闭')
+    : t('settings.device.lowPowerCompact', '{{value}} 分钟', { value: activeLowPower });
   const source = snapshot.source === 'mock'
     ? t('settings.device.sourceMock', '浏览器预览模拟')
     : snapshot.source === 'defaults'
