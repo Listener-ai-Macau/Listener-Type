@@ -24,6 +24,7 @@ const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
+const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 1_200;
 
 fn apply_and_publish_dictation_event(
     inner: &Arc<Inner>,
@@ -155,7 +156,11 @@ fn finish_dictation_pipeline_error(
     session_id: SessionId,
     message: String,
 ) -> bool {
-    set_device_ai_processing_warning_async(inner, "dictation_pipeline_error");
+    set_device_ai_processing_warning_async(
+        inner,
+        "dictation_pipeline_error",
+        Duration::from_millis(0),
+    );
     if !publish_dictation_pipeline_error(inner, session_id, message)
         && cleanup_cancelled_processing_session(inner, session_id)
     {
@@ -167,7 +172,7 @@ fn finish_dictation_pipeline_error(
 }
 
 fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: String) -> bool {
-    set_device_ai_processing_warning_async(inner, "dictation_timeout");
+    set_device_ai_processing_warning_async(inner, "dictation_timeout", Duration::from_millis(0));
     let published = if embedded_ble_actor_context_active(inner) {
         apply_embedded_ble_session_actor_dictation_event(
             inner,
@@ -262,15 +267,35 @@ fn set_device_ai_processing_async(inner: &Arc<Inner>, active: bool, reason: &'st
     });
 }
 
-fn set_device_ai_processing_done_async(inner: &Arc<Inner>, reason: &'static str) {
+fn device_ai_processing_completion_delay(started_at: Option<Instant>, now: Instant) -> Duration {
+    let Some(started_at) = started_at else {
+        return Duration::from_millis(0);
+    };
+    let min_visible = Duration::from_millis(DEVICE_AI_PROCESSING_MIN_VISIBLE_MS);
+    min_visible.saturating_sub(now.saturating_duration_since(started_at))
+}
+
+fn set_device_ai_processing_done_async(inner: &Arc<Inner>, reason: &'static str, delay: Duration) {
     if !should_sync_device_ai_processing(inner) {
         return;
     }
-    let session_id = inner.state.lock().session_id;
+    let expected_session_id = inner.state.lock().session_id;
+    let inner = Arc::clone(inner);
     async_runtime::spawn_blocking(move || {
+        if delay > Duration::from_millis(0) {
+            std::thread::sleep(delay);
+        }
+        let session_id = inner.state.lock().session_id;
+        if session_id != expected_session_id {
+            log::info!(
+                "[embedded-ble] skipped stale device AI processing LED completion reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
+            );
+            return;
+        }
         match crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2)) {
             Ok(()) => log::info!(
-                "[embedded-ble] device AI processing LED completed reason={reason} session_id={session_id}"
+                "[embedded-ble] device AI processing LED completed reason={reason} session_id={session_id} delayed_ms={}",
+                delay.as_millis()
             ),
             Err(err) => log::warn!(
                 "[embedded-ble] device AI processing LED completion sync failed reason={reason} session_id={session_id}: {err}"
@@ -279,15 +304,31 @@ fn set_device_ai_processing_done_async(inner: &Arc<Inner>, reason: &'static str)
     });
 }
 
-fn set_device_ai_processing_warning_async(inner: &Arc<Inner>, reason: &'static str) {
+fn set_device_ai_processing_warning_async(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+    delay: Duration,
+) {
     if !should_sync_device_ai_processing(inner) {
         return;
     }
-    let session_id = inner.state.lock().session_id;
+    let expected_session_id = inner.state.lock().session_id;
+    let inner = Arc::clone(inner);
     async_runtime::spawn_blocking(move || {
+        if delay > Duration::from_millis(0) {
+            std::thread::sleep(delay);
+        }
+        let session_id = inner.state.lock().session_id;
+        if session_id != expected_session_id {
+            log::info!(
+                "[embedded-ble] skipped stale device AI processing LED warning reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
+            );
+            return;
+        }
         match crate::embedded_ble::send_recording_processing_warning(Duration::from_secs(2)) {
             Ok(()) => log::info!(
-                "[embedded-ble] device AI processing LED warning reason={reason} session_id={session_id}"
+                "[embedded-ble] device AI processing LED warning reason={reason} session_id={session_id} delayed_ms={}",
+                delay.as_millis()
             ),
             Err(err) => log::warn!(
                 "[embedded-ble] device AI processing LED warning sync failed reason={reason} session_id={session_id}: {err}"
@@ -300,6 +341,7 @@ struct DeviceAiProcessingGuard {
     inner: Arc<Inner>,
     active: bool,
     completed: bool,
+    started_at: Option<Instant>,
 }
 
 impl DeviceAiProcessingGuard {
@@ -308,6 +350,7 @@ impl DeviceAiProcessingGuard {
             inner: Arc::clone(inner),
             active: false,
             completed: false,
+            started_at: None,
         }
     }
 
@@ -317,21 +360,26 @@ impl DeviceAiProcessingGuard {
         }
         set_device_ai_processing_async(&self.inner, true, reason);
         self.active = true;
+        self.started_at = Some(Instant::now());
     }
 
     fn complete_success(&mut self, reason: &'static str) {
         if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
-            set_device_ai_processing_done_async(&self.inner, reason);
+            let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
+            set_device_ai_processing_done_async(&self.inner, reason, delay);
             self.completed = true;
             self.active = false;
+            self.started_at = None;
         }
     }
 
     fn complete_warning(&mut self, reason: &'static str) {
         if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
-            set_device_ai_processing_warning_async(&self.inner, reason);
+            let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
+            set_device_ai_processing_warning_async(&self.inner, reason, delay);
             self.completed = true;
             self.active = false;
+            self.started_at = None;
         }
     }
 }
@@ -3679,7 +3727,8 @@ mod tests {
     use super::{
         append_typed_prefix, cancel_embedded_ble_listener_capture, cancel_session,
         clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview,
-        default_done_message, device_processing_final_succeeded, dictation_error_code,
+        default_done_message, device_ai_processing_completion_delay,
+        device_processing_final_succeeded, dictation_error_code,
         embedded_audio_stop_feedback_latched, embedded_ble_listener_capture_ready,
         embedded_ble_session_actor_history, embedded_ble_stream_idle_timeout,
         embedded_pcm_rms_and_peak, embedded_streaming_chunk_is_asr_input,
@@ -3692,8 +3741,8 @@ mod tests {
         request_embedded_ble_recording_stop_from_host, store_embedded_audio_stats,
         streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
         EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
-        EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
-        EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
+        DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_ASR_PREROLL_BYTES,
+        EMBEDDED_AUDIO_ASR_PREROLL_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
     };
     use crate::coordinator::Coordinator;
     use crate::coordinator_state::{new_session_id, SessionPhase};
@@ -3706,6 +3755,7 @@ mod tests {
     };
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     #[derive(Default)]
     struct CountingConsumer {
@@ -4542,6 +4592,34 @@ mod tests {
             InsertStatus::Inserted,
             Some("windowsImeTsfRequired")
         ));
+    }
+
+    #[test]
+    fn device_processing_completion_delay_keeps_ai_led_visible() {
+        let started_at = Instant::now();
+
+        assert_eq!(
+            device_ai_processing_completion_delay(Some(started_at), started_at),
+            Duration::from_millis(DEVICE_AI_PROCESSING_MIN_VISIBLE_MS)
+        );
+        assert_eq!(
+            device_ai_processing_completion_delay(
+                Some(started_at),
+                started_at + Duration::from_millis(400),
+            ),
+            Duration::from_millis(DEVICE_AI_PROCESSING_MIN_VISIBLE_MS - 400)
+        );
+        assert_eq!(
+            device_ai_processing_completion_delay(
+                Some(started_at),
+                started_at + Duration::from_millis(DEVICE_AI_PROCESSING_MIN_VISIBLE_MS + 1),
+            ),
+            Duration::from_millis(0)
+        );
+        assert_eq!(
+            device_ai_processing_completion_delay(None, started_at),
+            Duration::from_millis(0)
+        );
     }
 
     #[test]
