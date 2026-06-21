@@ -107,6 +107,14 @@ fn schedule_actionable_error_capsule_idle(inner: &Arc<Inner>, session_id: Sessio
     );
 }
 
+fn schedule_empty_transcript_capsule_idle(inner: &Arc<Inner>, session_id: SessionId) {
+    schedule_capsule_idle(
+        inner,
+        CAPSULE_EMPTY_TRANSCRIPT_HIDE_DELAY_MS,
+        Some(session_id),
+    );
+}
+
 fn publish_embedded_ble_asr_final(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -295,28 +303,24 @@ struct DeviceAiProcessingGuard {
 }
 
 impl DeviceAiProcessingGuard {
-    fn start(inner: &Arc<Inner>, reason: &'static str) -> Self {
-        Self::start_with_send(inner, reason, true)
-    }
-
-    fn track_existing_start(inner: &Arc<Inner>) -> Self {
-        Self::start_with_send(inner, "dictation_processing_already_started", false)
-    }
-
-    fn start_with_send(inner: &Arc<Inner>, reason: &'static str, send_start: bool) -> Self {
-        let active = should_sync_device_ai_processing(inner);
-        if active && send_start {
-            set_device_ai_processing_async(inner, true, reason);
-        }
+    fn defer(inner: &Arc<Inner>) -> Self {
         Self {
             inner: Arc::clone(inner),
-            active,
+            active: false,
             completed: false,
         }
     }
 
+    fn start_if_needed(&mut self, reason: &'static str) {
+        if self.completed || self.active || !should_sync_device_ai_processing(&self.inner) {
+            return;
+        }
+        set_device_ai_processing_async(&self.inner, true, reason);
+        self.active = true;
+    }
+
     fn complete_success(&mut self, reason: &'static str) {
-        if self.active && !self.completed {
+        if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
             set_device_ai_processing_done_async(&self.inner, reason);
             self.completed = true;
             self.active = false;
@@ -324,7 +328,7 @@ impl DeviceAiProcessingGuard {
     }
 
     fn complete_warning(&mut self, reason: &'static str) {
-        if self.active && !self.completed {
+        if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
             set_device_ai_processing_warning_async(&self.inner, reason);
             self.completed = true;
             self.active = false;
@@ -491,7 +495,7 @@ fn emit_embedded_audio_transcribing_if_active(
 
 pub(super) fn request_embedded_audio_stop_feedback(
     inner: &Arc<Inner>,
-    reason: &'static str,
+    _reason: &'static str,
 ) -> bool {
     let session_id = {
         let state = inner.state.lock();
@@ -500,17 +504,12 @@ pub(super) fn request_embedded_audio_stop_feedback(
         }
         state.session_id
     };
-    let already_latched = embedded_audio_stop_feedback_latched(inner);
     latch_embedded_audio_stop_feedback(inner);
-    let emitted = emit_embedded_audio_transcribing_if_active(
+    emit_embedded_audio_transcribing_if_active(
         inner,
         session_id,
         current_embedded_audio_partial_preview(inner),
-    );
-    if !already_latched && emitted {
-        set_device_ai_processing_async(inner, true, reason);
-    }
-    emitted
+    )
 }
 
 pub(super) async fn request_embedded_ble_recording_stop_from_host(
@@ -623,14 +622,6 @@ struct EmbeddedAudioDictationSession {
 }
 
 impl EmbeddedAudioDictationSession {
-    fn start_device_ai_processing_if_needed(&mut self, inner: &Arc<Inner>, reason: &'static str) {
-        if self.device_ai_processing_started || !should_sync_device_ai_processing(inner) {
-            return;
-        }
-        self.device_ai_processing_started = true;
-        set_device_ai_processing_async(inner, true, reason);
-    }
-
     fn consume_streaming_pcm(&mut self, inner: &Arc<Inner>, pcm: &[u8]) -> Result<(), String> {
         if pcm.is_empty() {
             return Ok(());
@@ -671,7 +662,6 @@ impl EmbeddedAudioDictationSession {
             self.clipped_samples += gain_stats.clipped_samples;
         }
 
-        self.start_device_ai_processing_if_needed(inner, "embedded_streaming_asr_start");
         feed_embedded_asr_preroll_if_needed(self);
         for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
             self.consumer.consume_pcm_chunk(chunk);
@@ -2348,16 +2338,12 @@ impl EmbeddedStreamingDictation {
 
     fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
         if let Some(session) = self.session.as_ref() {
-            let already_latched = embedded_audio_stop_feedback_latched(inner);
             latch_embedded_audio_stop_feedback(inner);
-            let emitted = emit_embedded_audio_transcribing_if_active(
+            let _ = emit_embedded_audio_transcribing_if_active(
                 inner,
                 session.session_id,
                 current_embedded_audio_partial_preview(inner),
             );
-            if !already_latched && emitted && !session.device_ai_processing_started {
-                set_device_ai_processing_async(inner, true, "dictation_stop_processing_start");
-            }
         }
     }
 
@@ -2875,11 +2861,7 @@ async fn finish_end_session_after_stop_transition(
             return Ok(());
         }
     };
-    let mut device_ai_processing = if embedded_audio_stop_feedback_latched(inner) {
-        DeviceAiProcessingGuard::track_existing_start(inner)
-    } else {
-        DeviceAiProcessingGuard::start(inner, "dictation_processing_start")
-    };
+    let mut device_ai_processing = DeviceAiProcessingGuard::defer(inner);
 
     let uses_global_timeout = asr_transcribe_uses_global_timeout(&asr);
     let raw = match asr {
@@ -3116,11 +3098,12 @@ async fn finish_end_session_after_stop_transition(
             Some("没有识别到语音".to_string()),
         );
         restore_prepared_windows_ime_session(inner, current_session_id);
-        schedule_actionable_error_capsule_idle(inner, current_session_id);
+        schedule_empty_transcript_capsule_idle(inner, current_session_id);
         return Err("ASR returned empty transcript".to_string());
     }
 
     publish_embedded_ble_asr_final(inner, current_session_id, false, Some(raw.text.clone()));
+    device_ai_processing.start_if_needed("dictation_text_ready_processing_start");
 
     let correction_rules = match inner.correction_rules.list() {
         Ok(rules) => rules,
@@ -4317,7 +4300,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_streaming_pcm_for_active_session_still_feeds_asr() {
+    fn embedded_streaming_pcm_for_active_session_feeds_asr_without_early_ai_led() {
         let coordinator = Coordinator::new();
         let session_id = new_session_id();
         {
@@ -4337,7 +4320,7 @@ mod tests {
 
         assert_eq!(session.streamed_pcm_bytes, pcm.len());
         assert_eq!(session.normalized_pcm_bytes, pcm.len());
-        assert!(session.device_ai_processing_started);
+        assert!(!session.device_ai_processing_started);
         assert_eq!(session.archive_pcm.as_ref().expect("archive"), &pcm);
         assert_eq!(consumer.bytes.load(Ordering::SeqCst), pcm.len());
     }

@@ -310,6 +310,7 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
         BleFailureKind::LowPowerIdleDisconnect
     } else if lower.contains("unreachable")
         || lower.contains("disconnected")
+        || (lower.contains("transport_not_ready") && lower.contains("disconnect"))
         || lower.contains("timed out")
         || lower.contains("timeout")
     {
@@ -440,11 +441,8 @@ fn ble_error_suggests_low_power_idle_disconnect(lower: &str) -> bool {
         || lower.contains("intentional idle");
     let transport_not_ready =
         lower.contains("transport_not_ready") || lower.contains("transport not ready");
-    let link_loss = lower.contains("connection status changed")
-        || lower.contains("gatt session status changed")
-        || lower.contains("disconnected");
 
-    reason_546 || idle_label || (transport_not_ready && link_loss)
+    reason_546 || idle_label || (transport_not_ready && lower.contains("low power"))
 }
 
 fn utc_now_rfc3339() -> String {
@@ -5941,7 +5939,12 @@ mod tests {
             ),
             (
                 "BLE device connection status changed to Disconnected; transport_not_ready",
-                BleFailureKind::LowPowerIdleDisconnect,
+                BleFailureKind::PairedButDisconnected,
+                true,
+            ),
+            (
+                "BLE validation injected disconnect through notify wait; transport_not_ready",
+                BleFailureKind::PairedButDisconnected,
                 true,
             ),
             (

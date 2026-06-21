@@ -590,9 +590,23 @@ impl Coordinator {
             return;
         }
         let prefs = self.inner.prefs.get();
-        if prefs.dictation_input_source_user_overridden
-            || prefs.dictation_input_source == DictationInputSource::EmbeddedBle
-        {
+        if prefs.dictation_input_source == DictationInputSource::EmbeddedBle {
+            let inner = Arc::clone(&self.inner);
+            log::info!(
+                "[embedded-ble] firmware power probe running for existing embedded BLE source user_overridden={}",
+                prefs.dictation_input_source_user_overridden
+            );
+            async_runtime::spawn_blocking(move || {
+                let firmware = crate::embedded_ble::firmware_ota_device_snapshot();
+                record_embedded_ble_firmware_power_snapshot(
+                    &inner,
+                    &firmware,
+                    "startup_embedded_ble_power_probe",
+                );
+            });
+            return;
+        }
+        if prefs.dictation_input_source_user_overridden {
             log::info!(
                 "[embedded-ble] auto input source selection skipped before firmware probe source={:?} user_overridden={}",
                 prefs.dictation_input_source,
@@ -3145,6 +3159,9 @@ fn embedded_ble_wake_guidance_for_error_with_power(err: &str, usb_powered: Optio
         }
         crate::embedded_ble::BleFailureKind::LowPowerIdleDisconnect => {
             return "Listener BLE 正在重连音频 notify；当前未确认处于离线状态场景，若持续失败请重新连接或导出诊断。".to_string();
+        }
+        crate::embedded_ble::BleFailureKind::PairedButDisconnected => {
+            return "Listener BLE 连接临时中断，Type 正在自动重连音频 notify；请保持设备唤醒。".to_string();
         }
         crate::embedded_ble::BleFailureKind::MissingPairing
         | crate::embedded_ble::BleFailureKind::StaleGattService => {
@@ -5717,6 +5734,27 @@ mod tests {
     }
 
     #[test]
+    fn embedded_ble_startup_power_snapshot_keeps_plugged_recovery_context() {
+        let coordinator = Coordinator::new();
+        let firmware = firmware_snapshot_for_auto_input_test(true);
+
+        record_embedded_ble_firmware_power_snapshot(
+            &coordinator.inner,
+            &firmware,
+            "startup_embedded_ble_power_probe",
+        );
+        record_embedded_ble_recovery_failure(
+            &coordinator.inner,
+            "BLE device connection status changed to Disconnected; transport_not_ready",
+        );
+        let snapshot = coordinator.embedded_ble_wake_recovery_snapshot();
+
+        assert_eq!(snapshot.usb_powered, Some(true));
+        assert_eq!(snapshot.status, EmbeddedBleWakeRecoveryStatus::Reconnecting);
+        assert!(snapshot.user_guidance.contains("临时中断"));
+    }
+
+    #[test]
     fn embedded_ble_notify_ready_reports_recovered_for_powered_disconnect() {
         let coordinator = Coordinator::new();
         coordinator
@@ -5745,7 +5783,7 @@ mod tests {
     fn embedded_ble_background_recovery_capsule_respects_power_state() {
         let coordinator = Coordinator::new();
 
-        assert!(!should_emit_embedded_ble_background_recovery_capsule(
+        assert!(should_emit_embedded_ble_background_recovery_capsule(
             &coordinator.inner,
             "BLE device connection status changed to Disconnected; transport_not_ready",
         ));
@@ -5755,9 +5793,14 @@ mod tests {
             .embedded_ble_wake_recovery
             .lock()
             .usb_powered = Some(false);
-        assert!(!should_emit_embedded_ble_background_recovery_capsule(
+        assert!(should_emit_embedded_ble_background_recovery_capsule(
             &coordinator.inner,
             "BLE device connection status changed to Disconnected; transport_not_ready",
+        ));
+
+        assert!(!should_emit_embedded_ble_background_recovery_capsule(
+            &coordinator.inner,
+            "Windows BLE disconnected; reason=546; audio path returned transport_not_ready",
         ));
 
         coordinator
@@ -6574,6 +6617,7 @@ fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
 /// 硬件 BLE 听写的日常路径需要按键结束后立刻收起；详细结果可在历史记录里复盘。
 const CAPSULE_AUTO_HIDE_DELAY_MS: u64 = 0;
 const CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS: u64 = 6_000;
+const CAPSULE_EMPTY_TRANSCRIPT_HIDE_DELAY_MS: u64 = 1_500;
 const CAPSULE_STREAM_ERROR_HIDE_DELAY_MS: u64 = 6_000;
 const CAPSULE_RECORDING_WINDOW_KEEPALIVE_MS: u64 = 1_000;
 
