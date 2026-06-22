@@ -1116,7 +1116,7 @@ export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise
     { request },
     () => {
       const batteryAutoShutdownMs = Math.round(request.batteryAutoShutdownMinutes * 60 * 1000);
-      const pluggedAutoShutdownMs = Math.round(request.pluggedAutoShutdownMinutes * 60 * 1000);
+      const pluggedAutoShutdownMs = 0;
       mockSettings = {
         ...mockSettings,
         deviceStatusLedBrightnessPercent: request.statusLedBrightnessPercent,

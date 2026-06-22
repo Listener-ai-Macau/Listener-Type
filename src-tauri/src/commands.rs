@@ -2441,7 +2441,7 @@ fn device_settings_snapshot_from_status(
         plugged_low_power_idle_minutes: status.plugged_low_power_idle_minutes,
         battery_low_power_idle_minutes: status.battery_low_power_idle_minutes,
         plugged_low_power_enabled: status.plugged_low_power_enabled,
-        plugged_auto_shutdown_ms: status.plugged_auto_shutdown_minutes.saturating_mul(60_000),
+        plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: status.battery_auto_shutdown_minutes.saturating_mul(60_000),
         knob_rotation_action: ui_knob_rotation_action_from_firmware(&status.knob_rotation_action),
         ble_name: status.ble_name,
@@ -2559,8 +2559,7 @@ fn device_settings_snapshot_from_request(
         "battery" => request.battery_low_power_idle_minutes,
         _ => request.battery_low_power_idle_minutes,
     };
-    snapshot.plugged_auto_shutdown_ms =
-        request.plugged_auto_shutdown_minutes.saturating_mul(60_000);
+    snapshot.plugged_auto_shutdown_ms = DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS;
     snapshot.battery_auto_shutdown_ms =
         request.battery_auto_shutdown_minutes.saturating_mul(60_000);
     snapshot.ble_name = request.ble_name.clone();
@@ -2599,10 +2598,7 @@ fn device_settings_update_commands(
             "DEVICE:SET plugged_low_power_enabled={}",
             if request.plugged_low_power_enabled { 1 } else { 0 }
         ),
-        format!(
-            "DEVICE:SET plugged_auto_shutdown_minutes={}",
-            request.plugged_auto_shutdown_minutes
-        ),
+        "DEVICE:SET plugged_auto_shutdown_minutes=off".to_string(),
         format!(
             "DEVICE:SET battery_auto_shutdown_minutes={}",
             request.battery_auto_shutdown_minutes
@@ -2637,9 +2633,10 @@ fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Re
             "Low-power idle must be between 1 and {MAX_DEVICE_LOW_POWER_IDLE_MINUTES} minutes."
         ));
     }
-    if request.plugged_auto_shutdown_minutes > DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES
-        || request.battery_auto_shutdown_minutes > DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES
-    {
+    if request.plugged_auto_shutdown_minutes != 0 {
+        return Err("Plugged auto-shutdown is disabled; use battery auto-shutdown instead.".to_string());
+    }
+    if request.battery_auto_shutdown_minutes > DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES {
         return Err(format!(
             "Auto-shutdown must be between {DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES} and {DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES} minutes."
         ));
@@ -5693,6 +5690,24 @@ mod tests {
     }
 
     #[test]
+    fn device_settings_request_rejects_plugged_auto_shutdown() {
+        let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 70,
+            key_led_brightness_percent: 65,
+            knob_led_brightness_percent: 60,
+            edge_led_brightness_percent: 55,
+            plugged_low_power_idle_minutes: 2,
+            battery_low_power_idle_minutes: 3,
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_minutes: 30,
+            battery_auto_shutdown_minutes: 30,
+            ble_name: "listener-dev".to_string(),
+        };
+
+        assert!(validate_device_settings_request(&request).is_err());
+    }
+
+    #[test]
     fn device_settings_snapshot_uses_firmware_readback_values() {
         let snapshot = super::device_settings_snapshot_from_status(
             crate::embedded_ble::DeviceSettingsStatus {
@@ -5754,6 +5769,9 @@ mod tests {
         assert_eq!(commands.len(), 8);
         assert!(commands.iter().any(|command| {
             command == "DEVICE:SET plugged_low_power_enabled=0"
+        }));
+        assert!(commands.iter().any(|command| {
+            command == "DEVICE:SET plugged_auto_shutdown_minutes=off"
         }));
         assert!(commands.iter().all(|command| {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
