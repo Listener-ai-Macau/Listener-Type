@@ -552,6 +552,8 @@ mod windows_ble {
     const BATTERY_LEVEL_UUID: GUID = GUID::from_u128(0x00002a19_0000_1000_8000_00805f9b34fb);
     const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
     const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+    const TYPE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(4);
+    const TYPE_HEARTBEAT_WRITE_TIMEOUT: Duration = Duration::from_millis(1200);
     const GATT_READY_TIMEOUT: Duration = Duration::from_secs(8);
     const GATT_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
     const CCCD_ENABLE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -1440,7 +1442,7 @@ mod windows_ble {
     ) -> Result<(), String> {
         if let Some(result) = send_audio_control_via_active_capture(command, timeout, label) {
             match result {
-                Ok(()) => {
+                Ok(_) => {
                     log::info!("[embedded-ble] {label} sent via active capture");
                     return Ok(());
                 }
@@ -2179,6 +2181,18 @@ mod windows_ble {
         }
         log::info!("[embedded-ble] capture #{capture_id}: notify CCCD enabled");
         on_ready()?;
+        let type_heartbeat_enabled =
+            terminal_behavior == CaptureTerminalBehavior::ContinueListening;
+        let mut next_type_heartbeat = if type_heartbeat_enabled {
+            if cleanup.write_type_heartbeat(b"TYPE:READY\n", "Type heartbeat ready") {
+                cleanup.mark_type_heartbeat_open();
+                Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let deadline = idle_timeout.map(|timeout| Instant::now() + timeout);
         let mut collector = crate::embedded_audio::SessionCollector::default();
@@ -2187,6 +2201,12 @@ mod windows_ble {
         let mut link_recovery_reason: Option<String> = None;
         loop {
             let now = Instant::now();
+            if let Some(due) = next_type_heartbeat {
+                if now >= due {
+                    let _ = cleanup.write_type_heartbeat(b"TYPE:HB\n", "Type heartbeat");
+                    next_type_heartbeat = Some(now + TYPE_HEARTBEAT_INTERVAL);
+                }
+            }
             if cancel_requested.load(Ordering::SeqCst) {
                 log::info!(
                     "[embedded-ble] capture #{capture_id}: cancelled by caller; closing notify"
@@ -2228,6 +2248,7 @@ mod windows_ble {
             let receive_timeout = [stop_drain_deadline, deadline, link_recovery_deadline]
                 .into_iter()
                 .flatten()
+                .chain(next_type_heartbeat)
                 .map(|deadline| deadline.saturating_duration_since(now))
                 .min()
                 .unwrap_or(RECEIVE_POLL_INTERVAL)
@@ -5216,6 +5237,7 @@ mod windows_ble {
         connection_status_token: Option<EventRegistrationToken>,
         session_status_token: Option<EventRegistrationToken>,
         audio_control_registration: Option<ActiveAudioControlRegistration>,
+        type_heartbeat_open: bool,
         notify_disabled: bool,
     }
 
@@ -5228,6 +5250,7 @@ mod windows_ble {
                 connection_status_token: None,
                 session_status_token: None,
                 audio_control_registration: None,
+                type_heartbeat_open: false,
                 notify_disabled: false,
             }
         }
@@ -5248,6 +5271,44 @@ mod windows_ble {
             self.audio_control_registration = Some(registration);
         }
 
+        fn mark_type_heartbeat_open(&mut self) {
+            self.type_heartbeat_open = true;
+        }
+
+        fn write_type_heartbeat(&self, command: &[u8], label: &str) -> bool {
+            let Some(control) = self.target.control.as_ref() else {
+                log::warn!(
+                    "[embedded-ble] capture #{}: Type heartbeat skipped; audio control unavailable",
+                    self.capture_id
+                );
+                return false;
+            };
+
+            match write_gatt_value_with_timeout(
+                control,
+                command,
+                GattWriteOption::WriteWithResponse,
+                TYPE_HEARTBEAT_WRITE_TIMEOUT,
+                label,
+            ) {
+                Ok(_) => {
+                    if label == "Type heartbeat" {
+                        log::debug!("[embedded-ble] capture #{}: {label} sent", self.capture_id);
+                    } else {
+                        log::info!("[embedded-ble] capture #{}: {label} sent", self.capture_id);
+                    }
+                    true
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] capture #{}: {label} failed: {err}",
+                        self.capture_id
+                    );
+                    false
+                }
+            }
+        }
+
         fn disable_notify(&mut self) {
             self.finish(NotifyCccdTeardown::Disable);
         }
@@ -5255,6 +5316,10 @@ mod windows_ble {
         fn finish(&mut self, teardown: NotifyCccdTeardown) {
             if self.notify_disabled {
                 return;
+            }
+            if self.type_heartbeat_open {
+                let _ = self.write_type_heartbeat(b"TYPE:BYE\n", "Type heartbeat bye");
+                self.type_heartbeat_open = false;
             }
             self.remove_status_handlers();
             self.remove_handler();

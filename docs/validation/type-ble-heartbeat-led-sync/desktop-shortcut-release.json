@@ -1,0 +1,14 @@
+{
+  "updated_at": "2026-06-22T20:48:31.7436391+08:00",
+  "shortcut": "C:\\Users\\Billy\\Desktop\\Listener Type.lnk",
+  "shortcut_target": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\src-tauri\\target\\release\\listener-type.exe",
+  "expected_target": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\src-tauri\\target\\release\\listener-type.exe",
+  "target_exists": true,
+  "release_process_id": 33392,
+  "release_process_running": true,
+  "running_process": {
+    "Id": 33392,
+    "Path": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\src-tauri\\target\\release\\listener-type.exe",
+    "StartTime": "2026-06-22T20:48:27.7198343+08:00"
+  }
+}
