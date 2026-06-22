@@ -1194,6 +1194,9 @@ impl Coordinator {
         )
         .await?
         {
+            if listening_session_has_no_current_asr(&self.inner) {
+                end_session(&self.inner).await?;
+            }
             return Ok(());
         }
         if self.inner.state.lock().phase == SessionPhase::Starting {
@@ -6658,6 +6661,20 @@ fn set_phase_idle_if_session_matches(inner: &Arc<Inner>, session_id: SessionId) 
     if state.session_id == session_id {
         state.phase = SessionPhase::Idle;
     }
+}
+
+fn listening_session_has_no_current_asr(inner: &Arc<Inner>) -> bool {
+    let (phase, session_id) = {
+        let state = inner.state.lock();
+        (state.phase, state.session_id)
+    };
+    phase == SessionPhase::Listening
+        && inner
+            .asr
+            .lock()
+            .as_ref()
+            .map(|resource| resource.session_id != session_id)
+            .unwrap_or(true)
 }
 
 fn schedule_capsule_idle(inner: &Arc<Inner>, delay_ms: u64, session_id: Option<SessionId>) {

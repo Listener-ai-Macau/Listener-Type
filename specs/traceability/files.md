@@ -17,6 +17,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/check-tauri-info.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-traceability.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-window-hotkey-fallback.mjs` | Global hotkeys | Hotkey tests and manual smoke |
+| `scripts/validation/run_ble_recording_cancel_matrix.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-build-gnu.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-capsule-lifecycle-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
@@ -70,6 +71,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/asr/wav.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/whisper.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/audio_mute.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/capsule_log.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/cli.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/combo_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/commands.rs` | Core app | Build and targeted tests |
@@ -81,12 +83,15 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/correction.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_audio.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/firmware_ota.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/github_oauth.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/global_hotkey_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/insertion.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/lib.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/llm_gemini.rs` | Polish providers | Rust unit tests, provider smoke |
 | `src-tauri/src/main.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/marketplace_backend.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/permissions.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/persistence.rs` | Local data and style packs | Rust unit tests, local import/export smoke |
 | `src-tauri/src/polish.rs` | Polish providers | Rust unit tests, provider smoke |
@@ -94,6 +99,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/recorder.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/selection.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_binding.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/shortcut_dispatch.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/timeline.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/types.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/unicode_keystroke.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/windows_ime_ipc.rs` | Windows IME insertion | Windows static and runtime smoke |
@@ -122,6 +129,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/vendor/qwen-asr/qwen_asr_safetensors.h` | Vendored local ASR engine | Cargo check and local ASR smoke |
 | `src-tauri/vendor/qwen-asr/qwen_asr_tokenizer.c` | Vendored local ASR engine | Cargo check and local ASR smoke |
 | `src-tauri/vendor/qwen-asr/qwen_asr_tokenizer.h` | Vendored local ASR engine | Cargo check and local ASR smoke |
+| `src-tauri/wix/listener-type-ime-cleanup.wxs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/wix/listener-type-ime.wxs` | Windows IME insertion | Windows static and runtime smoke |
 | `src/App.tsx` | Core app | Build and targeted tests |
 | `src/components/AutoUpdate.tsx` | React UI | TypeScript build and visual smoke |
@@ -138,9 +146,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/components/ShortcutRecorder.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/WindowChrome.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/ui/Row.tsx` | React UI | TypeScript build and visual smoke |
-| `src/components/ui/SegSimple.tsx` | React UI | TypeScript build and visual smoke |
 | `src/components/ui/SelectLite.tsx` | React UI | TypeScript build and visual smoke |
-| `src/components/ui/SwitchLite.tsx` | React UI | TypeScript build and visual smoke |
 | `src/i18n/en.ts` | Localization | TypeScript build |
 | `src/i18n/index.ts` | Localization | TypeScript build |
 | `src/i18n/ja.ts` | Localization | TypeScript build |
@@ -148,31 +154,39 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/i18n/zh-CN.ts` | Localization | TypeScript build |
 | `src/i18n/zh-TW.ts` | Localization | TypeScript build |
 | `src/lib/appVersion.ts` | Core app | Build and targeted tests |
+| `src/lib/bleRecoveryUi.test.ts` | Core app | Build and targeted tests |
+| `src/lib/bleRecoveryUi.ts` | Core app | Build and targeted tests |
+| `src/lib/capsuleActionRules.test.ts` | Core app | Build and targeted tests |
+| `src/lib/capsuleActionRules.ts` | Core app | Build and targeted tests |
+| `src/lib/capsuleEventOrdering.test.ts` | Core app | Build and targeted tests |
+| `src/lib/capsuleEventOrdering.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleLayout.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleLayout.ts` | Core app | Build and targeted tests |
 | `src/lib/capsulePreviewRules.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsulePreviewRules.ts` | Core app | Build and targeted tests |
+| `src/lib/demoMode.test.ts` | Core app | Build and targeted tests |
 | `src/lib/demoMode.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceHealth.test.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceHealth.ts` | Core app | Build and targeted tests |
 | `src/lib/embeddedBleProbe.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.test.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.ts` | Core app | Build and targeted tests |
+| `src/lib/firstRunPairingWizard.test.ts` | Core app | Build and targeted tests |
+| `src/lib/firstRunPairingWizard.ts` | Core app | Build and targeted tests |
 | `src/lib/fontScale.ts` | Core app | Build and targeted tests |
 | `src/lib/hotkey.ts` | Global hotkeys | Hotkey tests and manual smoke |
-| `src/lib/hotkeyMigration.ts` | Global hotkeys | Hotkey tests and manual smoke |
 | `src/lib/hotkeyRecorder.test.ts` | Global hotkeys | Hotkey tests and manual smoke |
 | `src/lib/hotkeyRecorder.ts` | Global hotkeys | Hotkey tests and manual smoke |
 | `src/lib/ipc.ts` | Core app | Build and targeted tests |
 | `src/lib/localAsr.ts` | Core app | Build and targeted tests |
+| `src/lib/marketplaceDiscovery.test.ts` | Core app | Build and targeted tests |
+| `src/lib/marketplaceDiscovery.ts` | Core app | Build and targeted tests |
 | `src/lib/mockData.ts` | Core app | Build and targeted tests |
 | `src/lib/providerSetup.test.ts` | Core app | Build and targeted tests |
 | `src/lib/providerSetup.ts` | Core app | Build and targeted tests |
 | `src/lib/qaMarkdown.test.ts` | Core app | Build and targeted tests |
 | `src/lib/qaMarkdown.ts` | Core app | Build and targeted tests |
 | `src/lib/savedEvent.ts` | Core app | Build and targeted tests |
-| `src/lib/stylePrefs.test.ts` | Core app | Build and targeted tests |
-| `src/lib/stylePrefs.ts` | Core app | Build and targeted tests |
 | `src/lib/types.ts` | Core app | Build and targeted tests |
 | `src/lib/vocab-presets.json` | Core app | Build and targeted tests |
 | `src/lib/vocabPresets.ts` | Core app | Build and targeted tests |
@@ -192,6 +206,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/pages/_atoms.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AboutUpdateControl.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AdvancedSection.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/settings/DeviceSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/FirmwareOtaPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/LanguageSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/PermissionsSection.tsx` | React UI | TypeScript build and visual smoke |
