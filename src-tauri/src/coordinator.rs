@@ -2987,6 +2987,7 @@ fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) -> bool {
     let previous_notify_state = snapshot.notify_subscription_state.clone();
     let usb_powered = snapshot.usb_powered;
     let battery_percent = snapshot.battery_percent;
+    let reconnect_attempts = snapshot.reconnect_attempts;
     let recent_disconnect_failure = recent_disconnect_reason
         .as_deref()
         .map(crate::embedded_ble::classify_ble_failure);
@@ -2998,16 +2999,21 @@ fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) -> bool {
         && recent_disconnect_reason
             .as_deref()
             .map(|reason| {
-                should_emit_embedded_ble_recovered_capsule_for_reason(reason, usb_powered)
+                should_emit_embedded_ble_recovered_capsule_for_reason(
+                    reason,
+                    usb_powered,
+                    reconnect_attempts,
+                )
             })
             .unwrap_or(true);
     log::info!(
-        "[embedded-ble] notify ready recovery decision recovered={} emit_recovered_capsule={} previous_status={:?} previous_notify_state={:?} notify_was_recovering={} usb_powered={:?} battery_percent={:?} recent_disconnect_kind={:?} recent_disconnect_automatic_recovery={} recent_disconnect_low_power_idle={} recent_disconnect_reason={}",
+        "[embedded-ble] notify ready recovery decision recovered={} emit_recovered_capsule={} previous_status={:?} previous_notify_state={:?} notify_was_recovering={} reconnect_attempts={} usb_powered={:?} battery_percent={:?} recent_disconnect_kind={:?} recent_disconnect_automatic_recovery={} recent_disconnect_low_power_idle={} recent_disconnect_reason={}",
         recovered,
         emit_recovered_capsule,
         previous_status,
         previous_notify_state,
         notify_was_recovering,
+        reconnect_attempts,
         usb_powered,
         battery_percent,
         recent_disconnect_failure.as_ref().map(|failure| failure.kind),
@@ -3427,6 +3433,7 @@ fn should_emit_embedded_ble_background_recovery_capsule(inner: &Arc<Inner>, err:
 fn should_emit_embedded_ble_recovered_capsule_for_reason(
     reason: &str,
     usb_powered: Option<bool>,
+    reconnect_attempts: u32,
 ) -> bool {
     let normalized = reason.trim().to_ascii_lowercase();
     if matches!(
@@ -3435,7 +3442,11 @@ fn should_emit_embedded_ble_recovered_capsule_for_reason(
     ) {
         return false;
     }
-    !is_embedded_ble_low_power_idle_candidate(reason) || usb_powered == Some(true)
+    let failure = crate::embedded_ble::classify_ble_failure(reason);
+    let automatic_recovery = is_embedded_ble_link_loss_error(reason) || failure.automatic_recovery;
+    let repeated_automatic_recovery = automatic_recovery && reconnect_attempts > 1;
+    !repeated_automatic_recovery
+        && (!is_embedded_ble_low_power_idle_candidate(reason) || usb_powered == Some(true))
 }
 
 fn is_embedded_ble_link_loss_error(err: &str) -> bool {
@@ -5842,7 +5853,7 @@ mod tests {
             record_embedded_ble_reconnect_attempt(&coordinator.inner, "rapid_reconnect_test");
             record_embedded_ble_recovery_failure(
                 &coordinator.inner,
-                "BLE embedded audio notification wait failed: disconnected",
+                "BLE device connection status changed to Disconnected; transport_not_ready",
             );
             let reconnecting = coordinator.embedded_ble_wake_recovery_snapshot();
 
@@ -5859,7 +5870,7 @@ mod tests {
                 .recent_disconnect_reason
                 .as_deref()
                 .unwrap_or_default()
-                .contains("notification wait failed"));
+                .contains("connection status changed"));
             assert_eq!(
                 next_embedded_ble_background_retry_delay(
                     reconnecting.recent_disconnect_reason.as_deref().unwrap(),
@@ -5868,7 +5879,12 @@ mod tests {
                 EMBEDDED_BLE_RETRY_FAST_DELAY
             );
 
-            assert!(record_embedded_ble_notify_ready(&coordinator.inner));
+            let recovered_capsule_visible = record_embedded_ble_notify_ready(&coordinator.inner);
+            assert_eq!(
+                recovered_capsule_visible,
+                attempt == 1,
+                "only the first repeated automatic recovery should show a reconnected capsule"
+            );
             let ready = coordinator.embedded_ble_wake_recovery_snapshot();
             assert_eq!(ready.status, EmbeddedBleWakeRecoveryStatus::Ready);
             assert_eq!(
