@@ -367,13 +367,16 @@ function DeviceFirmwareSettingsCard() {
             lowPowerDesc={t('settings.device.batteryLowPowerIdleDesc', '无操作多久进入低功耗空闲。')}
             lowPowerValue={form.batteryLowPowerIdleMinutes}
             autoShutdownLabel={t('settings.device.batteryAutoShutdownLabel', '自动关机')}
-            autoShutdownDesc={t('settings.device.batteryAutoShutdownDesc', '填 0 表示关闭。')}
+            autoShutdownDesc={t('settings.device.batteryAutoShutdownDesc', '电池供电且长时间空闲时自动关机。')}
             autoShutdownValue={form.batteryAutoShutdownMinutes}
             disabled={controlsDisabled}
             onLowPowerChange={value => setForm(current => ({ ...current, batteryLowPowerIdleMinutes: value }))}
             onAutoShutdownChange={value => setForm(current => ({ ...current, batteryAutoShutdownMinutes: value }))}
             t={t}
           />
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 8, lineHeight: 1.4 }}>
+          {t('settings.device.zeroMeansOff', '0 = 关闭')}
         </div>
       </DeviceSettingsPanel>
 
@@ -573,11 +576,6 @@ function MinuteInput({
       <span style={{ fontSize: 12, color: 'var(--ol-ink-4)' }}>
         {t('settings.device.minutes', '分钟')}
       </span>
-      {min === 0 && (
-        <span style={{ fontSize: 11.5, color: 'var(--ol-ink-4)' }}>
-          {t('settings.device.zeroMeansOff', '0 = 关闭')}
-        </span>
-      )}
     </div>
   );
 }

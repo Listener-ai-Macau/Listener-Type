@@ -765,6 +765,14 @@ fn current_device_custom_keys_default_with_external_app_path(
     }
 }
 
+fn current_device_custom_keys_default_with_legacy_knob_switch_style(
+    external_app_path: String,
+) -> DeviceCustomKeys {
+    let mut keys = current_device_custom_keys_default_with_external_app_path(external_app_path);
+    keys.knob.action = DeviceCustomKeyAction::SwitchStyle;
+    keys
+}
+
 fn previous_current_device_custom_keys_default_with_external_app_path(
     external_app_path: String,
 ) -> DeviceCustomKeys {
@@ -853,8 +861,14 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
         previous_current_device_custom_keys_default_with_external_app_path(
             default_device_external_app_path(),
         );
+    let current_default_with_legacy_knob =
+        current_device_custom_keys_default_with_legacy_knob_switch_style(
+            default_device_external_app_path(),
+        );
     keys == &legacy_device_custom_keys_default()
         || device_custom_key_defaults_match(keys, &legacy_device_custom_keys_default(), true)
+        || keys == &current_default_with_legacy_knob
+        || device_custom_key_defaults_match(keys, &current_default_with_legacy_knob, false)
         || keys == &previous_current_default
         || device_custom_key_defaults_match(keys, &previous_current_default, false)
         || keys == &legacy_device_custom_keys_default_with_external_app_path("code".into())
@@ -872,10 +886,18 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
                     previous_current_device_custom_keys_default_with_external_app_path(
                         path.clone(),
                     );
+                let current_default_with_legacy_knob =
+                    current_device_custom_keys_default_with_legacy_knob_switch_style(path.clone());
                 let previous_shortcuts_default =
                     previous_shortcuts_device_custom_keys_default_with_external_app_path(path);
                 keys == &legacy_default
                     || device_custom_key_defaults_match(keys, &legacy_default, true)
+                    || keys == &current_default_with_legacy_knob
+                    || device_custom_key_defaults_match(
+                        keys,
+                        &current_default_with_legacy_knob,
+                        false,
+                    )
                     || keys == &previous_current_default
                     || device_custom_key_defaults_match(keys, &previous_current_default, false)
                     || keys == &previous_shortcuts_default
@@ -2807,6 +2829,40 @@ mod tests {
     }
 
     #[test]
+    fn current_default_with_legacy_knob_switch_style_migrates_knob_to_disabled() {
+        let raw = serde_json::json!({
+            "deviceCustomKeysDefaultMigrated": true,
+            "deviceCustomKeys": {
+                "key1": { "action": "dictation", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "openApp", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "pasteShortcut", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "openExternalApp", "appPage": "settingsDevice", "externalAppPath": "code", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "switchStyle", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            },
+            "deviceCustomKeyDoubleClicks": {
+                "key1": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            },
+            "deviceCustomKeyLongPresses": {
+                "key1": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            }
+        });
+        let prefs: UserPreferences = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(
+            prefs.device_custom_keys.knob.action,
+            DeviceCustomKeyAction::Disabled
+        );
+    }
+
+    #[test]
     fn legacy_device_custom_key_defaults_migrate_to_current_defaults() {
         let raw = serde_json::json!({
             "deviceCustomKeysDefaultMigrated": true,
@@ -2924,6 +2980,10 @@ mod tests {
         assert_eq!(
             prefs.device_custom_keys.key3.action,
             DeviceCustomKeyAction::Dictation
+        );
+        assert_eq!(
+            prefs.device_custom_keys.knob.action,
+            DeviceCustomKeyAction::SwitchStyle
         );
     }
 
