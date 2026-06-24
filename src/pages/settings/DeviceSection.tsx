@@ -291,7 +291,11 @@ function DeviceFirmwareSettingsCard() {
     setStatus('saving');
     setMessage('');
     try {
-      const value = await setDeviceSettings({ ...form, pluggedAutoShutdownMinutes: 0 });
+      const value = await setDeviceSettings({
+        ...form,
+        pluggedLowPowerEnabled: form.pluggedLowPowerIdleMinutes > 0,
+        pluggedAutoShutdownMinutes: 0,
+      });
       setSnapshot(value);
       setForm(snapshotToForm(value));
       setStatus('saved');
@@ -348,12 +352,12 @@ function DeviceFirmwareSettingsCard() {
             lowPowerLabel={t('settings.device.pluggedLowPowerIdleLabel', '进入低功耗')}
             lowPowerDesc={t('settings.device.pluggedLowPowerIdleDesc', '无操作多久后进入低功耗空闲。')}
             lowPowerValue={form.pluggedLowPowerIdleMinutes}
-            lowPowerEnabledLabel={t('settings.device.pluggedLowPowerEnabledLabel', '允许低功耗')}
-            lowPowerEnabledDesc={t('settings.device.pluggedLowPowerEnabledDesc', '关闭后，插电、充电或外部供电时保持活跃连接和灯状态。')}
-            lowPowerEnabled={form.pluggedLowPowerEnabled}
             disabled={controlsDisabled}
-            onLowPowerEnabledChange={value => setForm(current => ({ ...current, pluggedLowPowerEnabled: value }))}
-            onLowPowerChange={value => setForm(current => ({ ...current, pluggedLowPowerIdleMinutes: value }))}
+            onLowPowerChange={value => setForm(current => ({
+              ...current,
+              pluggedLowPowerIdleMinutes: value,
+              pluggedLowPowerEnabled: value > 0,
+            }))}
             t={t}
           />
           <PowerModeTimingGroup
@@ -458,14 +462,10 @@ function PowerModeTimingGroup({
   lowPowerLabel,
   lowPowerDesc,
   lowPowerValue,
-  lowPowerEnabledLabel,
-  lowPowerEnabledDesc,
-  lowPowerEnabled,
   autoShutdownLabel,
   autoShutdownDesc,
   autoShutdownValue,
   disabled,
-  onLowPowerEnabledChange,
   onLowPowerChange,
   onAutoShutdownChange,
   t,
@@ -475,14 +475,10 @@ function PowerModeTimingGroup({
   lowPowerLabel: string;
   lowPowerDesc: string;
   lowPowerValue: number;
-  lowPowerEnabledLabel?: string;
-  lowPowerEnabledDesc?: string;
-  lowPowerEnabled?: boolean;
   autoShutdownLabel?: string;
   autoShutdownDesc?: string;
   autoShutdownValue?: number;
   disabled: boolean;
-  onLowPowerEnabledChange?: (value: boolean) => void;
   onLowPowerChange: (value: number) => void;
   onAutoShutdownChange?: (value: number) => void;
   t: ReturnType<typeof useTranslation>['t'];
@@ -495,20 +491,11 @@ function PowerModeTimingGroup({
           <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>
         </div>
       </div>
-      {typeof lowPowerEnabled === 'boolean' && onLowPowerEnabledChange && lowPowerEnabledLabel && (
-        <ToggleControl
-          label={lowPowerEnabledLabel}
-          desc={lowPowerEnabledDesc ?? ''}
-          checked={lowPowerEnabled}
-          disabled={disabled}
-          onChange={onLowPowerEnabledChange}
-        />
-      )}
       <TimingControl
         label={lowPowerLabel}
         desc={lowPowerDesc}
         value={lowPowerValue}
-        min={1}
+        min={0}
         disabled={disabled}
         onChange={onLowPowerChange}
         t={t}
@@ -525,38 +512,6 @@ function PowerModeTimingGroup({
         />
       )}
     </div>
-  );
-}
-
-function ToggleControl({
-  label,
-  desc,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  desc: string;
-  checked: boolean;
-  disabled: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className="ol-device-toggle-control" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', padding: '9px 0', borderTop: '0.5px solid var(--ol-line-soft)' }}>
-      <span style={{ minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600 }}>{label}</span>
-        {desc && (
-          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.4 }}>{desc}</span>
-        )}
-      </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={event => onChange(event.target.checked)}
-        style={{ width: 18, height: 18 }}
-      />
-    </label>
   );
 }
 
@@ -1123,7 +1078,7 @@ function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateR
     keyLedBrightnessPercent: snapshot.keyLedBrightnessPercent,
     knobLedBrightnessPercent: snapshot.knobLedBrightnessPercent,
     edgeLedBrightnessPercent: snapshot.edgeLedBrightnessPercent,
-    pluggedLowPowerIdleMinutes: snapshot.pluggedLowPowerIdleMinutes,
+    pluggedLowPowerIdleMinutes: snapshot.pluggedLowPowerEnabled ? snapshot.pluggedLowPowerIdleMinutes : 0,
     batteryLowPowerIdleMinutes: snapshot.batteryLowPowerIdleMinutes,
     pluggedLowPowerEnabled: snapshot.pluggedLowPowerEnabled,
     pluggedAutoShutdownMinutes: 0,
@@ -1144,11 +1099,11 @@ function validateDeviceSettingsForm(
   ) {
     return t('settings.device.errorZoneBrightness', '灯区亮度必须在 0-100 之间。');
   }
-  if (!Number.isFinite(form.pluggedLowPowerIdleMinutes) || form.pluggedLowPowerIdleMinutes < 1 || form.pluggedLowPowerIdleMinutes > 1440) {
-    return t('settings.device.errorLowPowerIdle', '低功耗等待时间必须在 1-1440 分钟之间。');
+  if (!Number.isFinite(form.pluggedLowPowerIdleMinutes) || form.pluggedLowPowerIdleMinutes < 0 || form.pluggedLowPowerIdleMinutes > 1440) {
+    return t('settings.device.errorLowPowerIdle', '低功耗等待时间必须在 0-1440 分钟之间。');
   }
-  if (!Number.isFinite(form.batteryLowPowerIdleMinutes) || form.batteryLowPowerIdleMinutes < 1 || form.batteryLowPowerIdleMinutes > 1440) {
-    return t('settings.device.errorLowPowerIdle', '低功耗等待时间必须在 1-1440 分钟之间。');
+  if (!Number.isFinite(form.batteryLowPowerIdleMinutes) || form.batteryLowPowerIdleMinutes < 0 || form.batteryLowPowerIdleMinutes > 1440) {
+    return t('settings.device.errorLowPowerIdle', '低功耗等待时间必须在 0-1440 分钟之间。');
   }
   if (!Number.isFinite(form.batteryAutoShutdownMinutes) || form.batteryAutoShutdownMinutes < 0 || form.batteryAutoShutdownMinutes > 1440) {
     return t('settings.device.errorAutoShutdown', '自动关机时间必须在 0-1440 分钟之间。');
@@ -1225,7 +1180,9 @@ function getDeviceSettingsStatusItems(
     : snapshot.activePowerSource === 'battery'
       ? snapshot.batteryLowPowerIdleMinutes
       : snapshot.lowPowerIdleMinutes;
-  const lowPower = snapshot.activePowerSource === 'plugged' && !snapshot.pluggedLowPowerEnabled
+  const lowPowerDisabled =
+    activeLowPower <= 0 || (snapshot.activePowerSource === 'plugged' && !snapshot.pluggedLowPowerEnabled);
+  const lowPower = lowPowerDisabled
     ? t('settings.device.lowPowerOff', '关闭')
     : t('settings.device.lowPowerCompact', '{{value}} 分钟', { value: activeLowPower });
   const source = snapshot.source === 'mock'

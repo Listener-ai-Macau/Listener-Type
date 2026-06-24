@@ -712,7 +712,7 @@ export const zhCN = {
       bleNameDesc: '1-32 个 ASCII 字符；部分 Windows 设备名变更需要重连或重新配对后才显示。',
       minutes: '分钟',
       zeroMeansOff: '0 = 关闭',
-      errorLowPowerIdle: '低功耗等待时间必须在 1-1440 分钟之间。',
+      errorLowPowerIdle: '低功耗等待时间必须在 0-1440 分钟之间。',
       errorAutoShutdown: '自动关机时间必须在 0-1440 分钟之间。',
       errorBleName: '蓝牙名称必须是 1-32 个可打印 ASCII 字符，不能包含空格、引号、分号、等号或反斜杠。',
       powerPlugged: '插电',

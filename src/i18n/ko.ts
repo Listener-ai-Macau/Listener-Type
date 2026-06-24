@@ -672,7 +672,7 @@ export const ko: typeof zhCN = {
       bleNameDesc: '1-32자의 ASCII. Windows에서는 다시 연결하거나 다시 페어링해야 이름이 반영될 수 있습니다.',
       minutes: '분',
       zeroMeansOff: '0 = 꺼짐',
-      errorLowPowerIdle: '저전력 대기는 1-1440분 사이여야 합니다.',
+      errorLowPowerIdle: '저전력 대기는 0-1440분 사이여야 합니다.',
       errorAutoShutdown: '자동 전원 끄기 시간은 0-1440분 사이여야 합니다.',
       errorBleName: 'Bluetooth 이름은 1-32자의 출력 가능한 ASCII여야 하며 공백, 따옴표, 세미콜론, 등호, 백슬래시를 포함할 수 없습니다.',
       powerPlugged: '연결됨',

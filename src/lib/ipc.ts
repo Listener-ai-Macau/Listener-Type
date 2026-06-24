@@ -116,7 +116,7 @@ let mockSettings: UserPreferences = {
     key2: { action: 'openApp', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
     key3: { action: 'pasteShortcut', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
     key4: { action: 'openExternalApp', appPage: 'settingsDevice', externalAppPath: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\微信\\微信.lnk', pasteTemplate: '', shortcut: null },
-    knob: { action: 'switchStyle', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
+    knob: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
   },
   deviceCustomKeyDoubleClicks: {
     key1: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },

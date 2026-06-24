@@ -1973,10 +1973,14 @@ mod windows_ble {
     }
 
     fn low_power_minutes_from_ms(ms: u32) -> u32 {
-        ms.saturating_add(59_999)
-            .checked_div(60_000)
-            .unwrap_or(1)
-            .clamp(1, crate::types::MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
+        if ms == 0 {
+            0
+        } else {
+            ms.saturating_add(59_999)
+                .checked_div(60_000)
+                .unwrap_or(0)
+                .clamp(1, crate::types::MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
+        }
     }
 
     fn auto_shutdown_minutes_from_ms(ms: u32) -> u32 {
@@ -6163,7 +6167,7 @@ mod tests {
     #[test]
     fn parses_device_settings_status_line() {
         let status = super::windows_ble::parse_device_settings_status_line(
-            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 led_status=70 led_key=65 led_ec11=60 led_edge=55 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,led_zone_brightness_0_100,low_power_idle_ms_60000_86400000"
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 led_status=70 led_key=65 led_ec11=60 led_edge=55 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,led_zone_brightness_0_100,low_power_idle_ms_0_86400000"
         )
         .expect("parse device settings");
         assert_eq!(status.status_led_brightness_percent, 70);
@@ -6214,6 +6218,20 @@ mod tests {
         assert!(status.key_led_brightness_percent <= 100);
         assert!(status.knob_led_brightness_percent <= 100);
         assert!(status.edge_led_brightness_percent <= 100);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_zero_low_power_idle_as_disabled() {
+        let status = super::windows_ble::parse_device_settings_status_line(
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK active_power=external low_power_idle_ms=0 plugged_low_power_idle_ms=0 battery_low_power_idle_ms=0 plugged_low_power_enabled=0 knob_rotation=system_volume ble_name=\"listener-dev\" ble_name_pending=0 external_power_present=1 usb_power_present=1 charging=0 charge_full=0"
+        )
+        .expect("parse zero low-power device settings");
+
+        assert_eq!(status.low_power_idle_minutes, 0);
+        assert_eq!(status.plugged_low_power_idle_minutes, 0);
+        assert_eq!(status.battery_low_power_idle_minutes, 0);
+        assert!(!status.plugged_low_power_enabled);
     }
 
     #[test]

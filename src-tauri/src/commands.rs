@@ -414,11 +414,9 @@ fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPrefe
 }
 
 fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), String> {
-    if prefs.device_low_power_idle_minutes == 0
-        || prefs.device_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
-    {
+    if prefs.device_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES {
         return Err(format!(
-            "低功耗等待时间必须在 1-{} 分钟之间。",
+            "低功耗等待时间必须在 0-{} 分钟之间。",
             MAX_DEVICE_LOW_POWER_IDLE_MINUTES
         ));
     }
@@ -2373,10 +2371,16 @@ pub async fn set_device_settings(
                 .map(device_settings_snapshot_from_device)
         }
     };
+    let plugged_low_power_enabled =
+        request.plugged_low_power_enabled && request.plugged_low_power_idle_minutes > 0;
     let led_zone_brightness_supported = previous_snapshot
         .as_ref()
         .is_some_and(|snapshot| snapshot.led_zone_brightness_supported);
-    let commands = device_settings_update_commands(&request, led_zone_brightness_supported)?;
+    let commands = device_settings_update_commands(
+        &request,
+        led_zone_brightness_supported,
+        plugged_low_power_enabled,
+    )?;
     for command in commands {
         tauri::async_runtime::spawn_blocking(move || {
             crate::embedded_ble::send_device_settings_command(
@@ -2397,7 +2401,7 @@ pub async fn set_device_settings(
             prefs.device_edge_led_brightness_percent = request.edge_led_brightness_percent;
         }
         prefs.device_low_power_idle_minutes = request.battery_low_power_idle_minutes;
-        prefs.device_plugged_low_power_enabled = request.plugged_low_power_enabled;
+        prefs.device_plugged_low_power_enabled = plugged_low_power_enabled;
         prefs.device_battery_auto_shutdown_minutes = request.battery_auto_shutdown_minutes;
         prefs.device_ble_name = request.ble_name.clone();
         persist_settings(&*coord, prefs.clone())?;
@@ -2406,7 +2410,11 @@ pub async fn set_device_settings(
     match read_device_settings_snapshot_from_firmware().await {
         Ok(snapshot) => Ok(snapshot),
         Err(readback_error) => {
-            let mut snapshot = device_settings_snapshot_from_request(&request, previous_snapshot);
+            let mut snapshot = device_settings_snapshot_from_request(
+                &request,
+                previous_snapshot,
+                plugged_low_power_enabled,
+            );
             snapshot.detail = Some(device_settings_sent_but_readback_unavailable_detail(
                 &readback_error,
             ));
@@ -2514,6 +2522,7 @@ fn device_settings_snapshot_from_device(
 fn device_settings_snapshot_from_request(
     request: &DeviceSettingsUpdateRequest,
     previous: Option<DeviceSettingsSnapshot>,
+    plugged_low_power_enabled: bool,
 ) -> DeviceSettingsSnapshot {
     let mut snapshot = previous.unwrap_or(DeviceSettingsSnapshot {
         schema: DEVICE_SETTINGS_SCHEMA,
@@ -2553,7 +2562,7 @@ fn device_settings_snapshot_from_request(
     }
     snapshot.plugged_low_power_idle_minutes = request.plugged_low_power_idle_minutes;
     snapshot.battery_low_power_idle_minutes = request.battery_low_power_idle_minutes;
-    snapshot.plugged_low_power_enabled = request.plugged_low_power_enabled;
+    snapshot.plugged_low_power_enabled = plugged_low_power_enabled;
     snapshot.low_power_idle_minutes = match snapshot.active_power_source {
         "plugged" => request.plugged_low_power_idle_minutes,
         "battery" => request.battery_low_power_idle_minutes,
@@ -2573,6 +2582,7 @@ fn device_settings_snapshot_from_request(
 fn device_settings_update_commands(
     request: &DeviceSettingsUpdateRequest,
     led_zone_brightness_supported: bool,
+    plugged_low_power_enabled: bool,
 ) -> Result<Vec<String>, String> {
     let mut commands = Vec::new();
     if led_zone_brightness_supported {
@@ -2596,7 +2606,7 @@ fn device_settings_update_commands(
         ),
         format!(
             "DEVICE:SET plugged_low_power_enabled={}",
-            if request.plugged_low_power_enabled { 1 } else { 0 }
+            if plugged_low_power_enabled { 1 } else { 0 }
         ),
         "DEVICE:SET plugged_auto_shutdown_minutes=off".to_string(),
         format!(
@@ -2624,13 +2634,11 @@ fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Re
     {
         return Err("Device LED zone brightness must be between 0 and 100 percent.".to_string());
     }
-    if request.plugged_low_power_idle_minutes == 0
-        || request.plugged_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
-        || request.battery_low_power_idle_minutes == 0
+    if request.plugged_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
         || request.battery_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
     {
         return Err(format!(
-            "Low-power idle must be between 1 and {MAX_DEVICE_LOW_POWER_IDLE_MINUTES} minutes."
+            "Low-power idle must be between 0 and {MAX_DEVICE_LOW_POWER_IDLE_MINUTES} minutes."
         ));
     }
     if request.plugged_auto_shutdown_minutes != 0 {
@@ -5565,7 +5573,7 @@ mod tests {
     use crate::types::{
         ComboBinding, DeviceCustomKeyAction, DeviceCustomKeyMapping, DictationSession,
         HotkeyBinding, HotkeyMode, HotkeyTrigger, InsertStatus, PolishMode, ShortcutBinding,
-        UserPreferences,
+        UserPreferences, MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -5678,7 +5686,7 @@ mod tests {
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
             edge_led_brightness_percent: 55,
-            plugged_low_power_idle_minutes: 0,
+            plugged_low_power_idle_minutes: MAX_DEVICE_LOW_POWER_IDLE_MINUTES + 1,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
             plugged_auto_shutdown_minutes: 0,
@@ -5764,7 +5772,9 @@ mod tests {
             battery_auto_shutdown_minutes: 1440,
             ble_name: "listener-12345678901234567890123".to_string(),
         };
-        let commands = device_settings_update_commands(&request, true).expect("commands");
+        let commands =
+            device_settings_update_commands(&request, true, request.plugged_low_power_enabled)
+                .expect("commands");
 
         assert_eq!(commands.len(), 8);
         assert!(commands.iter().any(|command| {
@@ -5777,8 +5787,42 @@ mod tests {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
         }));
 
-        let legacy_commands = device_settings_update_commands(&request, false).expect("commands");
+        let legacy_commands =
+            device_settings_update_commands(&request, false, request.plugged_low_power_enabled)
+                .expect("commands");
         assert_eq!(legacy_commands.len(), 6);
+    }
+
+    #[test]
+    fn device_settings_zero_low_power_disables_plugged_low_power_command() {
+        let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 100,
+            key_led_brightness_percent: 100,
+            knob_led_brightness_percent: 100,
+            edge_led_brightness_percent: 100,
+            plugged_low_power_idle_minutes: 0,
+            battery_low_power_idle_minutes: 0,
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_minutes: 0,
+            battery_auto_shutdown_minutes: 0,
+            ble_name: "listener-dev".to_string(),
+        };
+
+        assert!(validate_device_settings_request(&request).is_ok());
+        let plugged_low_power_enabled =
+            request.plugged_low_power_enabled && request.plugged_low_power_idle_minutes > 0;
+        let commands = device_settings_update_commands(&request, false, plugged_low_power_enabled)
+            .expect("commands");
+
+        assert!(commands.iter().any(|command| {
+            command == "DEVICE:SET plugged_low_power_idle_minutes=0"
+        }));
+        assert!(commands.iter().any(|command| {
+            command == "DEVICE:SET battery_low_power_idle_minutes=0"
+        }));
+        assert!(commands.iter().any(|command| {
+            command == "DEVICE:SET plugged_low_power_enabled=0"
+        }));
     }
 
     #[test]

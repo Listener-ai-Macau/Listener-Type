@@ -510,7 +510,7 @@ pub fn clamp_device_brightness_percent(value: u8) -> u8 {
 }
 
 pub fn clamp_device_low_power_idle_minutes(value: u32) -> u32 {
-    value.clamp(1, MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
+    value.clamp(0, MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
 }
 
 pub fn clamp_device_battery_auto_shutdown_minutes(value: u32) -> u32 {
@@ -761,10 +761,7 @@ fn current_device_custom_keys_default_with_external_app_path(
             external_app_path,
             ..DeviceCustomKeyMapping::default()
         },
-        knob: DeviceCustomKeyMapping {
-            action: DeviceCustomKeyAction::SwitchStyle,
-            ..DeviceCustomKeyMapping::default()
-        },
+        knob: DeviceCustomKeyMapping::default(),
     }
 }
 
@@ -2803,7 +2800,7 @@ mod tests {
         );
         assert_eq!(
             prefs.device_custom_keys.knob.action,
-            DeviceCustomKeyAction::SwitchStyle
+            DeviceCustomKeyAction::Disabled
         );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
@@ -2844,7 +2841,7 @@ mod tests {
         );
         assert_eq!(
             prefs.device_custom_keys.knob.action,
-            DeviceCustomKeyAction::SwitchStyle
+            DeviceCustomKeyAction::Disabled
         );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
@@ -2890,7 +2887,7 @@ mod tests {
         );
         assert_eq!(
             prefs.device_custom_keys.knob.action,
-            DeviceCustomKeyAction::SwitchStyle
+            DeviceCustomKeyAction::Disabled
         );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());

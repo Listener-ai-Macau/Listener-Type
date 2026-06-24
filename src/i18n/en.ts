@@ -714,7 +714,7 @@ export const en: typeof zhCN = {
       bleNameDesc: '1-32 ASCII characters. On Windows, name changes may require reconnecting or pairing again.',
       minutes: 'min',
       zeroMeansOff: '0 = off',
-      errorLowPowerIdle: 'Low-power wait must be between 1 and 1440 minutes.',
+      errorLowPowerIdle: 'Low-power wait must be between 0 and 1440 minutes.',
       errorAutoShutdown: 'Auto-shutdown must be between 0 and 1440 minutes.',
       errorBleName: 'Bluetooth name must be 1-32 printable ASCII characters and cannot contain spaces, quotes, semicolons, equals signs, or backslashes.',
       powerPlugged: 'Plugged',
