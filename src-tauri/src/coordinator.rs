@@ -2498,18 +2498,30 @@ async fn handle_device_dictation_action(
             return;
         }
 
-        let waiting_message = if matches!(phase, SessionPhase::Starting | SessionPhase::Listening) {
+        let control_session = current_device_key_recording_control_session(&inner);
+        let waiting_message = if control_session.is_some() {
             "正在发送设备录音停止控制..."
         } else {
             "正在发送设备录音控制，等待 Listener 音频..."
         };
-        emit_capsule(
+
+        let stop_feedback_requested =
+            if matches!(control_session, Some((_, SessionPhase::Listening))) {
+                request_embedded_audio_stop_feedback(&inner, "device_key_stop_control_pending")
+            } else {
+                false
+            };
+        let pending_ui_state = if stop_feedback_requested {
+            DictationUiState::Transcribing
+        } else {
+            DictationUiState::Recording
+        };
+        emit_device_key_recording_control_capsule(
             &inner,
+            control_session,
+            pending_ui_state,
             CapsuleState::Reconnecting,
-            0.0,
-            0,
-            Some(waiting_message.to_string()),
-            None,
+            waiting_message.to_string(),
         );
         let result = async_runtime::spawn_blocking(move || {
             crate::embedded_ble::send_recording_control_toggle(
@@ -2527,21 +2539,15 @@ async fn handle_device_dictation_action(
                     "ble_recording_control_sent",
                     format!("key={} gesture={}", key.label(), gesture.label()),
                 );
-                if phase == SessionPhase::Listening
-                    && request_embedded_audio_stop_feedback(
-                        &inner,
-                        "device_key_stop_processing_start",
-                    )
-                {
+                if matches!(control_session, Some((_, SessionPhase::Listening))) {
                     return;
                 }
-                emit_capsule(
+                emit_device_key_recording_control_capsule(
                     &inner,
+                    control_session,
+                    DictationUiState::Recording,
                     CapsuleState::Reconnecting,
-                    0.0,
-                    0,
-                    Some("设备录音控制已发送，等待 Listener 音频...".to_string()),
-                    None,
+                    "设备录音控制已发送，等待 Listener 音频...".to_string(),
                 );
             }
             Err(error) => {
@@ -2557,15 +2563,14 @@ async fn handle_device_dictation_action(
                         gesture.label()
                     ),
                 );
-                emit_capsule(
+                let idle_session = emit_device_key_recording_control_capsule(
                     &inner,
+                    control_session,
+                    DictationUiState::Error,
                     CapsuleState::Error,
-                    0.0,
-                    0,
-                    Some(embedded_ble_recording_control_guidance(&error)),
-                    None,
+                    embedded_ble_recording_control_guidance(&error),
                 );
-                schedule_capsule_idle(&inner, 6000, None);
+                schedule_capsule_idle(&inner, 6000, idle_session);
             }
         }
         return;
@@ -2583,6 +2588,51 @@ async fn handle_device_dictation_action(
         }
         _ => {}
     }
+}
+
+fn current_device_key_recording_control_session(
+    inner: &Arc<Inner>,
+) -> Option<(SessionId, SessionPhase)> {
+    let state = inner.state.lock();
+    matches!(
+        state.phase,
+        SessionPhase::Starting | SessionPhase::Listening
+    )
+    .then_some((state.session_id, state.phase))
+}
+
+fn emit_device_key_recording_control_capsule(
+    inner: &Arc<Inner>,
+    session: Option<(SessionId, SessionPhase)>,
+    ui_state: DictationUiState,
+    fallback_state: CapsuleState,
+    message: String,
+) -> Option<SessionId> {
+    if let Some((session_id, _)) = session {
+        if publish_dictation_capsule(
+            inner,
+            session_id,
+            ui_state,
+            0.0,
+            Some(message.clone()),
+            None,
+        ) {
+            return Some(session_id);
+        }
+        emit_capsule_for_session(
+            inner,
+            session_id,
+            fallback_state,
+            0.0,
+            0,
+            Some(message),
+            None,
+        );
+        return Some(session_id);
+    }
+
+    emit_capsule(inner, fallback_state, 0.0, 0, Some(message), None);
+    None
 }
 
 async fn handle_device_translation_action(inner: Arc<Inner>) {
@@ -5381,6 +5431,45 @@ mod tests {
             DeviceCustomKeyGesture::SingleClick,
             &mapping
         ));
+    }
+
+    #[test]
+    fn device_key_ble_recording_control_feedback_uses_active_session() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+
+        let session = current_device_key_recording_control_session(&coordinator.inner);
+        assert_eq!(session, Some((session_id, SessionPhase::Listening)));
+        assert_eq!(
+            emit_device_key_recording_control_capsule(
+                &coordinator.inner,
+                session,
+                DictationUiState::Transcribing,
+                CapsuleState::Reconnecting,
+                "正在发送设备录音停止控制...".to_string(),
+            ),
+            Some(session_id)
+        );
+
+        coordinator.inner.state.lock().phase = SessionPhase::Idle;
+        let idle_session = current_device_key_recording_control_session(&coordinator.inner);
+        assert_eq!(idle_session, None);
+        assert_eq!(
+            emit_device_key_recording_control_capsule(
+                &coordinator.inner,
+                idle_session,
+                DictationUiState::Recording,
+                CapsuleState::Reconnecting,
+                "正在发送设备录音控制，等待 Listener 音频...".to_string(),
+            ),
+            None
+        );
     }
 
     #[test]
