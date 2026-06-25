@@ -137,7 +137,23 @@ impl DeviceKeyBleRecordingControlDecision {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingDeviceKeyBleActionKind {
+    Start,
+    Stop,
+}
+
+impl PendingDeviceKeyBleActionKind {
+    fn label(self) -> &'static str {
+        match self {
+            PendingDeviceKeyBleActionKind::Start => "start",
+            PendingDeviceKeyBleActionKind::Stop => "stop",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingDeviceKeyBleAction {
+    kind: PendingDeviceKeyBleActionKind,
     key: DeviceCustomKeyId,
     gesture: DeviceCustomKeyGesture,
     queued_at: Instant,
@@ -2613,7 +2629,7 @@ async fn handle_device_dictation_action(
         let waiting_message = if control_session.is_some() {
             "正在发送设备录音停止控制..."
         } else {
-            "正在发送设备录音控制，等待 Listener 音频..."
+            "正在启动 Listener 录音..."
         };
 
         let stop_feedback_requested =
@@ -2631,13 +2647,30 @@ async fn handle_device_dictation_action(
             &inner,
             control_session,
             pending_ui_state,
-            CapsuleState::Reconnecting,
+            if control_session.is_some() {
+                CapsuleState::Reconnecting
+            } else {
+                CapsuleState::Recording
+            },
             waiting_message.to_string(),
         );
+        let send_stop_control = matches!(
+            control_decision,
+            DeviceKeyBleRecordingControlDecision::Stop {
+                phase: SessionPhase::Listening,
+                ..
+            }
+        );
         let result = async_runtime::spawn_blocking(move || {
-            crate::embedded_ble::send_recording_control_toggle(
-                EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
-            )
+            if send_stop_control {
+                crate::embedded_ble::send_recording_control_stop(
+                    EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                )
+            } else {
+                crate::embedded_ble::send_recording_control_toggle(
+                    EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                )
+            }
         })
         .await
         .map_err(|err| err.to_string())
@@ -2658,8 +2691,8 @@ async fn handle_device_dictation_action(
                     &inner,
                     control_session,
                     DictationUiState::Recording,
-                    CapsuleState::Reconnecting,
-                    "设备录音控制已发送，等待 Listener 音频...".to_string(),
+                    CapsuleState::Recording,
+                    "Listener 录音已启动，正在接收音频...".to_string(),
                 );
             }
             Err(error) => {
@@ -2675,23 +2708,46 @@ async fn handle_device_dictation_action(
                         gesture.label()
                     ),
                 );
-                if should_keep_device_key_ble_start_pending_after_error(control_decision, &error) {
-                    queue_pending_device_key_ble_start(
-                        &inner,
-                        key,
-                        gesture,
-                        "control_write_retryable_failure",
-                    );
-                    emit_capsule(
-                        &inner,
-                        CapsuleState::Reconnecting,
-                        0.0,
-                        0,
-                        Some(
-                            "设备键已触发，Listener BLE 控制通道恢复后会自动开始录音。".to_string(),
-                        ),
-                        None,
-                    );
+                if let Some(kind) =
+                    should_keep_device_key_ble_action_pending_after_error(control_decision, &error)
+                {
+                    match kind {
+                        PendingDeviceKeyBleActionKind::Start => {
+                            queue_pending_device_key_ble_start(
+                                &inner,
+                                key,
+                                gesture,
+                                "control_write_retryable_failure",
+                            );
+                            emit_capsule(
+                                &inner,
+                                CapsuleState::Reconnecting,
+                                0.0,
+                                0,
+                                Some(
+                                    "设备键已触发，Listener BLE 控制通道恢复后会自动开始录音。"
+                                        .to_string(),
+                                ),
+                                None,
+                            );
+                        }
+                        PendingDeviceKeyBleActionKind::Stop => {
+                            queue_pending_device_key_ble_stop(
+                                &inner,
+                                key,
+                                gesture,
+                                "control_write_retryable_failure",
+                            );
+                            emit_device_key_recording_control_capsule(
+                                &inner,
+                                control_session,
+                                DictationUiState::Transcribing,
+                                CapsuleState::Reconnecting,
+                                "设备停止控制会在 Listener BLE 控制通道恢复后自动补发。"
+                                    .to_string(),
+                            );
+                        }
+                    }
                     return;
                 }
                 let idle_session = emit_device_key_recording_control_capsule(
@@ -2747,13 +2803,15 @@ fn pending_device_key_ble_action_is_fresh(action: PendingDeviceKeyBleAction, now
     pending_device_key_ble_action_age(action, now) <= DEVICE_KEY_BLE_PENDING_ACTION_TTL
 }
 
-fn queue_pending_device_key_ble_start(
+fn queue_pending_device_key_ble_action(
     inner: &Arc<Inner>,
+    kind: PendingDeviceKeyBleActionKind,
     key: DeviceCustomKeyId,
     gesture: DeviceCustomKeyGesture,
     reason: &'static str,
 ) {
     let action = PendingDeviceKeyBleAction {
+        kind,
         key,
         gesture,
         queued_at: Instant::now(),
@@ -2766,17 +2824,49 @@ fn queue_pending_device_key_ble_start(
         "backend.device_key",
         "ble_recording_control_pending_queued",
         format!(
-            "key={} gesture={} reason={reason} replaced={}",
+            "kind={} key={} gesture={} reason={reason} replaced={}",
+            kind.label(),
             key.label(),
             gesture.label(),
             previous.is_some()
         ),
     );
     log::info!(
-        "[device-key] queued pending BLE recording start key={} gesture={} reason={reason} replaced={}",
+        "[device-key] queued pending BLE recording {} key={} gesture={} reason={reason} replaced={}",
+        kind.label(),
         key.label(),
         gesture.label(),
         previous.is_some()
+    );
+}
+
+fn queue_pending_device_key_ble_start(
+    inner: &Arc<Inner>,
+    key: DeviceCustomKeyId,
+    gesture: DeviceCustomKeyGesture,
+    reason: &'static str,
+) {
+    queue_pending_device_key_ble_action(
+        inner,
+        PendingDeviceKeyBleActionKind::Start,
+        key,
+        gesture,
+        reason,
+    );
+}
+
+fn queue_pending_device_key_ble_stop(
+    inner: &Arc<Inner>,
+    key: DeviceCustomKeyId,
+    gesture: DeviceCustomKeyGesture,
+    reason: &'static str,
+) {
+    queue_pending_device_key_ble_action(
+        inner,
+        PendingDeviceKeyBleActionKind::Stop,
+        key,
+        gesture,
+        reason,
     );
 }
 
@@ -2788,10 +2878,11 @@ fn clear_pending_device_key_ble_start(
 ) -> bool {
     let removed = {
         let mut slot = inner.device_key_pending_ble_action.lock();
-        if slot
-            .as_ref()
-            .is_some_and(|action| action.key == key && action.gesture == gesture)
-        {
+        if slot.as_ref().is_some_and(|action| {
+            action.kind == PendingDeviceKeyBleActionKind::Start
+                && action.key == key
+                && action.gesture == gesture
+        }) {
             slot.take()
         } else {
             None
@@ -2819,7 +2910,7 @@ fn clear_pending_device_key_ble_start(
     }
 }
 
-fn take_pending_device_key_ble_start(
+fn take_pending_device_key_ble_action(
     inner: &Arc<Inner>,
     reason: &'static str,
 ) -> Option<PendingDeviceKeyBleAction> {
@@ -2832,13 +2923,15 @@ fn take_pending_device_key_ble_start(
             "backend.device_key",
             "ble_recording_control_pending_expired",
             format!(
-                "key={} gesture={} reason={reason} age_ms={age_ms}",
+                "kind={} key={} gesture={} reason={reason} age_ms={age_ms}",
+                action.kind.label(),
                 action.key.label(),
                 action.gesture.label()
             ),
         );
         log::info!(
-            "[device-key] expired pending BLE recording start key={} gesture={} reason={reason} age_ms={age_ms}",
+            "[device-key] expired pending BLE recording {} key={} gesture={} reason={reason} age_ms={age_ms}",
+            action.kind.label(),
             action.key.label(),
             action.gesture.label()
         );
@@ -2848,7 +2941,8 @@ fn take_pending_device_key_ble_start(
         "backend.device_key",
         "ble_recording_control_pending_taken",
         format!(
-            "key={} gesture={} reason={reason} age_ms={age_ms}",
+            "kind={} key={} gesture={} reason={reason} age_ms={age_ms}",
+            action.kind.label(),
             action.key.label(),
             action.gesture.label()
         ),
@@ -2856,7 +2950,21 @@ fn take_pending_device_key_ble_start(
     Some(action)
 }
 
-fn drop_pending_device_key_ble_start_for_state(
+fn take_pending_device_key_ble_start(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+) -> Option<PendingDeviceKeyBleAction> {
+    let action = take_pending_device_key_ble_action(inner, reason)?;
+    if action.kind == PendingDeviceKeyBleActionKind::Start {
+        Some(action)
+    } else {
+        let mut slot = inner.device_key_pending_ble_action.lock();
+        *slot = Some(action);
+        None
+    }
+}
+
+fn drop_pending_device_key_ble_action_for_state(
     action: PendingDeviceKeyBleAction,
     decision: DeviceKeyBleRecordingControlDecision,
     reason: &'static str,
@@ -2866,38 +2974,74 @@ fn drop_pending_device_key_ble_start_for_state(
         "backend.device_key",
         "ble_recording_control_pending_dropped_state_changed",
         format!(
-            "key={} gesture={} reason={reason} decision={decision:?} age_ms={age_ms}",
+            "kind={} key={} gesture={} reason={reason} decision={decision:?} age_ms={age_ms}",
+            action.kind.label(),
             action.key.label(),
             action.gesture.label()
         ),
     );
     log::info!(
-        "[device-key] pending BLE recording start dropped because state changed key={} gesture={} reason={reason} decision={decision:?} age_ms={age_ms}",
+        "[device-key] pending BLE recording {} dropped because state changed key={} gesture={} reason={reason} decision={decision:?} age_ms={age_ms}",
+        action.kind.label(),
         action.key.label(),
         action.gesture.label()
     );
+}
+
+fn should_keep_device_key_ble_action_pending_after_error(
+    decision: DeviceKeyBleRecordingControlDecision,
+    error: &str,
+) -> Option<PendingDeviceKeyBleActionKind> {
+    if !crate::embedded_ble::classify_ble_failure(error).automatic_recovery {
+        return None;
+    }
+    match decision {
+        DeviceKeyBleRecordingControlDecision::Start => Some(PendingDeviceKeyBleActionKind::Start),
+        DeviceKeyBleRecordingControlDecision::Stop {
+            phase: SessionPhase::Listening,
+            ..
+        } => Some(PendingDeviceKeyBleActionKind::Stop),
+        _ => None,
+    }
 }
 
 fn should_keep_device_key_ble_start_pending_after_error(
     decision: DeviceKeyBleRecordingControlDecision,
     error: &str,
 ) -> bool {
-    matches!(decision, DeviceKeyBleRecordingControlDecision::Start)
-        && crate::embedded_ble::classify_ble_failure(error).automatic_recovery
+    should_keep_device_key_ble_action_pending_after_error(decision, error)
+        == Some(PendingDeviceKeyBleActionKind::Start)
 }
 
-fn flush_pending_device_key_ble_start(inner: &Arc<Inner>, reason: &'static str) {
-    let Some(action) = take_pending_device_key_ble_start(inner, reason) else {
-        return;
+fn restore_pending_device_key_ble_action(
+    inner: &Arc<Inner>,
+    action: PendingDeviceKeyBleAction,
+    reason: &'static str,
+) {
+    let previous = {
+        let mut slot = inner.device_key_pending_ble_action.lock();
+        slot.replace(action)
     };
+    log::info!(
+        "[device-key] pending BLE recording {} restored reason={reason} replaced={} age_ms={}",
+        action.kind.label(),
+        previous.is_some(),
+        pending_device_key_ble_action_age(action, Instant::now()).as_millis()
+    );
+}
+
+fn flush_pending_device_key_ble_start_action(
+    inner: &Arc<Inner>,
+    action: PendingDeviceKeyBleAction,
+    reason: &'static str,
+) {
     let decision = device_key_ble_recording_control_decision(inner);
     if !matches!(decision, DeviceKeyBleRecordingControlDecision::Start) {
-        drop_pending_device_key_ble_start_for_state(action, decision, reason);
+        drop_pending_device_key_ble_action_for_state(action, decision, reason);
         return;
     }
     if !embedded_ble_listener_capture_ready(inner) {
-        let mut slot = inner.device_key_pending_ble_action.lock();
-        *slot = Some(action);
+        restore_pending_device_key_ble_action(inner, action, reason);
         log::info!(
             "[device-key] pending BLE recording start restored because notify is no longer ready reason={reason}"
         );
@@ -2908,6 +3052,144 @@ fn flush_pending_device_key_ble_start(inner: &Arc<Inner>, reason: &'static str) 
     async_runtime::spawn(async move {
         handle_device_dictation_action(inner, action.key, action.gesture).await;
     });
+}
+
+fn flush_pending_device_key_ble_start(inner: &Arc<Inner>, reason: &'static str) {
+    let Some(action) = take_pending_device_key_ble_start(inner, reason) else {
+        return;
+    };
+    flush_pending_device_key_ble_start_action(inner, action, reason);
+}
+
+fn flush_pending_device_key_ble_stop_action(
+    inner: &Arc<Inner>,
+    action: PendingDeviceKeyBleAction,
+    reason: &'static str,
+) {
+    let decision = device_key_ble_recording_control_decision(inner);
+    if !matches!(
+        decision,
+        DeviceKeyBleRecordingControlDecision::Stop {
+            phase: SessionPhase::Listening,
+            ..
+        }
+    ) {
+        drop_pending_device_key_ble_action_for_state(action, decision, reason);
+        return;
+    }
+    if !embedded_ble_listener_capture_ready(inner) {
+        restore_pending_device_key_ble_action(inner, action, reason);
+        log::info!(
+            "[device-key] pending BLE recording stop restored because notify is no longer ready reason={reason}"
+        );
+        return;
+    }
+
+    let inner = Arc::clone(inner);
+    async_runtime::spawn(async move {
+        send_pending_device_key_ble_stop(inner, action, reason).await;
+    });
+}
+
+fn flush_pending_device_key_ble_action(inner: &Arc<Inner>, reason: &'static str) {
+    let Some(action) = take_pending_device_key_ble_action(inner, reason) else {
+        return;
+    };
+    match action.kind {
+        PendingDeviceKeyBleActionKind::Start => {
+            flush_pending_device_key_ble_start_action(inner, action, reason);
+        }
+        PendingDeviceKeyBleActionKind::Stop => {
+            flush_pending_device_key_ble_stop_action(inner, action, reason);
+        }
+    }
+}
+
+async fn send_pending_device_key_ble_stop(
+    inner: Arc<Inner>,
+    action: PendingDeviceKeyBleAction,
+    reason: &'static str,
+) {
+    let control_decision = device_key_ble_recording_control_decision(&inner);
+    let control_session = control_decision.control_session();
+    let Some((_, SessionPhase::Listening)) = control_session else {
+        drop_pending_device_key_ble_action_for_state(action, control_decision, reason);
+        return;
+    };
+
+    let _ = request_embedded_audio_stop_feedback(&inner, "device_key_stop_control_retry");
+    emit_device_key_recording_control_capsule(
+        &inner,
+        control_session,
+        DictationUiState::Transcribing,
+        CapsuleState::Reconnecting,
+        "正在补发设备录音停止控制...".to_string(),
+    );
+
+    let result = async_runtime::spawn_blocking(move || {
+        crate::embedded_ble::send_recording_control_stop(
+            EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+        )
+    })
+    .await
+    .map_err(|err| err.to_string())
+    .and_then(|value| value);
+
+    match result {
+        Ok(()) => {
+            clear_embedded_ble_listener_last_error(&inner);
+            crate::timeline::mark(
+                "backend.device_key",
+                "ble_recording_control_pending_stop_sent",
+                format!(
+                    "key={} gesture={} reason={reason}",
+                    action.key.label(),
+                    action.gesture.label()
+                ),
+            );
+            log::info!(
+                "[device-key] pending BLE recording stop sent key={} gesture={} reason={reason}",
+                action.key.label(),
+                action.gesture.label()
+            );
+        }
+        Err(error) => {
+            record_embedded_ble_listener_last_error(&inner, &error);
+            record_embedded_ble_recovery_failure(&inner, &error);
+            refresh_embedded_ble_listener(&inner);
+            crate::timeline::mark(
+                "backend.device_key",
+                "ble_recording_control_pending_stop_failed",
+                format!(
+                    "key={} gesture={} reason={reason} error={error}",
+                    action.key.label(),
+                    action.gesture.label()
+                ),
+            );
+            if should_keep_device_key_ble_action_pending_after_error(control_decision, &error)
+                == Some(PendingDeviceKeyBleActionKind::Stop)
+                && pending_device_key_ble_action_is_fresh(action, Instant::now())
+            {
+                restore_pending_device_key_ble_action(&inner, action, "stop_retryable_failure");
+                emit_device_key_recording_control_capsule(
+                    &inner,
+                    control_session,
+                    DictationUiState::Transcribing,
+                    CapsuleState::Reconnecting,
+                    "设备停止控制会在 Listener BLE 控制通道恢复后自动补发。".to_string(),
+                );
+                return;
+            }
+            let idle_session = emit_device_key_recording_control_capsule(
+                &inner,
+                control_session,
+                DictationUiState::Error,
+                CapsuleState::Error,
+                embedded_ble_recording_control_guidance(&error),
+            );
+            schedule_capsule_idle(&inner, 6000, idle_session);
+        }
+    }
 }
 
 fn current_device_key_recording_control_session(
@@ -3947,7 +4229,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
                 Some(1400),
             );
         }
-        flush_pending_device_key_ble_start(inner, "notify_ready");
+        flush_pending_device_key_ble_action(inner, "notify_ready");
         log::info!("[embedded-ble] background listener notify ready");
     }
 }
@@ -5870,6 +6152,7 @@ mod tests {
     fn device_key_ble_pending_start_expires() {
         let coordinator = Coordinator::new();
         *coordinator.inner.device_key_pending_ble_action.lock() = Some(PendingDeviceKeyBleAction {
+            kind: PendingDeviceKeyBleActionKind::Start,
             key: DeviceCustomKeyId::Key1,
             gesture: DeviceCustomKeyGesture::SingleClick,
             queued_at: Instant::now()
@@ -5902,6 +6185,16 @@ mod tests {
             },
             "Listener BLE low-power idle disconnect"
         ));
+        assert_eq!(
+            should_keep_device_key_ble_action_pending_after_error(
+                DeviceKeyBleRecordingControlDecision::Stop {
+                    session_id: new_session_id(),
+                    phase: SessionPhase::Listening,
+                },
+                "Listener BLE low-power idle disconnect"
+            ),
+            Some(PendingDeviceKeyBleActionKind::Stop)
+        );
     }
 
     #[test]
@@ -5928,6 +6221,33 @@ mod tests {
             .device_key_pending_ble_action
             .lock()
             .is_none());
+    }
+
+    #[test]
+    fn device_key_ble_pending_stop_restores_until_notify_ready() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        queue_pending_device_key_ble_stop(
+            &coordinator.inner,
+            DeviceCustomKeyId::Key1,
+            DeviceCustomKeyGesture::SingleClick,
+            "test",
+        );
+
+        flush_pending_device_key_ble_action(&coordinator.inner, "test");
+
+        let pending = coordinator.inner.device_key_pending_ble_action.lock();
+        assert!(pending.as_ref().is_some_and(|action| {
+            action.kind == PendingDeviceKeyBleActionKind::Stop
+                && action.key == DeviceCustomKeyId::Key1
+                && action.gesture == DeviceCustomKeyGesture::SingleClick
+        }));
     }
 
     #[test]

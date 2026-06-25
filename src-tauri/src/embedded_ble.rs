@@ -1435,10 +1435,17 @@ mod windows_ble {
         Ok(())
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum ActiveControlTransientFallback {
+        TryFreshGatt,
+        ReturnError,
+    }
+
     fn send_recording_control_command(
         command: &[u8],
         timeout: Duration,
         label: &'static str,
+        active_transient_fallback: ActiveControlTransientFallback,
     ) -> Result<(), String> {
         if let Some(result) = send_audio_control_via_active_capture(command, timeout, label) {
             match result {
@@ -1447,6 +1454,12 @@ mod windows_ble {
                     return Ok(());
                 }
                 Err(err) if is_transient_audio_control_write_error(&err) => {
+                    if active_transient_fallback == ActiveControlTransientFallback::ReturnError {
+                        log::warn!(
+                            "[embedded-ble] active {label} write failed with transient error; returning for caller recovery: {err}"
+                        );
+                        return Err(err);
+                    }
                     log::warn!(
                         "[embedded-ble] active {label} write failed with transient error; retrying fresh GATT path: {err}"
                     );
@@ -1467,15 +1480,30 @@ mod windows_ble {
     }
 
     pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
-        send_recording_control_command(b"VREC:TOGGLE\n", timeout, "audio control toggle")
+        send_recording_control_command(
+            b"VREC:TOGGLE\n",
+            timeout,
+            "audio control toggle",
+            ActiveControlTransientFallback::TryFreshGatt,
+        )
     }
 
     pub fn send_recording_control_cancel(timeout: Duration) -> Result<(), String> {
-        send_recording_control_command(b"VREC:CANCEL\n", timeout, "audio control cancel")
+        send_recording_control_command(
+            b"VREC:CANCEL\n",
+            timeout,
+            "audio control cancel",
+            ActiveControlTransientFallback::TryFreshGatt,
+        )
     }
 
     pub fn send_recording_control_stop(timeout: Duration) -> Result<(), String> {
-        send_recording_control_command(b"VREC:STOP\n", timeout, "audio control stop")
+        send_recording_control_command(
+            b"VREC:STOP\n",
+            timeout,
+            "audio control stop",
+            ActiveControlTransientFallback::ReturnError,
+        )
     }
 
     pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
@@ -1489,11 +1517,21 @@ mod windows_ble {
         } else {
             "audio processing stop"
         };
-        send_recording_control_command(command, timeout, label)
+        send_recording_control_command(
+            command,
+            timeout,
+            label,
+            ActiveControlTransientFallback::TryFreshGatt,
+        )
     }
 
     pub fn send_recording_processing_done(timeout: Duration) -> Result<(), String> {
-        send_recording_control_command(b"VREC:PROCESSING:DONE\n", timeout, "audio processing done")
+        send_recording_control_command(
+            b"VREC:PROCESSING:DONE\n",
+            timeout,
+            "audio processing done",
+            ActiveControlTransientFallback::TryFreshGatt,
+        )
     }
 
     pub fn send_recording_processing_warning(timeout: Duration) -> Result<(), String> {
@@ -1501,6 +1539,7 @@ mod windows_ble {
             b"VREC:PROCESSING:WARN\n",
             timeout,
             "audio processing warning",
+            ActiveControlTransientFallback::TryFreshGatt,
         )
     }
 
