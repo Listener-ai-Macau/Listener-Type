@@ -70,6 +70,8 @@ const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(3);
 const EMBEDDED_BLE_RETRY_OFFLINE_DELAY: Duration = Duration::from_secs(180);
+const EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD: u32 = 6;
+const EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN: Duration = Duration::from_secs(600);
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);
 const EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(12);
@@ -3906,6 +3908,7 @@ fn mark_translation_modifier_seen(inner: &Arc<Inner>) {
 async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u64) {
     log::info!("[embedded-ble] background listener started generation={generation}");
     let mut retry_delay = EMBEDDED_BLE_RETRY_BASE_DELAY;
+    let mut last_stale_cleanup_at: Option<Instant> = None;
     loop {
         if inner.shutdown.load(Ordering::SeqCst)
             || inner
@@ -3947,6 +3950,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 }
                 if is_embedded_ble_idle_timeout_error(&err) {
                     clear_embedded_ble_listener_last_error(&inner);
+                    retry_delay = next_embedded_ble_background_retry_delay(&err, retry_delay);
                 } else {
                     record_embedded_ble_listener_last_error(&inner, &err);
                     record_embedded_ble_recovery_failure(&inner, &err);
@@ -3962,8 +3966,32 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                             "[embedded-ble] background recovery capsule suppressed; see recovery decision log"
                         );
                     }
+                    let stale_cleanup_attempted =
+                        maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
+                            &inner,
+                            &err,
+                            &mut last_stale_cleanup_at,
+                        )
+                        .await;
+                    let stale_cleanup_backoff = stale_cleanup_attempted
+                        || should_throttle_embedded_ble_background_stale_pairing_cleanup(
+                            &err,
+                            &embedded_ble_wake_recovery_snapshot(&inner),
+                            last_stale_cleanup_at,
+                            Instant::now(),
+                        );
+                    if stale_cleanup_backoff && !stale_cleanup_attempted {
+                        log::warn!(
+                            "[embedded-ble] background stale pairing cleanup cooldown active; using long retry backoff err={}",
+                            embedded_ble_log_preview(&err),
+                        );
+                    }
+                    retry_delay = if stale_cleanup_backoff {
+                        EMBEDDED_BLE_RETRY_OFFLINE_DELAY
+                    } else {
+                        next_embedded_ble_background_retry_delay(&err, retry_delay)
+                    };
                 }
-                retry_delay = next_embedded_ble_background_retry_delay(&err, retry_delay);
                 log::warn!(
                     "[embedded-ble] background listen retrying in {} ms after: {err}",
                     retry_delay.as_millis()
@@ -3975,6 +4003,144 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
         clear_embedded_ble_listener_cancel(&inner, &cancel_capture);
     }
     log::info!("[embedded-ble] background listener stopped generation={generation}");
+}
+
+async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
+    inner: &Arc<Inner>,
+    err: &str,
+    last_cleanup_at: &mut Option<Instant>,
+) -> bool {
+    let snapshot = embedded_ble_wake_recovery_snapshot(inner);
+    let now = Instant::now();
+    if !should_attempt_embedded_ble_background_stale_pairing_cleanup(
+        err,
+        &snapshot,
+        *last_cleanup_at,
+        now,
+    ) {
+        return false;
+    }
+    *last_cleanup_at = Some(now);
+
+    log::warn!(
+        "[embedded-ble] background stale pairing cleanup triggered reconnect_attempts={} notify_state={:?} usb_powered={:?} err={}",
+        snapshot.reconnect_attempts,
+        snapshot.notify_subscription_state,
+        snapshot.usb_powered,
+        embedded_ble_log_preview(err),
+    );
+    emit_embedded_ble_recovery_capsule(
+        inner,
+        "reconnecting",
+        "Listener BLE 配对缓存异常，正在清理旧连接...",
+        Some(2600),
+    );
+
+    let cleanup = async_runtime::spawn_blocking(crate::embedded_ble::unpair_listener_devices).await;
+    match cleanup {
+        Ok(unpair) => {
+            log::warn!(
+                "[embedded-ble] background stale pairing cleanup result status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
+                unpair.status,
+                unpair.matched_devices,
+                unpair.unpaired_devices,
+                unpair.already_unpaired_devices,
+                unpair.failed_devices,
+                unpair.needs_user_action,
+            );
+            {
+                let mut wake = inner.embedded_ble_wake_recovery.lock();
+                wake.status = EmbeddedBleWakeRecoveryStatus::NeedsWakeKey;
+                wake.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Failed;
+                wake.recent_disconnect_reason = Some(format!(
+                    "background stale pairing cleanup status={:?}; previous error: {}",
+                    unpair.status,
+                    embedded_ble_log_preview(err),
+                ));
+                wake.user_guidance = match unpair.status {
+                    crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
+                        "旧的 Listener 蓝牙配对已清理。请在 Windows 蓝牙设置里重新配对 Listener，Type 会自动恢复。".to_string()
+                    }
+                    crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
+                    | crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
+                        "Type 没找到可继续自动清理的旧配对。请在 Windows 蓝牙设置里确认 Listener 已重新配对。".to_string()
+                    }
+                    crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
+                        "Windows 需要手动确认移除旧 Listener。请在蓝牙设置里删除 Listener 后重新配对。".to_string()
+                    }
+                };
+            }
+            emit_embedded_ble_recovery_capsule(
+                inner,
+                "reconnecting",
+                "请在 Windows 蓝牙里重新配对 Listener，Type 会自动恢复。",
+                Some(4200),
+            );
+            true
+        }
+        Err(err) => {
+            log::warn!("[embedded-ble] background stale pairing cleanup task failed: {err}");
+            false
+        }
+    }
+}
+
+fn should_attempt_embedded_ble_background_stale_pairing_cleanup(
+    err: &str,
+    snapshot: &EmbeddedBleWakeRecoverySnapshot,
+    last_cleanup_at: Option<Instant>,
+    now: Instant,
+) -> bool {
+    if !is_embedded_ble_background_stale_pairing_cleanup_candidate(err, snapshot) {
+        return false;
+    }
+    if last_cleanup_at.is_some_and(|last| {
+        now.saturating_duration_since(last) < EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN
+    }) {
+        return false;
+    }
+    true
+}
+
+fn should_throttle_embedded_ble_background_stale_pairing_cleanup(
+    err: &str,
+    snapshot: &EmbeddedBleWakeRecoverySnapshot,
+    last_cleanup_at: Option<Instant>,
+    now: Instant,
+) -> bool {
+    is_embedded_ble_background_stale_pairing_cleanup_candidate(err, snapshot)
+        && last_cleanup_at.is_some_and(|last| {
+            now.saturating_duration_since(last) < EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN
+        })
+}
+
+fn is_embedded_ble_background_stale_pairing_cleanup_candidate(
+    err: &str,
+    snapshot: &EmbeddedBleWakeRecoverySnapshot,
+) -> bool {
+    if snapshot.reconnect_attempts < EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD {
+        return false;
+    }
+    if snapshot.usb_powered == Some(false) {
+        return false;
+    }
+    if !matches!(
+        snapshot.notify_subscription_state,
+        EmbeddedBleNotifySubscriptionState::Failed
+            | EmbeddedBleNotifySubscriptionState::Opening
+            | EmbeddedBleNotifySubscriptionState::Lost
+            | EmbeddedBleNotifySubscriptionState::Unknown
+    ) {
+        return false;
+    }
+
+    let failure = crate::embedded_ble::classify_ble_failure(err);
+    matches!(
+        failure.kind,
+        crate::embedded_ble::BleFailureKind::CccdProtocolError
+            | crate::embedded_ble::BleFailureKind::StaleGattService
+            | crate::embedded_ble::BleFailureKind::MissingPairing
+    )
 }
 
 fn next_embedded_ble_background_retry_delay(err: &str, current: Duration) -> Duration {
@@ -6710,6 +6876,108 @@ mod tests {
             &coordinator.inner,
             "BLE GATT session did not become active after 8000 ms initial=Some(GattSessionStatus(0)) current=Some(GattSessionStatus(0)); stale GATT/cache or paired device disconnected",
         ));
+    }
+
+    #[test]
+    fn embedded_ble_background_stale_cleanup_requires_powered_repeated_cache_failure() {
+        let now = Instant::now();
+        let snapshot = EmbeddedBleWakeRecoverySnapshot {
+            reconnect_attempts: EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD,
+            notify_subscription_state: EmbeddedBleNotifySubscriptionState::Failed,
+            usb_powered: Some(true),
+            recent_disconnect_reason: Some(
+                "BLE CCCD write async error: Some(HRESULT(0x800704C7))".to_string(),
+            ),
+            ..Default::default()
+        };
+        let cccd_error = "BLE CCCD write async error: Some(HRESULT(0x800704C7))";
+
+        assert!(
+            should_attempt_embedded_ble_background_stale_pairing_cleanup(
+                cccd_error, &snapshot, None, now,
+            )
+        );
+
+        let too_early = EmbeddedBleWakeRecoverySnapshot {
+            reconnect_attempts: EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD - 1,
+            ..snapshot.clone()
+        };
+        assert!(
+            !should_attempt_embedded_ble_background_stale_pairing_cleanup(
+                cccd_error, &too_early, None, now,
+            )
+        );
+
+        let battery = EmbeddedBleWakeRecoverySnapshot {
+            usb_powered: Some(false),
+            ..snapshot.clone()
+        };
+        assert!(
+            !should_attempt_embedded_ble_background_stale_pairing_cleanup(
+                cccd_error, &battery, None, now,
+            )
+        );
+
+        let unknown_power = EmbeddedBleWakeRecoverySnapshot {
+            usb_powered: None,
+            ..snapshot.clone()
+        };
+        assert!(
+            should_attempt_embedded_ble_background_stale_pairing_cleanup(
+                cccd_error,
+                &unknown_power,
+                None,
+                now,
+            )
+        );
+
+        let link_loss = "BLE device connection status changed to Disconnected; transport_not_ready";
+        assert!(
+            !should_attempt_embedded_ble_background_stale_pairing_cleanup(
+                link_loss, &snapshot, None, now,
+            )
+        );
+
+        assert!(
+            !should_attempt_embedded_ble_background_stale_pairing_cleanup(
+                cccd_error,
+                &snapshot,
+                Some(now - Duration::from_secs(60)),
+                now,
+            )
+        );
+        assert!(
+            should_throttle_embedded_ble_background_stale_pairing_cleanup(
+                cccd_error,
+                &snapshot,
+                Some(now - Duration::from_secs(60)),
+                now,
+            )
+        );
+        assert!(
+            should_attempt_embedded_ble_background_stale_pairing_cleanup(
+                cccd_error,
+                &snapshot,
+                Some(now - EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN - Duration::from_secs(1)),
+                now,
+            )
+        );
+        assert!(
+            !should_throttle_embedded_ble_background_stale_pairing_cleanup(
+                cccd_error,
+                &snapshot,
+                Some(now - EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN - Duration::from_secs(1)),
+                now,
+            )
+        );
+        assert!(
+            !should_throttle_embedded_ble_background_stale_pairing_cleanup(
+                link_loss,
+                &snapshot,
+                Some(now - Duration::from_secs(60)),
+                now,
+            )
+        );
     }
 
     #[test]
