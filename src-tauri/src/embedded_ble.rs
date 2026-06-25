@@ -552,7 +552,7 @@ mod windows_ble {
     const BATTERY_LEVEL_UUID: GUID = GUID::from_u128(0x00002a19_0000_1000_8000_00805f9b34fb);
     const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
     const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
-    const TYPE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(4);
+    const TYPE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(8);
     const TYPE_HEARTBEAT_WRITE_TIMEOUT: Duration = Duration::from_millis(1200);
     const GATT_READY_TIMEOUT: Duration = Duration::from_secs(8);
     const GATT_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -569,7 +569,7 @@ mod windows_ble {
         Duration::from_millis(2000),
         Duration::from_millis(3000),
     ];
-    const ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT: Duration = Duration::from_secs(24);
+    const ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT: Duration = Duration::from_secs(5);
     const DIAGNOSTIC_PULL_CANDIDATE_DELAY: Duration = Duration::from_millis(350);
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
     const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
@@ -2188,11 +2188,17 @@ mod windows_ble {
         let type_heartbeat_enabled =
             terminal_behavior == CaptureTerminalBehavior::ContinueListening;
         let mut next_type_heartbeat = if type_heartbeat_enabled {
-            if cleanup.write_type_heartbeat(b"TYPE:READY\n", "Type heartbeat ready") {
-                cleanup.mark_type_heartbeat_open();
-                Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL)
-            } else {
-                None
+            match cleanup.write_type_heartbeat(b"TYPE:READY\n", "Type heartbeat ready") {
+                Ok(()) => {
+                    cleanup.mark_type_heartbeat_open();
+                    Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL)
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: Type heartbeat ready failed; keeping notify open for retry: {err}"
+                    );
+                    Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL)
+                }
             }
         } else {
             None
@@ -2207,7 +2213,33 @@ mod windows_ble {
             let now = Instant::now();
             if let Some(due) = next_type_heartbeat {
                 if now >= due {
-                    let _ = cleanup.write_type_heartbeat(b"TYPE:HB\n", "Type heartbeat");
+                    if let Err(err) = cleanup.write_type_heartbeat(b"TYPE:HB\n", "Type heartbeat") {
+                        let reason = format!("{err}; BLE audio/control response missing");
+                        if collector_has_active_recoverable_session(&collector) {
+                            let stats = collector.stats();
+                            if link_recovery_deadline.is_none() {
+                                link_recovery_deadline =
+                                    Some(now + ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT);
+                                link_recovery_reason = Some(reason.clone());
+                                log::warn!(
+                                    "[embedded-ble] capture #{capture_id}: {reason}; waiting for audio notify recovery (session_id={:?}, packets={}, timeout_ms={})",
+                                    stats.session_id,
+                                    stats.received_packet_count,
+                                    ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT.as_millis()
+                                );
+                            } else {
+                                log::warn!(
+                                    "[embedded-ble] capture #{capture_id}: additional heartbeat failure while waiting for recovery: {reason}"
+                                );
+                            }
+                        } else {
+                            log::warn!(
+                                "[embedded-ble] capture #{capture_id}: {reason}; keeping idle notify open for heartbeat retry"
+                            );
+                        }
+                    } else {
+                        cleanup.mark_type_heartbeat_open();
+                    }
                     next_type_heartbeat = Some(now + TYPE_HEARTBEAT_INTERVAL);
                 }
             }
@@ -2388,6 +2420,14 @@ mod windows_ble {
         collector: &crate::embedded_audio::SessionCollector,
     ) -> bool {
         collector.session_id().is_some() && !collector.terminal_received()
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_capture_recovery_timing_for_test() -> (Duration, Duration) {
+        (
+            TYPE_HEARTBEAT_INTERVAL,
+            ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT,
+        )
     }
 
     #[cfg(debug_assertions)]
@@ -5279,19 +5319,16 @@ mod windows_ble {
             self.type_heartbeat_open = true;
         }
 
-        fn write_type_heartbeat(&self, command: &[u8], label: &str) -> bool {
+        fn write_type_heartbeat(&self, command: &[u8], label: &str) -> Result<(), String> {
             let Some(control) = self.target.control.as_ref() else {
-                log::warn!(
-                    "[embedded-ble] capture #{}: Type heartbeat skipped; audio control unavailable",
-                    self.capture_id
-                );
-                return false;
+                return Err("audio control unavailable".to_string());
             };
+            let write_option = type_heartbeat_write_option(control, label);
 
             match write_gatt_value_with_timeout(
                 control,
                 command,
-                GattWriteOption::WriteWithResponse,
+                write_option,
                 TYPE_HEARTBEAT_WRITE_TIMEOUT,
                 label,
             ) {
@@ -5301,15 +5338,9 @@ mod windows_ble {
                     } else {
                         log::info!("[embedded-ble] capture #{}: {label} sent", self.capture_id);
                     }
-                    true
+                    Ok(())
                 }
-                Err(err) => {
-                    log::warn!(
-                        "[embedded-ble] capture #{}: {label} failed: {err}",
-                        self.capture_id
-                    );
-                    false
-                }
+                Err(err) => Err(format!("{label} failed: {err}")),
             }
         }
 
@@ -5435,6 +5466,26 @@ mod windows_ble {
         }
     }
 
+    fn type_heartbeat_write_option(control: &GattCharacteristic, label: &str) -> GattWriteOption {
+        if label != "Type heartbeat" {
+            return GattWriteOption::WriteWithResponse;
+        }
+        let Ok(properties) = control.CharacteristicProperties() else {
+            return GattWriteOption::WriteWithResponse;
+        };
+        type_heartbeat_write_option_from_properties(properties)
+    }
+
+    fn type_heartbeat_write_option_from_properties(
+        properties: GattCharacteristicProperties,
+    ) -> GattWriteOption {
+        if properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
+            GattWriteOption::WriteWithoutResponse
+        } else {
+            GattWriteOption::WriteWithResponse
+        }
+    }
+
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum NotifyCccdTeardown {
         Disable,
@@ -5489,6 +5540,20 @@ mod windows_ble {
                 Some("with-response")
             )
             .is_err());
+        }
+
+        #[test]
+        fn type_heartbeat_prefers_no_response_when_available() {
+            let both = GattCharacteristicProperties::Write
+                | GattCharacteristicProperties::WriteWithoutResponse;
+            assert_eq!(
+                type_heartbeat_write_option_from_properties(both),
+                GattWriteOption::WriteWithoutResponse
+            );
+            assert_eq!(
+                type_heartbeat_write_option_from_properties(GattCharacteristicProperties::Write),
+                GattWriteOption::WriteWithResponse
+            );
         }
 
         #[test]
@@ -5946,6 +6011,16 @@ mod tests {
         assert!(!windows_ble::collector_has_active_recoverable_session(
             &collector
         ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn active_capture_link_recovery_timeout_stays_bounded() {
+        let (heartbeat_interval, recovery_timeout) =
+            windows_ble::active_capture_recovery_timing_for_test();
+        assert_eq!(heartbeat_interval, Duration::from_secs(8));
+        assert_eq!(recovery_timeout, Duration::from_secs(5));
+        assert!(recovery_timeout < heartbeat_interval);
     }
 
     #[cfg(target_os = "windows")]
