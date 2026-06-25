@@ -108,6 +108,33 @@ enum ActiveAsr {
     Local(Arc<crate::asr::local::LocalQwenAsr>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeviceKeyBleRecordingControlDecision {
+    Start,
+    IgnoreStarting {
+        session_id: SessionId,
+        elapsed_ms: u64,
+    },
+    Stop {
+        session_id: SessionId,
+        phase: SessionPhase,
+    },
+}
+
+impl DeviceKeyBleRecordingControlDecision {
+    fn control_session(self) -> Option<(SessionId, SessionPhase)> {
+        match self {
+            DeviceKeyBleRecordingControlDecision::Start => None,
+            DeviceKeyBleRecordingControlDecision::IgnoreStarting { session_id, .. } => {
+                Some((session_id, SessionPhase::Starting))
+            }
+            DeviceKeyBleRecordingControlDecision::Stop { session_id, phase } => {
+                Some((session_id, phase))
+            }
+        }
+    }
+}
+
 fn asr_transcribe_uses_global_timeout(asr: &ActiveAsr) -> bool {
     match asr {
         #[cfg(target_os = "windows")]
@@ -2498,7 +2525,37 @@ async fn handle_device_dictation_action(
             return;
         }
 
-        let control_session = current_device_key_recording_control_session(&inner);
+        let control_decision = device_key_ble_recording_control_decision(&inner);
+        if let DeviceKeyBleRecordingControlDecision::IgnoreStarting {
+            session_id,
+            elapsed_ms,
+        } = control_decision
+        {
+            crate::timeline::mark(
+                "backend.device_key",
+                "ble_recording_control_ignored_starting",
+                format!(
+                    "key={} gesture={} session_id={session_id} elapsed_ms={elapsed_ms}",
+                    key.label(),
+                    gesture.label()
+                ),
+            );
+            log::info!(
+                "[device-key] {} {} recording control ignored while embedded BLE session is starting elapsed_ms={elapsed_ms}",
+                key.label(),
+                gesture.label()
+            );
+            emit_device_key_recording_control_capsule(
+                &inner,
+                Some((session_id, SessionPhase::Starting)),
+                DictationUiState::Recording,
+                CapsuleState::Reconnecting,
+                "正在等待 Listener 音频...".to_string(),
+            );
+            return;
+        }
+
+        let control_session = control_decision.control_session();
         let waiting_message = if control_session.is_some() {
             "正在发送设备录音停止控制..."
         } else {
@@ -2590,15 +2647,27 @@ async fn handle_device_dictation_action(
     }
 }
 
+fn device_key_ble_recording_control_decision(
+    inner: &Arc<Inner>,
+) -> DeviceKeyBleRecordingControlDecision {
+    let state = inner.state.lock();
+    match state.phase {
+        SessionPhase::Starting => DeviceKeyBleRecordingControlDecision::IgnoreStarting {
+            session_id: state.session_id,
+            elapsed_ms: state.started_at.elapsed().as_millis() as u64,
+        },
+        SessionPhase::Listening => DeviceKeyBleRecordingControlDecision::Stop {
+            session_id: state.session_id,
+            phase: state.phase,
+        },
+        _ => DeviceKeyBleRecordingControlDecision::Start,
+    }
+}
+
 fn current_device_key_recording_control_session(
     inner: &Arc<Inner>,
 ) -> Option<(SessionId, SessionPhase)> {
-    let state = inner.state.lock();
-    matches!(
-        state.phase,
-        SessionPhase::Starting | SessionPhase::Listening
-    )
-    .then_some((state.session_id, state.phase))
+    device_key_ble_recording_control_decision(inner).control_session()
 }
 
 fn emit_device_key_recording_control_capsule(
@@ -5469,6 +5538,48 @@ mod tests {
                 "正在发送设备录音控制，等待 Listener 音频...".to_string(),
             ),
             None
+        );
+    }
+
+    #[test]
+    fn device_key_ble_recording_control_ignores_starting_retry() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Starting;
+            state.started_at = Instant::now() - Duration::from_millis(375);
+            state.cancelled = false;
+        }
+
+        match device_key_ble_recording_control_decision(&coordinator.inner) {
+            DeviceKeyBleRecordingControlDecision::IgnoreStarting {
+                session_id: actual_session_id,
+                elapsed_ms,
+            } => {
+                assert_eq!(actual_session_id, session_id);
+                assert!(elapsed_ms >= 300);
+            }
+            other => panic!("unexpected decision: {other:?}"),
+        }
+
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.phase = SessionPhase::Listening;
+        }
+        assert_eq!(
+            device_key_ble_recording_control_decision(&coordinator.inner),
+            DeviceKeyBleRecordingControlDecision::Stop {
+                session_id,
+                phase: SessionPhase::Listening
+            }
+        );
+
+        coordinator.inner.state.lock().phase = SessionPhase::Idle;
+        assert_eq!(
+            device_key_ble_recording_control_decision(&coordinator.inner),
+            DeviceKeyBleRecordingControlDecision::Start
         );
     }
 
