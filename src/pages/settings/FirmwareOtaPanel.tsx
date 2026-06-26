@@ -25,6 +25,7 @@ import {
   firmwareOtaRollbackVersionFromText,
   firmwareOtaVersionNotConfirmedAction,
   initialFirmwareOtaState,
+  isStm32wbStBleOtaManifest,
   validateFirmwareOtaPackage,
   type FirmwareOtaBlocker,
   type FirmwareOtaDeviceSnapshot,
@@ -164,7 +165,7 @@ export function FirmwareOtaPanel({
       const selected = await open({
         multiple: false,
         directory,
-        filters: directory ? undefined : [{ name: 'Listener firmware package', extensions: ['zip'] }],
+        filters: directory ? undefined : [{ name: 'Device firmware package', extensions: ['zip'] }],
       });
       if (typeof selected !== 'string') return;
       dispatch({ type: 'check' });
@@ -247,7 +248,10 @@ export function FirmwareOtaPanel({
       await delay(450);
       dispatch({ type: 'deviceReconnected' });
       await delay(450);
-      if (firmwareOtaConfirmedVersionMatches(transferResult?.confirmedVersion, selectedPackage.manifest.version)) {
+      if (
+        firmwareOtaConfirmedVersionMatches(transferResult?.confirmedVersion, selectedPackage.manifest.version) ||
+        (isStm32wbStBleOtaManifest(selectedPackage.manifest) && transferResult?.transport === selectedPackage.manifest.protocolName)
+      ) {
         const confirmedVersion = transferResult?.confirmedVersion?.trim() ?? null;
         if (confirmedVersion) {
           setOtaSnapshot(previous => snapshotWithFirmwareVersion(previous, confirmedVersion));

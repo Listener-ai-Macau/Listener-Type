@@ -2838,6 +2838,8 @@ struct FactoryFirmwareArtifact {
     role: String,
     file: String,
     offset: String,
+    #[serde(default)]
+    format: Option<String>,
     size_bytes: u64,
     sha256: String,
 }
@@ -3478,7 +3480,7 @@ fn loaded_factory_package_from_manifest(
             (
                 None,
                 vec![
-                    "Companion STM32WB factory package: wired flash writes the Intel HEX app image over ST-LINK/SWD with STM32CubeProgrammer.".to_string(),
+                    "Companion STM32WB factory package: wired flash writes Intel HEX artifacts over ST-LINK/SWD with STM32CubeProgrammer.".to_string(),
                     "Boot repair is not offered for STM32WB packages; use ROM DFU/SWD recovery if needed.".to_string(),
                 ],
             )
@@ -3865,16 +3867,28 @@ fn run_stm32_wired_firmware_flash_with_progress(
     requested_port: Option<&str>,
     progress_app_ref: Option<&AppHandle>,
 ) -> Result<WiredFirmwareFlashResult, String> {
-    let artifact = require_artifact(&loaded.artifacts, "app")?;
-    let image_bytes = loaded
-        .files
-        .get(&artifact.file)
-        .ok_or_else(|| format!("Factory artifact file is missing: {}", artifact.file))?;
-    if !artifact.file.to_ascii_lowercase().ends_with(".hex") {
-        return Err(format!(
-            "STM32WB wired flashing currently expects an Intel HEX app artifact, got {}.",
-            artifact.file
-        ));
+    require_artifact(&loaded.artifacts, "app")?;
+    let stm32_artifacts = loaded
+        .artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact
+                .format
+                .as_deref()
+                .unwrap_or("intel_hex")
+                .eq_ignore_ascii_case("intel_hex")
+        })
+        .collect::<Vec<_>>();
+    if stm32_artifacts.is_empty() {
+        return Err("STM32WB wired flashing requires at least one Intel HEX artifact.".to_string());
+    }
+    for artifact in &stm32_artifacts {
+        if !artifact.file.to_ascii_lowercase().ends_with(".hex") {
+            return Err(format!(
+                "STM32WB wired flashing expects Intel HEX artifacts, got {}.",
+                artifact.file
+            ));
+        }
     }
 
     let requested = requested_port
@@ -3919,56 +3933,85 @@ fn run_stm32_wired_firmware_flash_with_progress(
         Some(&loaded.version),
         Some("SWD"),
         18,
-        "Preparing STM32WB HEX image",
+        "Preparing STM32WB HEX images",
     );
-    let image_path = write_stm32_temp_image(&loaded, artifact, image_bytes)?;
-    log.push_str(&format!("Prepared HEX image: {}\n", image_path.display()));
+    let total_artifacts = stm32_artifacts.len().max(1);
+    for (index, artifact) in stm32_artifacts.iter().enumerate() {
+        let image_bytes = loaded
+            .files
+            .get(&artifact.file)
+            .ok_or_else(|| format!("Factory artifact file is missing: {}", artifact.file))?;
+        let image_path = write_stm32_temp_image(&loaded, artifact, image_bytes)?;
+        log.push_str(&format!(
+            "Prepared HEX image {} ({}): {}\n",
+            artifact.role,
+            artifact.file,
+            image_path.display()
+        ));
 
-    emit_wired_firmware_stage(
-        progress_app_ref,
-        "flash",
-        "writing",
-        Some(&loaded.version),
-        Some("SWD"),
-        30,
-        "Flashing STM32WB image over SWD",
-    );
-    let output = Command::new(&programmer)
-        .arg("-c")
-        .args(["port=SWD", "mode=UR", "reset=HWrst", "freq=4000"])
-        .arg("-w")
-        .arg(&image_path)
-        .arg("-v")
-        .arg("-rst")
-        .output()
-        .map_err(|err| {
+        let percent = 30u8.saturating_add(((index as u8) * 60u8) / (total_artifacts as u8));
+        emit_wired_firmware_stage(
+            progress_app_ref,
+            "flash",
+            "writing",
+            Some(&loaded.version),
+            Some("SWD"),
+            percent,
+            &format!("Flashing STM32WB {} over SWD", artifact.role),
+        );
+        let mut command = Command::new(&programmer);
+        command
+            .arg("-c")
+            .args(["port=SWD", "mode=UR", "reset=HWrst", "freq=4000"])
+            .arg("-w")
+            .arg(&image_path)
+            .arg("-v");
+        if index + 1 == total_artifacts {
+            command.arg("-rst");
+        }
+        let output = command.output().map_err(|err| {
             format!(
                 "Failed to launch STM32CubeProgrammer CLI at {}: {err}",
                 programmer.display()
             )
         })?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stdout.trim().is_empty() {
-        log.push_str("\n[STM32CubeProgrammer stdout]\n");
-        log.push_str(stdout.as_ref());
-        if !stdout.ends_with('\n') {
-            log.push('\n');
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stdout.trim().is_empty() {
+            log.push_str(&format!(
+                "\n[STM32CubeProgrammer stdout: {}]\n",
+                artifact.role
+            ));
+            log.push_str(stdout.as_ref());
+            if !stdout.ends_with('\n') {
+                log.push('\n');
+            }
         }
-    }
-    if !stderr.trim().is_empty() {
-        log.push_str("\n[STM32CubeProgrammer stderr]\n");
-        log.push_str(stderr.as_ref());
-        if !stderr.ends_with('\n') {
-            log.push('\n');
+        if !stderr.trim().is_empty() {
+            log.push_str(&format!(
+                "\n[STM32CubeProgrammer stderr: {}]\n",
+                artifact.role
+            ));
+            log.push_str(stderr.as_ref());
+            if !stderr.ends_with('\n') {
+                log.push('\n');
+            }
         }
-    }
-    if !output.status.success() {
-        return Err(format!(
-            "STM32CubeProgrammer flash failed with status {}.\n{}",
-            output.status,
-            trim_command_output(&log, 12_000)
+        if !output.status.success() {
+            return Err(format!(
+                "STM32CubeProgrammer flash failed for {} with status {}.\n{}",
+                artifact.role,
+                output.status,
+                trim_command_output(&log, 12_000)
+            ));
+        }
+        log.push_str(&format!(
+            "Wrote STM32WB {} ({}) offset={} bytes={}.\n",
+            artifact.role,
+            artifact.file,
+            artifact.offset,
+            image_bytes.len()
         ));
     }
 
@@ -4742,32 +4785,42 @@ pub async fn transfer_firmware_ota_ble(
     }
 
     coord.begin_firmware_ota_transfer();
+    let is_stm32wb_st_ota = manifest.is_stm32wb_st_ble_ota();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_version = version.clone();
     let transfer_sha256 = expected_sha256.clone();
     let app_for_progress = app;
     let transfer = tauri::async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::transfer_firmware_ota(
-            &transfer_version,
-            &transfer_sha256,
-            &firmware_bytes,
-            manifest_chunk_bytes,
-            Some(&|bytes_sent, bytes_total| {
-                let _ = app_for_progress.emit(
-                    "firmware-ota:progress",
-                    serde_json::json!({
-                        "bytesSent": bytes_sent,
-                        "bytesTotal": bytes_total,
-                    }),
-                );
-            }),
-        )
+        let progress = |bytes_sent, bytes_total| {
+            let _ = app_for_progress.emit(
+                "firmware-ota:progress",
+                serde_json::json!({
+                    "bytesSent": bytes_sent,
+                    "bytesTotal": bytes_total,
+                }),
+            );
+        };
+        if is_stm32wb_st_ota {
+            crate::embedded_ble::transfer_stm32wb_st_ota(
+                &firmware_bytes,
+                manifest_chunk_bytes,
+                Some(&progress),
+            )
+        } else {
+            crate::embedded_ble::transfer_firmware_ota(
+                &transfer_version,
+                &transfer_sha256,
+                &firmware_bytes,
+                manifest_chunk_bytes,
+                Some(&progress),
+            )
+        }
     })
     .await
     .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
     .and_then(|result| result);
-    let confirmed_version = if transfer.is_ok() {
+    let confirmed_version = if transfer.is_ok() && !is_stm32wb_st_ota {
         confirm_firmware_ota_version(&version).await
     } else {
         None

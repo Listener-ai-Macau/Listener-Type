@@ -559,17 +559,56 @@ function MinuteInput({
   onChange: (value: number) => void;
   t: ReturnType<typeof useTranslation>['t'];
 }) {
+  const [draft, setDraft] = useState(() => String(value));
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(String(value));
+    }
+  }, [editing, value]);
+
+  const commit = (raw: string, fallback: number) => {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) {
+      setDraft(String(fallback));
+      return;
+    }
+    const next = Number(trimmed);
+    if (!Number.isFinite(next)) {
+      setDraft(String(fallback));
+      return;
+    }
+    const clamped = clampMinuteValue(next, min);
+    onChange(clamped);
+    setDraft(String(clamped));
+  };
+
   return (
     <div className="ol-device-minute-input">
       <input
         type="number"
+        inputMode="numeric"
+        step={1}
         min={min}
         max={1440}
-        value={value}
+        value={draft}
         disabled={disabled}
+        onFocus={() => setEditing(true)}
         onChange={event => {
-          const next = Number(event.target.value);
-          onChange(Number.isFinite(next) ? next : value);
+          const nextDraft = event.target.value;
+          setDraft(nextDraft);
+          if (nextDraft.trim().length === 0) {
+            return;
+          }
+          const next = Number(nextDraft);
+          if (Number.isFinite(next)) {
+            onChange(clampMinuteValue(next, min));
+          }
+        }}
+        onBlur={event => {
+          setEditing(false);
+          commit(event.target.value, value);
         }}
         style={{ ...inputStyle, flex: '0 1 96px', maxWidth: 120 }}
       />
@@ -1142,6 +1181,11 @@ function isValidBleName(value: string): boolean {
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function clampMinuteValue(value: number, min: 0 | 1): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(1440, Math.round(value)));
 }
 
 function getDeviceSettingsStatusItems(

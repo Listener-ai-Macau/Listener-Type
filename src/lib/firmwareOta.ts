@@ -35,7 +35,7 @@ export type FirmwareOtaFailureCode =
 
 export interface FirmwareOtaManifest {
   schemaVersion: number;
-  packageType: 'listener-firmware-ota';
+  packageType: 'listener-firmware-ota' | 'companion-firmware-ota';
   project: string;
   version: string;
   protocolName: string;
@@ -148,6 +148,20 @@ export const FIRMWARE_OTA_TRANSPORT_BOUNDARY = {
   notDataPlane: ['BLE audio VKA1 notifications', 'BLE HID keyboard reports'],
 } as const;
 
+export const STM32WB_ST_OTA_TRANSPORT_BOUNDARY = {
+  protocolName: 'stm32wb_st_ble_ota',
+  firmwareCapability: 'stm32wb_st_ble_ota_v1',
+  gatt: {
+    serviceUuid: '0000fe20-cc7a-482a-984a-7f2ed5b3e58f',
+    controlUuid: '0000fe22-8e22-4541-9d4c-21edae82ed19',
+    dataUuid: '0000fe24-8e22-4541-9d4c-21edae82ed19',
+    confirmUuid: '0000fe23-8e22-4541-9d4c-21edae82ed19',
+    defaultChunkBytes: 248,
+    maxChunkBytes: 248,
+  },
+  dataPlane: 'ST BLE_Ota service',
+} as const;
+
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const MIN_BATTERY_PERCENT = 20;
 
@@ -181,10 +195,10 @@ export async function validateFirmwareOtaPackage(
   if (!versionsCompatible(context.desktopVersion, manifest.minDesktopVersion)) {
     errors.push(`Listener Type ${context.desktopVersion} is older than required ${manifest.minDesktopVersion}.`);
   }
-  if (manifest.version.length > FIRMWARE_OTA_MAX_VERSION_CHARS) {
+  if (isListenerBleOtaManifest(manifest) && manifest.version.length > FIRMWARE_OTA_MAX_VERSION_CHARS) {
     errors.push(`Firmware version is too long for BLE OTA control; expected <= ${FIRMWARE_OTA_MAX_VERSION_CHARS} characters.`);
   }
-  if (manifest.hardwareRevision !== context.expectedHardwareRevision) {
+  if (isListenerBleOtaManifest(manifest) && manifest.hardwareRevision !== context.expectedHardwareRevision) {
     errors.push(`Hardware revision mismatch: package=${manifest.hardwareRevision}, expected=${context.expectedHardwareRevision}.`);
   }
   if (context.currentFirmwareVersion && compareVersionish(manifest.version, context.currentFirmwareVersion) <= 0) {
@@ -310,29 +324,55 @@ function parseFirmwareOtaManifestV2(value: Record<string, unknown>, schemaVersio
 }
 
 function validateNormalizedFirmwareOtaManifest(manifest: FirmwareOtaManifest): void {
-  if (manifest.packageType !== 'listener-firmware-ota') {
-    throw new Error('ota_manifest.json package_type must be listener-firmware-ota.');
-  }
-  if (manifest.protocolName !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName) {
+  if (isListenerBleOtaManifest(manifest)) {
+    if (manifest.packageType !== 'listener-firmware-ota') {
+      throw new Error('ota_manifest.json package_type must be listener-firmware-ota.');
+    }
+  } else if (isStm32wbStBleOtaManifest(manifest)) {
+    if (manifest.packageType !== 'companion-firmware-ota') {
+      throw new Error('Companion STM32WB OTA package_type must be companion-firmware-ota.');
+    }
+  } else {
     throw new Error(`Unsupported OTA protocol ${manifest.protocolName}.`);
   }
   if (manifest.protocolVersion < 1) {
     throw new Error('OTA protocol.version must be >= 1.');
   }
-  if (manifest.firmwareCapability !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.firmwareCapability) {
-    throw new Error('OTA package requires unsupported firmware capability.');
-  }
-  if (
-    manifest.gattServiceUuid !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid ||
-    manifest.gattControlUuid !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid ||
-    manifest.gattDataUuid !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid
-  ) {
-    throw new Error('OTA package uses an unsupported BLE OTA GATT boundary.');
-  }
-  if (manifest.gattChunkBytes !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes) {
-    throw new Error(
-      `OTA package uses unsupported BLE OTA chunk size ${manifest.gattChunkBytes}; supported value is ${FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes}.`,
-    );
+  if (isListenerBleOtaManifest(manifest)) {
+    if (manifest.firmwareCapability !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.firmwareCapability) {
+      throw new Error('OTA package requires unsupported firmware capability.');
+    }
+    if (
+      !uuidEquals(manifest.gattServiceUuid, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid) ||
+      !uuidEquals(manifest.gattControlUuid, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid) ||
+      !uuidEquals(manifest.gattDataUuid, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid)
+    ) {
+      throw new Error('OTA package uses an unsupported BLE OTA GATT boundary.');
+    }
+    if (manifest.gattChunkBytes !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes) {
+      throw new Error(
+        `OTA package uses unsupported BLE OTA chunk size ${manifest.gattChunkBytes}; supported value is ${FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes}.`,
+      );
+    }
+  } else if (isStm32wbStBleOtaManifest(manifest)) {
+    if (manifest.project !== 'Companion-Firmware') {
+      throw new Error('Companion STM32WB OTA project must be Companion-Firmware.');
+    }
+    if (manifest.firmwareCapability !== STM32WB_ST_OTA_TRANSPORT_BOUNDARY.firmwareCapability) {
+      throw new Error('Companion STM32WB OTA package requires unsupported firmware capability.');
+    }
+    if (
+      !uuidEquals(manifest.gattServiceUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid) ||
+      !uuidEquals(manifest.gattControlUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid) ||
+      !uuidEquals(manifest.gattDataUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid)
+    ) {
+      throw new Error('Companion STM32WB OTA package uses an unsupported ST GATT boundary.');
+    }
+    if (manifest.gattChunkBytes !== STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes) {
+      throw new Error(
+        `Companion STM32WB OTA chunk size must be ${STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes} bytes, got ${manifest.gattChunkBytes}.`,
+      );
+    }
   }
   if (manifest.fileSizeBytes <= 0) {
     throw new Error('file.size_bytes must be greater than zero.');
@@ -381,7 +421,7 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       'Use an OTA package built for this Listener device.',
     ));
   }
-  if (!device.capabilities.includes(manifest.firmwareCapability)) {
+  if (isListenerBleOtaManifest(manifest) && !device.capabilities.includes(manifest.firmwareCapability)) {
     blockers.push(blocker(
       'missingCapability',
       'Connected firmware does not advertise OTA support.',
@@ -389,13 +429,13 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
     ));
   }
   const battery = device.batteryPercent;
-  if (device.usbPowered === false && typeof battery === 'number' && battery < MIN_BATTERY_PERCENT) {
+  if (isListenerBleOtaManifest(manifest) && device.usbPowered === false && typeof battery === 'number' && battery < MIN_BATTERY_PERCENT) {
     blockers.push(blocker(
       'batteryLow',
       'Battery is too low for firmware update.',
       'Connect USB power or charge the device above 20%.',
     ));
-  } else if (device.usbPowered === false && battery == null) {
+  } else if (isListenerBleOtaManifest(manifest) && device.usbPowered === false && battery == null) {
     blockers.push(blocker(
       'powerUnknown',
       'Power state is unknown.',
@@ -572,6 +612,18 @@ function requireChannel(value: unknown): FirmwareOtaChannel {
     return value;
   }
   throw new Error('channel must be stable or development.');
+}
+
+export function isListenerBleOtaManifest(manifest: FirmwareOtaManifest): boolean {
+  return manifest.protocolName === FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName;
+}
+
+export function isStm32wbStBleOtaManifest(manifest: FirmwareOtaManifest): boolean {
+  return manifest.protocolName === STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName;
+}
+
+function uuidEquals(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
 }
 
 function requireInstructions(value: unknown, field: string): string[] {
