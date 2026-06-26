@@ -472,6 +472,7 @@ export const en: typeof zhCN = {
     sections: {
       recording: 'Recording',
       device: 'Device',
+      companion: 'Companion',
       providers: 'Providers',
       shortcuts: 'Shortcuts',
       permissions: 'Permissions',
@@ -867,6 +868,7 @@ export const en: typeof zhCN = {
           translation: 'Translation',
           selectionAsk: 'Selection Ask',
           settingsDevice: 'Device settings',
+          settingsCompanion: 'Companion settings',
           settingsRecording: 'Recording settings',
           settingsProviders: 'Provider settings',
           settingsShortcuts: 'Shortcut settings',

@@ -470,6 +470,7 @@ export const zhCN = {
     sections: {
       recording: '录音',
       device: '设备',
+      companion: 'Companion',
       providers: '提供商',
       shortcuts: '快捷键',
       permissions: '权限',
@@ -865,6 +866,7 @@ export const zhCN = {
           translation: '翻译',
           selectionAsk: '划词问答',
           settingsDevice: '设备设置',
+          settingsCompanion: 'Companion 设置',
           settingsRecording: '录音设置',
           settingsProviders: '供应商设置',
           settingsShortcuts: '快捷键设置',

@@ -310,6 +310,21 @@ export function FirmwareOtaPanel({
     }
   };
 
+  const startSelectedFirmwareAction = () => {
+    if (firmwareMode === 'ble') {
+      void startUpdate();
+      return;
+    }
+    void wiredRef.current?.flash();
+  };
+  const selectedFirmwareActionDisabled = firmwareMode === 'ble' ? !canStart : !wiredAction.canFlash;
+  const selectedFirmwareActionBusy = firmwareMode === 'ble' ? transferActive : wiredAction.isFlashing;
+  const selectedFirmwareActionLabel = selectedFirmwareActionBusy
+    ? firmwareMode === 'ble'
+      ? statusLabel
+      : t('settings.recording.wiredFirmwareFlashing', '刷入中')
+    : t('settings.recording.firmwareStartSelected', '开始刷入');
+
   return (
     <>
     <div
@@ -358,11 +373,8 @@ export function FirmwareOtaPanel({
         </div>
 
         <div className="ol-firmware-unified-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
-          <Btn variant="blue" size="sm" icon="download" onClick={() => void startUpdate()} disabled={firmwareMode !== 'ble' || !canStart}>
-            {t('settings.recording.firmwareOtaStart', '更新')}
-          </Btn>
-          <Btn variant="blue" size="sm" icon="download" onClick={() => void wiredRef.current?.flash()} disabled={firmwareMode !== 'wired' || !wiredAction.canFlash}>
-            {wiredAction.isFlashing ? t('settings.recording.wiredFirmwareFlashing', '刷入中') : t('settings.recording.wiredFirmwareFlash', '有线刷入')}
+          <Btn variant="blue" size="sm" icon={firmwareMode === 'wired' ? 'bolt' : 'download'} onClick={startSelectedFirmwareAction} disabled={selectedFirmwareActionDisabled}>
+            {selectedFirmwareActionLabel}
           </Btn>
         </div>
       </div>
