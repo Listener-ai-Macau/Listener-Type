@@ -2757,13 +2757,22 @@ mod windows_ble {
             firmware_bytes.len(),
             json_escape(firmware_sha256)
         );
-        write_gatt_value_with_timeout(
+        let finish_result = write_gatt_value_with_timeout(
             &target.control,
             finish.as_bytes(),
             GattWriteOption::WriteWithResponse,
             OTA_FINISH_WRITE_TIMEOUT,
             "OTA control finish",
-        )?;
+        );
+        if let Err(err) = finish_result {
+            if is_ota_finish_reboot_handoff_error(&err) {
+                log::warn!(
+                    "[embedded-ble] ota #{transfer_id}: finish write reported reboot handoff after full payload; continuing to confirmation: {err}"
+                );
+            } else {
+                return Err(err);
+            }
+        }
         log::info!(
             "[embedded-ble] ota #{transfer_id}: transferred {} bytes in {chunks_sent} chunks (chunk_bytes={data_chunk_bytes}, transport_limit={}, manifest_limit={})",
             firmware_bytes.len(),
@@ -2775,6 +2784,17 @@ mod windows_ble {
             chunks_sent,
             transport: "listener_ble_ota",
         })
+    }
+
+    pub(super) fn is_ota_finish_reboot_handoff_error(err: &str) -> bool {
+        let lower = err.to_ascii_lowercase();
+        lower.contains("0x800704c7")
+            || lower.contains("0x800706ba")
+            || lower.contains("transport_not_ready")
+            || lower.contains("disconnected")
+            || lower.contains("gattcommunicationstatus(3)")
+            || lower.contains("service open async result failed")
+            || (lower.contains("ota control finish") && lower.contains("timed out"))
     }
 
     pub fn firmware_ota_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
@@ -6186,6 +6206,26 @@ mod tests {
             );
             assert!(!classification.user_action.is_empty());
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn ota_finish_reboot_handoff_accepts_windows_ble_disconnect_errors() {
+        assert!(super::windows_ble::is_ota_finish_reboot_handoff_error(
+            "BLE OTA control finish write async error: Some(HRESULT(0x800704C7))"
+        ));
+        assert!(super::windows_ble::is_ota_finish_reboot_handoff_error(
+            "BLE OTA control finish write async error: Some(HRESULT(0x800706BA))"
+        ));
+        assert!(super::windows_ble::is_ota_finish_reboot_handoff_error(
+            "BLE device connection status changed to Disconnected; transport_not_ready"
+        ));
+        assert!(!super::windows_ble::is_ota_finish_reboot_handoff_error(
+            "BLE OTA data write async error: Some(HRESULT(0x80070057))"
+        ));
+        assert!(!super::windows_ble::is_ota_finish_reboot_handoff_error(
+            "BLE OTA control begin write returned status=GattCommunicationStatus(1)"
+        ));
     }
 
     #[cfg(target_os = "windows")]
