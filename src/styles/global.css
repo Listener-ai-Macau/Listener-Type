@@ -160,6 +160,23 @@ a { color: inherit; text-decoration: none; }
   white-space: nowrap;
 }
 
+.ol-firmware-control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px;
+  border: 0.5px solid var(--ol-line-soft);
+  border-radius: 8px;
+  background: var(--ol-control-track);
+}
+
+.ol-firmware-mode-switch,
+.ol-firmware-unified-actions {
+  min-width: 0;
+}
+
 .ol-device-settings-panel {
   margin-top: 12px;
   padding-top: 14px;
@@ -177,6 +194,18 @@ a { color: inherit; text-decoration: none; }
 .ol-device-settings-panel > .ol-setting-row:first-of-type {
   padding-top: 0 !important;
   border-top: 0 !important;
+}
+
+.ol-device-ble-name-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-radius: 9px;
+  border: 0.5px solid var(--ol-line-soft);
+  background: color-mix(in srgb, var(--ol-surface-2) 58%, transparent);
+  padding: 10px 12px;
 }
 
 .ol-device-power-mode-card {
@@ -331,6 +360,17 @@ a { color: inherit; text-decoration: none; }
   }
 
   .ol-firmware-ota-actions {
+    justify-content: flex-start !important;
+    width: 100% !important;
+  }
+
+  .ol-firmware-control-bar {
+    align-items: stretch !important;
+    flex-direction: column !important;
+  }
+
+  .ol-firmware-mode-switch,
+  .ol-firmware-unified-actions {
     justify-content: flex-start !important;
     width: 100% !important;
   }

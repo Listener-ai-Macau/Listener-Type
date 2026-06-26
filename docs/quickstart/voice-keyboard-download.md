@@ -1,13 +1,13 @@
-# Listener 语音键盘内部测试下载入口
+# Listener 语音键盘 1.0.0 下载入口
 
-本页是 `voice-keyboard-production-readiness / 3.4` 的内部测试下载入口。正式公开发布前，包装二维码可指向公开发布页；当前内部测试以本地构建产物和哈希为准。
+本页记录 Listener Type `1.0.0` Windows 发布产物。安装前先核对文件名和 SHA256。
 
 ## Windows 产物
 
 | 产物 | 路径 | SHA256 |
 |---|---|---|
-| MSI 安装包 | `.artifacts/windows-msvc/ListenerType_1.3.3_x64_en-US.msi` | `C69A5E7F0229366FFF677DB06D0C4121B8AF984C3A750482F4A3942CEB66E93F` |
-| 便携 ZIP | `.artifacts/windows-msvc/ListenerType_1.3.3_x64_portable.zip` | `AA0CEA6D88FC215A8899E5172D6D2A529091D3AEA949BF5EB994E32FA1C7DCD8` |
+| MSI 安装包 | `.artifacts/windows-msvc/ListenerType_1.0.0_x64_en-US.msi` | `8B22AD0BDE41CC10780020E1942651433257F4CD583A0EFE6E7A41C152CB50A5` |
+| 便携 ZIP | `.artifacts/windows-msvc/ListenerType_1.0.0_x64_portable.zip` | `B90DEE85DE56AF2B90064A0FA2B18880F513C65226D17D2184D456AB05BA6787` |
 
 ## 安装前检查
 

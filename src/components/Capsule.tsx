@@ -194,6 +194,7 @@ function Pill({
   const stopPending = state === 'recording' && stopRequested;
   const showStopAck = shouldShowStopAcknowledgement(state, stopPending || stopAcknowledged);
   const errorActive = state === 'error';
+  const dismissOnly = errorActive || state === 'done' || state === 'cancelled';
   const cancelEnabled = capsuleCancelEnabled(state);
   const confirmEnabled = capsuleConfirmEnabled(state, stopPending);
 
@@ -320,7 +321,7 @@ function Pill({
         willChange: 'transform, box-shadow',
       }}
     >
-      <CircleButton variant="cancel" enabled={cancelEnabled} onClick={errorActive ? onDismiss : onCancel} />
+      <CircleButton variant="cancel" enabled={cancelEnabled} onClick={dismissOnly ? onDismiss : onCancel} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {center}
       </div>
@@ -333,6 +334,8 @@ function Pill({
 // 退出动画只负责视觉收尾，避免文字落屏前出现一段空白等待。
 const EXIT_ANIM_MS = PREVIEW_FINAL_TRANSITION.exitAnimMs;
 const STOP_ACK_MS = PREVIEW_FINAL_TRANSITION.stopAckMs;
+const DISMISSED_NON_SESSION_SUPPRESS_MS = 13_000;
+const ERROR_AUTO_DISMISS_MS = 2_500;
 // 初始可见 state：Tauri 内运行从 idle 开始（等后端 capsule:state 事件），
 // 浏览器 dev 模式从 recording 开始以便直接看到胶囊。
 const INITIAL_VISIBLE_STATE: CapsuleState = isTauri ? 'idle' : 'recording';
@@ -376,7 +379,9 @@ export function Capsule() {
   const previousStateRef = useRef<CapsuleState>(INITIAL_VISIBLE_STATE);
   const previousElapsedMsRef = useRef<number>(0);
   const capsuleOrderingRef = useRef(createCapsuleOrderingTracker());
+  const suppressNonSessionEventsUntilRef = useRef<number>(0);
   const stopAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const errorAutoDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stopRequested, setStopRequested] = useState<boolean>(false);
   const [stopAcknowledged, setStopAcknowledged] = useState<boolean>(false);
   // Windows 端 host 在翻译模式从 84 长到 118；macOS / Linux 上 capsuleLayout 已固定 42 忽略此参数。
@@ -401,6 +406,29 @@ export function Capsule() {
     }, STOP_ACK_MS);
   };
 
+  const clearErrorAutoDismiss = () => {
+    if (errorAutoDismissTimerRef.current !== null) {
+      clearTimeout(errorAutoDismissTimerRef.current);
+      errorAutoDismissTimerRef.current = null;
+    }
+  };
+
+  const hideCapsuleLocally = () => {
+    clearErrorAutoDismiss();
+    const activeSessionId = capsuleOrderingRef.current.activeSessionId;
+    if (activeSessionId) {
+      capsuleOrderingRef.current.closedSessionStates.set(activeSessionId, 'idle');
+      capsuleOrderingRef.current.activeSessionId = null;
+    } else {
+      suppressNonSessionEventsUntilRef.current = Date.now() + DISMISSED_NON_SESSION_SUPPRESS_MS;
+    }
+    setStopRequested(false);
+    clearStopAcknowledgement();
+    setState('idle');
+    setMessage(undefined);
+    setTranslation(false);
+  };
+
   useEffect(() => {
     if (!isTauri) return;
     let unlisten: (() => void) | undefined;
@@ -409,6 +437,21 @@ export function Capsule() {
       const { listen } = await import('@tauri-apps/api/event');
       const handle = await listen<CapsulePayload>('capsule:state', event => {
         const p = event.payload;
+        if (p.sessionId) {
+          suppressNonSessionEventsUntilRef.current = 0;
+        } else if (p.state === 'idle') {
+          suppressNonSessionEventsUntilRef.current = 0;
+        } else if (suppressNonSessionEventsUntilRef.current > Date.now()) {
+          traceCapsule('event_dropped_local_non_session_dismiss', {
+            state: p.state,
+            elapsedMs: p.elapsedMs,
+            detail: {
+              seq: p.seq,
+              suppressUntil: suppressNonSessionEventsUntilRef.current,
+            },
+          });
+          return;
+        }
         traceCapsule('event_received', {
           state: p.state,
           elapsedMs: p.elapsedMs,
@@ -486,10 +529,30 @@ export function Capsule() {
   }, [state]);
 
   useEffect(() => {
+    clearErrorAutoDismiss();
+    if (state !== 'error') {
+      return undefined;
+    }
+    errorAutoDismissTimerRef.current = setTimeout(() => {
+      errorAutoDismissTimerRef.current = null;
+      traceCapsule('error_auto_dismiss', {
+        state: 'error',
+        detail: { errorAutoDismissMs: ERROR_AUTO_DISMISS_MS },
+      });
+      hideCapsuleLocally();
+    }, ERROR_AUTO_DISMISS_MS);
+    return clearErrorAutoDismiss;
+    // state is the only trigger: message churn must not keep an error capsule
+    // occupying the screen longer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  useEffect(() => {
     return () => {
       if (stopAckTimerRef.current !== null) {
         clearTimeout(stopAckTimerRef.current);
       }
+      clearErrorAutoDismiss();
     };
   }, []);
 
@@ -527,9 +590,8 @@ export function Capsule() {
 
   const onCancel = () => {
     traceCapsule('cancel_click', { state });
-    setStopRequested(false);
-    clearStopAcknowledgement();
     void invokeOrMock<void>('cancel_dictation', undefined, () => undefined);
+    hideCapsuleLocally();
   };
 
   const onConfirm = () => {
@@ -546,18 +608,13 @@ export function Capsule() {
 
   const onDismiss = () => {
     traceCapsule('dismiss_click', { state });
-    setStopRequested(false);
-    clearStopAcknowledgement();
-    setState('idle');
-    setMessage(undefined);
+    hideCapsuleLocally();
   };
 
   const onRetry = () => {
     traceCapsule('retry_click', { state });
-    setStopRequested(false);
-    clearStopAcknowledgement();
-    setState('idle');
-    setMessage(undefined);
+    hideCapsuleLocally();
+    suppressNonSessionEventsUntilRef.current = 0;
     void invokeOrMock<void>('start_dictation', undefined, () => undefined);
   };
 

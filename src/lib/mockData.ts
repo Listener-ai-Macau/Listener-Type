@@ -76,7 +76,7 @@ export const OL_DATA: MockData = {
     { word: 'Cloud', count: 2 },   { word: 'Hello.', count: 1 }, { word: 'A1003', count: 1 },
     { word: 'SVG', count: 1 },     { word: 'TTC', count: 0 },    { word: 'Swift', count: 0 },
     { word: 'LLMAPI', count: 0 },  { word: 'TypeLazyWordsForm', count: 0 }, { word: 'Meta', count: 0 },
-    { word: 'Beta', count: 0 },    { word: 'How', count: 0 },    { word: 'Request', count: 0 },
+    { word: 'Release', count: 0 }, { word: 'How', count: 0 },    { word: 'Request', count: 0 },
     { word: 'Pull', count: 0 },    { word: 'Table', count: 0 },  { word: 'README', count: 0 },
     { word: 'issue', count: 0 },   { word: 'PNG', count: 0 },    { word: 'coding', count: 0 },
     { word: 'Web', count: 0 },     { word: 'QQ', count: 0 },     { word: 'Claude', count: 0 },

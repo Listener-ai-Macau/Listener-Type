@@ -37,8 +37,8 @@ function manifest(overrides: Record<string, unknown> = {}): string {
       },
     },
     hardware_revision: 'esp32s3-devkit',
-    min_desktop_version: '1.3.3',
-    channel: 'internal-test',
+    min_desktop_version: '1.0.0',
+    channel: 'development',
     file: {
       name: 'firmware_ota.bin',
       size_bytes: firmwareBytes.byteLength,
@@ -59,7 +59,7 @@ function manifestV2(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     schema_version: 2,
     created_at_utc: '2026-05-26T00:00:00Z',
-    channel: 'internal-test',
+    channel: 'development',
     firmware: {
       project: 'voice-keyboard-firmware',
       version: '1.2.0',
@@ -73,7 +73,7 @@ function manifestV2(overrides: Record<string, unknown> = {}): string {
     requirements: {
       hardware_revision: 'keyboard-v2-n16r8',
       protocol_version: 1,
-      min_desktop_version: '1.3.3',
+      min_desktop_version: '1.0.0',
     },
     ble_identity: {
       name: 'Listener Voice Keyboard',
@@ -105,12 +105,12 @@ function manifestV2(overrides: Record<string, unknown> = {}): string {
 }
 
 const context = {
-  desktopVersion: '1.3.3',
+  desktopVersion: '1.0.0',
   expectedHardwareRevision: 'esp32s3-devkit',
 };
 
 const contextV2 = {
-  desktopVersion: '1.3.3',
+  desktopVersion: '1.0.0',
   expectedHardwareRevision: 'keyboard-v2-n16r8',
 };
 
@@ -133,7 +133,7 @@ const validV2FastChunk = await validateFirmwareOtaPackage(
     requirements: {
       hardware_revision: 'keyboard-v2-n16r8',
       protocol_version: 1,
-      min_desktop_version: '1.3.3',
+      min_desktop_version: '1.0.0',
       gatt_chunk_bytes: 500,
     },
   }),
@@ -173,7 +173,7 @@ const tooLongV2Version = await validateFirmwareOtaPackage(
   manifestV2({
     firmware: {
       project: 'voice-keyboard-firmware',
-      version: 'v1002.0.0-ota-test-226-g99934ff-dirty',
+      version: '1.0.0-local-build-226-g99934ff-dirty',
       git_commit: 'a'.repeat(40),
       git_dirty: true,
       target: 'esp32s3',
@@ -262,9 +262,9 @@ const badGattChunk = await validateFirmwareOtaPackage(
 assert.equal(badGattChunk.ok, false);
 assert.ok(badGattChunk.errors.some(error => error.includes('chunk size')));
 
-assert.equal(compareVersionish('v1.3.3', '1.3.2'), 1);
-assert.equal(compareVersionish('1.3.3', '1.3.3'), 0);
-assert.equal(compareVersionish('1.3.3', '1.4.0'), -1);
+assert.equal(compareVersionish('v1.0.1', '1.0.0'), 1);
+assert.equal(compareVersionish('1.0.0', '1.0.0'), 0);
+assert.equal(compareVersionish('1.0.0', '1.0.1'), -1);
 assert.equal(firmwareOtaConfirmedVersionMatches('v1.2.0', '1.2.0'), true);
 assert.equal(firmwareOtaConfirmedVersionMatches('1.2.0-dev', '1.2.0'), false);
 assert.equal(firmwareOtaConfirmedVersionMatches(null, '1.2.0'), false);
@@ -282,7 +282,7 @@ const parsedManifest = valid.manifest as FirmwareOtaManifest;
 const parsedV2Manifest = validV2.manifest as FirmwareOtaManifest;
 const readyPreflight = evaluateFirmwareOtaPreflight({
   manifest: parsedManifest,
-  desktopVersion: '1.3.3',
+  desktopVersion: '1.0.0',
   recordingActive: false,
   transferActive: false,
   device: {
@@ -298,7 +298,7 @@ assert.equal(readyPreflight.ok, true);
 
 const unknownDeviceStatus = evaluateFirmwareOtaPreflight({
   manifest: parsedV2Manifest,
-  desktopVersion: '1.3.3',
+  desktopVersion: '1.0.0',
   recordingActive: false,
   transferActive: false,
   device: {
@@ -314,7 +314,7 @@ assert.equal(unknownDeviceStatus.ok, true);
 
 const unknownPowerStatus = evaluateFirmwareOtaPreflight({
   manifest: parsedV2Manifest,
-  desktopVersion: '1.3.3',
+  desktopVersion: '1.0.0',
   recordingActive: false,
   transferActive: false,
   device: {
@@ -330,7 +330,7 @@ assert.equal(unknownPowerStatus.ok, true);
 
 const blockedPreflight = evaluateFirmwareOtaPreflight({
   manifest: parsedManifest,
-  desktopVersion: '1.3.3',
+  desktopVersion: '1.0.0',
   recordingActive: true,
   transferActive: true,
   device: {

@@ -33,13 +33,11 @@ import type {
   StylePackKind,
   StylePackRuntimeDiagnostics,
   StyleSystemPrompts,
-  UpdateChannel,
   UserPreferences,
   VocabPresetStore,
   WindowsImeStatus,
 } from './types';
 import type { FirmwareOtaManifest, FirmwareOtaPreflightSnapshot } from './firmwareOta';
-export type { UpdateChannel } from './types';
 import { OL_DATA } from './mockData';
 import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from './hotkey';
 
@@ -695,30 +693,6 @@ export function refreshDeviceSettingsStatus(): Promise<DeviceFirmwareSettingsSta
   }));
 }
 
-// ── Release channel (Beta opt-in) ──────────────────────────────────────
-// 渠道偏好与 fetch_latest_beta_release 实际效果只在 Tauri runtime 内有意义；
-// 浏览器开发模式下走 mock，避免设置页因 invoke 抛错而白屏。
-// UpdateChannel 类型搬到 types.ts（UserPreferences.updateChannel 字段使用），
-// 这里 re-export 保持外部模块（SettingsModal 等）import 路径不变。
-
-export interface LatestBetaRelease {
-  tagName: string;
-  htmlUrl: string;
-  publishedAt: string;
-}
-
-export function getUpdateChannel(): Promise<UpdateChannel> {
-  return invokeOrMock('get_update_channel', undefined, () => 'stable' as UpdateChannel);
-}
-
-export function setUpdateChannel(channel: UpdateChannel): Promise<void> {
-  return invokeOrMock('set_update_channel', { channel }, () => undefined);
-}
-
-export function fetchLatestBetaRelease(): Promise<LatestBetaRelease | null> {
-  return invokeOrMock('fetch_latest_beta_release', undefined, () => null);
-}
-
 export function getHotkeyStatus(): Promise<HotkeyStatus> {
   return invokeOrMock('get_hotkey_status', undefined, () => mockHotkeyStatus);
 }
@@ -1218,6 +1192,162 @@ export function transferFirmwareOtaBle(
       bytesTransferred: request.firmwareBytes.byteLength,
       confirmedVersion: null,
       transport: 'listener_ble_ota' as const,
+    }),
+  );
+}
+
+export interface WiredFirmwareArtifactInfo {
+  role: string;
+  file: string;
+  offset: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+export interface WiredFirmwarePackagePayload {
+  kind: 'factory';
+  project: string;
+  version: string;
+  target: string;
+  gitCommit: string | null;
+  sourceLabel: string;
+  artifacts: WiredFirmwareArtifactInfo[];
+  supportsFullFlash: boolean;
+  supportsBootRepair: boolean;
+  notes: string[];
+}
+
+export interface WiredFirmwareSerialPort {
+  port: string;
+  label: string;
+  isLikelyEsp32: boolean;
+}
+
+export interface WiredFirmwareFlashResult {
+  action: 'flash' | 'bootloaderRepair';
+  kind: 'factory';
+  port: string;
+  version: string;
+  log: string;
+}
+
+export interface WiredFirmwareProgressPayload {
+  action: 'flash' | 'bootloaderRepair';
+  stage:
+    | 'loading'
+    | 'packageLoaded'
+    | 'connecting'
+    | 'connected'
+    | 'erasing'
+    | 'erased'
+    | 'preparing'
+    | 'writing'
+    | 'finalizing'
+    | 'done'
+    | string;
+  port: string | null;
+  version: string | null;
+  currentRole: string | null;
+  currentFile: string | null;
+  bytesWritten: number;
+  bytesTotal: number;
+  currentBytes: number;
+  currentTotal: number;
+  percent: number;
+  message: string;
+}
+
+export function listWiredFirmwarePorts(): Promise<WiredFirmwareSerialPort[]> {
+  return invokeOrMock(
+    'list_wired_firmware_ports',
+    undefined,
+    () => [],
+  );
+}
+
+export function loadWiredFirmwarePackage(path: string): Promise<WiredFirmwarePackagePayload> {
+  return invokeOrMock(
+    'load_wired_firmware_package',
+    { path },
+    () => ({
+      kind: 'factory' as const,
+      project: 'voice-keyboard-firmware',
+      version: 'preview',
+      target: 'esp32s3',
+      gitCommit: null,
+      sourceLabel: path.split(/[\\/]/).pop() || 'firmware package',
+      artifacts: [
+        {
+          role: 'bootloader',
+          file: 'bootloader.bin',
+          offset: '0x0',
+          sizeBytes: 0,
+          sha256: '',
+        },
+        {
+          role: 'partition_table',
+          file: 'partition-table.bin',
+          offset: '0x8000',
+          sizeBytes: 0,
+          sha256: '',
+        },
+        {
+          role: 'app',
+          file: 'voice-keyboard-firmware.bin',
+          offset: '0x20000',
+          sizeBytes: 0,
+          sha256: '',
+        },
+      ],
+      supportsFullFlash: true,
+      supportsBootRepair: true,
+      notes: ['Browser preview mock. Tauri builds flash the factory package through esptool.'],
+    }),
+  );
+}
+
+export function flashWiredFirmwarePackage(options: {
+  path: string;
+  port?: string | null;
+  baud?: number | null;
+  preserveOtaData?: boolean;
+}): Promise<WiredFirmwareFlashResult> {
+  return invokeOrMock(
+    'flash_wired_firmware_package',
+    {
+      path: options.path,
+      port: options.port ?? null,
+      baud: options.baud ?? null,
+      preserveOtaData: options.preserveOtaData ?? false,
+    },
+    () => ({
+      action: 'flash' as const,
+      kind: 'factory' as const,
+      port: options.port || 'COMx',
+      version: 'preview',
+      log: 'Browser preview mock: wired firmware flash was not executed.',
+    }),
+  );
+}
+
+export function repairWiredFirmwareBootloader(options: {
+  path: string;
+  port?: string | null;
+  baud?: number | null;
+}): Promise<WiredFirmwareFlashResult> {
+  return invokeOrMock(
+    'repair_wired_firmware_bootloader',
+    {
+      path: options.path,
+      port: options.port ?? null,
+      baud: options.baud ?? null,
+    },
+    () => ({
+      action: 'bootloaderRepair' as const,
+      kind: 'factory' as const,
+      port: options.port || 'COMx',
+      version: 'preview',
+      log: 'Browser preview mock: bootloader repair was not executed.',
     }),
   );
 }

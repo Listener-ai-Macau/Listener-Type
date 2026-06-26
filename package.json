@@ -1,7 +1,7 @@
 {
   "name": "listener-type",
   "private": true,
-  "version": "1.3.3",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,6 +14,7 @@
     "check:docs": "node scripts/check-doc-inheritance.mjs",
     "check:traceability": "node scripts/check-traceability.mjs",
     "check:tauri-info": "node scripts/check-tauri-info.mjs",
+    "check:version": "node scripts/check-release-version.mjs",
     "test:rules": "node --experimental-strip-types src/lib/capsulePreviewRules.test.ts",
     "test:capsule-actions": "node --experimental-strip-types src/lib/capsuleActionRules.test.ts",
     "test:capsule-ordering": "node --experimental-strip-types src/lib/capsuleEventOrdering.test.ts",
@@ -27,7 +28,8 @@
     "test:marketplace-discovery": "node --experimental-strip-types src/lib/marketplaceDiscovery.test.ts",
     "test": "npm run test:rules && npm run test:capsule-actions && npm run test:capsule-ordering && npm run test:layout && npm run test:device-health && npm run test:ble-recovery-ui && npm run test:first-run-pairing && npm run test:provider-setup && npm run test:demo-mode && npm run test:firmware-ota && npm run test:marketplace-discovery",
     "check:dark-mode": "node scripts/check-dark-mode.mjs",
-    "verify": "node scripts/verify-frontend.mjs"
+    "verify": "node scripts/verify-frontend.mjs",
+    "release:check": "node scripts/release-check.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

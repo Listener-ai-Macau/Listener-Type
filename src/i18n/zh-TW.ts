@@ -108,8 +108,6 @@ export const zhTW: typeof zhCN = {
   shell: {
     shortcutLabel: '錄音快捷鍵',
     shortcutHint: '開始 / 停止',
-    betaTag: 'BETA',
-    betaNote: '所有數據都只保存在本機。',
     footer: {
       feedback: '反饋',
       settings: '設置',
@@ -984,8 +982,8 @@ export const zhTW: typeof zhCN = {
       zh: '簡體中文',
       zhTW: '繁體中文',
       en: 'English',
-      ja: '日本語 (Beta)',
-      ko: '한국어 (Beta)',
+      ja: '日本語',
+      ko: '한국어',
       restartHint: '部分原生菜單（系統托盤等）可能需要重啓 App 纔會切換。',
     },
     about: {
@@ -1005,15 +1003,6 @@ export const zhTW: typeof zhCN = {
       privacy: '隱私',
       privacyDesc: '所有識別結果僅保存在本機。雲端 API 僅用於實時轉寫與潤色，不會保留你的錄音。',
       localFirst: '本地優先',
-      betaChannelLabel: '加入 Beta 渠道',
-      betaChannelDesc: '預設拿到的是正式版。打開後可在下方看到最新 Beta 版的下載入口；Beta 包不會通過自動更新推送給普通用戶，需要手動下載安裝。可能不穩定，僅推薦願意嘗鮮並回報問題的用戶開啟。',
-      betaChannelFetching: '正在獲取最新 Beta 版本…',
-      betaChannelFetchBtn: '查詢最新 Beta',
-      betaChannelLatestPrefix: '最新 Beta：',
-      betaChannelDownloadBtn: '前往下載',
-      betaChannelRefresh: '重新查詢',
-      betaChannelNoBeta: '尚未發佈過 Beta 版。',
-      betaChannelFetchError: '獲取 Beta 版本資訊失敗，請稍後重試。',
       updateDialog: {
         available: {
           title: '發現新版本',

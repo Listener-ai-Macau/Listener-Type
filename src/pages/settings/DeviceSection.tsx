@@ -24,7 +24,7 @@ import type {
   ShortcutBinding,
 } from '../../lib/types';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
-import { Btn, Card } from '../_atoms';
+import { Btn, Card, Pill } from '../_atoms';
 import { FirmwareOtaPanel } from './FirmwareOtaPanel';
 import { inputStyle, SettingRow } from './shared';
 import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusPanel';
@@ -189,6 +189,11 @@ export function DeviceSection() {
     <>
       <DeviceFirmwareSettingsCard />
 
+      <FirmwareOtaPanel
+        supported={bleSupported}
+        bleStatus={bleStatus}
+      />
+
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
           {t('settings.deviceKeys.title')}
@@ -236,11 +241,136 @@ export function DeviceSection() {
         />
       </Card>
 
-      <FirmwareOtaPanel
-        supported={bleSupported}
-        bleStatus={bleStatus}
-      />
+      <CompanionBringupCard />
     </>
+  );
+}
+
+function CompanionBringupCard() {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState('');
+  const commands = [
+    {
+      id: 'build',
+      label: t('settings.companion.buildCommand', '编译 bring-up'),
+      value: 'pwsh -NoProfile -File .\\tools\\build_nucleo_bringup.ps1',
+    },
+    {
+      id: 'flash',
+      label: t('settings.companion.flashCommand', '刷入 NUCLEO'),
+      value: 'pwsh -NoProfile -File .\\tools\\flash_nucleo_bringup.ps1',
+    },
+    {
+      id: 'capture',
+      label: t('settings.companion.captureCommand', '抓串口日志'),
+      value: 'pwsh -NoProfile -File .\\tools\\capture_nucleo_serial.ps1 -Port COM13 -Seconds 30',
+    },
+  ];
+  const copy = async (id: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(id);
+      window.setTimeout(() => setCopied(current => (current === id ? '' : current)), 1400);
+    } catch (error) {
+      console.warn('[companion] copy command failed', error);
+    }
+  };
+
+  return (
+    <Card style={{ padding: 18 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>
+              {t('settings.companion.title', 'Companion Pendant bring-up')}
+            </div>
+            <Pill tone="blue" size="sm">{t('settings.companion.badge', 'NUCLEO-WB55RG')}</Pill>
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 5 }}>
+            {t('settings.companion.desc', '先用开发板验证麦克风、外部 flash、OTA readiness 和按钮输入；正式产品工程从 Companion_Pendant.ioc 生成。')}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))', gap: 8 }}>
+        <CompanionFact
+          label={t('settings.companion.sw1Label', 'SW1 / PC4')}
+          value={t('settings.companion.sw1Value', '开始 / 停止录音')}
+        />
+        <CompanionFact
+          label={t('settings.companion.sw2Label', 'SW2 / PD0')}
+          value={t('settings.companion.sw2Value', '取消并回 idle')}
+        />
+        <CompanionFact
+          label={t('settings.companion.sw3Label', 'SW3 / PD1')}
+          value={t('settings.companion.sw3Value', 'flash + OTA + diag')}
+        />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 8, marginTop: 12 }}>
+        <CompanionFact
+          label={t('settings.companion.bringupProjectLabel', '当前硬件工程')}
+          value="cubeide/Companion_Nucleo_WB55RG_Bringup"
+          mono
+        />
+        <CompanionFact
+          label={t('settings.companion.productIocLabel', '正式产品 .ioc')}
+          value="Companion_Pendant.ioc"
+          mono
+        />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12, paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)' }}>
+        {commands.map(command => (
+          <Btn
+            key={command.id}
+            variant={copied === command.id ? 'blue' : 'ghost'}
+            size="sm"
+            icon={copied === command.id ? 'check' : 'copy'}
+            onClick={() => void copy(command.id, command.value)}
+          >
+            {copied === command.id ? t('common.copied') : command.label}
+          </Btn>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function CompanionFact({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        padding: '8px 10px',
+        borderRadius: 7,
+        border: '0.5px solid var(--ol-line-soft)',
+        background: 'var(--ol-control-track)',
+      }}
+    >
+      <div style={{ fontSize: 10.5, color: 'var(--ol-ink-4)', marginBottom: 3 }}>{label}</div>
+      <div
+        title={value}
+        style={{
+          fontSize: 11.5,
+          color: 'var(--ol-ink)',
+          fontFamily: mono ? 'var(--ol-font-mono)' : undefined,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {value}
+      </div>
+    </div>
   );
 }
 
@@ -335,6 +465,21 @@ function DeviceFirmwareSettingsCard() {
 
       <DeviceSettingsStatusStrip snapshot={snapshot} t={t} />
 
+      <DeviceSettingsPanel
+        title={t('settings.device.bleNameLabel', '蓝牙名称')}
+        desc={t('settings.device.bleNameDesc', '1-32 个 ASCII 字符；部分 Windows 设备名变更需要重连或重新配对后才显示。')}
+      >
+        <div className="ol-device-ble-name-card">
+          <input
+            value={form.bleName}
+            maxLength={32}
+            disabled={controlsDisabled}
+            onChange={event => setForm(current => ({ ...current, bleName: event.target.value }))}
+            style={{ ...inputStyle, flex: '0 1 320px', maxWidth: 320 }}
+          />
+        </div>
+      </DeviceSettingsPanel>
+
       {detailText && (
         <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 8 }}>
           {detailText}
@@ -388,24 +533,6 @@ function DeviceFirmwareSettingsCard() {
         t={t}
       />
 
-      <DeviceSettingsPanel
-        title={t('settings.device.identityTitle', '设备标识')}
-        desc={t('settings.device.identityDesc', '设备在系统蓝牙列表中的显示名称。')}
-      >
-        <SettingRow
-          label={t('settings.device.bleNameLabel', '蓝牙名称')}
-          desc={t('settings.device.bleNameDesc', '1-32 个 ASCII 字符；部分 Windows 设备名变更需要重连或重新配对后才显示。')}
-        >
-          <input
-            value={form.bleName}
-            maxLength={32}
-            disabled={controlsDisabled}
-            onChange={event => setForm(current => ({ ...current, bleName: event.target.value }))}
-            style={{ ...inputStyle, maxWidth: 320 }}
-          />
-        </SettingRow>
-      </DeviceSettingsPanel>
-
       {footerText && (
         <div style={{ fontSize: 11.5, color: validationError || status === 'error' ? 'var(--ol-err)' : status === 'saved' ? 'var(--ol-ok)' : 'var(--ol-ink-4)', lineHeight: 1.45, paddingTop: 12, borderTop: '0.5px solid var(--ol-line-soft)' }}>
           {footerText}
@@ -420,20 +547,22 @@ function DeviceSettingsPanel({
   desc,
   children,
 }: {
-  title: string;
+  title?: string;
   desc?: string;
   children: ReactNode;
 }) {
   return (
     <section className="ol-device-settings-panel">
-      <div className="ol-device-settings-panel-header">
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{title}</div>
-          {desc && (
-            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>
-          )}
+      {title && (
+        <div className="ol-device-settings-panel-header">
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>{title}</div>
+            {desc && (
+              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 2, lineHeight: 1.45 }}>{desc}</div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
       {children}
     </section>
   );

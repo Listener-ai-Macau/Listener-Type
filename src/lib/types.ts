@@ -290,9 +290,8 @@ export interface WindowsImeStatus {
   dllPath: string | null;
 }
 
-/** Auto-update 渠道偏好。stable = 跟正式版（默认）；beta = Settings 里多一个
- *  手动下载 Beta 的入口。不影响 plugin-updater 的自动检查路径。 */
-export type UpdateChannel = 'stable' | 'beta';
+/** Auto-update 渠道偏好。当前只发布官方稳定版；字段保留用于兼容旧配置。 */
+export type UpdateChannel = 'stable';
 
 export interface CustomStylePrompts {
   raw: string;
@@ -461,8 +460,7 @@ export interface UserPreferences {
    *  不想被主窗口打扰。开后所有启动路径都不弹窗，从菜单栏 / 托盘进入主窗口。默认 false。 */
   startMinimized: boolean;
   darkMode: boolean;
-  /** 自动更新渠道。'stable'（默认）= plugin-updater 仅检查正式版；
-   *  'beta' = Settings → About 出现手动下载 Beta 的入口。 */
+  /** 自动更新渠道。当前固定为 'stable'，保留字段用于兼容旧配置。 */
   updateChannel: UpdateChannel;
   /** 流式输入：润色 SSE 一边到达一边逐字模拟键盘事件输出到当前焦点。开启后用户感知到
    *  的处理时延显著降低。v1 限定 macOS + OpenAI-compatible provider，其他配置自动回落

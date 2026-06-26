@@ -68,19 +68,22 @@ pub enum DictationInputSource {
     EmbeddedBle,
 }
 
-/// Auto-update 渠道。决定 Settings → 关于 里展示哪一类版本信息。
-/// `Stable` 沿用 `tauri-plugin-updater` 的默认 endpoints（即 `tauri.conf.json`
-/// 里的 `latest-{{target}}-{{arch}}.json`），与发版 pipeline 对齐。
-/// `Beta` 不动 plugin endpoints —— 只解锁 Settings 里"手动下载最新 Beta"的入口
-/// （fetch GitHub `prerelease` + 跳浏览器），物理隔离 Beta 包不会通过 auto-update
-/// 推到正式版用户。详见 README 的"Contributing workflow"和 CLAUDE.md 的
-/// `Branch & release-channel workflow` 段落。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+/// Auto-update 渠道。当前只发布官方稳定版；字段保留用于兼容旧配置文件。
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateChannel {
     #[default]
     Stable,
-    Beta,
+}
+
+impl<'de> Deserialize<'de> for UpdateChannel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let _legacy_value = Option::<String>::deserialize(deserializer)?;
+        Ok(UpdateChannel::Stable)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1209,8 +1212,7 @@ pub struct UserPreferences {
     /// Windows Foundry Local Whisper 模型在 runtime 中保持加载多久。
     #[serde(default = "default_local_asr_keep_loaded_secs")]
     pub foundry_local_asr_keep_loaded_secs: u32,
-    /// Auto-update 渠道偏好。stable = 跟正式版（默认）；beta = Settings 里多
-    /// 一个手动下载 Beta 的入口。不影响 plugin-updater 的自动检查路径。
+    /// Auto-update 渠道偏好。当前固定为 stable，保留字段用于兼容旧配置。
     #[serde(default)]
     pub update_channel: UpdateChannel,
     /// 历史记录保留天数。0 = 不按时间清理（仅受 200 条上限）。默认 7 天。

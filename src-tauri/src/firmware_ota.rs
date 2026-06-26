@@ -932,8 +932,8 @@ fn require_bool(value: Option<&Value>, field: &str) -> Result<bool, String> {
 fn require_channel(value: Option<&Value>) -> Result<String, String> {
     let channel = require_string(value, "channel")?;
     match channel.as_str() {
-        "stable" | "beta" | "internal-test" => Ok(channel),
-        _ => Err("channel must be stable, beta, or internal-test.".to_string()),
+        "stable" | "development" => Ok(channel),
+        _ => Err("channel must be stable or development.".to_string()),
     }
 }
 
@@ -1036,7 +1036,7 @@ mod tests {
 
     fn context() -> FirmwareOtaValidationContext {
         FirmwareOtaValidationContext {
-            desktop_version: "1.3.3".to_string(),
+            desktop_version: "1.0.0".to_string(),
             expected_hardware_revision: "keyboard-v1".to_string(),
             current_firmware_version: None,
         }
@@ -1047,7 +1047,7 @@ mod tests {
             r#"{{
   "schema_version": 2,
   "created_at_utc": "2026-05-26T00:00:00Z",
-  "channel": "internal-test",
+  "channel": "development",
   "firmware": {{
     "project": "voice-keyboard-firmware",
     "version": "1.2.0",
@@ -1061,7 +1061,7 @@ mod tests {
   "requirements": {{
     "hardware_revision": "keyboard-v1",
     "protocol_version": 1,
-    "min_desktop_version": "1.3.3"
+    "min_desktop_version": "1.0.0"
   }},
   "ble_identity": {{
     "name": "listener",
@@ -1102,7 +1102,7 @@ mod tests {
     fn schema_v2_accepts_required_gatt_chunk_size() {
         let result = validate_package(
             &manifest_v2(
-                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.3.3","gatt_chunk_bytes":500}"#,
+                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.0.0","gatt_chunk_bytes":500}"#,
             ),
             FIRMWARE_BYTES,
             &context(),
@@ -1119,7 +1119,7 @@ mod tests {
     fn rejects_gatt_chunk_above_safe_limit() {
         let result = validate_package(
             &manifest_v2(
-                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.3.3","gatt_chunk_bytes":499}"#,
+                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.0.0","gatt_chunk_bytes":499}"#,
             ),
             FIRMWARE_BYTES,
             &context(),
@@ -1147,7 +1147,7 @@ mod tests {
     #[test]
     fn rejects_version_too_long_for_ble_ota_control() {
         let manifest = manifest_v2(
-            r#","firmware":{"project":"voice-keyboard-firmware","version":"v1002.0.0-ota-test-226-g99934ff-dirty","git_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","git_dirty":true,"target":"esp32s3","file":"firmware_ota.bin","size_bytes":6,"sha256":"6d3841935f58db1c3efa67022f2d770184be6fdef93c087bca10c30e70157e84"}"#,
+            r#","firmware":{"project":"voice-keyboard-firmware","version":"1.0.0-local-build-226-g99934ff-dirty","git_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","git_dirty":true,"target":"esp32s3","file":"firmware_ota.bin","size_bytes":6,"sha256":"6d3841935f58db1c3efa67022f2d770184be6fdef93c087bca10c30e70157e84"}"#,
         );
         let result = validate_package(&manifest, FIRMWARE_BYTES, &context());
 
@@ -1169,9 +1169,9 @@ mod tests {
 
     #[test]
     fn version_helpers_match_ui_behavior() {
-        assert_eq!(compare_versionish("v1.3.3", "1.3.2"), 1);
-        assert_eq!(compare_versionish("1.3.3", "1.3.3"), 0);
-        assert_eq!(compare_versionish("1.3.3", "1.4.0"), -1);
+        assert_eq!(compare_versionish("v1.0.1", "1.0.0"), 1);
+        assert_eq!(compare_versionish("1.0.0", "1.0.0"), 0);
+        assert_eq!(compare_versionish("1.0.0", "1.0.1"), -1);
         assert!(firmware_ota_versions_match(" v1.2.0 ", "1.2.0"));
         assert!(firmware_ota_versions_match("1.2.0", "v1.2.0"));
         assert!(!firmware_ota_versions_match("1.2.0-dev", "1.2.0"));

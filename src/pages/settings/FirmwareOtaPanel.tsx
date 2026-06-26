@@ -1,12 +1,20 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 import { APP_VERSION } from '../../lib/appVersion';
 import {
   exportDiagnosticPackage,
+  flashWiredFirmwarePackage,
   getFirmwareOtaPreflightSnapshot,
+  listWiredFirmwarePorts,
   loadFirmwareOtaPackage,
+  loadWiredFirmwarePackage,
+  repairWiredFirmwareBootloader,
   transferFirmwareOtaBle,
+  type WiredFirmwareFlashResult,
+  type WiredFirmwarePackagePayload,
+  type WiredFirmwareProgressPayload,
+  type WiredFirmwareSerialPort,
 } from '../../lib/ipc';
 import {
   compareVersionish,
@@ -32,6 +40,7 @@ const OTA_VERSION_QUERY_TIMEOUT_MS = 15_000;
 const OTA_VERSION_QUERY_POLL_MS = 700;
 
 interface SelectedPackage {
+  path: string;
   manifest: FirmwareOtaManifest;
   manifestText: string;
   firmwareBytes: Uint8Array;
@@ -48,8 +57,11 @@ export function FirmwareOtaPanel({
   bleStatus: EmbeddedBleProbeStatus;
 }) {
   const { t, i18n } = useTranslation();
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const [state, dispatch] = useReducer(firmwareOtaReducer, initialFirmwareOtaState);
+  const [firmwareMode, setFirmwareMode] = useState<'ble' | 'wired'>('ble');
+  const [wiredBusy, setWiredBusy] = useState(false);
+  const wiredRef = useRef<FirmwareWiredFlashHandle>(null);
+  const [wiredAction, setWiredAction] = useState<{ canFlash: boolean; isFlashing: boolean }>({ canFlash: false, isFlashing: false });
   const [selectedPackage, setSelectedPackage] = useState<SelectedPackage | null>(null);
   const [blockers, setBlockers] = useState<FirmwareOtaBlocker[]>([]);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
@@ -60,6 +72,7 @@ export function FirmwareOtaPanel({
   const [progressBytes, setProgressBytes] = useState<{ sent: number; total: number } | null>(null);
 
   const transferActive = state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying';
+  const firmwareActionBusy = transferActive || wiredBusy;
   const statusTone = userStateTone(state.userState);
   const statusLabel = userStateLabel(state.userState, t);
 
@@ -141,36 +154,7 @@ export function FirmwareOtaPanel({
   }, [otaSnapshot?.device.firmwareVersion, selectedPackage]);
   const canStart = !!selectedPackage && state.userState === 'ready' && effectiveBlockers.length === 0 && !transferActive;
 
-  const onFilesSelected = async (files: FileList | null) => {
-    setValidationErrors([]);
-    setBlockers([]);
-    setSelectedPackage(null);
-    setProgressBytes(null);
-    if (!files || files.length === 0) return;
-    dispatch({ type: 'check' });
-    const selected = Array.from(files);
-    const manifestFile = selected.find(file => file.name === 'ota_manifest.json' || (file.name.endsWith('.json') && file.webkitRelativePath.includes('ota_manifest')));
-    const firmwareFile = selected.find(file => file.name === 'firmware_ota.bin' || (file.name.endsWith('.bin') && !file.name.startsWith('.')));
-    if (!manifestFile || !firmwareFile) {
-      dispatch({ type: 'failed', failureCode: 'manifestMismatch', message: 'Missing ota_manifest.json or firmware_ota.bin.' });
-      setValidationErrors([t('settings.recording.firmwareOtaMissingFiles', 'OTA 包目录里需要包含 ota_manifest.json 和 firmware_ota.bin。')]);
-      return;
-    }
-
-    try {
-      const manifestText = await manifestFile.text();
-      const firmwareBytes = new Uint8Array(await firmwareFile.arrayBuffer());
-      await acceptPackage(manifestText, firmwareBytes, 'OTA package directory');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      dispatch({ type: 'failed', failureCode: 'manifestMismatch', message });
-      setValidationErrors([message]);
-    } finally {
-      if (inputRef.current) inputRef.current.value = '';
-    }
-  };
-
-  const chooseZipPackage = async () => {
+  const choosePackage = async (directory: boolean) => {
     setValidationErrors([]);
     setBlockers([]);
     setSelectedPackage(null);
@@ -179,13 +163,13 @@ export function FirmwareOtaPanel({
       const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({
         multiple: false,
-        directory: false,
-        filters: [{ name: 'Listener OTA package', extensions: ['zip'] }],
+        directory,
+        filters: directory ? undefined : [{ name: 'Listener firmware package', extensions: ['zip'] }],
       });
       if (typeof selected !== 'string') return;
       dispatch({ type: 'check' });
       const payload = await loadFirmwareOtaPackage(selected);
-      await acceptPackage(payload.manifestText, new Uint8Array(payload.firmwareBytes), payload.sourceLabel);
+      await acceptPackage(selected, payload.manifestText, new Uint8Array(payload.firmwareBytes), payload.sourceLabel);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       dispatch({ type: 'failed', failureCode: 'manifestMismatch', message });
@@ -193,7 +177,7 @@ export function FirmwareOtaPanel({
     }
   };
 
-  const acceptPackage = async (manifestText: string, firmwareBytes: Uint8Array, sourceLabel: string) => {
+  const acceptPackage = async (path: string, manifestText: string, firmwareBytes: Uint8Array, sourceLabel: string) => {
     const result = await validateFirmwareOtaPackage(manifestText, firmwareBytes, {
       desktopVersion: APP_VERSION,
       expectedHardwareRevision: EXPECTED_HARDWARE_REVISION,
@@ -204,6 +188,7 @@ export function FirmwareOtaPanel({
       return;
     }
     setSelectedPackage({
+      path,
       manifest: result.manifest,
       manifestText,
       firmwareBytes,
@@ -326,6 +311,7 @@ export function FirmwareOtaPanel({
   };
 
   return (
+    <>
     <div
       style={{
         marginTop: 8,
@@ -338,29 +324,18 @@ export function FirmwareOtaPanel({
         gap: 12,
       }}
     >
-      <input
-        ref={inputRef}
-        type="file"
-        {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
-        onChange={event => void onFilesSelected(event.target.files)}
-        style={{ display: 'none' }}
-      />
       <div className="ol-firmware-ota-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ol-ink)' }}>
             {t('settings.recording.firmwareOtaTitle', '设备固件')}
           </div>
-          <Pill tone={statusTone} size="sm">{statusLabel}</Pill>
         </div>
         <div className="ol-firmware-ota-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Btn variant="ghost" size="sm" icon="doc" onClick={() => void chooseZipPackage()} disabled={transferActive}>
-            {t('settings.recording.firmwareOtaChoosePackage', '选择 OTA zip')}
+          <Btn variant="ghost" size="sm" icon="doc" onClick={() => void choosePackage(false)} disabled={firmwareActionBusy}>
+            {t('settings.recording.firmwareOtaChoosePackage', '选择固件 zip')}
           </Btn>
-          <Btn variant="soft" size="sm" icon="archive" onClick={() => inputRef.current?.click()} disabled={transferActive}>
+          <Btn variant="soft" size="sm" icon="archive" onClick={() => void choosePackage(true)} disabled={firmwareActionBusy}>
             {t('settings.recording.firmwareOtaChoosePackageDir', '目录')}
-          </Btn>
-          <Btn variant="blue" size="sm" icon="download" onClick={() => void startUpdate()} disabled={!canStart}>
-            {t('settings.recording.firmwareOtaStart', '更新')}
           </Btn>
         </div>
       </div>
@@ -368,106 +343,603 @@ export function FirmwareOtaPanel({
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.55 }}>
         {t(
           'settings.recording.firmwareOtaDesc',
-          '选择 firmware repo 生成的 OTA 包；更新时会暂停录音入口，只走独立 BLE OTA 通道，不占用 BLE audio 或 HID。',
+          '选择 firmware repo 生成的同一个固件发布包，然后选择蓝牙 OTA 或有线刷机。',
         )}
       </div>
 
-      {selectedPackage && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-          <FirmwareOtaFact label={t('settings.recording.firmwareOtaPackageVersion', '升级包版本')} value={selectedPackage.manifest.version} />
-          <FirmwareOtaFact label={t('settings.recording.firmwareOtaChannel', '渠道')} value={selectedPackage.manifest.channel} />
-          <FirmwareOtaFact label={t('settings.recording.firmwareOtaSize', '升级包大小')} value={formatBytes(selectedPackage.manifest.fileSizeBytes)} />
+      <div className="ol-firmware-control-bar">
+        <div className="ol-firmware-mode-switch" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Btn variant={firmwareMode === 'ble' ? 'blue' : 'soft'} size="sm" icon="cloud" onClick={() => setFirmwareMode('ble')} disabled={firmwareActionBusy}>
+            {t('settings.recording.firmwareModeBleOta', '蓝牙 OTA')}
+          </Btn>
+          <Btn variant={firmwareMode === 'wired' ? 'blue' : 'soft'} size="sm" icon="bolt" onClick={() => setFirmwareMode('wired')} disabled={firmwareActionBusy}>
+            {t('settings.recording.firmwareModeWired', '有线刷机')}
+          </Btn>
+        </div>
+
+        <div className="ol-firmware-unified-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <Btn variant="blue" size="sm" icon="download" onClick={() => void startUpdate()} disabled={firmwareMode !== 'ble' || !canStart}>
+            {t('settings.recording.firmwareOtaStart', '更新')}
+          </Btn>
+          <Btn variant="blue" size="sm" icon="download" onClick={() => void wiredRef.current?.flash()} disabled={firmwareMode !== 'wired' || !wiredAction.canFlash}>
+            {wiredAction.isFlashing ? t('settings.recording.wiredFirmwareFlashing', '刷入中') : t('settings.recording.wiredFirmwareFlash', '有线刷入')}
+          </Btn>
+        </div>
+      </div>
+
+      {firmwareMode === 'ble' && (
+        <div
+          style={{
+            paddingTop: 12,
+            borderTop: '0.5px solid var(--ol-line-soft)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div className="ol-firmware-ble-header" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ol-ink)' }}>
+              {t('settings.recording.firmwareModeBleOta', '蓝牙 OTA')}
+            </div>
+            <Pill tone={statusTone} size="sm">{statusLabel}</Pill>
+          </div>
+
+          <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.55 }}>
+            {t(
+              'settings.recording.firmwareOtaBleDesc',
+              '通过蓝牙发送 OTA 固件，只读取 ota_manifest.json 和 firmware_ota.bin，不占用 BLE audio 或 HID。',
+            )}
+          </div>
+
+          {!selectedPackage && (
+            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
+              {t('settings.recording.firmwareOtaNeedsSharedPackage', '先在上方选择固件发布包，再选择蓝牙 OTA。')}
+            </div>
+          )}
+
+          {selectedPackage && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(156px, 1fr))', gap: 8 }}>
+              <FirmwareOtaFact label={t('settings.recording.firmwareOtaPackageVersion', '升级包版本')} value={selectedPackage.manifest.version} />
+              <FirmwareOtaFact label={t('settings.recording.firmwareOtaChannel', '渠道')} value={selectedPackage.manifest.channel} />
+              <FirmwareOtaFact label={t('settings.recording.firmwareOtaSize', '升级包大小')} value={formatBytes(selectedPackage.manifest.fileSizeBytes)} />
+            </div>
+          )}
+
+          {selectedPackage && (
+            <FirmwareOtaReadinessSummary
+              snapshot={otaSnapshot}
+              snapshotError={snapshotError}
+              refreshing={snapshotRefreshing}
+              onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true })}
+              t={t}
+            />
+          )}
+
+          {(state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying') && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1, height: 6, borderRadius: 999, overflow: 'hidden', background: 'var(--ol-control-track)' }}>
+                  <div
+                    style={{
+                      width: `${Math.max(2, state.progress)}%`,
+                      height: '100%',
+                      background: 'var(--ol-blue)',
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', minWidth: 112, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {state.userState === 'transferring' && progressBytes
+                    ? `${formatBytes(progressBytes.sent)} / ${formatBytes(progressBytes.total)}`
+                    : state.userState === 'transferring' ? `${state.progress}%` : t('settings.recording.firmwareOtaFinalizingBytes', '已传完')}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', lineHeight: 1.4 }}>
+                {state.userState === 'transferring'
+                  ? t('settings.recording.firmwareOtaTransferProgress', '正在发送固件...')
+                  : state.userState === 'rebooting'
+                    ? t('settings.recording.firmwareOtaFinalizeProgress', '固件已发送，正在校验并准备重启...')
+                    : t('settings.recording.firmwareOtaVerifyProgress', '正在重新连接并确认固件版本...')}
+              </div>
+            </div>
+          )}
+
+          {(validationErrors.length > 0 || effectiveBlockers.length > 0 || state.failureCode) && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {validationErrors.map(error => (
+                <div key={error} style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
+                  {error}
+                </div>
+              ))}
+              {effectiveBlockers.map(item => (
+                <div key={item.code} style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
+                  {formatFirmwareOtaBlocker(item, i18n.resolvedLanguage ?? i18n.language)}
+                </div>
+              ))}
+              {state.failureCode && (
+                <>
+                  {state.message && (
+                    <div style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
+                      {state.message}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
+                    {formatFirmwareOtaFailureNextStep(state.failureCode, i18n.resolvedLanguage ?? i18n.language)}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {dynamicWarnings.map(warning => (
+            <div key={warning} style={{ fontSize: 11.5, color: '#b45309', lineHeight: 1.5 }}>
+              {formatFirmwareOtaWarning(warning, i18n.resolvedLanguage ?? i18n.language)}
+            </div>
+          ))}
+
+          {(state.userState === 'failed' || state.userState === 'rolledBack') && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Btn variant="soft" size="sm" icon="refresh" onClick={retryAfterFailure}>
+                {t('common.retry')}
+              </Btn>
+              <Btn variant="ghost" size="sm" icon="doc" onClick={() => void exportDiagnostics()} disabled={diagnosticStatus === 'busy'}>
+                {diagnosticStatus === 'busy'
+                  ? t('modal.about.exporting')
+                  : t('modal.about.exportDiagnosticPackageBtn')}
+              </Btn>
+              {diagnosticStatus === 'ok' && <span style={{ fontSize: 11, color: 'var(--ol-ok)' }}>{t('modal.about.exportSuccess')}</span>}
+              {diagnosticStatus === 'err' && <span style={{ fontSize: 11, color: 'var(--ol-err)' }}>{t('modal.about.exportFailed')}</span>}
+            </div>
+          )}
+        </div>
+      )}
+      {firmwareMode === 'wired' && (
+        <FirmwareWiredFlashPanel ref={wiredRef} packagePath={selectedPackage?.path ?? null} disabled={transferActive} onBusyChange={setWiredBusy} onActionStateChange={setWiredAction} />
+      )}
+    </div>
+    </>
+  );
+}
+
+interface WiredPackageSelection {
+  path: string;
+  payload: WiredFirmwarePackagePayload;
+}
+
+type WiredFlashStatus = 'idle' | 'checking' | 'ready' | 'flashing' | 'repairing' | 'ok' | 'err';
+
+interface FirmwareWiredFlashPanelProps {
+  packagePath: string | null;
+  disabled?: boolean;
+  onBusyChange?: (busy: boolean) => void;
+  onActionStateChange?: (state: { canFlash: boolean; isFlashing: boolean }) => void;
+}
+
+interface FirmwareWiredFlashHandle {
+  flash: () => void;
+}
+
+const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWiredFlashPanelProps>(function FirmwareWiredFlashPanel({
+  packagePath,
+  disabled = false,
+  onBusyChange,
+  onActionStateChange,
+}, ref) {
+  const { t } = useTranslation();
+  const [selection, setSelection] = useState<WiredPackageSelection | null>(null);
+  const [ports, setPorts] = useState<WiredFirmwareSerialPort[]>([]);
+  const [port, setPort] = useState('COMx');
+  const [baud, setBaud] = useState('460800');
+  const [preserveOtaData, setPreserveOtaData] = useState(false);
+  const [status, setStatus] = useState<WiredFlashStatus>('idle');
+  const [message, setMessage] = useState<string | null>(null);
+  const [result, setResult] = useState<WiredFirmwareFlashResult | null>(null);
+  const [progress, setProgress] = useState<WiredFirmwareProgressPayload | null>(null);
+
+  const busy = status === 'checking' || status === 'flashing' || status === 'repairing';
+  const statusTone = wiredStatusTone(status);
+  const statusLabel = wiredStatusLabel(status, t);
+  const canFlash = !!selection && !busy && !disabled;
+  const isFlashing = status === 'flashing';
+
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+
+  useEffect(() => {
+    return () => onBusyChange?.(false);
+  }, [onBusyChange]);
+
+  useEffect(() => {
+    onActionStateChange?.({ canFlash, isFlashing });
+  }, [canFlash, isFlashing, onActionStateChange]);
+
+  useEffect(() => {
+    return () => onActionStateChange?.({ canFlash: false, isFlashing: false });
+  }, [onActionStateChange]);
+
+  const refreshPorts = useCallback(async () => {
+    try {
+      const nextPorts = await listWiredFirmwarePorts();
+      setPorts(nextPorts);
+      const likely = nextPorts.find(item => item.isLikelyEsp32);
+      if (likely && (port === 'COMx' || port.trim() === '')) {
+        setPort(likely.port);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }, [port]);
+
+  useEffect(() => {
+    void refreshPorts();
+  }, [refreshPorts]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSelection(null);
+    setResult(null);
+    setMessage(null);
+    setProgress(null);
+    if (!packagePath) {
+      setStatus('idle');
+      return () => {
+        cancelled = true;
+      };
+    }
+    setStatus('checking');
+    void loadWiredFirmwarePackage(packagePath)
+      .then(payload => {
+        if (cancelled) return;
+        setSelection({ path: packagePath, payload });
+        setStatus('ready');
+      })
+      .catch(error => {
+        if (cancelled) return;
+        setStatus('err');
+        setMessage(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [packagePath]);
+
+  const runWiredOperationWithProgress = async (
+    action: WiredFirmwareProgressPayload['action'],
+    operation: () => Promise<WiredFirmwareFlashResult>,
+  ) => {
+    setProgress(makeInitialWiredProgress(action, port, selection?.payload.version ?? null));
+    const unlisten = await listen<WiredFirmwareProgressPayload>('wired-firmware:progress', event => {
+      if (event.payload.action === action) {
+        setProgress(event.payload);
+      }
+    });
+    try {
+      return await operation();
+    } finally {
+      unlisten();
+    }
+  };
+
+  const startWiredFlash = async () => {
+    if (!selection) return;
+    setStatus('flashing');
+    setMessage(null);
+    setResult(null);
+    try {
+      const nextResult = await runWiredOperationWithProgress('flash', () =>
+        flashWiredFirmwarePackage({
+          path: selection.path,
+          port,
+          baud: parseBaud(baud) ?? 460800,
+          preserveOtaData,
+        }),
+      );
+      setResult(nextResult);
+      setProgress(makeDoneWiredProgress('flash', nextResult.port, nextResult.version));
+      setStatus('ok');
+    } catch (error) {
+      setStatus('err');
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  useImperativeHandle(ref, () => ({
+    flash: () => {
+      void startWiredFlash();
+    },
+  }), [startWiredFlash]);
+
+  const startBootRepair = async () => {
+    if (!selection) return;
+    setStatus('repairing');
+    setMessage(null);
+    setResult(null);
+    try {
+      const nextResult = await runWiredOperationWithProgress('bootloaderRepair', () =>
+        repairWiredFirmwareBootloader({
+          path: selection.path,
+          port,
+          baud: null,
+        }),
+      );
+      setResult(nextResult);
+      setProgress(makeDoneWiredProgress('bootloaderRepair', nextResult.port, nextResult.version));
+      setStatus('ok');
+    } catch (error) {
+      setStatus('err');
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const selectedPayload = selection?.payload ?? null;
+  const artifacts = selectedPayload?.artifacts ?? [];
+
+  return (
+    <div
+      style={{
+        paddingTop: 12,
+        borderTop: '0.5px solid var(--ol-line-soft)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
+      <div className="ol-firmware-wired-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ol-ink)' }}>
+            {t('settings.recording.wiredFirmwareTitle', '有线出厂刷机')}
+          </div>
+          <Pill tone={statusTone} size="sm">{statusLabel}</Pill>
+        </div>
+        <div className="ol-firmware-wired-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Btn variant="soft" size="sm" icon="refresh" onClick={() => void refreshPorts()} disabled={busy || disabled}>
+            {t('settings.recording.wiredFirmwareRefreshPorts', '串口')}
+          </Btn>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.55 }}>
+        {t(
+          'settings.recording.wiredFirmwareDesc',
+          '使用上方已选择的同一个固件发布包，通过 USB/串口读取其中的 factory 子包，写入 bootloader、分区表和 app；也可以单独执行 Boot 修复。',
+        )}
+      </div>
+
+      {!packagePath && (
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
+          {t('settings.recording.wiredFirmwareNeedsSharedPackage', '先在上方选择固件发布包，再选择有线刷机。')}
         </div>
       )}
 
-      {selectedPackage && (
-        <FirmwareOtaReadinessSummary
-          snapshot={otaSnapshot}
-          snapshotError={snapshotError}
-          refreshing={snapshotRefreshing}
-          onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true })}
-          t={t}
-        />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+          <span style={{ fontSize: 10.5, color: 'var(--ol-ink-4)' }}>{t('settings.recording.wiredFirmwarePort', '串口')}</span>
+          <input
+            list="listener-wired-firmware-ports"
+            value={port}
+            onChange={event => setPort(event.target.value)}
+            placeholder="COMx"
+            disabled={busy || disabled || !packagePath}
+            style={wiredInputStyle}
+          />
+          <datalist id="listener-wired-firmware-ports">
+            <option value="COMx">{t('settings.recording.wiredFirmwareAutoPort', '自动识别')}</option>
+            {ports.map(item => <option key={item.port} value={item.port}>{item.label}</option>)}
+          </datalist>
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+          <span style={{ fontSize: 10.5, color: 'var(--ol-ink-4)' }}>{t('settings.recording.wiredFirmwareBaud', '刷机波特率')}</span>
+          <input
+            value={baud}
+            onChange={event => setBaud(event.target.value.replace(/[^\d]/g, '').slice(0, 7))}
+            placeholder="460800"
+            disabled={busy || disabled || !packagePath}
+            inputMode="numeric"
+            style={wiredInputStyle}
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 18, minWidth: 0, fontSize: 11.5, color: 'var(--ol-ink-3)' }}>
+          <input
+            type="checkbox"
+            checked={preserveOtaData}
+            onChange={event => setPreserveOtaData(event.target.checked)}
+            disabled={busy || disabled || !packagePath}
+          />
+          <span>{t('settings.recording.wiredFirmwarePreserveOta', '保留 OTA 选择区')}</span>
+        </label>
+      </div>
+
+      {selectedPayload && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(156px, 1fr))', gap: 8 }}>
+          <FirmwareOtaFact label={t('settings.recording.wiredFirmwarePackageType', '包类型')} value="factory full flash" />
+          <FirmwareOtaFact label={t('settings.recording.wiredFirmwareVersion', '版本')} value={selectedPayload.version} />
+          <FirmwareOtaFact label={t('settings.recording.wiredFirmwareTarget', '芯片')} value={selectedPayload.target} />
+        </div>
       )}
 
-      {(state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying') && (
+      {artifacts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {artifacts.map(item => (
+            <div key={`${item.role}-${item.file}`} style={{ fontSize: 11, color: 'var(--ol-ink-4)', fontFamily: 'var(--ol-font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {item.role}@{item.offset} {item.file} {item.sizeBytes > 0 ? formatBytes(item.sizeBytes) : ''}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selectedPayload?.notes.map(note => (
+        <div key={note} style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
+          {note}
+        </div>
+      ))}
+
+      {progress && (busy || status === 'ok' || status === 'err') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ flex: 1, height: 6, borderRadius: 999, overflow: 'hidden', background: 'var(--ol-control-track)' }}>
               <div
                 style={{
-                  width: `${Math.max(2, state.progress)}%`,
+                  width: `${Math.max(2, Math.min(100, progress.percent))}%`,
                   height: '100%',
-                  background: 'var(--ol-blue)',
-                  transition: 'width 0.3s ease',
+                  background: progress.action === 'bootloaderRepair' ? 'var(--ol-warn)' : 'var(--ol-blue)',
+                  transition: 'width 0.25s ease',
                 }}
               />
             </div>
-            <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', minWidth: 92, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-              {state.userState === 'transferring' && progressBytes
-                ? `${formatBytes(progressBytes.sent)} / ${formatBytes(progressBytes.total)}`
-                : state.userState === 'transferring' ? `${state.progress}%` : t('settings.recording.firmwareOtaFinalizingBytes', '已传完')}
+            <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', minWidth: 112, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              {progress.bytesTotal > 0
+                ? `${formatBytes(progress.bytesWritten)} / ${formatBytes(progress.bytesTotal)}`
+                : `${Math.max(0, Math.min(100, progress.percent))}%`}
             </span>
           </div>
           <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', lineHeight: 1.4 }}>
-            {state.userState === 'transferring'
-              ? t('settings.recording.firmwareOtaTransferProgress', '正在发送固件...')
-              : state.userState === 'rebooting'
-                ? t('settings.recording.firmwareOtaFinalizeProgress', '固件已发送，正在校验并准备重启...')
-                : t('settings.recording.firmwareOtaVerifyProgress', '正在重新连接并确认固件版本...')}
+            {formatWiredProgressMessage(progress, t)}
           </div>
         </div>
       )}
 
-      {(validationErrors.length > 0 || effectiveBlockers.length > 0 || state.failureCode) && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {validationErrors.map(error => (
-            <div key={error} style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
-              {error}
-            </div>
-          ))}
-          {effectiveBlockers.map(item => (
-            <div key={item.code} style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
-              {formatFirmwareOtaBlocker(item, i18n.resolvedLanguage ?? i18n.language)}
-            </div>
-          ))}
-          {state.failureCode && (
-            <>
-              {state.message && (
-                <div style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
-                  {state.message}
-                </div>
-              )}
-              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
-                {formatFirmwareOtaFailureNextStep(state.failureCode, i18n.resolvedLanguage ?? i18n.language)}
-              </div>
-            </>
-          )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Btn
+          variant="ghost"
+          size="sm"
+          icon="bolt"
+          onClick={() => void startBootRepair()}
+          disabled={!selection || busy || disabled || !selectedPayload?.supportsBootRepair}
+        >
+          {status === 'repairing' ? t('settings.recording.wiredFirmwareRepairing', '修复中') : t('settings.recording.wiredFirmwareBootRepair', 'Boot 修复')}
+        </Btn>
+        {selectedPayload && !selectedPayload.supportsBootRepair && (
+          <span style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>
+            {t('settings.recording.wiredFirmwareBootRepairNeedsFactory', 'Boot 修复需要 factory 包。')}
+          </span>
+        )}
+      </div>
+
+      {message && (
+        <div style={{ fontSize: 11.5, color: status === 'err' ? 'var(--ol-err)' : 'var(--ol-ink-4)', lineHeight: 1.5 }}>
+          {message}
         </div>
       )}
 
-      {dynamicWarnings.map(warning => (
-        <div key={warning} style={{ fontSize: 11.5, color: '#b45309', lineHeight: 1.5 }}>
-          {formatFirmwareOtaWarning(warning, i18n.resolvedLanguage ?? i18n.language)}
-        </div>
-      ))}
-
-      {(state.userState === 'failed' || state.userState === 'rolledBack') && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Btn variant="soft" size="sm" icon="refresh" onClick={retryAfterFailure}>
-            {t('common.retry')}
-          </Btn>
-          <Btn variant="ghost" size="sm" icon="doc" onClick={() => void exportDiagnostics()} disabled={diagnosticStatus === 'busy'}>
-            {diagnosticStatus === 'busy'
-              ? t('modal.about.exporting')
-              : t('modal.about.exportDiagnosticPackageBtn')}
-          </Btn>
-          {diagnosticStatus === 'ok' && <span style={{ fontSize: 11, color: 'var(--ol-ok)' }}>{t('modal.about.exportSuccess')}</span>}
-          {diagnosticStatus === 'err' && <span style={{ fontSize: 11, color: 'var(--ol-err)' }}>{t('modal.about.exportFailed')}</span>}
+      {result && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--ol-ok)', lineHeight: 1.5 }}>
+            {result.action === 'bootloaderRepair'
+              ? t('settings.recording.wiredFirmwareRepairDone', 'Boot 修复完成。')
+              : t('settings.recording.wiredFirmwareFlashDone', '有线刷机完成。')}
+          </div>
+          <pre style={{ margin: 0, maxHeight: 156, overflow: 'auto', padding: 10, borderRadius: 7, background: 'var(--ol-control-track)', color: 'var(--ol-ink-3)', fontSize: 10.5, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+            {result.log}
+          </pre>
         </div>
       )}
     </div>
   );
+});
+
+function makeInitialWiredProgress(
+  action: WiredFirmwareProgressPayload['action'],
+  port: string,
+  version: string | null,
+): WiredFirmwareProgressPayload {
+  return {
+    action,
+    stage: 'loading',
+    port: port && port !== 'COMx' ? port : null,
+    version,
+    currentRole: null,
+    currentFile: null,
+    bytesWritten: 0,
+    bytesTotal: 0,
+    currentBytes: 0,
+    currentTotal: 0,
+    percent: 1,
+    message: 'Loading wired firmware package',
+  };
+}
+
+function makeDoneWiredProgress(
+  action: WiredFirmwareProgressPayload['action'],
+  port: string,
+  version: string,
+): WiredFirmwareProgressPayload {
+  return {
+    action,
+    stage: 'done',
+    port,
+    version,
+    currentRole: null,
+    currentFile: null,
+    bytesWritten: 0,
+    bytesTotal: 0,
+    currentBytes: 0,
+    currentTotal: 0,
+    percent: 100,
+    message: action === 'bootloaderRepair' ? 'Bootloader repair completed' : 'Wired factory flash completed',
+  };
+}
+
+function formatWiredProgressMessage(
+  progress: WiredFirmwareProgressPayload,
+  t: ReturnType<typeof useTranslation>['t'],
+): string {
+  switch (progress.stage) {
+    case 'loading':
+      return t('settings.recording.wiredFirmwareProgressLoading', '正在读取固件包...');
+    case 'packageLoaded':
+      return t('settings.recording.wiredFirmwareProgressPackageLoaded', '固件包已读取，正在准备串口。');
+    case 'connecting':
+      return progress.action === 'bootloaderRepair'
+        ? t('settings.recording.wiredFirmwareProgressRepairConnecting', '正在等待 Boot 修复窗口并连接串口...')
+        : t('settings.recording.wiredFirmwareProgressConnecting', '正在连接串口刷机模式...');
+    case 'connected':
+      return progress.port
+        ? t('settings.recording.wiredFirmwareProgressConnectedPort', '已连接 {{port}}。', { port: progress.port })
+        : t('settings.recording.wiredFirmwareProgressConnected', '已连接设备。');
+    case 'erasing':
+      return t('settings.recording.wiredFirmwareProgressErasing', '正在擦除 OTA 状态区...');
+    case 'erased':
+      return t('settings.recording.wiredFirmwareProgressErased', 'OTA 状态区已处理。');
+    case 'preparing':
+      return t('settings.recording.wiredFirmwareProgressPreparing', '正在准备刷机镜像...');
+    case 'writing': {
+      const role = wiredArtifactRoleLabel(progress.currentRole, t);
+      const file = progress.currentFile ? ` ${progress.currentFile}` : '';
+      const bytes = progress.currentTotal > 0
+        ? ` ${formatBytes(progress.currentBytes)} / ${formatBytes(progress.currentTotal)}`
+        : '';
+      return t('settings.recording.wiredFirmwareProgressWriting', '正在写入 {{role}}{{file}}...{{bytes}}', {
+        role,
+        file,
+        bytes,
+      });
+    }
+    case 'finalizing':
+      return t('settings.recording.wiredFirmwareProgressFinalizing', '正在校验并收尾...');
+    case 'done':
+      return progress.action === 'bootloaderRepair'
+        ? t('settings.recording.wiredFirmwareProgressRepairDone', 'Boot 修复完成。')
+        : t('settings.recording.wiredFirmwareProgressDone', '有线刷机完成。');
+    default:
+      return progress.message || `${progress.percent}%`;
+  }
+}
+
+function wiredArtifactRoleLabel(
+  role: string | null,
+  t: ReturnType<typeof useTranslation>['t'],
+): string {
+  switch (role) {
+    case 'bootloader':
+      return t('settings.recording.wiredFirmwareRoleBootloader', 'bootloader');
+    case 'partition_table':
+      return t('settings.recording.wiredFirmwareRolePartitionTable', '分区表');
+    case 'app':
+      return t('settings.recording.wiredFirmwareRoleApp', 'app');
+    default:
+      return role || t('settings.recording.wiredFirmwareRoleFirmware', '固件');
+  }
 }
 
 function FirmwareOtaFact({ label, value }: { label: string; value: string }) {
@@ -595,6 +1067,58 @@ function formatBytes(bytes: number): string {
     return `${kib.toFixed(1)} KB`;
   }
   return `${(kib / 1024).toFixed(2)} MB`;
+}
+
+function parseBaud(value: string): number | null {
+  const parsed = Number.parseInt(value.trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+const wiredInputStyle: React.CSSProperties = {
+  height: 30,
+  minWidth: 0,
+  borderRadius: 7,
+  border: '0.5px solid var(--ol-line-soft)',
+  background: 'var(--ol-control-track)',
+  color: 'var(--ol-ink)',
+  fontSize: 11.5,
+  padding: '0 9px',
+  fontFamily: 'var(--ol-font-mono)',
+};
+
+function wiredStatusTone(state: WiredFlashStatus): PillTone {
+  switch (state) {
+    case 'ready':
+    case 'ok':
+      return 'ok';
+    case 'checking':
+    case 'flashing':
+    case 'repairing':
+      return 'blue';
+    case 'err':
+      return 'err';
+    case 'idle':
+      return 'outline';
+  }
+}
+
+function wiredStatusLabel(state: WiredFlashStatus, t: ReturnType<typeof useTranslation>['t']): string {
+  switch (state) {
+    case 'idle':
+      return t('settings.recording.wiredFirmwareIdle', '未选择');
+    case 'checking':
+      return t('settings.recording.wiredFirmwareChecking', '检查中');
+    case 'ready':
+      return t('settings.recording.wiredFirmwareReady', '可刷入');
+    case 'flashing':
+      return t('settings.recording.wiredFirmwareFlashing', '刷入中');
+    case 'repairing':
+      return t('settings.recording.wiredFirmwareRepairing', '修复中');
+    case 'ok':
+      return t('settings.recording.wiredFirmwareOk', '完成');
+    case 'err':
+      return t('settings.recording.wiredFirmwareErr', '失败');
+  }
 }
 
 function formatFirmwareOtaBlocker(

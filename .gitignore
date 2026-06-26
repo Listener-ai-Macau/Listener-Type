@@ -15,4 +15,5 @@ ref/
 
 # Tauri
 **/target/
+src-tauri/target-idf-free/
 src-tauri/gen/

@@ -217,7 +217,7 @@ mod tests {
 
     fn validation_context() -> firmware_ota::FirmwareOtaValidationContext {
         firmware_ota::FirmwareOtaValidationContext {
-            desktop_version: "1.3.3".to_string(),
+            desktop_version: "1.0.0".to_string(),
             expected_hardware_revision: "keyboard-v2-n16r8".to_string(),
             current_firmware_version: None,
         }
@@ -228,7 +228,7 @@ mod tests {
             r#"{{
   "schema_version": 2,
   "created_at_utc": "2026-05-26T00:00:00Z",
-  "channel": "internal-test",
+  "channel": "development",
   "firmware": {{
     "project": "voice-keyboard-firmware",
     "version": "1.2.0",
@@ -242,7 +242,7 @@ mod tests {
   "requirements": {{
     "hardware_revision": "keyboard-v2-n16r8",
     "protocol_version": 1,
-    "min_desktop_version": "1.3.3"
+    "min_desktop_version": "1.0.0"
   }},
   "ble_identity": {{
     "name": "listener",
@@ -304,7 +304,7 @@ mod tests {
             "--firmware".into(),
             "firmware_ota.bin".into(),
             "--desktop-version".into(),
-            "1.3.3".into(),
+            "1.0.0".into(),
             "--hardware".into(),
             "keyboard-v2-n16r8".into(),
             "--current-version".into(),
@@ -316,7 +316,7 @@ mod tests {
 
         assert_eq!(args.manifest_path, PathBuf::from("ota_manifest.json"));
         assert_eq!(args.firmware_path, PathBuf::from("firmware_ota.bin"));
-        assert_eq!(args.desktop_version, "1.3.3");
+        assert_eq!(args.desktop_version, "1.0.0");
         assert_eq!(args.expected_hardware_revision, "keyboard-v2-n16r8");
         assert_eq!(args.current_firmware_version.as_deref(), Some("1.2.0"));
         assert!(args.preflight);
@@ -373,7 +373,7 @@ mod tests {
             firmware_path,
             preflight_only: true,
             transfer: false,
-            desktop_version: "1.3.3".to_string(),
+            desktop_version: "1.0.0".to_string(),
             expected_hardware_revision: "keyboard-v2-n16r8".to_string(),
             current_firmware_version: None,
             recording_active: false,

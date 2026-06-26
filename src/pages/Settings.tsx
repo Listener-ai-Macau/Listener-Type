@@ -26,9 +26,9 @@ export type SettingsSectionId = 'recording' | 'device' | 'providers' | 'shortcut
 // 「高级」放最末——本地推理 / 实验性开关都集中到这一栏，避免新手用户在主流程
 // 里误开 CPU 推理（之前提案：把 local-qwen3 / foundry-local-whisper 从主 ASR
 // 下拉藏进高级）。位置末尾也是「实验性」语义在 macOS 系统偏好里的惯用位置。
-const SECTION_ORDER: SettingsSectionId[] = ['recording', 'device', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
+const SECTION_ORDER: SettingsSectionId[] = ['device', 'recording', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
 
-export function Settings({ embedded = false, initialSection = 'recording' }: SettingsProps) {
+export function Settings({ embedded = false, initialSection = 'device' }: SettingsProps) {
   const { t } = useTranslation();
   const [section, setSection] = useState<SettingsSectionId>(initialSection);
 

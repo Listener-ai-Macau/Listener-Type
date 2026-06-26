@@ -1,6 +1,6 @@
 # Listener 语音键盘 README
 
-Listener 语音键盘是一个 BLE 桌面语音输入设备。它用自定义按键触发 Listener Type 动作，默认 KEY3 用于开始/停止录音；EC11 旋钮是开机键，开机后单击可在设备自定义键里配置，适合内部测试从安装、配对到第一次语音试玩的完整路径。
+Listener 语音键盘是一个 BLE 桌面语音输入设备。它用自定义按键触发 Listener Type 动作，默认 KEY3 用于开始/停止录音；EC11 旋钮是开机键，开机后单击可在设备自定义键里配置，覆盖从安装、配对到第一次语音试玩的完整路径。
 
 ## 硬件要求
 
@@ -14,12 +14,12 @@ Listener 语音键盘是一个 BLE 桌面语音输入设备。它用自定义按
 
 ## 安装
 
-内部测试下载入口：`docs/quickstart/voice-keyboard-download.md`
+1.0.0 下载入口：`docs/quickstart/voice-keyboard-download.md`
 
-- MSI：`.artifacts/windows-msvc/ListenerType_1.3.3_x64_en-US.msi`
-- MSI SHA256：`C69A5E7F0229366FFF677DB06D0C4121B8AF984C3A750482F4A3942CEB66E93F`
-- 便携 ZIP：`.artifacts/windows-msvc/ListenerType_1.3.3_x64_portable.zip`
-- ZIP SHA256：`AA0CEA6D88FC215A8899E5172D6D2A529091D3AEA949BF5EB994E32FA1C7DCD8`
+- MSI：`.artifacts/windows-msvc/ListenerType_1.0.0_x64_en-US.msi`
+- MSI SHA256：`8B22AD0BDE41CC10780020E1942651433257F4CD583A0EFE6E7A41C152CB50A5`
+- 便携 ZIP：`.artifacts/windows-msvc/ListenerType_1.0.0_x64_portable.zip`
+- ZIP SHA256：`B90DEE85DE56AF2B90064A0FA2B18880F513C65226D17D2184D456AB05BA6787`
 
 安装步骤：
 

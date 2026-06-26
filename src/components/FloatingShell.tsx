@@ -20,7 +20,7 @@ import { SelectionAsk } from '../pages/SelectionAsk';
 // 风格市场不再作为独立 nav tab —— 已整合为 Style 页面内 modal（入口在「风格包」标题右侧）。
 // LocalAsr 不再作为主 nav tab——本地 ASR 模型管理已合并到 Settings → Advanced 中
 // 通过 Settings -> Advanced 内的 <LocalAsr /> 渲染。这里之前的 import 与 NAV_BASE 条目都已移除。
-import { APP_VERSION_LABEL, IS_BETA_BUILD } from '../lib/appVersion';
+import { APP_VERSION_LABEL } from '../lib/appVersion';
 import { createDemoModeSession, type DemoModeSession } from '../lib/demoMode';
 import { embeddedBleProbeErrorMessage, runEmbeddedBleProbeWithTimeout, type EmbeddedBleProbeStatus } from '../lib/embeddedBleProbe';
 import { buildFirstRunPairingWizard, type FirstRunPairingAction, type FirstRunPairingStageStatus } from '../lib/firstRunPairingWizard';
@@ -487,21 +487,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
         }}>
 
         <div style={{ flex: 1 }} />
-
-        {IS_BETA_BUILD && (
-          <span style={{
-            display: 'inline-block',
-            padding: '2px 8px',
-            fontSize: 10,
-            fontWeight: 600,
-            letterSpacing: 0,
-            textTransform: 'uppercase',
-            color: 'var(--ol-blue)',
-            background: 'rgba(101,123,112,0.10)',
-            borderRadius: 999,
-            marginRight: 8,
-          }}>{t('shell.betaTag')}</span>
-        )}
 
         <span style={{ fontFamily: 'var(--ol-font-sans)', marginRight: 12 }}>{t('shell.footer.version', { version: APP_VERSION_LABEL })}</span>
       </div>

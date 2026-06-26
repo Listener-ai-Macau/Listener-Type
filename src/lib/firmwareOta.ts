@@ -1,4 +1,4 @@
-export type FirmwareOtaChannel = 'stable' | 'beta' | 'internal-test';
+export type FirmwareOtaChannel = 'stable' | 'development';
 
 const FIRMWARE_OTA_MAX_VERSION_CHARS = 31;
 
@@ -568,10 +568,10 @@ function requireBool(value: unknown, field: string): boolean {
 }
 
 function requireChannel(value: unknown): FirmwareOtaChannel {
-  if (value === 'stable' || value === 'beta' || value === 'internal-test') {
+  if (value === 'stable' || value === 'development') {
     return value;
   }
-  throw new Error('channel must be stable, beta, or internal-test.');
+  throw new Error('channel must be stable or development.');
 }
 
 function requireInstructions(value: unknown, field: string): string[] {

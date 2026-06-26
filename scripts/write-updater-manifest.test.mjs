@@ -20,12 +20,11 @@ const macosDir = join(bundleDir, 'macos');
 const artifact = join(macosDir, 'ListenerType_aarch64.app.tar.gz');
 const signature = `${artifact}.sig`;
 const stableManifest = join(bundleDir, 'latest-darwin-aarch64.json');
-const betaManifest = join(bundleDir, 'latest-darwin-aarch64-beta.json');
 const mirrorManifest = join(bundleDir, 'latest-darwin-aarch64-mirror.json');
 const upstreamRepoNeedle = ['appergb', ['open', 'less'].join('')].join('/');
 
 function cleanup() {
-  for (const path of [artifact, signature, stableManifest, betaManifest, mirrorManifest]) {
+  for (const path of [artifact, signature, stableManifest, mirrorManifest]) {
     rmSync(path, { force: true });
   }
 }
@@ -42,8 +41,6 @@ function runManifest(extraEnv = {}) {
         LISTENER_TYPE_UPDATE_TARGET: 'darwin',
         LISTENER_TYPE_UPDATE_ARCH: 'aarch64',
         LISTENER_TYPE_UPDATE_REPO: 'Listener-ai-Macau/Listener-Type',
-        LISTENER_TYPE_RELEASE_CHANNEL: '',
-        LISTENER_TYPE_RELEASE_TAG: '',
         LISTENER_TYPE_UPDATE_MIRROR_BASE_URL: '',
         ...extraEnv,
       },
@@ -71,17 +68,6 @@ assert(stable.signature === 'fake-signature', 'stable manifest should include th
 assert(!existsSync(mirrorManifest), 'mirror manifest should not be generated unless a mirror base URL is configured');
 
 runManifest({
-  LISTENER_TYPE_RELEASE_CHANNEL: 'beta',
-  LISTENER_TYPE_RELEASE_TAG: 'v1.3.3-beta.1',
-});
-const beta = readJson(betaManifest);
-assert(
-  beta.url === 'https://github.com/Listener-ai-Macau/Listener-Type/releases/download/v1.3.3-beta.1/ListenerType_aarch64.app.tar.gz',
-  `beta manifest should use the explicit beta tag URL, got ${beta.url}`,
-);
-assert(!beta.url.includes('/latest/'), 'beta manifest must not use releases/latest');
-
-runManifest({
   LISTENER_TYPE_UPDATE_MIRROR_BASE_URL: 'https://updates.listener-type.example/',
 });
 const mirror = readJson(mirrorManifest);
@@ -90,7 +76,6 @@ assert(
   `mirror manifest should use the explicit Listener Type mirror URL, got ${mirror.url}`,
 );
 assert(!stable.url.includes(upstreamRepoNeedle), 'stable manifest must not point at the upstream repository');
-assert(!beta.url.includes(upstreamRepoNeedle), 'beta manifest must not point at the upstream repository');
 assert(!mirror.url.includes(upstreamRepoNeedle), 'mirror manifest must not point at the upstream repository');
 
 cleanup();

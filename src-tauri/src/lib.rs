@@ -69,10 +69,16 @@ use crate::types::{DictationInputSource, PolishMode};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let first_run_args: Vec<String> = std::env::args().collect();
-    if let Some(intent @ cli::CliIntent::FirmwareOta { .. }) =
-        cli::parse_cli_intent(&first_run_args)
-    {
-        std::process::exit(run_firmware_ota_headless_cli(intent));
+    if let Some(intent) = cli::parse_cli_intent(&first_run_args) {
+        match intent {
+            cli::CliIntent::FirmwareOta { .. } => {
+                std::process::exit(run_firmware_ota_headless_cli(intent));
+            }
+            cli::CliIntent::WiredFirmware { .. } => {
+                std::process::exit(run_wired_firmware_headless_cli(intent));
+            }
+            _ => {}
+        }
     }
 
     let foundry_local_runtime = Arc::new(asr::local::FoundryLocalRuntime::new());
@@ -310,9 +316,6 @@ pub fn run() {
             commands::record_ui_timeline_event,
             commands::set_settings,
             commands::refresh_device_settings_status,
-            commands::get_update_channel,
-            commands::set_update_channel,
-            commands::fetch_latest_beta_release,
             commands::get_hotkey_status,
             commands::get_hotkey_capability,
             commands::is_wayland_cli_mode,
@@ -362,6 +365,10 @@ pub fn run() {
             commands::set_device_settings,
             commands::get_firmware_ota_preflight_snapshot,
             commands::load_firmware_ota_package,
+            commands::list_wired_firmware_ports,
+            commands::load_wired_firmware_package,
+            commands::flash_wired_firmware_package,
+            commands::repair_wired_firmware_bootloader,
             commands::transfer_firmware_ota_ble,
             commands::submit_embedded_audio_ble_stream,
             commands::cancel_dictation,
@@ -1155,6 +1162,9 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
                 }
             });
         }
+        cli::CliIntent::WiredFirmware { .. } => {
+            log::warn!("[cli] wired firmware commands are headless-only and were ignored by the running GUI instance");
+        }
     }
 }
 
@@ -1203,6 +1213,78 @@ fn run_firmware_ota_headless_cli(intent: cli::CliIntent) -> i32 {
         }
     }
     if report.status == "PASS" {
+        0
+    } else {
+        1
+    }
+}
+
+fn run_wired_firmware_headless_cli(intent: cli::CliIntent) -> i32 {
+    init_file_logger();
+
+    let cli::CliIntent::WiredFirmware {
+        package_path,
+        port,
+        baud,
+        action,
+    } = intent
+    else {
+        return 2;
+    };
+
+    let mode = match action {
+        cli::WiredFirmwareCliAction::Check => "check",
+        cli::WiredFirmwareCliAction::Flash => "flash",
+        cli::WiredFirmwareCliAction::BootRepair => "bootRepair",
+    };
+    let result = match action {
+        cli::WiredFirmwareCliAction::Check => {
+            commands::load_wired_firmware_package(package_path.to_string_lossy().to_string())
+                .map(|package| serde_json::json!({ "package": package }))
+        }
+        cli::WiredFirmwareCliAction::Flash => {
+            commands::run_wired_firmware_flash(&package_path, port.as_deref(), baud, false)
+                .map(|flash| serde_json::json!({ "result": flash }))
+        }
+        cli::WiredFirmwareCliAction::BootRepair => {
+            commands::run_wired_bootloader_repair(&package_path, port.as_deref(), baud)
+                .map(|repair| serde_json::json!({ "result": repair }))
+        }
+    };
+
+    let payload = match result {
+        Ok(extra) => serde_json::json!({
+            "status": "PASS",
+            "mode": mode,
+            "packagePath": package_path,
+            "port": port,
+            "baud": baud,
+            "desktopVersion": env!("CARGO_PKG_VERSION"),
+            "extra": extra,
+        }),
+        Err(error) => serde_json::json!({
+            "status": "FAIL",
+            "mode": mode,
+            "packagePath": package_path,
+            "port": port,
+            "baud": baud,
+            "desktopVersion": env!("CARGO_PKG_VERSION"),
+            "error": error,
+        }),
+    };
+
+    match serde_json::to_string(&payload) {
+        Ok(json) => println!("wired_firmware_result_json={json}"),
+        Err(err) => {
+            eprintln!("wired_firmware_error=report serialization failed: {err}");
+            return 2;
+        }
+    }
+    if payload
+        .get("status")
+        .and_then(|value| value.as_str())
+        .is_some_and(|status| status == "PASS")
+    {
         0
     } else {
         1

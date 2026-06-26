@@ -1,0 +1,38 @@
+#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+import process from 'node:process';
+
+const checks = [
+  ['version consistency', 'npm run check:version'],
+  ['frontend verification', 'npm run verify'],
+  ['updater manifest generation', 'node scripts/write-updater-manifest.test.mjs'],
+  ['tauri library tests', 'cargo test --manifest-path src-tauri/Cargo.toml --lib'],
+  ['firmware OTA headless helper tests', 'cargo test --manifest-path tools/firmware_ota_headless/Cargo.toml'],
+];
+
+function runCommand(commandLine) {
+  if (process.platform === 'win32') {
+    return spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandLine], {
+      cwd: process.cwd(),
+      stdio: 'inherit',
+    });
+  }
+  return spawnSync('sh', ['-lc', commandLine], {
+    cwd: process.cwd(),
+    stdio: 'inherit',
+  });
+}
+
+for (const [label, commandLine] of checks) {
+  console.log(`\n=== ${label} ===`);
+  const result = runCommand(commandLine);
+  if (result.error) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+}
+
+console.log('\nPASS: Listener Type release checks completed.');

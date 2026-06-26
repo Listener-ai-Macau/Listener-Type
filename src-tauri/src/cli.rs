@@ -52,6 +52,20 @@ pub enum CliIntent {
         preflight_only: bool,
         transfer: bool,
     },
+    /// 调试 / 自动化入口：用 Type 后端的有线刷机实现校验或刷入 factory 固件包。
+    WiredFirmware {
+        package_path: PathBuf,
+        port: Option<String>,
+        baud: Option<u32>,
+        action: WiredFirmwareCliAction,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WiredFirmwareCliAction {
+    Check,
+    Flash,
+    BootRepair,
 }
 
 /// 扫描 argv 找第一个能识别的 intent。未知参数静默忽略，绝不 panic。
@@ -138,6 +152,24 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
                     });
                 }
             }
+            "--wired-firmware-check"
+            | "--wired-firmware-flash"
+            | "--wired-firmware-boot-repair"
+            | "--wired-firmware-repair-bootloader" => {
+                let action = match arg.as_ref() {
+                    "--wired-firmware-check" => WiredFirmwareCliAction::Check,
+                    "--wired-firmware-flash" => WiredFirmwareCliAction::Flash,
+                    _ => WiredFirmwareCliAction::BootRepair,
+                };
+                if let Some((package_path, port, baud)) = next_wired_firmware_args(&mut args) {
+                    return Some(CliIntent::WiredFirmware {
+                        package_path,
+                        port,
+                        baud,
+                        action,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -178,6 +210,40 @@ where
     let manifest_path = next_path_arg(args)?;
     let firmware_path = next_path_arg(args)?;
     Some((manifest_path, firmware_path))
+}
+
+fn next_wired_firmware_args<'a, S, I>(
+    args: &mut std::iter::Peekable<I>,
+) -> Option<(PathBuf, Option<String>, Option<u32>)>
+where
+    S: AsRef<str> + 'a,
+    I: Iterator<Item = &'a S>,
+{
+    let package_path = next_path_arg(args)?;
+    let Some(next) = args.peek() else {
+        return Some((package_path, None, None));
+    };
+    let next = next.as_ref();
+    if next.starts_with("--") {
+        return Some((package_path, None, None));
+    }
+    let first = args.next()?.as_ref().to_string();
+    if let Ok(baud) = first.parse::<u32>() {
+        return Some((package_path, None, Some(baud)));
+    }
+
+    let port = Some(first);
+    let baud = args.peek().and_then(|candidate| {
+        let value = candidate.as_ref();
+        if value.starts_with("--") {
+            return None;
+        }
+        value.parse::<u32>().ok()
+    });
+    if baud.is_some() {
+        let _ = args.next();
+    }
+    Some((package_path, port, baud))
 }
 
 #[cfg(test)]
@@ -397,6 +463,59 @@ mod tests {
     fn parse_ignores_firmware_ota_without_two_paths() {
         let args = vec!["listener-type", "--firmware-ota-check", "ota_manifest.json"];
         assert_eq!(parse_cli_intent(&args), None);
+    }
+
+    #[test]
+    fn parse_recognizes_wired_firmware_check() {
+        let args = vec!["listener-type", "--wired-firmware-check", "release.zip"];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::WiredFirmware {
+                package_path: PathBuf::from("release.zip"),
+                port: None,
+                baud: None,
+                action: WiredFirmwareCliAction::Check,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_wired_firmware_flash_with_port_and_baud() {
+        let args = vec![
+            "listener-type",
+            "--wired-firmware-flash",
+            "release.zip",
+            "COM10",
+            "460800",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::WiredFirmware {
+                package_path: PathBuf::from("release.zip"),
+                port: Some("COM10".to_string()),
+                baud: Some(460_800),
+                action: WiredFirmwareCliAction::Flash,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_wired_firmware_boot_repair_alias() {
+        let args = vec![
+            "listener-type",
+            "--wired-firmware-repair-bootloader",
+            "release.zip",
+            "COM10",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::WiredFirmware {
+                package_path: PathBuf::from("release.zip"),
+                port: Some("COM10".to_string()),
+                baud: None,
+                action: WiredFirmwareCliAction::BootRepair,
+            })
+        );
     }
 
     #[test]

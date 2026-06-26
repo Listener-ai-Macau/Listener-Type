@@ -4,10 +4,10 @@ Listener Type uses the Tauri updater plugin. Release metadata is scoped to the L
 
 ## Current Policy
 
-- Automatic background checks are off by default for local-first builds until Listener Type release manifests are published. Users can still run the manual About-panel check, and enabling the setting checks the Listener Type release channel below.
+- Automatic background checks are off by default for local-first builds until Listener Type release manifests are published. Users can still run the manual About-panel check, and enabling the setting checks the official Listener Type release channel below.
 - Stable updater endpoint: `https://github.com/Listener-ai-Macau/Listener-Type/releases/latest/download/latest-{{target}}-{{arch}}.json`.
 - Mirror manifests are not generated unless `LISTENER_TYPE_UPDATE_MIRROR_BASE_URL` is explicitly set.
-- Beta manifests require `LISTENER_TYPE_RELEASE_CHANNEL=beta` and `LISTENER_TYPE_RELEASE_TAG=<tag>`.
+- Listener Type `1.0.0` is the first managed release line. Do not publish development builds through the updater endpoint.
 - Signing key rotation must update `src-tauri/tauri.conf.json` and release automation together.
 
 ## Manifest Generation

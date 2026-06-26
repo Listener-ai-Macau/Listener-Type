@@ -5997,7 +5997,7 @@ fn build_active_llm_provider(llm_thinking_enabled: bool) -> anyhow::Result<Activ
 
     let api_key = CredentialsVault::get(CredentialAccount::ArkApiKey)?.unwrap_or_default();
     let model = model.unwrap_or_else(|| "deepseek-v3-2".to_string());
-    let endpoint = resolve_ark_endpoint(&api_key)?;
+    let endpoint = resolve_ark_endpoint(&active, &api_key)?;
     let base_url = endpoint
         .trim_end_matches("/chat/completions")
         .trim_end_matches('/')
@@ -6011,20 +6011,61 @@ fn build_active_llm_provider(llm_thinking_enabled: bool) -> anyhow::Result<Activ
     )))
 }
 
-fn resolve_ark_endpoint(api_key: &str) -> anyhow::Result<String> {
-    let endpoint = CredentialsVault::get(CredentialAccount::ArkEndpoint)?.filter(|s| !s.is_empty());
-    resolve_ark_endpoint_with_policy(api_key, endpoint)
+fn resolve_ark_endpoint(provider_id: &str, api_key: &str) -> anyhow::Result<String> {
+    let endpoint =
+        CredentialsVault::get(CredentialAccount::ArkEndpoint)?.filter(|s| !s.trim().is_empty());
+    resolve_ark_endpoint_with_policy(provider_id, api_key, endpoint)
 }
 
 fn resolve_ark_endpoint_with_policy(
+    provider_id: &str,
     api_key: &str,
     endpoint: Option<String>,
 ) -> anyhow::Result<String> {
-    if api_key.trim().is_empty() && endpoint.is_none() {
-        anyhow::bail!("API Key 为空");
+    if api_key.trim().is_empty() {
+        match endpoint.as_deref() {
+            Some(value) if llm_default_endpoint_requires_api_key(provider_id, value) => {
+                anyhow::bail!("API Key 为空");
+            }
+            None => anyhow::bail!("API Key 为空"),
+            _ => {}
+        }
     }
     Ok(endpoint
         .unwrap_or_else(|| "https://ark.cn-beijing.volces.com/api/v3/chat/completions".to_string()))
+}
+
+fn llm_default_endpoint_requires_api_key(provider_id: &str, endpoint: &str) -> bool {
+    llm_provider_default_endpoint(provider_id)
+        .map(|default| same_llm_endpoint(endpoint, default))
+        .unwrap_or(false)
+}
+
+fn llm_provider_default_endpoint(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "ark" => Some("https://ark.cn-beijing.volces.com/api/v3"),
+        "deepseek" => Some("https://api.deepseek.com/v1"),
+        "siliconflow" => Some("https://api.siliconflow.cn/v1"),
+        "openai" => Some("https://api.openai.com/v1"),
+        "gemini" => Some("https://generativelanguage.googleapis.com/v1beta"),
+        "mimo" => Some("https://api.xiaomimimo.com/v1"),
+        "cometapi" => Some("https://api.cometapi.com/v1"),
+        "openrouterFree" => Some("https://openrouter.ai/api/v1"),
+        "alibabaCoding" => Some("https://coding-intl.dashscope.aliyuncs.com/v1"),
+        "codingPlanX" => Some("https://api.codingplanx.ai/v1"),
+        _ => None,
+    }
+}
+
+fn same_llm_endpoint(a: &str, b: &str) -> bool {
+    fn normalize(value: &str) -> &str {
+        value
+            .trim()
+            .trim_end_matches('/')
+            .trim_end_matches("/chat/completions")
+            .trim_end_matches('/')
+    }
+    normalize(a).eq_ignore_ascii_case(normalize(b))
 }
 
 #[cfg(test)]
@@ -7251,7 +7292,7 @@ mod tests {
     #[test]
     fn resolve_ark_endpoint_rejects_blank_key_without_custom_endpoint() {
         assert_eq!(
-            resolve_ark_endpoint_with_policy("", None)
+            resolve_ark_endpoint_with_policy("ark", "", None)
                 .unwrap_err()
                 .to_string(),
             "API Key 为空"
@@ -7259,8 +7300,23 @@ mod tests {
     }
 
     #[test]
+    fn resolve_ark_endpoint_rejects_blank_key_with_default_endpoint() {
+        assert_eq!(
+            resolve_ark_endpoint_with_policy(
+                "ark",
+                "",
+                Some("https://ark.cn-beijing.volces.com/api/v3/chat/completions".to_string()),
+            )
+            .unwrap_err()
+            .to_string(),
+            "API Key 为空"
+        );
+    }
+
+    #[test]
     fn resolve_ark_endpoint_allows_blank_key_with_custom_endpoint() {
         let endpoint = resolve_ark_endpoint_with_policy(
+            "custom",
             "",
             Some("https://example.com/v1/chat/completions".to_string()),
         )

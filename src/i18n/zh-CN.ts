@@ -106,8 +106,6 @@ export const zhCN = {
   shell: {
     shortcutLabel: '录音快捷键',
     shortcutHint: '开始 / 停止',
-    betaTag: 'BETA',
-    betaNote: '所有数据都只保存在本机。',
     footer: {
       feedback: '反馈',
       settings: '设置',
@@ -982,8 +980,8 @@ export const zhCN = {
       zh: '简体中文',
       zhTW: '繁體中文',
       en: 'English',
-      ja: '日本語 (Beta)',
-      ko: '한국어 (Beta)',
+      ja: '日本語',
+      ko: '한국어',
       restartHint: '部分原生菜单（系统托盘等）可能需要重启 App 才会切换。',
     },
     about: {
@@ -1003,15 +1001,6 @@ export const zhCN = {
       privacy: '隐私',
       privacyDesc: '所有识别结果仅保存在本机。云端 API 仅用于实时转写与润色，不会保留你的录音。',
       localFirst: '本地优先',
-      betaChannelLabel: '加入 Beta 渠道',
-      betaChannelDesc: '默认拿到的是正式版。打开后可在下方看到最新 Beta 版的下载入口；Beta 包不会通过自动更新推到普通用户，需要手动下载安装。可能不稳定，仅推荐愿意尝鲜与反馈问题的用户开启。',
-      betaChannelFetching: '正在获取最新 Beta 版本…',
-      betaChannelFetchBtn: '查询最新 Beta',
-      betaChannelLatestPrefix: '最新 Beta：',
-      betaChannelDownloadBtn: '前往下载',
-      betaChannelRefresh: '重新查询',
-      betaChannelNoBeta: '暂无已发布的 Beta 版。',
-      betaChannelFetchError: '获取 Beta 版本信息失败，请稍后重试。',
       updateDialog: {
         available: {
           title: '发现新版本',

@@ -108,8 +108,6 @@ export const en: typeof zhCN = {
   shell: {
     shortcutLabel: 'Recording shortcut',
     shortcutHint: 'Start / Stop',
-    betaTag: 'BETA',
-    betaNote: 'All data stays on this device.',
     footer: {
       feedback: 'Feedback',
       settings: 'Settings',
@@ -984,8 +982,8 @@ export const en: typeof zhCN = {
       zh: '简体中文',
       zhTW: '繁體中文',
       en: 'English',
-      ja: '日本語 (Beta)',
-      ko: '한국어 (Beta)',
+      ja: '日本語',
+      ko: '한국어',
       restartHint: 'Some native menus (system tray, etc.) may require an app restart to fully switch.',
     },
     about: {
@@ -1005,15 +1003,6 @@ export const en: typeof zhCN = {
       privacy: 'Privacy',
       privacyDesc: 'All transcripts stay on this device. Cloud APIs are only called for real-time transcription/polish; no recordings are retained.',
       localFirst: 'Local-first',
-      betaChannelLabel: 'Join Beta channel',
-      betaChannelDesc: 'Stable channel is the default. Enabling this exposes a manual download link to the latest Beta below; Beta builds are NOT pushed to regular users via auto-update — you have to download and install them yourself. May be unstable, only recommended if you are willing to test pre-release builds and report issues.',
-      betaChannelFetching: 'Fetching the latest Beta…',
-      betaChannelFetchBtn: 'Look up latest Beta',
-      betaChannelLatestPrefix: 'Latest Beta:',
-      betaChannelDownloadBtn: 'Open download page',
-      betaChannelRefresh: 'Refresh',
-      betaChannelNoBeta: 'No Beta release has been published yet.',
-      betaChannelFetchError: 'Failed to fetch Beta release info. Please try again later.',
       updateDialog: {
         available: {
           title: 'Update available',

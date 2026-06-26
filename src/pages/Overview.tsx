@@ -270,12 +270,14 @@ export function Overview({ onOpenProvidersSettings, onOpenRecordingSettings, onS
           name={asrProviderName}
           subname={asrProviderId}
           status={credsError ? 'error' : creds.asrConfigured ? 'configured' : 'notConfigured'}
+          onOpenSettings={onOpenProvidersSettings}
         />
         <ProviderCard
           kind={t('overview.llmKind')}
           name={llmProviderName}
           subname={llmProviderId}
           status={credsError ? 'error' : creds.llmConfigured ? 'configured' : 'notConfigured'}
+          onOpenSettings={onOpenProvidersSettings}
         />
       </div>
 
@@ -326,13 +328,15 @@ interface ProviderCardProps {
   name: string;
   subname: string;
   status: 'configured' | 'notConfigured' | 'error';
+  onOpenSettings?: () => void;
 }
 
-function ProviderCard({ kind, name, subname, status }: ProviderCardProps) {
+function ProviderCard({ kind, name, subname, status, onOpenSettings }: ProviderCardProps) {
   const { t } = useTranslation();
   // ASR 卡用 mic 图标，其他用 sparkle —— 通过比较译文判断会随语言改变，故改用本地化无关的字面量比较。
   const isAsr = kind === t('overview.asrKind');
-  return (
+  const interactive = status !== 'configured' && Boolean(onOpenSettings);
+  const card = (
     <Card padding={16} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
       <div
         style={{
@@ -366,6 +370,27 @@ function ProviderCard({ kind, name, subname, status }: ProviderCardProps) {
         </div>
       </div>
     </Card>
+  );
+  if (!interactive) return card;
+  return (
+    <button
+      type="button"
+      onClick={onOpenSettings}
+      style={{
+        appearance: 'none',
+        WebkitAppearance: 'none',
+        border: 0,
+        background: 'transparent',
+        padding: 0,
+        margin: 0,
+        width: '100%',
+        font: 'inherit',
+        textAlign: 'left',
+        cursor: 'default',
+      }}
+    >
+      {card}
+    </button>
   );
 }
 

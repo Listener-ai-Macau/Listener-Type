@@ -1,5 +1,6 @@
 //! Tauri command surface — every IPC entry the React UI invokes lives here.
 
+use std::borrow::Cow;
 use std::collections::{hash_map::DefaultHasher, BTreeMap};
 use std::fs::File;
 use std::hash::{Hash, Hasher};
@@ -8,9 +9,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
+use espflash::elf::RomSegment;
+use espflash::flasher::{FlashFrequency, FlashMode, FlashSize, Flasher, ProgressCallbacks};
+use espflash::targets::Chip;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serialport::{FlowControl, SerialPortType, UsbPortInfo};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 
 use crate::asr::local::foundry::{
@@ -49,7 +56,7 @@ use crate::types::{
     DeviceCustomKeys, DeviceKnobRotationAction, DictationInputSource, DictationSession,
     DictionaryEntry, HotkeyCapability, HotkeyStatus, OutputLanguagePreference, PolishMode,
     ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics, StyleSystemPrompts,
-    UpdateChannel, UserPreferences, VocabPresetStore, WindowsImeStatus,
+    UserPreferences, VocabPresetStore, WindowsImeStatus,
     DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
     MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
 };
@@ -479,7 +486,11 @@ fn device_setting_packets_for_changes(
             id: "plugged_low_power_enabled",
             command: format!(
                 "DEVICE:SET plugged_low_power_enabled={}",
-                if next.device_plugged_low_power_enabled { 1 } else { 0 }
+                if next.device_plugged_low_power_enabled {
+                    1
+                } else {
+                    0
+                }
             ),
         });
     }
@@ -652,118 +663,6 @@ pub(crate) fn activate_builtin_style_mode(
     );
     let _ = activate_style_pack_by_id(coord, app, &pack_id)?;
     Ok(())
-}
-
-// ─────────────────────────── release channel (Beta opt-in) ───────────────────────────
-//
-// 渠道偏好的写入路径跟 set_settings 复用 persist_settings：保持热键兜底归一化
-// 跟其他 prefs 写入一致，且写完后 emit "prefs:changed"，让前端跨 webview 同步。
-//
-// 注意：plugin-updater 2.10 的 Builder 不暴露 endpoints() 运行时 API，因此切到 Beta
-// 渠道**不会**改变 in-app「检查更新」的行为——它仍然只看正式版 manifest。Beta 用户
-// 通过 `fetch_latest_beta_release` 获取最新 prerelease，由前端跳浏览器手动下载，
-// 物理隔离 Beta 包不会通过 auto-update 推到正式版用户。详见 PR-B-2 description 与
-// CLAUDE.md `Branch & release-channel workflow` 段落。
-
-#[tauri::command]
-pub fn get_update_channel(coord: CoordinatorState<'_>) -> UpdateChannel {
-    coord.prefs().get().update_channel
-}
-
-#[tauri::command]
-pub fn set_update_channel(
-    coord: CoordinatorState<'_>,
-    app: AppHandle,
-    channel: UpdateChannel,
-) -> Result<(), String> {
-    let mut prefs = coord.prefs().get();
-    if prefs.update_channel == channel {
-        return Ok(());
-    }
-    prefs.update_channel = channel;
-    persist_settings(&*coord, prefs.clone())?;
-    let _ = app.emit("prefs:changed", &prefs);
-    Ok(())
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LatestBetaRelease {
-    pub tag_name: String,
-    pub html_url: String,
-    pub published_at: String,
-}
-
-/// 拉 GitHub Releases atom feed 找最新 Beta release（tag 以 `-beta-tauri` 结尾）。
-///
-/// 历史：之前用 `api.github.com/repos/.../releases` REST 端点，**未认证 60 req/h/IP**，
-/// 多人多次切 Beta toggle 很容易撞 403 rate limit（用户报"获取 Beta 版本信息失败"
-/// 即是这个）。换成 `releases.atom` 后是公开页面 + CDN cache，没有同等 rate 限制。
-/// Atom feed 不显式标 prerelease，但项目约定 tag 后缀 `-beta-tauri` 必为 Beta，
-/// 所以只用 tag 后缀过滤就够了。
-///
-/// 返回 `Ok(None)` = 当前没发过 Beta 版；`Err(String)` = 网络/解析故障。
-#[tauri::command]
-pub async fn fetch_latest_beta_release() -> Result<Option<LatestBetaRelease>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .user_agent(concat!("Listener Type/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| format!("build http client: {e}"))?;
-    let resp = client
-        .get("https://github.com/Listener-ai-Macau/Listener-Type/releases.atom")
-        .send()
-        .await
-        .map_err(|e| format!("fetch releases.atom: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("releases.atom status {}", resp.status()));
-    }
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("read atom body: {e}"))?;
-    Ok(parse_latest_beta_from_atom(&body))
-}
-
-/// 简单字符串解析 atom feed，避免引 XML 库。每个 `<entry>...</entry>` 内含一行
-/// `<link rel="alternate" type="text/html" href=".../releases/tag/<tag>"/>`，
-/// 用 `/releases/tag/` 这个唯一锚点抓 tag。
-fn parse_latest_beta_from_atom(body: &str) -> Option<LatestBetaRelease> {
-    for entry in body.split("<entry>").skip(1) {
-        let entry_body = entry
-            .split_once("</entry>")
-            .map(|(b, _)| b)
-            .unwrap_or(entry);
-        let needle = "/releases/tag/";
-        let tag_start = match entry_body.find(needle) {
-            Some(i) => i + needle.len(),
-            None => continue,
-        };
-        let tag_after = &entry_body[tag_start..];
-        let tag_end = tag_after
-            .find(|c: char| c == '"' || c == '<' || c == ' ' || c == '/')
-            .unwrap_or(tag_after.len());
-        let tag_name = tag_after[..tag_end].to_string();
-        if !tag_name.ends_with("-beta-tauri") {
-            continue;
-        }
-        let html_url =
-            format!("https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/{tag_name}");
-        let published_at =
-            extract_between(entry_body, "<updated>", "</updated>").unwrap_or_default();
-        return Some(LatestBetaRelease {
-            tag_name,
-            html_url,
-            published_at,
-        });
-    }
-    None
-}
-
-fn extract_between(haystack: &str, open: &str, close: &str) -> Option<String> {
-    let start = haystack.find(open)? + open.len();
-    let end = haystack[start..].find(close)?;
-    Some(haystack[start..start + end].to_string())
 }
 
 #[tauri::command]
@@ -2642,7 +2541,9 @@ fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Re
         ));
     }
     if request.plugged_auto_shutdown_minutes != 0 {
-        return Err("Plugged auto-shutdown is disabled; use battery auto-shutdown instead.".to_string());
+        return Err(
+            "Plugged auto-shutdown is disabled; use battery auto-shutdown instead.".to_string(),
+        );
     }
     if request.battery_auto_shutdown_minutes > DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES {
         return Err(format!(
@@ -2877,6 +2778,1603 @@ fn read_zip_entry_by_basename<R: std::io::Read + std::io::Seek>(
         .read_to_end(&mut bytes)
         .map_err(|err| format!("Failed to read OTA zip entry {basename}: {err}"))?;
     Ok(bytes)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum WiredFirmwarePackageKind {
+    Factory,
+}
+
+impl WiredFirmwarePackageKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Factory => "factory",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct FactoryFirmwareManifest {
+    schema_version: u64,
+    project: String,
+    version: String,
+    target: String,
+    #[serde(default)]
+    git_commit: String,
+    #[serde(default)]
+    flash: Option<FactoryFirmwareFlash>,
+    artifacts: Vec<FactoryFirmwareArtifact>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct FactoryFirmwareFlash {
+    #[serde(default)]
+    baud: Option<Value>,
+    #[serde(default)]
+    partition_table: Vec<FactoryFirmwarePartition>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct FactoryFirmwarePartition {
+    name: String,
+    offset: String,
+    size: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct FactoryFirmwareArtifact {
+    role: String,
+    file: String,
+    offset: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WiredFirmwareArtifactInfo {
+    role: String,
+    file: String,
+    offset: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+impl From<&FactoryFirmwareArtifact> for WiredFirmwareArtifactInfo {
+    fn from(value: &FactoryFirmwareArtifact) -> Self {
+        Self {
+            role: value.role.clone(),
+            file: value.file.clone(),
+            offset: value.offset.clone(),
+            size_bytes: value.size_bytes,
+            sha256: value.sha256.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WiredFirmwarePackagePayload {
+    kind: String,
+    project: String,
+    version: String,
+    target: String,
+    git_commit: Option<String>,
+    source_label: String,
+    artifacts: Vec<WiredFirmwareArtifactInfo>,
+    supports_full_flash: bool,
+    supports_boot_repair: bool,
+    notes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WiredFirmwareSerialPort {
+    port: String,
+    label: String,
+    is_likely_esp32: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WiredFirmwareFlashResult {
+    action: String,
+    kind: String,
+    port: String,
+    version: String,
+    log: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WiredFirmwareProgressPayload {
+    action: String,
+    stage: String,
+    port: Option<String>,
+    version: Option<String>,
+    current_role: Option<String>,
+    current_file: Option<String>,
+    bytes_written: u64,
+    bytes_total: u64,
+    current_bytes: u64,
+    current_total: u64,
+    percent: u8,
+    message: String,
+}
+
+#[derive(Clone, Debug)]
+struct LoadedWiredFirmwarePackage {
+    kind: WiredFirmwarePackageKind,
+    project: String,
+    version: String,
+    target: String,
+    git_commit: Option<String>,
+    source_label: String,
+    artifacts: Vec<FactoryFirmwareArtifact>,
+    files: BTreeMap<String, Vec<u8>>,
+    manifest_file_name: &'static str,
+    manifest_text: String,
+    otadata_region: Option<(String, String)>,
+    notes: Vec<String>,
+}
+
+impl LoadedWiredFirmwarePackage {
+    fn to_payload(&self) -> WiredFirmwarePackagePayload {
+        WiredFirmwarePackagePayload {
+            kind: self.kind.as_str().to_string(),
+            project: self.project.clone(),
+            version: self.version.clone(),
+            target: self.target.clone(),
+            git_commit: self.git_commit.clone(),
+            source_label: self.source_label.clone(),
+            artifacts: self
+                .artifacts
+                .iter()
+                .map(WiredFirmwareArtifactInfo::from)
+                .collect(),
+            supports_full_flash: true,
+            supports_boot_repair: true,
+            notes: self.notes.clone(),
+        }
+    }
+}
+
+const WIRED_FIRMWARE_PACKAGE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const WIRED_OTADATA_OFFSET: &str = "0xf000";
+const WIRED_OTADATA_SIZE: &str = "0x2000";
+const WIRED_DEFAULT_BAUD: u32 = 460_800;
+const WIRED_BOOT_REPAIR_BAUDS: &[u32] = &[115_200, 57_600, 9_600];
+const WIRED_FLASH_MODE: FlashMode = FlashMode::Dio;
+const WIRED_FLASH_FREQUENCY: FlashFrequency = FlashFrequency::_80Mhz;
+const WIRED_FLASH_SIZE: FlashSize = FlashSize::_16Mb;
+const WIRED_FULL_FLASH_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+const WIRED_BOOT_REPAIR_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const WIRED_FLASH_CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(120);
+
+struct PreparedWiredFlashArtifact {
+    role: String,
+    file: String,
+    offset: u32,
+    bytes: Vec<u8>,
+    patch_report: Option<EspImagePatchReport>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct EspImagePatchReport {
+    changed: bool,
+    digest_recalculated: bool,
+}
+
+#[derive(Clone, Debug)]
+struct WiredFlashProgressArtifact {
+    role: String,
+    file: String,
+    offset: u32,
+    size_bytes: u64,
+}
+
+#[derive(Clone, Debug)]
+struct WiredFlashProgressCurrent {
+    artifact: WiredFlashProgressArtifact,
+    total_units: usize,
+    current_units: usize,
+}
+
+struct WiredFlashProgressCallbacks {
+    app: Option<AppHandle>,
+    action: String,
+    version: String,
+    port: String,
+    artifacts: Vec<WiredFlashProgressArtifact>,
+    total_bytes: u64,
+    completed_bytes: u64,
+    current: Option<WiredFlashProgressCurrent>,
+    stage_start_percent: u8,
+    stage_end_percent: u8,
+    last_emitted_percent: Option<u8>,
+    last_emitted_bytes: u64,
+}
+
+impl WiredFlashProgressCallbacks {
+    fn new(
+        app: Option<&AppHandle>,
+        action: &str,
+        version: &str,
+        port: &str,
+        artifacts: Vec<WiredFlashProgressArtifact>,
+        stage_start_percent: u8,
+        stage_end_percent: u8,
+    ) -> Self {
+        let total_bytes = artifacts
+            .iter()
+            .map(|artifact| artifact.size_bytes)
+            .sum::<u64>()
+            .max(1);
+        Self {
+            app: app.cloned(),
+            action: action.to_string(),
+            version: version.to_string(),
+            port: port.to_string(),
+            artifacts,
+            total_bytes,
+            completed_bytes: 0,
+            current: None,
+            stage_start_percent,
+            stage_end_percent: stage_end_percent.max(stage_start_percent),
+            last_emitted_percent: None,
+            last_emitted_bytes: 0,
+        }
+    }
+
+    fn emit_current(&mut self, force: bool) {
+        let Some(current) = self.current.as_ref() else {
+            return;
+        };
+        let current_bytes = scaled_progress_bytes(
+            current.artifact.size_bytes,
+            current.current_units,
+            current.total_units,
+        );
+        let bytes_written = self
+            .completed_bytes
+            .saturating_add(current_bytes)
+            .min(self.total_bytes);
+        let percent = wired_progress_percent_for_range(
+            bytes_written,
+            self.total_bytes,
+            self.stage_start_percent,
+            self.stage_end_percent,
+        );
+        if !force
+            && self.last_emitted_percent == Some(percent)
+            && bytes_written.saturating_sub(self.last_emitted_bytes) < 32 * 1024
+        {
+            return;
+        }
+        self.last_emitted_percent = Some(percent);
+        self.last_emitted_bytes = bytes_written;
+        emit_wired_firmware_progress(
+            self.app.as_ref(),
+            WiredFirmwareProgressPayload {
+                action: self.action.clone(),
+                stage: "writing".to_string(),
+                port: Some(self.port.clone()),
+                version: Some(self.version.clone()),
+                current_role: Some(current.artifact.role.clone()),
+                current_file: Some(current.artifact.file.clone()),
+                bytes_written,
+                bytes_total: self.total_bytes,
+                current_bytes,
+                current_total: current.artifact.size_bytes,
+                percent,
+                message: format!("Writing {}", current.artifact.file),
+            },
+        );
+    }
+}
+
+impl ProgressCallbacks for WiredFlashProgressCallbacks {
+    fn init(&mut self, addr: u32, total: usize) {
+        let artifact = self
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.offset == addr)
+            .cloned()
+            .unwrap_or_else(|| WiredFlashProgressArtifact {
+                role: "firmware".to_string(),
+                file: format!("0x{addr:x}"),
+                offset: addr,
+                size_bytes: 0,
+            });
+        self.current = Some(WiredFlashProgressCurrent {
+            artifact,
+            total_units: total.max(1),
+            current_units: 0,
+        });
+        self.emit_current(true);
+    }
+
+    fn update(&mut self, current: usize) {
+        if let Some(progress) = self.current.as_mut() {
+            progress.current_units = current.min(progress.total_units);
+        }
+        self.emit_current(false);
+    }
+
+    fn finish(&mut self) {
+        if let Some(progress) = self.current.as_mut() {
+            progress.current_units = progress.total_units;
+        }
+        self.emit_current(true);
+        if let Some(progress) = self.current.take() {
+            self.completed_bytes = self
+                .completed_bytes
+                .saturating_add(progress.artifact.size_bytes)
+                .min(self.total_bytes);
+        }
+    }
+}
+
+fn emit_wired_firmware_progress(app: Option<&AppHandle>, payload: WiredFirmwareProgressPayload) {
+    if let Some(app) = app {
+        let _ = app.emit("wired-firmware:progress", payload);
+    }
+}
+
+fn emit_wired_firmware_stage(
+    app: Option<&AppHandle>,
+    action: &str,
+    stage: &str,
+    version: Option<&str>,
+    port: Option<&str>,
+    percent: u8,
+    message: impl Into<String>,
+) {
+    emit_wired_firmware_progress(
+        app,
+        WiredFirmwareProgressPayload {
+            action: action.to_string(),
+            stage: stage.to_string(),
+            port: port.map(ToOwned::to_owned),
+            version: version.map(ToOwned::to_owned),
+            current_role: None,
+            current_file: None,
+            bytes_written: 0,
+            bytes_total: 0,
+            current_bytes: 0,
+            current_total: 0,
+            percent: percent.min(100),
+            message: message.into(),
+        },
+    );
+}
+
+fn scaled_progress_bytes(total_bytes: u64, current_units: usize, total_units: usize) -> u64 {
+    if total_units == 0 {
+        return total_bytes;
+    }
+    ((total_bytes as u128)
+        .saturating_mul(current_units as u128)
+        .checked_div(total_units as u128)
+        .unwrap_or(0)
+        .min(total_bytes as u128)) as u64
+}
+
+fn wired_progress_percent_for_range(
+    bytes_written: u64,
+    bytes_total: u64,
+    start_percent: u8,
+    end_percent: u8,
+) -> u8 {
+    if bytes_total == 0 {
+        return end_percent.min(100);
+    }
+    let span = u16::from(end_percent.saturating_sub(start_percent));
+    let delta = ((bytes_written as u128)
+        .saturating_mul(span as u128)
+        .checked_div(bytes_total as u128)
+        .unwrap_or(0)
+        .min(span as u128)) as u8;
+    start_percent.saturating_add(delta).min(100)
+}
+
+#[tauri::command]
+pub fn list_wired_firmware_ports() -> Result<Vec<WiredFirmwareSerialPort>, String> {
+    Ok(list_wired_firmware_ports_internal())
+}
+
+#[tauri::command]
+pub fn load_wired_firmware_package(path: String) -> Result<WiredFirmwarePackagePayload, String> {
+    load_wired_firmware_package_internal(&PathBuf::from(path)).map(|loaded| loaded.to_payload())
+}
+
+#[tauri::command]
+pub async fn flash_wired_firmware_package(
+    app: AppHandle,
+    path: String,
+    port: Option<String>,
+    baud: Option<u32>,
+    preserve_ota_data: Option<bool>,
+) -> Result<WiredFirmwareFlashResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_wired_firmware_flash_with_progress(
+            &PathBuf::from(path),
+            port.as_deref(),
+            baud,
+            preserve_ota_data.unwrap_or(false),
+            Some(app),
+        )
+    })
+    .await
+    .map_err(|err| format!("Wired firmware flash task failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn repair_wired_firmware_bootloader(
+    app: AppHandle,
+    path: String,
+    port: Option<String>,
+    baud: Option<u32>,
+) -> Result<WiredFirmwareFlashResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_wired_bootloader_repair_with_progress(
+            &PathBuf::from(path),
+            port.as_deref(),
+            baud,
+            Some(app),
+        )
+    })
+    .await
+    .map_err(|err| format!("Wired bootloader repair task failed: {err}"))?
+}
+
+fn list_wired_firmware_ports_internal() -> Vec<WiredFirmwareSerialPort> {
+    let mut ports = serialport::available_ports().unwrap_or_default();
+    ports.sort_by(|a, b| a.port_name.cmp(&b.port_name));
+    ports
+        .into_iter()
+        .map(|port| {
+            let mut label = port.port_name.clone();
+            let mut is_likely_esp32 = false;
+            if let serialport::SerialPortType::UsbPort(info) = port.port_type {
+                is_likely_esp32 = info.vid == 0x303a || info.pid == 0x1001;
+                let details = [info.manufacturer, info.product]
+                    .into_iter()
+                    .flatten()
+                    .filter(|value| !value.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !details.is_empty() {
+                    label = format!("{} · {}", port.port_name, details);
+                }
+            }
+            WiredFirmwareSerialPort {
+                port: port.port_name,
+                label,
+                is_likely_esp32,
+            }
+        })
+        .collect()
+}
+
+fn resolve_wired_flash_port(requested: Option<&str>) -> Result<String, String> {
+    let requested = requested.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(value) = requested {
+        if !value.eq_ignore_ascii_case("COMx") {
+            return Ok(value.to_string());
+        }
+    }
+
+    let ports = list_wired_firmware_ports_internal();
+    if ports.is_empty() {
+        return Err(
+            "No serial ports were detected. Connect the Listener ESP32-S3 USB port and retry."
+                .to_string(),
+        );
+    }
+    let esp32_ports = ports
+        .iter()
+        .filter(|port| port.is_likely_esp32)
+        .collect::<Vec<_>>();
+    if esp32_ports.len() == 1 {
+        return Ok(esp32_ports[0].port.clone());
+    }
+    if ports.len() == 1 {
+        return Ok(ports[0].port.clone());
+    }
+
+    let summary = ports
+        .iter()
+        .map(|port| port.label.clone())
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(format!(
+        "Multiple serial ports were detected. Choose the Listener COM port explicitly. Ports: {summary}"
+    ))
+}
+
+fn load_wired_firmware_package_internal(path: &Path) -> Result<LoadedWiredFirmwarePackage, String> {
+    if path.is_dir() {
+        if path.join("manifest.json").is_file() {
+            return load_factory_firmware_package_dir(path);
+        }
+        if let Some(factory_dir) = find_factory_package_dir(path) {
+            return load_factory_firmware_package_dir(&factory_dir);
+        }
+        return Err(format!(
+            "Wired firmware flashing requires a factory package directory with manifest.json, or a directory containing factory/<package>/manifest.json: {}",
+            path.display()
+        ));
+    }
+
+    let is_zip = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("zip"))
+        .unwrap_or(false);
+    if !is_zip {
+        return Err("Wired firmware package must be a .zip file or package directory.".to_string());
+    }
+
+    if zip_entry_exists(path, "manifest.json")? {
+        return load_factory_firmware_package_zip(path);
+    }
+    if zip_entry_exists(path, "ota_manifest.json")? {
+        return Err("Wired firmware flashing uses the factory package format, not a Bluetooth OTA zip. Select a factory zip or package directory containing manifest.json.".to_string());
+    }
+    Err("Wired firmware zip is missing factory manifest.json.".to_string())
+}
+
+fn find_factory_package_dir(path: &Path) -> Option<PathBuf> {
+    if path.join("manifest.json").is_file() {
+        return Some(path.to_path_buf());
+    }
+
+    let factory_root = path.join("factory");
+    let entries = std::fs::read_dir(factory_root).ok()?;
+    let mut candidates = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|candidate| candidate.join("manifest.json").is_file())
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.into_iter().next()
+}
+
+fn source_label_for_path(path: &Path, fallback: &str) -> String {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn load_factory_firmware_package_dir(path: &Path) -> Result<LoadedWiredFirmwarePackage, String> {
+    let manifest_path = path.join("manifest.json");
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .map_err(|err| format!("Failed to read {}: {err}", manifest_path.display()))?;
+    let manifest = parse_factory_firmware_manifest(&manifest_text)?;
+    let mut files = BTreeMap::new();
+    for artifact in &manifest.artifacts {
+        validate_factory_artifact(artifact)?;
+        let bytes = read_limited_wired_file(&path.join(&artifact.file))?;
+        validate_factory_artifact_bytes(artifact, &bytes)?;
+        files.insert(artifact.file.clone(), bytes);
+    }
+    loaded_factory_package_from_manifest(
+        manifest,
+        manifest_text,
+        source_label_for_path(path, "factory firmware package"),
+        files,
+    )
+}
+
+fn load_factory_firmware_package_zip(path: &Path) -> Result<LoadedWiredFirmwarePackage, String> {
+    let manifest_bytes = read_zip_entry_by_basename_limited(path, "manifest.json")?
+        .ok_or_else(|| "Factory firmware zip is missing manifest.json.".to_string())?;
+    let manifest_text = String::from_utf8(manifest_bytes)
+        .map_err(|err| format!("manifest.json is not valid UTF-8: {err}"))?;
+    let manifest = parse_factory_firmware_manifest(&manifest_text)?;
+    let mut files = BTreeMap::new();
+    for artifact in &manifest.artifacts {
+        validate_factory_artifact(artifact)?;
+        let bytes = read_zip_entry_by_basename_limited(path, &artifact.file)?
+            .ok_or_else(|| format!("Factory firmware zip is missing {}.", artifact.file))?;
+        validate_factory_artifact_bytes(artifact, &bytes)?;
+        files.insert(artifact.file.clone(), bytes);
+    }
+    loaded_factory_package_from_manifest(
+        manifest,
+        manifest_text,
+        source_label_for_path(path, "factory firmware zip"),
+        files,
+    )
+}
+
+fn parse_factory_firmware_manifest(text: &str) -> Result<FactoryFirmwareManifest, String> {
+    let manifest: FactoryFirmwareManifest =
+        serde_json::from_str(text).map_err(|err| format!("manifest.json is invalid: {err}"))?;
+    if manifest.schema_version != 1 {
+        return Err(format!(
+            "Factory manifest schema_version must be 1, got {}.",
+            manifest.schema_version
+        ));
+    }
+    if manifest.project != "voice-keyboard-firmware" {
+        return Err(format!(
+            "Factory manifest project must be voice-keyboard-firmware, got {}.",
+            manifest.project
+        ));
+    }
+    if manifest.target != "esp32s3" {
+        return Err(format!(
+            "Factory manifest target must be esp32s3, got {}.",
+            manifest.target
+        ));
+    }
+    Ok(manifest)
+}
+
+fn loaded_factory_package_from_manifest(
+    manifest: FactoryFirmwareManifest,
+    manifest_text: String,
+    source_label: String,
+    files: BTreeMap<String, Vec<u8>>,
+) -> Result<LoadedWiredFirmwarePackage, String> {
+    for role in ["bootloader", "partition_table", "app"] {
+        require_artifact(&manifest.artifacts, role)?;
+    }
+    let otadata_region = manifest.flash.as_ref().and_then(|flash| {
+        flash
+            .partition_table
+            .iter()
+            .find(|entry| entry.name == "otadata")
+    });
+    let otadata_region = match otadata_region {
+        Some(entry) => Some((
+            normalize_esptool_region_arg(&entry.offset, "otadata offset", true)?,
+            normalize_esptool_region_arg(&entry.size, "otadata size", false)?,
+        )),
+        None => Some((
+            WIRED_OTADATA_OFFSET.to_string(),
+            WIRED_OTADATA_SIZE.to_string(),
+        )),
+    };
+    Ok(LoadedWiredFirmwarePackage {
+        kind: WiredFirmwarePackageKind::Factory,
+        project: manifest.project,
+        version: manifest.version,
+        target: manifest.target,
+        git_commit: (!manifest.git_commit.trim().is_empty()).then_some(manifest.git_commit),
+        source_label,
+        artifacts: manifest.artifacts,
+        files,
+        manifest_file_name: "manifest.json",
+        manifest_text,
+        otadata_region,
+        notes: vec![
+            "Factory package: wired flash writes bootloader, partition table, and app.".to_string(),
+            "Boot repair is available and writes only bootloader.bin at 0x0.".to_string(),
+        ],
+    })
+}
+
+fn validate_factory_artifact(artifact: &FactoryFirmwareArtifact) -> Result<(), String> {
+    if artifact.role.trim().is_empty() {
+        return Err("Factory artifact role must not be empty.".to_string());
+    }
+    if artifact.offset.trim().is_empty() {
+        return Err(format!(
+            "Factory artifact {} offset is empty.",
+            artifact.role
+        ));
+    }
+    validate_package_file_name(&artifact.file)?;
+    if artifact.size_bytes == 0 {
+        return Err(format!("Factory artifact {} is empty.", artifact.file));
+    }
+    if !is_sha256_hex(&artifact.sha256) {
+        return Err(format!(
+            "Factory artifact {} has invalid SHA256.",
+            artifact.file
+        ));
+    }
+    Ok(())
+}
+
+fn validate_package_file_name(file_name: &str) -> Result<(), String> {
+    if file_name.trim().is_empty()
+        || file_name.contains('/')
+        || file_name.contains('\\')
+        || file_name.contains("..")
+        || file_name.chars().any(char::is_control)
+    {
+        return Err(format!("Unsafe firmware package file name: {file_name}"));
+    }
+    Ok(())
+}
+
+fn validate_factory_artifact_bytes(
+    artifact: &FactoryFirmwareArtifact,
+    bytes: &[u8],
+) -> Result<(), String> {
+    if bytes.len() as u64 != artifact.size_bytes {
+        return Err(format!(
+            "{} size mismatch: manifest={} actual={}.",
+            artifact.file,
+            artifact.size_bytes,
+            bytes.len()
+        ));
+    }
+    let actual_sha256 = crate::firmware_ota::sha256_hex(bytes);
+    if actual_sha256 != artifact.sha256.to_ascii_lowercase() {
+        return Err(format!(
+            "{} SHA256 does not match manifest.json.",
+            artifact.file
+        ));
+    }
+    Ok(())
+}
+
+fn require_artifact<'a>(
+    artifacts: &'a [FactoryFirmwareArtifact],
+    role: &str,
+) -> Result<&'a FactoryFirmwareArtifact, String> {
+    artifacts
+        .iter()
+        .find(|artifact| artifact.role == role)
+        .ok_or_else(|| format!("Firmware package is missing {role} artifact."))
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn read_limited_wired_file(path: &Path) -> Result<Vec<u8>, String> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|err| format!("Failed to stat {}: {err}", path.display()))?;
+    if metadata.len() > WIRED_FIRMWARE_PACKAGE_MAX_BYTES {
+        return Err(format!(
+            "{} is too large for a firmware package ({} bytes > {} bytes).",
+            path.display(),
+            metadata.len(),
+            WIRED_FIRMWARE_PACKAGE_MAX_BYTES
+        ));
+    }
+    std::fs::read(path).map_err(|err| format!("Failed to read {}: {err}", path.display()))
+}
+
+fn zip_entry_exists(path: &Path, basename: &str) -> Result<bool, String> {
+    read_zip_entry_by_basename_limited(path, basename).map(|entry| entry.is_some())
+}
+
+fn read_zip_entry_by_basename_limited(
+    path: &Path,
+    basename: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let file =
+        File::open(path).map_err(|err| format!("Failed to open {}: {err}", path.display()))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|err| format!("Invalid firmware zip package: {err}"))?;
+    let mut match_index = None;
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|err| format!("Failed to read firmware zip entry #{index}: {err}"))?;
+        if entry.is_dir() {
+            continue;
+        }
+        let normalized = entry.name().replace('\\', "/");
+        if normalized
+            .rsplit('/')
+            .next()
+            .map(|name| name == basename)
+            .unwrap_or(false)
+        {
+            match_index = Some(index);
+            break;
+        }
+    }
+
+    let Some(index) = match_index else {
+        return Ok(None);
+    };
+    let mut entry = archive
+        .by_index(index)
+        .map_err(|err| format!("Failed to open firmware zip entry {basename}: {err}"))?;
+    if entry.size() > WIRED_FIRMWARE_PACKAGE_MAX_BYTES {
+        return Err(format!(
+            "{basename} is too large for a firmware package ({} bytes > {} bytes).",
+            entry.size(),
+            WIRED_FIRMWARE_PACKAGE_MAX_BYTES
+        ));
+    }
+    let mut bytes = Vec::with_capacity(entry.size().min(usize::MAX as u64) as usize);
+    entry
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("Failed to read firmware zip entry {basename}: {err}"))?;
+    Ok(Some(bytes))
+}
+
+pub(crate) fn run_wired_firmware_flash(
+    path: &Path,
+    requested_port: Option<&str>,
+    baud: Option<u32>,
+    preserve_ota_data: bool,
+) -> Result<WiredFirmwareFlashResult, String> {
+    run_wired_firmware_flash_with_progress(path, requested_port, baud, preserve_ota_data, None)
+}
+
+fn run_wired_firmware_flash_with_progress(
+    path: &Path,
+    requested_port: Option<&str>,
+    baud: Option<u32>,
+    preserve_ota_data: bool,
+    progress_app: Option<AppHandle>,
+) -> Result<WiredFirmwareFlashResult, String> {
+    let progress_app_ref = progress_app.as_ref();
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "flash",
+        "loading",
+        None,
+        requested_port,
+        1,
+        "Loading wired firmware package",
+    );
+    let loaded = load_wired_firmware_package_internal(path)?;
+    let chip = wired_target_chip(&loaded.target)?;
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "flash",
+        "packageLoaded",
+        Some(&loaded.version),
+        requested_port,
+        4,
+        "Wired firmware package loaded",
+    );
+    let port_hint = resolve_wired_flash_port(requested_port)?;
+    let baud = baud
+        .or_else(|| package_manifest_baud(&loaded))
+        .unwrap_or(WIRED_DEFAULT_BAUD);
+    let mut log = String::new();
+    log.push_str("> Listener Type built-in wired firmware flasher\n");
+    log.push_str("No ESP-IDF, IDF_PATH, Python, or esptool.py environment is required.\n");
+    log.push_str(&format!(
+        "Package: {} ({})\nTarget: {}\nBaud: {}\n",
+        loaded.source_label, loaded.version, loaded.target, baud
+    ));
+
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "flash",
+        "connecting",
+        Some(&loaded.version),
+        Some(&port_hint),
+        8,
+        "Connecting to ESP32-S3 serial flasher",
+    );
+    let (mut flasher, port, connect_log) = connect_builtin_esp_flasher_with_wait(
+        Some(&port_hint),
+        baud,
+        chip,
+        true,
+        true,
+        ResetBeforeOperation::DefaultReset,
+        ResetAfterOperation::HardReset,
+        WIRED_FULL_FLASH_CONNECT_TIMEOUT,
+        false,
+    )?;
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "flash",
+        "connected",
+        Some(&loaded.version),
+        Some(&port),
+        16,
+        "Connected to ESP32-S3 flasher",
+    );
+    log.push_str(&connect_log);
+    flasher.set_flash_size(WIRED_FLASH_SIZE);
+    match flasher.device_info() {
+        Ok(info) => log.push_str(&format_wired_device_info(&info)),
+        Err(err) => log.push_str(&format!("Device info read skipped: {err}\n")),
+    }
+    log.push_str(&format!(
+        "Flash config: mode={:?}, frequency={:?}, size={:?}\n",
+        WIRED_FLASH_MODE, WIRED_FLASH_FREQUENCY, WIRED_FLASH_SIZE
+    ));
+
+    if !preserve_ota_data {
+        if let Some((offset, size)) = loaded.otadata_region.as_ref() {
+            let offset = parse_flash_u32_arg(offset, "otadata offset", true)?;
+            let size = parse_flash_u32_arg(size, "otadata size", false)?;
+            emit_wired_firmware_stage(
+                progress_app_ref,
+                "flash",
+                "erasing",
+                Some(&loaded.version),
+                Some(&port),
+                22,
+                "Erasing OTA state partition",
+            );
+            flasher
+                .erase_region(offset, size)
+                .map_err(|err| format!("Failed to erase otadata region: {err}"))?;
+            log.push_str(&format!(
+                "Erased otadata region at 0x{offset:x}, size 0x{size:x}.\n"
+            ));
+            emit_wired_firmware_stage(
+                progress_app_ref,
+                "flash",
+                "erased",
+                Some(&loaded.version),
+                Some(&port),
+                26,
+                "OTA state partition erased",
+            );
+        }
+    } else {
+        log.push_str("Preserved otadata region.\n");
+        emit_wired_firmware_stage(
+            progress_app_ref,
+            "flash",
+            "erased",
+            Some(&loaded.version),
+            Some(&port),
+            26,
+            "OTA state partition preserved",
+        );
+    }
+
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "flash",
+        "preparing",
+        Some(&loaded.version),
+        Some(&port),
+        28,
+        "Preparing firmware images",
+    );
+    let prepared = prepare_wired_flash_artifacts(&loaded, chip)?;
+    let segments = prepared
+        .iter()
+        .map(|artifact| RomSegment {
+            addr: artifact.offset,
+            data: Cow::Borrowed(artifact.bytes.as_slice()),
+        })
+        .collect::<Vec<_>>();
+    if progress_app_ref.is_some() {
+        let progress_artifacts = wired_progress_artifacts_from_prepared(&prepared);
+        let mut progress = WiredFlashProgressCallbacks::new(
+            progress_app_ref,
+            "flash",
+            &loaded.version,
+            &port,
+            progress_artifacts,
+            28,
+            98,
+        );
+        flasher
+            .write_bins_to_flash(&segments, Some(&mut progress))
+            .map_err(|err| format!("Failed to write wired firmware image: {err}"))?;
+    } else {
+        flasher
+            .write_bins_to_flash(&segments, None)
+            .map_err(|err| format!("Failed to write wired firmware image: {err}"))?;
+    }
+    for artifact in &prepared {
+        log.push_str(&format!(
+            "Wrote {} ({}) at 0x{:x}, {} bytes",
+            artifact.role,
+            artifact.file,
+            artifact.offset,
+            artifact.bytes.len()
+        ));
+        if let Some(report) = artifact.patch_report {
+            if report.changed {
+                log.push_str("; ESP image header patched to wired flash config");
+                if report.digest_recalculated {
+                    log.push_str("; SHA256 digest recalculated");
+                }
+            }
+        }
+        log.push_str(".\n");
+    }
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "flash",
+        "finalizing",
+        Some(&loaded.version),
+        Some(&port),
+        99,
+        "Finalizing wired firmware flash",
+    );
+    log.push_str("Wired factory flash completed and verified by espflash.\n");
+
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "flash",
+        "done",
+        Some(&loaded.version),
+        Some(&port),
+        100,
+        "Wired factory flash completed",
+    );
+    Ok(WiredFirmwareFlashResult {
+        action: "flash".to_string(),
+        kind: loaded.kind.as_str().to_string(),
+        port,
+        version: loaded.version,
+        log: trim_command_output(&log, 24_000),
+    })
+}
+
+pub(crate) fn run_wired_bootloader_repair(
+    path: &Path,
+    requested_port: Option<&str>,
+    baud: Option<u32>,
+) -> Result<WiredFirmwareFlashResult, String> {
+    run_wired_bootloader_repair_with_progress(path, requested_port, baud, None)
+}
+
+fn run_wired_bootloader_repair_with_progress(
+    path: &Path,
+    requested_port: Option<&str>,
+    baud: Option<u32>,
+    progress_app: Option<AppHandle>,
+) -> Result<WiredFirmwareFlashResult, String> {
+    let progress_app_ref = progress_app.as_ref();
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "bootloaderRepair",
+        "loading",
+        None,
+        requested_port,
+        1,
+        "Loading wired firmware package",
+    );
+    let loaded = load_wired_firmware_package_internal(path)?;
+    let chip = wired_target_chip(&loaded.target)?;
+    let port_hint = normalize_requested_wired_port(requested_port);
+    let bootloader = require_artifact(&loaded.artifacts, "bootloader")?;
+    let bootloader_offset = parse_flash_u32_arg(&bootloader.offset, "bootloader offset", true)?;
+    let bootloader_bytes = loaded
+        .files
+        .get(&bootloader.file)
+        .ok_or_else(|| format!("Factory artifact file is missing: {}", bootloader.file))?;
+    let (bootloader_bytes, patch_report) =
+        prepare_esp_image_for_wired_flash("bootloader", bootloader_bytes, chip)?;
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "bootloaderRepair",
+        "packageLoaded",
+        Some(&loaded.version),
+        port_hint.as_deref(),
+        4,
+        "Bootloader image loaded",
+    );
+    let bauds = baud
+        .map(|value| vec![value])
+        .unwrap_or_else(|| WIRED_BOOT_REPAIR_BAUDS.to_vec());
+    let reset_modes = [
+        ResetBeforeOperation::NoReset,
+        ResetBeforeOperation::DefaultReset,
+    ];
+    let mut log = String::new();
+    log.push_str("> Listener Type built-in bootloader repair\n");
+    log.push_str("No ESP-IDF, IDF_PATH, Python, or esptool.py environment is required.\n");
+    log.push_str(
+        "Repair strategy: poll for the COM port, sync immediately without resetting first, and write bootloader.bin in the same session.\n",
+    );
+    let mut failures = Vec::new();
+
+    for baud in bauds {
+        for before in reset_modes {
+            emit_wired_firmware_stage(
+                progress_app_ref,
+                "bootloaderRepair",
+                "connecting",
+                Some(&loaded.version),
+                port_hint.as_deref(),
+                8,
+                "Waiting for ESP32-S3 bootloader repair window",
+            );
+            match connect_builtin_esp_flasher_with_wait(
+                port_hint.as_deref(),
+                baud,
+                chip,
+                false,
+                true,
+                before,
+                ResetAfterOperation::HardReset,
+                WIRED_BOOT_REPAIR_CONNECT_TIMEOUT,
+                true,
+            ) {
+                Ok((mut flasher, port, connect_log)) => {
+                    log.push_str(&connect_log);
+                    flasher.set_flash_size(WIRED_FLASH_SIZE);
+                    emit_wired_firmware_stage(
+                        progress_app_ref,
+                        "bootloaderRepair",
+                        "connected",
+                        Some(&loaded.version),
+                        Some(&port),
+                        28,
+                        "Connected to ESP32-S3 bootloader repair window",
+                    );
+                    log.push_str(&format!(
+                        "Writing bootloader immediately at 0x{bootloader_offset:x}, {} bytes.\n",
+                        bootloader_bytes.len()
+                    ));
+                    if patch_report.changed {
+                        log.push_str("ESP image header patched to wired flash config");
+                        if patch_report.digest_recalculated {
+                            log.push_str("; SHA256 digest recalculated");
+                        }
+                        log.push_str(".\n");
+                    }
+                    let write_result = if progress_app_ref.is_some() {
+                        let mut progress = WiredFlashProgressCallbacks::new(
+                            progress_app_ref,
+                            "bootloaderRepair",
+                            &loaded.version,
+                            &port,
+                            vec![WiredFlashProgressArtifact {
+                                role: bootloader.role.clone(),
+                                file: bootloader.file.clone(),
+                                offset: bootloader_offset,
+                                size_bytes: bootloader_bytes.len() as u64,
+                            }],
+                            32,
+                            96,
+                        );
+                        flasher.write_bin_to_flash(
+                            bootloader_offset,
+                            &bootloader_bytes,
+                            Some(&mut progress),
+                        )
+                    } else {
+                        flasher.write_bin_to_flash(bootloader_offset, &bootloader_bytes, None)
+                    };
+                    match write_result {
+                        Ok(()) => {
+                            emit_wired_firmware_stage(
+                                progress_app_ref,
+                                "bootloaderRepair",
+                                "done",
+                                Some(&loaded.version),
+                                Some(&port),
+                                100,
+                                "Bootloader repair completed",
+                            );
+                            log.push_str("Bootloader repair completed and verified by espflash.\n");
+                            return Ok(WiredFirmwareFlashResult {
+                                action: "bootloaderRepair".to_string(),
+                                kind: loaded.kind.as_str().to_string(),
+                                port,
+                                version: loaded.version,
+                                log: trim_command_output(&log, 24_000),
+                            });
+                        }
+                        Err(err) => failures.push(format!(
+                            "baud {baud} before={before:?} bootloader write failed: {err}"
+                        )),
+                    }
+                }
+                Err(err) => failures.push(format!(
+                    "baud {baud} before={before:?} connect failed: {err}"
+                )),
+            }
+        }
+    }
+
+    Err(format!(
+        "Bootloader repair failed after polling the COM port and trying all repair modes: {}",
+        failures.join("; ")
+    ))
+}
+
+fn package_manifest_baud(package: &LoadedWiredFirmwarePackage) -> Option<u32> {
+    let manifest = serde_json::from_str::<FactoryFirmwareManifest>(&package.manifest_text).ok()?;
+    manifest
+        .flash
+        .as_ref()
+        .and_then(|flash| flash.baud.as_ref())
+        .and_then(parse_baud_value)
+}
+
+fn parse_baud_value(value: &Value) -> Option<u32> {
+    if let Some(number) = value.as_u64() {
+        return u32::try_from(number).ok();
+    }
+    value
+        .as_str()
+        .and_then(|text| text.trim().parse::<u32>().ok())
+}
+
+fn wired_target_chip(target: &str) -> Result<Chip, String> {
+    let normalized = target
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "")
+        .replace('_', "");
+    match normalized.as_str() {
+        "esp32s3" => Ok(Chip::Esp32s3),
+        _ => Err(format!(
+            "Wired firmware flashing currently supports ESP32-S3 packages only; package target is {target}."
+        )),
+    }
+}
+
+fn prepare_wired_flash_artifacts(
+    package: &LoadedWiredFirmwarePackage,
+    chip: Chip,
+) -> Result<Vec<PreparedWiredFlashArtifact>, String> {
+    let mut prepared = Vec::new();
+    for role in ["bootloader", "partition_table", "app"] {
+        let artifact = require_artifact(&package.artifacts, role)?;
+        let offset = parse_flash_u32_arg(&artifact.offset, &format!("{role} offset"), true)?;
+        let bytes = package
+            .files
+            .get(&artifact.file)
+            .ok_or_else(|| format!("Factory artifact file is missing: {}", artifact.file))?;
+        let (bytes, patch_report) = if matches!(role, "bootloader" | "app") {
+            let (bytes, report) = prepare_esp_image_for_wired_flash(role, bytes, chip)?;
+            (bytes, Some(report))
+        } else {
+            (bytes.clone(), None)
+        };
+        prepared.push(PreparedWiredFlashArtifact {
+            role: artifact.role.clone(),
+            file: artifact.file.clone(),
+            offset,
+            bytes,
+            patch_report,
+        });
+    }
+    Ok(prepared)
+}
+
+fn wired_progress_artifacts_from_prepared(
+    prepared: &[PreparedWiredFlashArtifact],
+) -> Vec<WiredFlashProgressArtifact> {
+    prepared
+        .iter()
+        .map(|artifact| WiredFlashProgressArtifact {
+            role: artifact.role.clone(),
+            file: artifact.file.clone(),
+            offset: artifact.offset,
+            size_bytes: artifact.bytes.len() as u64,
+        })
+        .collect()
+}
+
+fn prepare_esp_image_for_wired_flash(
+    role: &str,
+    bytes: &[u8],
+    chip: Chip,
+) -> Result<(Vec<u8>, EspImagePatchReport), String> {
+    const ESP_IMAGE_MAGIC: u8 = 0xe9;
+    const ESP_IMAGE_APPEND_DIGEST_OFFSET: usize = 23;
+    const ESP_IMAGE_DIGEST_LEN: usize = 32;
+
+    if bytes.len() <= ESP_IMAGE_APPEND_DIGEST_OFFSET {
+        return Err(format!(
+            "Factory artifact {role} is too small to be an ESP image."
+        ));
+    }
+    if bytes[0] != ESP_IMAGE_MAGIC {
+        return Err(format!(
+            "Factory artifact {role} is not an ESP image; expected magic 0xe9."
+        ));
+    }
+
+    let mode = WIRED_FLASH_MODE as u8;
+    let size = WIRED_FLASH_SIZE
+        .encode_flash_size()
+        .map_err(|err| format!("Unsupported wired flash size: {err}"))?;
+    let frequency = WIRED_FLASH_FREQUENCY
+        .encode_flash_frequency(chip)
+        .map_err(|err| format!("Unsupported wired flash frequency: {err}"))?;
+    let flash_config = (size << 4) | frequency;
+
+    let mut patched = bytes.to_vec();
+    let changed = patched[2] != mode || patched[3] != flash_config;
+    let mut digest_recalculated = false;
+    if changed {
+        patched[2] = mode;
+        patched[3] = flash_config;
+        if patched[ESP_IMAGE_APPEND_DIGEST_OFFSET] == 1 {
+            if patched.len() <= ESP_IMAGE_DIGEST_LEN {
+                return Err(format!(
+                    "Factory artifact {role} declares a SHA256 digest but is too small to contain one."
+                ));
+            }
+            let digest_start = patched.len() - ESP_IMAGE_DIGEST_LEN;
+            let digest = sha256_digest_bytes(&patched[..digest_start]);
+            patched[digest_start..].copy_from_slice(&digest);
+            digest_recalculated = true;
+        }
+    }
+
+    Ok((
+        patched,
+        EspImagePatchReport {
+            changed,
+            digest_recalculated,
+        },
+    ))
+}
+
+fn sha256_digest_bytes(bytes: &[u8]) -> [u8; 32] {
+    let digest = Sha256::digest(bytes);
+    let mut output = [0_u8; 32];
+    output.copy_from_slice(&digest);
+    output
+}
+
+fn normalize_esptool_region_arg(
+    value: &str,
+    field_name: &str,
+    allow_zero: bool,
+) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(format!("Factory manifest {field_name} is empty."));
+    }
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
+        let parsed = u64::from_str_radix(hex, 16).map_err(|_| {
+            format!("Factory manifest {field_name} must be a number, hex value, or IDF size unit.")
+        })?;
+        if parsed == 0 && !allow_zero {
+            return Err(format!(
+                "Factory manifest {field_name} must be greater than 0."
+            ));
+        }
+        return Ok(format!("0x{parsed:x}"));
+    }
+    if let Ok(parsed) = trimmed.parse::<u64>() {
+        if parsed == 0 && !allow_zero {
+            return Err(format!(
+                "Factory manifest {field_name} must be greater than 0."
+            ));
+        }
+        return Ok(parsed.to_string());
+    }
+
+    let upper = trimmed.to_ascii_uppercase();
+    let (number, multiplier) = if let Some(number) = upper.strip_suffix("KB") {
+        (number, 1024_u64)
+    } else if let Some(number) = upper.strip_suffix('K') {
+        (number, 1024_u64)
+    } else if let Some(number) = upper.strip_suffix("MB") {
+        (number, 1024_u64 * 1024)
+    } else if let Some(number) = upper.strip_suffix('M') {
+        (number, 1024_u64 * 1024)
+    } else {
+        return Err(format!(
+            "Factory manifest {field_name} must be a number, hex value, or IDF size unit."
+        ));
+    };
+    let count = number.trim().parse::<u64>().map_err(|_| {
+        format!("Factory manifest {field_name} has invalid IDF size unit: {trimmed}.")
+    })?;
+    let parsed = count
+        .checked_mul(multiplier)
+        .ok_or_else(|| format!("Factory manifest {field_name} is too large: {trimmed}."))?;
+    if parsed == 0 && !allow_zero {
+        return Err(format!(
+            "Factory manifest {field_name} must be greater than 0."
+        ));
+    }
+    Ok(parsed.to_string())
+}
+
+fn parse_flash_u32_arg(value: &str, field_name: &str, allow_zero: bool) -> Result<u32, String> {
+    let normalized = normalize_esptool_region_arg(value, field_name, allow_zero)?;
+    let parsed = if let Some(hex) = normalized
+        .strip_prefix("0x")
+        .or_else(|| normalized.strip_prefix("0X"))
+    {
+        u64::from_str_radix(hex, 16).map_err(|_| {
+            format!("Factory manifest {field_name} must be a number, hex value, or IDF size unit.")
+        })?
+    } else {
+        normalized.parse::<u64>().map_err(|_| {
+            format!("Factory manifest {field_name} must be a number, hex value, or IDF size unit.")
+        })?
+    };
+    u32::try_from(parsed)
+        .map_err(|_| format!("Factory manifest {field_name} is too large: {normalized}."))
+}
+
+fn normalize_requested_wired_port(requested: Option<&str>) -> Option<String> {
+    requested
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter(|value| !value.eq_ignore_ascii_case("COMx"))
+        .map(ToOwned::to_owned)
+}
+
+fn connect_builtin_esp_flasher_with_wait(
+    requested_port: Option<&str>,
+    baud: u32,
+    chip: Chip,
+    use_stub: bool,
+    verify: bool,
+    before_operation: ResetBeforeOperation,
+    after_operation: ResetAfterOperation,
+    timeout: Duration,
+    allow_auto_select: bool,
+) -> Result<(Flasher, String, String), String> {
+    let started = Instant::now();
+    let mut attempts = 0_u32;
+    let mut connection_errors = Vec::new();
+
+    loop {
+        match select_wired_flash_port_for_attempt(requested_port, allow_auto_select) {
+            Ok(Some(port)) => {
+                attempts = attempts.saturating_add(1);
+                match connect_builtin_esp_flasher(
+                    &port,
+                    baud,
+                    chip,
+                    use_stub,
+                    verify,
+                    before_operation,
+                    after_operation,
+                ) {
+                    Ok(flasher) => {
+                        let mut log = String::new();
+                        log.push_str(&format!(
+                            "Serial port: {port}\nConnecting with built-in espflash: baud={baud}, stub={use_stub}, verify={verify}, before={before_operation:?}, after={after_operation:?}.\n"
+                        ));
+                        log.push_str(&format!("Connected after {attempts} attempt(s).\n"));
+                        return Ok((flasher, port, log));
+                    }
+                    Err(err) => {
+                        connection_errors.push(format!("{port}: {err}"));
+                    }
+                }
+            }
+            Ok(None) => {
+                connection_errors.push("serial port not present yet".to_string());
+            }
+            Err(err) => return Err(err),
+        }
+
+        if started.elapsed() >= timeout {
+            break;
+        }
+        std::thread::sleep(WIRED_FLASH_CONNECT_RETRY_INTERVAL);
+    }
+
+    let requested = normalize_requested_wired_port(requested_port)
+        .map(|port| format!(" Requested port: {port}."))
+        .unwrap_or_default();
+    let last_error = connection_errors
+        .last()
+        .map(|err| format!(" Last error: {err}."))
+        .unwrap_or_default();
+    Err(format!(
+        "Timed out after {:.1}s waiting for a Listener ESP32-S3 serial flashing connection.{requested}{last_error}",
+        timeout.as_secs_f32()
+    ))
+}
+
+fn connect_builtin_esp_flasher(
+    port: &str,
+    baud: u32,
+    chip: Chip,
+    use_stub: bool,
+    verify: bool,
+    before_operation: ResetBeforeOperation,
+    after_operation: ResetAfterOperation,
+) -> Result<Flasher, String> {
+    let usb_info = usb_port_info_for(port);
+    let serial_port = serialport::new(port, 115_200)
+        .flow_control(FlowControl::None)
+        .open_native()
+        .map_err(|err| format!("Failed to open serial port {port}: {err}"))?;
+
+    Flasher::connect(
+        serial_port,
+        usb_info,
+        Some(baud),
+        use_stub,
+        verify,
+        false,
+        Some(chip),
+        after_operation,
+        before_operation,
+    )
+    .map_err(|err| format!("Failed to connect to ESP ROM/flasher on {port}: {err}"))
+}
+
+fn select_wired_flash_port_for_attempt(
+    requested_port: Option<&str>,
+    allow_auto_select: bool,
+) -> Result<Option<String>, String> {
+    if let Some(port) = normalize_requested_wired_port(requested_port) {
+        return Ok(Some(port));
+    }
+    if !allow_auto_select {
+        return resolve_wired_flash_port(None).map(Some);
+    }
+
+    let ports = list_wired_firmware_ports_internal();
+    if ports.is_empty() {
+        return Ok(None);
+    }
+    let esp32_ports = ports
+        .iter()
+        .filter(|port| port.is_likely_esp32)
+        .collect::<Vec<_>>();
+    if esp32_ports.len() == 1 {
+        return Ok(Some(esp32_ports[0].port.clone()));
+    }
+    if ports.len() == 1 {
+        return Ok(Some(ports[0].port.clone()));
+    }
+
+    let summary = ports
+        .iter()
+        .map(|port| port.label.clone())
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(format!(
+        "Multiple serial ports were detected. Choose the Listener COM port explicitly. Ports: {summary}"
+    ))
+}
+
+fn usb_port_info_for(port_name: &str) -> UsbPortInfo {
+    if let Ok(ports) = serialport::available_ports() {
+        for port in ports {
+            if port.port_name.eq_ignore_ascii_case(port_name) {
+                if let SerialPortType::UsbPort(info) = port.port_type {
+                    return info;
+                }
+            }
+        }
+    }
+    UsbPortInfo {
+        vid: 0,
+        pid: 0,
+        serial_number: None,
+        manufacturer: None,
+        product: None,
+    }
+}
+
+fn format_wired_device_info(info: &espflash::flasher::DeviceInfo) -> String {
+    let revision = info
+        .revision
+        .map(|(major, minor)| format!("{major}.{minor}"))
+        .unwrap_or_else(|| "unknown".to_string());
+    let features = if info.features.is_empty() {
+        "none".to_string()
+    } else {
+        info.features.join(", ")
+    };
+    format!(
+        "Connected chip: {}\nRevision: {revision}\nCrystal: {:?}\nMAC: {}\nFeatures: {features}\n",
+        info.chip, info.crystal_frequency, info.mac_address
+    )
+}
+
+fn trim_command_output(text: &str, max_chars: usize) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return text.to_string();
+    }
+    let tail = chars[chars.len().saturating_sub(max_chars)..]
+        .iter()
+        .collect::<String>();
+    format!("... output truncated ...\n{tail}")
 }
 
 #[tauri::command]
@@ -5560,8 +7058,8 @@ mod tests {
         is_gemini_base_url, is_valid_local_pack_id, is_valid_session_id,
         llm_configured_for_provider, load_firmware_ota_package,
         local_asr_release_plan_for_provider, models_url, normalize_foundry_language_hint,
-        parse_gemini_model_ids, parse_latest_beta_from_atom, parse_model_ids, persist_settings,
-        provider_models_cache, sanitize_diagnostic_log_line, validate_device_settings_request,
+        parse_gemini_model_ids, parse_model_ids, persist_settings, provider_models_cache,
+        sanitize_diagnostic_log_line, validate_device_settings_request,
         validate_foundry_model_alias, DeviceSettingsUpdateRequest, ProviderConfig, SettingsWriter,
         DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES,
     };
@@ -5777,12 +7275,12 @@ mod tests {
                 .expect("commands");
 
         assert_eq!(commands.len(), 8);
-        assert!(commands.iter().any(|command| {
-            command == "DEVICE:SET plugged_low_power_enabled=0"
-        }));
-        assert!(commands.iter().any(|command| {
-            command == "DEVICE:SET plugged_auto_shutdown_minutes=off"
-        }));
+        assert!(commands
+            .iter()
+            .any(|command| { command == "DEVICE:SET plugged_low_power_enabled=0" }));
+        assert!(commands
+            .iter()
+            .any(|command| { command == "DEVICE:SET plugged_auto_shutdown_minutes=off" }));
         assert!(commands.iter().all(|command| {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
         }));
@@ -5814,15 +7312,15 @@ mod tests {
         let commands = device_settings_update_commands(&request, false, plugged_low_power_enabled)
             .expect("commands");
 
-        assert!(commands.iter().any(|command| {
-            command == "DEVICE:SET plugged_low_power_idle_minutes=0"
-        }));
-        assert!(commands.iter().any(|command| {
-            command == "DEVICE:SET battery_low_power_idle_minutes=0"
-        }));
-        assert!(commands.iter().any(|command| {
-            command == "DEVICE:SET plugged_low_power_enabled=0"
-        }));
+        assert!(commands
+            .iter()
+            .any(|command| { command == "DEVICE:SET plugged_low_power_idle_minutes=0" }));
+        assert!(commands
+            .iter()
+            .any(|command| { command == "DEVICE:SET battery_low_power_idle_minutes=0" }));
+        assert!(commands
+            .iter()
+            .any(|command| { command == "DEVICE:SET plugged_low_power_enabled=0" }));
     }
 
     #[test]
@@ -6066,6 +7564,277 @@ mod tests {
         assert_eq!(payload.manifest_text, "{\"schema_version\":2}");
         assert_eq!(payload.firmware_bytes, vec![4, 5, 6]);
         let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn combined_firmware_release_zip_supports_ota_and_wired_factory() {
+        let root = std::env::temp_dir().join(format!(
+            "listener-combined-release-test-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let factory_dir = root.join("factory").join("listener-factory-test");
+        let zip_path = root.with_extension("zip");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&zip_path);
+        std::fs::create_dir_all(&factory_dir).expect("create nested factory dir");
+        write_test_factory_package(&factory_dir, "v1.2.6");
+
+        {
+            let file = std::fs::File::create(&zip_path).expect("create temp combined zip");
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("ota_manifest.json", options)
+                .expect("start OTA manifest");
+            zip.write_all(b"{\"schema_version\":2}")
+                .expect("write OTA manifest");
+            zip.start_file("firmware_ota.bin", options)
+                .expect("start OTA firmware");
+            zip.write_all(&[4u8, 5, 6]).expect("write OTA firmware");
+            for file_name in [
+                "manifest.json",
+                "FLASHING.md",
+                "bootloader.bin",
+                "partition-table.bin",
+                "voice-keyboard-firmware.bin",
+            ] {
+                let source = factory_dir.join(file_name);
+                if file_name == "FLASHING.md" && !source.is_file() {
+                    std::fs::write(&source, "# Factory flashing\n").expect("write flashing doc");
+                }
+                zip.start_file(
+                    format!("factory/listener-factory-test/{file_name}"),
+                    options,
+                )
+                .expect("start factory file");
+                zip.write_all(&std::fs::read(&source).expect("read factory file"))
+                    .expect("write factory file");
+            }
+            zip.finish().expect("finish combined zip");
+        }
+
+        let ota_payload = load_firmware_ota_package(zip_path.to_string_lossy().to_string())
+            .expect("load OTA files from combined release zip");
+        assert_eq!(ota_payload.manifest_text, "{\"schema_version\":2}");
+        assert_eq!(ota_payload.firmware_bytes, vec![4, 5, 6]);
+
+        let wired = super::load_wired_firmware_package_internal(&zip_path)
+            .expect("load factory files from combined release zip");
+        assert_eq!(wired.kind, super::WiredFirmwarePackageKind::Factory);
+        assert_eq!(wired.version, "v1.2.6");
+        assert_eq!(wired.artifacts.len(), 3);
+        assert!(wired.files.contains_key("bootloader.bin"));
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn load_wired_firmware_package_reads_factory_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "listener-wired-factory-test-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create temp factory package dir");
+
+        let bootloader = vec![0xe9, 1, 2, 3];
+        let partition_table = vec![0xaa, 0xbb, 0xcc];
+        let app = vec![0xe9, 9, 8, 7, 6];
+        std::fs::write(root.join("bootloader.bin"), &bootloader).expect("write bootloader");
+        std::fs::write(root.join("partition-table.bin"), &partition_table)
+            .expect("write partition table");
+        std::fs::write(root.join("voice-keyboard-firmware.bin"), &app).expect("write app");
+
+        let manifest = format!(
+            r#"{{
+  "schema_version": 1,
+  "project": "voice-keyboard-firmware",
+  "version": "v1.2.3",
+  "target": "esp32s3",
+  "git_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "flash": {{
+    "baud": "921600",
+    "partition_table": [
+      {{"name": "otadata", "offset": "0xf000", "size": "8K"}}
+    ]
+  }},
+  "artifacts": [
+    {{"role": "bootloader", "file": "bootloader.bin", "offset": "0x0", "size_bytes": {}, "sha256": "{}"}},
+    {{"role": "partition_table", "file": "partition-table.bin", "offset": "0x8000", "size_bytes": {}, "sha256": "{}"}},
+    {{"role": "app", "file": "voice-keyboard-firmware.bin", "offset": "0x20000", "size_bytes": {}, "sha256": "{}"}}
+  ]
+}}"#,
+            bootloader.len(),
+            crate::firmware_ota::sha256_hex(&bootloader),
+            partition_table.len(),
+            crate::firmware_ota::sha256_hex(&partition_table),
+            app.len(),
+            crate::firmware_ota::sha256_hex(&app)
+        );
+        std::fs::write(root.join("manifest.json"), manifest).expect("write factory manifest");
+
+        let loaded = super::load_wired_firmware_package_internal(&root)
+            .expect("load factory wired firmware package");
+        assert_eq!(loaded.kind, super::WiredFirmwarePackageKind::Factory);
+        assert_eq!(loaded.version, "v1.2.3");
+        assert_eq!(
+            loaded.otadata_region,
+            Some(("0xf000".to_string(), "8192".to_string()))
+        );
+        assert_eq!(loaded.artifacts.len(), 3);
+        assert_eq!(loaded.files.get("bootloader.bin"), Some(&bootloader));
+
+        let payload = loaded.to_payload();
+        assert_eq!(payload.kind, "factory");
+        assert!(payload.supports_full_flash);
+        assert!(payload.supports_boot_repair);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn load_wired_firmware_package_reads_nested_factory_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "listener-wired-nested-factory-test-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let factory_dir = root.join("factory").join("listener-factory-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&factory_dir).expect("create nested factory dir");
+        write_test_factory_package(&factory_dir, "v1.2.5");
+
+        let loaded = super::load_wired_firmware_package_internal(&root)
+            .expect("load nested factory wired firmware package");
+        assert_eq!(loaded.kind, super::WiredFirmwarePackageKind::Factory);
+        assert_eq!(loaded.version, "v1.2.5");
+        let payload = loaded.to_payload();
+        assert_eq!(payload.kind, "factory");
+        assert!(payload.supports_full_flash);
+        assert!(payload.supports_boot_repair);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn load_wired_firmware_package_rejects_ota_zip() {
+        let zip_path = std::env::temp_dir().join(format!(
+            "listener-wired-reject-ota-zip-test-{}-{}.zip",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let _ = std::fs::remove_file(&zip_path);
+        {
+            let file = std::fs::File::create(&zip_path).expect("create temp OTA zip");
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("listener-ota/ota_manifest.json", options)
+                .expect("start OTA manifest");
+            zip.write_all(b"{\"schema_version\":2}")
+                .expect("write OTA manifest");
+            zip.start_file("listener-ota/firmware_ota.bin", options)
+                .expect("start OTA firmware");
+            zip.write_all(&[0xe9, 1, 2, 3]).expect("write OTA firmware");
+            zip.finish().expect("finish OTA zip");
+        }
+
+        let err = super::load_wired_firmware_package_internal(&zip_path)
+            .expect_err("OTA zip should not be accepted for wired factory flashing");
+        assert!(err.contains("factory package format"), "{err}");
+        let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn normalize_esptool_region_arg_accepts_idf_size_units() {
+        assert_eq!(
+            super::normalize_esptool_region_arg("8K", "size", false).unwrap(),
+            "8192"
+        );
+        assert_eq!(
+            super::normalize_esptool_region_arg("6M", "size", false).unwrap(),
+            "6291456"
+        );
+        assert_eq!(
+            super::normalize_esptool_region_arg("0xf000", "offset", true).unwrap(),
+            "0xf000"
+        );
+        assert!(super::normalize_esptool_region_arg("0K", "size", false).is_err());
+    }
+
+    #[test]
+    fn parse_flash_u32_arg_accepts_idf_size_units() {
+        assert_eq!(
+            super::parse_flash_u32_arg("8K", "size", false).unwrap(),
+            8192
+        );
+        assert_eq!(
+            super::parse_flash_u32_arg("0xf000", "offset", true).unwrap(),
+            0xf000
+        );
+        assert!(super::parse_flash_u32_arg("5G", "size", false).is_err());
+    }
+
+    #[test]
+    fn prepare_esp_image_for_wired_flash_updates_header_and_digest() {
+        let mut image = vec![0_u8; 96];
+        image[0] = 0xe9;
+        image[1] = 1;
+        image[2] = 0;
+        image[3] = 0;
+        image[23] = 1;
+        let digest_start = image.len() - 32;
+        let digest = super::sha256_digest_bytes(&image[..digest_start]);
+        image[digest_start..].copy_from_slice(&digest);
+
+        let (patched, report) =
+            super::prepare_esp_image_for_wired_flash("app", &image, super::Chip::Esp32s3)
+                .expect("patch ESP image");
+
+        assert!(report.changed);
+        assert!(report.digest_recalculated);
+        assert_eq!(patched[2], super::WIRED_FLASH_MODE as u8);
+        assert_eq!(patched[3], 0x4f);
+        let patched_digest = super::sha256_digest_bytes(&patched[..digest_start]);
+        assert_eq!(&patched[digest_start..], &patched_digest);
+    }
+
+    fn write_test_factory_package(root: &std::path::Path, version: &str) {
+        let bootloader = vec![0xe9, 1, 2, 3];
+        let partition_table = vec![0xaa, 0xbb, 0xcc];
+        let app = vec![0xe9, 9, 8, 7, 6];
+        std::fs::write(root.join("bootloader.bin"), &bootloader).expect("write bootloader");
+        std::fs::write(root.join("partition-table.bin"), &partition_table)
+            .expect("write partition table");
+        std::fs::write(root.join("voice-keyboard-firmware.bin"), &app).expect("write app");
+        let manifest = format!(
+            r#"{{
+  "schema_version": 1,
+  "project": "voice-keyboard-firmware",
+  "version": "{version}",
+  "target": "esp32s3",
+  "git_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "flash": {{
+    "baud": "921600",
+    "partition_table": [
+      {{"name": "otadata", "offset": "0xf000", "size": "0x2000"}}
+    ]
+  }},
+  "artifacts": [
+    {{"role": "bootloader", "file": "bootloader.bin", "offset": "0x0", "size_bytes": {}, "sha256": "{}"}},
+    {{"role": "partition_table", "file": "partition-table.bin", "offset": "0x8000", "size_bytes": {}, "sha256": "{}"}},
+    {{"role": "app", "file": "voice-keyboard-firmware.bin", "offset": "0x20000", "size_bytes": {}, "sha256": "{}"}}
+  ]
+}}"#,
+            bootloader.len(),
+            crate::firmware_ota::sha256_hex(&bootloader),
+            partition_table.len(),
+            crate::firmware_ota::sha256_hex(&partition_table),
+            app.len(),
+            crate::firmware_ota::sha256_hex(&app)
+        );
+        std::fs::write(root.join("manifest.json"), manifest).expect("write factory manifest");
     }
 
     #[derive(Default)]
@@ -7233,45 +9002,6 @@ mod tests {
             Err("设备 fallback 快捷键已保留给 KEY1-KEY4 和 EC11 单击入口".into())
         );
         assert!(writer.saved.lock().unwrap().is_none());
-    }
-
-    #[test]
-    fn parse_latest_beta_from_atom_picks_first_beta_tagged_entry() {
-        // Fixture trimmed from real `releases.atom`：包含一条 stable + 一条 Beta。
-        // 解析必须跳过 stable（tag 不以 -beta-tauri 结尾），返回 Beta。
-        let body = r#"<?xml version="1.0"?>
-<feed>
-  <entry>
-    <id>tag:github.com,2008:Repository/X/v1.2.23-tauri</id>
-    <updated>2026-05-07T09:05:00Z</updated>
-    <link rel="alternate" type="text/html" href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.2.23-tauri"/>
-    <title>Listener Type v1.2.23-tauri</title>
-  </entry>
-  <entry>
-    <id>tag:github.com,2008:Repository/X/v1.2.24-2-beta-tauri</id>
-    <updated>2026-05-08T01:27:23Z</updated>
-    <link rel="alternate" type="text/html" href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.2.24-2-beta-tauri"/>
-    <title>Listener Type v1.2.24-2-beta-tauri</title>
-  </entry>
-</feed>"#;
-        let got = parse_latest_beta_from_atom(body).expect("must find a Beta entry");
-        assert_eq!(got.tag_name, "v1.2.24-2-beta-tauri");
-        assert_eq!(
-            got.html_url,
-            "https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.2.24-2-beta-tauri"
-        );
-        assert_eq!(got.published_at, "2026-05-08T01:27:23Z");
-    }
-
-    #[test]
-    fn parse_latest_beta_from_atom_returns_none_when_only_stable_releases() {
-        let body = r#"<feed>
-  <entry>
-    <link rel="alternate" type="text/html" href="https://github.com/Listener-ai-Macau/Listener-Type/releases/tag/v1.2.23-tauri"/>
-    <updated>2026-05-07T09:05:00Z</updated>
-  </entry>
-</feed>"#;
-        assert!(parse_latest_beta_from_atom(body).is_none());
     }
 
     #[tokio::test]

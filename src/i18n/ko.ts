@@ -1,7 +1,7 @@
 import type { zhCN } from './zh-CN';
 import { en } from './en';
 
-// 한국어 (Beta) — AI 기계 번역 기반. 원어민 검토를 권장합니다.
+// Korean locale.
 // 구조는 zh-CN.ts 를 따릅니다. 새 key 를 추가할 때 ja.ts / ko.ts 도 동시에
 // 갱신해 주세요(갱신되지 않은 key 는 ...en 으로 영어로 fallback 됩니다).
 export const ko: typeof zhCN = {
@@ -66,8 +66,6 @@ export const ko: typeof zhCN = {
   shell: {
     shortcutLabel: '녹음 단축키',
     shortcutHint: '시작 / 정지',
-    betaTag: 'BETA',
-    betaNote: '모든 데이터는 로컬에만 저장됩니다.',
     footer: {
       feedback: '피드백',
       settings: '설정',
@@ -942,8 +940,8 @@ export const ko: typeof zhCN = {
       zh: '简体中文',
       zhTW: '繁體中文',
       en: 'English',
-      ja: '日本語 (Beta)',
-      ko: '한국어 (Beta)',
+      ja: '日本語',
+      ko: '한국어',
       restartHint: '일부 네이티브 메뉴(트레이 등)는 앱 재시작 후 반영될 수 있습니다.',
     },
     about: {
@@ -963,15 +961,6 @@ export const ko: typeof zhCN = {
       privacy: '프라이버시',
       privacyDesc: '모든 인식 결과는 로컬에만 저장됩니다. 클라우드 API 는 실시간 전사와 정리에만 사용되며 녹음을 보관하지 않습니다.',
       localFirst: '로컬 우선',
-      betaChannelLabel: 'Beta 채널 참여',
-      betaChannelDesc: '기본은 정식 버전입니다. 켜면 최신 Beta 버전 다운로드 링크가 아래에 표시됩니다. Beta 빌드는 자동 업데이트로 배포되지 않으며 직접 다운로드해 설치해야 합니다. 불안정할 수 있으므로 사전 평가와 피드백을 제공할 의향이 있는 사용자에게만 권장합니다.',
-      betaChannelFetching: '최신 Beta 버전을 가져오는 중…',
-      betaChannelFetchBtn: '최신 Beta 확인',
-      betaChannelLatestPrefix: '최신 Beta:',
-      betaChannelDownloadBtn: '다운로드 페이지 열기',
-      betaChannelRefresh: '새로 고침',
-      betaChannelNoBeta: '아직 게시된 Beta 릴리스가 없습니다.',
-      betaChannelFetchError: 'Beta 릴리스 정보를 가져오지 못했습니다. 잠시 후 다시 시도하세요.',
       updateDialog: {
         available: {
           title: '새 버전 발견',
