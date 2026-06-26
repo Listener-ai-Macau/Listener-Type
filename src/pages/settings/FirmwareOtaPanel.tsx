@@ -373,7 +373,7 @@ export function FirmwareOtaPanel({
         </div>
 
         <div className="ol-firmware-unified-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
-          <Btn variant="blue" size="sm" icon={firmwareMode === 'wired' ? 'bolt' : 'download'} onClick={startSelectedFirmwareAction} disabled={selectedFirmwareActionDisabled}>
+          <Btn variant="blue" size="sm" icon={firmwareMode === 'wired' ? 'bolt' : 'cloud'} onClick={startSelectedFirmwareAction} disabled={selectedFirmwareActionDisabled}>
             {selectedFirmwareActionLabel}
           </Btn>
         </div>
