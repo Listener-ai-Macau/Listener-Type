@@ -49,6 +49,23 @@ function CompanionBringupCard() {
     message: '',
     stats: null,
   });
+  const hardwareAcceptanceCommand = [
+    'pwsh -NoProfile -File <ai-collaboration-workflow>\\scripts\\aiw.ps1',
+    'with-lock -Resource Companion-WB55,BLE-Companion',
+    '-Purpose "Companion hardware acceptance"',
+    '-Run pwsh -NoProfile -File .\\tools\\verify_companion_hardware_acceptance.ps1',
+    '-Execute -WorkflowLockHeld',
+    '-PackagePath <companion-package.zip>',
+    '-EvidencePath <companion_ui_screenshot_or_log>',
+  ].join(' ');
+  const wiredPackageFlashCommand = [
+    'pwsh -NoProfile -File <ai-collaboration-workflow>\\scripts\\aiw.ps1',
+    'with-lock -Resource Companion-WB55',
+    '-Purpose "Companion wired factory flash validation"',
+    '-Run pwsh -NoProfile -File .\\tools\\verify_companion_wired_flash.ps1',
+    '-Execute -WorkflowLockHeld',
+    '-PackagePath <companion-package.zip>',
+  ].join(' ');
   const commands = [
     {
       id: 'readiness',
@@ -73,7 +90,7 @@ function CompanionBringupCard() {
     {
       id: 'hardwareAcceptance',
       label: t('settings.companion.hardwareAcceptanceCommand', '总体验收'),
-      value: 'pwsh -NoProfile -File <companion-firmware-repo>\\tools\\verify_companion_hardware_acceptance.ps1 -PackagePath <companion-package.zip> -EvidencePath <companion_ui_screenshot_or_log>',
+      value: hardwareAcceptanceCommand,
     },
     {
       id: 'flash',
@@ -83,7 +100,7 @@ function CompanionBringupCard() {
     {
       id: 'flashPackage',
       label: t('settings.companion.flashPackageCommand', '同包有线'),
-      value: 'pwsh -NoProfile -File <companion-firmware-repo>\\tools\\verify_companion_wired_flash.ps1 -PackagePath <companion-package.zip>',
+      value: wiredPackageFlashCommand,
     },
     {
       id: 'capture',
