@@ -3890,6 +3890,9 @@ fn run_stm32_wired_firmware_flash_with_progress(
     requested_port: Option<&str>,
     progress_app_ref: Option<&AppHandle>,
 ) -> Result<WiredFirmwareFlashResult, String> {
+    const STM32WB_OTA_HANDOFF_BASE_ADDRESS: &str = "0x20000000";
+    const STM32WB_OTA_FW_APP_HANDOFF_BYTES: [&str; 4] = ["0x00", "0x07", "0x00", "0xC3"];
+
     require_artifact(&loaded.artifacts, "app")?;
     let stm32_artifacts = loaded
         .artifacts
@@ -3989,9 +3992,6 @@ fn run_stm32_wired_firmware_flash_with_progress(
             .arg("-w")
             .arg(&image_path)
             .arg("-v");
-        if index + 1 == total_artifacts {
-            command.arg("-rst");
-        }
         let output = command.output().map_err(|err| {
             format!(
                 "Failed to launch STM32CubeProgrammer CLI at {}: {err}",
@@ -4037,6 +4037,61 @@ fn run_stm32_wired_firmware_flash_with_progress(
             image_bytes.len()
         ));
     }
+
+    emit_wired_firmware_stage(
+        progress_app_ref,
+        "flash",
+        "finalizing",
+        Some(&loaded.version),
+        Some("SWD"),
+        96,
+        "Booting STM32WB Companion app",
+    );
+    let mut handoff_command = Command::new(&programmer);
+    handoff_command
+        .arg("-c")
+        .args(["port=SWD", "mode=UR", "reset=HWrst", "freq=4000"])
+        .arg("-w8")
+        .arg(STM32WB_OTA_HANDOFF_BASE_ADDRESS)
+        .args(STM32WB_OTA_FW_APP_HANDOFF_BYTES)
+        .arg("-r8")
+        .arg(STM32WB_OTA_HANDOFF_BASE_ADDRESS)
+        .arg("4")
+        .arg("-rst");
+    let handoff_output = handoff_command.output().map_err(|err| {
+        format!(
+            "Failed to launch STM32CubeProgrammer CLI for STM32WB app handoff at {}: {err}",
+            programmer.display()
+        )
+    })?;
+    let handoff_stdout = String::from_utf8_lossy(&handoff_output.stdout);
+    let handoff_stderr = String::from_utf8_lossy(&handoff_output.stderr);
+    if !handoff_stdout.trim().is_empty() {
+        log.push_str("\n[STM32CubeProgrammer stdout: app_handoff]\n");
+        log.push_str(handoff_stdout.as_ref());
+        if !handoff_stdout.ends_with('\n') {
+            log.push('\n');
+        }
+    }
+    if !handoff_stderr.trim().is_empty() {
+        log.push_str("\n[STM32CubeProgrammer stderr: app_handoff]\n");
+        log.push_str(handoff_stderr.as_ref());
+        if !handoff_stderr.ends_with('\n') {
+            log.push('\n');
+        }
+    }
+    if !handoff_output.status.success() {
+        return Err(format!(
+            "STM32CubeProgrammer STM32WB app handoff failed with status {}.\n{}",
+            handoff_output.status,
+            trim_command_output(&log, 12_000)
+        ));
+    }
+    log.push_str(&format!(
+        "Wrote STM32WB OTA FW_APP SRAM handoff {} = {} and reset into the Companion app.\n",
+        STM32WB_OTA_HANDOFF_BASE_ADDRESS,
+        STM32WB_OTA_FW_APP_HANDOFF_BYTES.join(" ")
+    ));
 
     emit_wired_firmware_stage(
         progress_app_ref,

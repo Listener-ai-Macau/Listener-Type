@@ -5252,7 +5252,7 @@ mod windows_ble {
             format!("STM32WB ST OTA raw characteristic properties read failed: {err}")
         })?;
         let raw_write_option = stm32wb_st_ota_write_option(raw_properties)?;
-        let raw_chunk_bytes = stm32wb_st_ota_raw_chunk_bytes(session.as_ref());
+        let raw_chunk_bytes = stm32wb_st_ota_raw_chunk_bytes(session.as_ref(), raw_write_option);
         log::info!(
             "[embedded-ble] STM32WB ST OTA {} base write option={base_write_option:?} raw write option={raw_write_option:?} chunk_bytes={raw_chunk_bytes}",
             uuid_set.label
@@ -5407,6 +5407,9 @@ mod windows_ble {
     fn stm32wb_st_ota_write_option(
         properties: GattCharacteristicProperties,
     ) -> Result<GattWriteOption, String> {
+        // The Companion loader exposes Write on top of ST's original
+        // Write-Without-Response path so Windows waits for the WB55 write
+        // permit response instead of silently dropping queued raw data.
         if properties.contains(GattCharacteristicProperties::Write) {
             Ok(GattWriteOption::WriteWithResponse)
         } else if properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
@@ -5425,12 +5428,21 @@ mod windows_ble {
         ]
     }
 
-    fn stm32wb_st_ota_raw_chunk_bytes(session: Option<&GattSession>) -> usize {
-        session
+    fn stm32wb_st_ota_raw_chunk_bytes(
+        session: Option<&GattSession>,
+        write_option: GattWriteOption,
+    ) -> usize {
+        let payload_bytes = session
             .and_then(|session| session.MaxPduSize().ok())
             .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
             .filter(|payload_bytes| *payload_bytes > 0)
-            .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES)
+            .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
+        // ST BLE_Ota gates raw writes through ACI_GATT_PERMIT_WRITE. The
+        // permit response echoes the payload, so keep raw chunks at the
+        // default ATT payload size even when Windows negotiates a larger PDU.
+        let _ = write_option;
+        payload_bytes
+            .min(ATT_DEFAULT_PAYLOAD_BYTES)
             .min(STM32WB_ST_OTA_RAW_DATA_SIZE)
             .max(1)
     }
@@ -7167,6 +7179,10 @@ mod windows_ble {
                 stm32wb_st_ota_write_option(GattCharacteristicProperties::Write),
                 Ok(GattWriteOption::WriteWithResponse)
             );
+            assert_eq!(
+                stm32wb_st_ota_write_option(GattCharacteristicProperties::WriteWithoutResponse),
+                Ok(GattWriteOption::WriteWithoutResponse)
+            );
         }
 
         #[test]
@@ -7188,6 +7204,18 @@ mod windows_ble {
             assert_eq!(
                 stm32wb_st_ota_base_address_command(0x0800_7000),
                 [STM32WB_ST_OTA_APPLICATION_UPLOAD, 0x00, 0x70, 0x00]
+            );
+        }
+
+        #[test]
+        fn stm32wb_st_ota_caps_no_response_chunks_to_default_att_payload() {
+            assert_eq!(
+                stm32wb_st_ota_raw_chunk_bytes(None, GattWriteOption::WriteWithoutResponse),
+                ATT_DEFAULT_PAYLOAD_BYTES
+            );
+            assert_eq!(
+                stm32wb_st_ota_raw_chunk_bytes(None, GattWriteOption::WriteWithResponse),
+                ATT_DEFAULT_PAYLOAD_BYTES
             );
         }
 
