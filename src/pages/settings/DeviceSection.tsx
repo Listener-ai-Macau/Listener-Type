@@ -108,6 +108,7 @@ const KNOB_CONTROL_WIDTH = 208;
 
 const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
 const DEVICE_SETTINGS_REFRESH_MS = 8000;
+const DEVICE_SETTINGS_READ_TIMEOUT_MS = 12_000;
 const DEVICE_SETTINGS_WRITE_TIMEOUT_MS = 45_000;
 const DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES = 10;
 
@@ -269,7 +270,11 @@ function DeviceFirmwareSettingsCard() {
     setStatus(previous => (previous === 'saving' ? previous : 'loading'));
     setMessage('');
     try {
-      const value = await getDeviceSettings();
+      const value = await withTimeout(
+        getDeviceSettings(),
+        DEVICE_SETTINGS_READ_TIMEOUT_MS,
+        t('settings.device.readTimeout', '读取超时，请确认设备仍连接后重试。'),
+      );
       setSnapshot(value);
       setForm(snapshotToForm(value));
       setStatus('idle');
@@ -288,6 +293,11 @@ function DeviceFirmwareSettingsCard() {
   const readDisabled = status === 'loading' || status === 'saving';
   const controlsDisabled = !snapshot?.writeSupported || status === 'saving';
   const ledControlsDisabled = controlsDisabled || !(snapshot?.ledZoneBrightnessSupported ?? false);
+  const busyText = status === 'loading'
+    ? t('settings.device.readingDetail', '正在读取设备设置...')
+    : status === 'saving'
+      ? t('settings.device.writingDetail', '正在写入设备设置...')
+      : '';
 
   const save = async () => {
     if (writeDisabled) return;
@@ -326,12 +336,14 @@ function DeviceFirmwareSettingsCard() {
         </div>
         <div className="ol-device-settings-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
           <div className="ol-device-readwrite-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: 'min(100%, 176px)' }}>
-            <Btn variant="ghost" size="sm" icon="refresh" onClick={() => void refresh()} disabled={readDisabled} style={{ height: 34, justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
+            <Btn variant="ghost" size="sm" icon={status === 'loading' ? undefined : 'refresh'} onClick={() => void refresh()} disabled={readDisabled} style={{ height: 34, justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
+              {status === 'loading' && <span className="ol-device-button-spinner" aria-hidden="true" />}
               {status === 'loading'
                 ? t('settings.device.reading', '读取中')
                 : t('settings.device.readFromDevice', '读取')}
             </Btn>
-            <Btn variant="blue" size="sm" icon="check" disabled={writeDisabled} onClick={() => void save()} style={{ height: 34, justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
+            <Btn variant="blue" size="sm" icon={status === 'saving' ? undefined : 'check'} disabled={writeDisabled} onClick={() => void save()} style={{ height: 34, justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
+              {status === 'saving' && <span className="ol-device-button-spinner ol-device-button-spinner-on-blue" aria-hidden="true" />}
               {status === 'saving'
                 ? t('settings.device.writing', '写入中')
                 : t('settings.device.writeToDevice', '写入')}
@@ -340,7 +352,12 @@ function DeviceFirmwareSettingsCard() {
         </div>
       </div>
 
-      <DeviceSettingsStatusStrip snapshot={snapshot} t={t} />
+      {busyText && (
+        <div className="ol-device-settings-busy" role="status" aria-live="polite">
+          <span className="ol-device-busy-spinner" aria-hidden="true" />
+          <span>{busyText}</span>
+        </div>
+      )}
 
       <DeviceSettingsPanel
         title={t('settings.device.bleNameLabel', '蓝牙名称')}
@@ -442,26 +459,6 @@ function DeviceSettingsPanel({
       )}
       {children}
     </section>
-  );
-}
-
-function DeviceSettingsStatusStrip({
-  snapshot,
-  t,
-}: {
-  snapshot: DeviceSettingsSnapshot | null;
-  t: ReturnType<typeof useTranslation>['t'];
-}) {
-  const items = getDeviceSettingsStatusItems(snapshot, t);
-  return (
-    <div className="ol-device-status-strip">
-      {items.map(item => (
-        <span key={item.label} className="ol-device-status-chip" title={`${item.label}: ${item.value}`}>
-          <span className="ol-device-status-label">{item.label}</span>
-          <span className="ol-device-status-value">{item.value}</span>
-        </span>
-      ))}
-    </div>
   );
 }
 
@@ -1207,76 +1204,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: 
       window.clearTimeout(timer);
     }
   });
-}
-
-function getDeviceSettingsStatusItems(
-  snapshot: DeviceSettingsSnapshot | null,
-  t: ReturnType<typeof useTranslation>['t'],
-): Array<{ label: string; value: string }> {
-  if (!snapshot) {
-    return [
-      {
-        label: t('settings.device.statusSourceLabel', '来源'),
-        value: t('settings.device.configLoading', '正在读取设备设置...'),
-      },
-      {
-        label: t('settings.device.statusPowerLabel', '供电'),
-        value: '—',
-      },
-      {
-        label: t('settings.device.statusLowPowerLabel', '低功耗'),
-        value: '—',
-      },
-      {
-        label: t('settings.device.statusWriteLabel', '写入'),
-        value: '—',
-      },
-    ];
-  }
-  const power = snapshot.activePowerSource === 'plugged'
-    ? t('settings.device.powerPlugged', '插电')
-    : snapshot.activePowerSource === 'battery'
-      ? t('settings.device.powerBattery', '电池')
-      : t('settings.device.powerUnknown', '供电未知');
-  const activeLowPower = snapshot.activePowerSource === 'plugged'
-    ? snapshot.pluggedLowPowerIdleMinutes
-    : snapshot.activePowerSource === 'battery'
-      ? snapshot.batteryLowPowerIdleMinutes
-      : snapshot.lowPowerIdleMinutes;
-  const lowPowerDisabled =
-    activeLowPower <= 0 || (snapshot.activePowerSource === 'plugged' && !snapshot.pluggedLowPowerEnabled);
-  const lowPower = lowPowerDisabled
-    ? t('settings.device.lowPowerOff', '关闭')
-    : t('settings.device.lowPowerCompact', '{{value}} 分钟', { value: activeLowPower });
-  const source = snapshot.source === 'mock'
-    ? t('settings.device.sourceMock', '浏览器预览模拟')
-    : snapshot.source === 'defaults'
-      ? t('settings.device.sourceDefaults', '默认值')
-      : snapshot.source === 'lastKnown'
-        ? t('settings.device.sourceLastKnown', '上次已知值')
-        : snapshot.source === 'unavailable'
-          ? t('settings.device.sourceUnavailable', '设备不可用')
-          : t('settings.device.sourceFirmware', '固件');
-  return [
-    {
-      label: t('settings.device.statusSourceLabel', '来源'),
-      value: source,
-    },
-    {
-      label: t('settings.device.statusPowerLabel', '供电'),
-      value: power,
-    },
-    {
-      label: t('settings.device.statusLowPowerLabel', '低功耗'),
-      value: lowPower,
-    },
-    {
-      label: t('settings.device.statusWriteLabel', '写入'),
-      value: snapshot.writeSupported
-        ? t('settings.device.configSourceWritable', '可写')
-        : t('settings.device.configSourceReadOnly', '只读'),
-    },
-  ];
 }
 
 function formatDeviceSnapshotFooter(

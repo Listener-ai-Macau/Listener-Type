@@ -57,6 +57,7 @@ const LOG_ROTATE_LIMIT_BYTES: u64 = 10 * 1024 * 1024;
 /// 第一次 show 时把 QA 浮窗摆到屏幕底部居中；之后的 show 不再 reposition，
 /// 让用户拖动后的位置在 hide → show 之间得以保持。详见 issue #118 v2。
 static QA_WINDOW_POSITIONED: AtomicBool = AtomicBool::new(false);
+static APP_QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static TRAY_MICROPHONE_WATCHER_STOPPING: AtomicBool = AtomicBool::new(false);
 use tauri::menu::{
     CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, Submenu, SubmenuBuilder,
@@ -254,7 +255,7 @@ pub fn run() {
                     .menu(&menu)
                     .show_menu_on_left_click(false)
                     .on_menu_event(move |app, event| match event.id.as_ref() {
-                        "quit" => app.exit(0),
+                        "quit" => request_app_quit(app),
                         "dark-mode" => handle_dark_mode_toggle(app),
                         id => {
                             if handle_style_tray_menu_event(app, id) {
@@ -456,19 +457,22 @@ pub fn run() {
             }
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => show_main_window(app),
-            RunEvent::ExitRequested {
-                code: None, api, ..
-            } => {
-                log::warn!(
-                    "[main] exit requested without explicit code; keeping Listener Type alive"
-                );
-                api.prevent_exit();
+            RunEvent::ExitRequested { code, api, .. } => {
+                if should_keep_alive_on_exit_request(code, APP_QUIT_REQUESTED.load(Ordering::Relaxed))
+                {
+                    log::warn!(
+                        "[main] exit requested without explicit quit; keeping Listener Type alive"
+                    );
+                    api.prevent_exit();
+                }
             }
             RunEvent::WindowEvent { label, event, .. } => {
                 if label == "main" {
                     if let tauri::WindowEvent::CloseRequested { ref api, .. } = event {
-                        api.prevent_close();
-                        hide_main_window(app);
+                        if should_hide_main_on_close(APP_QUIT_REQUESTED.load(Ordering::Relaxed)) {
+                            api.prevent_close();
+                            hide_main_window(app);
+                        }
                     }
                 }
             }
@@ -486,6 +490,21 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+fn request_app_quit(app: &AppHandle) {
+    log::info!("[main] explicit quit requested");
+    APP_QUIT_REQUESTED.store(true, Ordering::Relaxed);
+    TRAY_MICROPHONE_WATCHER_STOPPING.store(true, Ordering::Relaxed);
+    app.exit(0);
+}
+
+fn should_keep_alive_on_exit_request(code: Option<i32>, explicit_quit: bool) -> bool {
+    code.is_none() && !explicit_quit
+}
+
+fn should_hide_main_on_close(explicit_quit: bool) -> bool {
+    !explicit_quit
 }
 
 fn should_force_show_main_on_start() -> bool {
@@ -1790,8 +1809,9 @@ fn capsule_height_for_qa() -> f64 {
 mod tests {
     use super::{
         capsule_height_for_qa, capsule_visual_height, capsule_window_bounds,
-        parse_tray_polish_mode_id, rotate_log_if_too_large, tray_polish_mode_menu_entries,
-        tray_style_menu_enabled, LOG_ROTATE_LIMIT_BYTES,
+        parse_tray_polish_mode_id, rotate_log_if_too_large, should_hide_main_on_close,
+        should_keep_alive_on_exit_request, tray_polish_mode_menu_entries, tray_style_menu_enabled,
+        LOG_ROTATE_LIMIT_BYTES,
     };
     use crate::types::PolishMode;
     use std::io::Write;
@@ -1803,6 +1823,16 @@ mod tests {
 
         #[cfg(not(target_os = "windows"))]
         assert!(!tray_style_menu_enabled());
+    }
+
+    #[test]
+    fn window_close_hides_but_explicit_quit_exits() {
+        assert!(should_keep_alive_on_exit_request(None, false));
+        assert!(!should_keep_alive_on_exit_request(None, true));
+        assert!(!should_keep_alive_on_exit_request(Some(0), false));
+
+        assert!(should_hide_main_on_close(false));
+        assert!(!should_hide_main_on_close(true));
     }
 
     #[test]
