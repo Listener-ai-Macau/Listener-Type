@@ -1131,11 +1131,22 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
             tauri::async_runtime::spawn(async move {
                 log::info!("[cli] submit-embedded-audio-ble-stream: timeout_ms={timeout_ms:?}");
                 match coord.submit_embedded_audio_ble_stream(timeout_ms).await {
-                    Ok(result) => log::info!(
-                        "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={}",
-                        result.reconstructed_pcm_bytes,
-                        result.stats.missing_packet_count
-                    ),
+                    Ok(result) => {
+                        let result_json = serde_json::to_string(&result)
+                            .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+                        println!("embedded_audio_ble_stream_result_json={result_json}");
+                        log::info!("embedded_audio_ble_stream_result_json={result_json}");
+                        log::info!(
+                            "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={} final_text_chars={}",
+                            result.reconstructed_pcm_bytes,
+                            result.stats.missing_packet_count,
+                            result
+                                .transcript
+                                .as_ref()
+                                .map(|transcript| transcript.final_text.chars().count())
+                                .unwrap_or(0)
+                        );
+                    }
                     Err(err) => log::warn!("[cli] submit-embedded-audio-ble-stream failed: {err}"),
                 }
             });
@@ -1267,10 +1278,19 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
             );
             match runtime.block_on(coordinator.submit_embedded_audio_ble_stream(timeout_ms)) {
                 Ok(result) => {
+                    let result_json = serde_json::to_string(&result)
+                        .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+                    println!("embedded_audio_ble_stream_result_json={result_json}");
+                    log::info!("embedded_audio_ble_stream_result_json={result_json}");
                     log::info!(
-                        "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={}",
+                        "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={} final_text_chars={}",
                         result.reconstructed_pcm_bytes,
-                        result.stats.missing_packet_count
+                        result.stats.missing_packet_count,
+                        result
+                            .transcript
+                            .as_ref()
+                            .map(|transcript| transcript.final_text.chars().count())
+                            .unwrap_or(0)
                     );
                     0
                 }

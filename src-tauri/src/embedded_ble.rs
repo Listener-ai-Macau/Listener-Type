@@ -623,6 +623,7 @@ mod windows_ble {
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
     const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
     const OTA_DATA_WRITE_OPTION_ENV: &str = "LISTENER_OTA_DATA_WRITE_OPTION";
+    const TYPE_READY_COMMAND_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_READY_COMMAND";
     const STM32WB_ST_OTA_ADVERTISEMENT_NAME: &str = "companion";
     const STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
     const OTA_DATA_CHUNK_BYTES_ENV: &str = "LISTENER_OTA_DATA_CHUNK_BYTES";
@@ -2342,7 +2343,8 @@ mod windows_ble {
         let type_heartbeat_enabled =
             terminal_behavior == CaptureTerminalBehavior::ContinueListening;
         let mut next_type_heartbeat = None;
-        match cleanup.write_type_heartbeat(b"TYPE:READY\n", "Type heartbeat ready") {
+        let type_ready_command = type_ready_command_bytes();
+        match cleanup.write_type_heartbeat(&type_ready_command, "Type heartbeat ready") {
             Ok(()) => {
                 cleanup.mark_type_heartbeat_open();
                 if type_heartbeat_enabled {
@@ -5437,14 +5439,20 @@ mod windows_ble {
             .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
             .filter(|payload_bytes| *payload_bytes > 0)
             .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
-        // ST BLE_Ota gates raw writes through ACI_GATT_PERMIT_WRITE. The
-        // permit response echoes the payload, so keep raw chunks at the
-        // default ATT payload size even when Windows negotiates a larger PDU.
-        let _ = write_option;
-        payload_bytes
-            .min(ATT_DEFAULT_PAYLOAD_BYTES)
-            .min(STM32WB_ST_OTA_RAW_DATA_SIZE)
-            .max(1)
+        stm32wb_st_ota_raw_chunk_bytes_from_payload(payload_bytes, write_option)
+    }
+
+    fn stm32wb_st_ota_raw_chunk_bytes_from_payload(
+        payload_bytes: usize,
+        write_option: GattWriteOption,
+    ) -> usize {
+        let payload_bytes = payload_bytes.max(1);
+        let transport_limit = if write_option == GattWriteOption::WriteWithoutResponse {
+            payload_bytes.min(ATT_DEFAULT_PAYLOAD_BYTES)
+        } else {
+            payload_bytes
+        };
+        transport_limit.min(STM32WB_ST_OTA_RAW_DATA_SIZE).max(1)
     }
 
     fn stm32wb_st_ota_transfer_chunk_bytes(
@@ -5552,6 +5560,26 @@ mod windows_ble {
         } else {
             Some(value)
         }
+    }
+
+    fn type_ready_command_bytes() -> Vec<u8> {
+        let command = std::env::var(TYPE_READY_COMMAND_ENV)
+            .ok()
+            .and_then(ota_env_value)
+            .unwrap_or_else(|| "TYPE:READY".to_string());
+        let command = if command.starts_with("TYPE:READY") {
+            command
+        } else {
+            log::warn!(
+                "[embedded-ble] ignoring unsupported {TYPE_READY_COMMAND_ENV}={command:?}; using TYPE:READY"
+            );
+            "TYPE:READY".to_string()
+        };
+        let mut bytes = command.into_bytes();
+        if !bytes.ends_with(b"\n") {
+            bytes.push(b'\n');
+        }
+        bytes
     }
 
     fn open_write_characteristic_from_service(
@@ -7208,7 +7236,7 @@ mod windows_ble {
         }
 
         #[test]
-        fn stm32wb_st_ota_caps_no_response_chunks_to_default_att_payload() {
+        fn stm32wb_st_ota_uses_large_confirmed_chunks_and_caps_no_response() {
             assert_eq!(
                 stm32wb_st_ota_raw_chunk_bytes(None, GattWriteOption::WriteWithoutResponse),
                 ATT_DEFAULT_PAYLOAD_BYTES
@@ -7216,6 +7244,17 @@ mod windows_ble {
             assert_eq!(
                 stm32wb_st_ota_raw_chunk_bytes(None, GattWriteOption::WriteWithResponse),
                 ATT_DEFAULT_PAYLOAD_BYTES
+            );
+            assert_eq!(
+                stm32wb_st_ota_raw_chunk_bytes_from_payload(
+                    248,
+                    GattWriteOption::WriteWithoutResponse
+                ),
+                ATT_DEFAULT_PAYLOAD_BYTES
+            );
+            assert_eq!(
+                stm32wb_st_ota_raw_chunk_bytes_from_payload(248, GattWriteOption::WriteWithResponse),
+                STM32WB_ST_OTA_RAW_DATA_SIZE
             );
         }
 
