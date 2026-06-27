@@ -1,6 +1,6 @@
 [package]
 name = "listener-type"
-version = "1.0.0"
+version = "1.0.1"
 description = "Listener Type — local voice input that types where your cursor is"
 authors = ["Listener Type"]
 edition = "2021"
