@@ -2967,6 +2967,7 @@ const WIRED_FLASH_SIZE: FlashSize = FlashSize::_16Mb;
 const WIRED_FULL_FLASH_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const WIRED_BOOT_REPAIR_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const WIRED_FLASH_CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(120);
+const WIRED_FLASH_SERIAL_IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct PreparedWiredFlashArtifact {
     role: String,
@@ -4217,15 +4218,12 @@ fn run_wired_bootloader_repair_with_progress(
     let bauds = baud
         .map(|value| vec![value])
         .unwrap_or_else(|| WIRED_BOOT_REPAIR_BAUDS.to_vec());
-    let reset_modes = [
-        ResetBeforeOperation::NoReset,
-        ResetBeforeOperation::DefaultReset,
-    ];
+    let reset_modes = [ResetBeforeOperation::DefaultReset];
     let mut log = String::new();
     log.push_str("> Listener Type built-in bootloader repair\n");
     log.push_str("No ESP-IDF, IDF_PATH, Python, or esptool.py environment is required.\n");
     log.push_str(
-        "Repair strategy: poll for the COM port, sync immediately without resetting first, and write bootloader.bin in the same session.\n",
+        "Repair strategy: poll for the COM port, use default reset to enter the ESP ROM loader, and write bootloader.bin in the same session.\n",
     );
     let mut failures = Vec::new();
 
@@ -4650,6 +4648,7 @@ fn connect_builtin_esp_flasher(
     let usb_info = usb_port_info_for(port);
     let serial_port = serialport::new(port, 115_200)
         .flow_control(FlowControl::None)
+        .timeout(WIRED_FLASH_SERIAL_IO_TIMEOUT)
         .open_native()
         .map_err(|err| format!("Failed to open serial port {port}: {err}"))?;
 
