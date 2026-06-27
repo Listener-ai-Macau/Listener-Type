@@ -3524,9 +3524,13 @@ mod windows_ble {
                     continue;
                 }
             };
+            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+            if !ble_candidate_allowed("audio notify", index, &name, address) {
+                continue;
+            }
 
             let mut candidate_error = None;
-            if let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
+            if let Some(address) = address {
                 match open_notify_target_for_device(address) {
                     Ok(target) => {
                         log::info!(
@@ -3662,9 +3666,13 @@ mod windows_ble {
                     continue;
                 }
             };
+            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+            if !ble_candidate_allowed("audio control", index, &name, address) {
+                continue;
+            }
 
             let mut candidate_error = None;
-            if let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
+            if let Some(address) = address {
                 match open_audio_control_target_for_device(address) {
                     Ok(target) => {
                         log::info!(
@@ -3993,9 +4001,13 @@ mod windows_ble {
                     continue;
                 }
             };
+            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+            if !ble_candidate_allowed("OTA", index, &name, address) {
+                continue;
+            }
 
             let mut candidate_error = None;
-            if let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
+            if let Some(address) = address {
                 match open_ota_target_for_device(address) {
                     Ok(target) => {
                         log::info!(
@@ -4101,9 +4113,13 @@ mod windows_ble {
                     continue;
                 }
             };
+            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+            if !ble_candidate_allowed("STM32WB ST OTA", index, &name, address) {
+                continue;
+            }
 
             let mut candidate_error = None;
-            if let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
+            if let Some(address) = address {
                 match open_stm32wb_st_ota_target_for_device(address, uuid_set) {
                     Ok(target) => {
                         log::info!(
@@ -5703,6 +5719,51 @@ mod windows_ble {
             log::warn!("[embedded-ble] ignoring invalid {key}={value}");
         }
         None
+    }
+
+    fn configured_bluetooth_target_name() -> Option<String> {
+        for key in [
+            "LISTENER_TYPE_BLE_TARGET_NAME",
+            "LISTENER_TYPE_BLUETOOTH_TARGET_NAME",
+        ] {
+            let Ok(value) = std::env::var(key) else {
+                continue;
+            };
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        None
+    }
+
+    fn ble_candidate_allowed(kind: &str, index: u32, name: &str, address: Option<u64>) -> bool {
+        if let Some(expected_address) = configured_bluetooth_address() {
+            if address != Some(expected_address) {
+                log::info!(
+                    "[embedded-ble] skipping {kind} candidate index={index} name={name} address={}: configured address is {}",
+                    address
+                        .map(crate::embedded_ble::format_bluetooth_address)
+                        .unwrap_or_else(|| "-".to_string()),
+                    crate::embedded_ble::format_bluetooth_address(expected_address)
+                );
+                return false;
+            }
+        }
+
+        if let Some(expected_name) = configured_bluetooth_target_name() {
+            if !name.trim().eq_ignore_ascii_case(&expected_name) {
+                log::info!(
+                    "[embedded-ble] skipping {kind} candidate index={index} name={name:?} address={}: target name is {expected_name:?}",
+                    address
+                        .map(crate::embedded_ble::format_bluetooth_address)
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                return false;
+            }
+        }
+
+        true
     }
 
     pub(super) fn parse_bluetooth_address_hex(value: &str) -> Option<u64> {

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Companion Type",
+  "identifier": "com.denzic.companion.type",
+  "build": {
+    "beforeDevCommand": "npm run dev -- --host 127.0.0.1 --port 1421",
+    "devUrl": "http://localhost:1421"
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Listener-ai-Macau/Companion-Type/releases/latest/download/latest-{{target}}-{{arch}}.json"
+      ]
+    }
+  }
+}

@@ -95,6 +95,18 @@ fn reset_credentials_cache_for_tests() {
 
 // ───────────────────────── path helpers ─────────────────────────
 
+fn app_profile_dir_name() -> &'static str {
+    if std::env::var("LISTENER_TYPE_APP_PROFILE")
+        .ok()
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("companion"))
+    {
+        "Listener Type Companion"
+    } else {
+        "Listener Type"
+    }
+}
+
 fn data_dir() -> Result<PathBuf> {
     #[cfg(target_os = "macos")]
     {
@@ -102,27 +114,27 @@ fn data_dir() -> Result<PathBuf> {
         Ok(PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join("Listener Type"))
+            .join(app_profile_dir_name()))
     }
 
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").context("APPDATA not set")?;
-        Ok(PathBuf::from(appdata).join("Listener Type"))
+        Ok(PathBuf::from(appdata).join(app_profile_dir_name()))
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
             if !xdg.is_empty() {
-                return Ok(PathBuf::from(xdg).join("Listener Type"));
+                return Ok(PathBuf::from(xdg).join(app_profile_dir_name()));
             }
         }
         let home = std::env::var("HOME").context("HOME not set")?;
         Ok(PathBuf::from(home)
             .join(".local")
             .join("share")
-            .join("Listener Type"))
+            .join(app_profile_dir_name()))
     }
 }
 

@@ -71,6 +71,11 @@ pub fn run() {
     let first_run_args: Vec<String> = std::env::args().collect();
     if let Some(intent) = cli::parse_cli_intent(&first_run_args) {
         match intent {
+            cli::CliIntent::SubmitEmbeddedAudioBleOnce { .. }
+            | cli::CliIntent::SubmitEmbeddedAudioBleStream { .. }
+            | cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. } => {
+                std::process::exit(run_embedded_ble_headless_cli(intent));
+            }
             cli::CliIntent::FirmwareOta { .. } => {
                 std::process::exit(run_firmware_ota_headless_cli(intent));
             }
@@ -938,6 +943,18 @@ fn rotate_log_if_too_large(path: &std::path::Path) -> std::io::Result<()> {
     std::fs::rename(path, archive)
 }
 
+fn app_profile_dir_name() -> &'static str {
+    if std::env::var("LISTENER_TYPE_APP_PROFILE")
+        .ok()
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("companion"))
+    {
+        "Listener Type Companion"
+    } else {
+        "Listener Type"
+    }
+}
+
 pub fn log_dir_path() -> std::path::PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -945,14 +962,14 @@ pub fn log_dir_path() -> std::path::PathBuf {
             return std::path::PathBuf::from(home)
                 .join("Library")
                 .join("Logs")
-                .join("Listener Type");
+                .join(app_profile_dir_name());
         }
     }
     #[cfg(target_os = "windows")]
     {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             return std::path::PathBuf::from(local)
-                .join("Listener Type")
+                .join(app_profile_dir_name())
                 .join("Logs");
         }
     }
@@ -962,11 +979,11 @@ pub fn log_dir_path() -> std::path::PathBuf {
             return std::path::PathBuf::from(home)
                 .join(".local")
                 .join("share")
-                .join("Listener Type")
+                .join(app_profile_dir_name())
                 .join("logs");
         }
     }
-    std::env::temp_dir().join("Listener Type")
+    std::env::temp_dir().join(app_profile_dir_name())
 }
 
 pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
@@ -1165,6 +1182,86 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
         cli::CliIntent::WiredFirmware { .. } => {
             log::warn!("[cli] wired firmware commands are headless-only and were ignored by the running GUI instance");
         }
+    }
+}
+
+fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
+    init_file_logger();
+
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("embedded_ble_error=failed to create runtime: {err}");
+            return 2;
+        }
+    };
+
+    let foundry_local_runtime = Arc::new(asr::local::FoundryLocalRuntime::new());
+    #[cfg(target_os = "windows")]
+    let coordinator = Arc::new(coordinator::Coordinator::new_with_foundry_runtime(
+        Arc::clone(&foundry_local_runtime),
+    ));
+    #[cfg(not(target_os = "windows"))]
+    let coordinator = Arc::new(coordinator::Coordinator::new());
+
+    match intent {
+        cli::CliIntent::ProbeEmbeddedAudioBleSubscription { timeout_ms } => {
+            log::info!(
+                "[cli] headless probe-embedded-audio-ble-subscription: timeout_ms={timeout_ms:?}"
+            );
+            match runtime.block_on(coordinator.probe_embedded_audio_ble_subscription(timeout_ms)) {
+                Ok(()) => {
+                    println!("embedded_ble_probe_result=PASS");
+                    log::info!("[cli] probe-embedded-audio-ble-subscription PASS");
+                    0
+                }
+                Err(err) => {
+                    println!("embedded_ble_probe_result=FAIL error={err}");
+                    log::warn!("[cli] probe-embedded-audio-ble-subscription failed: {err}");
+                    1
+                }
+            }
+        }
+        cli::CliIntent::SubmitEmbeddedAudioBleOnce { timeout_ms } => {
+            log::info!("[cli] headless submit-embedded-audio-ble-once: timeout_ms={timeout_ms:?}");
+            match runtime.block_on(coordinator.submit_embedded_audio_ble_once(timeout_ms)) {
+                Ok(result) => {
+                    log::info!(
+                        "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={}",
+                        result.reconstructed_pcm_bytes,
+                        result.stats.missing_packet_count
+                    );
+                    0
+                }
+                Err(err) => {
+                    log::warn!("[cli] submit-embedded-audio-ble-once failed: {err}");
+                    1
+                }
+            }
+        }
+        cli::CliIntent::SubmitEmbeddedAudioBleStream { timeout_ms } => {
+            log::info!(
+                "[cli] headless submit-embedded-audio-ble-stream: timeout_ms={timeout_ms:?}"
+            );
+            match runtime.block_on(coordinator.submit_embedded_audio_ble_stream(timeout_ms)) {
+                Ok(result) => {
+                    log::info!(
+                        "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={}",
+                        result.reconstructed_pcm_bytes,
+                        result.stats.missing_packet_count
+                    );
+                    0
+                }
+                Err(err) => {
+                    log::warn!("[cli] submit-embedded-audio-ble-stream failed: {err}");
+                    1
+                }
+            }
+        }
+        _ => 2,
     }
 }
 
