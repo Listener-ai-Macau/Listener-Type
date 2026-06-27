@@ -435,7 +435,10 @@ fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), S
         ));
     }
     if !device_ble_name_is_valid(&prefs.device_ble_name) {
-        return Err("蓝牙名称只支持 1-32 个字符：英文字母、数字、连字符或下划线。".to_string());
+        return Err(
+            "蓝牙名称只支持 1-29 个可见 ASCII 字符，不能包含空格、引号、分号、等号或反斜杠。"
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -2574,10 +2577,7 @@ fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Re
 
 fn validate_device_settings_ble_name(name: &str) -> Result<(), String> {
     if !device_ble_name_is_valid(name) {
-        return Err(
-            "BLE name must be 1-32 characters using letters, numbers, hyphen, or underscore."
-                .to_string(),
-        );
+        return Err("BLE name must be 1-29 printable ASCII characters without spaces, quotes, semicolon, equals sign, or backslash.".to_string());
     }
     Ok(())
 }
@@ -7623,7 +7623,7 @@ mod tests {
     }
 
     #[test]
-    fn device_settings_request_rejects_ble_name_angle_brackets() {
+    fn device_settings_request_rejects_ble_name_too_long_for_advertising() {
         let request = DeviceSettingsUpdateRequest {
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
@@ -7634,7 +7634,7 @@ mod tests {
             plugged_low_power_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
-            ble_name: "listener<bad".to_string(),
+            ble_name: "listener-1234567890123456789012".to_string(),
         };
 
         assert!(validate_device_settings_request(&request).is_err());

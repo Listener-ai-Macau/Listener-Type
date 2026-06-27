@@ -523,10 +523,11 @@ pub fn clamp_device_battery_auto_shutdown_minutes(value: u32) -> u32 {
 pub fn device_ble_name_is_valid(name: &str) -> bool {
     let bytes = name.as_bytes();
     !bytes.is_empty()
-        && bytes.len() <= 32
-        && name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        && bytes.len() <= 29
+        && bytes.iter().all(|byte| {
+            let byte = *byte;
+            (0x21..=0x7e).contains(&byte) && !matches!(byte, b'"' | b'\'' | b';' | b'=' | b'\\')
+        })
 }
 
 pub fn normalize_device_ble_name(name: String) -> String {
@@ -2798,12 +2799,15 @@ mod tests {
     }
 
     #[test]
-    fn device_ble_name_rejects_shell_and_markup_delimiters() {
+    fn device_ble_name_matches_firmware_advertising_contract() {
         assert!(device_ble_name_is_valid("listener-dev_01"));
-        assert!(!device_ble_name_is_valid("listener<dev"));
-        assert!(!device_ble_name_is_valid("listener>dev"));
+        assert!(device_ble_name_is_valid("listener<dev"));
+        assert!(device_ble_name_is_valid("listener-12345678901234567890"));
+        assert!(!device_ble_name_is_valid("listener-1234567890123456789012"));
+        assert!(!device_ble_name_is_valid("listener dev"));
+        assert!(!device_ble_name_is_valid("listener=dev"));
         assert_eq!(
-            normalize_device_ble_name("listener<dev".to_string()),
+            normalize_device_ble_name("listener-1234567890123456789012".to_string()),
             default_device_ble_name()
         );
     }
