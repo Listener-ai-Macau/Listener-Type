@@ -656,6 +656,38 @@ fn take_embedded_audio_stats(inner: &Arc<Inner>) -> Option<crate::embedded_audio
     inner.embedded_audio_stats.lock().take()
 }
 
+fn clear_embedded_audio_final_result(inner: &Arc<Inner>) {
+    *inner.embedded_audio_final_result.lock() = None;
+}
+
+fn store_embedded_audio_final_result(
+    inner: &Arc<Inner>,
+    result: crate::embedded_audio::EmbeddedAudioTranscriptResult,
+) {
+    *inner.embedded_audio_final_result.lock() = Some(result);
+}
+
+fn take_embedded_audio_final_result(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) -> Option<crate::embedded_audio::EmbeddedAudioTranscriptResult> {
+    let mut slot = inner.embedded_audio_final_result.lock();
+    if slot
+        .as_ref()
+        .is_some_and(|result| result.session_id == session_id.to_string())
+    {
+        slot.take()
+    } else {
+        None
+    }
+}
+
+fn take_latest_embedded_audio_final_result(
+    inner: &Arc<Inner>,
+) -> Option<crate::embedded_audio::EmbeddedAudioTranscriptResult> {
+    inner.embedded_audio_final_result.lock().take()
+}
+
 struct EmbeddedAudioDictationSession {
     session_id: SessionId,
     active_asr: String,
@@ -749,6 +781,7 @@ struct EmbeddedStreamingDictation {
     collector: crate::embedded_audio::StreamingSessionCollector,
     session: Option<EmbeddedAudioDictationSession>,
     embedded_session_id: Option<u32>,
+    transcript: Option<crate::embedded_audio::EmbeddedAudioTranscriptResult>,
     pending_stop_expected_packet_count: Option<u16>,
     terminal_received: bool,
     keep_listening_after_pipeline_errors: bool,
@@ -1246,6 +1279,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         session_id
     };
     clear_embedded_audio_stats(inner);
+    clear_embedded_audio_final_result(inner);
     clear_embedded_audio_partial_preview(inner);
     #[cfg(target_os = "windows")]
     {
@@ -1764,9 +1798,11 @@ pub(super) async fn submit_embedded_audio_notifications(
         );
     }
     submit_embedded_pcm_for_dictation_with_stats(inner, &pcm, Some(stats.clone())).await?;
+    let transcript = take_latest_embedded_audio_final_result(inner);
     Ok(crate::embedded_audio::EmbeddedAudioSubmissionResult {
         stats,
         reconstructed_pcm_bytes,
+        transcript,
     })
 }
 
@@ -1939,6 +1975,7 @@ async fn submit_embedded_audio_ble_stream_stats_only(
     Ok(crate::embedded_audio::EmbeddedAudioSubmissionResult {
         reconstructed_pcm_bytes: stats.reconstructed_pcm_bytes,
         stats,
+        transcript: None,
     })
 }
 
@@ -2332,14 +2369,19 @@ impl EmbeddedStreamingDictation {
             session.normalized_pcm_bytes,
             archive_active
         );
-        end_embedded_ble_session(
+        let coordinator_session_id = session.session_id;
+        let end_result = end_embedded_ble_session(
             inner,
             format!(
                 "embedded_session_id={embedded_session_id} coordinator_session_id={} expected_packets={expected_packet_count}",
-                session.session_id
+                coordinator_session_id
             ),
         )
-        .await
+        .await;
+        if end_result.is_ok() {
+            self.transcript = take_embedded_audio_final_result(inner, coordinator_session_id);
+        }
+        end_result
     }
 
     async fn finish_completed_streaming_session(
@@ -2453,13 +2495,18 @@ impl EmbeddedStreamingDictation {
     fn submission_result(
         &self,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-        submission_result_from_stats(self.terminal_received, self.collector.inner().stats())
+        submission_result_from_stats(
+            self.terminal_received,
+            self.collector.inner().stats(),
+            self.transcript.clone(),
+        )
     }
 
     fn reset_for_next_session(&mut self) {
         self.collector.reset();
         self.session = None;
         self.embedded_session_id = None;
+        self.transcript = None;
         self.pending_stop_expected_packet_count = None;
         self.terminal_received = false;
     }
@@ -2467,7 +2514,11 @@ impl EmbeddedStreamingDictation {
     fn into_submission_result(
         self,
     ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-        submission_result_from_stats(self.terminal_received, self.collector.into_inner().stats())
+        submission_result_from_stats(
+            self.terminal_received,
+            self.collector.into_inner().stats(),
+            self.transcript,
+        )
     }
 
     fn into_cancelled_submission_result(
@@ -2479,6 +2530,7 @@ impl EmbeddedStreamingDictation {
         crate::embedded_audio::EmbeddedAudioSubmissionResult {
             reconstructed_pcm_bytes: stats.reconstructed_pcm_bytes,
             stats,
+            transcript: None,
         }
     }
 }
@@ -2486,6 +2538,7 @@ impl EmbeddedStreamingDictation {
 fn submission_result_from_stats(
     terminal_received: bool,
     stats: crate::embedded_audio::SessionStats,
+    transcript: Option<crate::embedded_audio::EmbeddedAudioTranscriptResult>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     if !terminal_received || !stats.terminal_received {
         return Err("嵌入式音频流式会话尚未收到结束包".to_string());
@@ -2499,6 +2552,7 @@ fn submission_result_from_stats(
     Ok(crate::embedded_audio::EmbeddedAudioSubmissionResult {
         reconstructed_pcm_bytes: stats.reconstructed_pcm_bytes,
         stats,
+        transcript,
     })
 }
 
@@ -3193,6 +3247,15 @@ async fn finish_end_session_after_stop_transition(
         ) {
             log::error!("[coord] history append failed: {e}");
         }
+        store_embedded_audio_final_result(
+            inner,
+            crate::embedded_audio::EmbeddedAudioTranscriptResult {
+                session_id: current_session_id.to_string(),
+                raw_transcript: raw.text.clone(),
+                final_text: String::new(),
+                error_code: Some("emptyTranscript".to_string()),
+            },
+        );
         device_ai_processing.complete_warning("dictation_empty_transcript");
         publish_embedded_ble_asr_final(
             inner,
@@ -3529,6 +3592,7 @@ async fn finish_end_session_after_stop_transition(
         wayland_session,
     )
     .map(str::to_string);
+    let transcript_error_code = error_code.clone();
     let tsf_required_insert_failed = error_code.as_deref() == Some("windowsImeTsfRequired");
     let device_processing_succeeded =
         device_processing_final_succeeded(status, error_code.as_deref());
@@ -3569,6 +3633,15 @@ async fn finish_end_session_after_stop_transition(
     ) {
         log::error!("[coord] history append failed: {e}");
     }
+    store_embedded_audio_final_result(
+        inner,
+        crate::embedded_audio::EmbeddedAudioTranscriptResult {
+            session_id: current_session_id.to_string(),
+            raw_transcript: raw.text.clone(),
+            final_text: polished.clone(),
+            error_code: transcript_error_code,
+        },
+    );
     let done_message = if status == InsertStatus::Inserted
         && !polish_error.is_some()
         && !tsf_required_insert_failed

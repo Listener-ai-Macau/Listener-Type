@@ -200,6 +200,9 @@ struct Inner {
     audio_archive_active: AtomicBool,
     /// 当前嵌入式 BLE 音频会话的传输统计，随同一条 dictation history 写入。
     embedded_audio_stats: Mutex<Option<crate::embedded_audio::SessionStats>>,
+    /// 当前嵌入式 BLE 音频会话的 ASR 最终文本，用于 headless A2 验收。
+    embedded_audio_final_result:
+        Mutex<Option<crate::embedded_audio::EmbeddedAudioTranscriptResult>>,
     /// 嵌入式 BLE 流式 ASR 的最近一次 partial preview。只用于胶囊视觉反馈；
     /// 光标仍只在 final text 完成后写入。
     embedded_audio_partial_preview: Mutex<Option<String>>,
@@ -479,6 +482,7 @@ impl Coordinator {
                     recorder: Mutex::new(None),
                     audio_archive_active: AtomicBool::new(false),
                     embedded_audio_stats: Mutex::new(None),
+                    embedded_audio_final_result: Mutex::new(None),
                     embedded_audio_partial_preview: Mutex::new(None),
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
@@ -547,6 +551,7 @@ impl Coordinator {
                 recorder: Mutex::new(None),
                 audio_archive_active: AtomicBool::new(false),
                 embedded_audio_stats: Mutex::new(None),
+                embedded_audio_final_result: Mutex::new(None),
                 embedded_audio_partial_preview: Mutex::new(None),
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),

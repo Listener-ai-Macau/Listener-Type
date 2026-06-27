@@ -615,9 +615,20 @@ pub struct SessionStats {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct EmbeddedAudioTranscriptResult {
+    pub session_id: String,
+    pub raw_transcript: String,
+    pub final_text: String,
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EmbeddedAudioSubmissionResult {
     pub stats: SessionStats,
     pub reconstructed_pcm_bytes: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<EmbeddedAudioTranscriptResult>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
