@@ -37,7 +37,12 @@ import type {
   VocabPresetStore,
   WindowsImeStatus,
 } from './types';
-import type { FirmwareOtaManifest, FirmwareOtaPreflightSnapshot } from './firmwareOta';
+import {
+  FIRMWARE_OTA_TRANSPORT_BOUNDARY,
+  STM32WB_ST_OTA_TRANSPORT_BOUNDARY,
+  type FirmwareOtaManifest,
+  type FirmwareOtaPreflightSnapshot,
+} from './firmwareOta';
 import { OL_DATA } from './mockData';
 import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from './hotkey';
 
@@ -1175,8 +1180,12 @@ export function loadFirmwareOtaPackage(path: string): Promise<FirmwareOtaPackage
 export interface FirmwareOtaBleTransferResult {
   bytesTransferred: number;
   confirmedVersion: string | null;
-  transport: 'listener_ble_ota';
+  transport: FirmwareOtaBleTransferTransport;
 }
+
+export type FirmwareOtaBleTransferTransport =
+  | typeof FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName
+  | typeof STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName;
 
 export function transferFirmwareOtaBle(
   request: FirmwareOtaBleTransferRequest,
@@ -1191,7 +1200,9 @@ export function transferFirmwareOtaBle(
     () => ({
       bytesTransferred: request.firmwareBytes.byteLength,
       confirmedVersion: null,
-      transport: 'listener_ble_ota' as const,
+      transport: request.manifest.protocolName === STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName
+        ? STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName
+        : FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName,
     }),
   );
 }

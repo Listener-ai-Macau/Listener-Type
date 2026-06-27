@@ -85,6 +85,7 @@ foundry-local-sdk = { version = "1.1.0", features = ["winml"] }
 raw-window-handle = "0.6"
 windows = { version = "0.58", features = [
   "Devices_Bluetooth",
+  "Devices_Bluetooth_Advertisement",
   "Devices_Bluetooth_GenericAttributeProfile",
   "Devices_Enumeration",
   "Win32_Devices_DeviceAndDriverInstallation",

@@ -15,10 +15,10 @@ pub const OTA_MAX_CHUNK_BYTES: u64 = 500;
 pub const OTA_CHUNK_BYTES: u64 = OTA_MAX_CHUNK_BYTES;
 pub const STM32WB_ST_PROTOCOL_NAME: &str = "stm32wb_st_ble_ota";
 pub const STM32WB_ST_FIRMWARE_CAPABILITY: &str = "stm32wb_st_ble_ota_v1";
-pub const STM32WB_ST_OTA_SERVICE_UUID: &str = "0000fe20-cc7a-482a-984a-7f2ed5b3e58f";
-pub const STM32WB_ST_OTA_CONTROL_UUID: &str = "0000fe22-8e22-4541-9d4c-21edae82ed19";
-pub const STM32WB_ST_OTA_DATA_UUID: &str = "0000fe24-8e22-4541-9d4c-21edae82ed19";
-pub const STM32WB_ST_OTA_CONFIRM_UUID: &str = "0000fe23-8e22-4541-9d4c-21edae82ed19";
+pub const STM32WB_ST_OTA_SERVICE_UUID: &str = "8f7a0007-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_CONTROL_UUID: &str = "8f7a7002-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_DATA_UUID: &str = "8f7a7004-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_CONFIRM_UUID: &str = "8f7a7003-7b7d-4f3d-9d6f-6c2d1b7c0000";
 pub const STM32WB_ST_OTA_CHUNK_BYTES: u64 = 248;
 pub const OTA_MAX_VERSION_CHARS: usize = 31;
 pub const DEFAULT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
@@ -43,6 +43,7 @@ pub struct FirmwareOtaManifest {
     pub gatt_service_uuid: String,
     pub gatt_control_uuid: String,
     pub gatt_data_uuid: String,
+    pub gatt_confirm_uuid: Option<String>,
     pub gatt_chunk_bytes: u64,
     pub rollback_instructions: Vec<String>,
     pub recovery_instructions: Vec<String>,
@@ -327,7 +328,21 @@ fn run_stm32wb_st_transfer_preflight_and_write(
     package: &FirmwareOtaPackage,
     options: &FirmwareOtaHeadlessOptions,
 ) -> HeadlessTransferAttempt {
-    let snapshot = crate::embedded_ble::stm32wb_st_ota_device_snapshot();
+    let prepared = match crate::embedded_ble::prepare_stm32wb_st_ota_transfer() {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            let snapshot = disconnected_ota_snapshot(err);
+            let blockers =
+                preflight_blockers(&package.manifest, &snapshot, options.recording_active);
+            return HeadlessTransferAttempt {
+                preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
+                stats: None,
+                errors: blockers,
+            };
+        }
+    };
+
+    let snapshot = prepared.snapshot().clone();
     let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
     let preflight = headless_preflight_from_snapshot(options, snapshot, blockers.clone());
     if !blockers.is_empty() {
@@ -338,7 +353,7 @@ fn run_stm32wb_st_transfer_preflight_and_write(
         };
     }
 
-    match crate::embedded_ble::transfer_stm32wb_st_ota(
+    match prepared.transfer(
         &package.firmware_bytes,
         package.manifest.gatt_chunk_bytes as usize,
         None,
@@ -816,6 +831,7 @@ fn parse_manifest_v1(value: &Value, schema_version: u64) -> Result<FirmwareOtaMa
             OTA_CONTROL_UUID,
         )?,
         gatt_data_uuid: optional_gatt_string(gatt, "data_uuid", "dataUuid", OTA_DATA_UUID)?,
+        gatt_confirm_uuid: optional_gatt_optional_string(gatt, "confirm_uuid", "confirmUuid")?,
         gatt_chunk_bytes: optional_gatt_u64(gatt, "chunk_bytes", "chunkBytes", OTA_CHUNK_BYTES)?,
         rollback_instructions: require_instructions(
             rollback.get("instructions"),
@@ -933,6 +949,7 @@ fn parse_manifest_v2(value: &Value, schema_version: u64) -> Result<FirmwareOtaMa
         gatt_service_uuid: OTA_SERVICE_UUID.to_string(),
         gatt_control_uuid: OTA_CONTROL_UUID.to_string(),
         gatt_data_uuid: OTA_DATA_UUID.to_string(),
+        gatt_confirm_uuid: None,
         gatt_chunk_bytes: optional_u64(
             requirements
                 .get("gatt_chunk_bytes")
@@ -1001,6 +1018,10 @@ pub fn validate_normalized_manifest(
         if !uuid_eq(&manifest.gatt_service_uuid, STM32WB_ST_OTA_SERVICE_UUID)
             || !uuid_eq(&manifest.gatt_control_uuid, STM32WB_ST_OTA_CONTROL_UUID)
             || !uuid_eq(&manifest.gatt_data_uuid, STM32WB_ST_OTA_DATA_UUID)
+            || manifest
+                .gatt_confirm_uuid
+                .as_deref()
+                .map_or(true, |value| !uuid_eq(value, STM32WB_ST_OTA_CONFIRM_UUID))
         {
             return Err(
                 "Companion STM32WB OTA package uses an unsupported ST GATT boundary.".to_string(),
@@ -1108,6 +1129,21 @@ fn optional_gatt_string(
             &format!("protocol.gatt.{snake}"),
         ),
         None => Ok(default_value.to_string()),
+    }
+}
+
+fn optional_gatt_optional_string(
+    gatt: Option<&serde_json::Map<String, Value>>,
+    snake: &str,
+    camel: &str,
+) -> Result<Option<String>, String> {
+    let Some(gatt) = gatt else {
+        return Ok(None);
+    };
+    let value = gatt.get(snake).or_else(|| gatt.get(camel));
+    match value {
+        Some(_) => require_string(value, &format!("protocol.gatt.{snake}")).map(Some),
+        None => Ok(None),
     }
 }
 
@@ -1241,6 +1277,7 @@ mod tests {
             gatt_service_uuid: STM32WB_ST_OTA_SERVICE_UUID.to_string(),
             gatt_control_uuid: STM32WB_ST_OTA_CONTROL_UUID.to_string(),
             gatt_data_uuid: STM32WB_ST_OTA_DATA_UUID.to_string(),
+            gatt_confirm_uuid: Some(STM32WB_ST_OTA_CONFIRM_UUID.to_string()),
             gatt_chunk_bytes: STM32WB_ST_OTA_CHUNK_BYTES,
             rollback_instructions: vec!["Re-run wired factory flash.".to_string()],
             recovery_instructions: vec!["Use ST-LINK wired package.".to_string()],
@@ -1251,7 +1288,7 @@ mod tests {
         crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             connected: true,
             hardware_revision: Some("NUCLEO-WB55RG".to_string()),
-            firmware_version: Some("STM_OTA loader".to_string()),
+            firmware_version: Some("companion OTA loader".to_string()),
             capabilities: vec![STM32WB_ST_FIRMWARE_CAPABILITY.to_string()],
             battery_percent: None,
             usb_powered: None,
@@ -1356,6 +1393,27 @@ mod tests {
         let snapshot = stm32wb_loader_snapshot();
 
         assert!(preflight_blockers(&manifest, &snapshot, false).is_empty());
+    }
+
+    #[test]
+    fn stm32wb_st_manifest_requires_confirm_gatt_boundary() {
+        let mut missing = stm32wb_manifest();
+        missing.gatt_confirm_uuid = None;
+        let missing_result = validate_normalized_manifest(missing);
+
+        assert!(missing_result.is_err());
+        assert!(missing_result
+            .unwrap_err()
+            .contains("unsupported ST GATT boundary"));
+
+        let mut wrong = stm32wb_manifest();
+        wrong.gatt_confirm_uuid = Some("8f7a7003-7b7d-4f3d-9d6f-6c2d1b7cffff".to_string());
+        let wrong_result = validate_normalized_manifest(wrong);
+
+        assert!(wrong_result.is_err());
+        assert!(wrong_result
+            .unwrap_err()
+            .contains("unsupported ST GATT boundary"));
     }
 
     #[test]

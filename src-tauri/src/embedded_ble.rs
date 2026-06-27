@@ -11,10 +11,10 @@ pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3
 pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093b";
 pub const DIAGNOSTIC_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093c";
 pub const DIAGNOSTIC_COUNT_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093d";
-pub const STM32WB_ST_OTA_SERVICE_UUID_TEXT: &str = "0000fe20-cc7a-482a-984a-7f2ed5b3e58f";
-pub const STM32WB_ST_OTA_BASE_UUID_TEXT: &str = "0000fe22-8e22-4541-9d4c-21edae82ed19";
-pub const STM32WB_ST_OTA_CONFIRM_UUID_TEXT: &str = "0000fe23-8e22-4541-9d4c-21edae82ed19";
-pub const STM32WB_ST_OTA_RAW_UUID_TEXT: &str = "0000fe24-8e22-4541-9d4c-21edae82ed19";
+pub const STM32WB_ST_OTA_SERVICE_UUID_TEXT: &str = "8f7a0007-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_BASE_UUID_TEXT: &str = "8f7a7002-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_CONFIRM_UUID_TEXT: &str = "8f7a7003-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_RAW_UUID_TEXT: &str = "8f7a7004-7b7d-4f3d-9d6f-6c2d1b7c0000";
 pub const DIAGNOSTIC_EVENT_BYTES: usize = 24;
 pub const DIAGNOSTIC_CHUNK_HEADER_BYTES: usize = 8;
 
@@ -512,6 +512,10 @@ mod windows_ble {
 
     use serialport::{SerialPortInfo, SerialPortType};
     use windows::core::{IInspectable, GUID, HSTRING, PCWSTR};
+    use windows::Devices::Bluetooth::Advertisement::{
+        BluetoothLEAdvertisementReceivedEventArgs, BluetoothLEAdvertisementWatcher,
+        BluetoothLEScanningMode,
+    };
     use windows::Devices::Bluetooth::GenericAttributeProfile::{
         GattCharacteristic, GattCharacteristicProperties,
         GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
@@ -543,11 +547,45 @@ mod windows_ble {
     const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
     const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
     const STM32WB_ST_OTA_SERVICE_UUID: GUID =
-        GUID::from_u128(0x0000fe20_cc7a_482a_984a_7f2ed5b3e58f);
-    const STM32WB_ST_OTA_BASE_UUID: GUID = GUID::from_u128(0x0000fe22_8e22_4541_9d4c_21edae82ed19);
+        GUID::from_u128(0x8f7a0007_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    const STM32WB_ST_OTA_BASE_UUID: GUID = GUID::from_u128(0x8f7a7002_7b7d_4f3d_9d6f_6c2d1b7c0000);
     const STM32WB_ST_OTA_CONFIRM_UUID: GUID =
+        GUID::from_u128(0x8f7a7003_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    const STM32WB_ST_OTA_RAW_UUID: GUID = GUID::from_u128(0x8f7a7004_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    const STM32WB_ST_LEGACY_OTA_SERVICE_UUID: GUID =
+        GUID::from_u128(0x0000fe20_cc7a_482a_984a_7f2ed5b3e58f);
+    const STM32WB_ST_LEGACY_OTA_BASE_UUID: GUID =
+        GUID::from_u128(0x0000fe22_8e22_4541_9d4c_21edae82ed19);
+    const STM32WB_ST_LEGACY_OTA_CONFIRM_UUID: GUID =
         GUID::from_u128(0x0000fe23_8e22_4541_9d4c_21edae82ed19);
-    const STM32WB_ST_OTA_RAW_UUID: GUID = GUID::from_u128(0x0000fe24_8e22_4541_9d4c_21edae82ed19);
+    const STM32WB_ST_LEGACY_OTA_RAW_UUID: GUID =
+        GUID::from_u128(0x0000fe24_8e22_4541_9d4c_21edae82ed19);
+
+    #[derive(Clone, Copy)]
+    struct Stm32wbStOtaUuidSet {
+        label: &'static str,
+        service: GUID,
+        base: GUID,
+        confirm: GUID,
+        raw: GUID,
+    }
+
+    const STM32WB_ST_OTA_UUID_SETS: [Stm32wbStOtaUuidSet; 2] = [
+        Stm32wbStOtaUuidSet {
+            label: "companion",
+            service: STM32WB_ST_OTA_SERVICE_UUID,
+            base: STM32WB_ST_OTA_BASE_UUID,
+            confirm: STM32WB_ST_OTA_CONFIRM_UUID,
+            raw: STM32WB_ST_OTA_RAW_UUID,
+        },
+        Stm32wbStOtaUuidSet {
+            label: "legacy-st",
+            service: STM32WB_ST_LEGACY_OTA_SERVICE_UUID,
+            base: STM32WB_ST_LEGACY_OTA_BASE_UUID,
+            confirm: STM32WB_ST_LEGACY_OTA_CONFIRM_UUID,
+            raw: STM32WB_ST_LEGACY_OTA_RAW_UUID,
+        },
+    ];
     const DIAGNOSTIC_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093a);
     const DIAGNOSTIC_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093b);
     const DIAGNOSTIC_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093c);
@@ -584,6 +622,8 @@ mod windows_ble {
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
     const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
     const OTA_DATA_WRITE_OPTION_ENV: &str = "LISTENER_OTA_DATA_WRITE_OPTION";
+    const STM32WB_ST_OTA_ADVERTISEMENT_NAME: &str = "companion";
+    const STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
     const OTA_DATA_CHUNK_BYTES_ENV: &str = "LISTENER_OTA_DATA_CHUNK_BYTES";
     const OTA_DATA_INTER_CHUNK_DELAY_MS_ENV: &str = "LISTENER_OTA_DATA_INTER_CHUNK_DELAY_MS";
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -596,6 +636,8 @@ mod windows_ble {
     const STM32WB_ST_OTA_APP_BASE_ADDRESS: u32 = 0x0800_7000;
     const STM32WB_ST_OTA_RAW_DATA_SIZE: usize = 248;
     const STM32WB_ST_OTA_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
+    const STM32WB_ST_OTA_REBOOT_HANDOFF_TIMEOUT: Duration = Duration::from_secs(12);
+    const STM32WB_ST_OTA_NO_RESPONSE_CHUNK_DELAY: Duration = Duration::from_millis(50);
     const STM32WB_ST_OTA_APPLICATION_UPLOAD: u8 = 0x02;
     const STM32WB_ST_OTA_UPLOAD_FINISHED: u8 = 0x07;
     const STM32WB_ST_OTA_REBOOT_CONFIRMED: u8 = 0x01;
@@ -2242,22 +2284,27 @@ mod windows_ble {
         on_ready()?;
         let type_heartbeat_enabled =
             terminal_behavior == CaptureTerminalBehavior::ContinueListening;
-        let mut next_type_heartbeat = if type_heartbeat_enabled {
-            match cleanup.write_type_heartbeat(b"TYPE:READY\n", "Type heartbeat ready") {
-                Ok(()) => {
-                    cleanup.mark_type_heartbeat_open();
-                    Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL)
+        let mut next_type_heartbeat = None;
+        match cleanup.write_type_heartbeat(b"TYPE:READY\n", "Type heartbeat ready") {
+            Ok(()) => {
+                cleanup.mark_type_heartbeat_open();
+                if type_heartbeat_enabled {
+                    next_type_heartbeat = Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL);
                 }
-                Err(err) => {
+            }
+            Err(err) => {
+                if type_heartbeat_enabled {
                     log::warn!(
                         "[embedded-ble] capture #{capture_id}: Type heartbeat ready failed; keeping notify open for retry: {err}"
                     );
-                    Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL)
+                    next_type_heartbeat = Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL);
+                } else {
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: Type ready failed; waiting for audio notifications anyway: {err}"
+                    );
                 }
             }
-        } else {
-            None
-        };
+        }
 
         let deadline = idle_timeout.map(|timeout| Instant::now() + timeout);
         let mut collector = crate::embedded_audio::SessionCollector::default();
@@ -2631,6 +2678,12 @@ mod windows_ble {
         transfer_guard: BleCaptureGuard,
     }
 
+    pub(super) struct PreparedStm32wbStOtaTransfer {
+        target: OpenStm32wbStOtaTarget,
+        snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+        transfer_guard: BleCaptureGuard,
+    }
+
     impl PreparedFirmwareOtaTransfer {
         pub(super) fn snapshot(&self) -> &crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             &self.snapshot
@@ -2656,6 +2709,27 @@ mod windows_ble {
         }
     }
 
+    impl PreparedStm32wbStOtaTransfer {
+        pub(super) fn snapshot(&self) -> &crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+            &self.snapshot
+        }
+
+        pub(super) fn transfer(
+            self,
+            firmware_bytes: &[u8],
+            manifest_chunk_bytes: usize,
+            on_progress: Option<&dyn Fn(usize, usize)>,
+        ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
+            transfer_stm32wb_st_ota_to_target(
+                &self.target,
+                self.transfer_guard.session_id(),
+                firmware_bytes,
+                manifest_chunk_bytes,
+                on_progress,
+            )
+        }
+    }
+
     pub(super) fn prepare_firmware_ota_transfer() -> Result<PreparedFirmwareOtaTransfer, String> {
         log::info!("[embedded-ble] OTA prepare: acquiring BLE capture guard");
         let transfer_guard = BleCaptureGuard::enter(None)?;
@@ -2668,6 +2742,24 @@ mod windows_ble {
             snapshot.firmware_version.as_deref().unwrap_or("unknown")
         );
         Ok(PreparedFirmwareOtaTransfer {
+            target,
+            snapshot,
+            transfer_guard,
+        })
+    }
+
+    pub(super) fn prepare_stm32wb_st_ota_transfer() -> Result<PreparedStm32wbStOtaTransfer, String>
+    {
+        log::info!("[embedded-ble] STM32WB ST OTA prepare: acquiring BLE capture guard");
+        let transfer_guard = BleCaptureGuard::enter(None)?;
+        log::info!("[embedded-ble] STM32WB ST OTA prepare: discovering companion OTA service");
+        let target = open_stm32wb_st_ota_target()?;
+        let snapshot = stm32wb_st_ota_device_snapshot_from_target(&target);
+        log::info!(
+            "[embedded-ble] STM32WB ST OTA prepare: ready (detail={})",
+            snapshot.detail.as_deref().unwrap_or("unknown")
+        );
+        Ok(PreparedStm32wbStOtaTransfer {
             target,
             snapshot,
             transfer_guard,
@@ -2822,17 +2914,8 @@ mod windows_ble {
             return Err("firmware_ota.bin is empty.".to_string());
         }
 
-        log::info!("[embedded-ble] STM32WB ST OTA: acquiring BLE capture guard");
-        let transfer_guard = BleCaptureGuard::enter(None)?;
-        log::info!("[embedded-ble] STM32WB ST OTA: discovering STM_OTA service");
-        let target = open_stm32wb_st_ota_target()?;
-        transfer_stm32wb_st_ota_to_target(
-            &target,
-            transfer_guard.session_id(),
-            firmware_bytes,
-            manifest_chunk_bytes,
-            on_progress,
-        )
+        let prepared = prepare_stm32wb_st_ota_transfer()?;
+        prepared.transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
     }
 
     fn transfer_stm32wb_st_ota_to_target(
@@ -2846,79 +2929,110 @@ mod windows_ble {
             stm32wb_st_ota_transfer_chunk_bytes(target.raw_chunk_bytes, manifest_chunk_bytes)?;
         let total_chunks = firmware_bytes.len().div_ceil(data_chunk_bytes);
         let (confirm_tx, confirm_rx) = mpsc::channel::<Vec<u8>>();
-        let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
-            move |_sender, args| {
-                if let Some(args) = args {
-                    match args
-                        .CharacteristicValue()
-                        .map_err(|err| err.to_string())
-                        .and_then(|buffer| buffer_to_vec(&buffer).map_err(|err| err.to_string()))
-                    {
-                        Ok(bytes) => {
-                            let _ = confirm_tx.send(bytes);
-                        }
-                        Err(err) => {
-                            log::warn!(
-                                "[embedded-ble] STM32WB ST OTA confirm indication read failed: {err}"
-                            );
-                        }
-                    }
-                }
-                Ok(())
-            },
-        );
-        let token = target.confirm.ValueChanged(&handler).map_err(|err| {
-            format!("STM32WB ST OTA confirm ValueChanged registration failed: {err}")
-        })?;
         let mut cleanup = Stm32wbStOtaConfirmCleanup {
             characteristic: target.confirm.clone(),
-            token: Some(token),
+            token: None,
             cccd_enabled: false,
         };
-        write_cccd_with_timeout(
-            &target.confirm,
-            GattClientCharacteristicConfigurationDescriptorValue::Indicate,
-            CCCD_ENABLE_TIMEOUT,
-        )
-        .and_then(|status| {
-            if status == GattCommunicationStatus::Success {
-                Ok(status)
-            } else {
-                Err(format!(
-                    "STM32WB ST OTA confirm indication CCCD returned status={status:?}"
-                ))
+        let use_confirm = stm32wb_st_ota_use_confirm_indication();
+        let confirm_enabled = if use_confirm {
+            let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
+                move |_sender, args| {
+                    if let Some(args) = args {
+                        match args
+                            .CharacteristicValue()
+                            .map_err(|err| err.to_string())
+                            .and_then(|buffer| {
+                                buffer_to_vec(&buffer).map_err(|err| err.to_string())
+                            }) {
+                            Ok(bytes) => {
+                                let _ = confirm_tx.send(bytes);
+                            }
+                            Err(err) => {
+                                log::warn!(
+                                    "[embedded-ble] STM32WB ST OTA confirm indication read failed: {err}"
+                                );
+                            }
+                        }
+                    }
+                    Ok(())
+                },
+            );
+            let token = target.confirm.ValueChanged(&handler).map_err(|err| {
+                format!("STM32WB ST OTA confirm ValueChanged registration failed: {err}")
+            })?;
+            cleanup.token = Some(token);
+            let confirm_cccd_result = write_cccd_indicate_with_retry(
+                transfer_id,
+                "STM32WB ST OTA confirm",
+                &target.confirm,
+                CCCD_ENABLE_TIMEOUT,
+            )
+            .and_then(|status| {
+                if status == GattCommunicationStatus::Success {
+                    Ok(status)
+                } else {
+                    Err(format!(
+                        "STM32WB ST OTA confirm indication CCCD returned status={status:?}"
+                    ))
+                }
+            });
+            match confirm_cccd_result {
+                Ok(_) => {
+                    cleanup.cccd_enabled = true;
+                    true
+                }
+                Err(err) => {
+                    return Err(format!(
+                        "STM32WB ST OTA confirmation indication is required before transfer; CCCD enable failed: {err}. Set COMPANION_STM32WB_ST_OTA_CONFIRM=0 only when testing the legacy no-confirm loader."
+                    ));
+                }
             }
-        })?;
-        cleanup.cccd_enabled = true;
+        } else {
+            log::info!(
+                "[embedded-ble] STM32WB ST OTA #{transfer_id}: using explicit no-confirm reboot handoff debug path because COMPANION_STM32WB_ST_OTA_CONFIRM=0"
+            );
+            drop(confirm_tx);
+            false
+        };
+
+        if confirm_enabled {
+            log::info!(
+                "[embedded-ble] STM32WB ST OTA #{transfer_id}: ST reboot confirmation indication enabled"
+            );
+        } else {
+            log::info!(
+                "[embedded-ble] STM32WB ST OTA #{transfer_id}: transfer will verify completion by reboot handoff"
+            );
+        }
 
         let base_address = STM32WB_ST_OTA_APP_BASE_ADDRESS;
-        let begin = [
-            STM32WB_ST_OTA_APPLICATION_UPLOAD,
-            ((base_address >> 24) & 0xff) as u8,
-            ((base_address >> 16) & 0xff) as u8,
-            ((base_address >> 8) & 0xff) as u8,
-        ];
+        let begin = stm32wb_st_ota_base_address_command(base_address);
         log::info!(
             "[embedded-ble] STM32WB ST OTA #{transfer_id}: begin base=0x{base_address:08x} size={} chunks={total_chunks}",
             firmware_bytes.len()
         );
-        write_gatt_value_with_timeout(
+        write_stm32wb_st_ota_value_with_fallback(
             &target.base,
             &begin,
-            GattWriteOption::WriteWithoutResponse,
+            target.base_write_option,
             OTA_WRITE_TIMEOUT,
             "STM32WB ST OTA base address",
         )?;
 
         let mut chunks_sent = 0usize;
+        let mut raw_write_option = target.raw_write_option;
         for chunk in firmware_bytes.chunks(data_chunk_bytes) {
-            write_gatt_value_with_timeout(
+            raw_write_option = write_stm32wb_st_ota_value_with_fallback(
                 &target.raw,
                 chunk,
-                target.raw_write_option,
+                raw_write_option,
                 OTA_WRITE_TIMEOUT,
                 "STM32WB ST OTA raw data",
             )?;
+            if raw_write_option == GattWriteOption::WriteWithoutResponse {
+                std::thread::sleep(STM32WB_ST_OTA_NO_RESPONSE_CHUNK_DELAY);
+            }
             chunks_sent += 1;
             let bytes_sent = (chunks_sent * data_chunk_bytes).min(firmware_bytes.len());
             if chunks_sent % 10 == 0 || bytes_sent == firmware_bytes.len() {
@@ -2932,29 +3046,36 @@ mod windows_ble {
             }
         }
 
+        let (handoff_tx, handoff_rx) = mpsc::channel::<String>();
+        let mut handoff_cleanup =
+            Stm32wbStOtaHandoffCleanup::install(transfer_id, target, handoff_tx);
+
         let finish = [STM32WB_ST_OTA_UPLOAD_FINISHED, 0x00, 0x00, 0x00];
         log::info!("[embedded-ble] STM32WB ST OTA #{transfer_id}: writing finish");
-        write_gatt_value_with_timeout(
+        let finish_result = write_stm32wb_st_ota_value_with_fallback(
             &target.base,
             &finish,
-            GattWriteOption::WriteWithoutResponse,
+            target.base_write_option,
             OTA_WRITE_TIMEOUT,
             "STM32WB ST OTA finish",
-        )?;
-
-        let confirm = confirm_rx
-            .recv_timeout(STM32WB_ST_OTA_CONFIRM_TIMEOUT)
-            .map_err(|err| {
-                format!(
-                    "Timed out waiting for STM32WB ST OTA reboot confirmation indication: {err}"
-                )
-            })?;
-        if confirm.first().copied() != Some(STM32WB_ST_OTA_REBOOT_CONFIRMED) {
-            return Err(format!(
-                "STM32WB ST OTA returned unexpected confirmation payload: {:02x?}",
-                confirm
-            ));
+        );
+        if let Err(err) = finish_result {
+            if is_stm32wb_st_ota_finish_reboot_handoff_error(&err) {
+                log::warn!(
+                    "[embedded-ble] STM32WB ST OTA #{transfer_id}: finish write reported reboot handoff after full payload; continuing to confirmation/handoff: {err}"
+                );
+            } else {
+                return Err(err);
+            }
         }
+        wait_stm32wb_st_ota_completion(
+            transfer_id,
+            target,
+            confirm_enabled,
+            &confirm_rx,
+            &handoff_rx,
+        )?;
+        handoff_cleanup.finish();
         cleanup.finish();
         log::info!(
             "[embedded-ble] STM32WB ST OTA #{transfer_id}: transferred {} bytes in {chunks_sent} chunks (chunk_bytes={data_chunk_bytes})",
@@ -2965,6 +3086,170 @@ mod windows_ble {
             chunks_sent,
             transport: "stm32wb_st_ble_ota",
         })
+    }
+
+    fn write_stm32wb_st_ota_value_with_fallback(
+        characteristic: &GattCharacteristic,
+        bytes: &[u8],
+        primary: GattWriteOption,
+        timeout: Duration,
+        label: &str,
+    ) -> Result<GattWriteOption, String> {
+        match write_gatt_value_with_timeout(characteristic, bytes, primary, timeout, label) {
+            Ok(_) => Ok(primary),
+            Err(primary_err) => {
+                let fallback = match primary {
+                    GattWriteOption::WriteWithoutResponse => GattWriteOption::WriteWithResponse,
+                    GattWriteOption::WriteWithResponse => GattWriteOption::WriteWithoutResponse,
+                    _ => return Err(primary_err),
+                };
+                log::warn!(
+                    "[embedded-ble] {label} failed with {primary:?}: {primary_err}; retrying with {fallback:?}"
+                );
+                write_gatt_value_with_timeout(characteristic, bytes, fallback, timeout, label)
+                    .map(|_| fallback)
+                    .map_err(|fallback_err| {
+                        format!(
+                            "{primary_err}; fallback {fallback:?} for {label} also failed: {fallback_err}"
+                        )
+                    })
+            }
+        }
+    }
+
+    fn wait_stm32wb_st_ota_completion(
+        transfer_id: u64,
+        target: &OpenStm32wbStOtaTarget,
+        confirm_enabled: bool,
+        confirm_rx: &mpsc::Receiver<Vec<u8>>,
+        handoff_rx: &mpsc::Receiver<String>,
+    ) -> Result<(), String> {
+        if confirm_enabled {
+            let deadline = Instant::now() + STM32WB_ST_OTA_CONFIRM_TIMEOUT;
+            loop {
+                match confirm_rx.recv_timeout(Duration::from_millis(200)) {
+                    Ok(confirm)
+                        if confirm.first().copied() == Some(STM32WB_ST_OTA_REBOOT_CONFIRMED) =>
+                    {
+                        log::info!(
+                            "[embedded-ble] STM32WB ST OTA #{transfer_id}: reboot confirmation indication received"
+                        );
+                        return Ok(());
+                    }
+                    Ok(confirm) => {
+                        return Err(format!(
+                            "STM32WB ST OTA returned unexpected confirmation payload: {:02x?}",
+                            confirm
+                        ));
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        if let Ok(reason) = handoff_rx.try_recv() {
+                            log::info!(
+                                "[embedded-ble] STM32WB ST OTA #{transfer_id}: reboot handoff observed before confirm: {reason}"
+                            );
+                            return Ok(());
+                        }
+                        if stm32wb_st_ota_target_rebooted(target) {
+                            log::info!(
+                                "[embedded-ble] STM32WB ST OTA #{transfer_id}: reboot handoff observed by polling"
+                            );
+                            return Ok(());
+                        }
+                        if Instant::now() >= deadline {
+                            return Err(
+                                "Timed out waiting for STM32WB ST OTA reboot confirmation indication or reboot handoff".to_string(),
+                            );
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err(
+                            "STM32WB ST OTA confirm indication channel disconnected".to_string()
+                        );
+                    }
+                }
+            }
+        }
+
+        let deadline = Instant::now() + STM32WB_ST_OTA_REBOOT_HANDOFF_TIMEOUT;
+        loop {
+            match handoff_rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(reason) => {
+                    log::info!(
+                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: no-confirm reboot handoff observed: {reason}"
+                    );
+                    return Ok(());
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if stm32wb_st_ota_target_rebooted(target) {
+                        log::info!(
+                            "[embedded-ble] STM32WB ST OTA #{transfer_id}: no-confirm reboot handoff observed by polling"
+                        );
+                        return Ok(());
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(format!(
+                            "Timed out waiting {} ms for STM32WB ST OTA no-confirm reboot handoff after finish",
+                            STM32WB_ST_OTA_REBOOT_HANDOFF_TIMEOUT.as_millis()
+                        ));
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("STM32WB ST OTA reboot handoff channel disconnected".to_string());
+                }
+            }
+        }
+    }
+
+    fn stm32wb_st_ota_target_rebooted(target: &OpenStm32wbStOtaTarget) -> bool {
+        if let Some(session) = target.session.as_ref() {
+            match session.SessionStatus() {
+                Ok(status) if status != GattSessionStatus::Active => {
+                    return true;
+                }
+                Err(err) => {
+                    log::info!(
+                        "[embedded-ble] STM32WB ST OTA session status read failed after finish; treating as reboot handoff: {err}"
+                    );
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        if let Some(device) = target.device.as_ref() {
+            match device.ConnectionStatus() {
+                Ok(BluetoothConnectionStatus::Disconnected) => {
+                    return true;
+                }
+                Err(err) => {
+                    log::info!(
+                        "[embedded-ble] STM32WB ST OTA device status read failed after finish; treating as reboot handoff: {err}"
+                    );
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    pub(super) fn is_stm32wb_st_ota_finish_reboot_handoff_error(err: &str) -> bool {
+        let lower = err.to_ascii_lowercase();
+        is_ota_finish_reboot_handoff_error(err)
+            || lower.contains("gattcommunicationstatus(1)")
+            || lower.contains("0x80000013")
+            || (lower.contains("stm32wb st ota finish") && lower.contains("timed out"))
+    }
+
+    fn stm32wb_st_ota_use_confirm_indication() -> bool {
+        std::env::var("COMPANION_STM32WB_ST_OTA_CONFIRM")
+            .ok()
+            .map(|value| {
+                !matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "0" | "false" | "no" | "off"
+                )
+            })
+            .unwrap_or(true)
     }
 
     pub fn firmware_ota_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
@@ -3008,13 +3293,13 @@ mod windows_ble {
         crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             connected: true,
             hardware_revision: Some("NUCLEO-WB55RG".to_string()),
-            firmware_version: Some("STM_OTA loader".to_string()),
+            firmware_version: Some("companion OTA loader".to_string()),
             capabilities: vec!["stm32wb_st_ble_ota_v1".to_string()],
             battery_percent: None,
             usb_powered: None,
             detail: target.bluetooth_address.map(|address| {
                 format!(
-                    "STM32WB ST BLE_Ota loader connected at {}",
+                    "companion ST BLE_Ota loader connected at {}",
                     crate::embedded_ble::format_bluetooth_address(address)
                 )
             }),
@@ -3748,7 +4033,34 @@ mod windows_ble {
     }
 
     fn open_stm32wb_st_ota_target() -> Result<OpenStm32wbStOtaTarget, String> {
-        let selector = GattDeviceService::GetDeviceSelectorFromUuid(STM32WB_ST_OTA_SERVICE_UUID)
+        let mut errors = Vec::new();
+        for uuid_set in STM32WB_ST_OTA_UUID_SETS.iter() {
+            match open_stm32wb_st_ota_target_for_uuid_set(uuid_set) {
+                Ok(target) => return Ok(target),
+                Err(err) => errors.push(format!("{}: {err}", uuid_set.label)),
+            }
+        }
+        Err(format!(
+            "No writable STM32WB ST OTA service found ({})",
+            errors.join("; ")
+        ))
+    }
+
+    fn open_stm32wb_st_ota_target_for_uuid_set(
+        uuid_set: &Stm32wbStOtaUuidSet,
+    ) -> Result<OpenStm32wbStOtaTarget, String> {
+        if uuid_set.label == "companion" {
+            match open_stm32wb_st_ota_target_from_advertisement(uuid_set) {
+                Ok(target) => return Ok(target),
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] STM32WB ST OTA companion advertisement fallback failed: {err}"
+                    );
+                }
+            }
+        }
+
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(uuid_set.service)
             .map_err(|err| format!("STM32WB ST OTA service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
             .map_err(|err| format!("STM32WB ST OTA service discovery failed: {err}"))
@@ -3764,7 +4076,8 @@ mod windows_ble {
             .map_err(|err| format!("STM32WB ST OTA service collection size failed: {err}"))?;
         if count == 0 {
             return Err(format!(
-                "STM32WB ST OTA service {STM32WB_ST_OTA_SERVICE_UUID:?} not found; flash or reboot into the ST BLE_Ota loader (STM_OTA) and pair it in Windows Bluetooth"
+                "STM32WB ST OTA service {:?} ({}) not found; flash or reboot into companion OTA loader, then connect companion in Windows Bluetooth if Windows has not cached it yet",
+                uuid_set.service, uuid_set.label
             ));
         }
 
@@ -3791,10 +4104,11 @@ mod windows_ble {
 
             let mut candidate_error = None;
             if let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
-                match open_stm32wb_st_ota_target_for_device(address) {
+                match open_stm32wb_st_ota_target_for_device(address, uuid_set) {
                     Ok(target) => {
                         log::info!(
-                            "[embedded-ble] selected STM32WB ST OTA device index={index} name={name} address={address:012X}"
+                            "[embedded-ble] selected STM32WB ST OTA {} device index={index} name={name} address={address:012X}",
+                            uuid_set.label
                         );
                         return Ok(target);
                     }
@@ -3806,10 +4120,11 @@ mod windows_ble {
                 }
             }
 
-            match open_stm32wb_st_ota_target_for_service(&id) {
+            match open_stm32wb_st_ota_target_for_service(&id, uuid_set) {
                 Ok(target) => {
                     log::info!(
-                        "[embedded-ble] selected STM32WB ST OTA service-id fallback index={index} name={name}"
+                        "[embedded-ble] selected STM32WB ST OTA {} service-id fallback index={index} name={name}",
+                        uuid_set.label
                     );
                     return Ok(target);
                 }
@@ -3825,6 +4140,112 @@ mod windows_ble {
         }
 
         Err(last_error.unwrap_or_else(|| "No writable STM32WB ST OTA service found".to_string()))
+    }
+
+    fn open_stm32wb_st_ota_target_from_advertisement(
+        uuid_set: &Stm32wbStOtaUuidSet,
+    ) -> Result<OpenStm32wbStOtaTarget, String> {
+        let addresses = scan_stm32wb_st_ota_advertisements()?;
+        let mut last_error = None;
+        for address in addresses {
+            match open_stm32wb_st_ota_target_for_device(address, uuid_set) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] selected STM32WB ST OTA {} advertisement address={address:012X}",
+                        uuid_set.label
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    last_error = Some(format!(
+                        "advertised companion address {address:012X} failed: {err}"
+                    ));
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "companion advertisement scan returned no usable addresses".to_string()
+        }))
+    }
+
+    fn scan_stm32wb_st_ota_advertisements() -> Result<Vec<u64>, String> {
+        let watcher = BluetoothLEAdvertisementWatcher::new()
+            .map_err(|err| format!("STM32WB ST OTA advertisement watcher create failed: {err}"))?;
+        watcher
+            .SetScanningMode(BluetoothLEScanningMode::Active)
+            .map_err(|err| format!("STM32WB ST OTA advertisement active scan failed: {err}"))?;
+
+        let (tx, rx) = mpsc::channel::<(u64, String, i16)>();
+        let handler = TypedEventHandler::<
+            BluetoothLEAdvertisementWatcher,
+            BluetoothLEAdvertisementReceivedEventArgs,
+        >::new(move |_watcher, args| {
+            let Some(args) = args.as_ref() else {
+                return Ok(());
+            };
+            let Ok(advertisement) = args.Advertisement() else {
+                return Ok(());
+            };
+            let name = advertisement
+                .LocalName()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            if !stm32wb_st_ota_advertisement_name_matches(&name) {
+                return Ok(());
+            }
+            let address = args.BluetoothAddress().unwrap_or_default();
+            if address == 0 {
+                return Ok(());
+            }
+            let rssi = args.RawSignalStrengthInDBm().unwrap_or_default();
+            let _ = tx.send((address, name, rssi));
+            Ok(())
+        });
+
+        let token = watcher
+            .Received(&handler)
+            .map_err(|err| format!("STM32WB ST OTA advertisement handler failed: {err}"))?;
+        watcher
+            .Start()
+            .map_err(|err| format!("STM32WB ST OTA advertisement scan start failed: {err}"))?;
+
+        let deadline = Instant::now() + STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT;
+        let mut addresses = Vec::new();
+        while Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let timeout = remaining.min(Duration::from_millis(500));
+            match rx.recv_timeout(timeout) {
+                Ok((address, name, rssi)) => {
+                    if addresses.contains(&address) {
+                        continue;
+                    }
+                    log::info!(
+                        "[embedded-ble] STM32WB ST OTA advertisement candidate name={name} address={address:012X} rssi={rssi}"
+                    );
+                    addresses.push(address);
+                    break;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        let _ = watcher.Stop();
+        let _ = watcher.RemoveReceived(token);
+
+        if addresses.is_empty() {
+            return Err(format!(
+                "no Bluetooth advertisement named {STM32WB_ST_OTA_ADVERTISEMENT_NAME:?} seen in {} ms",
+                STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT.as_millis()
+            ));
+        }
+        Ok(addresses)
+    }
+
+    fn stm32wb_st_ota_advertisement_name_matches(name: &str) -> bool {
+        name.trim()
+            .eq_ignore_ascii_case(STM32WB_ST_OTA_ADVERTISEMENT_NAME)
     }
 
     fn diagnostic_target_candidates() -> Result<Vec<DiagnosticTargetCandidate>, String> {
@@ -4028,6 +4449,7 @@ mod windows_ble {
 
     fn open_stm32wb_st_ota_target_for_device(
         address: u64,
+        uuid_set: &Stm32wbStOtaUuidSet,
     ) -> Result<OpenStm32wbStOtaTarget, String> {
         let device = open_ble_device(address)?;
         if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
@@ -4041,9 +4463,9 @@ mod windows_ble {
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached] {
+        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
             let services_result = match device
-                .GetGattServicesForUuidWithCacheModeAsync(STM32WB_ST_OTA_SERVICE_UUID, cache_mode)
+                .GetGattServicesForUuidWithCacheModeAsync(uuid_set.service, cache_mode)
                 .map_err(|err| {
                     format!("STM32WB ST OTA {cache_mode:?} service discovery failed: {err}")
                 })
@@ -4083,7 +4505,8 @@ mod windows_ble {
             })?;
             if count == 0 {
                 last_error = Some(format!(
-                    "STM32WB ST OTA service {STM32WB_ST_OTA_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
+                    "STM32WB ST OTA service {:?} ({}) not found from BLE device via {cache_mode:?}",
+                    uuid_set.service, uuid_set.label
                 ));
                 continue;
             }
@@ -4098,12 +4521,15 @@ mod windows_ble {
                         continue;
                     }
                 };
-                match open_stm32wb_st_ota_characteristics_from_service(&service, cache_mode) {
+                match open_stm32wb_st_ota_characteristics_from_service(
+                    &service, cache_mode, uuid_set,
+                ) {
                     Ok(prepared) => {
                         return Ok(OpenStm32wbStOtaTarget {
                             base: prepared.base,
                             raw: prepared.raw,
                             confirm: prepared.confirm,
+                            base_write_option: prepared.base_write_option,
                             raw_write_option: prepared.raw_write_option,
                             raw_chunk_bytes: prepared.raw_chunk_bytes,
                             service: Some(service),
@@ -4461,6 +4887,7 @@ mod windows_ble {
 
     fn open_stm32wb_st_ota_target_for_service(
         service_id: &HSTRING,
+        uuid_set: &Stm32wbStOtaUuidSet,
     ) -> Result<OpenStm32wbStOtaTarget, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
             .map_err(|err| format!("STM32WB ST OTA service open failed: {err}"))
@@ -4476,23 +4903,33 @@ mod windows_ble {
                 })
         });
 
-        let prepared = open_stm32wb_st_ota_characteristics_from_service(
-            &service,
-            BluetoothCacheMode::Uncached,
-        )?;
-        Ok(OpenStm32wbStOtaTarget {
-            base: prepared.base,
-            raw: prepared.raw,
-            confirm: prepared.confirm,
-            raw_write_option: prepared.raw_write_option,
-            raw_chunk_bytes: prepared.raw_chunk_bytes,
-            service: Some(service),
-            session: prepared.session,
-            device,
-            bluetooth_address: parse_bluetooth_address_from_device_id(
-                &service_id.to_string_lossy(),
-            ),
-        })
+        let mut last_error = None;
+        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+            match open_stm32wb_st_ota_characteristics_from_service(&service, cache_mode, uuid_set) {
+                Ok(prepared) => {
+                    return Ok(OpenStm32wbStOtaTarget {
+                        base: prepared.base,
+                        raw: prepared.raw,
+                        confirm: prepared.confirm,
+                        base_write_option: prepared.base_write_option,
+                        raw_write_option: prepared.raw_write_option,
+                        raw_chunk_bytes: prepared.raw_chunk_bytes,
+                        service: Some(service),
+                        session: prepared.session,
+                        device,
+                        bluetooth_address: parse_bluetooth_address_from_device_id(
+                            &service_id.to_string_lossy(),
+                        ),
+                    });
+                }
+                Err(err) => {
+                    last_error = Some(format!("{cache_mode:?}: {err}"));
+                }
+            }
+        }
+        return Err(last_error.unwrap_or_else(|| {
+            "No writable STM32WB ST OTA characteristics found from service id".to_string()
+        }));
     }
 
     fn open_diagnostic_target_for_service(
@@ -4599,6 +5036,7 @@ mod windows_ble {
     fn open_stm32wb_st_ota_characteristics_from_service(
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
+        uuid_set: &Stm32wbStOtaUuidSet,
     ) -> Result<PreparedStm32wbStOtaCharacteristics, String> {
         if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
             wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "STM32WB ST OTA service access").ok()
@@ -4612,34 +5050,40 @@ mod windows_ble {
         let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
         let base = open_write_characteristic_from_service(
             service,
-            STM32WB_ST_OTA_BASE_UUID,
+            uuid_set.base,
             "STM32WB ST OTA base",
             cache_mode,
         )?;
         let raw = open_write_characteristic_from_service(
             service,
-            STM32WB_ST_OTA_RAW_UUID,
+            uuid_set.raw,
             "STM32WB ST OTA raw",
             cache_mode,
         )?;
         let confirm = open_indicate_characteristic_from_service(
             service,
-            STM32WB_ST_OTA_CONFIRM_UUID,
+            uuid_set.confirm,
             "STM32WB ST OTA confirm",
             cache_mode,
         )?;
+        let base_properties = base.CharacteristicProperties().map_err(|err| {
+            format!("STM32WB ST OTA base characteristic properties read failed: {err}")
+        })?;
+        let base_write_option = stm32wb_st_ota_write_option(base_properties)?;
         let raw_properties = raw.CharacteristicProperties().map_err(|err| {
             format!("STM32WB ST OTA raw characteristic properties read failed: {err}")
         })?;
         let raw_write_option = stm32wb_st_ota_write_option(raw_properties)?;
         let raw_chunk_bytes = stm32wb_st_ota_raw_chunk_bytes(session.as_ref());
         log::info!(
-            "[embedded-ble] STM32WB ST OTA raw write option={raw_write_option:?} chunk_bytes={raw_chunk_bytes}"
+            "[embedded-ble] STM32WB ST OTA {} base write option={base_write_option:?} raw write option={raw_write_option:?} chunk_bytes={raw_chunk_bytes}",
+            uuid_set.label
         );
         Ok(PreparedStm32wbStOtaCharacteristics {
             base,
             raw,
             confirm,
+            base_write_option,
             raw_write_option,
             raw_chunk_bytes,
             session,
@@ -4785,13 +5229,22 @@ mod windows_ble {
     fn stm32wb_st_ota_write_option(
         properties: GattCharacteristicProperties,
     ) -> Result<GattWriteOption, String> {
-        if properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
-            Ok(GattWriteOption::WriteWithoutResponse)
-        } else if properties.contains(GattCharacteristicProperties::Write) {
+        if properties.contains(GattCharacteristicProperties::Write) {
             Ok(GattWriteOption::WriteWithResponse)
+        } else if properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
+            Ok(GattWriteOption::WriteWithoutResponse)
         } else {
             Err("STM32WB ST OTA raw characteristic is not writable".to_string())
         }
+    }
+
+    fn stm32wb_st_ota_base_address_command(base_address: u32) -> [u8; 4] {
+        [
+            STM32WB_ST_OTA_APPLICATION_UPLOAD,
+            ((base_address >> 16) & 0xff) as u8,
+            ((base_address >> 8) & 0xff) as u8,
+            (base_address & 0xff) as u8,
+        ]
     }
 
     fn stm32wb_st_ota_raw_chunk_bytes(session: Option<&GattSession>) -> usize {
@@ -5432,6 +5885,57 @@ mod windows_ble {
         }))
     }
 
+    fn write_cccd_indicate_with_retry(
+        transfer_id: u64,
+        label: &str,
+        characteristic: &GattCharacteristic,
+        timeout: Duration,
+    ) -> Result<GattCommunicationStatus, String> {
+        let mut last_error: Option<String> = None;
+        let mut last_status: Option<GattCommunicationStatus> = None;
+        for attempt in 1..=CCCD_ENABLE_RETRY_DELAYS.len() + 1 {
+            match write_cccd_with_timeout(
+                characteristic,
+                GattClientCharacteristicConfigurationDescriptorValue::Indicate,
+                timeout,
+            ) {
+                Ok(GattCommunicationStatus::Success) => {
+                    return Ok(GattCommunicationStatus::Success);
+                }
+                Ok(status) => {
+                    if attempt > CCCD_ENABLE_RETRY_DELAYS.len() {
+                        return Ok(status);
+                    }
+                    last_status = Some(status);
+                    let delay = cccd_enable_retry_delay(attempt);
+                    log::warn!(
+                        "[embedded-ble] {label} #{transfer_id}: indicate CCCD enable attempt {attempt} returned status={status:?}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    std::thread::sleep(delay);
+                }
+                Err(err) => {
+                    if attempt > CCCD_ENABLE_RETRY_DELAYS.len() {
+                        return Err(err);
+                    }
+                    let delay = cccd_enable_retry_delay(attempt);
+                    log::warn!(
+                        "[embedded-ble] {label} #{transfer_id}: indicate CCCD enable attempt {attempt} failed: {err}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    last_error = Some(err);
+                    std::thread::sleep(delay);
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            format!(
+                "BLE CCCD indicate write returned status={:?}",
+                last_status.unwrap_or(GattCommunicationStatus::Unreachable)
+            )
+        }))
+    }
+
     fn cccd_enable_retry_delay(attempt: usize) -> Duration {
         CCCD_ENABLE_RETRY_DELAYS
             .get(attempt.saturating_sub(1))
@@ -5745,6 +6249,7 @@ mod windows_ble {
         base: GattCharacteristic,
         raw: GattCharacteristic,
         confirm: GattCharacteristic,
+        base_write_option: GattWriteOption,
         raw_write_option: GattWriteOption,
         raw_chunk_bytes: usize,
         service: Option<GattDeviceService>,
@@ -5799,6 +6304,7 @@ mod windows_ble {
         base: GattCharacteristic,
         raw: GattCharacteristic,
         confirm: GattCharacteristic,
+        base_write_option: GattWriteOption,
         raw_write_option: GattWriteOption,
         raw_chunk_bytes: usize,
         session: Option<GattSession>,
@@ -5836,6 +6342,148 @@ mod windows_ble {
             if let Some(device) = self.device.take() {
                 let _ = device.Close();
             }
+        }
+    }
+
+    struct Stm32wbStOtaHandoffCleanup {
+        transfer_id: u64,
+        device: Option<BluetoothLEDevice>,
+        session: Option<GattSession>,
+        connection_status_token: Option<EventRegistrationToken>,
+        session_status_token: Option<EventRegistrationToken>,
+    }
+
+    impl Stm32wbStOtaHandoffCleanup {
+        fn install(
+            transfer_id: u64,
+            target: &OpenStm32wbStOtaTarget,
+            tx: mpsc::Sender<String>,
+        ) -> Self {
+            let mut cleanup = Self {
+                transfer_id,
+                device: None,
+                session: None,
+                connection_status_token: None,
+                session_status_token: None,
+            };
+
+            if let Some(device) = target.device.as_ref() {
+                if let Ok(status) = device.ConnectionStatus() {
+                    log::info!(
+                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: device connection status before finish={status:?}"
+                    );
+                    if status == BluetoothConnectionStatus::Disconnected {
+                        let _ = tx.send("device already disconnected before finish".to_string());
+                    }
+                }
+                let handler_tx = tx.clone();
+                let handler = TypedEventHandler::<BluetoothLEDevice, IInspectable>::new(
+                    move |sender, _| {
+                        if let Some(device) = sender {
+                            match device.ConnectionStatus() {
+                                Ok(status) => {
+                                    log::info!(
+                                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: device connection status changed to {status:?}"
+                                    );
+                                    if status == BluetoothConnectionStatus::Disconnected {
+                                        let _ = handler_tx.send(
+                                            "device connection changed to Disconnected".to_string(),
+                                        );
+                                    }
+                                }
+                                Err(err) => {
+                                    let _ = handler_tx.send(format!(
+                                        "device connection status read failed after finish: {err}"
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(())
+                    },
+                );
+                match device.ConnectionStatusChanged(&handler) {
+                    Ok(token) => {
+                        cleanup.device = Some(device.clone());
+                        cleanup.connection_status_token = Some(token);
+                    }
+                    Err(err) => log::warn!(
+                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: device connection status handler registration failed: {err}"
+                    ),
+                }
+            }
+
+            if let Some(session) = target.session.as_ref() {
+                if let Ok(status) = session.SessionStatus() {
+                    log::info!(
+                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: GATT session status before finish={status:?}"
+                    );
+                    if status != GattSessionStatus::Active {
+                        let _ = tx.send(format!(
+                            "GATT session already non-active before finish: {status:?}"
+                        ));
+                    }
+                }
+                let handler_tx = tx;
+                let handler =
+                    TypedEventHandler::<GattSession, GattSessionStatusChangedEventArgs>::new(
+                        move |_sender, args| {
+                            if let Some(args) = args {
+                                let status = args.Status().ok();
+                                let error = args.Error().ok();
+                                log::info!(
+                                    "[embedded-ble] STM32WB ST OTA #{transfer_id}: GATT session status changed status={status:?} error={error:?}"
+                                );
+                                if status.is_some_and(|status| status != GattSessionStatus::Active)
+                                {
+                                    let _ = handler_tx.send(format!(
+                                        "GATT session changed to {status:?} error={error:?}"
+                                    ));
+                                }
+                            }
+                            Ok(())
+                        },
+                    );
+                match session.SessionStatusChanged(&handler) {
+                    Ok(token) => {
+                        cleanup.session = Some(session.clone());
+                        cleanup.session_status_token = Some(token);
+                    }
+                    Err(err) => log::warn!(
+                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: GATT session status handler registration failed: {err}"
+                    ),
+                }
+            }
+
+            cleanup
+        }
+
+        fn finish(&mut self) {
+            if let Some(token) = self.connection_status_token.take() {
+                if let Some(device) = self.device.as_ref() {
+                    if let Err(err) = device.RemoveConnectionStatusChanged(token) {
+                        log::warn!(
+                            "[embedded-ble] STM32WB ST OTA #{}: device connection status handler remove failed: {err}",
+                            self.transfer_id
+                        );
+                    }
+                }
+            }
+            if let Some(token) = self.session_status_token.take() {
+                if let Some(session) = self.session.as_ref() {
+                    if let Err(err) = session.RemoveSessionStatusChanged(token) {
+                        log::warn!(
+                            "[embedded-ble] STM32WB ST OTA #{}: GATT session status handler remove failed: {err}",
+                            self.transfer_id
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    impl Drop for Stm32wbStOtaHandoffCleanup {
+        fn drop(&mut self) {
+            self.finish();
         }
     }
 
@@ -6223,6 +6871,36 @@ mod windows_ble {
             LOCK.get_or_init(|| Mutex::new(()))
         }
 
+        fn stm32wb_st_ota_confirm_env_test_lock() -> &'static Mutex<()> {
+            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+            LOCK.get_or_init(|| Mutex::new(()))
+        }
+
+        #[test]
+        fn stm32wb_st_ota_confirm_indication_defaults_on_and_accepts_explicit_opt_out() {
+            let _guard = stm32wb_st_ota_confirm_env_test_lock().lock().unwrap();
+            const ENV_NAME: &str = "COMPANION_STM32WB_ST_OTA_CONFIRM";
+            let previous = std::env::var_os(ENV_NAME);
+
+            std::env::remove_var(ENV_NAME);
+            assert!(stm32wb_st_ota_use_confirm_indication());
+
+            for value in ["0", "false", "no", "off", " OFF "] {
+                std::env::set_var(ENV_NAME, value);
+                assert!(!stm32wb_st_ota_use_confirm_indication(), "{value}");
+            }
+
+            for value in ["1", "true", "yes", "on", "unexpected"] {
+                std::env::set_var(ENV_NAME, value);
+                assert!(stm32wb_st_ota_use_confirm_indication(), "{value}");
+            }
+
+            match previous {
+                Some(value) => std::env::set_var(ENV_NAME, value),
+                None => std::env::remove_var(ENV_NAME),
+            }
+        }
+
         #[test]
         fn ota_write_option_prefers_with_response_and_accepts_overrides() {
             let both = GattCharacteristicProperties::Write
@@ -6254,6 +6932,35 @@ mod windows_ble {
             assert_eq!(
                 type_heartbeat_write_option_from_properties(GattCharacteristicProperties::Write),
                 GattWriteOption::WriteWithResponse
+            );
+        }
+
+        #[test]
+        fn stm32wb_st_ota_prefers_with_response_when_available() {
+            let both = GattCharacteristicProperties::Write
+                | GattCharacteristicProperties::WriteWithoutResponse;
+            assert_eq!(
+                stm32wb_st_ota_write_option(both),
+                Ok(GattWriteOption::WriteWithResponse)
+            );
+            assert_eq!(
+                stm32wb_st_ota_write_option(GattCharacteristicProperties::Write),
+                Ok(GattWriteOption::WriteWithResponse)
+            );
+        }
+
+        #[test]
+        fn stm32wb_st_ota_advertisement_name_is_case_insensitive() {
+            assert!(stm32wb_st_ota_advertisement_name_matches("companion"));
+            assert!(stm32wb_st_ota_advertisement_name_matches(" Companion "));
+            assert!(!stm32wb_st_ota_advertisement_name_matches("listener"));
+        }
+
+        #[test]
+        fn stm32wb_st_ota_base_address_command_uses_st_24bit_flash_offset() {
+            assert_eq!(
+                stm32wb_st_ota_base_address_command(0x0800_7000),
+                [STM32WB_ST_OTA_APPLICATION_UPLOAD, 0x00, 0x70, 0x00]
             );
         }
 
@@ -6432,6 +7139,9 @@ pub fn transfer_stm32wb_st_ota(
 pub struct FirmwareOtaPreparedTransfer(windows_ble::PreparedFirmwareOtaTransfer);
 
 #[cfg(target_os = "windows")]
+pub struct Stm32wbStOtaPreparedTransfer(windows_ble::PreparedStm32wbStOtaTransfer);
+
+#[cfg(target_os = "windows")]
 impl FirmwareOtaPreparedTransfer {
     pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
         self.0.snapshot()
@@ -6456,8 +7166,30 @@ impl FirmwareOtaPreparedTransfer {
 }
 
 #[cfg(target_os = "windows")]
+impl Stm32wbStOtaPreparedTransfer {
+    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+        self.0.snapshot()
+    }
+
+    pub fn transfer(
+        self,
+        firmware_bytes: &[u8],
+        manifest_chunk_bytes: usize,
+        on_progress: Option<&dyn Fn(usize, usize)>,
+    ) -> Result<FirmwareOtaTransferStats, String> {
+        self.0
+            .transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
+    }
+}
+
+#[cfg(target_os = "windows")]
 pub fn prepare_firmware_ota_transfer() -> Result<FirmwareOtaPreparedTransfer, String> {
     windows_ble::prepare_firmware_ota_transfer().map(FirmwareOtaPreparedTransfer)
+}
+
+#[cfg(target_os = "windows")]
+pub fn prepare_stm32wb_st_ota_transfer() -> Result<Stm32wbStOtaPreparedTransfer, String> {
+    windows_ble::prepare_stm32wb_st_ota_transfer().map(Stm32wbStOtaPreparedTransfer)
 }
 
 #[cfg(target_os = "windows")]
@@ -6592,6 +7324,9 @@ pub fn transfer_stm32wb_st_ota(
 pub struct FirmwareOtaPreparedTransfer;
 
 #[cfg(not(target_os = "windows"))]
+pub struct Stm32wbStOtaPreparedTransfer;
+
+#[cfg(not(target_os = "windows"))]
 impl FirmwareOtaPreparedTransfer {
     pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
         unreachable!("prepare_firmware_ota_transfer is unsupported on this platform")
@@ -6609,8 +7344,29 @@ impl FirmwareOtaPreparedTransfer {
 }
 
 #[cfg(not(target_os = "windows"))]
+impl Stm32wbStOtaPreparedTransfer {
+    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+        unreachable!("prepare_stm32wb_st_ota_transfer is unsupported on this platform")
+    }
+
+    pub fn transfer(
+        self,
+        _firmware_bytes: &[u8],
+        _manifest_chunk_bytes: usize,
+        _on_progress: Option<&dyn Fn(usize, usize)>,
+    ) -> Result<FirmwareOtaTransferStats, String> {
+        Err("STM32WB ST BLE OTA is only supported on Windows".to_string())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn prepare_firmware_ota_transfer() -> Result<FirmwareOtaPreparedTransfer, String> {
     Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn prepare_stm32wb_st_ota_transfer() -> Result<Stm32wbStOtaPreparedTransfer, String> {
+    Err("STM32WB ST BLE OTA is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -6904,6 +7660,16 @@ mod tests {
         assert!(!super::windows_ble::is_ota_finish_reboot_handoff_error(
             "BLE OTA control begin write returned status=GattCommunicationStatus(1)"
         ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn stm32wb_finish_reboot_handoff_accepts_windows_timeout_then_disconnect() {
+        assert!(
+            super::windows_ble::is_stm32wb_st_ota_finish_reboot_handoff_error(
+                "BLE STM32WB ST OTA finish write timed out after 8000 ms; fallback GattWriteOption(1) for STM32WB ST OTA finish also failed: BLE STM32WB ST OTA finish write async error: Some(HRESULT(0x80000013))"
+            )
+        );
     }
 
     #[cfg(target_os = "windows")]

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   FIRMWARE_OTA_REQUIRED_PUBLIC_STATES,
   FIRMWARE_OTA_TRANSPORT_BOUNDARY,
+  STM32WB_ST_OTA_TRANSPORT_BOUNDARY,
   compareVersionish,
   evaluateFirmwareOtaPreflight,
   firmwareOtaConfirmedVersionMatches,
@@ -104,6 +106,43 @@ function manifestV2(overrides: Record<string, unknown> = {}): string {
   });
 }
 
+function companionStm32wbManifest(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    schema_version: 1,
+    package_type: 'companion-firmware-ota',
+    project: 'Companion-Firmware',
+    version: '3119c18-dirty',
+    protocol: {
+      name: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName,
+      version: 1,
+      firmware_capability: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.firmwareCapability,
+      data_plane: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.dataPlane,
+      gatt: {
+        service_uuid: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
+        control_uuid: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
+        data_uuid: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
+        confirm_uuid: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.confirmUuid,
+        chunk_bytes: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
+      },
+    },
+    hardware_revision: 'NUCLEO-WB55RG',
+    min_desktop_version: '1.0.0',
+    channel: 'development',
+    file: {
+      name: 'firmware_ota.bin',
+      size_bytes: firmwareBytes.byteLength,
+      sha256: firmwareSha256,
+    },
+    rollback: {
+      instructions: ['Re-run the wired ST-LINK factory flash package.'],
+    },
+    recovery: {
+      instructions: ['Use the Companion wired package from the same release.'],
+    },
+    ...overrides,
+  });
+}
+
 const context = {
   desktopVersion: '1.0.0',
   expectedHardwareRevision: 'esp32s3-devkit',
@@ -127,6 +166,28 @@ assert.equal(validV2.manifest?.hardwareRevision, 'keyboard-v2-n16r8');
 assert.equal(validV2.manifest?.fileName, 'firmware_ota.bin');
 assert.equal(validV2.manifest?.gattChunkBytes, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes);
 assert.equal(validV2.manifest?.recoveryInstructions.length, 2);
+
+const validCompanionStm32wb = await validateFirmwareOtaPackage(
+  companionStm32wbManifest(),
+  firmwareBytes,
+  contextV2,
+);
+assert.equal(validCompanionStm32wb.ok, true);
+assert.equal(validCompanionStm32wb.manifest?.packageType, 'companion-firmware-ota');
+assert.equal(validCompanionStm32wb.manifest?.protocolName, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName);
+assert.equal(validCompanionStm32wb.manifest?.hardwareRevision, 'NUCLEO-WB55RG');
+assert.equal(validCompanionStm32wb.manifest?.gattConfirmUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.confirmUuid);
+
+const badCompanionStm32wbConfirmUuid = JSON.parse(companionStm32wbManifest()) as Record<string, unknown>;
+((badCompanionStm32wbConfirmUuid.protocol as Record<string, unknown>).gatt as Record<string, unknown>).confirm_uuid =
+  '8f7a7003-7b7d-4f3d-9d6f-6c2d1b7cffff';
+const badCompanionStm32wbConfirm = await validateFirmwareOtaPackage(
+  JSON.stringify(badCompanionStm32wbConfirmUuid),
+  firmwareBytes,
+  contextV2,
+);
+assert.equal(badCompanionStm32wbConfirm.ok, false);
+assert.ok(badCompanionStm32wbConfirm.errors.some(error => error.includes('ST GATT boundary')));
 
 const validV2FastChunk = await validateFirmwareOtaPackage(
   manifestV2({
@@ -280,6 +341,7 @@ assert.equal(firmwareOtaVersionNotConfirmedAction(null, 'v1.2.0').type, 'failed'
 
 const parsedManifest = valid.manifest as FirmwareOtaManifest;
 const parsedV2Manifest = validV2.manifest as FirmwareOtaManifest;
+const parsedCompanionStm32wbManifest = validCompanionStm32wb.manifest as FirmwareOtaManifest;
 const readyPreflight = evaluateFirmwareOtaPreflight({
   manifest: parsedManifest,
   desktopVersion: '1.0.0',
@@ -295,6 +357,79 @@ const readyPreflight = evaluateFirmwareOtaPreflight({
   },
 });
 assert.equal(readyPreflight.ok, true);
+
+const companionStm32wbPreflightIgnoresListenerSnapshot = evaluateFirmwareOtaPreflight({
+  manifest: parsedCompanionStm32wbManifest,
+  desktopVersion: '1.0.0',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: true,
+    hardwareRevision: 'keyboard-v2-n16r8',
+    firmwareVersion: '1.2.0',
+    capabilities: ['firmware_ota_v1'],
+    batteryPercent: 9,
+    usbPowered: false,
+  },
+});
+assert.equal(companionStm32wbPreflightIgnoresListenerSnapshot.ok, true);
+
+const companionStm32wbPreflightAllowsBackendDiscovery = evaluateFirmwareOtaPreflight({
+  manifest: parsedCompanionStm32wbManifest,
+  desktopVersion: '1.0.0',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: false,
+    hardwareRevision: null,
+    firmwareVersion: null,
+    capabilities: [],
+    batteryPercent: null,
+    usbPowered: null,
+    detail: 'Listener BLE status is unavailable.',
+  },
+});
+assert.equal(companionStm32wbPreflightAllowsBackendDiscovery.ok, true);
+
+const companionStm32wbPreflightChecksMatchingStm32wbSnapshot = evaluateFirmwareOtaPreflight({
+  manifest: parsedCompanionStm32wbManifest,
+  desktopVersion: '1.0.0',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: true,
+    hardwareRevision: 'companion-ce-v1',
+    firmwareVersion: 'companion OTA loader',
+    capabilities: [STM32WB_ST_OTA_TRANSPORT_BOUNDARY.firmwareCapability],
+    batteryPercent: null,
+    usbPowered: null,
+  },
+});
+assert.equal(companionStm32wbPreflightChecksMatchingStm32wbSnapshot.ok, false);
+assert.deepEqual(
+  companionStm32wbPreflightChecksMatchingStm32wbSnapshot.blockers.map(item => item.code),
+  ['hardwareMismatch'],
+);
+
+const companionStm32wbPreflightRequiresCapabilityForMatchingSnapshot = evaluateFirmwareOtaPreflight({
+  manifest: parsedCompanionStm32wbManifest,
+  desktopVersion: '1.0.0',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: true,
+    hardwareRevision: 'NUCLEO-WB55RG',
+    firmwareVersion: 'companion OTA loader',
+    capabilities: [],
+    batteryPercent: null,
+    usbPowered: null,
+  },
+});
+assert.equal(companionStm32wbPreflightRequiresCapabilityForMatchingSnapshot.ok, false);
+assert.deepEqual(
+  companionStm32wbPreflightRequiresCapabilityForMatchingSnapshot.blockers.map(item => item.code),
+  ['missingCapability'],
+);
 
 const unknownDeviceStatus = evaluateFirmwareOtaPreflight({
   manifest: parsedV2Manifest,
@@ -388,4 +523,23 @@ assert.deepEqual(
 assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName, 'listener_ble_ota');
 assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes, 500);
 assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 500);
+assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName, 'stm32wb_st_ble_ota');
+assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid, '8f7a0007-7b7d-4f3d-9d6f-6c2d1b7c0000');
+assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid, '8f7a7002-7b7d-4f3d-9d6f-6c2d1b7c0000');
+assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid, '8f7a7004-7b7d-4f3d-9d6f-6c2d1b7c0000');
+assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.confirmUuid, '8f7a7003-7b7d-4f3d-9d6f-6c2d1b7c0000');
+assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 248);
 assert.ok(FIRMWARE_OTA_TRANSPORT_BOUNDARY.notDataPlane.every(item => item.includes('BLE')));
+
+const rustFirmwareOtaSource = readFileSync('src-tauri/src/firmware_ota.rs', 'utf8');
+for (const expected of [
+  STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
+  STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
+  STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
+  STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.confirmUuid,
+]) {
+  assert.ok(
+    rustFirmwareOtaSource.includes(expected),
+    `STM32WB OTA UUID ${expected} must match src-tauri/src/firmware_ota.rs`,
+  );
+}

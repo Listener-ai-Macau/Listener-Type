@@ -50,6 +50,7 @@ export interface FirmwareOtaManifest {
   gattServiceUuid: string;
   gattControlUuid: string;
   gattDataUuid: string;
+  gattConfirmUuid: string | null;
   gattChunkBytes: number;
   rollbackInstructions: string[];
   recoveryInstructions: string[];
@@ -152,10 +153,10 @@ export const STM32WB_ST_OTA_TRANSPORT_BOUNDARY = {
   protocolName: 'stm32wb_st_ble_ota',
   firmwareCapability: 'stm32wb_st_ble_ota_v1',
   gatt: {
-    serviceUuid: '0000fe20-cc7a-482a-984a-7f2ed5b3e58f',
-    controlUuid: '0000fe22-8e22-4541-9d4c-21edae82ed19',
-    dataUuid: '0000fe24-8e22-4541-9d4c-21edae82ed19',
-    confirmUuid: '0000fe23-8e22-4541-9d4c-21edae82ed19',
+    serviceUuid: '8f7a0007-7b7d-4f3d-9d6f-6c2d1b7c0000',
+    controlUuid: '8f7a7002-7b7d-4f3d-9d6f-6c2d1b7c0000',
+    dataUuid: '8f7a7004-7b7d-4f3d-9d6f-6c2d1b7c0000',
+    confirmUuid: '8f7a7003-7b7d-4f3d-9d6f-6c2d1b7c0000',
     defaultChunkBytes: 248,
     maxChunkBytes: 248,
   },
@@ -254,6 +255,7 @@ function parseFirmwareOtaManifestV1(value: Record<string, unknown>, schemaVersio
     gattDataUuid: gatt
       ? requireString(gatt.data_uuid ?? gatt.dataUuid, 'protocol.gatt.data_uuid')
       : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
+    gattConfirmUuid: optionalString(gatt?.confirm_uuid ?? gatt?.confirmUuid, 'protocol.gatt.confirm_uuid'),
     gattChunkBytes: gatt
       ? requireNumber(gatt.chunk_bytes ?? gatt.chunkBytes, 'protocol.gatt.chunk_bytes')
       : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
@@ -311,6 +313,7 @@ function parseFirmwareOtaManifestV2(value: Record<string, unknown>, schemaVersio
     gattServiceUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
     gattControlUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
     gattDataUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
+    gattConfirmUuid: null,
     gattChunkBytes: optionalNumber(
       requirements.gatt_chunk_bytes ?? requirements.gattChunkBytes,
       FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
@@ -364,7 +367,9 @@ function validateNormalizedFirmwareOtaManifest(manifest: FirmwareOtaManifest): v
     if (
       !uuidEquals(manifest.gattServiceUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid) ||
       !uuidEquals(manifest.gattControlUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid) ||
-      !uuidEquals(manifest.gattDataUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid)
+      !uuidEquals(manifest.gattDataUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid) ||
+      !manifest.gattConfirmUuid ||
+      !uuidEquals(manifest.gattConfirmUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.confirmUuid)
     ) {
       throw new Error('Companion STM32WB OTA package uses an unsupported ST GATT boundary.');
     }
@@ -385,8 +390,15 @@ function validateNormalizedFirmwareOtaManifest(manifest: FirmwareOtaManifest): v
 export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): FirmwareOtaPreflightResult {
   const blockers: FirmwareOtaBlocker[] = [];
   const { manifest, device } = input;
+  const listenerBleOta = isListenerBleOtaManifest(manifest);
+  const stm32wbStBleOta = isStm32wbStBleOtaManifest(manifest);
+  const manifestDeviceSnapshot =
+    listenerBleOta ||
+    (stm32wbStBleOta &&
+      (device.capabilities.includes(manifest.firmwareCapability) ||
+        device.hardwareRevision === manifest.hardwareRevision));
 
-  if (!device.connected) {
+  if (listenerBleOta && !device.connected) {
     blockers.push(blocker(
       'deviceDisconnected',
       device.detail ? `Device is not ready for OTA: ${device.detail}` : 'Device is not connected.',
@@ -414,28 +426,35 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       `Update Listener Type to ${manifest.minDesktopVersion} or newer first.`,
     ));
   }
-  if (device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {
+  if (manifestDeviceSnapshot && device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {
     blockers.push(blocker(
       'hardwareMismatch',
       'Firmware package is for a different hardware revision.',
-      'Use an OTA package built for this Listener device.',
+      'Use an OTA package built for this device.',
     ));
   }
-  if (isListenerBleOtaManifest(manifest) && !device.capabilities.includes(manifest.firmwareCapability)) {
+  if (listenerBleOta && !device.capabilities.includes(manifest.firmwareCapability)) {
     blockers.push(blocker(
       'missingCapability',
       'Connected firmware does not advertise OTA support.',
       'Use the USB factory package once, then retry OTA from Listener Type.',
     ));
   }
+  if (stm32wbStBleOta && manifestDeviceSnapshot && !device.capabilities.includes(manifest.firmwareCapability)) {
+    blockers.push(blocker(
+      'missingCapability',
+      'Connected STM32WB firmware does not advertise ST BLE OTA support.',
+      'Use the Companion wired package once, then retry OTA from Listener Type.',
+    ));
+  }
   const battery = device.batteryPercent;
-  if (isListenerBleOtaManifest(manifest) && device.usbPowered === false && typeof battery === 'number' && battery < MIN_BATTERY_PERCENT) {
+  if (listenerBleOta && device.usbPowered === false && typeof battery === 'number' && battery < MIN_BATTERY_PERCENT) {
     blockers.push(blocker(
       'batteryLow',
       'Battery is too low for firmware update.',
       'Connect USB power or charge the device above 20%.',
     ));
-  } else if (isListenerBleOtaManifest(manifest) && device.usbPowered === false && battery == null) {
+  } else if (listenerBleOta && device.usbPowered === false && battery == null) {
     blockers.push(blocker(
       'powerUnknown',
       'Power state is unknown.',
@@ -587,6 +606,13 @@ function requireString(value: unknown, field: string): string {
     throw new Error(`${field} must be a non-empty string.`);
   }
   return value.trim();
+}
+
+function optionalString(value: unknown, field: string): string | null {
+  if (value == null) {
+    return null;
+  }
+  return requireString(value, field);
 }
 
 function requireNumber(value: unknown, field: string): number {
