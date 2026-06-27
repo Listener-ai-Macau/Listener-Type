@@ -143,7 +143,7 @@ let mockSettings: UserPreferences = {
   deviceEdgeLedBrightnessPercent: 100,
   deviceLowPowerIdleMinutes: 1,
   devicePluggedLowPowerEnabled: true,
-  deviceBatteryAutoShutdownMinutes: 30,
+  deviceBatteryAutoShutdownMinutes: 10,
   deviceBleName: 'listener',
   localAsrActiveModel: 'qwen3-asr-0.6b',
   localAsrMirror: 'huggingface',
@@ -190,7 +190,7 @@ let mockDeviceSettings: DeviceSettingsSnapshot = {
   batteryLowPowerIdleMinutes: 1,
   pluggedLowPowerEnabled: true,
   pluggedAutoShutdownMs: 0,
-  batteryAutoShutdownMs: 30 * 60 * 1000,
+  batteryAutoShutdownMs: 10 * 60 * 1000,
   knobRotationAction: 'systemVolume',
   bleName: 'listener',
   bleNamePendingRestart: false,
@@ -272,7 +272,7 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     deviceEdgeLedBrightnessPercent: clampNumber(prefs.deviceEdgeLedBrightnessPercent, 100, 0, 100),
     deviceLowPowerIdleMinutes: clampNumber(prefs.deviceLowPowerIdleMinutes, 1, 1, 1440),
     devicePluggedLowPowerEnabled: prefs.devicePluggedLowPowerEnabled ?? true,
-    deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 30, 0, 1440),
+    deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 10, 0, 1440),
     deviceBleName: normalizeDeviceBleName(prefs.deviceBleName),
   };
 }

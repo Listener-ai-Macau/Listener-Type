@@ -57,7 +57,8 @@ use crate::types::{
     DeviceCustomKeys, DeviceKnobRotationAction, DictationInputSource, DictationSession,
     DictionaryEntry, HotkeyCapability, HotkeyStatus, OutputLanguagePreference, PolishMode,
     ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics, StyleSystemPrompts,
-    UserPreferences, VocabPresetStore, WindowsImeStatus, DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+    UserPreferences, VocabPresetStore, WindowsImeStatus,
+    DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES, DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
     MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES, MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
 };
 
@@ -2190,20 +2191,40 @@ pub struct DeviceSettingsUpdateRequest {
 
 const DEVICE_SETTINGS_SCHEMA: &str = "listener.device_settings.v1";
 const DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS: u32 = 0;
-const DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS: u32 = 30 * 60 * 1000;
+const DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS: u32 =
+    DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES * 60 * 1000;
 const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 0;
 const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
 const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
 const DEVICE_SETTINGS_BLE_WRITE_TIMEOUT: Duration = Duration::from_secs(4);
+const DEVICE_SETTINGS_BLE_TASK_TIMEOUT: Duration = Duration::from_secs(10);
 const DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES: usize = 63;
 
 async fn read_device_settings_snapshot_from_firmware() -> Result<DeviceSettingsSnapshot, String> {
-    let status = tauri::async_runtime::spawn_blocking(|| {
+    let status = run_device_settings_blocking("readback", || {
         crate::embedded_ble::read_device_settings_status(DEVICE_SETTINGS_BLE_WRITE_TIMEOUT)
     })
-    .await
-    .map_err(|err| format!("Listener device settings readback task failed: {err}"))??;
+    .await?;
     Ok(device_settings_snapshot_from_status(status))
+}
+
+async fn run_device_settings_blocking<T, F>(label: &'static str, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    let joined = tokio::time::timeout(
+        DEVICE_SETTINGS_BLE_TASK_TIMEOUT,
+        tauri::async_runtime::spawn_blocking(task),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "Listener device settings {label} timed out after {} ms",
+            DEVICE_SETTINGS_BLE_TASK_TIMEOUT.as_millis()
+        )
+    })?;
+    joined.map_err(|err| format!("Listener device settings {label} task failed: {err}"))?
 }
 
 #[tauri::command]
@@ -2281,14 +2302,15 @@ pub async fn set_device_settings(
         plugged_low_power_enabled,
     )?;
     for command in commands {
-        tauri::async_runtime::spawn_blocking(move || {
+        let command_for_error = command.clone();
+        run_device_settings_blocking("write", move || {
             crate::embedded_ble::send_device_settings_command(
                 &command,
                 DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
             )
         })
         .await
-        .map_err(|err| format!("Listener device settings write task failed: {err}"))??;
+        .map_err(|err| format!("{err}; command={command_for_error}"))?;
     }
     {
         let _settings_guard = settings_update_lock().lock();

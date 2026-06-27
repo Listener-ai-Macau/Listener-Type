@@ -108,6 +108,8 @@ const KNOB_CONTROL_WIDTH = 208;
 
 const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
 const DEVICE_SETTINGS_REFRESH_MS = 8000;
+const DEVICE_SETTINGS_WRITE_TIMEOUT_MS = 45_000;
+const DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES = 10;
 
 const fallbackShortcut = (): ShortcutBinding => ({
   primary: 'K',
@@ -257,7 +259,7 @@ function DeviceFirmwareSettingsCard() {
     batteryLowPowerIdleMinutes: 1,
     pluggedLowPowerEnabled: true,
     pluggedAutoShutdownMinutes: 0,
-    batteryAutoShutdownMinutes: 30,
+    batteryAutoShutdownMinutes: DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES,
     bleName: 'listener',
   });
   const [status, setStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
@@ -292,11 +294,15 @@ function DeviceFirmwareSettingsCard() {
     setStatus('saving');
     setMessage('');
     try {
-      const value = await setDeviceSettings({
-        ...form,
-        pluggedLowPowerEnabled: form.pluggedLowPowerIdleMinutes > 0,
-        pluggedAutoShutdownMinutes: 0,
-      });
+      const value = await withTimeout(
+        setDeviceSettings({
+          ...form,
+          pluggedLowPowerEnabled: form.pluggedLowPowerIdleMinutes > 0,
+          pluggedAutoShutdownMinutes: 0,
+        }),
+        DEVICE_SETTINGS_WRITE_TIMEOUT_MS,
+        t('settings.device.writeTimeout', '写入超时，请确认设备仍连接后重试。'),
+      );
       setSnapshot(value);
       setForm(snapshotToForm(value));
       setStatus('saved');
@@ -596,14 +602,15 @@ function MinuteInput({
         disabled={disabled}
         onFocus={() => setEditing(true)}
         onChange={event => {
-          const nextDraft = event.target.value;
-          setDraft(nextDraft);
-          if (nextDraft.trim().length === 0) {
-            return;
-          }
-          const next = Number(nextDraft);
-          if (Number.isFinite(next)) {
-            onChange(clampMinuteValue(next, min));
+          setDraft(event.target.value);
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            event.currentTarget.blur();
+          } else if (event.key === 'Escape') {
+            setDraft(String(value));
+            setEditing(false);
+            event.currentTarget.blur();
           }
         }}
         onBlur={event => {
@@ -1186,6 +1193,20 @@ function clampPercent(value: number): number {
 function clampMinuteValue(value: number, min: 0 | 1): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(1440, Math.round(value)));
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  let timer: number | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = window.setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+    }
+  });
 }
 
 function getDeviceSettingsStatusItems(
