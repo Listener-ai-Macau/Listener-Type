@@ -25,6 +25,7 @@ const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
 const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 1_200;
+const EMBEDDED_BLE_STATS_ONLY_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_STATS_ONLY";
 
 fn apply_and_publish_dictation_event(
     inner: &Arc<Inner>,
@@ -1894,6 +1895,53 @@ enum EmbeddedBleStreamSignal {
     Notification(Vec<u8>),
 }
 
+fn embedded_ble_stats_only_enabled() -> bool {
+    std::env::var(EMBEDDED_BLE_STATS_ONLY_ENV)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+async fn submit_embedded_audio_ble_stream_stats_only(
+    timeout: Duration,
+) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    let notifications = tauri::async_runtime::spawn_blocking(move || {
+        crate::embedded_ble::capture_notifications_once(timeout)
+    })
+    .await
+    .map_err(|err| format!("嵌入式 BLE stats-only 抓音任务失败: {err}"))??;
+    let collector =
+        crate::embedded_audio::collect_notifications(notifications.iter().map(Vec::as_slice))
+            .map_err(|err| format!("嵌入式 BLE stats-only 包解析失败: {err}"))?;
+    let stats = collector.stats();
+    if !stats.terminal_received {
+        return Err("嵌入式 BLE stats-only 会话尚未收到结束包".to_string());
+    }
+    if stats.end_reason != Some(crate::embedded_audio::SessionEndReason::Stop) {
+        return Err(format!(
+            "嵌入式 BLE stats-only 会话未正常结束: {:?}",
+            stats.end_reason
+        ));
+    }
+    if stats.reconstructed_pcm_bytes == 0 {
+        return Err("嵌入式 BLE stats-only 会话没有可识别的 PCM 数据".to_string());
+    }
+    log::info!(
+        "[embedded-ble] stats-only stream done: pcm_bytes={} missing_packets={} received_packets={}",
+        stats.reconstructed_pcm_bytes,
+        stats.missing_packet_count,
+        stats.received_packet_count
+    );
+    Ok(crate::embedded_audio::EmbeddedAudioSubmissionResult {
+        reconstructed_pcm_bytes: stats.reconstructed_pcm_bytes,
+        stats,
+    })
+}
+
 async fn submit_embedded_audio_ble_stream_impl(
     inner: &Arc<Inner>,
     timeout_ms: Option<u64>,
@@ -1901,6 +1949,13 @@ async fn submit_embedded_audio_ble_stream_impl(
     cancel_capture: Arc<AtomicBool>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
+    if emit_idle_capture_errors && embedded_ble_stats_only_enabled() {
+        log::info!(
+            "[embedded-ble] headless stats-only stream enabled by {EMBEDDED_BLE_STATS_ONLY_ENV}"
+        );
+        return submit_embedded_audio_ble_stream_stats_only(timeout).await;
+    }
+
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<EmbeddedBleStreamSignal>();
     register_embedded_ble_cancel_flag(inner, &cancel_capture);
     let cancel_capture_for_task = Arc::clone(&cancel_capture);

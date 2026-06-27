@@ -505,7 +505,7 @@ fn stop_drain_timeout_reason(stats: &crate::embedded_audio::SessionStats) -> Str
 mod windows_ble {
     use std::fmt;
     use std::io::{Read, Write};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
     use std::time::{Duration, Instant};
@@ -602,6 +602,7 @@ mod windows_ble {
     const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
     const TYPE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(8);
     const TYPE_HEARTBEAT_WRITE_TIMEOUT: Duration = Duration::from_millis(1200);
+    const CAPTURE_NOTIFICATION_INFO_LOG_LIMIT: usize = 4;
     const GATT_READY_TIMEOUT: Duration = Duration::from_secs(8);
     const GATT_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
     const CCCD_ENABLE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -626,6 +627,7 @@ mod windows_ble {
     const STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
     const OTA_DATA_CHUNK_BYTES_ENV: &str = "LISTENER_OTA_DATA_CHUNK_BYTES";
     const OTA_DATA_INTER_CHUNK_DELAY_MS_ENV: &str = "LISTENER_OTA_DATA_INTER_CHUNK_DELAY_MS";
+    const AUDIO_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
@@ -2206,11 +2208,24 @@ mod windows_ble {
         let characteristic = target.characteristic.clone();
         let (tx, rx) = mpsc::channel::<BleCaptureSignal>();
         let notification_tx = tx.clone();
+        let notification_log_count = Arc::new(AtomicUsize::new(0));
+        let notification_log_count_for_handler = Arc::clone(&notification_log_count);
         let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
             move |_sender, args| {
                 if let Some(args) = args {
                     if let Ok(buffer) = args.CharacteristicValue() {
                         if let Ok(bytes) = buffer_to_vec(&buffer) {
+                            let log_index =
+                                notification_log_count_for_handler.fetch_add(1, Ordering::Relaxed);
+                            if log_index < CAPTURE_NOTIFICATION_INFO_LOG_LIMIT {
+                                let prefix_len = bytes.len().min(4);
+                                log::info!(
+                                    "[embedded-ble] capture #{capture_id}: notification #{} bytes={} prefix={:02X?}",
+                                    log_index + 1,
+                                    bytes.len(),
+                                    &bytes[..prefix_len]
+                                );
+                            }
                             let _ = notification_tx.send(BleCaptureSignal::Notification(bytes));
                         }
                     }
@@ -3498,75 +3513,86 @@ mod windows_ble {
         let count = devices
             .Size()
             .map_err(|err| format!("BLE service collection size failed: {err}"))?;
-        if count == 0 {
-            return Err(format!(
-                "Embedded audio BLE service {SERVICE_UUID:?} not found; ensure device is paired and online"
-            ));
-        }
 
-        let mut last_error = None;
-        for index in 0..count {
-            let info = match devices.GetAt(index) {
-                Ok(info) => info,
-                Err(err) => {
-                    last_error = Some(format!("read BLE service info failed: {err}"));
+        let mut last_error = if count == 0 {
+            Some(format!(
+                "Embedded audio BLE service {SERVICE_UUID:?} not found by Windows service selector"
+            ))
+        } else {
+            None
+        };
+        if count > 0 {
+            for index in 0..count {
+                let info = match devices.GetAt(index) {
+                    Ok(info) => info,
+                    Err(err) => {
+                        last_error = Some(format!("read BLE service info failed: {err}"));
+                        continue;
+                    }
+                };
+                let name = info
+                    .Name()
+                    .map(|value| value.to_string_lossy())
+                    .unwrap_or_default();
+                let id = match info.Id() {
+                    Ok(id) => id,
+                    Err(err) => {
+                        last_error = Some(format!("read BLE service id failed: {err}"));
+                        continue;
+                    }
+                };
+                let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+                if !ble_candidate_allowed("audio notify", index, &name, address) {
                     continue;
                 }
-            };
-            let name = info
-                .Name()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
-            let id = match info.Id() {
-                Ok(id) => id,
-                Err(err) => {
-                    last_error = Some(format!("read BLE service id failed: {err}"));
-                    continue;
-                }
-            };
-            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
-            if !ble_candidate_allowed("audio notify", index, &name, address) {
-                continue;
-            }
 
-            let mut candidate_error = None;
-            if let Some(address) = address {
-                match open_notify_target_for_device(address) {
+                let mut candidate_error = None;
+                if let Some(address) = address {
+                    match open_notify_target_for_device(address) {
+                        Ok(target) => {
+                            log::info!(
+                                "[embedded-ble] selected device path index={index} name={name} address={address:012X}"
+                            );
+                            return Ok(target);
+                        }
+                        Err(err) => {
+                            candidate_error = Some(format!(
+                                "{name}: BLE device path {address:012X} failed: {err}"
+                            ));
+                        }
+                    }
+                }
+
+                match open_notify_target_for_service(&id) {
                     Ok(target) => {
                         log::info!(
-                            "[embedded-ble] selected device path index={index} name={name} address={address:012X}"
+                            "[embedded-ble] selected service-id fallback index={index} name={name}"
                         );
                         return Ok(target);
                     }
                     Err(err) => {
-                        candidate_error = Some(format!(
-                            "{name}: BLE device path {address:012X} failed: {err}"
-                        ));
+                        last_error = Some(match candidate_error {
+                            Some(previous) => {
+                                format!("{previous}; service-id fallback failed: {err}")
+                            }
+                            None => format!("{name}: {err}"),
+                        });
                     }
-                }
-            }
-
-            match open_notify_target_for_service(&id) {
-                Ok(target) => {
-                    log::info!(
-                        "[embedded-ble] selected service-id fallback index={index} name={name}"
-                    );
-                    return Ok(target);
-                }
-                Err(err) => {
-                    last_error = Some(match candidate_error {
-                        Some(previous) => {
-                            format!("{previous}; service-id fallback failed: {err}")
-                        }
-                        None => format!("{name}: {err}"),
-                    });
                 }
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            "No subscribable embedded audio BLE notify characteristic found".to_string()
-        }))
+        match open_notify_target_from_advertisement() {
+            Ok(target) => Ok(target),
+            Err(advertisement_error) => {
+                let service_error = last_error.unwrap_or_else(|| {
+                    "No subscribable embedded audio BLE notify characteristic found by service selector".to_string()
+                });
+                Err(format!(
+                    "{service_error}; advertisement fallback failed: {advertisement_error}"
+                ))
+            }
+        }
     }
 
     fn open_notify_target_with_retry(capture_id: u64) -> Result<OpenNotifyTarget, String> {
@@ -3640,75 +3666,153 @@ mod windows_ble {
         let count = devices
             .Size()
             .map_err(|err| format!("BLE audio control service collection size failed: {err}"))?;
-        if count == 0 {
-            return Err(format!(
-                "Embedded audio BLE service {SERVICE_UUID:?} not found for recording control; ensure device is paired and online"
-            ));
-        }
 
-        let mut last_error = None;
-        for index in 0..count {
-            let info = match devices.GetAt(index) {
-                Ok(info) => info,
-                Err(err) => {
-                    last_error = Some(format!("read BLE audio control service info failed: {err}"));
+        let mut last_error = if count == 0 {
+            Some(format!(
+                "Embedded audio BLE service {SERVICE_UUID:?} not found for recording control by Windows service selector"
+            ))
+        } else {
+            None
+        };
+        if count > 0 {
+            for index in 0..count {
+                let info = match devices.GetAt(index) {
+                    Ok(info) => info,
+                    Err(err) => {
+                        last_error =
+                            Some(format!("read BLE audio control service info failed: {err}"));
+                        continue;
+                    }
+                };
+                let name = info
+                    .Name()
+                    .map(|value| value.to_string_lossy())
+                    .unwrap_or_default();
+                let id = match info.Id() {
+                    Ok(id) => id,
+                    Err(err) => {
+                        last_error =
+                            Some(format!("read BLE audio control service id failed: {err}"));
+                        continue;
+                    }
+                };
+                let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+                if !ble_candidate_allowed("audio control", index, &name, address) {
                     continue;
                 }
-            };
-            let name = info
-                .Name()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
-            let id = match info.Id() {
-                Ok(id) => id,
-                Err(err) => {
-                    last_error = Some(format!("read BLE audio control service id failed: {err}"));
-                    continue;
-                }
-            };
-            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
-            if !ble_candidate_allowed("audio control", index, &name, address) {
-                continue;
-            }
 
-            let mut candidate_error = None;
-            if let Some(address) = address {
-                match open_audio_control_target_for_device(address) {
+                let mut candidate_error = None;
+                if let Some(address) = address {
+                    match open_audio_control_target_for_device(address) {
+                        Ok(target) => {
+                            log::info!(
+                                "[embedded-ble] selected audio control device path index={index} name={name} address={address:012X}"
+                            );
+                            return Ok(target);
+                        }
+                        Err(err) => {
+                            candidate_error = Some(format!(
+                                "{name}: BLE audio control device path {address:012X} failed: {err}"
+                            ));
+                        }
+                    }
+                }
+
+                match open_audio_control_target_for_service(&id) {
                     Ok(target) => {
                         log::info!(
-                            "[embedded-ble] selected audio control device path index={index} name={name} address={address:012X}"
+                            "[embedded-ble] selected audio control service-id fallback index={index} name={name}"
                         );
                         return Ok(target);
                     }
                     Err(err) => {
-                        candidate_error = Some(format!(
-                            "{name}: BLE audio control device path {address:012X} failed: {err}"
-                        ));
+                        last_error = Some(match candidate_error {
+                            Some(previous) => {
+                                format!(
+                                    "{previous}; audio control service-id fallback failed: {err}"
+                                )
+                            }
+                            None => format!("{name}: {err}"),
+                        });
                     }
                 }
             }
+        }
 
-            match open_audio_control_target_for_service(&id) {
+        match open_audio_control_target_from_advertisement() {
+            Ok(target) => Ok(target),
+            Err(advertisement_error) => {
+                let service_error = last_error.unwrap_or_else(|| {
+                    "No writable Listener BLE audio control characteristic found by service selector"
+                        .to_string()
+                });
+                Err(format!(
+                    "{service_error}; advertisement fallback failed: {advertisement_error}"
+                ))
+            }
+        }
+    }
+
+    fn open_notify_target_from_advertisement() -> Result<OpenNotifyTarget, String> {
+        let addresses = audio_target_advertisement_addresses("audio notify")?;
+        let mut last_error = None;
+        for address in addresses {
+            match open_notify_target_for_device(address) {
                 Ok(target) => {
                     log::info!(
-                        "[embedded-ble] selected audio control service-id fallback index={index} name={name}"
+                        "[embedded-ble] selected audio notify advertisement address={address:012X}"
                     );
                     return Ok(target);
                 }
                 Err(err) => {
-                    last_error = Some(match candidate_error {
-                        Some(previous) => {
-                            format!("{previous}; audio control service-id fallback failed: {err}")
-                        }
-                        None => format!("{name}: {err}"),
-                    });
+                    last_error = Some(format!(
+                        "advertised audio notify address {address:012X} failed: {err}"
+                    ));
                 }
             }
         }
 
         Err(last_error.unwrap_or_else(|| {
-            "No writable Listener BLE audio control characteristic found".into()
+            "audio notify advertisement scan returned no usable addresses".to_string()
         }))
+    }
+
+    fn open_audio_control_target_from_advertisement() -> Result<OpenAudioControlTarget, String> {
+        let addresses = audio_target_advertisement_addresses("audio control")?;
+        let mut last_error = None;
+        for address in addresses {
+            match open_audio_control_target_for_device(address) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] selected audio control advertisement address={address:012X}"
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    last_error = Some(format!(
+                        "advertised audio control address {address:012X} failed: {err}"
+                    ));
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "audio control advertisement scan returned no usable addresses".to_string()
+        }))
+    }
+
+    fn audio_target_advertisement_addresses(kind: &str) -> Result<Vec<u64>, String> {
+        if let Some(address) = configured_bluetooth_address() {
+            log::info!(
+                "[embedded-ble] using configured {kind} BLE address {}",
+                crate::embedded_ble::format_bluetooth_address(address)
+            );
+            return Ok(vec![address]);
+        }
+
+        let expected_name = configured_bluetooth_target_name()
+            .unwrap_or_else(|| STM32WB_ST_OTA_ADVERTISEMENT_NAME.to_string());
+        scan_ble_advertisements_by_name(kind, &expected_name, AUDIO_ADVERTISEMENT_SCAN_TIMEOUT)
     }
 
     fn read_optional_string_characteristic(
@@ -4186,13 +4290,26 @@ mod windows_ble {
     }
 
     fn scan_stm32wb_st_ota_advertisements() -> Result<Vec<u64>, String> {
+        scan_ble_advertisements_by_name(
+            "STM32WB ST OTA",
+            STM32WB_ST_OTA_ADVERTISEMENT_NAME,
+            STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT,
+        )
+    }
+
+    fn scan_ble_advertisements_by_name(
+        context: &str,
+        expected_name: &str,
+        timeout: Duration,
+    ) -> Result<Vec<u64>, String> {
         let watcher = BluetoothLEAdvertisementWatcher::new()
-            .map_err(|err| format!("STM32WB ST OTA advertisement watcher create failed: {err}"))?;
+            .map_err(|err| format!("{context} advertisement watcher create failed: {err}"))?;
         watcher
             .SetScanningMode(BluetoothLEScanningMode::Active)
-            .map_err(|err| format!("STM32WB ST OTA advertisement active scan failed: {err}"))?;
+            .map_err(|err| format!("{context} advertisement active scan failed: {err}"))?;
 
         let (tx, rx) = mpsc::channel::<(u64, String, i16)>();
+        let expected_name_for_handler = expected_name.to_string();
         let handler = TypedEventHandler::<
             BluetoothLEAdvertisementWatcher,
             BluetoothLEAdvertisementReceivedEventArgs,
@@ -4207,7 +4324,7 @@ mod windows_ble {
                 .LocalName()
                 .map(|value| value.to_string_lossy())
                 .unwrap_or_default();
-            if !stm32wb_st_ota_advertisement_name_matches(&name) {
+            if !ble_advertisement_name_matches(&name, &expected_name_for_handler) {
                 return Ok(());
             }
             let address = args.BluetoothAddress().unwrap_or_default();
@@ -4221,12 +4338,12 @@ mod windows_ble {
 
         let token = watcher
             .Received(&handler)
-            .map_err(|err| format!("STM32WB ST OTA advertisement handler failed: {err}"))?;
+            .map_err(|err| format!("{context} advertisement handler failed: {err}"))?;
         watcher
             .Start()
-            .map_err(|err| format!("STM32WB ST OTA advertisement scan start failed: {err}"))?;
+            .map_err(|err| format!("{context} advertisement scan start failed: {err}"))?;
 
-        let deadline = Instant::now() + STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT;
+        let deadline = Instant::now() + timeout;
         let mut addresses = Vec::new();
         while Instant::now() < deadline {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -4237,7 +4354,7 @@ mod windows_ble {
                         continue;
                     }
                     log::info!(
-                        "[embedded-ble] STM32WB ST OTA advertisement candidate name={name} address={address:012X} rssi={rssi}"
+                        "[embedded-ble] {context} advertisement candidate name={name} address={address:012X} rssi={rssi}"
                     );
                     addresses.push(address);
                     break;
@@ -4252,16 +4369,19 @@ mod windows_ble {
 
         if addresses.is_empty() {
             return Err(format!(
-                "no Bluetooth advertisement named {STM32WB_ST_OTA_ADVERTISEMENT_NAME:?} seen in {} ms",
-                STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT.as_millis()
+                "no Bluetooth advertisement named {expected_name:?} seen for {context} in {} ms",
+                timeout.as_millis()
             ));
         }
         Ok(addresses)
     }
 
+    fn ble_advertisement_name_matches(name: &str, expected_name: &str) -> bool {
+        name.trim().eq_ignore_ascii_case(expected_name.trim())
+    }
+
     fn stm32wb_st_ota_advertisement_name_matches(name: &str) -> bool {
-        name.trim()
-            .eq_ignore_ascii_case(STM32WB_ST_OTA_ADVERTISEMENT_NAME)
+        ble_advertisement_name_matches(name, STM32WB_ST_OTA_ADVERTISEMENT_NAME)
     }
 
     fn diagnostic_target_candidates() -> Result<Vec<DiagnosticTargetCandidate>, String> {
@@ -6876,10 +6996,7 @@ mod windows_ble {
         }
     }
 
-    fn type_heartbeat_write_option(control: &GattCharacteristic, label: &str) -> GattWriteOption {
-        if label != "Type heartbeat" {
-            return GattWriteOption::WriteWithResponse;
-        }
+    fn type_heartbeat_write_option(control: &GattCharacteristic, _label: &str) -> GattWriteOption {
         let Ok(properties) = control.CharacteristicProperties() else {
             return GattWriteOption::WriteWithResponse;
         };
@@ -7015,6 +7132,13 @@ mod windows_ble {
             assert!(stm32wb_st_ota_advertisement_name_matches("companion"));
             assert!(stm32wb_st_ota_advertisement_name_matches(" Companion "));
             assert!(!stm32wb_st_ota_advertisement_name_matches("listener"));
+        }
+
+        #[test]
+        fn ble_advertisement_name_matching_trims_expected_target() {
+            assert!(ble_advertisement_name_matches(" Companion ", "companion"));
+            assert!(ble_advertisement_name_matches("companion", " Companion "));
+            assert!(!ble_advertisement_name_matches("Blistener", "companion"));
         }
 
         #[test]
