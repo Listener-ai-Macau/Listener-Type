@@ -1,9 +1,9 @@
 # Listener Type Feature Map
 
-`tools/ai/repo_features.ps1` is the workflow entry point for AI context. The
-files in this directory are the human-readable feature map: each document should
-state what is implemented, where the code lives, how to validate it, and which
-limits remain.
+`tools/ai/repo_features.ps1` prints a machine-readable summary of the product
+surface. The files in this directory are the human-readable feature map: each
+document should state what is implemented, where the code lives, how to validate
+it, and which limits remain.
 
 ## Index
 
@@ -22,4 +22,5 @@ limits remain.
 - Keep this directory aligned with `docs/features/index.json`.
 - Do not list planned work as implemented until code and validation evidence exist.
 - Use `known_limits` for platform dependencies, credentials, hardware, or packaging requirements that remain true.
-- Keep workflow state in `ai-collaboration-workflow`; feature docs describe product/code behavior only.
+- Keep local planning, validation logs, and review state outside these product
+  feature docs.

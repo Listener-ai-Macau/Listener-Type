@@ -3,16 +3,28 @@ dist/
 .DS_Store
 *.local
 .env
+.env.*
+!.env.example
 .vite/
 .cache/
 __pycache__/
 *.pyc
 artifacts/
 .artifacts/
+docs/validation/
 tests/artifacts/
+tools/ai/repo_features.accepted.jsonl
 .omx/
 .task/
 ref/
+*.msi
+*.dmg
+*.pkg
+*.AppImage
+*.deb
+*.rpm
+*.zip
+*.sig
 
 # Tauri
 **/target/

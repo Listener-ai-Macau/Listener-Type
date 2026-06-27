@@ -36,6 +36,17 @@ mod embedded_ble {
         )
     }
 
+    pub fn transfer_stm32wb_st_ota(
+        _firmware_bytes: &[u8],
+        _manifest_chunk_bytes: usize,
+        _on_progress: Option<&dyn Fn(usize, usize)>,
+    ) -> Result<FirmwareOtaTransferStats, String> {
+        Err(
+            "STM32WB ST BLE OTA is only available from the Tauri app on Windows."
+                .to_string(),
+        )
+    }
+
     pub struct PreparedFirmwareOtaTransfer {
         snapshot: FirmwareOtaDeviceSnapshot,
     }
@@ -70,6 +81,32 @@ mod embedded_ble {
         )
     }
 
+    pub struct PreparedStm32wbStOtaTransfer {
+        snapshot: FirmwareOtaDeviceSnapshot,
+    }
+
+    impl PreparedStm32wbStOtaTransfer {
+        pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+            &self.snapshot
+        }
+
+        pub fn transfer(
+            self,
+            firmware_bytes: &[u8],
+            manifest_chunk_bytes: usize,
+            on_progress: Option<&dyn Fn(usize, usize)>,
+        ) -> Result<FirmwareOtaTransferStats, String> {
+            transfer_stm32wb_st_ota(firmware_bytes, manifest_chunk_bytes, on_progress)
+        }
+    }
+
+    pub fn prepare_stm32wb_st_ota_transfer() -> Result<PreparedStm32wbStOtaTransfer, String> {
+        Err(
+            "STM32WB ST BLE OTA is only available from the Tauri app on Windows."
+                .to_string(),
+        )
+    }
+
     pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
         FirmwareOtaDeviceSnapshot {
             connected: false,
@@ -80,6 +117,21 @@ mod embedded_ble {
             usb_powered: None,
             detail: Some(
                 "Standalone headless helper only supports package validation; use listener-type --firmware-ota-transfer for BLE transfer."
+                    .to_string(),
+            ),
+        }
+    }
+
+    pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+        FirmwareOtaDeviceSnapshot {
+            connected: false,
+            hardware_revision: None,
+            firmware_version: None,
+            capabilities: Vec::new(),
+            battery_percent: None,
+            usb_powered: None,
+            detail: Some(
+                "Standalone headless helper only supports package validation; use Listener Type for STM32WB ST BLE OTA transfer."
                     .to_string(),
             ),
         }

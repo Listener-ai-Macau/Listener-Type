@@ -529,10 +529,25 @@ def find_workflow_metadata(repo_root: Path, git_info: dict[str, Any]) -> dict[st
         "effective_agent_id": branch_agent or env_agent_id,
         "branch": git_info.get("branch"),
     }
-    workflow_root = repo_root.parent / "ai-collaboration-workflow"
-    status_path = workflow_root / "docs" / "plans" / "listener-type-ai-diagnostic-bundle_status.json"
-    metadata["workflow_root"] = str(workflow_root) if workflow_root.exists() else None
-    metadata["status_path"] = str(status_path) if status_path.exists() else None
+    workflow_root_env = os.environ.get("AI_WORKFLOW_REPO")
+    workflow_status_env = os.environ.get("AI_WORKFLOW_STATUS_PATH")
+    workflow_root = Path(workflow_root_env) if workflow_root_env else None
+    status_path = (
+        Path(workflow_status_env)
+        if workflow_status_env
+        else (
+            workflow_root
+            / "docs"
+            / "plans"
+            / "listener-type-ai-diagnostic-bundle_status.json"
+            if workflow_root
+            else None
+        )
+    )
+    metadata["workflow_root"] = str(workflow_root) if workflow_root and workflow_root.exists() else None
+    metadata["status_path"] = str(status_path) if status_path and status_path.exists() else None
+    if status_path is None:
+        return metadata
     if status_path.exists():
         payload, error = read_json_file(status_path)
         if error:

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" alt="Listener.ai app icon" width="128" />
+  <img src="src-tauri/icons/128x128@2x.png" alt="Listener Type app icon" width="128" />
 </p>
 
-<h1 align="center">Listener.ai</h1>
+<h1 align="center">Listener Type</h1>
 
 <p align="center">
   <strong>面向 macOS 和 Windows 的本地优先语音输入应用。</strong><br/>
@@ -29,7 +29,7 @@ Listener Type 做一件事：把语音变成当前光标处可直接使用的文
 
 ## 品牌形象
 
-Listener.ai 的品牌形象是一只趴在语音胶囊上的小狗伙伴。它采用极简圆润的设计：下垂圆耳、开心眯眼、柔和腮红、圆鼓鼓的小爪子和亲近的表情，让语音输入这件事显得温暖、轻松，而不是冰冷的工具。
+Listener Type 的品牌形象是一只趴在语音胶囊上的小狗伙伴。它采用极简圆润的设计：下垂圆耳、开心眯眼、柔和腮红、圆鼓鼓的小爪子和亲近的表情，让语音输入这件事显得温暖、轻松，而不是冰冷的工具。
 
 小狗下方的胶囊来自应用内录音时的浮动胶囊。胶囊内部保留五根圆角竖条，对应录音时随音量变化的 audio bars 动效；中间一根使用温暖琥珀色作为唯一强调。整体配色延续当前 UI：石英白背景、低饱和鼠尾草绿线条、深墨色五官、柔和灰线和克制的暖色点缀。
 

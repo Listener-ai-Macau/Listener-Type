@@ -83,7 +83,7 @@ function New-FeatureSnapshot {
         boundaries = @(
             "Firmware behavior, BLE GATT implementation, button scanning, and device logs live in voice-keyboard-firmware.",
             "Industrial design, CAD, review renders, and manufacturing constraints live in voice-keyboard-design.",
-            "Workflow plans, claims, review state, and cross-repo orchestration live in ai-collaboration-workflow."
+            "Planning, review state, and cross-repo orchestration are external to this product repository."
         )
         validation_commands = @(
             "pwsh -NoProfile -File .\tools\ai\repo_features.ps1 -Check",
@@ -231,7 +231,7 @@ if ($UpdateFromAccepted) {
         plan = $Plan
         step_id = $StepId
         commit = $Commit
-        repo_root = $resolvedRepoRoot
+        repo = (Split-Path -Leaf $resolvedRepoRoot)
         note = "Keep this entry only if the accepted work changed important Listener-Type responsibilities, workflows, providers, device support, or validation."
     }
     $record | ConvertTo-Json -Depth 6 -Compress | Add-Content -Path $acceptedLogPath -Encoding UTF8

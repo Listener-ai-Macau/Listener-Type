@@ -33,7 +33,7 @@
 |---|--------|------|----------|------|------|----------|
 | B1 | BLE 广播名称 | Windows 蓝牙设置或手机 BLE 扫描工具 | 设备名称为 `Listener` 或发布计划中定义的名称 | ☐ | | |
 | B2 | DIS 服务存在 | 使用 nRF Connect 或类似工具扫描 | 0x180A（Device Information Service）存在 | ☐ | | |
-| B3 | DIS 制造商名 | 读取 DIS Manufacturer Name String | 值为 `Listener.ai` 或发布计划中定义的值 | ☐ | | |
+| B3 | DIS 制造商名 | 读取 DIS Manufacturer Name String | 值为发布计划中定义的制造商名 | ☐ | | |
 | B4 | DIS 型号 | 读取 DIS Model Number String | 值为 `Voice Keyboard V1.0` 或对应型号 | ☐ | | |
 | B5 | DIS 固件版本 | 读取 DIS Firmware Revision String | 与固件版本号（V1）一致 | ☐ | | |
 | B6 | DIS 硬件版本 | 读取 DIS Hardware Revision String | 值为 `V1.0` 或对应版本 | ☐ | | |

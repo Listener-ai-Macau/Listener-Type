@@ -14,9 +14,11 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/check-doc-inheritance.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-hotkey-injection.mjs` | Global hotkeys | Hotkey tests and manual smoke |
 | `scripts/check-hotkey-recorder.mjs` | Global hotkeys | Hotkey tests and manual smoke |
+| `scripts/check-release-version.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-tauri-info.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-traceability.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-window-hotkey-fallback.mjs` | Global hotkeys | Hotkey tests and manual smoke |
+| `scripts/release-check.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/validation/run_ble_recording_cancel_matrix.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-build-gnu.ps1` | Automation and audits | Node/PowerShell script tests |
@@ -32,7 +34,9 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/windows-ime-unregister.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-listener-type-lifecycle-e2e.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-microphone-privacy-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-open-companion-dev.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-open-dev.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-package-companion-msvc.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-package-msvc.cmd` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-package-msvc.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-package-msvc.test.mjs` | Automation and audits | Node/PowerShell script tests |
@@ -206,6 +210,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/pages/_atoms.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AboutUpdateControl.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AdvancedSection.tsx` | React UI | TypeScript build and visual smoke |
+| `src/pages/settings/CompanionSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/DeviceSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/FirmwareOtaPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/LanguageSection.tsx` | React UI | TypeScript build and visual smoke |

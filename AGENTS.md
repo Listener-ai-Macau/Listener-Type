@@ -21,27 +21,6 @@ Listener Type is a local-first desktop voice input app. It records speech, trans
 - `docs/` - User-facing and operational documentation.
 - `specs/` - Architecture, design and code traceability.
 
-## AI Collaboration
-
-The shared workflow repository is the single collaboration source:
-
-`C:\Users\Billy\Desktop\Denzic\ai-collaboration-workflow`
-
-Use its dispatcher from this product repo:
-
-```powershell
-$aiw = "..\..\ai-collaboration-workflow\scripts\aiw.ps1"
-pwsh -NoProfile -File $aiw status
-pwsh -NoProfile -File $aiw list -Plan <plan> -IncludeStale
-pwsh -NoProfile -File $aiw claim -Plan <plan> -StepId <id> -Assignee <you> -RepoRoot .
-pwsh -NoProfile -File $aiw submit -Plan <plan> -StepId <id> -ValidationResult "PASS: ..." -RepoRoot .
-pwsh -NoProfile -File $aiw review -Plan <plan> -StepId <id> -Reviewer <reviewer> -Result approved -Notes "<what was checked>"
-```
-
-`submit` only moves work to `review`; only `review -Result approved` writes `accepted` and unlocks dependencies. Use `review -Result changes_requested -Notes "..."` for rework.
-
-Read `C:\Users\Billy\Desktop\Denzic\ai-collaboration-workflow\docs\ai_collaboration_protocol.md` before claiming shared work. Do not keep local copies of collaboration scripts in this repo.
-
 ## Required Reading
 
 - Frontend or visual work: read `specs/DESIGN.md`.

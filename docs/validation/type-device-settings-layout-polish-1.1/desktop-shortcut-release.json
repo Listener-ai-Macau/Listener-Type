@@ -1,9 +1,0 @@
-{
-  "updated_at": "2026-06-17T16:24:25.5868404+08:00",
-  "shortcut": "C:\\Users\\Billy\\Desktop\\Listener Type.lnk",
-  "shortcut_target": "C:\\Users\\Billy\\Desktop\\listener\\Listener-Type-wt-codex-type-device-settings-layout-polish-1.1\\src-tauri\\target\\release\\listener-type.exe",
-  "expected_target": "C:\\Users\\Billy\\Desktop\\listener\\Listener-Type-wt-codex-type-device-settings-layout-polish-1.1\\src-tauri\\target\\release\\listener-type.exe",
-  "target_exists": true,
-  "release_process_id": 16980,
-  "release_process_running": true
-}
