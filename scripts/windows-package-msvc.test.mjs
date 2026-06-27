@@ -49,11 +49,15 @@ const requiredFragments = [
   "npm.cmd ci",
   "tauri build -- --target x86_64-pc-windows-msvc --bundles msi",
   "Repair-TauriMsiBundle",
+  "Enable-SameVersionMsiUpgrade",
   "Find-BuiltMsiPath",
+  "candle.exe",
   "light.exe",
   "main.wixobj",
   "listener-type-ime-cleanup.wixobj",
   "locale.wxl",
+  "AllowSameVersionUpgrades=\"yes\"",
+  "DowngradeErrorMessage",
   "WebView2Loader.dll",
   "Compress-Archive",
   "Get-FileHash -Algorithm SHA256",
@@ -81,6 +85,9 @@ assert.doesNotMatch(script, /LISTENER_TYPE_IME_DLL_X86/, "default packaging must
 assert.doesNotMatch(script, /listener-type-ime\.wixobj/, "default MSI repair must not link the IME WiX object");
 assert.match(script, /Listener Type_\$\(Get-PackageVersion\)_x64_en-US\.msi/, "packaging should accept Tauri's product-name MSI output");
 assert.match(script, /Copy-Item -LiteralPath \$msiPath -Destination \(Join-Path \$ArtifactsRoot \$msiName\)/, "packaging should copy the built MSI to the stable ListenerType artifact name");
+assert.match(script, /Invoke-MsvcBuild[\s\S]*Repair-TauriMsiBundle[\s\S]*Copy-WindowsArtifacts/, "packaging should relink the Tauri MSI after enabling same-version major upgrades");
+assert.match(script, /AllowSameVersionUpgrades="yes"/, "MSI packaging should allow same-version 1.0.0 replacement builds to major-upgrade installed copies");
+assert.match(script, /DowngradeErrorMessage=/, "MSI packaging should keep an explicit downgrade block after replacing AllowDowngrades");
 assert.doesNotMatch(ciWorkflow, /windows-ime-install-smoke\.ps1/, "release CI must not expect default installers to register a TSF IME");
 assert.match(ciWorkflow, /node scripts\/windows-package-msvc\.test\.mjs/, "release CI should run the static packaging guard");
 

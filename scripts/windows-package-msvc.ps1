@@ -176,15 +176,29 @@ function Invoke-MsvcBuild {
 
 function Repair-TauriMsiBundle {
   $wixRoot = Join-Path $releaseRoot "wix\x64"
+  $mainSource = Join-Path $wixRoot "main.wxs"
   $mainObject = Join-Path $wixRoot "main.wixobj"
+  $imeCleanupSource = Join-Path $appRoot "src-tauri\wix\listener-type-ime-cleanup.wxs"
   $imeCleanupObject = Join-Path $wixRoot "listener-type-ime-cleanup.wixobj"
   $locale = Join-Path $wixRoot "locale.wxl"
   $msiPath = Get-MsiPath
 
-  foreach ($requiredPath in @($mainObject, $imeCleanupObject, $locale)) {
+  foreach ($requiredPath in @($mainSource, $imeCleanupSource, $locale)) {
     if ([string]::IsNullOrWhiteSpace($requiredPath) -or -not (Test-Path $requiredPath)) {
       throw "Cannot repair Tauri MSI bundle because a required file is missing: $requiredPath"
     }
+  }
+
+  Enable-SameVersionMsiUpgrade -MainWxsPath $mainSource
+
+  $candle = Find-WixTool "candle.exe"
+  & $candle -nologo -arch x64 -out $mainObject $mainSource
+  if ($LASTEXITCODE -ne 0) {
+    throw "WiX candle.exe failed for main.wxs with exit code $LASTEXITCODE."
+  }
+  & $candle -nologo -arch x64 -out $imeCleanupObject $imeCleanupSource
+  if ($LASTEXITCODE -ne 0) {
+    throw "WiX candle.exe failed for listener-type-ime-cleanup.wxs with exit code $LASTEXITCODE."
   }
 
   $bundleDir = Split-Path -Parent $msiPath
@@ -201,6 +215,38 @@ function Repair-TauriMsiBundle {
   }
 
   Write-Host "[ok] MSI linked from generated WiX objects -> $msiPath"
+}
+
+function Enable-SameVersionMsiUpgrade {
+  param([string]$MainWxsPath)
+
+  $text = Get-Content -LiteralPath $MainWxsPath -Raw
+  if ($text -match 'AllowSameVersionUpgrades="yes"' -and $text -notmatch 'AllowDowngrades="yes"') {
+    Write-Host "[ok] MSI same-version major upgrade already enabled"
+    return
+  }
+
+  $next = [regex]::Replace(
+    $text,
+    '<MajorUpgrade\b([^>]*)\sAllowDowngrades="yes"([^>]*)/>',
+    {
+      param($match)
+      $attributes = "$($match.Groups[1].Value)$($match.Groups[2].Value)"
+      if ($attributes -notmatch '\bAllowSameVersionUpgrades=') {
+        $attributes = "$attributes AllowSameVersionUpgrades=`"yes`""
+      }
+      if ($attributes -notmatch '\bDowngradeErrorMessage=') {
+        $attributes = "$attributes DowngradeErrorMessage=`"A newer version of [ProductName] is already installed.`""
+      }
+      return "<MajorUpgrade$attributes />"
+    },
+    1)
+  if ($next -eq $text) {
+    throw "Cannot enable same-version MSI upgrade; generated MajorUpgrade element was not found in $MainWxsPath"
+  }
+
+  Set-Content -LiteralPath $MainWxsPath -Value $next -NoNewline
+  Write-Host "[ok] MSI same-version major upgrade enabled in generated WiX"
 }
 
 function Reset-ArtifactsRoot {
@@ -285,6 +331,7 @@ try {
   $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
   Write-Host "[info] Default Windows package does not bundle or register the optional TSF IME."
   Invoke-MsvcBuild -VsDevCmd $vsDevCmd -CargoBin $cargoBin
+  Repair-TauriMsiBundle
   Copy-WindowsArtifacts
 } finally {
   Pop-Location
