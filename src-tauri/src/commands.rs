@@ -435,10 +435,7 @@ fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), S
         ));
     }
     if !device_ble_name_is_valid(&prefs.device_ble_name) {
-        return Err(
-            "蓝牙名称只支持 1-32 个可见 ASCII 字符，不能包含空格、引号、分号、等号或反斜杠。"
-                .to_string(),
-        );
+        return Err("蓝牙名称只支持 1-32 个字符：英文字母、数字、连字符或下划线。".to_string());
     }
     Ok(())
 }
@@ -2576,21 +2573,11 @@ fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Re
 }
 
 fn validate_device_settings_ble_name(name: &str) -> Result<(), String> {
-    if name.is_empty() || name.len() > 32 {
-        return Err("BLE name must be 1-32 printable ASCII characters without spaces.".to_string());
-    }
-    for ch in name.chars() {
-        if !ch.is_ascii_graphic() {
-            return Err(
-                "BLE name must contain printable ASCII characters without spaces only.".to_string(),
-            );
-        }
-        if matches!(ch, '"' | '\'' | ';' | '=' | '\\') {
-            return Err(
-                "BLE name cannot contain spaces, quotes, semicolon, equals sign, or backslash."
-                    .to_string(),
-            );
-        }
+    if !device_ble_name_is_valid(name) {
+        return Err(
+            "BLE name must be 1-32 characters using letters, numbers, hyphen, or underscore."
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -7630,6 +7617,24 @@ mod tests {
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener dev".to_string(),
+        };
+
+        assert!(validate_device_settings_request(&request).is_err());
+    }
+
+    #[test]
+    fn device_settings_request_rejects_ble_name_angle_brackets() {
+        let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 70,
+            key_led_brightness_percent: 65,
+            knob_led_brightness_percent: 60,
+            edge_led_brightness_percent: 55,
+            plugged_low_power_idle_minutes: 2,
+            battery_low_power_idle_minutes: 3,
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_minutes: 0,
+            battery_auto_shutdown_minutes: 30,
+            ble_name: "listener<bad".to_string(),
         };
 
         assert!(validate_device_settings_request(&request).is_err());

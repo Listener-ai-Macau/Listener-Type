@@ -1117,11 +1117,22 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
             tauri::async_runtime::spawn(async move {
                 log::info!("[cli] submit-embedded-audio-ble-once: timeout_ms={timeout_ms:?}");
                 match coord.submit_embedded_audio_ble_once(timeout_ms).await {
-                    Ok(result) => log::info!(
-                        "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={}",
-                        result.reconstructed_pcm_bytes,
-                        result.stats.missing_packet_count
-                    ),
+                    Ok(result) => {
+                        let result_json = serde_json::to_string(&result)
+                            .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+                        println!("embedded_audio_ble_once_result_json={result_json}");
+                        log::info!("embedded_audio_ble_once_result_json={result_json}");
+                        log::info!(
+                            "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={} final_text_chars={}",
+                            result.reconstructed_pcm_bytes,
+                            result.stats.missing_packet_count,
+                            result
+                                .transcript
+                                .as_ref()
+                                .map(|transcript| transcript.final_text.chars().count())
+                                .unwrap_or(0)
+                        );
+                    }
                     Err(err) => log::warn!("[cli] submit-embedded-audio-ble-once failed: {err}"),
                 }
             });
@@ -1218,8 +1229,11 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
 fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
     init_file_logger();
 
-    let runtime = match tokio::runtime::Builder::new_current_thread()
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("listener-type-embedded-ble-cli")
         .enable_time()
+        .enable_io()
         .build()
     {
         Ok(runtime) => runtime,
@@ -1242,7 +1256,9 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
             log::info!(
                 "[cli] headless probe-embedded-audio-ble-subscription: timeout_ms={timeout_ms:?}"
             );
-            match runtime.block_on(coordinator.probe_embedded_audio_ble_subscription(timeout_ms)) {
+            let timeout =
+                std::time::Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
+            match crate::embedded_ble::probe_notify_subscription(timeout) {
                 Ok(()) => {
                     println!("embedded_ble_probe_result=PASS");
                     log::info!("[cli] probe-embedded-audio-ble-subscription PASS");
@@ -1259,10 +1275,19 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
             log::info!("[cli] headless submit-embedded-audio-ble-once: timeout_ms={timeout_ms:?}");
             match runtime.block_on(coordinator.submit_embedded_audio_ble_once(timeout_ms)) {
                 Ok(result) => {
+                    let result_json = serde_json::to_string(&result)
+                        .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+                    println!("embedded_audio_ble_once_result_json={result_json}");
+                    log::info!("embedded_audio_ble_once_result_json={result_json}");
                     log::info!(
-                        "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={}",
+                        "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={} final_text_chars={}",
                         result.reconstructed_pcm_bytes,
-                        result.stats.missing_packet_count
+                        result.stats.missing_packet_count,
+                        result
+                            .transcript
+                            .as_ref()
+                            .map(|transcript| transcript.final_text.chars().count())
+                            .unwrap_or(0)
                     );
                     0
                 }

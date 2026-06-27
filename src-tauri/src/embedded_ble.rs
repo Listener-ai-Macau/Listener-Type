@@ -601,7 +601,7 @@ mod windows_ble {
     const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
     const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
     const TYPE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(8);
-    const TYPE_HEARTBEAT_WRITE_TIMEOUT: Duration = Duration::from_millis(1200);
+    const TYPE_HEARTBEAT_WRITE_TIMEOUT: Duration = Duration::from_millis(3000);
     const CAPTURE_NOTIFICATION_INFO_LOG_LIMIT: usize = 4;
     const GATT_READY_TIMEOUT: Duration = Duration::from_secs(8);
     const GATT_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -611,12 +611,20 @@ mod windows_ble {
         Duration::from_millis(750),
         Duration::from_millis(1500),
     ];
-    const NOTIFY_TARGET_OPEN_RETRY_DELAYS: [Duration; 5] = [
+    const NOTIFY_TARGET_OPEN_RETRY_DELAYS: [Duration; 7] = [
         Duration::from_millis(250),
         Duration::from_millis(500),
         Duration::from_millis(1000),
         Duration::from_millis(2000),
         Duration::from_millis(3000),
+        Duration::from_millis(5000),
+        Duration::from_millis(8000),
+    ];
+    const AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS: [Duration; 4] = [
+        Duration::from_millis(150),
+        Duration::from_millis(350),
+        Duration::from_millis(750),
+        Duration::from_millis(1500),
     ];
     const ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT: Duration = Duration::from_secs(5);
     const DIAGNOSTIC_PULL_CANDIDATE_DELAY: Duration = Duration::from_millis(350);
@@ -1528,7 +1536,7 @@ mod windows_ble {
                 Err(err) => return Err(err),
             }
         }
-        let target = open_audio_control_target()?;
+        let target = open_audio_control_target_with_retry(label)?;
         write_gatt_value_with_timeout(
             &target.control,
             command,
@@ -1624,7 +1632,7 @@ mod windows_ble {
                 Err(err) => return Err(err),
             }
         }
-        let target = open_audio_control_target()?;
+        let target = open_audio_control_target_with_retry("EC11 rotation mode")?;
         write_gatt_value_with_timeout(
             &target.control,
             command.as_bytes(),
@@ -1702,7 +1710,7 @@ mod windows_ble {
             ));
         }
 
-        let target = open_audio_control_target().map_err(|err| {
+        let target = open_audio_control_target_with_retry("device settings").map_err(|err| {
             format!(
                 "{err}; active BLE fallback failed: {}; USB serial fallback failed: {}",
                 active_capture_error.as_deref().unwrap_or("not attempted"),
@@ -2370,11 +2378,14 @@ mod windows_ble {
         let mut stop_drain_deadline: Option<Instant> = None;
         let mut link_recovery_deadline: Option<Instant> = None;
         let mut link_recovery_reason: Option<String> = None;
+        let mut consecutive_type_heartbeat_failures = 0u32;
         loop {
             let now = Instant::now();
             if let Some(due) = next_type_heartbeat {
                 if now >= due {
                     if let Err(err) = cleanup.write_type_heartbeat(b"TYPE:HB\n", "Type heartbeat") {
+                        consecutive_type_heartbeat_failures =
+                            consecutive_type_heartbeat_failures.saturating_add(1);
                         let reason = format!("{err}; BLE audio/control response missing");
                         if collector_has_active_recoverable_session(&collector) {
                             let stats = collector.stats();
@@ -2394,11 +2405,23 @@ mod windows_ble {
                                 );
                             }
                         } else {
-                            log::warn!(
-                                "[embedded-ble] capture #{capture_id}: {reason}; keeping idle notify open for heartbeat retry"
-                            );
+                            let log_message =
+                                format!("[embedded-ble] capture #{capture_id}: {reason}; keeping idle notify open for heartbeat retry");
+                            if consecutive_type_heartbeat_failures == 1 {
+                                log::info!("{log_message}");
+                            } else {
+                                log::warn!(
+                                    "{log_message}; consecutive_failures={consecutive_type_heartbeat_failures}"
+                                );
+                            }
                         }
                     } else {
+                        if consecutive_type_heartbeat_failures > 0 {
+                            log::info!(
+                                "[embedded-ble] capture #{capture_id}: Type heartbeat recovered after {consecutive_type_heartbeat_failures} failure(s)"
+                            );
+                        }
+                        consecutive_type_heartbeat_failures = 0;
                         cleanup.mark_type_heartbeat_open();
                     }
                     next_type_heartbeat = Some(now + TYPE_HEARTBEAT_INTERVAL);
@@ -3795,6 +3818,39 @@ mod windows_ble {
                 ))
             }
         }
+    }
+
+    fn open_audio_control_target_with_retry(label: &str) -> Result<OpenAudioControlTarget, String> {
+        let mut last_error = None;
+        for attempt in 1..=NOTIFY_TARGET_OPEN_RETRY_DELAYS.len() + 1 {
+            match open_audio_control_target() {
+                Ok(target) => {
+                    if attempt > 1 {
+                        log::info!(
+                            "[embedded-ble] {label}: audio control target recovered on attempt {attempt}"
+                        );
+                    }
+                    return Ok(target);
+                }
+                Err(err) => {
+                    if attempt > NOTIFY_TARGET_OPEN_RETRY_DELAYS.len()
+                        || !is_transient_notify_target_open_error(&err)
+                    {
+                        return Err(err);
+                    }
+                    let delay = NOTIFY_TARGET_OPEN_RETRY_DELAYS[attempt - 1];
+                    log::warn!(
+                        "[embedded-ble] {label}: audio control target open attempt {attempt} failed: {err}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    last_error = Some(err);
+                    std::thread::sleep(delay);
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            "No writable Listener BLE audio control characteristic found".to_string()
+        }))
     }
 
     fn open_notify_target_from_advertisement() -> Result<OpenNotifyTarget, String> {
@@ -5768,20 +5824,7 @@ mod windows_ble {
             }
         }
         let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
-        let control = match open_write_characteristic_from_service(
-            service,
-            AUDIO_CONTROL_UUID,
-            "audio control",
-            cache_mode,
-        ) {
-            Ok(control) => Some(control),
-            Err(err) => {
-                log::warn!(
-                    "[embedded-ble] audio control characteristic unavailable during notify setup via {cache_mode:?}: {err}"
-                );
-                None
-            }
-        };
+        let control = open_optional_audio_control_for_notify_setup(service, cache_mode);
 
         let result = service
             .GetCharacteristicsForUuidWithCacheModeAsync(NOTIFY_UUID, cache_mode)
@@ -5821,6 +5864,51 @@ mod windows_ble {
             control,
             session,
         })
+    }
+
+    fn open_optional_audio_control_for_notify_setup(
+        service: &GattDeviceService,
+        cache_mode: BluetoothCacheMode,
+    ) -> Option<GattCharacteristic> {
+        let mut last_error = None;
+        for attempt in 1..=AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() + 1 {
+            match open_write_characteristic_from_service(
+                service,
+                AUDIO_CONTROL_UUID,
+                "audio control",
+                cache_mode,
+            ) {
+                Ok(control) => {
+                    if attempt > 1 {
+                        log::info!(
+                            "[embedded-ble] audio control characteristic recovered during notify setup via {cache_mode:?} on attempt {attempt}"
+                        );
+                    }
+                    return Some(control);
+                }
+                Err(err) => {
+                    let transient = is_transient_audio_control_write_error(&err);
+                    if attempt > AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() || !transient {
+                        log::warn!(
+                            "[embedded-ble] audio control characteristic unavailable during notify setup via {cache_mode:?}: {err}"
+                        );
+                        return None;
+                    }
+                    let delay = AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS[attempt - 1];
+                    log::info!(
+                        "[embedded-ble] audio control characteristic discovery attempt {attempt} via {cache_mode:?} returned transient error: {err}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    last_error = Some(err);
+                    std::thread::sleep(delay);
+                }
+            }
+        }
+        log::warn!(
+            "[embedded-ble] audio control characteristic unavailable during notify setup via {cache_mode:?}: {}",
+            last_error.unwrap_or_else(|| "no attempts completed".to_string())
+        );
+        None
     }
 
     fn prepare_gatt_session(
@@ -7253,7 +7341,10 @@ mod windows_ble {
                 ATT_DEFAULT_PAYLOAD_BYTES
             );
             assert_eq!(
-                stm32wb_st_ota_raw_chunk_bytes_from_payload(248, GattWriteOption::WriteWithResponse),
+                stm32wb_st_ota_raw_chunk_bytes_from_payload(
+                    248,
+                    GattWriteOption::WriteWithResponse
+                ),
                 STM32WB_ST_OTA_RAW_DATA_SIZE
             );
         }

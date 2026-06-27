@@ -1150,7 +1150,7 @@ function validateDeviceSettingsForm(
     return t('settings.device.errorAutoShutdown', '自动关机时间必须在 0-1440 分钟之间。');
   }
   if (!isValidBleName(form.bleName)) {
-    return t('settings.device.errorBleName', '蓝牙名称必须是 1-32 个可打印 ASCII 字符，不能包含空格、引号、分号、等号或反斜杠。');
+    return t('settings.device.errorBleName', '蓝牙名称必须是 1-32 个字符，只能包含英文字母、数字、连字符或下划线。');
   }
   return '';
 }
@@ -1176,8 +1176,10 @@ function isValidBleName(value: string): boolean {
   if (value.length < 1 || value.length > 32) return false;
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
-    if (code <= 0x20 || code > 0x7e) return false;
-    if (value[index] === '"' || value[index] === '\'' || value[index] === ';' || value[index] === '=' || value[index] === '\\') return false;
+    const isDigit = code >= 0x30 && code <= 0x39;
+    const isUpper = code >= 0x41 && code <= 0x5a;
+    const isLower = code >= 0x61 && code <= 0x7a;
+    if (!isDigit && !isUpper && !isLower && value[index] !== '-' && value[index] !== '_') return false;
   }
   return true;
 }

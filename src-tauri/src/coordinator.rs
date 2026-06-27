@@ -1324,12 +1324,15 @@ impl Coordinator {
         timeout_ms: Option<u64>,
     ) -> Result<(), String> {
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
+        let background_recovery_timeout = timeout.max(Duration::from_secs(20));
         match embedded_ble_foreground_probe_mode(&self.inner) {
             EmbeddedBleForegroundProbeMode::RefreshBackgroundListener => {
                 log::info!("[embedded-ble] foreground BLE path probe refreshing active background listener");
                 self.refresh_embedded_ble_listener();
                 record_embedded_ble_reconnect_attempt(&self.inner, "foreground_probe_refresh");
-                let result = wait_for_embedded_ble_listener_ready(&self.inner, timeout).await;
+                let result =
+                    wait_for_embedded_ble_listener_ready(&self.inner, background_recovery_timeout)
+                        .await;
                 if result.is_ok() {
                     clear_embedded_ble_listener_last_error(&self.inner);
                     record_embedded_ble_notify_ready(&self.inner);
@@ -1343,7 +1346,9 @@ impl Coordinator {
                 log::info!("[embedded-ble] foreground BLE path probe delegated to background listener recovery");
                 self.refresh_embedded_ble_listener();
                 record_embedded_ble_reconnect_attempt(&self.inner, "foreground_probe");
-                let result = wait_for_embedded_ble_listener_ready(&self.inner, timeout).await;
+                let result =
+                    wait_for_embedded_ble_listener_ready(&self.inner, background_recovery_timeout)
+                        .await;
                 if result.is_ok() {
                     clear_embedded_ble_listener_last_error(&self.inner);
                     record_embedded_ble_notify_ready(&self.inner);

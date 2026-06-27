@@ -297,6 +297,21 @@ impl Packet<'_> {
         };
         &self.payload[..wanted]
     }
+
+    pub fn declared_pcm_bytes(&self) -> usize {
+        let declared = usize::from(self.header.packet_pcm_bytes);
+        if declared == 0 {
+            self.payload_pcm().len()
+        } else {
+            declared.max(self.payload_pcm().len())
+        }
+    }
+
+    pub fn expanded_payload_pcm(&self) -> Vec<u8> {
+        let payload = self.payload_pcm();
+        let declared = self.declared_pcm_bytes();
+        expand_packet_payload_pcm(payload, declared)
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -684,7 +699,7 @@ impl StreamingSessionCollector {
         let after_stop_boundary =
             header.packet_type == PacketType::AudioData && self.inner.after_stop_boundary();
         let pcm = (header.packet_type == PacketType::AudioData)
-            .then(|| packet.payload_pcm().to_vec())
+            .then(|| packet.expanded_payload_pcm())
             .unwrap_or_default();
         let event = self.inner.handle_packet(packet);
         match event {
@@ -852,7 +867,10 @@ impl SessionCollector {
     }
 
     pub fn received_pcm_bytes(&self) -> usize {
-        self.packet_pcm_bytes.values().sum()
+        self.audio_packets
+            .values()
+            .map(|payload| payload.len())
+            .sum()
     }
 
     pub fn missing_packet_indices(&self) -> Vec<u16> {
@@ -887,6 +905,7 @@ impl SessionCollector {
             .map(|sequence| self.inferred_packet_pcm_bytes(*sequence))
             .sum();
         let reconstructed_pcm_bytes = self.reconstructed_pcm_len();
+        let received_pcm_bytes = self.received_pcm_bytes();
         let asr_boundary_pcm_bytes = self.reconstructed_asr_boundary_pcm_len();
         let post_stop_pcm_bytes: usize = self.post_stop_packet_pcm_bytes.values().sum();
 
@@ -900,7 +919,7 @@ impl SessionCollector {
             received_packet_count: self.received_packet_count(),
             missing_packet_count: missing_packet_indices.len(),
             missing_packet_indices,
-            received_pcm_bytes: self.received_pcm_bytes(),
+            received_pcm_bytes,
             reconstructed_pcm_bytes,
             silence_filled_bytes,
             duplicate_packet_count: self.duplicate_packet_count,
@@ -930,16 +949,20 @@ impl SessionCollector {
         if payload.is_empty() {
             return SessionEvent::Ignored(IgnoredPacketReason::EmptyAudioPayload);
         }
+        let packet_pcm_bytes = packet.declared_pcm_bytes();
 
         let packet_sequence = header.packet_sequence;
         let after_stop_boundary = self.after_stop_boundary();
-        if self
-            .audio_packets
-            .get(&packet_sequence)
-            .is_some_and(|existing| existing.len() >= payload.len())
-        {
-            self.duplicate_packet_count += 1;
-            return SessionEvent::Ignored(IgnoredPacketReason::DuplicateOrShorterPacket);
+        if let Some(existing) = self.audio_packets.get(&packet_sequence) {
+            let existing_pcm_bytes = self
+                .packet_pcm_bytes
+                .get(&packet_sequence)
+                .copied()
+                .unwrap_or(existing.len());
+            if existing.len() >= payload.len() && existing_pcm_bytes >= packet_pcm_bytes {
+                self.duplicate_packet_count += 1;
+                return SessionEvent::Ignored(IgnoredPacketReason::DuplicateOrShorterPacket);
+            }
         }
 
         if self.audio_packets.contains_key(&packet_sequence) {
@@ -947,15 +970,16 @@ impl SessionCollector {
         }
 
         self.audio_packets.insert(packet_sequence, payload.to_vec());
-        self.packet_pcm_bytes.insert(packet_sequence, payload.len());
+        self.packet_pcm_bytes
+            .insert(packet_sequence, packet_pcm_bytes);
         if after_stop_boundary {
             self.post_stop_packet_pcm_bytes
-                .insert(packet_sequence, payload.len());
+                .insert(packet_sequence, packet_pcm_bytes);
         } else {
             self.asr_boundary_audio_packets
                 .insert(packet_sequence, payload.to_vec());
             self.asr_boundary_packet_pcm_bytes
-                .insert(packet_sequence, payload.len());
+                .insert(packet_sequence, packet_pcm_bytes);
         }
 
         SessionEvent::AudioData {
@@ -1020,16 +1044,25 @@ impl SessionCollector {
         expected_packet_count: Option<u16>,
     ) -> Vec<u8> {
         let Some(expected_packet_count) = expected_packet_count else {
-            return audio_packets
-                .values()
-                .flat_map(|payload| payload.iter().copied())
-                .collect();
+            let mut pcm = Vec::new();
+            for (sequence, payload) in audio_packets {
+                let packet_pcm_bytes = packet_pcm_bytes
+                    .get(sequence)
+                    .copied()
+                    .unwrap_or(payload.len());
+                Self::append_packet_pcm(&mut pcm, payload, packet_pcm_bytes);
+            }
+            return pcm;
         };
 
         let mut pcm = Vec::new();
         for sequence in 0..expected_packet_count {
             if let Some(payload) = audio_packets.get(&sequence) {
-                pcm.extend_from_slice(payload);
+                let packet_pcm_bytes = packet_pcm_bytes
+                    .get(&sequence)
+                    .copied()
+                    .unwrap_or(payload.len());
+                Self::append_packet_pcm(&mut pcm, payload, packet_pcm_bytes);
             } else {
                 let silence_bytes =
                     Self::inferred_packet_pcm_bytes_from(packet_pcm_bytes, sequence);
@@ -1037,6 +1070,10 @@ impl SessionCollector {
             }
         }
         pcm
+    }
+
+    fn append_packet_pcm(pcm: &mut Vec<u8>, payload: &[u8], packet_pcm_bytes: usize) {
+        pcm.extend_from_slice(&expand_packet_payload_pcm(payload, packet_pcm_bytes));
     }
 
     fn reconstructed_pcm_len_from(
@@ -1167,6 +1204,63 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> u32 {
     ])
 }
 
+fn expand_packet_payload_pcm(payload: &[u8], packet_pcm_bytes: usize) -> Vec<u8> {
+    if packet_pcm_bytes <= payload.len() {
+        return payload[..packet_pcm_bytes].to_vec();
+    }
+    if payload.is_empty() {
+        return vec![0; packet_pcm_bytes];
+    }
+    if payload.len() % 2 != 0 || packet_pcm_bytes % 2 != 0 {
+        let mut pcm = Vec::with_capacity(packet_pcm_bytes);
+        pcm.extend_from_slice(payload);
+        pcm.resize(packet_pcm_bytes, 0);
+        return pcm;
+    }
+
+    let input_samples = payload.len() / 2;
+    let output_samples = packet_pcm_bytes / 2;
+    if input_samples == 0 || output_samples == 0 {
+        return vec![0; packet_pcm_bytes];
+    }
+    if input_samples == output_samples {
+        return payload.to_vec();
+    }
+    if input_samples == 1 || output_samples == 1 {
+        let sample = i16::from_le_bytes([payload[0], payload[1]]);
+        let mut pcm = Vec::with_capacity(packet_pcm_bytes);
+        for _ in 0..output_samples {
+            pcm.extend_from_slice(&sample.to_le_bytes());
+        }
+        return pcm;
+    }
+
+    let mut pcm = Vec::with_capacity(packet_pcm_bytes);
+    let input_last = input_samples - 1;
+    let output_last = output_samples - 1;
+    for output_index in 0..output_samples {
+        let numerator = output_index * input_last;
+        let left_index = numerator / output_last;
+        let fraction = numerator % output_last;
+        let right_index = (left_index + 1).min(input_last);
+        let left =
+            i16::from_le_bytes([payload[left_index * 2], payload[left_index * 2 + 1]]) as i64;
+        let right =
+            i16::from_le_bytes([payload[right_index * 2], payload[right_index * 2 + 1]]) as i64;
+        let sample = if fraction == 0 {
+            left
+        } else {
+            let output_last = output_last as i64;
+            let fraction = fraction as i64;
+            ((left * (output_last - fraction)) + (right * fraction) + (output_last / 2))
+                / output_last
+        };
+        let sample = sample.clamp(i16::MIN as i64, i16::MAX as i64) as i16;
+        pcm.extend_from_slice(&sample.to_le_bytes());
+    }
+    pcm
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1264,6 +1358,68 @@ mod tests {
         assert_eq!(stats.missing_packet_count, 1);
         assert_eq!(stats.silence_filled_bytes, 4);
         assert_eq!(stats.reconstructed_pcm_bytes, 12);
+    }
+
+    #[test]
+    fn collector_expands_short_payload_to_declared_pcm_span() {
+        let mut collector = SessionCollector::default();
+        let payload = pcm16(&[0, 900]);
+        let expected = pcm16(&[0, 300, 600, 900]);
+
+        collector
+            .handle_notification(&packet(PacketType::SessionStart, 151, 0, &[], Some(0)))
+            .expect("start");
+        collector
+            .handle_notification(&packet(
+                PacketType::AudioData,
+                151,
+                0,
+                &payload,
+                Some(expected.len() as u16),
+            ))
+            .expect("audio");
+        collector
+            .handle_notification(&packet(PacketType::SessionStop, 151, 1, &[], Some(0)))
+            .expect("stop");
+
+        assert_eq!(collector.reconstructed_pcm(), expected);
+
+        let stats = collector.stats();
+        assert_eq!(stats.received_pcm_bytes, payload.len());
+        assert_eq!(stats.reconstructed_pcm_bytes, 8);
+        assert_eq!(stats.silence_filled_bytes, 0);
+    }
+
+    #[test]
+    fn streaming_collector_expands_short_payload_to_declared_pcm_span() {
+        let mut collector = StreamingSessionCollector::default();
+        let payload = pcm16(&[0, 900]);
+        let expected = pcm16(&[0, 300, 600, 900]);
+
+        assert_eq!(
+            collector
+                .handle_notification(&packet(PacketType::SessionStart, 152, 0, &[], Some(0)))
+                .expect("start"),
+            StreamingSessionEvent::Started { session_id: 152 }
+        );
+        assert_eq!(
+            collector
+                .handle_notification(&packet(
+                    PacketType::AudioData,
+                    152,
+                    0,
+                    &payload,
+                    Some(expected.len() as u16),
+                ))
+                .expect("audio"),
+            StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+                session_id: 152,
+                packet_sequence: 0,
+                pcm: expected.clone(),
+                after_stop_boundary: false,
+            })
+        );
+        assert_eq!(collector.inner().reconstructed_pcm(), expected);
     }
 
     #[test]
@@ -1691,6 +1847,13 @@ mod tests {
         wav.extend_from_slice(&data_size.to_le_bytes());
         wav.extend_from_slice(pcm);
         wav
+    }
+
+    fn pcm16(samples: &[i16]) -> Vec<u8> {
+        samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect()
     }
 
     fn packet(
