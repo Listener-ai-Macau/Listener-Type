@@ -1643,6 +1643,37 @@ mod windows_ble {
             return Err("device settings command must be a single line".to_string());
         }
         let payload = format!("{command}\n");
+        let payload_len = payload.as_bytes().len();
+        let mut active_capture_error: Option<String> = None;
+
+        if payload_len < 64 {
+            if let Some(result) = send_audio_control_via_active_capture(
+                payload.as_bytes(),
+                timeout,
+                "device settings",
+            ) {
+                match result {
+                    Ok(()) => {
+                        log::info!(
+                            "[embedded-ble] device settings command sent via active capture"
+                        );
+                        return Ok(());
+                    }
+                    Err(err) if is_transient_audio_control_write_error(&err) => {
+                        log::warn!(
+                            "[embedded-ble] active device settings write failed with transient error; trying USB serial/fresh GATT fallback: {err}"
+                        );
+                        active_capture_error = Some(err);
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[embedded-ble] active device settings write failed; trying USB serial/fresh GATT fallback: {err}"
+                        );
+                        active_capture_error = Some(err);
+                    }
+                }
+            }
+        }
 
         let serial_result = send_device_settings_via_usb_serial(command, timeout);
         match &serial_result {
@@ -1658,10 +1689,10 @@ mod windows_ble {
             }
         }
 
-        if payload.as_bytes().len() >= 64 {
+        if payload_len >= 64 {
             return Err(format!(
                 "device settings command is too long for BLE control characteristic: {} bytes (max 63 including newline); USB serial fallback failed: {}",
-                payload.as_bytes().len(),
+                payload_len,
                 serial_result
                     .as_ref()
                     .err()
@@ -1670,25 +1701,10 @@ mod windows_ble {
             ));
         }
 
-        if let Some(result) =
-            send_audio_control_via_active_capture(payload.as_bytes(), timeout, "device settings")
-        {
-            match result {
-                Ok(()) => {
-                    log::info!("[embedded-ble] device settings command sent via active capture");
-                    return Ok(());
-                }
-                Err(err) if is_transient_audio_control_write_error(&err) => {
-                    log::warn!(
-                        "[embedded-ble] active device settings write failed with transient error; retrying fresh GATT path: {err}"
-                    );
-                }
-                Err(err) => return Err(err),
-            }
-        }
         let target = open_audio_control_target().map_err(|err| {
             format!(
-                "{err}; USB serial fallback failed: {}",
+                "{err}; active BLE fallback failed: {}; USB serial fallback failed: {}",
+                active_capture_error.as_deref().unwrap_or("not attempted"),
                 serial_result
                     .as_ref()
                     .err()
@@ -1705,7 +1721,8 @@ mod windows_ble {
         )
         .map_err(|err| {
             format!(
-                "{err}; USB serial fallback failed: {}",
+                "{err}; active BLE fallback failed: {}; USB serial fallback failed: {}",
+                active_capture_error.as_deref().unwrap_or("not attempted"),
                 serial_result
                     .as_ref()
                     .err()
@@ -1786,15 +1803,12 @@ mod windows_ble {
         )))
     }
 
-    fn listener_usb_serial_candidates(ports: &[SerialPortInfo]) -> Vec<SerialPortInfo> {
+    pub(super) fn listener_usb_serial_candidates(ports: &[SerialPortInfo]) -> Vec<SerialPortInfo> {
         let mut candidates: Vec<SerialPortInfo> = ports
             .iter()
             .filter(|port| is_listener_usb_serial_candidate(port))
             .cloned()
             .collect();
-        if candidates.is_empty() && ports.len() == 1 {
-            candidates.push(ports[0].clone());
-        }
         candidates.sort_by(|left, right| left.port_name.cmp(&right.port_name));
         candidates
     }
@@ -1803,23 +1817,51 @@ mod windows_ble {
         let SerialPortType::UsbPort(usb) = &port.port_type else {
             return false;
         };
-        if usb.vid == 0x303a || usb.vid == 0x10c4 || usb.vid == 0x1a86 {
+        let text = listener_usb_serial_identity_text(port, usb);
+        if text.contains("stlink")
+            || text.contains("st-link")
+            || text.contains("stmicroelectronics")
+            || text.contains("nucleo")
+            || text.contains("wb55")
+            || text.contains("companion")
+        {
+            return false;
+        }
+        if usb.vid == 0x303a {
             return true;
         }
-        let text = format!(
+        if usb.vid == 0x10c4 || usb.vid == 0x1a86 {
+            return text.contains("listener")
+                || text.contains("espressif")
+                || text.contains("esp32")
+                || text.contains("usb jtag")
+                || text.contains("usb-serial")
+                || text.contains("usb serial")
+                || text.contains("cp210")
+                || text.contains("ch340");
+        }
+        text.contains("listener")
+            || text.contains("espressif")
+            || text.contains("esp32")
+            || text.contains("usb jtag")
+            || text.contains("usb-serial")
+            || text.contains("usb serial")
+            || text.contains("cp210")
+            || text.contains("ch340")
+    }
+
+    fn listener_usb_serial_identity_text(
+        port: &SerialPortInfo,
+        usb: &serialport::UsbPortInfo,
+    ) -> String {
+        format!(
             "{} {} {} {}",
             port.port_name,
             usb.manufacturer.as_deref().unwrap_or_default(),
             usb.product.as_deref().unwrap_or_default(),
             usb.serial_number.as_deref().unwrap_or_default()
         )
-        .to_ascii_lowercase();
-        text.contains("listener")
-            || text.contains("espressif")
-            || text.contains("esp32")
-            || text.contains("usb jtag")
-            || text.contains("usb-serial")
-            || text.contains("cp210")
+        .to_ascii_lowercase()
     }
 
     fn exchange_device_settings_via_serial_port(
@@ -7192,6 +7234,43 @@ mod windows_ble {
         }
 
         #[test]
+        fn device_settings_command_prefers_active_capture() {
+            let _guard = active_audio_control_test_lock().lock().unwrap();
+            *active_audio_control_slot().lock().unwrap() = None;
+
+            let (tx, rx) = mpsc::channel();
+            let registration = ActiveAudioControlRegistration::install(42, tx);
+            let receiver = std::thread::spawn(move || {
+                let signal = rx
+                    .recv_timeout(Duration::from_secs(1))
+                    .expect("active control request");
+                match signal {
+                    BleCaptureSignal::AudioControl(request) => {
+                        assert_eq!(request.bytes, b"DEVICE:SET knob_rotation=system_volume\n");
+                        assert_eq!(request.label, "device settings");
+                        request.result_tx.send(Ok(())).expect("send result");
+                    }
+                    BleCaptureSignal::Notification(_) => {
+                        panic!("unexpected notification signal")
+                    }
+                    BleCaptureSignal::Disconnected(reason) => {
+                        panic!("unexpected disconnect signal: {reason}")
+                    }
+                }
+            });
+
+            send_device_settings_command(
+                "DEVICE:SET knob_rotation=system_volume",
+                Duration::from_millis(200),
+            )
+            .expect("device settings command should use active capture");
+
+            receiver.join().expect("receiver thread");
+            drop(registration);
+            assert!(active_audio_control_sender().is_none());
+        }
+
+        #[test]
         fn foreground_probe_success_leaves_notify_cccd_enabled() {
             assert_eq!(
                 NotifyCccdTeardown::for_probe_success(),
@@ -7633,6 +7712,26 @@ mod tests {
     #[cfg(target_os = "windows")]
     static DEVICE_SETTINGS_HARDWARE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    #[cfg(target_os = "windows")]
+    fn usb_serial_port(
+        port_name: &str,
+        vid: u16,
+        pid: u16,
+        manufacturer: &str,
+        product: &str,
+    ) -> serialport::SerialPortInfo {
+        serialport::SerialPortInfo {
+            port_name: port_name.to_string(),
+            port_type: serialport::SerialPortType::UsbPort(serialport::UsbPortInfo {
+                vid,
+                pid,
+                serial_number: Some(format!("{port_name}-serial")),
+                manufacturer: Some(manufacturer.to_string()),
+                product: Some(product.to_string()),
+            }),
+        }
+    }
+
     #[test]
     fn terminal_detection_only_matches_stop_cancel_error() {
         assert!(!is_terminal_notification(
@@ -7916,6 +8015,40 @@ mod tests {
             super::windows_ble::parse_bluetooth_address_hex("D4-1A-50-FB-F3-5E"),
             Some(0xD41A_50FB_F35E)
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn device_settings_serial_candidates_reject_single_stlink_port() {
+        let ports = vec![usb_serial_port(
+            "COM13",
+            0x0483,
+            0x374b,
+            "STMicroelectronics",
+            "STLink Virtual COM Port",
+        )];
+
+        assert!(super::windows_ble::listener_usb_serial_candidates(&ports).is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn device_settings_serial_candidates_keep_listener_esp32_port() {
+        let ports = vec![
+            usb_serial_port(
+                "COM13",
+                0x0483,
+                0x374b,
+                "STMicroelectronics",
+                "STLink Virtual COM Port",
+            ),
+            usb_serial_port("COM11", 0x303a, 0x1001, "Microsoft", "USB Serial Device"),
+        ];
+
+        let candidates = super::windows_ble::listener_usb_serial_candidates(&ports);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].port_name, "COM11");
     }
 
     #[cfg(target_os = "windows")]
