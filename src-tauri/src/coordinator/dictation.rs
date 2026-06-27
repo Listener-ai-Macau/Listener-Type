@@ -23,6 +23,14 @@ const EMBEDDED_AUDIO_ASR_PREROLL_BYTES: usize = 16_000 * 2 * EMBEDDED_AUDIO_ASR_
 const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
+const EMBEDDED_AUDIO_TRIM_MIN_INPUT_MS: usize = 3_000;
+const EMBEDDED_AUDIO_TRIM_WINDOW_MS: usize = 100;
+const EMBEDDED_AUDIO_TRIM_LEADING_MARGIN_MS: usize = 200;
+const EMBEDDED_AUDIO_TRIM_TRAILING_MARGIN_MS: usize = 400;
+const EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS: usize = 500;
+const EMBEDDED_AUDIO_TRIM_MIN_RMS: f64 = 300.0;
+const EMBEDDED_AUDIO_TRIM_NOISE_MULTIPLIER: f64 = 3.0;
+const EMBEDDED_AUDIO_TRIM_PEAK_RATIO: f64 = 0.12;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
 const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 1_200;
 const EMBEDDED_BLE_STATS_ONLY_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_STATS_ONLY";
@@ -2677,7 +2685,22 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
     inner
         .audio_archive_active
         .store(archive_active, std::sync::atomic::Ordering::Relaxed);
-    let (asr_pcm, gain_stats) = normalize_embedded_pcm_for_asr(pcm);
+    let (trimmed_pcm, trim_stats) = trim_embedded_pcm_for_asr(pcm);
+    if let Some(trim_stats) = trim_stats {
+        log::info!(
+            "[coord] embedded audio trimmed for ASR (original_pcm_bytes={}, speech_pcm_bytes={}, asr_input_pcm_bytes={}, speech_start_ms={}, speech_end_ms={}, active_windows={}, noise_floor_rms={:.1}, max_window_rms={:.1}, threshold_rms={:.1})",
+            trim_stats.original_pcm_bytes,
+            trim_stats.speech_pcm_bytes,
+            trim_stats.asr_input_pcm_bytes,
+            trim_stats.speech_start_ms,
+            trim_stats.speech_end_ms,
+            trim_stats.active_windows,
+            trim_stats.noise_floor_rms,
+            trim_stats.max_window_rms,
+            trim_stats.threshold_rms
+        );
+    }
+    let (asr_pcm, gain_stats) = normalize_embedded_pcm_for_asr(&trimmed_pcm);
     if gain_stats.gain > 1.0 {
         log::info!(
             "[coord] embedded audio normalized for ASR (rms_before={:.1}, peak_before={}, gain={:.2}, clipped_samples={})",
@@ -2901,6 +2924,99 @@ struct EmbeddedPcmGainStats {
     peak_before: u16,
     gain: f64,
     clipped_samples: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EmbeddedPcmTrimStats {
+    original_pcm_bytes: usize,
+    speech_start_ms: usize,
+    speech_end_ms: usize,
+    speech_pcm_bytes: usize,
+    asr_input_pcm_bytes: usize,
+    active_windows: usize,
+    noise_floor_rms: f64,
+    max_window_rms: f64,
+    threshold_rms: f64,
+}
+
+fn embedded_pcm_bytes_for_ms(ms: usize) -> usize {
+    let bytes = crate::embedded_audio::PCM_BYTES_PER_SECOND * ms / 1_000;
+    bytes - (bytes % 2)
+}
+
+fn trim_embedded_pcm_for_asr(pcm: &[u8]) -> (Vec<u8>, Option<EmbeddedPcmTrimStats>) {
+    if pcm.len() < embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_MIN_INPUT_MS) {
+        return (pcm.to_vec(), None);
+    }
+
+    let window_bytes = embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_WINDOW_MS);
+    if window_bytes == 0 || pcm.len() < window_bytes {
+        return (pcm.to_vec(), None);
+    }
+
+    let mut windows = Vec::new();
+    let mut offset = 0usize;
+    while offset + window_bytes <= pcm.len() {
+        let (rms, _) = embedded_pcm_rms_and_peak(&pcm[offset..offset + window_bytes]);
+        windows.push((offset, offset + window_bytes, rms));
+        offset += window_bytes;
+    }
+    if windows.is_empty() {
+        return (pcm.to_vec(), None);
+    }
+
+    let mut sorted_rms: Vec<f64> = windows.iter().map(|(_, _, rms)| *rms).collect();
+    sorted_rms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let noise_floor_rms = sorted_rms[sorted_rms.len() / 4];
+    let max_window_rms = sorted_rms.last().copied().unwrap_or(noise_floor_rms);
+    let threshold_rms = EMBEDDED_AUDIO_TRIM_MIN_RMS
+        .max(noise_floor_rms * EMBEDDED_AUDIO_TRIM_NOISE_MULTIPLIER)
+        .max(max_window_rms * EMBEDDED_AUDIO_TRIM_PEAK_RATIO);
+
+    let active_windows: Vec<(usize, usize, f64)> = windows
+        .iter()
+        .copied()
+        .filter(|(_, _, rms)| *rms >= threshold_rms)
+        .collect();
+    let Some(first_active) = active_windows.first() else {
+        return (pcm.to_vec(), None);
+    };
+    let Some(last_active) = active_windows.last() else {
+        return (pcm.to_vec(), None);
+    };
+
+    let leading_margin = embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_LEADING_MARGIN_MS);
+    let trailing_margin = embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_TRAILING_MARGIN_MS);
+    let mut start = first_active.0.saturating_sub(leading_margin);
+    let mut end = (last_active.1 + trailing_margin).min(pcm.len());
+    start -= start % 2;
+    end -= end % 2;
+    if start == 0 && end == pcm.len() {
+        return (pcm.to_vec(), None);
+    }
+    if end <= start {
+        return (pcm.to_vec(), None);
+    }
+
+    let pad_bytes = embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS);
+    let speech_pcm_bytes = end - start;
+    let mut trimmed = Vec::with_capacity(pad_bytes + speech_pcm_bytes + pad_bytes);
+    trimmed.resize(pad_bytes, 0);
+    trimmed.extend_from_slice(&pcm[start..end]);
+    trimmed.resize(trimmed.len() + pad_bytes, 0);
+
+    let stats = EmbeddedPcmTrimStats {
+        original_pcm_bytes: pcm.len(),
+        speech_start_ms: start * 1_000 / crate::embedded_audio::PCM_BYTES_PER_SECOND,
+        speech_end_ms: end * 1_000 / crate::embedded_audio::PCM_BYTES_PER_SECOND,
+        speech_pcm_bytes,
+        asr_input_pcm_bytes: trimmed.len(),
+        active_windows: active_windows.len(),
+        noise_floor_rms,
+        max_window_rms,
+        threshold_rms,
+    };
+    (trimmed, Some(stats))
 }
 
 fn normalize_embedded_pcm_for_asr(pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
@@ -3867,10 +3983,12 @@ mod tests {
         publish_embedded_ble_asr_final, record_embedded_ble_session_actor_command,
         register_embedded_ble_cancel_flag, request_embedded_audio_stop_feedback,
         request_embedded_ble_recording_stop_from_host, store_embedded_audio_stats,
-        streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
-        EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
+        streaming_insert_eligible, trim_embedded_pcm_for_asr,
+        update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
+        EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
         DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_ASR_PREROLL_BYTES,
         EMBEDDED_AUDIO_ASR_PREROLL_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
+        EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS,
     };
     use crate::coordinator::Coordinator;
     use crate::coordinator_state::{new_session_id, SessionPhase};
@@ -3930,6 +4048,10 @@ mod tests {
             .iter()
             .flat_map(|sample| sample.to_le_bytes())
             .collect()
+    }
+
+    fn samples_for_ms(ms: usize, sample: i16) -> Vec<i16> {
+        vec![sample; 16_000 * ms / 1_000]
     }
 
     fn seed_cancelled_processing_session(
@@ -4781,6 +4903,43 @@ mod tests {
 
         assert_eq!(stats.gain, 1.0);
         assert_eq!(normalized, pcm);
+    }
+
+    #[test]
+    fn embedded_pcm_trim_removes_long_tail_and_pads_silence() {
+        let mut samples = Vec::new();
+        samples.extend(samples_for_ms(500, 120));
+        samples.extend(samples_for_ms(1_000, 2_600));
+        samples.extend(samples_for_ms(7_500, 140));
+        let pcm = pcm_from_samples(&samples);
+
+        let (trimmed, stats) = trim_embedded_pcm_for_asr(&pcm);
+        let stats = stats.expect("long noisy tail should be trimmed");
+
+        assert_eq!(stats.speech_start_ms, 300);
+        assert_eq!(stats.speech_end_ms, 1_900);
+        assert_eq!(
+            stats.asr_input_pcm_bytes,
+            stats.speech_pcm_bytes + (16_000 * 2 * EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS / 500)
+        );
+        assert_eq!(trimmed.len(), stats.asr_input_pcm_bytes);
+        assert!(trimmed[..16_000].iter().all(|byte| *byte == 0));
+        assert!(trimmed[trimmed.len() - 16_000..]
+            .iter()
+            .all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn embedded_pcm_trim_leaves_short_audio_unchanged() {
+        let mut samples = Vec::new();
+        samples.extend(samples_for_ms(300, 120));
+        samples.extend(samples_for_ms(900, 2_600));
+        let pcm = pcm_from_samples(&samples);
+
+        let (trimmed, stats) = trim_embedded_pcm_for_asr(&pcm);
+
+        assert!(stats.is_none());
+        assert_eq!(trimmed, pcm);
     }
 
     #[test]
