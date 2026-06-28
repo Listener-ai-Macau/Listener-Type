@@ -59,6 +59,7 @@ const LOG_ROTATE_LIMIT_BYTES: u64 = 10 * 1024 * 1024;
 static QA_WINDOW_POSITIONED: AtomicBool = AtomicBool::new(false);
 static APP_QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static TRAY_MICROPHONE_WATCHER_STOPPING: AtomicBool = AtomicBool::new(false);
+static COMPANION_APP_MODE: AtomicBool = AtomicBool::new(false);
 use tauri::menu::{
     CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, Submenu, SubmenuBuilder,
 };
@@ -74,7 +75,8 @@ pub fn run() {
         match intent {
             cli::CliIntent::SubmitEmbeddedAudioBleOnce { .. }
             | cli::CliIntent::SubmitEmbeddedAudioBleStream { .. }
-            | cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. } => {
+            | cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. }
+            | cli::CliIntent::SendEmbeddedAudioControlStop { .. } => {
                 std::process::exit(run_embedded_ble_headless_cli(intent));
             }
             cli::CliIntent::FirmwareOta { .. } => {
@@ -133,8 +135,17 @@ pub fn run() {
         .manage(commands::MicrophoneMonitorState::new(None))
         .manage(commands::TrayMicrophoneMenuState::new(Vec::new()))
         .setup(move |app| {
+            let companion_app = is_companion_app_name(&app.package_info().name);
+            if companion_app {
+                std::env::set_var("LISTENER_TYPE_APP_PROFILE", "companion");
+                COMPANION_APP_MODE.store(true, Ordering::Relaxed);
+            }
             init_file_logger();
-            log::info!("=== Listener Type 启动 ===");
+            if companion_app {
+                log::info!("=== Companion Type 启动 ===");
+            } else {
+                log::info!("=== Listener Type 启动 ===");
+            }
 
             // Panic hook: catch Rust panics and emit to frontend so the user sees
             // an error card instead of a silent white-screen crash.
@@ -148,29 +159,31 @@ pub fn run() {
                 }));
             }
 
-            // Capsule 启动时定位到屏幕底部居中并隐藏；coordinator 按需显示。
-            // 与 Swift `CapsuleWindowController.repositionToBottomCenter` 同语义。
-            if let Some(capsule) = app.get_webview_window("capsule") {
-                prepare_capsule_window_for_overlay(&capsule);
-                if let Err(e) = position_capsule_bottom_center(&capsule, false) {
-                    log::warn!("[capsule] position failed: {e}");
+            if !companion_app {
+                // Capsule 启动时定位到屏幕底部居中并隐藏；coordinator 按需显示。
+                // 与 Swift `CapsuleWindowController.repositionToBottomCenter` 同语义。
+                if let Some(capsule) = app.get_webview_window("capsule") {
+                    prepare_capsule_window_for_overlay(&capsule);
+                    if let Err(e) = position_capsule_bottom_center(&capsule, false) {
+                        log::warn!("[capsule] position failed: {e}");
+                    }
+                    let _ = capsule.hide();
                 }
-                let _ = capsule.hide();
-            }
 
-            // QA 浮窗（issue #118）：紧贴胶囊上方 8pt、屏幕底部居中、380×440。
-            // 启动时 hide()，等 coordinator 在 open_qa_panel 时再 show + 首次定位。
-            // tauri.conf.json 里需要声明 label="qa" 的窗口（前端 agent 负责）；
-            // 这里 get_webview_window 返回 None 时直接跳过，不影响主流程。
-            if let Some(qa) = app.get_webview_window("qa") {
-                if let Err(e) = position_qa_window(&qa) {
-                    log::warn!("[qa] position failed: {e}");
+                // QA 浮窗（issue #118）：紧贴胶囊上方 8pt、屏幕底部居中、380×440。
+                // 启动时 hide()，等 coordinator 在 open_qa_panel 时再 show + 首次定位。
+                // tauri.conf.json 里需要声明 label="qa" 的窗口（前端 agent 负责）；
+                // 这里 get_webview_window 返回 None 时直接跳过，不影响主流程。
+                if let Some(qa) = app.get_webview_window("qa") {
+                    if let Err(e) = position_qa_window(&qa) {
+                        log::warn!("[qa] position failed: {e}");
+                    }
+                    #[cfg(target_os = "macos")]
+                    make_qa_window_draggable_macos(&qa);
+                    let _ = qa.hide();
+                } else {
+                    log::info!("[qa] qa 窗口未在 tauri.conf.json 中声明，前端 agent 会补上");
                 }
-                #[cfg(target_os = "macos")]
-                make_qa_window_draggable_macos(&qa);
-                let _ = qa.hide();
-            } else {
-                log::info!("[qa] qa 窗口未在 tauri.conf.json 中声明，前端 agent 会补上");
             }
 
             // 主窗口磨砂：macOS 用 NSVisualEffectView，Windows 用 Mica。
@@ -218,8 +231,9 @@ pub fn run() {
                     .ok()
                     .as_deref()
                     == Some("1");
-                let suppress_show =
-                    !force_show && (hide_main_on_start || coordinator.prefs().get().start_minimized);
+                let suppress_show = !companion_app
+                    && !force_show
+                    && (hide_main_on_start || coordinator.prefs().get().start_minimized);
                 if suppress_show {
                     log::info!(
                         "[main] start minimized/hidden requested → 跳过初始 show，等用户点托盘"
@@ -229,72 +243,82 @@ pub fn run() {
                 }
             }
 
-            // 启动时主动弹 Accessibility 授权框（与 Swift `AppDelegate` 行为一致）。
-            // 用户首次必看到系统提示；已授权则静默返回。
-            #[cfg(target_os = "macos")]
-            {
-                let status = permissions::request_accessibility();
-                log::info!("[startup] Accessibility status = {:?}", status);
-            }
-
-            // 菜单栏图标 — 与 Swift `MenuBarController` 同语义：
-            // 左键点 → 显示/聚焦主窗口；右键菜单只保留日常切换项与退出。
-            let tray_menu = build_tray_menu(app, &coordinator)?;
-            let menu = tray_menu.menu;
-
-            // 与 Swift `StatusBarIcon.swift` 行为一致：用全彩 AppIcon，**不**走 template 模式
-            // （走 template 会被 macOS 染成单色 → 看起来像个黑方块）。
-            if let Some(icon) = app.default_window_icon() {
+            if !companion_app {
+                // 启动时主动弹 Accessibility 授权框（与 Swift `AppDelegate` 行为一致）。
+                // 用户首次必看到系统提示；已授权则静默返回。
+                #[cfg(target_os = "macos")]
                 {
-                    let state = app.state::<commands::TrayMicrophoneMenuState>();
-                    *state.lock() = tray_menu.microphone_items;
+                    let status = permissions::request_accessibility();
+                    log::info!("[startup] Accessibility status = {:?}", status);
                 }
-                let _tray = TrayIconBuilder::with_id("main-tray")
-                    .icon(icon.clone())
-                    .icon_as_template(false)
-                    .menu(&menu)
-                    .show_menu_on_left_click(false)
-                    .on_menu_event(move |app, event| match event.id.as_ref() {
-                        "quit" => request_app_quit(app),
-                        "dark-mode" => handle_dark_mode_toggle(app),
-                        id => {
-                            if handle_style_tray_menu_event(app, id) {
-                                return;
+
+                // 菜单栏图标 — 与 Swift `MenuBarController` 同语义：
+                // 左键点 → 显示/聚焦主窗口；右键菜单只保留日常切换项与退出。
+                let tray_menu = build_tray_menu(app, &coordinator)?;
+                let menu = tray_menu.menu;
+
+                // 与 Swift `StatusBarIcon.swift` 行为一致：用全彩 AppIcon，**不**走 template 模式
+                // （走 template 会被 macOS 染成单色 → 看起来像个黑方块）。
+                if let Some(icon) = app.default_window_icon() {
+                    {
+                        let state = app.state::<commands::TrayMicrophoneMenuState>();
+                        *state.lock() = tray_menu.microphone_items;
+                    }
+                    let _tray = TrayIconBuilder::with_id("main-tray")
+                        .icon(icon.clone())
+                        .icon_as_template(false)
+                        .menu(&menu)
+                        .show_menu_on_left_click(false)
+                        .on_menu_event(move |app, event| match event.id.as_ref() {
+                            "quit" => request_app_quit(app),
+                            "dark-mode" => handle_dark_mode_toggle(app),
+                            id => {
+                                if handle_style_tray_menu_event(app, id) {
+                                    return;
+                                }
+                                if handle_input_source_tray_menu_event(app, id) {
+                                    return;
+                                }
+                                handle_microphone_tray_menu_event(app, id);
                             }
-                            if handle_input_source_tray_menu_event(app, id) {
-                                return;
+                        })
+                        .on_tray_icon_event(move |tray, event| match event {
+                            TrayIconEvent::Enter { .. } => {
+                                if let Err(err) = refresh_tray_microphone_menu(tray.app_handle()) {
+                                    log::warn!(
+                                        "[tray] refresh microphone menu on hover failed: {err}"
+                                    );
+                                }
                             }
-                            handle_microphone_tray_menu_event(app, id);
-                        }
-                    })
-                    .on_tray_icon_event(move |tray, event| match event {
-                        TrayIconEvent::Enter { .. } => {
-                            if let Err(err) = refresh_tray_microphone_menu(tray.app_handle()) {
-                                log::warn!("[tray] refresh microphone menu on hover failed: {err}");
-                            }
-                        }
-                        TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            ..
-                        } => show_main_window(tray.app_handle()),
-                        _ => {}
-                    })
-                    .build(app)?;
-                start_tray_microphone_watcher(app.handle().clone());
+                            TrayIconEvent::Click {
+                                button: MouseButton::Left,
+                                ..
+                            } => show_main_window(tray.app_handle()),
+                            _ => {}
+                        })
+                        .build(app)?;
+                    start_tray_microphone_watcher(app.handle().clone());
+                } else {
+                    log::warn!("[startup] default window icon missing; tray icon disabled");
+                }
             } else {
-                log::warn!("[startup] default window icon missing; tray icon disabled");
+                log::info!(
+                    "[startup] Companion app mode: skipping Listener tray, global hotkeys, capsule, and QA windows"
+                );
             }
 
-            // Spin up hotkey listener; coordinator owns the lifecycle.
             let app_handle = app.handle().clone();
             coordinator.bind_app(app_handle);
-            coordinator.start_hotkey_listener();
-            coordinator.auto_select_embedded_ble_input_source_in_background();
-            coordinator.refresh_embedded_ble_listener();
-            // QA / custom combo hotkeys use `global-hotkey` (Carbon on macOS).
-            // Start those after RunEvent::Ready, when the AppKit event loop is live.
-            if should_force_show_main_on_start() {
-                show_main_window(app.handle());
+            if !companion_app {
+                // Spin up hotkey listener; coordinator owns the lifecycle.
+                coordinator.start_hotkey_listener();
+                coordinator.auto_select_embedded_ble_input_source_in_background();
+                coordinator.refresh_embedded_ble_listener();
+                // QA / custom combo hotkeys use `global-hotkey` (Carbon on macOS).
+                // Start those after RunEvent::Ready, when the AppKit event loop is live.
+                if should_force_show_main_on_start() {
+                    show_main_window(app.handle());
+                }
             }
 
             // Wayland 下没有可用的全局键盘监听（issue #420）。Coordinator 已通过 stub adapter
@@ -445,20 +469,26 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| match event {
             RunEvent::Ready => {
-                let coordinator = app.state::<Arc<coordinator::Coordinator>>();
-                // 同步启动 QA hotkey listener。和 dictation hotkey 平行，互不抢状态。
-                coordinator.start_qa_hotkey_listener();
-                // 启动自定义组合键监听器。当 trigger == Custom 时替代 modifier-only 监听器。
-                coordinator.start_combo_hotkey_listener();
-                coordinator.start_translation_hotkey_listener();
-                coordinator.start_switch_style_hotkey_listener();
-                coordinator.start_open_app_hotkey_listener();
-                coordinator.start_device_custom_key_hotkey_listeners();
+                if !is_companion_app_mode() {
+                    let coordinator = app.state::<Arc<coordinator::Coordinator>>();
+                    // 同步启动 QA hotkey listener。和 dictation hotkey 平行，互不抢状态。
+                    coordinator.start_qa_hotkey_listener();
+                    // 启动自定义组合键监听器。当 trigger == Custom 时替代 modifier-only 监听器。
+                    coordinator.start_combo_hotkey_listener();
+                    coordinator.start_translation_hotkey_listener();
+                    coordinator.start_switch_style_hotkey_listener();
+                    coordinator.start_open_app_hotkey_listener();
+                    coordinator.start_device_custom_key_hotkey_listeners();
+                }
             }
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => show_main_window(app),
             RunEvent::ExitRequested { code, api, .. } => {
-                if should_keep_alive_on_exit_request(code, APP_QUIT_REQUESTED.load(Ordering::Relaxed))
+                if !is_companion_app_mode()
+                    && should_keep_alive_on_exit_request(
+                        code,
+                        APP_QUIT_REQUESTED.load(Ordering::Relaxed),
+                    )
                 {
                     log::warn!(
                         "[main] exit requested without explicit quit; keeping Listener Type alive"
@@ -469,7 +499,9 @@ pub fn run() {
             RunEvent::WindowEvent { label, event, .. } => {
                 if label == "main" {
                     if let tauri::WindowEvent::CloseRequested { ref api, .. } = event {
-                        if should_hide_main_on_close(APP_QUIT_REQUESTED.load(Ordering::Relaxed)) {
+                        if !is_companion_app_mode()
+                            && should_hide_main_on_close(APP_QUIT_REQUESTED.load(Ordering::Relaxed))
+                        {
                             api.prevent_close();
                             hide_main_window(app);
                         }
@@ -513,6 +545,26 @@ fn should_force_show_main_on_start() -> bool {
         .as_deref()
         == Some("1")
         || std::env::args().any(|arg| arg == "--show-main")
+}
+
+fn is_companion_app_name(name: &str) -> bool {
+    std::env::var("LISTENER_TYPE_APP_PROFILE")
+        .ok()
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("companion"))
+        || is_companion_product_name(name)
+}
+
+fn is_companion_app_mode() -> bool {
+    COMPANION_APP_MODE.load(Ordering::Relaxed)
+        || std::env::var("LISTENER_TYPE_APP_PROFILE")
+            .ok()
+            .as_deref()
+            .is_some_and(|value| value.eq_ignore_ascii_case("companion"))
+}
+
+fn is_companion_product_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("Companion Type")
 }
 
 struct MicrophoneTrayMenu {
@@ -1183,6 +1235,9 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
                 }
             });
         }
+        cli::CliIntent::SendEmbeddedAudioControlStop { .. } => {
+            log::warn!("[cli] embedded BLE control stop is headless-only and was ignored by the running GUI instance");
+        }
         cli::CliIntent::FirmwareOta {
             manifest_path,
             firmware_path,
@@ -1267,6 +1322,25 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                 Err(err) => {
                     println!("embedded_ble_probe_result=FAIL error={err}");
                     log::warn!("[cli] probe-embedded-audio-ble-subscription failed: {err}");
+                    1
+                }
+            }
+        }
+        cli::CliIntent::SendEmbeddedAudioControlStop { timeout_ms } => {
+            log::info!(
+                "[cli] headless send-embedded-audio-control-stop: timeout_ms={timeout_ms:?}"
+            );
+            let timeout =
+                std::time::Duration::from_millis(timeout_ms.unwrap_or(5_000).clamp(500, 30_000));
+            match crate::embedded_ble::send_recording_control_stop(timeout) {
+                Ok(()) => {
+                    println!("embedded_ble_control_stop_result=PASS");
+                    log::info!("[cli] send-embedded-audio-control-stop PASS");
+                    0
+                }
+                Err(err) => {
+                    println!("embedded_ble_control_stop_result=FAIL error={err}");
+                    log::warn!("[cli] send-embedded-audio-control-stop failed: {err}");
                     1
                 }
             }
@@ -1854,9 +1928,9 @@ fn capsule_height_for_qa() -> f64 {
 mod tests {
     use super::{
         capsule_height_for_qa, capsule_visual_height, capsule_window_bounds,
-        parse_tray_polish_mode_id, rotate_log_if_too_large, should_hide_main_on_close,
-        should_keep_alive_on_exit_request, tray_polish_mode_menu_entries, tray_style_menu_enabled,
-        LOG_ROTATE_LIMIT_BYTES,
+        is_companion_product_name, parse_tray_polish_mode_id, rotate_log_if_too_large,
+        should_hide_main_on_close, should_keep_alive_on_exit_request,
+        tray_polish_mode_menu_entries, tray_style_menu_enabled, LOG_ROTATE_LIMIT_BYTES,
     };
     use crate::types::PolishMode;
     use std::io::Write;
@@ -1878,6 +1952,13 @@ mod tests {
 
         assert!(should_hide_main_on_close(false));
         assert!(!should_hide_main_on_close(true));
+    }
+
+    #[test]
+    fn companion_product_name_selects_companion_shell() {
+        assert!(is_companion_product_name("Companion Type"));
+        assert!(is_companion_product_name("companion type"));
+        assert!(!is_companion_product_name("Listener Type"));
     }
 
     #[test]

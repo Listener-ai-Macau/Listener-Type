@@ -66,6 +66,37 @@ function AudioBars({ level }: AudioBarsProps) {
   );
 }
 
+function RecordingLiveGlyph() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 2,
+        width: 16,
+        height: 12,
+        flex: '0 0 16px',
+      }}
+    >
+      {[0, 1, 2].map(i => (
+        <span
+          key={i}
+          style={{
+            width: 3,
+            height: 3,
+            borderRadius: 999,
+            background: 'var(--ol-blue)',
+            opacity: 0.54,
+            animation: `cap-live-dot 1.05s ease-in-out ${i * 0.16}s infinite`,
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
 interface CenterTextProps {
   os: OS;
   kind: 'default' | 'processing' | 'error';
@@ -256,6 +287,42 @@ function Pill({
       </div>
     );
   };
+  const renderRecordingPreview = (displayText: string): JSX.Element => {
+    const compactText = compactCapsuleText(displayText, os, 'processing');
+    return (
+      <div
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          width: '100%',
+          maxWidth: metrics.textWidth,
+          minWidth: 0,
+          justifyContent: 'center',
+        }}
+      >
+        <RecordingLiveGlyph />
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 500,
+            color: '#171714',
+            minWidth: 0,
+            textAlign: 'center',
+            lineHeight: processingLayout.allowWrap ? 1.2 : 1,
+            whiteSpace: processingLayout.allowWrap ? 'normal' : 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            display: '-webkit-box',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: processingLayout.lineClamp,
+          }}
+        >
+          {compactText}
+        </span>
+      </div>
+    );
+  };
   switch (state) {
     case 'reconnecting':
       center = renderProcessingCenter(message || t('capsule.thinking'));
@@ -264,7 +331,7 @@ function Pill({
       center = stopPending
         ? renderProcessingCenter(message || t('capsule.thinking'))
         : message
-          ? <CenterText os={os} kind="processing" text={message} color="#171714" />
+          ? renderRecordingPreview(message)
           : <AudioBars level={level} />;
       break;
     case 'transcribing':
@@ -730,6 +797,10 @@ export function Capsule() {
         }
         @keyframes cap-spin {
           to { transform: rotate(360deg); }
+        }
+        @keyframes cap-live-dot {
+          0%, 100% { opacity: .34; transform: translateY(1px) scale(.78); }
+          45%      { opacity: .95; transform: translateY(-1px) scale(1.16); }
         }
         @keyframes cap-state-enter {
           from { opacity: 0; transform: translateY(2px); }

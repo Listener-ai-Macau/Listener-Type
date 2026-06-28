@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
+import { CompanionApp } from "./CompanionApp";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Settings } from "./pages/Settings";
 import { HotkeySettingsProvider } from "./state/HotkeySettingsContext";
@@ -10,6 +11,8 @@ import "./styles/global.css";
 
 const params = new URLSearchParams(window.location.search);
 const windowKind = params.get("window");
+const appKind = params.get("app");
+const isCompanionApp = appKind === "companion";
 const isCapsule = windowKind === "capsule";
 const isQa = windowKind === "qa";
 const isLocalAsrVisual =
@@ -32,7 +35,9 @@ const renderApp = () => {
   root.render(
     <React.StrictMode>
       <ErrorBoundary>
-        {isLocalAsrVisual ? (
+        {isCompanionApp ? (
+          <CompanionApp />
+        ) : isLocalAsrVisual ? (
           <HotkeySettingsProvider>
             <div className="ol-settings-visual-root" style={{ width: "100%", height: "100%", padding: 24, overflow: "auto", background: "var(--ol-window-bg)" }}>
               <Settings embedded initialSection="advanced" />

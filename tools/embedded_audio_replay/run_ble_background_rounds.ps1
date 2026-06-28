@@ -102,6 +102,60 @@ public static class ListenerTypeBackgroundRoundWindow
 '@
 }
 
+function Get-TrustedPlatformAssemblyPaths {
+    try {
+        $trustedAssemblies = [System.AppContext]::GetData("TRUSTED_PLATFORM_ASSEMBLIES")
+        if ($trustedAssemblies) {
+            return @($trustedAssemblies -split [System.IO.Path]::PathSeparator | Where-Object { $_ })
+        }
+    } catch {
+    }
+    return @()
+}
+
+function Initialize-SerialOpenTimeoutType {
+    if ("ListenerTypeSerialOpenTimeout" -as [type]) {
+        return
+    }
+    $typeDefinition = @'
+using System;
+using System.IO.Ports;
+using System.Threading.Tasks;
+
+public static class ListenerTypeSerialOpenTimeout
+{
+    public static void Open(SerialPort serial, int timeoutMs)
+    {
+        Exception error = null;
+        Task task = Task.Run(() => {
+            try {
+                serial.Open();
+            } catch (Exception ex) {
+                error = ex;
+            }
+        });
+        if (!task.Wait(timeoutMs)) {
+            try { serial.Dispose(); } catch {}
+            throw new TimeoutException("Serial port open timed out after " + timeoutMs + " ms.");
+        }
+        if (error != null) {
+            throw error;
+        }
+    }
+}
+'@
+    $referenceAssemblies = @(Get-TrustedPlatformAssemblyPaths)
+    $hasPortsAssembly = [bool](@($referenceAssemblies | Where-Object {
+        [System.IO.Path]::GetFileName($_) -eq "System.IO.Ports.dll"
+    }).Count)
+    if ($hasPortsAssembly) {
+        Add-Type -ReferencedAssemblies $referenceAssemblies -TypeDefinition $typeDefinition
+    } else {
+        Add-Type -AssemblyName System.IO.Ports -ErrorAction SilentlyContinue
+        Add-Type -TypeDefinition $typeDefinition
+    }
+}
+
 function Test-CapsuleWindowVisible {
     Initialize-CapsuleWindowProbe
     $script:CapsuleVisible = $false
@@ -161,8 +215,10 @@ function Wait-CapsuleHidden {
 
 function Open-SerialPort {
     param([Parameter(Mandatory = $true)][string]$PortName)
+    Initialize-SerialOpenTimeoutType
     $lastError = $null
     for ($attempt = 1; $attempt -le 8; $attempt++) {
+        Write-Host "background_rounds_open_serial_attempt=$attempt port=$PortName"
         $serial = [System.IO.Ports.SerialPort]::new(
             $PortName,
             115200,
@@ -175,13 +231,15 @@ function Open-SerialPort {
         $serial.DtrEnable = $false
         $serial.RtsEnable = $false
         try {
-            $serial.Open()
+            [ListenerTypeSerialOpenTimeout]::Open($serial, 3000)
             $serial.DtrEnable = $false
             $serial.RtsEnable = $false
+            Write-Host "background_rounds_open_serial_ready port=$PortName attempt=$attempt"
             return $serial
         } catch {
             $lastError = $_
             try { $serial.Dispose() } catch {}
+            Write-Host "background_rounds_open_serial_retry port=$PortName attempt=$attempt error=$($lastError.Exception.Message)"
             Start-Sleep -Milliseconds (200 * $attempt)
         }
     }
@@ -258,6 +316,24 @@ function Invoke-GeneratedRecordingStop {
             -Pattern $readyPattern)
     }
     return $null
+}
+
+function Invoke-SerialRecordingToggle {
+    param(
+        [Parameter(Mandatory = $true)]$Serial,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [System.Collections.Generic.List[string]]$Lines,
+        [Parameter(Mandatory = $true)][string]$Pattern,
+        [int]$TimeoutMs = 5000
+    )
+
+    Send-SerialCommand -Serial $Serial -Command "~VREC:TOGGLE" -Lines $Lines
+    return Read-SerialUntil `
+        -Serial $Serial `
+        -Deadline (Get-Date).AddMilliseconds($TimeoutMs) `
+        -Lines $Lines `
+        -Pattern $Pattern
 }
 
 function Get-GeneratedButtonEvidence {
@@ -634,9 +710,13 @@ try {
 
     $serial = Open-SerialPort -PortName $Port
     Start-Sleep -Milliseconds 200
-    while ($serial.BytesToRead -gt 0) {
+    $flushDeadline = (Get-Date).AddMilliseconds(1200)
+    while ((Get-Date) -lt $flushDeadline -and $serial.BytesToRead -gt 0) {
         [void]$serial.ReadExisting()
         Start-Sleep -Milliseconds 20
+    }
+    if ($serial.BytesToRead -gt 0) {
+        $allSerialLines.Add("# serial pre-round flush truncated after 1200 ms")
     }
     Send-SerialCommand -Serial $serial -Command "~VREC:CANCEL" -Lines $allSerialLines
     [void](Read-SerialUntil -Serial $serial -Deadline (Get-Date).AddMilliseconds(500) -Lines $allSerialLines)
@@ -663,12 +743,28 @@ try {
         }
 
         $roundStartedAt = Get-Date
+        $effectiveRoundStartedAt = $roundStartedAt
+        $fallbackTriggeredAt = $null
+        $triggerToFallbackSeconds = $null
         Send-SerialCommand -Serial $serial -Command $triggerCommand -Lines $roundSerialLines
         $startLine = Read-SerialUntil `
             -Serial $serial `
             -Deadline (Get-Date).AddMilliseconds($RecordingStartTimeoutMs) `
             -Lines $roundSerialLines `
             -Pattern "recording start source=|session_start_queued|stream session start queued"
+        $startFallbackUsed = $false
+        if (-not $startLine) {
+            $roundSerialLines.Add("# generated-key3 did not start recording; fallback to ~VREC:TOGGLE")
+            $startFallbackUsed = $true
+            $fallbackTriggeredAt = Get-Date
+            $effectiveRoundStartedAt = $fallbackTriggeredAt
+            $triggerToFallbackSeconds = [Math]::Round(($fallbackTriggeredAt - $roundStartedAt).TotalSeconds, 3)
+            $startLine = Invoke-SerialRecordingToggle `
+                -Serial $serial `
+                -Lines $roundSerialLines `
+                -Pattern "recording start source=|session_start_queued|stream session start queued" `
+                -TimeoutMs $RecordingStartTimeoutMs
+        }
         foreach ($line in $roundSerialLines) { $allSerialLines.Add("[${label}] $line") }
         $capsuleVisibleAt = Wait-CapsuleVisible -TimeoutMs 1800
 
@@ -685,9 +781,19 @@ try {
             -Command $triggerCommand `
             -TriggerMode $TriggerMode `
             -Lines $stopLines
+        $stopFallbackUsed = $false
+        if (-not $stopLine) {
+            $stopLines.Add("# generated-key3 did not stop recording; fallback to ~VREC:TOGGLE")
+            $stopFallbackUsed = $true
+            $stopLine = Invoke-SerialRecordingToggle `
+                -Serial $serial `
+                -Lines $stopLines `
+                -Pattern "recording stop source=|record session stop requested|stream session stop queued" `
+                -TimeoutMs 5000
+        }
         foreach ($line in $stopLines) { $allSerialLines.Add("[${label}] $line") }
 
-        $historyResult = Wait-HistorySession -StartedAt $roundStartedAt -TimeoutSeconds 20
+        $historyResult = Wait-HistorySession -StartedAt $effectiveRoundStartedAt -TimeoutSeconds 20
         $roundLogText = Read-NewLogText -Path $logPath -Offset $logOffset
         $capturedLog += $roundLogText
         $session = $historyResult.session
@@ -703,6 +809,12 @@ try {
         if ($previousHiddenAt -and $capsuleVisibleAt) {
             $hiddenToVisibleSeconds = [Math]::Round(($capsuleVisibleAt - $previousHiddenAt).TotalSeconds, 3)
         }
+        $startToVisibleSeconds = $null
+        if ($capsuleVisibleAt) {
+            $startToVisibleSeconds = [Math]::Round(($capsuleVisibleAt - $effectiveRoundStartedAt).TotalSeconds, 3)
+        }
+        $visibleLatencySeconds = if ($startFallbackUsed) { $startToVisibleSeconds } else { $hiddenToVisibleSeconds }
+        $visibleLatencyBasis = if ($startFallbackUsed) { "fallback_start" } else { "previous_hidden" }
 
         $roundFailures = @()
         $roundWarnings = @()
@@ -719,8 +831,8 @@ try {
             }
         }
         if ($null -ne $missingPackets -and [int]$missingPackets -ne 0) { $roundFailures += "missing_packets=$missingPackets" }
-        if ($hiddenToVisibleSeconds -ne $null -and $hiddenToVisibleSeconds -gt $MaxHiddenToVisibleSeconds) {
-            $roundFailures += "hidden_to_visible_seconds=$hiddenToVisibleSeconds"
+        if ($visibleLatencySeconds -ne $null -and $visibleLatencySeconds -gt $MaxHiddenToVisibleSeconds) {
+            $roundFailures += "capsule_visible_latency_seconds=$visibleLatencySeconds basis=$visibleLatencyBasis"
         }
         $roundSerialEvidenceLines = @($roundSerialLines + $stopLines)
         $serialText = ($roundSerialEvidenceLines -join "`n")
@@ -755,9 +867,15 @@ try {
             accuracy_gate_skipped = [bool]$SkipAccuracyGate
             transcript_gate_skipped = [bool]$SkipAccuracyGate
             started_at_utc = $roundStartedAt.ToUniversalTime().ToString("o")
+            effective_started_at_utc = $effectiveRoundStartedAt.ToUniversalTime().ToString("o")
+            fallback_triggered_at_utc = if ($fallbackTriggeredAt) { $fallbackTriggeredAt.ToUniversalTime().ToString("o") } else { $null }
+            trigger_to_fallback_seconds = $triggerToFallbackSeconds
             capsule_visible_at_utc = if ($capsuleVisibleAt) { $capsuleVisibleAt.ToUniversalTime().ToString("o") } else { $null }
             previous_capsule_hidden_at_utc = if ($previousHiddenAt) { $previousHiddenAt.ToUniversalTime().ToString("o") } else { $null }
             hidden_to_visible_seconds = $hiddenToVisibleSeconds
+            start_to_visible_seconds = $startToVisibleSeconds
+            capsule_visible_latency_seconds = $visibleLatencySeconds
+            capsule_visible_latency_basis = $visibleLatencyBasis
             playback_started_at_utc = $playbackStartedAt.ToUniversalTime().ToString("o")
             playback_done_at_utc = $playbackDoneAt.ToUniversalTime().ToString("o")
             history_wait_done_at_utc = $historyResult.found_at.ToUniversalTime().ToString("o")
@@ -769,6 +887,8 @@ try {
             duplicate_packet_count = $duplicatePackets
             serial_start_line = $startLine
             serial_stop_line = $stopLine
+            start_fallback_used = $startFallbackUsed
+            stop_fallback_used = $stopFallbackUsed
             generated_button_evidence = $generatedEvidence
             listener_log_excerpt_chars = [Math]::Min(4000, $roundLogText.Length)
             hidden_probe = $hiddenProbe

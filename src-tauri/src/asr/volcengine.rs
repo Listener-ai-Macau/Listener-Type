@@ -24,9 +24,9 @@ use super::frame::{self, Flags, MessageType, Serialization};
 use super::{AudioConsumer, DictionaryHotword, RawTranscript};
 
 const ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
-/// 200 ms of 16 kHz / 16-bit / mono PCM.
-const TARGET_AUDIO_CHUNK_BYTES: usize = 6_400;
-const TARGET_AUDIO_CHUNK_MS: usize = 200;
+/// 100 ms of 16 kHz / 16-bit / mono PCM.
+const TARGET_AUDIO_CHUNK_BYTES: usize = 3_200;
+const TARGET_AUDIO_CHUNK_MS: usize = 100;
 /// 16 kHz · 16-bit · mono = 32 000 bytes/sec → 32 bytes/ms.
 const BYTES_PER_MS: f64 = 32.0;
 const HOTWORD_CAP: usize = 80;
@@ -34,7 +34,7 @@ const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);
 const WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_millis(1_200);
 const FINAL_FRAME_SEND_BUDGET: Duration = Duration::from_millis(1_800);
 const AUDIO_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(3);
-const FINAL_SILENCE_FRAMES: usize = 5; // 1000 ms, using 200 ms TARGET_AUDIO_CHUNK_BYTES frames.
+const FINAL_SILENCE_FRAMES: usize = 8; // 800 ms, using 100 ms TARGET_AUDIO_CHUNK_BYTES frames.
 const FINAL_SILENCE_PADDING_MS: usize = FINAL_SILENCE_FRAMES * TARGET_AUDIO_CHUNK_MS;
 const SECOND_PASS_END_WINDOW_MS: u32 = 500;
 const SECOND_PASS_FORCE_TO_SPEECH_MS: u32 = 1_000;
@@ -80,8 +80,9 @@ type SharedWriter = Arc<AsyncMutex<Option<WsSink>>>;
 type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 use super::volcengine_transcript::{
-    is_unstable_initial_partial, merge_streaming_candidate, normalized_result,
-    transcript_candidate_from_result, TranscriptSegment,
+    is_unstable_initial_partial, merge_streaming_candidate, normalize_cjk_final_spacing_and_echoes,
+    normalized_result, transcript_candidate_from_result, trim_repeated_short_final_tail,
+    TranscriptSegment,
 };
 
 /// Sync state shared across the receive loop, the public API, and the
@@ -615,11 +616,31 @@ impl VolcengineStreamingASR {
         }
         let (full_text, partial_changed) = {
             let mut state = self.state.lock();
-            let (merged, segments) = merge_streaming_candidate(
+            let (mut merged, segments) = merge_streaming_candidate(
                 &state.best_transcript_text,
                 &state.best_transcript_segments,
                 candidate,
             );
+            if has_final {
+                let normalized = normalize_cjk_final_spacing_and_echoes(&merged);
+                if normalized != merged {
+                    log::info!(
+                        "[asr] normalized CJK final spacing/echoes ({} -> {} chars)",
+                        merged.chars().count(),
+                        normalized.chars().count()
+                    );
+                    merged = normalized;
+                }
+                let trimmed = trim_repeated_short_final_tail(&merged);
+                if trimmed != merged {
+                    log::info!(
+                        "[asr] trimmed repeated short final tail ({} -> {} chars)",
+                        merged.chars().count(),
+                        trimmed.chars().count()
+                    );
+                    merged = trimmed;
+                }
+            }
             let changed = !merged.is_empty() && state.last_partial_text != merged;
             if !merged.is_empty() {
                 state.best_transcript_text = merged.clone();
@@ -916,11 +937,11 @@ mod tests {
 
     #[test]
     fn final_silence_padding_covers_second_pass_tail_window() {
-        assert_eq!(TARGET_AUDIO_CHUNK_MS, 200);
-        assert_eq!(FINAL_SILENCE_FRAMES, 5);
-        assert_eq!(FINAL_SILENCE_PADDING_MS, 1_000);
-        assert!(FINAL_SILENCE_PADDING_MS as u32 >= SECOND_PASS_FORCE_TO_SPEECH_MS);
+        assert_eq!(TARGET_AUDIO_CHUNK_MS, 100);
+        assert_eq!(FINAL_SILENCE_FRAMES, 8);
+        assert_eq!(FINAL_SILENCE_PADDING_MS, 800);
         assert!(FINAL_SILENCE_PADDING_MS as u32 >= SECOND_PASS_END_WINDOW_MS);
+        assert!(FINAL_SILENCE_PADDING_MS as u32 <= SECOND_PASS_FORCE_TO_SPEECH_MS);
     }
 
     #[test]

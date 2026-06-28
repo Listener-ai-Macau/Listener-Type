@@ -3,7 +3,7 @@ param(
     [string]$TriggerMode = "serial-toggle",
     [string]$Port = "COM3",
     [string]$DeviceName = "listener",
-    [string]$BluetoothAddress = "DCB4D91112CE",
+    [string]$BluetoothAddress = "",
     [int]$TimeoutMs = 45000,
     [int]$NotifyReadyTimeoutSeconds = 20,
     [double]$NotifySettleSeconds = 0.8,
@@ -789,6 +789,36 @@ function Write-ForegroundTrace {
     Write-SmokeTrace "$Label foreground_pid=$($Snapshot.ProcessId) foreground_visible=$($Snapshot.Visible) foreground_title=$($Snapshot.Title)"
 }
 
+function Get-ProcessWindowHandleByTitle {
+    param(
+        [int]$ProcessId,
+        [string]$Title
+    )
+
+    Ensure-WindowInterop
+    $script:ListenerSmokeMatchedWindowHandle = [IntPtr]::Zero
+    $callback = [ListenerSmokeEnumWindowsProc]{
+        param([IntPtr]$hWnd, [IntPtr]$lParam)
+        if (-not [ListenerSmokeWindow]::IsWindowVisible($hWnd)) {
+            return $true
+        }
+        [uint32]$windowPid = 0
+        [void][ListenerSmokeWindow]::GetWindowThreadProcessId($hWnd, [ref]$windowPid)
+        if ($windowPid -ne [uint32]$ProcessId) {
+            return $true
+        }
+        if ((Get-WindowTitleByHandle -Handle $hWnd) -ne $Title) {
+            return $true
+        }
+        $script:ListenerSmokeMatchedWindowHandle = $hWnd
+        return $false
+    }
+    [void][ListenerSmokeWindow]::EnumWindows($callback, [IntPtr]::Zero)
+    $handle = $script:ListenerSmokeMatchedWindowHandle
+    $script:ListenerSmokeMatchedWindowHandle = [IntPtr]::Zero
+    return $handle
+}
+
 function Get-CapsuleWindowSnapshot {
     param([int]$ProcessId = 0)
 
@@ -1081,7 +1111,9 @@ function Wait-CapsuleWindowVisible {
 function Focus-ProcessWindow {
     param(
         [System.Diagnostics.Process]$Process,
-        [int]$Retries = 30
+        [int]$Retries = 30,
+        [string]$Title = "",
+        [switch]$AcceptVisibleOnly
     )
 
     if (-not $Process) {
@@ -1093,12 +1125,44 @@ function Focus-ProcessWindow {
             return $false
         }
         $Process.Refresh()
-        $handle = $Process.MainWindowHandle
+        $handle = [IntPtr]::Zero
+        if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
+            if ([string]::IsNullOrWhiteSpace($Title) -or (Get-WindowTitleByHandle -Handle $Process.MainWindowHandle) -eq $Title) {
+                $handle = $Process.MainWindowHandle
+            }
+        }
+        if ($handle -eq [IntPtr]::Zero -and -not [string]::IsNullOrWhiteSpace($Title)) {
+            $handle = Get-ProcessWindowHandleByTitle -ProcessId $Process.Id -Title $Title
+        }
         if ($handle -ne [IntPtr]::Zero) {
             [void][ListenerSmokeWindow]::ShowWindow($handle, 9)
             [void][ListenerSmokeWindow]::SetForegroundWindow($handle)
             Start-Sleep -Milliseconds 150
-            return $true
+            if ([string]::IsNullOrWhiteSpace($Title)) {
+                return $true
+            }
+            $current = Get-ForegroundWindowSnapshot
+            if ($current.Handle -eq $handle -or $current.Title -eq $Title) {
+                return $true
+            }
+            $rect = [ListenerSmokeRect]::new()
+            if ([ListenerSmokeWindow]::GetWindowRect($handle, [ref]$rect)) {
+                $width = $rect.Right - $rect.Left
+                $height = $rect.Bottom - $rect.Top
+                if ($width -gt 0 -and $height -gt 0) {
+                    [void][ListenerSmokeWindow]::SetCursorPos(($rect.Left + [int]($width / 2)), ($rect.Top + [int]($height / 2)))
+                    [ListenerSmokeWindow]::mouse_event([ListenerSmokeWindow]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                    [ListenerSmokeWindow]::mouse_event([ListenerSmokeWindow]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                    Start-Sleep -Milliseconds 150
+                    $current = Get-ForegroundWindowSnapshot
+                    if ($current.Handle -eq $handle -or $current.Title -eq $Title) {
+                        return $true
+                    }
+                }
+            }
+            if ($AcceptVisibleOnly -and (Get-WindowTitleByHandle -Handle $handle) -eq $Title) {
+                return $true
+            }
         }
         Start-Sleep -Milliseconds 200
     }
@@ -1152,28 +1216,39 @@ $timer.Start()
 [System.Windows.Forms.Application]::Run($form)
 '@
     Set-Content -Path $targetScript -Value $targetScriptBody -Encoding UTF8
-    $process = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList @(
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-STA",
-            "-File",
-            (Quote-ProcessArgument $targetScript),
-            "-Path",
-            (Quote-ProcessArgument $Path)
-        ) `
-        -RedirectStandardOutput $targetStdout `
-        -RedirectStandardError $targetStderr `
-        -PassThru
-    [void](Focus-ProcessWindow -Process $process)
-    return [ordered]@{
-        Process = $process
-        Path = $Path
-        ScriptPath = $targetScript
-        StdoutPath = $targetStdout
-        StderrPath = $targetStderr
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $process = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList @(
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-STA",
+                "-File",
+                (Quote-ProcessArgument $targetScript),
+                "-Path",
+                (Quote-ProcessArgument $Path)
+            ) `
+            -RedirectStandardOutput $targetStdout `
+            -RedirectStandardError $targetStderr `
+            -PassThru
+        if (Focus-ProcessWindow -Process $process -Title "Listener BLE Smoke Target" -Retries 40 -AcceptVisibleOnly) {
+            Write-SmokeTrace "insertion_target_window_ready attempt=$attempt pid=$($process.Id)"
+            return [ordered]@{
+                Process = $process
+                Path = $Path
+                ScriptPath = $targetScript
+                StdoutPath = $targetStdout
+                StderrPath = $targetStderr
+            }
+        }
+        $process.Refresh()
+        $exitStatus = if ($process.HasExited) { "exited=$true exit_code=$($process.ExitCode)" } else { "exited=$false" }
+        Write-SmokeTrace "insertion_target_window_not_ready attempt=$attempt pid=$($process.Id) $exitStatus main_window_handle=$($process.MainWindowHandle) main_window_title=$($process.MainWindowTitle)"
+        try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+        try { Wait-Process -Id $process.Id -Timeout 3 -ErrorAction SilentlyContinue } catch {}
+        Start-Sleep -Milliseconds 300
     }
+    throw "Insertion target window did not become ready."
 }
 
 function Read-InsertionTargetText {
@@ -2418,9 +2493,13 @@ $recordingWindowMs = [System.Math]::Max(
 $serialLogPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.serial.log"
 $serialStartSignalPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.start.signal"
 $serialStopSignalPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.stop.signal"
+$typeControlStartSignalPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.type-start.signal"
+$typeControlStopSignalPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.type-stop.signal"
 $serialRecordingStartedSignalPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.recording-started.signal"
 Remove-Item -LiteralPath $serialStartSignalPath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $serialStopSignalPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $typeControlStartSignalPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $typeControlStopSignalPath -Force -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $ListenerExe)) {
     $frontendDist = Join-Path $RepoRoot "dist"
@@ -2520,6 +2599,7 @@ $generatedKeyCommand = switch ($TriggerMode) {
     default { $null }
 }
 $usesSerialSignal = @("serial-toggle", "serial-cancel", "desktop-cancel", "desktop-confirm", "generated-key3") -contains $TriggerMode
+$usesTypeControlSignal = $TriggerMode -eq "generated-key3"
 $serialStartCommand = if ($generatedKeyCommand) { $generatedKeyCommand } else { "~VREC:TOGGLE" }
 $serialEndCommand = if ($TriggerMode -eq "serial-cancel") {
     "~VREC:CANCEL"
@@ -2562,6 +2642,8 @@ try {
     $oldBleAddress = $env:LISTENER_TYPE_BLE_ADDRESS
     $oldBluetoothAddress = $env:LISTENER_TYPE_BLUETOOTH_ADDRESS
     $oldAcceptSyntheticHotkeys = $env:LISTENER_TYPE_ACCEPT_SYNTHETIC_HOTKEY_EVENTS
+    $oldTypeControlStartSignal = $env:LISTENER_TYPE_EMBEDDED_BLE_CONTROL_START_SIGNAL
+    $oldTypeControlStopSignal = $env:LISTENER_TYPE_EMBEDDED_BLE_CONTROL_STOP_SIGNAL
     try {
         $env:LISTENER_TYPE_HIDE_MAIN_ON_START = "1"
         $env:LISTENER_TYPE_DISABLE_BACKGROUND_BLE = "1"
@@ -2573,6 +2655,10 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($normalizedBluetoothAddress)) {
             $env:LISTENER_TYPE_BLE_ADDRESS = $normalizedBluetoothAddress
             $env:LISTENER_TYPE_BLUETOOTH_ADDRESS = $normalizedBluetoothAddress
+        }
+        if ($usesTypeControlSignal) {
+            $env:LISTENER_TYPE_EMBEDDED_BLE_CONTROL_START_SIGNAL = $typeControlStartSignalPath
+            $env:LISTENER_TYPE_EMBEDDED_BLE_CONTROL_STOP_SIGNAL = $typeControlStopSignalPath
         }
         $process = Start-Process -FilePath (Resolve-Path $ListenerExe).Path `
             -ArgumentList @("--submit-embedded-audio-ble-stream", ([string]$TimeoutMs)) `
@@ -2592,6 +2678,8 @@ try {
         if ($null -eq $oldBleAddress) { Remove-Item Env:LISTENER_TYPE_BLE_ADDRESS -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_BLE_ADDRESS = $oldBleAddress }
         if ($null -eq $oldBluetoothAddress) { Remove-Item Env:LISTENER_TYPE_BLUETOOTH_ADDRESS -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_BLUETOOTH_ADDRESS = $oldBluetoothAddress }
         if ($null -eq $oldAcceptSyntheticHotkeys) { Remove-Item Env:LISTENER_TYPE_ACCEPT_SYNTHETIC_HOTKEY_EVENTS -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_ACCEPT_SYNTHETIC_HOTKEY_EVENTS = $oldAcceptSyntheticHotkeys }
+        if ($null -eq $oldTypeControlStartSignal) { Remove-Item Env:LISTENER_TYPE_EMBEDDED_BLE_CONTROL_START_SIGNAL -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_EMBEDDED_BLE_CONTROL_START_SIGNAL = $oldTypeControlStartSignal }
+        if ($null -eq $oldTypeControlStopSignal) { Remove-Item Env:LISTENER_TYPE_EMBEDDED_BLE_CONTROL_STOP_SIGNAL -ErrorAction SilentlyContinue } else { $env:LISTENER_TYPE_EMBEDDED_BLE_CONTROL_STOP_SIGNAL = $oldTypeControlStopSignal }
     }
 
     $readyDeadline = (Get-Date).AddSeconds($NotifyReadyTimeoutSeconds)
@@ -2648,7 +2736,7 @@ try {
         if ($index -eq $RecordPlaybackIndex) {
             $capsuleVisibleAlreadyValidated = $false
             if ($VerifyInsertion -and $insertionTarget) {
-                [void](Focus-ProcessWindow -Process $insertionTarget.Process)
+                [void](Focus-ProcessWindow -Process $insertionTarget.Process -Title "Listener BLE Smoke Target")
                 Start-Sleep -Milliseconds 150
                 Write-SmokeTrace "insertion_target_focused"
             }
@@ -2656,6 +2744,12 @@ try {
             Write-ForegroundTrace -Label "before_capsule" -Snapshot $foregroundBeforeCapsule
             if ($usesSerialSignal) {
                 Set-Content -Path $serialStartSignalPath -Value "start" -Encoding ASCII
+                if ($usesTypeControlSignal) {
+                    Start-Sleep -Milliseconds 120
+                    Set-Content -Path $typeControlStartSignalPath -Value "start" -Encoding ASCII
+                    $timeline["type_control_start_signal_at_utc"] = Get-SmokeUtcNow
+                    Write-SmokeTrace "type_control_start_signal_written"
+                }
                 $recordingStarted = $true
                 $timeline["serial_start_signal_at_utc"] = Get-SmokeUtcNow
                 Write-SmokeTrace "serial_start_signal_written"
@@ -2726,6 +2820,12 @@ try {
                 Write-SmokeTrace "desktop_${desktopButton}_requested"
             } elseif ($usesSerialSignal) {
                 Start-Sleep -Milliseconds $PostPlaybackRecordMs
+                if ($usesTypeControlSignal) {
+                    Set-Content -Path $typeControlStopSignalPath -Value "stop" -Encoding ASCII
+                    $timeline["type_control_stop_signal_at_utc"] = Get-SmokeUtcNow
+                    Write-SmokeTrace "type_control_stop_signal_written"
+                    Start-Sleep -Milliseconds 160
+                }
                 Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
                 $timeline["serial_stop_signal_at_utc"] = Get-SmokeUtcNow
                 Write-SmokeTrace "serial_stop_signal_written"
@@ -2735,7 +2835,7 @@ try {
                 $timeline["serial_window_done_at_utc"] = Get-SmokeUtcNow
                 Write-SmokeTrace "serial_window_done"
                 if ($VerifyInsertion -and $insertionTarget) {
-                    [void](Focus-ProcessWindow -Process $insertionTarget.Process -Retries 5)
+                    [void](Focus-ProcessWindow -Process $insertionTarget.Process -Retries 5 -Title "Listener BLE Smoke Target")
                     Write-SmokeTrace "insertion_target_refocused_after_serial"
                 }
             } else {
@@ -2756,7 +2856,7 @@ try {
     while ((Get-Date) -lt $doneDeadline) {
         Start-Sleep -Milliseconds 300
         if ($VerifyInsertion -and $insertionTarget -and (((Get-Date) - $lastInsertionTargetFocusAt).TotalMilliseconds -ge 1000)) {
-            [void](Focus-ProcessWindow -Process $insertionTarget.Process -Retries 3)
+            [void](Focus-ProcessWindow -Process $insertionTarget.Process -Retries 3 -Title "Listener BLE Smoke Target")
             $lastInsertionTargetFocusAt = Get-Date
             Write-SmokeTrace "insertion_target_refocused"
         }
@@ -3140,6 +3240,12 @@ try {
     Write-SmokeTrace "catch error=$($caughtError.Exception.Message)"
     if ($recordingStarted) {
         try {
+            if ($usesTypeControlSignal) {
+                Set-Content -Path $typeControlStopSignalPath -Value "stop" -Encoding ASCII
+                $timeline["catch_type_control_stop_signal_at_utc"] = Get-SmokeUtcNow
+                Write-SmokeTrace "catch_type_control_stop_signal_written"
+                Start-Sleep -Milliseconds 160
+            }
             Set-Content -Path $serialStopSignalPath -Value "stop" -Encoding ASCII
             Write-SmokeTrace "catch_serial_stop_signal_written"
             $serialReport = Wait-SerialRecordingWindow -Window $serialWindow

@@ -45,6 +45,8 @@ pub enum CliIntent {
     SubmitEmbeddedAudioBleStream { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：触发前台 BLE 状态探测，验证它能复用或等待后台 listener。
     ProbeEmbeddedAudioBleSubscription { timeout_ms: Option<u64> },
+    /// 调试 / 自动化入口：只发一次嵌入式 BLE 录音停止控制，用于清理失败的硬件测试会话。
+    SendEmbeddedAudioControlStop { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：校验固件 OTA 包，可选做 BLE preflight 或真实传输。
     FirmwareOta {
         manifest_path: PathBuf,
@@ -138,6 +140,11 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
             }
             "--probe-embedded-audio-ble-subscription" => {
                 return Some(CliIntent::ProbeEmbeddedAudioBleSubscription {
+                    timeout_ms: next_u64_arg(&mut args),
+                });
+            }
+            "--send-embedded-audio-control-stop" => {
+                return Some(CliIntent::SendEmbeddedAudioControlStop {
                     timeout_ms: next_u64_arg(&mut args),
                 });
             }
@@ -399,6 +406,21 @@ mod tests {
         assert_eq!(
             parse_cli_intent(&args),
             Some(CliIntent::ProbeEmbeddedAudioBleSubscription { timeout_ms: None })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_ble_control_stop_with_timeout() {
+        let args = vec![
+            "listener-type",
+            "--send-embedded-audio-control-stop",
+            "4000",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::SendEmbeddedAudioControlStop {
+                timeout_ms: Some(4000),
+            })
         );
     }
 

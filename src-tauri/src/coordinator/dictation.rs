@@ -31,9 +31,15 @@ const EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS: usize = 500;
 const EMBEDDED_AUDIO_TRIM_MIN_RMS: f64 = 300.0;
 const EMBEDDED_AUDIO_TRIM_NOISE_MULTIPLIER: f64 = 3.0;
 const EMBEDDED_AUDIO_TRIM_PEAK_RATIO: f64 = 0.12;
+const EMBEDDED_BLE_PCM_EVENT_TRACE_PACKET_INTERVAL: u16 = 50;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
 const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 1_200;
 const EMBEDDED_BLE_STATS_ONLY_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_STATS_ONLY";
+const EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV: &str =
+    "LISTENER_TYPE_DISABLE_EMBEDDED_BLE_PROCESSING_SYNC";
+const EMBEDDED_BLE_CONTROL_START_SIGNAL_ENV: &str =
+    "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_START_SIGNAL";
+const EMBEDDED_BLE_CONTROL_STOP_SIGNAL_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_STOP_SIGNAL";
 
 fn apply_and_publish_dictation_event(
     inner: &Arc<Inner>,
@@ -59,9 +65,38 @@ fn apply_embedded_ble_session_actor_dictation_event(
     message: Option<String>,
     inserted_chars: Option<u32>,
 ) -> bool {
-    dispatch_embedded_ble_session_actor_command(inner, command, Some(session_id), detail, |_| {
-        apply_and_publish_dictation_event(inner, event, level, message, inserted_chars)
-    })
+    apply_embedded_ble_session_actor_dictation_event_with_trace(
+        inner,
+        command,
+        session_id,
+        detail,
+        true,
+        event,
+        level,
+        message,
+        inserted_chars,
+    )
+}
+
+fn apply_embedded_ble_session_actor_dictation_event_with_trace(
+    inner: &Arc<Inner>,
+    command: EmbeddedBleSessionActorCommand,
+    session_id: SessionId,
+    detail: impl Into<String>,
+    trace_timeline: bool,
+    event: DictationEvent,
+    level: f32,
+    message: Option<String>,
+    inserted_chars: Option<u32>,
+) -> bool {
+    dispatch_embedded_ble_session_actor_command_with_trace(
+        inner,
+        command,
+        Some(session_id),
+        detail,
+        trace_timeline,
+        |_| apply_and_publish_dictation_event(inner, event, level, message, inserted_chars),
+    )
 }
 
 fn embedded_ble_actor_context_active(inner: &Arc<Inner>) -> bool {
@@ -255,8 +290,20 @@ fn embedded_audio_stop_feedback_latched(inner: &Arc<Inner>) -> bool {
         .load(Ordering::SeqCst)
 }
 
+fn embedded_ble_processing_sync_disabled() -> bool {
+    std::env::var(EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn should_sync_device_ai_processing(inner: &Arc<Inner>) -> bool {
     embedded_ble_host_recording_control_context_active(inner)
+        && !embedded_ble_processing_sync_disabled()
 }
 
 fn set_device_ai_processing_async(inner: &Arc<Inner>, active: bool, reason: &'static str) {
@@ -313,6 +360,43 @@ fn set_device_ai_processing_done_async(inner: &Arc<Inner>, reason: &'static str,
     });
 }
 
+async fn set_device_ai_processing_done_wait(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+    delay: Duration,
+) {
+    if !should_sync_device_ai_processing(inner) {
+        return;
+    }
+    let expected_session_id = inner.state.lock().session_id;
+    if delay > Duration::from_millis(0) {
+        tokio::time::sleep(delay).await;
+    }
+    let session_id = inner.state.lock().session_id;
+    if session_id != expected_session_id {
+        log::info!(
+            "[embedded-ble] skipped stale device AI processing LED completion reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
+        );
+        return;
+    }
+    let result = async_runtime::spawn_blocking(move || {
+        crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2))
+    })
+    .await;
+    match result {
+        Ok(Ok(())) => log::info!(
+            "[embedded-ble] device AI processing LED completed reason={reason} session_id={session_id} delayed_ms={}",
+            delay.as_millis()
+        ),
+        Ok(Err(err)) => log::warn!(
+            "[embedded-ble] device AI processing LED completion sync failed reason={reason} session_id={session_id}: {err}"
+        ),
+        Err(err) => log::warn!(
+            "[embedded-ble] device AI processing LED completion task failed reason={reason} session_id={session_id}: {err}"
+        ),
+    }
+}
+
 fn set_device_ai_processing_warning_async(
     inner: &Arc<Inner>,
     reason: &'static str,
@@ -346,6 +430,43 @@ fn set_device_ai_processing_warning_async(
     });
 }
 
+async fn set_device_ai_processing_warning_wait(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+    delay: Duration,
+) {
+    if !should_sync_device_ai_processing(inner) {
+        return;
+    }
+    let expected_session_id = inner.state.lock().session_id;
+    if delay > Duration::from_millis(0) {
+        tokio::time::sleep(delay).await;
+    }
+    let session_id = inner.state.lock().session_id;
+    if session_id != expected_session_id {
+        log::info!(
+            "[embedded-ble] skipped stale device AI processing LED warning reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
+        );
+        return;
+    }
+    let result = async_runtime::spawn_blocking(move || {
+        crate::embedded_ble::send_recording_processing_warning(Duration::from_secs(2))
+    })
+    .await;
+    match result {
+        Ok(Ok(())) => log::info!(
+            "[embedded-ble] device AI processing LED warning reason={reason} session_id={session_id} delayed_ms={}",
+            delay.as_millis()
+        ),
+        Ok(Err(err)) => log::warn!(
+            "[embedded-ble] device AI processing LED warning sync failed reason={reason} session_id={session_id}: {err}"
+        ),
+        Err(err) => log::warn!(
+            "[embedded-ble] device AI processing LED warning task failed reason={reason} session_id={session_id}: {err}"
+        ),
+    }
+}
+
 struct DeviceAiProcessingGuard {
     inner: Arc<Inner>,
     active: bool,
@@ -372,20 +493,20 @@ impl DeviceAiProcessingGuard {
         self.started_at = Some(Instant::now());
     }
 
-    fn complete_success(&mut self, reason: &'static str) {
+    async fn complete_success(&mut self, reason: &'static str) {
         if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
-            set_device_ai_processing_done_async(&self.inner, reason, delay);
+            set_device_ai_processing_done_wait(&self.inner, reason, delay).await;
             self.completed = true;
             self.active = false;
             self.started_at = None;
         }
     }
 
-    fn complete_warning(&mut self, reason: &'static str) {
+    async fn complete_warning(&mut self, reason: &'static str) {
         if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
-            set_device_ai_processing_warning_async(&self.inner, reason, delay);
+            set_device_ai_processing_warning_wait(&self.inner, reason, delay).await;
             self.completed = true;
             self.active = false;
             self.started_at = None;
@@ -496,11 +617,13 @@ fn emit_embedded_audio_pcm_capsule_if_active(
         _ => return false,
     };
     if embedded_ble_actor_context_active(inner) {
-        apply_embedded_ble_session_actor_dictation_event(
+        let trace_timeline = should_trace_embedded_ble_pcm_capsule(inner, session_id, after_stop);
+        apply_embedded_ble_session_actor_dictation_event_with_trace(
             inner,
             EmbeddedBleSessionActorCommand::BlePacket,
             session_id,
             format!("pcm_capsule after_stop={after_stop}"),
+            trace_timeline,
             DictationEvent::BlePcm {
                 session_id,
                 after_stop,
@@ -1950,6 +2073,84 @@ fn embedded_ble_stats_only_enabled() -> bool {
         .unwrap_or(false)
 }
 
+fn configured_embedded_ble_control_signal_path(env_name: &str) -> Option<String> {
+    std::env::var(env_name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn wait_for_embedded_ble_control_signal(path: &str, timeout: Duration, label: &str) -> bool {
+    let started = Instant::now();
+    while started.elapsed() < timeout {
+        if std::path::Path::new(path).exists() {
+            if let Err(err) = fs::remove_file(path) {
+                log::warn!("[embedded-ble] {label} signal remove failed ({path}): {err}");
+            }
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    false
+}
+
+fn start_embedded_ble_control_signal_worker_if_configured() {
+    let start_signal =
+        configured_embedded_ble_control_signal_path(EMBEDDED_BLE_CONTROL_START_SIGNAL_ENV);
+    let stop_signal =
+        configured_embedded_ble_control_signal_path(EMBEDDED_BLE_CONTROL_STOP_SIGNAL_ENV);
+    if start_signal.is_none() && stop_signal.is_none() {
+        return;
+    }
+
+    let _ = std::thread::Builder::new()
+        .name("listener-type-embedded-ble-control-signals".into())
+        .spawn(move || {
+            log::info!(
+                "[embedded-ble] headless control signal worker started start_signal={:?} stop_signal={:?}",
+                start_signal,
+                stop_signal
+            );
+            if let Some(path) = start_signal.as_deref() {
+                if wait_for_embedded_ble_control_signal(path, Duration::from_secs(60), "start") {
+                    match crate::embedded_ble::send_recording_control_toggle(
+                        EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                    ) {
+                        Ok(()) => log::info!(
+                            "[embedded-ble] headless control start signal sent VREC:TOGGLE via Type"
+                        ),
+                        Err(err) => log::warn!(
+                            "[embedded-ble] headless control start signal failed: {err}"
+                        ),
+                    }
+                } else {
+                    log::warn!(
+                        "[embedded-ble] headless control start signal timed out waiting for {path}"
+                    );
+                    return;
+                }
+            }
+            if let Some(path) = stop_signal.as_deref() {
+                if wait_for_embedded_ble_control_signal(path, Duration::from_secs(300), "stop") {
+                    match crate::embedded_ble::send_recording_control_stop(
+                        EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                    ) {
+                        Ok(()) => log::info!(
+                            "[embedded-ble] headless control stop signal sent VREC:STOP via Type"
+                        ),
+                        Err(err) => log::warn!(
+                            "[embedded-ble] headless control stop signal failed: {err}"
+                        ),
+                    }
+                } else {
+                    log::warn!(
+                        "[embedded-ble] headless control stop signal timed out waiting for {path}"
+                    );
+                }
+            }
+        });
+}
+
 async fn submit_embedded_audio_ble_stream_stats_only(
     timeout: Duration,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
@@ -2048,9 +2249,14 @@ async fn submit_embedded_audio_ble_stream_impl(
         EmbeddedStreamingDictation::background_listener()
     };
     let mut ready_capsule_shown = false;
+    let mut control_signal_worker_started = false;
     while let Some(signal) = rx.recv().await {
         let notification = match signal {
             EmbeddedBleStreamSignal::Ready => {
+                if emit_idle_capture_errors && !control_signal_worker_started {
+                    control_signal_worker_started = true;
+                    start_embedded_ble_control_signal_worker_if_configured();
+                }
                 if emit_idle_capture_errors && !ready_capsule_shown {
                     ready_capsule_shown = true;
                     emit_capsule(
@@ -2184,11 +2390,13 @@ impl EmbeddedStreamingDictation {
         event: crate::embedded_audio::StreamingSessionEvent,
     ) -> Result<bool, String> {
         let event_detail = embedded_ble_session_event_detail(&event);
-        dispatch_embedded_ble_session_actor_command(
+        let trace_timeline = embedded_ble_session_event_should_trace(&event);
+        dispatch_embedded_ble_session_actor_command_with_trace(
             inner,
             EmbeddedBleSessionActorCommand::BlePacket,
             self.session.as_ref().map(|session| session.session_id),
             event_detail,
+            trace_timeline,
             |_| (),
         );
         self.apply_ble_packet_actor_command(inner, event).await
@@ -2775,6 +2983,19 @@ fn embedded_ble_session_event_detail(
         crate::embedded_audio::StreamingSessionEvent::Ignored(reason) => {
             format!("event=ignored reason={reason:?}")
         }
+    }
+}
+
+fn embedded_ble_session_event_should_trace(
+    event: &crate::embedded_audio::StreamingSessionEvent,
+) -> bool {
+    match event {
+        crate::embedded_audio::StreamingSessionEvent::PcmChunk(chunk) => {
+            chunk.after_stop_boundary
+                || chunk.packet_sequence == 0
+                || chunk.packet_sequence % EMBEDDED_BLE_PCM_EVENT_TRACE_PACKET_INTERVAL == 0
+        }
+        _ => true,
     }
 }
 
@@ -3372,7 +3593,9 @@ async fn finish_end_session_after_stop_transition(
                 error_code: Some("emptyTranscript".to_string()),
             },
         );
-        device_ai_processing.complete_warning("dictation_empty_transcript");
+        device_ai_processing
+            .complete_warning("dictation_empty_transcript")
+            .await;
         publish_embedded_ble_asr_final(
             inner,
             current_session_id,
@@ -3782,9 +4005,13 @@ async fn finish_end_session_after_stop_transition(
         Some(inserted_chars),
     );
     if device_processing_succeeded {
-        device_ai_processing.complete_success(device_processing_success_reason);
+        device_ai_processing
+            .complete_success(device_processing_success_reason)
+            .await;
     } else {
-        device_ai_processing.complete_warning("dictation_processing_warning");
+        device_ai_processing
+            .complete_warning("dictation_processing_warning")
+            .await;
     }
 
     schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
@@ -3974,7 +4201,8 @@ mod tests {
         default_done_message, device_ai_processing_completion_delay,
         device_processing_final_succeeded, dictation_error_code,
         embedded_audio_stop_feedback_latched, embedded_ble_listener_capture_ready,
-        embedded_ble_session_actor_history, embedded_ble_stream_idle_timeout,
+        embedded_ble_processing_sync_disabled, embedded_ble_session_actor_history,
+        embedded_ble_session_event_should_trace, embedded_ble_stream_idle_timeout,
         embedded_pcm_rms_and_peak, embedded_streaming_chunk_is_asr_input,
         emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
         finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
@@ -3988,13 +4216,13 @@ mod tests {
         EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
         DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_ASR_PREROLL_BYTES,
         EMBEDDED_AUDIO_ASR_PREROLL_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
-        EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS,
+        EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS, EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV,
     };
     use crate::coordinator::Coordinator;
     use crate::coordinator_state::{new_session_id, SessionPhase};
     use crate::embedded_audio::{
         build_audio_data_notification, build_session_start_notification,
-        build_session_stop_notification, StreamingPcmChunk,
+        build_session_stop_notification, StreamingPcmChunk, StreamingSessionEvent,
     };
     use crate::types::{
         ChineseScriptPreference, CorrectionRule, DictationInputSource, InsertStatus, PolishMode,
@@ -4699,6 +4927,45 @@ mod tests {
     }
 
     #[test]
+    fn embedded_ble_pcm_event_trace_is_sampled() {
+        let first = StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+            session_id: 1,
+            packet_sequence: 0,
+            pcm: vec![1, 2],
+            after_stop_boundary: false,
+        });
+        let middle = StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+            session_id: 1,
+            packet_sequence: 17,
+            pcm: vec![1, 2],
+            after_stop_boundary: false,
+        });
+        let sample = StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+            session_id: 1,
+            packet_sequence: 50,
+            pcm: vec![1, 2],
+            after_stop_boundary: false,
+        });
+        let after_stop = StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
+            session_id: 1,
+            packet_sequence: 51,
+            pcm: vec![1, 2],
+            after_stop_boundary: true,
+        });
+
+        assert!(embedded_ble_session_event_should_trace(&first));
+        assert!(!embedded_ble_session_event_should_trace(&middle));
+        assert!(embedded_ble_session_event_should_trace(&sample));
+        assert!(embedded_ble_session_event_should_trace(&after_stop));
+        assert!(embedded_ble_session_event_should_trace(
+            &StreamingSessionEvent::Stopped {
+                session_id: 1,
+                expected_packet_count: 52,
+            }
+        ));
+    }
+
+    #[test]
     fn streamed_output_skips_postprocessing_mutations() {
         let rules = vec![correction_rule("Open AI", "OpenAI")];
 
@@ -4870,6 +5137,19 @@ mod tests {
             device_ai_processing_completion_delay(None, started_at),
             Duration::from_millis(0)
         );
+    }
+
+    #[test]
+    fn embedded_ble_processing_sync_can_be_disabled_by_env() {
+        let previous = std::env::var_os(EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV);
+        std::env::set_var(EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, "1");
+        assert!(embedded_ble_processing_sync_disabled());
+        std::env::set_var(EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, "false");
+        assert!(!embedded_ble_processing_sync_disabled());
+        match previous {
+            Some(value) => std::env::set_var(EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, value),
+            None => std::env::remove_var(EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV),
+        }
     }
 
     #[test]

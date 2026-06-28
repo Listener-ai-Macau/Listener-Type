@@ -78,6 +78,7 @@ const EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(12);
 const EMBEDDED_BLE_RECORDING_CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const DEVICE_KEY_BLE_PENDING_ACTION_TTL: Duration = Duration::from_secs(15);
+const EXTRA_ASR_HOTWORDS_ENV: &str = "LISTENER_TYPE_EXTRA_ASR_HOTWORDS";
 const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
     "Listener BLE 正在重连。若设备处于离线状态，请按 KEY4/唤醒键，再重试；仍失败可导出诊断。";
 
@@ -326,6 +327,7 @@ pub enum EmbeddedBleNotifySubscriptionState {
 }
 
 const EMBEDDED_BLE_SESSION_ACTOR_HISTORY_LIMIT: usize = 64;
+const EMBEDDED_BLE_PCM_CAPSULE_TRACE_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EmbeddedBleSessionActorCommand {
@@ -388,6 +390,33 @@ impl EmbeddedBleSessionActorRecord {
 struct EmbeddedBleSessionActorState {
     next_seq: u64,
     history: VecDeque<EmbeddedBleSessionActorRecord>,
+    pcm_capsule_trace: EmbeddedBlePcmCapsuleTraceState,
+}
+
+#[derive(Debug, Default)]
+struct EmbeddedBlePcmCapsuleTraceState {
+    session_id: Option<SessionId>,
+    last_after_stop: Option<bool>,
+    last_trace_at: Option<Instant>,
+}
+
+impl EmbeddedBlePcmCapsuleTraceState {
+    fn should_trace(&mut self, session_id: SessionId, after_stop: bool, now: Instant) -> bool {
+        let session_changed = self.session_id != Some(session_id);
+        let boundary_changed = self.last_after_stop != Some(after_stop);
+        let due = self
+            .last_trace_at
+            .map(|last| now.duration_since(last) >= EMBEDDED_BLE_PCM_CAPSULE_TRACE_INTERVAL)
+            .unwrap_or(true);
+
+        let should_trace = after_stop || session_changed || boundary_changed || due;
+        if should_trace {
+            self.session_id = Some(session_id);
+            self.last_after_stop = Some(after_stop);
+            self.last_trace_at = Some(now);
+        }
+        should_trace
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -2522,14 +2551,13 @@ async fn handle_device_dictation_action(
     );
 
     if input_source == DictationInputSource::EmbeddedBle {
-        let mut queued_pending_start = false;
+        let mut queue_pending_start_on_wait_failure = false;
         if !embedded_ble_listener_capture_ready(&inner) {
             if matches!(
                 device_key_ble_recording_control_decision(&inner),
                 DeviceKeyBleRecordingControlDecision::Start
             ) {
-                queue_pending_device_key_ble_start(&inner, key, gesture, "listener_not_ready");
-                queued_pending_start = true;
+                queue_pending_start_on_wait_failure = true;
             }
             record_embedded_ble_reconnect_attempt(&inner, "device_key_recording_control");
             refresh_embedded_ble_listener(&inner);
@@ -2554,13 +2582,14 @@ async fn handle_device_dictation_action(
                 "backend.device_key",
                 "ble_recording_control_wait_failed",
                 format!(
-                    "key={} gesture={} pending_start={} error={error}",
+                    "key={} gesture={} queue_pending_start={} error={error}",
                     key.label(),
                     gesture.label(),
-                    queued_pending_start
+                    queue_pending_start_on_wait_failure
                 ),
             );
-            if queued_pending_start {
+            if queue_pending_start_on_wait_failure {
+                queue_pending_device_key_ble_start(&inner, key, gesture, "listener_not_ready");
                 emit_capsule(
                     &inner,
                     CapsuleState::Reconnecting,
@@ -2587,27 +2616,6 @@ async fn handle_device_dictation_action(
         }
 
         let control_decision = device_key_ble_recording_control_decision(&inner);
-        if queued_pending_start {
-            clear_pending_device_key_ble_start(&inner, key, gesture, "inline_ready");
-            if !matches!(
-                control_decision,
-                DeviceKeyBleRecordingControlDecision::Start
-            ) {
-                crate::timeline::mark(
-                    "backend.device_key",
-                    "ble_recording_control_pending_dropped_state_changed",
-                    format!(
-                        "key={} gesture={} decision={control_decision:?}",
-                        key.label(),
-                        gesture.label()
-                    ),
-                );
-                log::info!(
-                    "[device-key] pending BLE recording start dropped after inline recovery because state changed decision={control_decision:?}"
-                );
-                return;
-            }
-        }
         if let DeviceKeyBleRecordingControlDecision::IgnoreStarting {
             session_id,
             elapsed_ms,
@@ -3447,7 +3455,14 @@ fn record_embedded_ble_session_actor_command(
     session_id: Option<SessionId>,
     detail: impl Into<String>,
 ) -> u64 {
-    dispatch_embedded_ble_session_actor_command(inner, command, session_id, detail, |seq| seq)
+    dispatch_embedded_ble_session_actor_command_with_trace(
+        inner,
+        command,
+        session_id,
+        detail,
+        true,
+        |seq| seq,
+    )
 }
 
 fn dispatch_embedded_ble_session_actor_command<T>(
@@ -3455,6 +3470,19 @@ fn dispatch_embedded_ble_session_actor_command<T>(
     command: EmbeddedBleSessionActorCommand,
     session_id: Option<SessionId>,
     detail: impl Into<String>,
+    handle: impl FnOnce(u64) -> T,
+) -> T {
+    dispatch_embedded_ble_session_actor_command_with_trace(
+        inner, command, session_id, detail, true, handle,
+    )
+}
+
+fn dispatch_embedded_ble_session_actor_command_with_trace<T>(
+    inner: &Arc<Inner>,
+    command: EmbeddedBleSessionActorCommand,
+    session_id: Option<SessionId>,
+    detail: impl Into<String>,
+    trace_timeline: bool,
     handle: impl FnOnce(u64) -> T,
 ) -> T {
     let detail = detail.into();
@@ -3474,12 +3502,25 @@ fn dispatch_embedded_ble_session_actor_command<T>(
         let result = handle(seq);
         (seq, result)
     };
-    crate::timeline::mark(
-        "backend.embedded_ble_session_actor",
-        command.as_str(),
-        format!("seq={seq} session_id={session_id:?} {detail}"),
-    );
+    if trace_timeline {
+        crate::timeline::mark(
+            "backend.embedded_ble_session_actor",
+            command.as_str(),
+            format!("seq={seq} session_id={session_id:?} {detail}"),
+        );
+    }
     result
+}
+
+fn should_trace_embedded_ble_pcm_capsule(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    after_stop: bool,
+) -> bool {
+    let mut actor = inner.embedded_ble_session_actor.lock();
+    actor
+        .pcm_capsule_trace
+        .should_trace(session_id, after_stop, Instant::now())
 }
 
 #[cfg(test)]
@@ -5408,7 +5449,7 @@ fn read_volc_credentials() -> VolcengineCredentials {
 }
 
 fn enabled_hotwords(inner: &Arc<Inner>) -> Vec<DictionaryHotword> {
-    inner
+    let mut hotwords: Vec<DictionaryHotword> = inner
         .vocab
         .list()
         .unwrap_or_default()
@@ -5417,7 +5458,35 @@ fn enabled_hotwords(inner: &Arc<Inner>) -> Vec<DictionaryHotword> {
             phrase: e.phrase,
             enabled: e.enabled,
         })
+        .collect();
+    append_extra_asr_hotwords(&mut hotwords);
+    hotwords
+}
+
+fn extra_asr_hotword_phrases() -> Vec<String> {
+    let Ok(raw) = std::env::var(EXTRA_ASR_HOTWORDS_ENV) else {
+        return Vec::new();
+    };
+    raw.split(|ch: char| matches!(ch, ',' | ';' | '|' | '\n' | '\r' | '\t'))
+        .map(str::trim)
+        .filter(|phrase| !phrase.is_empty())
+        .map(ToOwned::to_owned)
         .collect()
+}
+
+fn append_extra_asr_hotwords(hotwords: &mut Vec<DictionaryHotword>) {
+    for phrase in extra_asr_hotword_phrases() {
+        if hotwords
+            .iter()
+            .any(|entry| entry.enabled && entry.phrase == phrase)
+        {
+            continue;
+        }
+        hotwords.push(DictionaryHotword {
+            phrase,
+            enabled: true,
+        });
+    }
 }
 
 // ─────────────────────────── QA session lifecycle ───────────────────────────
@@ -6103,6 +6172,33 @@ mod tests {
 
     fn session_id(n: u128) -> SessionId {
         Uuid::from_u128(n)
+    }
+
+    #[tokio::test]
+    async fn extra_asr_hotwords_env_splits_and_enables_phrases() {
+        let _guard = ENV_LOCK.lock().await;
+        std::env::set_var(
+            EXTRA_ASR_HOTWORDS_ENV,
+            "打开设置, 新建文件;撤销操作|打开设置\nCompanion",
+        );
+
+        let mut hotwords = vec![DictionaryHotword {
+            phrase: "打开设置".to_string(),
+            enabled: false,
+        }];
+        append_extra_asr_hotwords(&mut hotwords);
+
+        let enabled: Vec<&str> = hotwords
+            .iter()
+            .filter(|entry| entry.enabled)
+            .map(|entry| entry.phrase.as_str())
+            .collect();
+        assert_eq!(
+            enabled,
+            vec!["打开设置", "新建文件", "撤销操作", "Companion"]
+        );
+
+        std::env::remove_var(EXTRA_ASR_HOTWORDS_ENV);
     }
 
     #[test]
@@ -7820,17 +7916,151 @@ mod tests {
             start + Duration::from_millis(100),
         ));
     }
+
+    #[test]
+    fn capsule_recording_frontend_events_are_throttled() {
+        let mut throttle = CapsuleUiThrottleState::default();
+        let start = Instant::now();
+        let request = CapsuleFrontendRequest {
+            session_id: Some("session-1".to_string()),
+            state: CapsuleState::Recording,
+            visible: true,
+            translation: false,
+            show_capsule: true,
+            message: None,
+            inserted_chars: None,
+        };
+        let mut emitted = 0;
+
+        for tick in 0..300 {
+            let now = start + Duration::from_millis(tick * 2);
+            if throttle.should_emit_frontend(request.clone(), now) {
+                emitted += 1;
+            }
+        }
+
+        assert!(
+            (10..=13).contains(&emitted),
+            "2 ms Recording ticks over ~600 ms should emit at about 20 Hz, got {emitted}"
+        );
+    }
+
+    #[test]
+    fn capsule_frontend_state_transition_bypasses_throttle() {
+        let mut throttle = CapsuleUiThrottleState::default();
+        let start = Instant::now();
+
+        assert!(throttle.should_emit_frontend(
+            CapsuleFrontendRequest {
+                session_id: Some("session-1".to_string()),
+                state: CapsuleState::Recording,
+                visible: true,
+                translation: false,
+                show_capsule: true,
+                message: None,
+                inserted_chars: None,
+            },
+            start,
+        ));
+        assert!(!throttle.should_emit_frontend(
+            CapsuleFrontendRequest {
+                session_id: Some("session-1".to_string()),
+                state: CapsuleState::Recording,
+                visible: true,
+                translation: false,
+                show_capsule: true,
+                message: None,
+                inserted_chars: None,
+            },
+            start + Duration::from_millis(10),
+        ));
+        assert!(throttle.should_emit_frontend(
+            CapsuleFrontendRequest {
+                session_id: Some("session-1".to_string()),
+                state: CapsuleState::Transcribing,
+                visible: true,
+                translation: false,
+                show_capsule: true,
+                message: None,
+                inserted_chars: None,
+            },
+            start + Duration::from_millis(10),
+        ));
+    }
+
+    #[test]
+    fn capsule_frontend_text_change_bypasses_level_throttle() {
+        let mut throttle = CapsuleUiThrottleState::default();
+        let start = Instant::now();
+
+        assert!(throttle.should_emit_frontend(
+            CapsuleFrontendRequest {
+                session_id: Some("session-1".to_string()),
+                state: CapsuleState::Recording,
+                visible: true,
+                translation: false,
+                show_capsule: true,
+                message: Some("第一段".to_string()),
+                inserted_chars: None,
+            },
+            start,
+        ));
+        assert!(!throttle.should_emit_frontend(
+            CapsuleFrontendRequest {
+                session_id: Some("session-1".to_string()),
+                state: CapsuleState::Recording,
+                visible: true,
+                translation: false,
+                show_capsule: true,
+                message: Some("第一段".to_string()),
+                inserted_chars: None,
+            },
+            start + Duration::from_millis(10),
+        ));
+        assert!(throttle.should_emit_frontend(
+            CapsuleFrontendRequest {
+                session_id: Some("session-1".to_string()),
+                state: CapsuleState::Recording,
+                visible: true,
+                translation: false,
+                show_capsule: true,
+                message: Some("第二段".to_string()),
+                inserted_chars: None,
+            },
+            start + Duration::from_millis(10),
+        ));
+    }
+
+    #[test]
+    fn embedded_ble_pcm_capsule_trace_is_sampled() {
+        let mut trace = EmbeddedBlePcmCapsuleTraceState::default();
+        let start = Instant::now();
+        let session_a = session_id(1);
+        let session_b = session_id(2);
+
+        assert!(trace.should_trace(session_a, false, start));
+        assert!(!trace.should_trace(session_a, false, start + Duration::from_millis(100)));
+        assert!(trace.should_trace(session_a, false, start + Duration::from_millis(500)));
+        assert!(trace.should_trace(session_b, false, start + Duration::from_millis(510)));
+        assert!(trace.should_trace(session_b, true, start + Duration::from_millis(520)));
+    }
 }
 
 fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
-    inner
+    let mut phrases: Vec<String> = inner
         .vocab
         .list()
         .unwrap_or_default()
         .into_iter()
         .filter(|e| e.enabled)
         .map(|e| e.phrase)
-        .collect()
+        .collect();
+    for phrase in extra_asr_hotword_phrases() {
+        if !phrases.iter().any(|existing| existing == &phrase) {
+            phrases.push(phrase);
+        }
+    }
+    phrases
 }
 
 /// 终止态（Done / Cancelled / Error）后延迟 N ms 把胶囊改回 Idle，让浮窗自动消失。
@@ -7840,6 +8070,7 @@ const CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS: u64 = 6_000;
 const CAPSULE_EMPTY_TRANSCRIPT_HIDE_DELAY_MS: u64 = 1_500;
 const CAPSULE_STREAM_ERROR_HIDE_DELAY_MS: u64 = 6_000;
 const CAPSULE_RECORDING_WINDOW_KEEPALIVE_MS: u64 = 1_000;
+const CAPSULE_RECORDING_FRONTEND_TICK_MS: u64 = 50;
 
 /// Coordinator 全局超时保护：防止 ASR await_final_result() 永远挂起。
 /// 设置为 15 秒（比 ASR 的 12 秒 FINAL_RESULT_TIMEOUT 稍长），
@@ -8023,8 +8254,11 @@ fn capture_frontmost_app() -> Option<String> {
 fn restore_focus_target_if_possible(target: Option<usize>) -> bool {
     use std::ffi::c_void;
     use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, IsIconic, IsWindow, SetForegroundWindow, ShowWindow, SW_RESTORE,
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindow,
+        SetForegroundWindow, ShowWindow, SW_RESTORE,
     };
 
     let Some(raw_target) = target else {
@@ -8048,12 +8282,36 @@ fn restore_focus_target_if_possible(target: Option<usize>) -> bool {
     if unsafe { IsIconic(hwnd).as_bool() } {
         let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
     }
+    let current_thread_id = unsafe { GetCurrentThreadId() };
+    let mut foreground_process_id = 0;
+    let foreground_thread_id =
+        unsafe { GetWindowThreadProcessId(foreground, Some(&mut foreground_process_id)) };
+    let mut target_process_id = 0;
+    let target_thread_id = unsafe { GetWindowThreadProcessId(hwnd, Some(&mut target_process_id)) };
+    let attach_foreground = foreground_thread_id != 0 && foreground_thread_id != current_thread_id;
+    let attach_target = target_thread_id != 0 && target_thread_id != current_thread_id;
+    if attach_foreground {
+        let _ = unsafe { AttachThreadInput(current_thread_id, foreground_thread_id, true) };
+    }
+    if attach_target {
+        let _ = unsafe { AttachThreadInput(current_thread_id, target_thread_id, true) };
+    }
+    let _ = unsafe { BringWindowToTop(hwnd) };
     let _ = unsafe { SetForegroundWindow(hwnd) };
-    std::thread::sleep(std::time::Duration::from_millis(60));
+    let _ = unsafe { SetFocus(hwnd) };
+    std::thread::sleep(std::time::Duration::from_millis(90));
+    if attach_target {
+        let _ = unsafe { AttachThreadInput(current_thread_id, target_thread_id, false) };
+    }
+    if attach_foreground {
+        let _ = unsafe { AttachThreadInput(current_thread_id, foreground_thread_id, false) };
+    }
 
     let foreground = unsafe { GetForegroundWindow() };
     if foreground != hwnd {
-        log::warn!("[coord] failed to restore original Windows insertion target before paste");
+        log::warn!(
+            "[coord] failed to restore original Windows insertion target before paste target_thread={target_thread_id} foreground_thread={foreground_thread_id}"
+        );
         return false;
     }
     true
@@ -8311,9 +8569,31 @@ fn emit_capsule_with_session(
 ) {
     let app_opt = inner.app.lock().clone();
     let Some(app) = app_opt else { return };
-    let seq = inner.capsule_sequence.fetch_add(1, Ordering::SeqCst) + 1;
     let session_id = event_session_id.map(|id| id.to_string());
     let translation = inner.translation_modifier_seen.load(Ordering::SeqCst);
+    let visible = !matches!(state, CapsuleState::Idle);
+    let show_capsule = inner.prefs.get().show_capsule;
+    let now = Instant::now();
+    let should_emit_frontend = {
+        let mut throttle = inner.capsule_ui_throttle.lock();
+        throttle.should_emit_frontend(
+            CapsuleFrontendRequest {
+                session_id: session_id.clone(),
+                state,
+                visible,
+                translation,
+                show_capsule,
+                message: message.clone(),
+                inserted_chars,
+            },
+            now,
+        )
+    };
+    if !should_emit_frontend {
+        return;
+    }
+
+    let seq = inner.capsule_sequence.fetch_add(1, Ordering::SeqCst) + 1;
     let payload = CapsulePayload {
         seq,
         session_id,
@@ -8325,8 +8605,6 @@ fn emit_capsule_with_session(
         translation,
     };
 
-    let visible = !matches!(state, CapsuleState::Idle);
-    let show_capsule = inner.prefs.get().show_capsule;
     crate::capsule_log::record_backend_emit(&payload, visible, show_capsule);
     let should_trace_emit = !matches!(state, CapsuleState::Recording)
         || elapsed_ms == 0
@@ -8357,7 +8635,7 @@ fn emit_capsule_with_session(
                 translation,
                 show_capsule,
             },
-            Instant::now(),
+            now,
         )
     };
 
@@ -8441,13 +8719,60 @@ impl CapsuleWindowRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CapsuleFrontendRequest {
+    session_id: Option<String>,
+    state: CapsuleState,
+    visible: bool,
+    translation: bool,
+    show_capsule: bool,
+    message: Option<String>,
+    inserted_chars: Option<u32>,
+}
+
+impl CapsuleFrontendRequest {
+    fn visible_recording_level_tick(&self) -> bool {
+        self.visible
+            && self.show_capsule
+            && matches!(self.state, CapsuleState::Recording)
+            && self.message.is_none()
+            && self.inserted_chars.is_none()
+    }
+}
+
 #[derive(Debug, Default)]
 struct CapsuleUiThrottleState {
     last_request: Option<CapsuleWindowRequest>,
     last_recording_keepalive_at: Option<Instant>,
+    last_frontend_request: Option<CapsuleFrontendRequest>,
+    last_frontend_emit_at: Option<Instant>,
 }
 
 impl CapsuleUiThrottleState {
+    fn should_emit_frontend(&mut self, request: CapsuleFrontendRequest, now: Instant) -> bool {
+        if self.last_frontend_request.as_ref() != Some(&request) {
+            self.last_frontend_request = Some(request);
+            self.last_frontend_emit_at = Some(now);
+            return true;
+        }
+
+        if request.visible_recording_level_tick() {
+            let due = self
+                .last_frontend_emit_at
+                .map(|last| {
+                    now.duration_since(last)
+                        >= Duration::from_millis(CAPSULE_RECORDING_FRONTEND_TICK_MS)
+                })
+                .unwrap_or(true);
+            if due {
+                self.last_frontend_emit_at = Some(now);
+                return true;
+            }
+        }
+
+        false
+    }
+
     fn should_run_window_ops(&mut self, request: CapsuleWindowRequest, now: Instant) -> bool {
         let visible_recording = request.visible_recording();
         if self.last_request.as_ref() != Some(&request) {

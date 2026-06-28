@@ -4849,6 +4849,8 @@ pub async fn transfer_firmware_ota_ble(
 
     coord.begin_firmware_ota_transfer();
     let is_stm32wb_st_ota = manifest.is_stm32wb_st_ble_ota();
+    let is_companion_ota_v2 = manifest.is_companion_ota_v2();
+    let is_listener_ota_v2 = manifest.is_listener_ble_ota_v2();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_version = version.clone();
@@ -4870,6 +4872,18 @@ pub async fn transfer_firmware_ota_ble(
                 manifest_chunk_bytes,
                 Some(&progress),
             )
+        } else if is_companion_ota_v2 {
+            crate::embedded_ble::transfer_companion_ota_v2(
+                &firmware_bytes,
+                manifest_chunk_bytes,
+                Some(&progress),
+            )
+        } else if is_listener_ota_v2 {
+            crate::embedded_ble::transfer_listener_ota_v2(
+                &firmware_bytes,
+                manifest_chunk_bytes,
+                Some(&progress),
+            )
         } else {
             crate::embedded_ble::transfer_firmware_ota(
                 &transfer_version,
@@ -4883,7 +4897,7 @@ pub async fn transfer_firmware_ota_ble(
     .await
     .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
     .and_then(|result| result);
-    let confirmed_version = if transfer.is_ok() && !is_stm32wb_st_ota {
+    let confirmed_version = if transfer.is_ok() && !is_stm32wb_st_ota && !is_companion_ota_v2 {
         confirm_firmware_ota_version(&version).await
     } else {
         None

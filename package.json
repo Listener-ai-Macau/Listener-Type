@@ -1,11 +1,13 @@
 {
   "name": "listener-type",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:companion": "tauri dev --config src-tauri/tauri.companion.conf.json",
     "build": "tsc && vite build",
+    "build:companion": "tauri build --config src-tauri/tauri.companion.conf.json",
     "preview": "vite preview",
     "tauri": "tauri",
     "check:hotkey-injection": "node scripts/check-hotkey-injection.mjs",

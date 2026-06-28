@@ -25,6 +25,7 @@ import {
   firmwareOtaRollbackVersionFromText,
   firmwareOtaVersionNotConfirmedAction,
   initialFirmwareOtaState,
+  isCompanionOtaV2Manifest,
   isStm32wbStBleOtaManifest,
   validateFirmwareOtaPackage,
   type FirmwareOtaBlocker,
@@ -250,7 +251,8 @@ export function FirmwareOtaPanel({
       await delay(450);
       if (
         firmwareOtaConfirmedVersionMatches(transferResult?.confirmedVersion, selectedPackage.manifest.version) ||
-        (isStm32wbStBleOtaManifest(selectedPackage.manifest) && transferResult?.transport === selectedPackage.manifest.protocolName)
+        ((isStm32wbStBleOtaManifest(selectedPackage.manifest) || isCompanionOtaV2Manifest(selectedPackage.manifest)) &&
+          transferResult?.transport === selectedPackage.manifest.protocolName)
       ) {
         const confirmedVersion = transferResult?.confirmedVersion?.trim() ?? null;
         if (confirmedVersion) {

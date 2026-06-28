@@ -154,6 +154,53 @@ fn choose_transcript_text(result_text: &str, utterance_text: &str) -> String {
     }
 }
 
+fn choose_revision_text(candidate_text: &str, merged_text: &str) -> String {
+    if let Some(clean) = trim_short_stale_suffix_after_full_candidate(candidate_text, merged_text) {
+        return clean;
+    }
+    choose_transcript_text(candidate_text, merged_text)
+}
+
+fn trim_short_stale_suffix_after_full_candidate(
+    candidate_text: &str,
+    merged_text: &str,
+) -> Option<String> {
+    const MIN_STALE_SUFFIX_CHARS: usize = 2;
+    const MAX_STALE_SUFFIX_CHARS: usize = 6;
+    const MIN_CANDIDATE_CHARS: usize = 12;
+
+    let candidate = candidate_text.trim();
+    let merged = merged_text.trim();
+    if candidate.chars().count() < MIN_CANDIDATE_CHARS
+        || candidate.is_empty()
+        || candidate.len() >= merged.len()
+        || !merged.starts_with(candidate)
+    {
+        return None;
+    }
+
+    let suffix = merged[candidate.len()..].trim();
+    let suffix_len = suffix.chars().count();
+    if !(MIN_STALE_SUFFIX_CHARS..=MAX_STALE_SUFFIX_CHARS).contains(&suffix_len) {
+        return None;
+    }
+    if suffix
+        .chars()
+        .any(|ch| is_sentence_terminal_punctuation(ch) || ch == '，' || ch == ',' || ch == '、')
+    {
+        return None;
+    }
+
+    let suffix_compact = compact_transcript_for_duplicate_check(suffix);
+    if suffix_compact.is_empty() {
+        return None;
+    }
+    let candidate_compact = compact_transcript_for_duplicate_check(candidate);
+    candidate_compact
+        .contains(&suffix_compact)
+        .then(|| candidate.to_string())
+}
+
 fn merge_streaming_transcript(previous: &str, current: &str) -> String {
     let previous = previous.trim();
     let current = current.trim();
@@ -236,6 +283,111 @@ fn has_duplicate_tail_after_full_revision(candidate: &str, stable_full: &str) ->
         .collect();
     let distance = char_edit_distance(&stable_suffix, &duplicate_tail);
     (distance as f64 / duplicate_len as f64) <= MAX_DUPLICATE_TAIL_CER
+}
+
+pub(super) fn trim_repeated_short_final_tail(text: &str) -> String {
+    const MIN_SHORT_TAIL_CHARS: usize = 2;
+    const MAX_SHORT_TAIL_CHARS: usize = 6;
+
+    let trimmed = text.trim();
+    let Some((space_start, space_end)) = last_whitespace_run(trimmed) else {
+        return trimmed.to_string();
+    };
+    let prefix = trimmed[..space_start].trim_end();
+    let suffix = trimmed[space_end..].trim_start();
+    if prefix.is_empty()
+        || suffix.is_empty()
+        || !prefix
+            .chars()
+            .next_back()
+            .is_some_and(is_sentence_terminal_punctuation)
+    {
+        return trimmed.to_string();
+    }
+
+    let suffix_compact = compact_transcript_for_duplicate_check(suffix);
+    let suffix_len = suffix_compact.chars().count();
+    if !(MIN_SHORT_TAIL_CHARS..=MAX_SHORT_TAIL_CHARS).contains(&suffix_len) {
+        return trimmed.to_string();
+    }
+    if suffix
+        .chars()
+        .any(|ch| is_sentence_terminal_punctuation(ch) || ch == '，' || ch == ',' || ch == '、')
+    {
+        return trimmed.to_string();
+    }
+
+    let prefix_compact = compact_transcript_for_duplicate_check(prefix);
+    if prefix_compact.contains(&suffix_compact) {
+        return prefix.to_string();
+    }
+    trimmed.to_string()
+}
+
+pub(super) fn normalize_cjk_final_spacing_and_echoes(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut output = String::with_capacity(text.len());
+    let mut index = 0;
+
+    while index < chars.len() {
+        let current = chars[index];
+        if !current.is_whitespace() {
+            output.push(current);
+            index += 1;
+            continue;
+        }
+
+        let whitespace_start = index;
+        while index < chars.len() && chars[index].is_whitespace() {
+            index += 1;
+        }
+
+        let previous = output.chars().next_back();
+        let next = chars.get(index).copied();
+        if previous.zip(next).is_some_and(|(previous, next)| {
+            is_cjk_unified_ideograph(previous) && is_cjk_unified_ideograph(next)
+        }) {
+            if previous == next {
+                index += 1;
+            }
+            continue;
+        }
+
+        for whitespace in &chars[whitespace_start..index] {
+            output.push(*whitespace);
+        }
+    }
+
+    output
+}
+
+fn last_whitespace_run(text: &str) -> Option<(usize, usize)> {
+    let mut active_start = None;
+    let mut last_run = None;
+    for (index, ch) in text.char_indices() {
+        if ch.is_whitespace() {
+            if active_start.is_none() {
+                active_start = Some(index);
+            }
+        } else if let Some(start) = active_start.take() {
+            last_run = Some((start, index));
+        }
+    }
+    if let Some(start) = active_start {
+        last_run = Some((start, text.len()));
+    }
+    last_run
+}
+
+fn is_sentence_terminal_punctuation(ch: char) -> bool {
+    matches!(ch, '。' | '！' | '？' | '.' | '!' | '?')
+}
+
+fn is_cjk_unified_ideograph(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
+    )
 }
 
 fn char_edit_distance(left: &str, right: &str) -> usize {
@@ -428,7 +580,7 @@ pub(super) fn merge_streaming_candidate(
             merged_text.push_str(&new_segment_text);
             merged_text.push_str(&previous_text[index + old_segment_text.len()..]);
             return (
-                choose_transcript_text(&candidate_text, &merged_text),
+                choose_revision_text(&candidate_text, &merged_text),
                 merged_segments,
             );
         }
@@ -436,7 +588,7 @@ pub(super) fn merge_streaming_candidate(
 
     if replaced_existing {
         return (
-            choose_transcript_text(previous_text, &new_segment_text),
+            choose_revision_text(&new_segment_text, previous_text),
             merged_segments,
         );
     }
@@ -492,7 +644,7 @@ fn merge_provider_segmentation_revision(
     };
 
     Some((
-        choose_transcript_text(candidate_text, &merged_text),
+        choose_revision_text(candidate_text, &merged_text),
         incoming_segments.to_vec(),
     ))
 }
@@ -743,6 +895,81 @@ mod tests {
         let duplicated = format!("{final_text}{duplicate_tail}");
 
         assert_eq!(choose_transcript_text(final_text, &duplicated), final_text);
+    }
+
+    #[test]
+    fn trim_repeated_short_final_tail_removes_spaced_history_fragment() {
+        let text = "测试报告里要记录蓝牙包数和识别准确率。再观察识别完成后文字是否立即进入当前光标。最后确认这段文字没有明显缺句，再结束测试。 再观察";
+
+        assert_eq!(
+            trim_repeated_short_final_tail(text),
+            "测试报告里要记录蓝牙包数和识别准确率。再观察识别完成后文字是否立即进入当前光标。最后确认这段文字没有明显缺句，再结束测试。"
+        );
+    }
+
+    #[test]
+    fn trim_repeated_short_final_tail_keeps_intentional_unspaced_repetition() {
+        assert_eq!(
+            trim_repeated_short_final_tail("最后确认一遍。确认"),
+            "最后确认一遍。确认"
+        );
+    }
+
+    #[test]
+    fn trim_repeated_short_final_tail_keeps_new_tail_not_seen_before() {
+        assert_eq!(
+            trim_repeated_short_final_tail("最后确认这段文字没有明显缺句。 结束"),
+            "最后确认这段文字没有明显缺句。 结束"
+        );
+    }
+
+    #[test]
+    fn normalize_cjk_final_spacing_and_echoes_removes_single_char_echo() {
+        assert_eq!(
+            normalize_cjk_final_spacing_and_echoes("后端需要把最终结果稳定的交 交给系统输入链路"),
+            "后端需要把最终结果稳定的交给系统输入链路"
+        );
+        assert_eq!(
+            normalize_cjk_final_spacing_and_echoes("胶囊里可以实时 时看到稳定的预览内容"),
+            "胶囊里可以实时看到稳定的预览内容"
+        );
+    }
+
+    #[test]
+    fn normalize_cjk_final_spacing_and_echoes_removes_cjk_inner_space_only() {
+        assert_eq!(
+            normalize_cjk_final_spacing_and_echoes("胶囊里可以实时 看到稳定的预览内容"),
+            "胶囊里可以实时看到稳定的预览内容"
+        );
+        assert_eq!(
+            normalize_cjk_final_spacing_and_echoes("版本 1.0 uses BLE audio"),
+            "版本 1.0 uses BLE audio"
+        );
+    }
+
+    #[test]
+    fn merge_streaming_candidate_drops_short_stale_tail_after_full_revision() {
+        let previous_core = "我感觉你现在这个说话有点像是及时响应，但是就是它长录音的时候，浏览的时候，它那个录音胶囊有时候会卡住。然后你看是不是存在这个问题。好，比以前快很多，所以说你做了什么？然后 OTA 方面的话是优化了什么东西";
+        let previous_text = format!("{previous_core}然后你");
+        let final_text = "我感觉你现在这个说话有点像是及时响应，但是就是它长录音的时候，浏览的时候，它那个录音胶囊有时候会卡住。然后你看是不是存在这个问题。然后比以前快很多。所以说你做了什么？然后 OTA 方面的话是优化了什么东西吗？";
+        let previous_segments = vec![TranscriptSegment {
+            start_ms: 720,
+            end_ms: Some(19500),
+            text: previous_core.into(),
+        }];
+        let candidate = TranscriptCandidate {
+            text: final_text.into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 720,
+                end_ms: Some(20460),
+                text: final_text.into(),
+            }],
+        };
+
+        let (merged, _segments) =
+            merge_streaming_candidate(&previous_text, &previous_segments, candidate);
+
+        assert_eq!(merged, final_text);
     }
 
     #[test]

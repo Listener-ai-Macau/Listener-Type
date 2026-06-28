@@ -39,6 +39,8 @@ import type {
 } from './types';
 import {
   FIRMWARE_OTA_TRANSPORT_BOUNDARY,
+  LISTENER_OTA_V2_TRANSPORT_BOUNDARY,
+  COMPANION_OTA_V2_TRANSPORT_BOUNDARY,
   STM32WB_ST_OTA_TRANSPORT_BOUNDARY,
   type FirmwareOtaManifest,
   type FirmwareOtaPreflightSnapshot,
@@ -1185,6 +1187,8 @@ export interface FirmwareOtaBleTransferResult {
 
 export type FirmwareOtaBleTransferTransport =
   | typeof FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName
+  | typeof LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName
+  | typeof COMPANION_OTA_V2_TRANSPORT_BOUNDARY.protocolName
   | typeof STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName;
 
 export function transferFirmwareOtaBle(
@@ -1202,7 +1206,11 @@ export function transferFirmwareOtaBle(
       confirmedVersion: null,
       transport: request.manifest.protocolName === STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName
         ? STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName
-        : FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName,
+        : request.manifest.protocolName === LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName
+          ? LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName
+        : request.manifest.protocolName === COMPANION_OTA_V2_TRANSPORT_BOUNDARY.protocolName
+          ? COMPANION_OTA_V2_TRANSPORT_BOUNDARY.protocolName
+          : FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName,
     }),
   );
 }
