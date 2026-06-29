@@ -43,12 +43,6 @@ import {
   type FirmwareOtaManifest,
   type FirmwareOtaPreflightSnapshot,
 } from './firmwareOta';
-import {
-  applyCompanionV1ControlFixture,
-  createCompanionV1Fixture,
-  type CompanionV1ControlRequest,
-  type CompanionV1Snapshot,
-} from './companionV1';
 import { OL_DATA } from './mockData';
 import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from './hotkey';
 
@@ -205,8 +199,6 @@ let mockDeviceSettings: DeviceSettingsSnapshot = {
   detail: 'Browser preview mock. Tauri builds use the firmware DEVICE command contract.',
   lastUpdatedAt: new Date().toISOString(),
 };
-
-let mockCompanionV1Snapshot: CompanionV1Snapshot = createCompanionV1Fixture();
 
 function normalizeDeviceCustomKeyMapping(
   mapping: UserPreferences['deviceCustomKeys']['key1'] | undefined,
@@ -1137,25 +1129,6 @@ export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise
         lastUpdatedAt: new Date().toISOString(),
       };
       return mockDeviceSettings;
-    },
-  );
-}
-
-export function getCompanionV1Snapshot(): Promise<CompanionV1Snapshot> {
-  return invokeOrMock(
-    'get_companion_v1_snapshot',
-    undefined,
-    () => mockCompanionV1Snapshot,
-  );
-}
-
-export function applyCompanionV1Control(request: CompanionV1ControlRequest): Promise<CompanionV1Snapshot> {
-  return invokeOrMock(
-    'apply_companion_v1_control',
-    { request },
-    () => {
-      mockCompanionV1Snapshot = applyCompanionV1ControlFixture(mockCompanionV1Snapshot, request);
-      return mockCompanionV1Snapshot;
     },
   );
 }
