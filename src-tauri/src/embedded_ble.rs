@@ -1693,6 +1693,15 @@ mod windows_ble {
         )
     }
 
+    pub fn send_recording_control_recovery(timeout: Duration) -> Result<(), String> {
+        send_recording_control_command(
+            b"VREC:RECOVERY\n",
+            timeout,
+            "audio control recovery",
+            ActiveControlTransientFallback::TryFreshGatt,
+        )
+    }
+
     pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
         send_type_ready_keepalive_before_processing(timeout, "audio type ready before processing");
         let command = if active {
@@ -9502,6 +9511,11 @@ pub fn send_recording_control_stop(timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_recovery(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_control_recovery(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_processing_state(active, timeout)
 }
@@ -9783,6 +9797,11 @@ pub fn send_recording_control_cancel(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_stop(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording stop is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_recovery(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE recovery is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -10457,6 +10476,27 @@ mod tests {
             .unwrap_or_else(|_| "DEVICE:SET knob_rotation=system_volume".to_string());
         super::windows_ble::send_device_settings_command(&command, Duration::from_secs(4))
             .expect("device settings command should be acknowledged by firmware");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires a Listener device and removes stale Windows pairing/device nodes"]
+    fn ble_name_windows_cleanup_hardware_smoke() {
+        let _guard = DEVICE_SETTINGS_HARDWARE_TEST_LOCK
+            .lock()
+            .expect("device settings hardware test mutex poisoned");
+        super::windows_ble::send_recording_control_recovery(Duration::from_secs(4))
+            .expect("BLE recovery control should be sent to firmware");
+        std::thread::sleep(Duration::from_secs(2));
+        let result = super::windows_ble::unpair_listener_devices();
+        println!("ble_name_windows_cleanup_result={result:?}");
+        assert_eq!(result.failed_devices, 0);
+        assert!(matches!(
+            result.status,
+            super::BleDeviceUnpairStatus::Removed
+                | super::BleDeviceUnpairStatus::AlreadyClean
+                | super::BleDeviceUnpairStatus::NotFound
+        ));
     }
 
     #[cfg(target_os = "windows")]
