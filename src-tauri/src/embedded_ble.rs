@@ -562,6 +562,8 @@ mod windows_ble {
         CM_REMOVE_NO_RESTART, CM_REMOVE_UI_NOT_OK, CONFIGRET, CR_ACCESS_DENIED, CR_NO_SUCH_DEVINST,
         CR_NO_SUCH_DEVNODE, CR_QUERY_VETOED, CR_REMOVE_VETOED, CR_SUCCESS, PNP_VETO_TYPE,
     };
+    use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE};
+    use winreg::RegKey;
 
     const SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091a);
     const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b);
@@ -689,6 +691,8 @@ mod windows_ble {
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
+    const BTHPORT_DEVICE_CACHE_REGISTRY_PATH: &str =
+        r"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices";
     const ATT_WRITE_HEADER_BYTES: usize = 3;
     const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
     const SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091a";
@@ -1022,6 +1026,49 @@ mod windows_ble {
             }
         }
 
+        match bthport_listener_cache_candidates(&target_addresses) {
+            Ok(cache_candidates) => {
+                result.matched_devices = result
+                    .matched_devices
+                    .saturating_add(cache_candidates.len() as u32);
+                for candidate in cache_candidates {
+                    if let Some(address) = candidate.address {
+                        push_unique_address(&mut target_addresses, address);
+                    }
+                    match delete_bthport_cache_candidate(&candidate) {
+                        Ok(DeviceUnpairOutcome::Unpaired) => {
+                            result.unpaired_devices = result.unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Removed stale Windows Bluetooth cache: {}",
+                                candidate.label
+                            ));
+                        }
+                        Ok(DeviceUnpairOutcome::AlreadyUnpaired) => {
+                            result.already_unpaired_devices =
+                                result.already_unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Windows Bluetooth cache was already removed: {}",
+                                candidate.label
+                            ));
+                        }
+                        Err(err) => {
+                            result.failed_devices = result.failed_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Could not remove Windows Bluetooth cache {}: {err}",
+                                candidate.label
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                log::warn!("[embedded-ble] Listener BTHPORT cache cleanup unavailable: {err}");
+                result
+                    .details
+                    .push(format!("Listener BTHPORT cache cleanup unavailable: {err}"));
+            }
+        }
+
         if result.matched_devices == 0 {
             return Ok(crate::embedded_ble::BleDeviceUnpairResult {
                 status: crate::embedded_ble::BleDeviceUnpairStatus::NotFound,
@@ -1060,6 +1107,14 @@ mod windows_ble {
     struct ListenerPnpRemoveCandidate {
         label: String,
         instance_id: String,
+    }
+
+    #[derive(Clone)]
+    struct ListenerBthPortCacheCandidate {
+        label: String,
+        address_key: String,
+        name: String,
+        address: Option<u64>,
     }
 
     enum DeviceUnpairOutcome {
@@ -1268,8 +1323,14 @@ mod windows_ble {
         let count = devices
             .Size()
             .map_err(|err| format!("Windows PnP device collection size failed: {err}"))?;
-        let mut candidates = Vec::new();
-        let mut seen_ids = Vec::new();
+        #[derive(Clone)]
+        struct PnpEntry {
+            name: String,
+            instance_id: String,
+            address: Option<u64>,
+        }
+        let mut entries = Vec::new();
+        let mut known_addresses = target_addresses.to_vec();
         for index in 0..count {
             let info = devices
                 .GetAt(index)
@@ -1286,32 +1347,187 @@ mod windows_ble {
                 continue;
             };
             let address = parse_bluetooth_address_from_device_id(&instance_id);
+            if listener_device_name_matches(&name) {
+                if let Some(address) = address {
+                    push_unique_address(&mut known_addresses, address);
+                }
+            }
+            entries.push(PnpEntry {
+                name,
+                instance_id,
+                address,
+            });
+        }
+
+        let mut candidates = Vec::new();
+        let mut seen_ids = Vec::new();
+        for entry in entries {
+            let address_matches = entry
+                .address
+                .is_some_and(|value| known_addresses.contains(&value));
+            let name_matches = listener_device_name_matches(&entry.name);
+            if !address_matches && !name_matches {
+                continue;
+            }
+            if seen_ids.iter().any(|seen| seen == &entry.instance_id) {
+                continue;
+            }
+            seen_ids.push(entry.instance_id.clone());
+            let label = match (entry.name.trim().is_empty(), entry.address) {
+                (false, Some(address)) => format!(
+                    "{} ({}) [{}]",
+                    entry.name,
+                    crate::embedded_ble::format_bluetooth_address(address),
+                    entry.instance_id
+                ),
+                (false, None) => format!("{} [{}]", entry.name, entry.instance_id),
+                (true, Some(address)) => format!(
+                    "{} [{}]",
+                    crate::embedded_ble::format_bluetooth_address(address),
+                    entry.instance_id
+                ),
+                (true, None) => entry.instance_id.clone(),
+            };
+            if name_matches {
+                log::info!("[embedded-ble] matched Listener PnP node by name: {label}");
+            }
+            candidates.push(ListenerPnpRemoveCandidate {
+                label,
+                instance_id: entry.instance_id,
+            });
+        }
+        Ok(candidates)
+    }
+
+    fn bthport_listener_cache_candidates(
+        target_addresses: &[u64],
+    ) -> Result<Vec<ListenerBthPortCacheCandidate>, String> {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let devices = hklm
+            .open_subkey_with_flags(BTHPORT_DEVICE_CACHE_REGISTRY_PATH, KEY_READ)
+            .map_err(|err| format!("open BTHPORT device cache failed: {err}"))?;
+        let mut candidates = Vec::new();
+        let mut seen_keys = Vec::new();
+
+        for key_result in devices.enum_keys() {
+            let address_key = key_result
+                .map_err(|err| format!("enumerate BTHPORT device cache failed: {err}"))?;
+            let address = parse_bluetooth_address_hex_exact(&address_key);
+            let subkey = match devices.open_subkey_with_flags(&address_key, KEY_READ) {
+                Ok(value) => value,
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] could not open BTHPORT cache key {address_key}: {err}"
+                    );
+                    continue;
+                }
+            };
+            let name = read_bthport_device_name(&subkey).unwrap_or_default();
             let address_matches = address.is_some_and(|value| target_addresses.contains(&value));
             if !address_matches && !listener_device_name_matches(&name) {
                 continue;
             }
-            if seen_ids.iter().any(|seen| seen == &instance_id) {
+            if seen_keys.iter().any(|seen| seen == &address_key) {
                 continue;
             }
-            seen_ids.push(instance_id.clone());
+            seen_keys.push(address_key.clone());
             let label = match (name.trim().is_empty(), address) {
                 (false, Some(address)) => format!(
-                    "{} ({}) [{}]",
+                    "{} ({}) [BTHPORT\\{}]",
                     name,
                     crate::embedded_ble::format_bluetooth_address(address),
-                    instance_id
+                    address_key
                 ),
-                (false, None) => format!("{name} [{instance_id}]"),
+                (false, None) => format!("{name} [BTHPORT\\{address_key}]"),
                 (true, Some(address)) => format!(
-                    "{} [{}]",
+                    "{} [BTHPORT\\{}]",
                     crate::embedded_ble::format_bluetooth_address(address),
-                    instance_id
+                    address_key
                 ),
-                (true, None) => instance_id.clone(),
+                (true, None) => format!("BTHPORT\\{address_key}"),
             };
-            candidates.push(ListenerPnpRemoveCandidate { label, instance_id });
+            candidates.push(ListenerBthPortCacheCandidate {
+                label,
+                address_key,
+                name,
+                address,
+            });
         }
+
         Ok(candidates)
+    }
+
+    fn read_bthport_device_name(key: &RegKey) -> Option<String> {
+        let raw = key.get_raw_value("Name").ok()?;
+        Some(decode_bthport_device_name(&raw.bytes))
+    }
+
+    pub(super) fn decode_bthport_device_name(bytes: &[u8]) -> String {
+        let mut utf16_end = bytes.len();
+        while utf16_end >= 2 && bytes[utf16_end - 1] == 0 && bytes[utf16_end - 2] == 0 {
+            utf16_end -= 2;
+        }
+        let utf16_candidate = &bytes[..utf16_end];
+        if utf16_candidate.len() >= 2 && utf16_candidate.len() % 2 == 0 {
+            let zero_high_bytes = utf16_candidate
+                .chunks_exact(2)
+                .filter(|pair| pair[1] == 0)
+                .count();
+            if zero_high_bytes * 2 >= utf16_candidate.len() {
+                let utf16: Vec<u16> = utf16_candidate
+                    .chunks_exact(2)
+                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                    .collect();
+                return String::from_utf16_lossy(&utf16)
+                    .trim_matches('\0')
+                    .trim()
+                    .to_string();
+            }
+        }
+
+        let end = bytes
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let trimmed = &bytes[..end];
+        String::from_utf8_lossy(trimmed)
+            .trim_matches('\0')
+            .trim()
+            .to_string()
+    }
+
+    fn delete_bthport_cache_candidate(
+        candidate: &ListenerBthPortCacheCandidate,
+    ) -> Result<DeviceUnpairOutcome, String> {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let devices = hklm
+            .open_subkey_with_flags(BTHPORT_DEVICE_CACHE_REGISTRY_PATH, KEY_READ | KEY_WRITE)
+            .map_err(|err| format!("open BTHPORT device cache for write failed: {err}"))?;
+        match devices.delete_subkey_all(&candidate.address_key) {
+            Ok(()) => Ok(DeviceUnpairOutcome::Unpaired),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                Ok(DeviceUnpairOutcome::AlreadyUnpaired)
+            }
+            Err(err) => Err(format!("delete BTHPORT cache key failed: {err}")),
+        }
+    }
+
+    pub fn listener_ble_name_cache_needs_cleanup(expected_name: &str) -> bool {
+        let expected_name = expected_name.trim();
+        if expected_name.is_empty() {
+            return false;
+        }
+        match bthport_listener_cache_candidates(&listener_recovery_target_addresses()) {
+            Ok(candidates) => candidates.iter().any(|candidate| {
+                let name = candidate.name.trim();
+                !name.is_empty() && !name.eq_ignore_ascii_case(expected_name)
+            }),
+            Err(err) => {
+                log::warn!("[embedded-ble] BLE name cache mismatch check failed: {err}");
+                false
+            }
+        }
     }
 
     pub(super) fn normalize_pnp_device_instance_id(raw_id: &str) -> Option<String> {
@@ -1320,9 +1536,17 @@ mod windows_ble {
             return None;
         }
         let upper = trimmed.to_ascii_uppercase();
-        let start = upper
-            .find("BTHLE\\DEV_")
-            .or_else(|| upper.find("BTHLE#DEV_"))?;
+        let start = [
+            "BTHLE\\",
+            "BTHLE#",
+            "BTHLEDEVICE\\",
+            "BTHLEDEVICE#",
+            "HID\\",
+            "HID#",
+        ]
+        .iter()
+        .filter_map(|marker| upper.find(marker))
+        .min()?;
         let mut value = trimmed[start..].to_string();
         if let Some(guid_marker) = value.find("#{") {
             value.truncate(guid_marker);
@@ -1331,7 +1555,10 @@ mod windows_ble {
             value = value.replace('#', "\\");
         }
         let normalized_upper = value.to_ascii_uppercase();
-        if !normalized_upper.starts_with("BTHLE\\DEV_") {
+        if !normalized_upper.starts_with("BTHLE\\")
+            && !normalized_upper.starts_with("BTHLEDEVICE\\")
+            && !normalized_upper.starts_with("HID\\")
+        {
             return None;
         }
         Some(value)
@@ -9848,6 +10075,11 @@ pub fn unpair_listener_devices() -> BleDeviceUnpairResult {
     windows_ble::unpair_listener_devices()
 }
 
+#[cfg(target_os = "windows")]
+pub fn listener_ble_name_cache_needs_cleanup(expected_name: &str) -> bool {
+    windows_ble::listener_ble_name_cache_needs_cleanup(expected_name)
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
@@ -10169,6 +10401,11 @@ pub fn unpair_listener_devices() -> BleDeviceUnpairResult {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn listener_ble_name_cache_needs_cleanup(_expected_name: &str) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -10310,6 +10547,45 @@ mod tests {
         assert_eq!(
             windows_ble::normalize_pnp_device_instance_id(r#"USB\VID_0000&PID_0000"#),
             None
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn pnp_device_instance_normalizer_keeps_btledevice_and_hid_children() {
+        assert_eq!(
+            windows_ble::normalize_pnp_device_instance_id(
+                r#"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0216C0_PID&05DF_REV&0001_FD2F988DB40D\9&2E60A20C&0&004B"#
+            ),
+            Some(
+                r#"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0216C0_PID&05DF_REV&0001_FD2F988DB40D\9&2E60A20C&0&004B"#
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            windows_ble::normalize_pnp_device_instance_id(
+                r#"HID\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0216C0_PID&05DF_REV&0001_FD2F988DB40D&COL01\A&220D8BA7&0&0000"#
+            ),
+            Some(
+                r#"HID\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0216C0_PID&05DF_REV&0001_FD2F988DB40D&COL01\A&220D8BA7&0&0000"#
+                    .to_string()
+            )
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn bthport_device_name_decoder_accepts_ascii_and_utf16() {
+        assert_eq!(
+            windows_ble::decode_bthport_device_name(b"Blistener\0\0"),
+            "Blistener"
+        );
+        assert_eq!(
+            windows_ble::decode_bthport_device_name(&[
+                b'l', 0, b'i', 0, b's', 0, b't', 0, b'e', 0, b'n', 0, b'e', 0, b'r', 0, b'B', 0, 0,
+                0,
+            ]),
+            "listenerB"
         );
     }
 

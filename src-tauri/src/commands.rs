@@ -2285,10 +2285,13 @@ struct DeviceBleNameRecoveryOutcome {
 fn device_ble_name_recovery_needed(
     request: &DeviceSettingsUpdateRequest,
     previous_snapshot: Option<&DeviceSettingsSnapshot>,
+    previous_prefs_ble_name: Option<&str>,
+    windows_cache_needs_cleanup: bool,
 ) -> bool {
     previous_snapshot.is_some_and(|snapshot| {
         snapshot.ble_name != request.ble_name || snapshot.ble_name_pending_restart
-    })
+    }) || previous_prefs_ble_name.is_some_and(|name| name != request.ble_name)
+        || windows_cache_needs_cleanup
 }
 
 fn apply_device_ble_name_recovery_blocking() -> DeviceBleNameRecoveryOutcome {
@@ -2373,8 +2376,15 @@ pub async fn set_device_settings(
         led_zone_brightness_supported,
         plugged_low_power_enabled,
     )?;
-    let ble_name_recovery_needed =
-        device_ble_name_recovery_needed(&request, previous_snapshot.as_ref());
+    let previous_prefs_ble_name = coord.prefs().get().device_ble_name;
+    let windows_cache_needs_cleanup =
+        crate::embedded_ble::listener_ble_name_cache_needs_cleanup(&request.ble_name);
+    let ble_name_recovery_needed = device_ble_name_recovery_needed(
+        &request,
+        previous_snapshot.as_ref(),
+        Some(&previous_prefs_ble_name),
+        windows_cache_needs_cleanup,
+    );
     for command in commands {
         let command_for_error = command.clone();
         run_device_settings_blocking("write", move || {
@@ -7454,20 +7464,43 @@ mod tests {
 
         assert!(!super::device_ble_name_recovery_needed(
             &request,
-            Some(&snapshot)
+            Some(&snapshot),
+            Some("listener-dev"),
+            false,
         ));
         snapshot.ble_name = "listener-old".to_string();
         assert!(super::device_ble_name_recovery_needed(
             &request,
-            Some(&snapshot)
+            Some(&snapshot),
+            Some("listener-dev"),
+            false,
         ));
         snapshot.ble_name = "listener-dev".to_string();
         snapshot.ble_name_pending_restart = true;
         assert!(super::device_ble_name_recovery_needed(
             &request,
-            Some(&snapshot)
+            Some(&snapshot),
+            Some("listener-dev"),
+            false,
         ));
-        assert!(!super::device_ble_name_recovery_needed(&request, None));
+        assert!(super::device_ble_name_recovery_needed(
+            &request,
+            None,
+            Some("listener-old"),
+            false,
+        ));
+        assert!(!super::device_ble_name_recovery_needed(
+            &request,
+            None,
+            Some("listener-dev"),
+            false,
+        ));
+        assert!(super::device_ble_name_recovery_needed(
+            &request,
+            None,
+            Some("listener-dev"),
+            true,
+        ));
     }
 
     #[test]
