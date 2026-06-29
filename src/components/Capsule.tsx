@@ -112,6 +112,42 @@ function CenterText({ os, kind, text, color = 'var(--ol-ink-3)' }: CenterTextPro
   );
 }
 
+function CompletionMark() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: 22,
+        height: 22,
+        borderRadius: 999,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--ol-blue)',
+        background: 'var(--ol-blue-soft)',
+        boxShadow: '0 0 0 0.5px rgba(101, 123, 112, 0.14) inset',
+        animation: 'cap-complete-pop 420ms var(--ol-motion-soft) both',
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14">
+        <path
+          d="M3.2 7.1l2.5 2.6 5.1-5.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            strokeDasharray: 13,
+            strokeDashoffset: 13,
+            animation: 'cap-complete-check 360ms 90ms var(--ol-motion-soft) forwards',
+          }}
+        />
+      </svg>
+    </div>
+  );
+}
+
 interface CircleButtonProps {
   variant: 'cancel' | 'confirm';
   enabled: boolean;
@@ -166,7 +202,6 @@ interface PillProps {
   os: OS;
   state: CapsuleState;
   level: number;
-  insertedChars: number;
   message?: string;
   stopRequested?: boolean;
   stopAcknowledged?: boolean;
@@ -180,7 +215,6 @@ function Pill({
   os,
   state,
   level,
-  insertedChars,
   message,
   stopRequested = false,
   stopAcknowledged = false,
@@ -309,7 +343,9 @@ function Pill({
       break;
     }
     case 'done':
-      center = <CenterText os={os} kind="default" text={message || t('capsule.inserted', { count: insertedChars })} />;
+      center = message
+        ? <CenterText os={os} kind="default" text={message} />
+        : <CompletionMark />;
       break;
     case 'cancelled':
       center = <CenterText os={os} kind="default" text={t('capsule.cancelled')} />;
@@ -422,7 +458,6 @@ export function Capsule() {
   const metrics = getCapsulePillMetrics(os);
   const [state, setState] = useState<CapsuleState>(INITIAL_VISIBLE_STATE);
   const [level, setLevel] = useState<number>(isTauri ? 0 : 0.6);
-  const [insertedChars, setInsertedChars] = useState<number>(0);
   const [message, setMessage] = useState<string | undefined>();
   const [translation, setTranslation] = useState<boolean>(false);
   // `leaving` 与 `lastVisibleState` 协同实现「退出动画」：
@@ -570,7 +605,6 @@ export function Capsule() {
           messageSessionIdRef.current = null;
           setMessage(undefined);
         }
-        if (p.insertedChars != null) setInsertedChars(p.insertedChars);
         setTranslation(p.translation === true);
       });
       if (cancelled) handle();
@@ -780,7 +814,6 @@ export function Capsule() {
         os={os}
         state={renderedState}
         level={leaving ? 0 : level}
-        insertedChars={insertedChars}
         message={message}
         stopRequested={!leaving && renderedState === 'recording' && stopRequested}
         stopAcknowledged={!leaving && shouldShowStopAcknowledgement(renderedState, stopAcknowledged)}
@@ -814,6 +847,14 @@ export function Capsule() {
           0%   { opacity: 0; transform: translateY(4px) scale(.96); }
           45%  { opacity: 1; transform: translateY(0) scale(1.03); }
           100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes cap-complete-pop {
+          0%   { opacity: 0; transform: scale(.72); }
+          58%  { opacity: 1; transform: scale(1.08); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes cap-complete-check {
+          to { stroke-dashoffset: 0; }
         }
       `}</style>
     </div>
