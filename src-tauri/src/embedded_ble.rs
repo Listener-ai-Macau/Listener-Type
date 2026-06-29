@@ -9082,7 +9082,7 @@ mod windows_ble {
 
     impl NotifyCccdTeardown {
         fn for_probe_success() -> Self {
-            Self::LeaveEnabled
+            Self::Disable
         }
     }
 
@@ -9372,10 +9372,10 @@ mod windows_ble {
         }
 
         #[test]
-        fn foreground_probe_success_leaves_notify_cccd_enabled() {
+        fn foreground_probe_success_disables_notify_cccd() {
             assert_eq!(
                 NotifyCccdTeardown::for_probe_success(),
-                NotifyCccdTeardown::LeaveEnabled
+                NotifyCccdTeardown::Disable
             );
         }
     }
