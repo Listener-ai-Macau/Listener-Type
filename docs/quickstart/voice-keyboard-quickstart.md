@@ -4,11 +4,11 @@
 
 ## 1. 安装软件
 
-1.0.0 下载入口：`docs/quickstart/voice-keyboard-download.md`
+1.0.1 下载入口：`docs/quickstart/voice-keyboard-download.md`
 
-- 推荐安装包：`.artifacts/windows-msvc/ListenerType_1.0.0_x64_en-US.msi`
-- SHA256：`8B22AD0BDE41CC10780020E1942651433257F4CD583A0EFE6E7A41C152CB50A5`
-- 备用便携版：`.artifacts/windows-msvc/ListenerType_1.0.0_x64_portable.zip`
+- 推荐安装包：`.artifacts/windows-msvc/ListenerType_1.0.1_x64_en-US.msi`
+- SHA256：`174E92566785FC4D9E488D51B5BD2022DC1F94B23147E1EC5C7ACE4A310BA08B`
+- 备用便携版：`.artifacts/windows-msvc/ListenerType_1.0.1_x64_portable.zip`
 
 双击 MSI 安装。未签名构建可能出现 Windows「未知发布者」提示，请先核对文件名和 SHA256，再选择继续运行。
 
