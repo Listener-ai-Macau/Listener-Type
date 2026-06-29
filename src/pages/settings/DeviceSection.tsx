@@ -5,19 +5,11 @@ import { detectOS } from '../../components/WindowChrome';
 import { SelectLite } from '../../components/ui/SelectLite';
 import { defaultAppShortcutModifiers } from '../../lib/hotkey';
 import {
-  applyCompanionV1Control,
   getDeviceSettings,
-  getCompanionV1Snapshot,
   getEmbeddedBleRuntimeStatus,
   listInstalledApplications,
   setDeviceSettings,
 } from '../../lib/ipc';
-import {
-  companionBleNameIsValid,
-  type CompanionV1ControlAction,
-  type CompanionV1ControlRequest,
-  type CompanionV1Snapshot,
-} from '../../lib/companionV1';
 import type {
   DeviceCustomKeyAction,
   DeviceCustomKeyAppPage,
@@ -117,8 +109,6 @@ const EXTERNAL_APP_MANUAL_VALUE = '__manual_external_app__';
 const DEVICE_SETTINGS_REFRESH_MS = 8000;
 const DEVICE_SETTINGS_READ_TIMEOUT_MS = 12_000;
 const DEVICE_SETTINGS_WRITE_TIMEOUT_MS = 45_000;
-const COMPANION_V1_READ_TIMEOUT_MS = 12_000;
-const COMPANION_V1_WRITE_TIMEOUT_MS = 20_000;
 const DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES = 10;
 
 const fallbackShortcut = (): ShortcutBinding => ({
@@ -201,7 +191,6 @@ export function DeviceSection() {
   return (
     <>
       <DeviceFirmwareSettingsCard />
-      <CompanionV1Panel />
 
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
@@ -443,248 +432,6 @@ function DeviceFirmwareSettingsCard() {
         </div>
       )}
     </Card>
-  );
-}
-
-function CompanionV1Panel() {
-  const { t } = useTranslation();
-  const [snapshot, setSnapshot] = useState<CompanionV1Snapshot | null>(null);
-  const [draftName, setDraftName] = useState('companion');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
-  const [message, setMessage] = useState('');
-
-  const refresh = async () => {
-    setStatus(previous => (previous === 'saving' ? previous : 'loading'));
-    setMessage('');
-    try {
-      const value = await withTimeout(
-        getCompanionV1Snapshot(),
-        COMPANION_V1_READ_TIMEOUT_MS,
-        t('settings.companionV1.readTimeout', '读取 Companion 状态超时。'),
-      );
-      setSnapshot(value);
-      setDraftName(value.bleName.stagedName || value.bleName.activeName);
-      setStatus('idle');
-    } catch (error) {
-      setStatus('error');
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  const nameError = draftName.length > 0 && !companionBleNameIsValid(draftName)
-    ? t('settings.companionV1.errorBleName', 'Companion 蓝牙名称必须是 1-29 个 printable ASCII，不能包含引号、分号、等号或反斜杠。')
-    : '';
-  const controlsDisabled = status === 'loading' || status === 'saving' || !(snapshot?.writeSupported ?? false);
-  const runControl = async (action: CompanionV1ControlAction, patch: Partial<CompanionV1ControlRequest> = {}) => {
-    if (controlsDisabled && action !== 'stageBleName') return;
-    setStatus('saving');
-    setMessage('');
-    try {
-      const value = await withTimeout(
-        applyCompanionV1Control({
-          action,
-          requestId: Math.floor(Date.now() % 0xffff_ffff),
-          ...patch,
-        }),
-        COMPANION_V1_WRITE_TIMEOUT_MS,
-        t('settings.companionV1.writeTimeout', 'Companion 控制写入超时。'),
-      );
-      setSnapshot(value);
-      setDraftName(value.bleName.stagedName || value.bleName.activeName);
-      setStatus('saved');
-      setMessage(t('settings.companionV1.commandSaved', '已发送到 Companion V1'));
-      window.setTimeout(() => setStatus(current => (current === 'saved' ? 'idle' : current)), 1800);
-    } catch (error) {
-      setStatus('error');
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const stageBleName = async () => {
-    if (!snapshot || nameError || status === 'loading' || status === 'saving') return;
-    await runControl('stageBleName', { bleName: draftName });
-  };
-
-  const footerText = nameError || message || formatCompanionV1Footer(snapshot, t);
-  const footerColor = nameError || status === 'error'
-    ? 'var(--ol-err)'
-    : status === 'saved'
-      ? 'var(--ol-ok)'
-      : 'var(--ol-ink-4)';
-
-  return (
-    <Card className="ol-companion-v1-card" style={{ padding: 20 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700 }}>
-            {t('settings.companionV1.title', 'Companion V1')}
-          </div>
-        </div>
-        <Btn
-          variant="ghost"
-          size="sm"
-          icon={status === 'loading' ? undefined : 'refresh'}
-          onClick={() => void refresh()}
-          disabled={status === 'loading' || status === 'saving'}
-          style={{ height: 34, justifyContent: 'center', minWidth: 76, whiteSpace: 'nowrap' }}
-        >
-          {status === 'loading' && <span className="ol-device-button-spinner" aria-hidden="true" />}
-          {status === 'loading'
-            ? t('settings.device.reading', '读取中')
-            : t('settings.device.readFromDevice', '读取')}
-        </Btn>
-      </div>
-
-      {snapshot && (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, marginBottom: 12 }}>
-            <CompanionV1StatusTile
-              title={t('settings.companionV1.meeting', '会议')}
-              value={snapshot.meeting.state}
-              meta={`${formatDurationMs(snapshot.meeting.durationMs)} / ${snapshot.meeting.syncState}`}
-            />
-            <CompanionV1StatusTile
-              title={t('settings.companionV1.imu', 'IMU')}
-              value={snapshot.imu.sensorState}
-              meta={`${snapshot.imu.sampleRateHz} Hz / ${snapshot.imu.calibrationState}`}
-            />
-            <CompanionV1StatusTile
-              title={t('settings.companionV1.speaker', 'Speaker')}
-              value={snapshot.speaker.state}
-              meta={`${snapshot.speaker.volumePercent}% / prompt ${snapshot.speaker.promptId}`}
-            />
-            <CompanionV1StatusTile
-              title={t('settings.companionV1.wake', '语音唤醒')}
-              value={snapshot.wakeWord.engineState}
-              meta={`${snapshot.wakeWord.armed ? 'armed' : 'disabled'} / ${snapshot.wakeWord.sensitivity}%`}
-            />
-          </div>
-
-          <DeviceSettingsPanel
-            title={t('settings.companionV1.bleName', 'Companion 蓝牙名称')}
-            desc={t('settings.companionV1.bleNameDesc', '1-29 个 printable ASCII；写入后需要 BLE 重启或重新配对才会显示。')}
-          >
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input
-                value={draftName}
-                maxLength={29}
-                disabled={controlsDisabled}
-                onChange={event => setDraftName(event.target.value)}
-                style={{ ...inputStyle, flex: '1 1 220px', maxWidth: 320 }}
-              />
-              <Btn variant="ghost" size="sm" icon="check" disabled={controlsDisabled || !!nameError} onClick={() => void stageBleName()}>
-                {t('settings.companionV1.stageName', '暂存')}
-              </Btn>
-              <Btn variant="ghost" size="sm" icon="refresh" disabled={controlsDisabled} onClick={() => void runControl('applyBleName')}>
-                {t('settings.companionV1.applyName', '应用')}
-              </Btn>
-              <Btn variant="ghost" size="sm" icon="x" disabled={controlsDisabled} onClick={() => void runControl('resetBleName')}>
-                {t('settings.companionV1.resetName', '重置')}
-              </Btn>
-            </div>
-          </DeviceSettingsPanel>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10, marginTop: 12 }}>
-            <CompanionV1CommandGroup
-              title={t('settings.companionV1.meetingControls', '会议记录')}
-              actions={[
-                { label: t('settings.companionV1.meetingStart', '开始'), action: 'meetingStart', icon: 'play' },
-                { label: t('settings.companionV1.meetingStop', '停止'), action: 'meetingStop', icon: 'x' },
-                { label: t('settings.companionV1.meetingFinalize', '完成'), action: 'meetingFinalize', icon: 'check' },
-              ]}
-              disabled={controlsDisabled}
-              onAction={action => void runControl(action)}
-            />
-            <CompanionV1CommandGroup
-              title={t('settings.companionV1.audioControls', 'Speaker')}
-              actions={[
-                { label: t('settings.companionV1.prompt', '提示音'), action: 'speakerPrompt', icon: 'play' },
-                { label: t('settings.companionV1.speakerStop', '停止'), action: 'speakerStop', icon: 'x' },
-              ]}
-              disabled={controlsDisabled}
-              onAction={action => void runControl(action, { promptId: snapshot.speaker.promptId, volumePercent: snapshot.speaker.volumePercent })}
-            />
-            <CompanionV1CommandGroup
-              title={t('settings.companionV1.wakeControls', '语音唤醒')}
-              actions={[
-                { label: t('settings.companionV1.wakeArm', '开启'), action: 'wakeArm', icon: 'mic' },
-                { label: t('settings.companionV1.wakeDisable', '关闭'), action: 'wakeDisable', icon: 'x' },
-                { label: t('settings.companionV1.wakeDetect', '测试'), action: 'wakeTestDetect', icon: 'sparkle' },
-              ]}
-              disabled={controlsDisabled}
-              onAction={action => void runControl(action, { sensitivity: snapshot.wakeWord.sensitivity })}
-            />
-          </div>
-        </>
-      )}
-
-      {!snapshot && status === 'loading' && (
-        <div className="ol-device-settings-busy" role="status" aria-live="polite">
-          <span className="ol-device-busy-spinner" aria-hidden="true" />
-          <span>{t('settings.companionV1.reading', '正在读取 Companion V1...')}</span>
-        </div>
-      )}
-
-      {footerText && (
-        <div style={{ fontSize: 11.5, color: footerColor, lineHeight: 1.45, paddingTop: 12, marginTop: 12, borderTop: '0.5px solid var(--ol-line-soft)' }}>
-          {footerText}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function CompanionV1StatusTile({
-  title,
-  value,
-  meta,
-}: {
-  title: string;
-  value: string;
-  meta: string;
-}) {
-  return (
-    <div style={{ border: '0.5px solid var(--ol-line-soft)', borderRadius: 8, padding: '10px 12px', minWidth: 0 }}>
-      <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', marginBottom: 4 }}>{title}</div>
-      <div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
-      <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{meta}</div>
-    </div>
-  );
-}
-
-function CompanionV1CommandGroup({
-  title,
-  actions,
-  disabled,
-  onAction,
-}: {
-  title: string;
-  actions: Array<{ label: string; action: CompanionV1ControlAction; icon: string }>;
-  disabled: boolean;
-  onAction: (action: CompanionV1ControlAction) => void;
-}) {
-  return (
-    <div style={{ borderTop: '0.5px solid var(--ol-line-soft)', paddingTop: 10, minWidth: 0 }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>{title}</div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {actions.map(item => (
-          <Btn
-            key={item.action}
-            variant="ghost"
-            size="sm"
-            icon={item.icon}
-            disabled={disabled}
-            onClick={() => onAction(item.action)}
-          >
-            {item.label}
-          </Btn>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -1363,31 +1110,6 @@ function DeviceKeyMappingControl({
       )}
     </div>
   );
-}
-
-function formatDurationMs(durationMs: number): string {
-  if (!Number.isFinite(durationMs) || durationMs <= 0) return '0s';
-  const totalSeconds = Math.round(durationMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-}
-
-function formatCompanionV1Footer(
-  snapshot: CompanionV1Snapshot | null,
-  t: ReturnType<typeof useTranslation>['t'],
-): string {
-  if (!snapshot) return '';
-  if (!snapshot.writeSupported) {
-    return t('settings.companionV1.readOnly', '当前 Companion 状态只读。');
-  }
-  if (snapshot.bleName.pendingRestart) {
-    return t('settings.companionV1.pendingRestart', '蓝牙名称已暂存；需要 BLE 重启或重新配对后生效。');
-  }
-  if (snapshot.detail) {
-    return snapshot.detail;
-  }
-  return '';
 }
 
 function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateRequest {
