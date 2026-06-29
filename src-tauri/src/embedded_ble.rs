@@ -5362,6 +5362,23 @@ mod windows_ble {
     }
 
     fn open_ota_target() -> Result<OpenOtaTarget, String> {
+        let mut last_error = None;
+        if let Some(address) = configured_bluetooth_address() {
+            match open_ota_target_for_device(address) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] selected configured OTA device address={address:012X}"
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    let message = format!("configured OTA address {address:012X} failed: {err}");
+                    log::warn!("[embedded-ble] {message}");
+                    last_error = Some(message);
+                }
+            }
+        }
+
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(OTA_SERVICE_UUID)
             .map_err(|err| format!("BLE OTA service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
@@ -5378,7 +5395,6 @@ mod windows_ble {
             ));
         }
 
-        let mut last_error = None;
         for index in 0..count {
             let info = match devices.GetAt(index) {
                 Ok(info) => info,
