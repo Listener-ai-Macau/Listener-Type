@@ -8564,6 +8564,80 @@ fn publish_dictation_capsule(
     true
 }
 
+fn apply_capsule_window_request<R: tauri::Runtime>(
+    inner: &Arc<Inner>,
+    app: &AppHandle<R>,
+    seq: u64,
+    session_id_for_log: &str,
+    state: CapsuleState,
+    elapsed_ms: u64,
+    translation: bool,
+    show_capsule: bool,
+    visible: bool,
+) {
+    let Some(window) = app.get_webview_window("capsule") else {
+        log::warn!("[capsule] emit requested but capsule window is missing");
+        crate::timeline::mark(
+            "backend.capsule",
+            "missing_window",
+            format!(
+                "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms}"
+            ),
+        );
+        return;
+    };
+    crate::prepare_capsule_window_for_overlay(&window);
+    maybe_position_capsule_bottom_center(inner, &window, translation);
+    if show_capsule && visible {
+        let shown_no_activate = show_capsule_window_no_activate(app, &window);
+        crate::timeline::mark(
+            "backend.capsule",
+            "show_request",
+            format!(
+                "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms} shown_no_activate={shown_no_activate}"
+            ),
+        );
+        log::info!("[capsule] show request state={state:?} shown_no_activate={shown_no_activate}");
+        if !shown_no_activate {
+            log::warn!("[capsule] no-activate show failed; falling back to window.show()");
+            match window.show() {
+                Ok(()) => crate::timeline::mark(
+                    "backend.capsule",
+                    "show_fallback",
+                    format!(
+                        "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms}"
+                    ),
+                ),
+                Err(err) => {
+                    log::warn!("[capsule] show fallback failed: {err}");
+                    crate::timeline::mark(
+                        "backend.capsule",
+                        "show_fallback_failed",
+                        format!(
+                            "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms} err={err}"
+                        ),
+                    );
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        crate::restore_main_window_key_if_active(app);
+    } else {
+        crate::timeline::mark(
+            "backend.capsule",
+            "hide_request",
+            format!(
+                "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms} show_capsule={show_capsule} visible={visible}"
+            ),
+        );
+        log::info!(
+            "[capsule] hide request state={state:?} show_capsule={show_capsule} visible={visible}"
+        );
+        hide_capsule_window_if_present();
+        let _ = window.hide();
+    }
+}
+
 fn emit_capsule_with_session(
     inner: &Arc<Inner>,
     event_session_id: Option<SessionId>,
@@ -8646,56 +8720,47 @@ fn emit_capsule_with_session(
     };
 
     if run_window_ops {
-        let inner_for_main = Arc::clone(inner);
-        let app_for_main = app.clone();
-        let session_id_for_main = session_id_for_log.clone();
-        let _ = app.run_on_main_thread(move || {
-            let Some(window) = app_for_main.get_webview_window("capsule") else {
-                log::warn!("[capsule] emit requested but capsule window is missing");
+        #[cfg(target_os = "windows")]
+        apply_capsule_window_request(
+            inner,
+            &app,
+            seq,
+            &session_id_for_log,
+            state,
+            elapsed_ms,
+            translation,
+            show_capsule,
+            visible,
+        );
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let inner_for_main = Arc::clone(inner);
+            let app_for_main = app.clone();
+            let session_id_for_main = session_id_for_log.clone();
+            if let Err(err) = app.run_on_main_thread(move || {
+                apply_capsule_window_request(
+                    &inner_for_main,
+                    &app_for_main,
+                    seq,
+                    &session_id_for_main,
+                    state,
+                    elapsed_ms,
+                    translation,
+                    show_capsule,
+                    visible,
+                );
+            }) {
+                log::warn!("[capsule] main-thread window request dispatch failed: {err}");
                 crate::timeline::mark(
-                    "backend.capsule",
-                    "missing_window",
-                    format!("seq={seq} session_id={session_id_for_main} state={state:?} elapsed_ms={elapsed_ms}"),
-                );
-                return;
-            };
-            crate::prepare_capsule_window_for_overlay(&window);
-            maybe_position_capsule_bottom_center(&inner_for_main, &window, translation);
-            if show_capsule && visible {
-                let shown_no_activate = show_capsule_window_no_activate(&app_for_main, &window);
-                crate::timeline::mark(
-                    "backend.capsule",
-                    "show_request",
-                    format!(
-                        "seq={seq} session_id={session_id_for_main} state={state:?} elapsed_ms={elapsed_ms} shown_no_activate={shown_no_activate}"
-                    ),
-                );
-                log::info!(
-                    "[capsule] show request state={state:?} shown_no_activate={shown_no_activate}"
-                );
-                if !shown_no_activate {
-                    #[cfg(target_os = "windows")]
-                    log::warn!("[capsule] no-activate show failed; skipped activating fallback");
-                    #[cfg(not(target_os = "windows"))]
-                    let _ = window.show();
-                }
-                #[cfg(target_os = "macos")]
-                crate::restore_main_window_key_if_active(&app_for_main);
-            } else {
-                crate::timeline::mark(
-                    "backend.capsule",
-                    "hide_request",
-                    format!(
-                        "seq={seq} session_id={session_id_for_main} state={state:?} elapsed_ms={elapsed_ms} show_capsule={show_capsule} visible={visible}"
-                    ),
-                );
-                log::info!(
-                    "[capsule] hide request state={state:?} show_capsule={show_capsule} visible={visible}"
-                );
-                hide_capsule_window_if_present();
-                let _ = window.hide();
+                "backend.capsule",
+                "main_thread_dispatch_failed",
+                format!(
+                    "seq={seq} session_id={session_id_for_log} state={state:?} elapsed_ms={elapsed_ms} err={err}"
+                ),
+            );
             }
-        });
+        }
     }
 
     if should_trace_emit {
