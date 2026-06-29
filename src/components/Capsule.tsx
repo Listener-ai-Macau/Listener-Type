@@ -8,6 +8,7 @@ import {
 } from '../lib/capsuleLayout';
 import { invokeOrMock, isTauri } from '../lib/ipc';
 import { capsuleCancelEnabled, capsuleConfirmEnabled } from '../lib/capsuleActionRules';
+import { getCapsuleDisplayMessage } from '../lib/capsuleDisplayMessage';
 import {
   truncatePreview,
   PREVIEW_FINAL_TRANSITION,
@@ -552,9 +553,13 @@ export function Capsule() {
           return;
         }
         setLevel(p.level ?? 0);
-        if (p.message) {
+        const displayMessage = getCapsuleDisplayMessage(p.state, p.message);
+        if (displayMessage) {
           messageSessionIdRef.current = p.sessionId ?? null;
-          setMessage(p.message);
+          setMessage(displayMessage);
+        } else if (p.message) {
+          messageSessionIdRef.current = null;
+          setMessage(undefined);
         } else if (!shouldPreserveMessageWithoutPayload(
           p.state,
           p.sessionId ?? null,
