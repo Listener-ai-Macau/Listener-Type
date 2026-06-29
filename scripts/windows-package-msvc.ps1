@@ -2,6 +2,7 @@ param(
   [string]$ArtifactsRoot = "",
   [switch]$SkipRustInstall,
   [switch]$SkipNpmCi,
+  [switch]$IncludePortable,
   [switch]$CleanArtifacts
 )
 
@@ -270,40 +271,47 @@ function Copy-WindowsArtifacts {
   $version = Get-PackageVersion
   $msiName = Get-MsiName
   $msiPath = Find-BuiltMsiPath
-  $exePath = Join-Path $releaseRoot "listener-type.exe"
-  $webView2Loader = Get-ChildItem -Path (Join-Path $releaseRoot "build") -Recurse -Filter "WebView2Loader.dll" -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -match "\\out\\x64\\WebView2Loader\.dll$" } |
-    Select-Object -First 1
+  $portableName = "ListenerType_${version}_x64_portable"
+  $portableRoot = Join-Path $ArtifactsRoot $portableName
+  $zipPath = Join-Path $ArtifactsRoot "$portableName.zip"
 
   if (-not (Test-Path $msiPath)) {
     throw "MSI not found: $msiPath"
-  }
-  if (-not (Test-Path $exePath)) {
-    throw "Release exe not found: $exePath"
-  }
-  if ($null -eq $webView2Loader) {
-    throw "WebView2Loader.dll x64 not found under $releaseRoot\build"
   }
 
   Reset-ArtifactsRoot
   Copy-Item -LiteralPath $msiPath -Destination (Join-Path $ArtifactsRoot $msiName) -Force
 
-  $portableName = "ListenerType_${version}_x64_portable"
-  $portableRoot = Join-Path $ArtifactsRoot $portableName
-  New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
-  Copy-Item -LiteralPath $exePath -Destination (Join-Path $portableRoot "listener-type.exe") -Force
-  Copy-Item -LiteralPath $webView2Loader.FullName -Destination (Join-Path $portableRoot "WebView2Loader.dll") -Force
-
-  $zipPath = Join-Path $ArtifactsRoot "$portableName.zip"
+  Remove-Item -LiteralPath $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
-  Compress-Archive -LiteralPath $portableRoot -DestinationPath $zipPath -CompressionLevel Optimal
+
+  $hashPaths = @((Join-Path $ArtifactsRoot $msiName))
+  if ($IncludePortable) {
+    $exePath = Join-Path $releaseRoot "listener-type.exe"
+    $webView2Loader = Get-ChildItem -Path (Join-Path $releaseRoot "build") -Recurse -Filter "WebView2Loader.dll" -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -match "\\out\\x64\\WebView2Loader\.dll$" } |
+      Select-Object -First 1
+
+    if (-not (Test-Path $exePath)) {
+      throw "Release exe not found: $exePath"
+    }
+    if ($null -eq $webView2Loader) {
+      throw "WebView2Loader.dll x64 not found under $releaseRoot\build"
+    }
+
+    New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
+    Copy-Item -LiteralPath $exePath -Destination (Join-Path $portableRoot "listener-type.exe") -Force
+    Copy-Item -LiteralPath $webView2Loader.FullName -Destination (Join-Path $portableRoot "WebView2Loader.dll") -Force
+    Compress-Archive -LiteralPath $portableRoot -DestinationPath $zipPath -CompressionLevel Optimal
+    $hashPaths += $zipPath
+  }
 
   Write-Host ""
   Write-Host "Windows artifacts:"
   Get-ChildItem -File -LiteralPath $ArtifactsRoot | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
 
   Write-Host "SHA256:"
-  Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $ArtifactsRoot $msiName), $zipPath | Select-Object Path,Hash | Format-List
+  Get-FileHash -Algorithm SHA256 -LiteralPath $hashPaths | Select-Object Path,Hash | Format-List
 }
 
 Push-Location $appRoot

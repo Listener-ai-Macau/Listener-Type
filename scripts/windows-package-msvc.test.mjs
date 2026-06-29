@@ -69,6 +69,7 @@ for (const fragment of requiredFragments) {
 
 assert.match(script, /\[switch\]\$SkipRustInstall/, "script should support opting out of Rust installation");
 assert.match(script, /\[switch\]\$SkipNpmCi/, "script should support reusing existing node_modules");
+assert.match(script, /\[switch\]\$IncludePortable/, "portable zip generation should require an explicit opt-in switch");
 assert.match(script, /\[switch\]\$CleanArtifacts/, "script should support cleaning the output directory");
 assert.doesNotMatch(script, /WixTools314/, "MSVC packaging must not hard-code a single Tauri WiX tools version");
 assert.doesNotMatch(ciWorkflow, /WixTools314/, "CI MSI repair must not hard-code a single Tauri WiX tools version");
@@ -85,6 +86,9 @@ assert.doesNotMatch(script, /LISTENER_TYPE_IME_DLL_X86/, "default packaging must
 assert.doesNotMatch(script, /listener-type-ime\.wixobj/, "default MSI repair must not link the IME WiX object");
 assert.match(script, /Listener Type_\$\(Get-PackageVersion\)_x64_en-US\.msi/, "packaging should accept Tauri's product-name MSI output");
 assert.match(script, /Copy-Item -LiteralPath \$msiPath -Destination \(Join-Path \$ArtifactsRoot \$msiName\)/, "packaging should copy the built MSI to the stable ListenerType artifact name");
+assert.match(script, /Remove-Item -LiteralPath \$portableRoot -Recurse -Force -ErrorAction SilentlyContinue/, "default packaging should remove stale portable folders");
+assert.match(script, /Remove-Item -LiteralPath \$zipPath -Force -ErrorAction SilentlyContinue/, "default packaging should remove stale portable zips");
+assert.match(script, /if \(\$IncludePortable\) \{[\s\S]*Compress-Archive/, "portable zip generation should stay behind IncludePortable");
 assert.match(script, /Invoke-MsvcBuild[\s\S]*Repair-TauriMsiBundle[\s\S]*Copy-WindowsArtifacts/, "packaging should relink the Tauri MSI after enabling same-version major upgrades");
 assert.match(script, /AllowSameVersionUpgrades="yes"/, "MSI packaging should allow same-version 1.0.0 replacement builds to major-upgrade installed copies");
 assert.match(script, /DowngradeErrorMessage=/, "MSI packaging should keep an explicit downgrade block after replacing AllowDowngrades");
