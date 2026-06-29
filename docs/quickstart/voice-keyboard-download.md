@@ -6,8 +6,8 @@
 
 | 产物 | 路径 | SHA256 |
 |---|---|---|
-| MSI 安装包 | `.artifacts/windows-msvc/ListenerType_1.0.1_x64_en-US.msi` | `174E92566785FC4D9E488D51B5BD2022DC1F94B23147E1EC5C7ACE4A310BA08B` |
-| 便携 ZIP | `.artifacts/windows-msvc/ListenerType_1.0.1_x64_portable.zip` | `3FA235EC08BC83F52DE90D9C96DCCC408CECE31929DDC0431777FD53BE1EB10E` |
+| MSI 安装包 | `.artifacts/windows-msvc/ListenerType_1.0.1_x64_en-US.msi` | `796EEFE942E49E2B00A043B409DE4FA59181BE0D36F6073654E599CA585DADC9` |
+| 便携 ZIP | `.artifacts/windows-msvc/ListenerType_1.0.1_x64_portable.zip` | `7AF3E6DEF8B9AFEB182524B321C848548DDFFBDB4D3BC144810BA1C7D2A08DFB` |
 
 ## 安装前检查
 

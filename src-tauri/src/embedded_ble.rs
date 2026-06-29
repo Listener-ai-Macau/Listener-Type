@@ -64,6 +64,15 @@ pub struct FirmwareOtaDeviceSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct EmbeddedAudioBleStatus {
+    pub connected: bool,
+    pub readiness: Option<String>,
+    pub capabilities: Option<String>,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeviceSettingsStatus {
     pub status_led_brightness_percent: u8,
     pub key_led_brightness_percent: u8,
@@ -1781,7 +1790,7 @@ mod windows_ble {
         let payload_len = payload.as_bytes().len();
         let mut active_capture_error: Option<String> = None;
 
-        if payload_len < 64 {
+        if payload_len < 64 && device_settings_command_allows_active_capture(command) {
             if let Some(result) = send_audio_control_via_active_capture(
                 payload.as_bytes(),
                 timeout,
@@ -1867,6 +1876,19 @@ mod windows_ble {
         })?;
         log::info!("[embedded-ble] device settings command sent");
         Ok(())
+    }
+
+    fn device_settings_command_allows_active_capture(command: &str) -> bool {
+        let Some(arguments) = command.strip_prefix("DEVICE:SET ") else {
+            return true;
+        };
+        !arguments
+            .split_ascii_whitespace()
+            .any(device_settings_token_updates_ble_name)
+    }
+
+    fn device_settings_token_updates_ble_name(token: &str) -> bool {
+        token.starts_with("ble_name=") || token.starts_with("name=")
     }
 
     pub fn read_device_settings_status(
@@ -2560,6 +2582,7 @@ mod windows_ble {
                 return Ok(());
             }
             if deadline.is_some_and(|deadline| now >= deadline) {
+                cleanup.log_embedded_audio_status_snapshot("capture timeout");
                 return Err(format!(
                     "BLE embedded audio capture timed out after {} ms",
                     idle_timeout
@@ -4754,6 +4777,40 @@ mod windows_ble {
         Err(last_error.unwrap_or_else(|| {
             "No subscribable embedded audio BLE notify characteristic found".to_string()
         }))
+    }
+
+    fn read_embedded_audio_status_from_service(
+        service: &GattDeviceService,
+    ) -> crate::embedded_ble::EmbeddedAudioBleStatus {
+        let readiness = read_optional_string_characteristic_from_service(
+            service,
+            OTA_READINESS_UUID,
+            BluetoothCacheMode::Uncached,
+        );
+        let capabilities = read_optional_string_characteristic_from_service(
+            service,
+            OTA_CAPABILITIES_UUID,
+            BluetoothCacheMode::Uncached,
+        );
+
+        crate::embedded_ble::EmbeddedAudioBleStatus {
+            connected: true,
+            readiness,
+            capabilities,
+            detail: Some("embedded audio BLE service reachable".to_string()),
+        }
+    }
+
+    pub fn read_embedded_audio_status(
+        _timeout: Duration,
+    ) -> Result<crate::embedded_ble::EmbeddedAudioBleStatus, String> {
+        let target = open_notify_target()?;
+        let service = target
+            .service
+            .as_ref()
+            .ok_or_else(|| "embedded audio BLE service was not retained".to_string())?;
+
+        Ok(read_embedded_audio_status_from_service(service))
     }
 
     pub(super) fn is_transient_notify_target_open_error(err: &str) -> bool {
@@ -8949,6 +9006,23 @@ mod windows_ble {
             let _ = request.result_tx.send(result);
         }
 
+        fn log_embedded_audio_status_snapshot(&self, label: &str) {
+            let Some(service) = self.target.service.as_ref() else {
+                log::warn!(
+                    "[embedded-ble] capture #{}: {label} status snapshot unavailable: service not retained",
+                    self.capture_id
+                );
+                return;
+            };
+            let status = read_embedded_audio_status_from_service(service);
+            log::info!(
+                "[embedded-ble] capture #{}: {label} status readiness={:?} capabilities={:?}",
+                self.capture_id,
+                status.readiness,
+                status.capabilities
+            );
+        }
+
         fn remove_status_handlers(&mut self) {
             if let Some(token) = self.connection_status_token.take() {
                 if let Some(device) = self.target.device.as_ref() {
@@ -9352,6 +9426,22 @@ mod windows_ble {
         }
 
         #[test]
+        fn device_settings_ble_name_commands_skip_active_capture() {
+            assert!(!device_settings_command_allows_active_capture(
+                "DEVICE:SET ble_name=Blistener"
+            ));
+            assert!(!device_settings_command_allows_active_capture(
+                "DEVICE:SET name=Blistener"
+            ));
+            assert!(device_settings_command_allows_active_capture(
+                "DEVICE:SET knob_rotation=system_volume"
+            ));
+            assert!(device_settings_command_allows_active_capture(
+                "DEVICE:STATUS"
+            ));
+        }
+
+        #[test]
         fn recording_stop_retries_with_fresh_gatt_after_active_transient_error() {
             assert_eq!(
                 recording_stop_active_transient_fallback(),
@@ -9389,6 +9479,11 @@ pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, Str
 #[cfg(target_os = "windows")]
 pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
     windows_ble::probe_notify_subscription(timeout)
+}
+
+#[cfg(target_os = "windows")]
+pub fn read_embedded_audio_status(timeout: Duration) -> Result<EmbeddedAudioBleStatus, String> {
+    windows_ble::read_embedded_audio_status(timeout)
 }
 
 #[cfg(target_os = "windows")]
@@ -9668,6 +9763,11 @@ pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, St
 #[cfg(not(target_os = "windows"))]
 pub fn probe_notify_subscription(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_embedded_audio_status(_timeout: Duration) -> Result<EmbeddedAudioBleStatus, String> {
+    Err("Embedded BLE audio status is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -10357,6 +10457,18 @@ mod tests {
             .unwrap_or_else(|_| "DEVICE:SET knob_rotation=system_volume".to_string());
         super::windows_ble::send_device_settings_command(&command, Duration::from_secs(4))
             .expect("device settings command should be acknowledged by firmware");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_device_settings_status_line_preserves_ble_name_order() {
+        let status = super::windows_ble::parse_device_settings_status_line(
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK active_power=external low_power_idle_ms=60000 knob_rotation=screen_brightness ble_name=\"Blistener\" ble_name_pending=0 external_power_present=1 usb_power_present=1 charging=0 charge_full=1"
+        )
+        .expect("parse Blistener device settings");
+
+        assert_eq!(status.ble_name, "Blistener");
+        assert_ne!(status.ble_name, "listenerB");
     }
 
     #[cfg(target_os = "windows")]

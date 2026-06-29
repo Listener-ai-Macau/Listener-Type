@@ -75,7 +75,8 @@ pub fn run() {
             cli::CliIntent::SubmitEmbeddedAudioBleOnce { .. }
             | cli::CliIntent::SubmitEmbeddedAudioBleStream { .. }
             | cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. }
-            | cli::CliIntent::SendEmbeddedAudioControlStop { .. } => {
+            | cli::CliIntent::SendEmbeddedAudioControlStop { .. }
+            | cli::CliIntent::ReadEmbeddedAudioBleStatus { .. } => {
                 std::process::exit(run_embedded_ble_headless_cli(intent));
             }
             cli::CliIntent::FirmwareOta { .. } => {
@@ -1183,6 +1184,9 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
         cli::CliIntent::SendEmbeddedAudioControlStop { .. } => {
             log::warn!("[cli] embedded BLE control stop is headless-only and was ignored by the running GUI instance");
         }
+        cli::CliIntent::ReadEmbeddedAudioBleStatus { .. } => {
+            log::warn!("[cli] embedded BLE status read is headless-only and was ignored by the running GUI instance");
+        }
         cli::CliIntent::FirmwareOta {
             manifest_path,
             firmware_path,
@@ -1286,6 +1290,25 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                 Err(err) => {
                     println!("embedded_ble_control_stop_result=FAIL error={err}");
                     log::warn!("[cli] send-embedded-audio-control-stop failed: {err}");
+                    1
+                }
+            }
+        }
+        cli::CliIntent::ReadEmbeddedAudioBleStatus { timeout_ms } => {
+            log::info!("[cli] headless read-embedded-audio-ble-status: timeout_ms={timeout_ms:?}");
+            let timeout =
+                std::time::Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
+            match crate::embedded_ble::read_embedded_audio_status(timeout) {
+                Ok(status) => {
+                    let status_json = serde_json::to_string(&status)
+                        .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+                    println!("embedded_audio_ble_status_json={status_json}");
+                    log::info!("embedded_audio_ble_status_json={status_json}");
+                    0
+                }
+                Err(err) => {
+                    println!("embedded_audio_ble_status_result=FAIL error={err}");
+                    log::warn!("[cli] read-embedded-audio-ble-status failed: {err}");
                     1
                 }
             }
