@@ -1694,6 +1694,18 @@ mod windows_ble {
     }
 
     pub fn send_recording_control_recovery(timeout: Duration) -> Result<(), String> {
+        let serial_result = send_control_command_via_usb_serial("VREC:RECOVERY", timeout);
+        match &serial_result {
+            Ok(()) => {
+                log::info!("[embedded-ble] audio control recovery sent via USB serial");
+                return Ok(());
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] audio control recovery USB serial path unavailable; trying BLE control: {err}"
+                );
+            }
+        }
         send_recording_control_command(
             b"VREC:RECOVERY\n",
             timeout,
@@ -1938,6 +1950,36 @@ mod windows_ble {
         exchange_device_settings_via_usb_serial(command, timeout).map(|_| ())
     }
 
+    fn send_control_command_via_usb_serial(
+        command: &str,
+        timeout: Duration,
+    ) -> Result<(), DeviceSettingsSerialError> {
+        let ports = serialport::available_ports().map_err(|err| {
+            DeviceSettingsSerialError::Unavailable(format!(
+                "USB serial port enumeration failed: {err}"
+            ))
+        })?;
+        let candidates = listener_usb_serial_candidates(&ports);
+        if candidates.is_empty() {
+            return Err(DeviceSettingsSerialError::Unavailable(
+                "no Listener USB serial port found".to_string(),
+            ));
+        }
+
+        let mut errors = Vec::new();
+        for port in candidates {
+            match send_control_command_via_serial_port(&port.port_name, command, timeout) {
+                Ok(()) => return Ok(()),
+                Err(err) => errors.push(format!("{}: {err}", port.port_name)),
+            }
+        }
+
+        Err(DeviceSettingsSerialError::Transport(format!(
+            "all Listener USB serial candidates failed: {}",
+            errors.join("; ")
+        )))
+    }
+
     fn exchange_device_settings_via_usb_serial(
         command: &str,
         timeout: Duration,
@@ -2081,6 +2123,30 @@ mod windows_ble {
         Err(DeviceSettingsSerialError::Transport(format!(
             "timed out waiting for ~DEVICE:SETTINGS result=OK; received={tail:?}"
         )))
+    }
+
+    fn send_control_command_via_serial_port(
+        port_name: &str,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<(), DeviceSettingsSerialError> {
+        let serial_timeout = Duration::from_millis(120);
+        let mut port = serialport::new(port_name, DEVICE_SETTINGS_SERIAL_BAUD_RATE)
+            .dtr_on_open(false)
+            .timeout(serial_timeout)
+            .open()
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("open failed: {err}")))?;
+        let _ = port.write_data_terminal_ready(false);
+        let _ = port.write_request_to_send(false);
+
+        drain_serial_input(&mut *port, Duration::from_millis(180));
+        let payload = format!("~{command}\n");
+        port.write_all(payload.as_bytes())
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("write failed: {err}")))?;
+        port.flush()
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("flush failed: {err}")))?;
+        std::thread::sleep(timeout.min(Duration::from_millis(500)));
+        Ok(())
     }
 
     fn drain_serial_input(port: &mut dyn serialport::SerialPort, duration: Duration) {
@@ -10480,23 +10546,14 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    #[ignore = "requires a Listener device and removes stale Windows pairing/device nodes"]
-    fn ble_name_windows_cleanup_hardware_smoke() {
+    #[ignore = "requires a USB-connected or paired Listener device"]
+    fn ble_name_recovery_hardware_smoke() {
         let _guard = DEVICE_SETTINGS_HARDWARE_TEST_LOCK
             .lock()
             .expect("device settings hardware test mutex poisoned");
         super::windows_ble::send_recording_control_recovery(Duration::from_secs(4))
             .expect("BLE recovery control should be sent to firmware");
         std::thread::sleep(Duration::from_secs(2));
-        let result = super::windows_ble::unpair_listener_devices();
-        println!("ble_name_windows_cleanup_result={result:?}");
-        assert_eq!(result.failed_devices, 0);
-        assert!(matches!(
-            result.status,
-            super::BleDeviceUnpairStatus::Removed
-                | super::BleDeviceUnpairStatus::AlreadyClean
-                | super::BleDeviceUnpairStatus::NotFound
-        ));
     }
 
     #[cfg(target_os = "windows")]

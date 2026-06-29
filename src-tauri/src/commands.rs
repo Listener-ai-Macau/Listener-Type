@@ -2279,7 +2279,6 @@ fn device_settings_sent_but_readback_unavailable_detail(error: &str) -> String {
 #[derive(Debug, Clone)]
 struct DeviceBleNameRecoveryOutcome {
     recovery_error: Option<String>,
-    unpair_result: crate::embedded_ble::BleDeviceUnpairResult,
 }
 
 fn device_ble_name_recovery_needed(
@@ -2303,45 +2302,21 @@ fn apply_device_ble_name_recovery_blocking() -> DeviceBleNameRecoveryOutcome {
     };
 
     std::thread::sleep(DEVICE_SETTINGS_BLE_NAME_RECOVERY_SETTLE_DELAY);
-
-    let unpair_result = crate::embedded_ble::unpair_listener_devices();
     log::info!(
-        "[device-settings] BLE name Windows cleanup result status={:?} matched={} removed={} already_clean={} failed={} user_action={} recovery_error={}",
-        unpair_result.status,
-        unpair_result.matched_devices,
-        unpair_result.unpaired_devices,
-        unpair_result.already_unpaired_devices,
-        unpair_result.failed_devices,
-        unpair_result.needs_user_action,
+        "[device-settings] BLE name recovery settle complete recovery_error={}",
         recovery_error.as_deref().unwrap_or("none")
     );
-    DeviceBleNameRecoveryOutcome {
-        recovery_error,
-        unpair_result,
-    }
+    DeviceBleNameRecoveryOutcome { recovery_error }
 }
 
 fn device_ble_name_recovery_detail(outcome: &DeviceBleNameRecoveryOutcome) -> String {
-    let recovery_detail = if outcome.recovery_error.is_some() {
-        "BLE recovery command could not be confirmed"
+    if outcome.recovery_error.is_some() {
+        "BLE name was saved; recovery command could not be confirmed, so Windows may need reconnecting or re-pairing."
+            .to_string()
     } else {
-        "BLE recovery command was sent"
-    };
-    let cleanup_detail = match outcome.unpair_result.status {
-        crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
-            "old Windows Listener pairing/device nodes were removed; pair Listener again if Windows asks"
-        }
-        crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean => {
-            "Windows Listener pairing/device nodes were already clean"
-        }
-        crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
-            "no old Windows Listener pairing/device node was found"
-        }
-        crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
-            "Windows still needs manual Listener removal or re-pairing"
-        }
-    };
-    format!("{recovery_detail}; {cleanup_detail}.")
+        "BLE name was saved and the device was asked to restart pairing advertising with the new name."
+            .to_string()
+    }
 }
 
 #[tauri::command]
@@ -7471,20 +7446,10 @@ mod tests {
     fn device_ble_name_recovery_detail_hides_transport_jargon() {
         let outcome = super::DeviceBleNameRecoveryOutcome {
             recovery_error: Some("BLE CCCD write timed out after GATT cache failure".to_string()),
-            unpair_result: crate::embedded_ble::BleDeviceUnpairResult {
-                status: crate::embedded_ble::BleDeviceUnpairStatus::Removed,
-                attempted: true,
-                matched_devices: 1,
-                unpaired_devices: 1,
-                already_unpaired_devices: 0,
-                failed_devices: 0,
-                needs_user_action: false,
-                details: vec!["Removed stale Listener pairing".to_string()],
-            },
         };
 
         let detail = super::device_ble_name_recovery_detail(&outcome);
-        assert!(detail.contains("pair Listener again"));
+        assert!(detail.contains("re-pairing"));
         assert!(!detail.to_ascii_lowercase().contains("cccd"));
         assert!(!detail.to_ascii_lowercase().contains("gatt"));
     }
