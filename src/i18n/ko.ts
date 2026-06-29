@@ -35,7 +35,7 @@ export const ko: typeof zhCN = {
     thinking: 'thinking',
     cancelled: '취소됨',
     error: '오류 발생',
-    inserted: '입력됨',
+    inserted: '입력 완료',
     translating: '번역 중',
   },
   qa: {

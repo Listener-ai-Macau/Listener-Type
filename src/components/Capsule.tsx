@@ -112,38 +112,70 @@ function CenterText({ os, kind, text, color = 'var(--ol-ink-3)' }: CenterTextPro
   );
 }
 
-function CompletionMark() {
+function CompletionMark({ label }: { label: string }) {
   return (
     <div
       aria-hidden="true"
       style={{
-        width: 22,
-        height: 22,
+        minWidth: 0,
+        height: 26,
+        padding: '0 10px 0 8px',
         borderRadius: 999,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: 7,
         color: 'var(--ol-blue)',
-        background: 'var(--ol-blue-soft)',
-        boxShadow: '0 0 0 0.5px rgba(101, 123, 112, 0.14) inset',
-        animation: 'cap-complete-pop 420ms var(--ol-motion-soft) both',
+        background: 'color-mix(in srgb, var(--ol-blue-soft) 74%, rgba(255,255,255,.72))',
+        boxShadow: '0 0 0 0.5px rgba(101, 123, 112, 0.16) inset, 0 6px 14px -10px rgba(101, 123, 112, 0.42)',
+        animation: 'cap-complete-chip 520ms var(--ol-motion-soft) both',
       }}
     >
-      <svg width="14" height="14" viewBox="0 0 14 14">
-        <path
-          d="M3.2 7.1l2.5 2.6 5.1-5.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{
-            strokeDasharray: 13,
-            strokeDashoffset: 13,
-            animation: 'cap-complete-check 360ms 90ms var(--ol-motion-soft) forwards',
-          }}
-        />
-      </svg>
+      <span
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: 999,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flex: '0 0 auto',
+          background: 'rgba(255,255,255,.72)',
+          boxShadow: '0 0 0 0.5px rgba(101, 123, 112, 0.18) inset',
+        }}
+      >
+        <svg width="11" height="11" viewBox="0 0 11 11">
+          <path
+            d="M2.3 5.8l2 2.1 4.4-4.8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              strokeDasharray: 11,
+              strokeDashoffset: 11,
+              animation: 'cap-complete-check 320ms 90ms var(--ol-motion-soft) forwards',
+            }}
+          />
+        </svg>
+      </span>
+      <span
+        style={{
+          minWidth: 0,
+          fontSize: 11,
+          fontWeight: 650,
+          lineHeight: 1,
+          letterSpacing: 0,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          color: '#171714',
+          animation: 'cap-complete-label 360ms 140ms var(--ol-motion-soft) both',
+        }}
+      >
+        {label}
+      </span>
     </div>
   );
 }
@@ -151,10 +183,11 @@ function CompletionMark() {
 interface CircleButtonProps {
   variant: 'cancel' | 'confirm';
   enabled: boolean;
+  subdued?: boolean;
   onClick: () => void;
 }
 
-function CircleButton({ variant, enabled, onClick }: CircleButtonProps) {
+function CircleButton({ variant, enabled, subdued = false, onClick }: CircleButtonProps) {
   const { t } = useTranslation();
   const isCancel = variant === 'cancel';
   // confirm 是主操作锚点，纯白；cancel 半透 + 自带 backdrop blur 跟 pill 拉开层级。
@@ -177,8 +210,9 @@ function CircleButton({ variant, enabled, onClick }: CircleButtonProps) {
         alignItems: 'center',
         justifyContent: 'center',
         cursor: enabled ? 'default' : 'not-allowed',
-        opacity: enabled ? 1 : 0.42,
+        opacity: subdued ? 0 : (enabled ? 1 : 0.42),
         visibility: 'visible',
+        pointerEvents: subdued ? 'none' : 'auto',
         flexShrink: 0,
         padding: 0,
         boxShadow: '0 1px 2px rgba(0, 0, 0, 0.06)',
@@ -230,6 +264,7 @@ function Pill({
   const showStopAck = shouldShowStopAcknowledgement(state, stopPending || stopAcknowledged);
   const errorActive = state === 'error';
   const dismissOnly = errorActive || state === 'done' || state === 'cancelled';
+  const controlsSubdued = state === 'done' || state === 'cancelled';
   const cancelEnabled = capsuleCancelEnabled(state);
   const confirmEnabled = capsuleConfirmEnabled(state, stopPending);
 
@@ -345,7 +380,7 @@ function Pill({
     case 'done':
       center = message
         ? <CenterText os={os} kind="default" text={message} />
-        : <CompletionMark />;
+        : <CompletionMark label={t('capsule.inserted')} />;
       break;
     case 'cancelled':
       center = <CenterText os={os} kind="default" text={t('capsule.cancelled')} />;
@@ -392,11 +427,11 @@ function Pill({
         willChange: 'transform, box-shadow',
       }}
     >
-      <CircleButton variant="cancel" enabled={cancelEnabled} onClick={dismissOnly ? onDismiss : onCancel} />
+      <CircleButton variant="cancel" enabled={cancelEnabled} subdued={controlsSubdued} onClick={dismissOnly ? onDismiss : onCancel} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {center}
       </div>
-      <CircleButton variant="confirm" enabled={confirmEnabled} onClick={errorActive ? onRetry : onConfirm} />
+      <CircleButton variant="confirm" enabled={confirmEnabled} subdued={controlsSubdued} onClick={errorActive ? onRetry : onConfirm} />
     </div>
   );
 }
@@ -848,10 +883,14 @@ export function Capsule() {
           45%  { opacity: 1; transform: translateY(0) scale(1.03); }
           100% { opacity: 1; transform: translateY(0) scale(1); }
         }
-        @keyframes cap-complete-pop {
-          0%   { opacity: 0; transform: scale(.72); }
-          58%  { opacity: 1; transform: scale(1.08); }
-          100% { opacity: 1; transform: scale(1); }
+        @keyframes cap-complete-chip {
+          0%   { opacity: 0; transform: translateY(2px) scale(.88); filter: saturate(.9); }
+          58%  { opacity: 1; transform: translateY(0) scale(1.035); filter: saturate(1.08); }
+          100% { opacity: 1; transform: translateY(0) scale(1); filter: saturate(1); }
+        }
+        @keyframes cap-complete-label {
+          from { opacity: 0; transform: translateX(-3px); }
+          to   { opacity: 1; transform: translateX(0); }
         }
         @keyframes cap-complete-check {
           to { stroke-dashoffset: 0; }

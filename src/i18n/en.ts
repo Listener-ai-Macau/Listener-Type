@@ -33,7 +33,7 @@ export const en: typeof zhCN = {
     thinking: 'thinking',
     cancelled: 'Cancelled',
     error: 'Something went wrong',
-    inserted: 'Inserted',
+    inserted: 'Typed',
     translating: 'Translating',
   },
   qa: {

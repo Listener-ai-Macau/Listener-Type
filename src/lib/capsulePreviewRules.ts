@@ -52,8 +52,8 @@ export const PREVIEW_DEDUP_POLICY = 'exact-match' as const;
  * The preview text stays visible through transcribing/polishing so the user sees
  * continuity. Done state replaces it with a compact success mark; actionable
  * fallback messages may still show text.
- * After Done, the normal success path lingers ~850ms (schedule_capsule_idle) then
- * fades to Idle with EXIT_ANIM_MS = 140ms.
+ * After Done, the normal success path lingers ~1050ms (schedule_capsule_idle) then
+ * fades to Idle with EXIT_ANIM_MS = 180ms.
  */
 export const PREVIEW_FINAL_TRANSITION = {
   /** Capsule states that display partial preview text. */
@@ -63,9 +63,9 @@ export const PREVIEW_FINAL_TRANSITION = {
   /** Terminal state where preview is replaced by completion feedback. */
   finalState: 'done' as const,
   /** How long the normal success done toast stays visible before idle (ms). */
-  lingerMs: 850,
+  lingerMs: 1050,
   /** Exit animation duration (ms). */
-  exitAnimMs: 140,
+  exitAnimMs: 180,
 };
 
 export type StopFeedbackCapsuleState =
