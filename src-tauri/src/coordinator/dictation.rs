@@ -33,7 +33,7 @@ const EMBEDDED_AUDIO_TRIM_NOISE_MULTIPLIER: f64 = 3.0;
 const EMBEDDED_AUDIO_TRIM_PEAK_RATIO: f64 = 0.12;
 const EMBEDDED_BLE_PCM_EVENT_TRACE_PACKET_INTERVAL: u16 = 50;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
-const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 1_200;
+const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 750;
 const EMBEDDED_BLE_STATS_ONLY_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_STATS_ONLY";
 const EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV: &str =
     "LISTENER_TYPE_DISABLE_EMBEDDED_BLE_PROCESSING_SYNC";
@@ -503,10 +503,30 @@ impl DeviceAiProcessingGuard {
         }
     }
 
+    fn complete_success_async(&mut self, reason: &'static str) {
+        if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
+            let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
+            set_device_ai_processing_done_async(&self.inner, reason, delay);
+            self.completed = true;
+            self.active = false;
+            self.started_at = None;
+        }
+    }
+
     async fn complete_warning(&mut self, reason: &'static str) {
         if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
             set_device_ai_processing_warning_wait(&self.inner, reason, delay).await;
+            self.completed = true;
+            self.active = false;
+            self.started_at = None;
+        }
+    }
+
+    fn complete_warning_async(&mut self, reason: &'static str) {
+        if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
+            let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
+            set_device_ai_processing_warning_async(&self.inner, reason, delay);
             self.completed = true;
             self.active = false;
             self.started_at = None;
@@ -3947,6 +3967,11 @@ async fn finish_end_session_after_stop_transition(
     } else {
         "dictation_processing_done"
     };
+    if device_processing_succeeded {
+        device_ai_processing.complete_success_async(device_processing_success_reason);
+    } else {
+        device_ai_processing.complete_warning_async("dictation_processing_warning");
+    }
 
     // 与 coordinator 内部 SessionId 对齐：方便 recorder 旁路写盘的 `<session_id>.wav`
     // 跟 history 这条 DictationSession.id 同名，前端凭 id 就能找到对应录音文件。
@@ -4011,15 +4036,6 @@ async fn finish_end_session_after_stop_transition(
         done_message,
         Some(inserted_chars),
     );
-    if device_processing_succeeded {
-        device_ai_processing
-            .complete_success(device_processing_success_reason)
-            .await;
-    } else {
-        device_ai_processing
-            .complete_warning("dictation_processing_warning")
-            .await;
-    }
 
     schedule_capsule_idle(inner, CAPSULE_SUCCESS_HIDE_DELAY_MS, Some(current_session_id));
 

@@ -8,6 +8,7 @@ import {
   getDeviceSettings,
   getEmbeddedBleRuntimeStatus,
   listInstalledApplications,
+  openSystemSettings,
   setDeviceSettings,
 } from '../../lib/ipc';
 import type {
@@ -73,6 +74,10 @@ const DEVICE_KEY_ACTIONS: DeviceCustomKeyAction[] = [
   'selectionAsk',
   'disabled',
 ];
+
+type BleNamePairingPrompt = {
+  name: string;
+};
 
 const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
   'overview',
@@ -264,6 +269,7 @@ function DeviceFirmwareSettingsCard() {
   });
   const [status, setStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [message, setMessage] = useState('');
+  const [bleNamePairingPrompt, setBleNamePairingPrompt] = useState<BleNamePairingPrompt | null>(null);
 
   const refresh = async () => {
     setStatus(previous => (previous === 'saving' ? previous : 'loading'));
@@ -276,6 +282,7 @@ function DeviceFirmwareSettingsCard() {
       );
       setSnapshot(value);
       setForm(snapshotToForm(value));
+      setBleNamePairingPrompt(null);
       setStatus('idle');
     } catch (error) {
       setStatus('error');
@@ -298,8 +305,19 @@ function DeviceFirmwareSettingsCard() {
       ? t('settings.device.writingDetail', '正在写入设备设置...')
       : '';
 
+  const openBluetoothSettings = () => {
+    void openSystemSettings('bluetooth').catch(error => {
+      console.warn('[device-settings] open bluetooth settings failed after BLE name update', error);
+    });
+  };
+
   const save = async () => {
     if (writeDisabled) return;
+    const requestedBleName = form.bleName;
+    const bleNamePairingNeeded = snapshot !== null && (
+      snapshot.bleName !== requestedBleName ||
+      snapshot.bleNamePendingRestart
+    );
     setStatus('saving');
     setMessage('');
     try {
@@ -315,7 +333,14 @@ function DeviceFirmwareSettingsCard() {
       setSnapshot(value);
       setForm(snapshotToForm(value));
       setStatus('saved');
-      setMessage(t('settings.device.configSaved', '已发送到设备'));
+      if (bleNamePairingNeeded) {
+        setBleNamePairingPrompt({ name: requestedBleName });
+        setMessage(t('settings.device.bleNameSavedNeedsPairing', '蓝牙名称已写入，Type 已清理旧配对；请在 Windows 蓝牙里重新配对。'));
+        openBluetoothSettings();
+      } else {
+        setBleNamePairingPrompt(null);
+        setMessage(t('settings.device.configSaved', '已发送到设备'));
+      }
       window.setTimeout(() => setStatus(current => (current === 'saved' ? 'idle' : current)), 1800);
     } catch (error) {
       setStatus('error');
@@ -324,6 +349,8 @@ function DeviceFirmwareSettingsCard() {
   };
   const detailText = formatDeviceSnapshotDetail(snapshot, t);
   const footerText = validationError || message || formatDeviceSnapshotFooter(snapshot, t);
+  const showBleNamePairingPrompt = bleNamePairingPrompt !== null || !!snapshot?.bleNamePendingRestart;
+  const bleNamePairingPromptName = bleNamePairingPrompt?.name ?? snapshot?.bleName ?? form.bleName;
 
   return (
     <Card className="ol-device-settings-card" style={{ padding: 20 }}>
@@ -371,6 +398,30 @@ function DeviceFirmwareSettingsCard() {
             style={{ ...inputStyle, flex: '0 1 320px', maxWidth: 320 }}
           />
         </div>
+        {showBleNamePairingPrompt && (
+          <div className="ol-device-ble-pairing-prompt" role="status" aria-live="polite">
+            <div className="ol-device-ble-pairing-copy">
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ol-ink)' }}>
+                {t('settings.device.bleNamePairingTitle', '需要重新配对')}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 2 }}>
+                {t('settings.device.bleNamePairingBody', {
+                  name: bleNamePairingPromptName,
+                  defaultValue: 'Type 已尝试清理旧配对。请在 Windows 蓝牙里添加 {{name}}。',
+                })}
+              </div>
+            </div>
+            <Btn
+              variant="blue"
+              size="sm"
+              icon="external"
+              onClick={openBluetoothSettings}
+              style={{ height: 32, justifyContent: 'center', whiteSpace: 'nowrap' }}
+            >
+              {t('settings.device.openBluetoothSettings', '打开 Windows 蓝牙')}
+            </Btn>
+          </div>
+        )}
       </DeviceSettingsPanel>
 
       {detailText && (
@@ -1122,7 +1173,7 @@ function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateR
     batteryLowPowerIdleMinutes: snapshot.batteryLowPowerIdleMinutes,
     pluggedLowPowerEnabled: snapshot.pluggedLowPowerEnabled,
     pluggedAutoShutdownMinutes: 0,
-    batteryAutoShutdownMinutes: Math.round(snapshot.batteryAutoShutdownMs / 60000),
+    batteryAutoShutdownMinutes: minutesFromMsForDeviceForm(snapshot.batteryAutoShutdownMs),
     bleName: snapshot.bleName,
   };
 }
@@ -1189,6 +1240,11 @@ function clampPercent(value: number): number {
 function clampMinuteValue(value: number, min: 0 | 1): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(1440, Math.round(value)));
+}
+
+function minutesFromMsForDeviceForm(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.max(1, Math.min(1440, Math.round(value / 60000)));
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {

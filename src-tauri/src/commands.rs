@@ -2279,6 +2279,7 @@ fn device_settings_sent_but_readback_unavailable_detail(error: &str) -> String {
 #[derive(Debug, Clone)]
 struct DeviceBleNameRecoveryOutcome {
     recovery_error: Option<String>,
+    unpair_result: crate::embedded_ble::BleDeviceUnpairResult,
 }
 
 fn device_ble_name_recovery_needed(
@@ -2306,16 +2307,43 @@ fn apply_device_ble_name_recovery_blocking() -> DeviceBleNameRecoveryOutcome {
         "[device-settings] BLE name recovery settle complete recovery_error={}",
         recovery_error.as_deref().unwrap_or("none")
     );
-    DeviceBleNameRecoveryOutcome { recovery_error }
+    let unpair_result = crate::embedded_ble::unpair_listener_devices();
+    log::info!(
+        "[device-settings] BLE name stale pairing cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
+        unpair_result.status,
+        unpair_result.matched_devices,
+        unpair_result.unpaired_devices,
+        unpair_result.already_unpaired_devices,
+        unpair_result.failed_devices,
+        unpair_result.needs_user_action,
+    );
+    DeviceBleNameRecoveryOutcome {
+        recovery_error,
+        unpair_result,
+    }
 }
 
 fn device_ble_name_recovery_detail(outcome: &DeviceBleNameRecoveryOutcome) -> String {
+    let cleanup_detail = match outcome.unpair_result.status {
+        crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
+            "Old Windows pairing entries were removed. Please re-pair in Windows Bluetooth."
+        }
+        crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean => {
+            "Windows pairing entries were already clean. Please pair the new name in Windows Bluetooth."
+        }
+        crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
+            "No old Windows pairing entry was found. Please pair the new name in Windows Bluetooth."
+        }
+        crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
+            "Windows may still need manual pairing cleanup. Please remove the old entry and re-pair in Windows Bluetooth."
+        }
+    };
     if outcome.recovery_error.is_some() {
-        "BLE name was saved; recovery command could not be confirmed, so Windows may need reconnecting or re-pairing."
-            .to_string()
+        format!("BLE name was saved; recovery command could not be confirmed. {cleanup_detail}")
     } else {
-        "BLE name was saved and the device was asked to restart pairing advertising with the new name."
-            .to_string()
+        format!(
+            "BLE name was saved and the device was asked to restart pairing advertising with the new name. {cleanup_detail}"
+        )
     }
 }
 
@@ -7446,10 +7474,20 @@ mod tests {
     fn device_ble_name_recovery_detail_hides_transport_jargon() {
         let outcome = super::DeviceBleNameRecoveryOutcome {
             recovery_error: Some("BLE CCCD write timed out after GATT cache failure".to_string()),
+            unpair_result: crate::embedded_ble::BleDeviceUnpairResult {
+                status: crate::embedded_ble::BleDeviceUnpairStatus::Removed,
+                attempted: true,
+                matched_devices: 1,
+                unpaired_devices: 1,
+                already_unpaired_devices: 0,
+                failed_devices: 0,
+                needs_user_action: true,
+                details: vec!["Removed stale Listener pairing: Listener".to_string()],
+            },
         };
 
         let detail = super::device_ble_name_recovery_detail(&outcome);
-        assert!(detail.contains("re-pairing"));
+        assert!(detail.contains("re-pair"));
         assert!(!detail.to_ascii_lowercase().contains("cccd"));
         assert!(!detail.to_ascii_lowercase().contains("gatt"));
     }

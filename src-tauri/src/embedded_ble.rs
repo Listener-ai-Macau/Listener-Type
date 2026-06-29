@@ -2345,24 +2345,21 @@ mod windows_ble {
     }
 
     fn low_power_minutes_from_ms(ms: u32) -> u32 {
-        if ms == 0 {
-            0
-        } else {
-            ms.saturating_add(59_999)
-                .checked_div(60_000)
-                .unwrap_or(0)
-                .clamp(1, crate::types::MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
-        }
+        minutes_from_ms_nearest(ms, crate::types::MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
     }
 
     fn auto_shutdown_minutes_from_ms(ms: u32) -> u32 {
+        minutes_from_ms_nearest(ms, crate::types::MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES)
+    }
+
+    fn minutes_from_ms_nearest(ms: u32, max_minutes: u32) -> u32 {
         if ms == 0 {
             0
         } else {
-            ms.saturating_add(59_999)
+            ms.saturating_add(30_000)
                 .checked_div(60_000)
                 .unwrap_or(0)
-                .clamp(1, crate::types::MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES)
+                .clamp(1, max_minutes)
         }
     }
 
@@ -10582,6 +10579,21 @@ mod tests {
 
         assert_eq!(status.ble_name, "Blistener");
         assert_ne!(status.ble_name, "listenerB");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_device_settings_ms_jitter_without_rounding_up_full_minute() {
+        let status = super::windows_ble::parse_device_settings_status_line(
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK active_power=battery low_power_idle_ms=600001 plugged_low_power_idle_ms=600001 battery_low_power_idle_ms=600001 plugged_low_power_enabled=1 auto_shutdown_ms=600001 plugged_auto_shutdown_ms=0 battery_auto_shutdown_ms=600001 knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=0 external_power_present=0 usb_power_present=0 charging=0 charge_full=0"
+        )
+        .expect("parse device settings with millisecond jitter");
+
+        assert_eq!(status.low_power_idle_minutes, 10);
+        assert_eq!(status.plugged_low_power_idle_minutes, 10);
+        assert_eq!(status.battery_low_power_idle_minutes, 10);
+        assert_eq!(status.plugged_auto_shutdown_minutes, 0);
+        assert_eq!(status.battery_auto_shutdown_minutes, 10);
     }
 
     #[cfg(target_os = "windows")]
