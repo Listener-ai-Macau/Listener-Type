@@ -8,7 +8,6 @@ import {
   getDeviceSettings,
   getEmbeddedBleRuntimeStatus,
   listInstalledApplications,
-  openSystemSettings,
   setDeviceSettings,
 } from '../../lib/ipc';
 import type {
@@ -305,19 +304,10 @@ function DeviceFirmwareSettingsCard() {
       ? t('settings.device.writingDetail', '正在写入设备设置...')
       : '';
 
-  const openBluetoothSettings = () => {
-    void openSystemSettings('bluetooth').catch(error => {
-      console.warn('[device-settings] open bluetooth settings failed after BLE name update', error);
-    });
-  };
-
   const save = async () => {
     if (writeDisabled) return;
     const requestedBleName = form.bleName;
-    const bleNamePairingNeeded = snapshot !== null && (
-      snapshot.bleName !== requestedBleName ||
-      snapshot.bleNamePendingRestart
-    );
+    const bleNameChanged = snapshot !== null && snapshot.bleName !== requestedBleName;
     setStatus('saving');
     setMessage('');
     try {
@@ -333,10 +323,9 @@ function DeviceFirmwareSettingsCard() {
       setSnapshot(value);
       setForm(snapshotToForm(value));
       setStatus('saved');
-      if (bleNamePairingNeeded) {
+      if (bleNameChanged) {
         setBleNamePairingPrompt({ name: requestedBleName });
-        setMessage(t('settings.device.bleNameSavedNeedsPairing', '蓝牙名称已写入，Type 已清理旧配对；请在 Windows 蓝牙里重新配对。'));
-        openBluetoothSettings();
+        setMessage(t('settings.device.bleNameSavedNeedsPairing', '蓝牙名称已写入；设备会用新名称重新广播。'));
       } else {
         setBleNamePairingPrompt(null);
         setMessage(t('settings.device.configSaved', '已发送到设备'));
@@ -349,8 +338,8 @@ function DeviceFirmwareSettingsCard() {
   };
   const detailText = formatDeviceSnapshotDetail(snapshot, t);
   const footerText = validationError || message || formatDeviceSnapshotFooter(snapshot, t);
-  const showBleNamePairingPrompt = bleNamePairingPrompt !== null || !!snapshot?.bleNamePendingRestart;
-  const bleNamePairingPromptName = bleNamePairingPrompt?.name ?? snapshot?.bleName ?? form.bleName;
+  const showBleNamePairingPrompt = bleNamePairingPrompt !== null;
+  const bleNamePairingPromptName = bleNamePairingPrompt?.name ?? form.bleName;
 
   return (
     <Card className="ol-device-settings-card" style={{ padding: 20 }}>
@@ -401,25 +390,16 @@ function DeviceFirmwareSettingsCard() {
         {showBleNamePairingPrompt && (
           <div className="ol-device-ble-pairing-prompt" role="status" aria-live="polite">
             <div className="ol-device-ble-pairing-copy">
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ol-ink)' }}>
-                {t('settings.device.bleNamePairingTitle', '需要重新配对')}
+              <div style={{ fontSize: 11.5, fontWeight: 650, color: 'var(--ol-ink)' }}>
+                {t('settings.device.bleNamePairingTitle', '等待重新连接')}
               </div>
-              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5, marginTop: 2 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.45, marginTop: 1 }}>
                 {t('settings.device.bleNamePairingBody', {
                   name: bleNamePairingPromptName,
-                  defaultValue: 'Type 已尝试清理旧配对。请在 Windows 蓝牙里添加 {{name}}。',
+                  defaultValue: '设备会以 {{name}} 重新出现；看到后重新连接即可。',
                 })}
               </div>
             </div>
-            <Btn
-              variant="blue"
-              size="sm"
-              icon="external"
-              onClick={openBluetoothSettings}
-              style={{ height: 32, justifyContent: 'center', whiteSpace: 'nowrap' }}
-            >
-              {t('settings.device.openBluetoothSettings', '打开 Windows 蓝牙')}
-            </Btn>
           </div>
         )}
       </DeviceSettingsPanel>
