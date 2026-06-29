@@ -201,6 +201,77 @@ fn trim_short_stale_suffix_after_full_candidate(
         .then(|| candidate.to_string())
 }
 
+pub(super) fn trim_repeated_short_streaming_tail(text: &str) -> String {
+    const MIN_SHORT_TAIL_CHARS: usize = 3;
+    const MAX_SHORT_TAIL_CHARS: usize = 6;
+    const MIN_PREFIX_CHARS: usize = 12;
+    const MAX_RECENT_ECHO_GAP_CHARS: usize = 32;
+
+    let trimmed = text.trim();
+    let Some((space_start, space_end)) = last_whitespace_run(trimmed) else {
+        return trimmed.to_string();
+    };
+    let prefix = trimmed[..space_start].trim_end();
+    let suffix = trimmed[space_end..].trim_start();
+    if prefix.is_empty() || suffix.is_empty() {
+        return trimmed.to_string();
+    }
+    if suffix
+        .chars()
+        .any(|ch| is_sentence_terminal_punctuation(ch) || ch == '，' || ch == ',' || ch == '、')
+    {
+        return trimmed.to_string();
+    }
+
+    let suffix_compact = compact_transcript_for_duplicate_check(suffix);
+    let suffix_len = suffix_compact.chars().count();
+    if !(MIN_SHORT_TAIL_CHARS..=MAX_SHORT_TAIL_CHARS).contains(&suffix_len) {
+        return trimmed.to_string();
+    }
+    if !suffix_compact.chars().all(is_cjk_unified_ideograph) {
+        return trimmed.to_string();
+    }
+
+    let prefix_compact = compact_transcript_for_duplicate_check(prefix);
+    let prefix_len = prefix_compact.chars().count();
+    if prefix_len < MIN_PREFIX_CHARS {
+        return trimmed.to_string();
+    }
+
+    if recent_short_tail_echo_gap(&prefix_compact, &suffix_compact, MAX_RECENT_ECHO_GAP_CHARS)
+        .is_some()
+    {
+        prefix.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn recent_short_tail_echo_gap(
+    prefix_compact: &str,
+    suffix_compact: &str,
+    max_gap_chars: usize,
+) -> Option<usize> {
+    let prefix_chars: Vec<char> = prefix_compact.chars().collect();
+    let suffix_chars: Vec<char> = suffix_compact.chars().collect();
+    let suffix_len = suffix_chars.len();
+    if suffix_len == 0 || prefix_chars.len() < suffix_len {
+        return None;
+    }
+    let max_distance = usize::from(suffix_len >= 3);
+    for start in (0..=prefix_chars.len() - suffix_len).rev() {
+        let gap = prefix_chars.len().saturating_sub(start + suffix_len);
+        if gap > max_gap_chars {
+            break;
+        }
+        let window: String = prefix_chars[start..start + suffix_len].iter().collect();
+        if char_edit_distance(&window, suffix_compact) <= max_distance {
+            return Some(gap);
+        }
+    }
+    None
+}
+
 fn merge_streaming_transcript(previous: &str, current: &str) -> String {
     let previous = previous.trim();
     let current = current.trim();
@@ -654,9 +725,90 @@ fn find_matching_timed_segment(
     incoming: &TranscriptSegment,
 ) -> Option<usize> {
     const START_TIME_TOLERANCE_MS: i64 = 240;
-    segments
-        .iter()
-        .position(|segment| (segment.start_ms - incoming.start_ms).abs() <= START_TIME_TOLERANCE_MS)
+    segments.iter().position(|segment| {
+        (segment.start_ms - incoming.start_ms).abs() <= START_TIME_TOLERANCE_MS
+            || is_timed_segment_revision_match(segment, incoming)
+    })
+}
+
+fn is_timed_segment_revision_match(
+    existing: &TranscriptSegment,
+    incoming: &TranscriptSegment,
+) -> bool {
+    const CONTAINMENT_TOLERANCE_MS: i64 = 500;
+    const MIN_OVERLAP_RATIO: f64 = 0.82;
+
+    if !transcript_segments_share_revision_origin(&existing.text, &incoming.text) {
+        return false;
+    }
+
+    let Some(existing_end) = existing.end_ms else {
+        return false;
+    };
+    let Some(incoming_end) = incoming.end_ms else {
+        return false;
+    };
+
+    let incoming_covers_existing = incoming.start_ms
+        <= existing.start_ms + CONTAINMENT_TOLERANCE_MS
+        && incoming_end + CONTAINMENT_TOLERANCE_MS >= existing_end;
+    let existing_covers_incoming = existing.start_ms
+        <= incoming.start_ms + CONTAINMENT_TOLERANCE_MS
+        && existing_end + CONTAINMENT_TOLERANCE_MS >= incoming_end;
+    if incoming_covers_existing || existing_covers_incoming {
+        return true;
+    }
+
+    let overlap_start = existing.start_ms.max(incoming.start_ms);
+    let overlap_end = existing_end.min(incoming_end);
+    let overlap_ms = overlap_end.saturating_sub(overlap_start);
+    if overlap_ms <= 0 {
+        return false;
+    }
+
+    let existing_duration = existing_end.saturating_sub(existing.start_ms);
+    let incoming_duration = incoming_end.saturating_sub(incoming.start_ms);
+    let shorter_duration = existing_duration.min(incoming_duration);
+    shorter_duration > 0 && (overlap_ms as f64 / shorter_duration as f64) >= MIN_OVERLAP_RATIO
+}
+
+fn transcript_segments_share_revision_origin(left: &str, right: &str) -> bool {
+    const MIN_COMMON_EDGE_CHARS: usize = 6;
+    const MIN_FUZZY_CHARS: usize = 10;
+    const MAX_REVISION_CER: f64 = 0.42;
+
+    let left = compact_transcript_for_duplicate_check(left);
+    let right = compact_transcript_for_duplicate_check(right);
+    let left_len = left.chars().count();
+    let right_len = right.chars().count();
+    let shorter_len = left_len.min(right_len);
+    let longer_len = left_len.max(right_len);
+    if shorter_len < MIN_COMMON_EDGE_CHARS {
+        return false;
+    }
+    if left.contains(&right) || right.contains(&left) {
+        return true;
+    }
+    if common_prefix_char_count(&left, &right) >= MIN_COMMON_EDGE_CHARS {
+        return true;
+    }
+    if common_suffix_char_count(&left, &right) >= MIN_COMMON_EDGE_CHARS {
+        return true;
+    }
+    if shorter_len < MIN_FUZZY_CHARS || longer_len > shorter_len * 2 {
+        return false;
+    }
+
+    let distance = char_edit_distance(&left, &right);
+    (distance as f64 / longer_len as f64) <= MAX_REVISION_CER
+}
+
+fn common_suffix_char_count(left: &str, right: &str) -> usize {
+    left.chars()
+        .rev()
+        .zip(right.chars().rev())
+        .take_while(|(left, right)| left == right)
+        .count()
 }
 
 fn merge_timed_segment(
@@ -924,6 +1076,28 @@ mod tests {
     }
 
     #[test]
+    fn trim_repeated_short_streaming_tail_removes_recent_spaced_echo() {
+        let text = "他现在的问题是文字浏览可能在很长时间后就是它有时候会卡住，你看能尝试复现一下这个问题吗？ 就是他";
+
+        assert_eq!(
+            trim_repeated_short_streaming_tail(text),
+            "他现在的问题是文字浏览可能在很长时间后就是它有时候会卡住，你看能尝试复现一下这个问题吗？"
+        );
+    }
+
+    #[test]
+    fn trim_repeated_short_streaming_tail_keeps_new_short_continuation() {
+        assert_eq!(
+            trim_repeated_short_streaming_tail("现在继续做长录音预览测试 后续"),
+            "现在继续做长录音预览测试 后续"
+        );
+        assert_eq!(
+            trim_repeated_short_streaming_tail("今天需要先修复胶囊文字预览，然后继续验证 蓝牙"),
+            "今天需要先修复胶囊文字预览，然后继续验证 蓝牙"
+        );
+    }
+
+    #[test]
     fn normalize_cjk_final_spacing_and_echoes_removes_single_char_echo() {
         assert_eq!(
             normalize_cjk_final_spacing_and_echoes("后端需要把最终结果稳定的交 交给系统输入链路"),
@@ -970,6 +1144,32 @@ mod tests {
             merge_streaming_candidate(&previous_text, &previous_segments, candidate);
 
         assert_eq!(merged, final_text);
+    }
+
+    #[test]
+    fn merge_streaming_candidate_replaces_full_revision_when_start_time_shifts() {
+        let previous_text =
+            "所以你帮我看一下太平面那些 companion 的东西是不是要移动出去，就不要再继续放在太平面了";
+        let final_text = "所以你帮我看一下，Tab 里面那些 companion 的东西是不是要移动出去？就不要再继续放在 Tab 里面了。";
+        let previous_segments = vec![TranscriptSegment {
+            start_ms: 1240,
+            end_ms: Some(7600),
+            text: previous_text.into(),
+        }];
+        let candidate = TranscriptCandidate {
+            text: final_text.into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 880,
+                end_ms: Some(7902),
+                text: final_text.into(),
+            }],
+        };
+
+        let (merged, segments) =
+            merge_streaming_candidate(previous_text, &previous_segments, candidate);
+
+        assert_eq!(merged, final_text);
+        assert_eq!(segments.len(), 1);
     }
 
     #[test]

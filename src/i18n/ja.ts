@@ -430,7 +430,6 @@ export const ja: typeof zhCN = {
     sections: {
       recording: '録音',
       device: 'デバイス',
-      companion: 'Companion',
       providers: 'プロバイダー',
       shortcuts: 'ショートカット',
       permissions: '権限',
@@ -826,7 +825,6 @@ export const ja: typeof zhCN = {
         translation: '翻訳',
         selectionAsk: '選択質問',
         settingsDevice: 'デバイス設定',
-        settingsCompanion: 'Companion 設定',
         settingsRecording: '録音設定',
         settingsProviders: 'プロバイダー設定',
         settingsShortcuts: 'ショートカット設定',

@@ -96,15 +96,7 @@ fn reset_credentials_cache_for_tests() {
 // ───────────────────────── path helpers ─────────────────────────
 
 fn app_profile_dir_name() -> &'static str {
-    if std::env::var("LISTENER_TYPE_APP_PROFILE")
-        .ok()
-        .as_deref()
-        .is_some_and(|value| value.eq_ignore_ascii_case("companion"))
-    {
-        "Listener Type Companion"
-    } else {
-        "Listener Type"
-    }
+    "Listener Type"
 }
 
 fn data_dir() -> Result<PathBuf> {

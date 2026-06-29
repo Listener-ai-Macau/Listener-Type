@@ -107,6 +107,58 @@ mod embedded_ble {
         )
     }
 
+    pub struct PreparedListenerOtaV2Transfer {
+        snapshot: FirmwareOtaDeviceSnapshot,
+    }
+
+    impl PreparedListenerOtaV2Transfer {
+        pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+            &self.snapshot
+        }
+
+        pub fn transfer(
+            self,
+            firmware_bytes: &[u8],
+            manifest_chunk_bytes: usize,
+            on_progress: Option<&dyn Fn(usize, usize)>,
+        ) -> Result<FirmwareOtaTransferStats, String> {
+            transfer_firmware_ota("", "", firmware_bytes, manifest_chunk_bytes, on_progress)
+        }
+    }
+
+    pub fn prepare_listener_ota_v2_transfer() -> Result<PreparedListenerOtaV2Transfer, String> {
+        Err(
+            "Listener OTA v2 over BLE is only available from the Tauri app on Windows."
+                .to_string(),
+        )
+    }
+
+    pub struct PreparedCompanionOtaV2Transfer {
+        snapshot: FirmwareOtaDeviceSnapshot,
+    }
+
+    impl PreparedCompanionOtaV2Transfer {
+        pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+            &self.snapshot
+        }
+
+        pub fn transfer(
+            self,
+            firmware_bytes: &[u8],
+            manifest_chunk_bytes: usize,
+            on_progress: Option<&dyn Fn(usize, usize)>,
+        ) -> Result<FirmwareOtaTransferStats, String> {
+            transfer_stm32wb_st_ota(firmware_bytes, manifest_chunk_bytes, on_progress)
+        }
+    }
+
+    pub fn prepare_companion_ota_v2_transfer() -> Result<PreparedCompanionOtaV2Transfer, String> {
+        Err(
+            "Companion OTA v2 over BLE is only available from the Tauri app on Windows."
+                .to_string(),
+        )
+    }
+
     pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
         FirmwareOtaDeviceSnapshot {
             connected: false,
@@ -135,6 +187,14 @@ mod embedded_ble {
                     .to_string(),
             ),
         }
+    }
+
+    pub fn listener_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+        firmware_ota_device_snapshot()
+    }
+
+    pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+        stm32wb_st_ota_device_snapshot()
     }
 }
 

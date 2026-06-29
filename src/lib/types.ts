@@ -514,7 +514,6 @@ export type DeviceCustomKeyAppPage =
   | 'translation'
   | 'selectionAsk'
   | 'settingsDevice'
-  | 'settingsCompanion'
   | 'settingsRecording'
   | 'settingsProviders'
   | 'settingsShortcuts'

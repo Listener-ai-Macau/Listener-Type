@@ -6,7 +6,6 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -2805,12 +2804,11 @@ impl WiredFirmwarePackageKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WiredFirmwareTargetKind {
     Esp32S3,
-    Stm32WbSwd,
 }
 
 impl WiredFirmwareTargetKind {
     fn supports_boot_repair(self) -> bool {
-        matches!(self, Self::Esp32S3)
+        true
     }
 }
 
@@ -3427,23 +3425,12 @@ fn parse_factory_firmware_manifest(text: &str) -> Result<FactoryFirmwareManifest
             manifest.schema_version
         ));
     }
-    match wired_firmware_target_kind(&manifest.target)? {
-        WiredFirmwareTargetKind::Esp32S3 => {
-            if manifest.project != "voice-keyboard-firmware" {
-                return Err(format!(
-                    "Factory manifest project must be voice-keyboard-firmware for ESP32-S3, got {}.",
-                    manifest.project
-                ));
-            }
-        }
-        WiredFirmwareTargetKind::Stm32WbSwd => {
-            if manifest.project != "Companion-Firmware" {
-                return Err(format!(
-                    "Factory manifest project must be Companion-Firmware for STM32WB, got {}.",
-                    manifest.project
-                ));
-            }
-        }
+    let _ = wired_firmware_target_kind(&manifest.target)?;
+    if manifest.project != "voice-keyboard-firmware" {
+        return Err(format!(
+            "Factory manifest project must be voice-keyboard-firmware for ESP32-S3, got {}.",
+            manifest.project
+        ));
     }
     Ok(manifest)
 }
@@ -3454,48 +3441,30 @@ fn loaded_factory_package_from_manifest(
     source_label: String,
     files: BTreeMap<String, Vec<u8>>,
 ) -> Result<LoadedWiredFirmwarePackage, String> {
-    let target_kind = wired_firmware_target_kind(&manifest.target)?;
-    let (otadata_region, notes) = match target_kind {
-        WiredFirmwareTargetKind::Esp32S3 => {
-            for role in ["bootloader", "partition_table", "app"] {
-                require_artifact(&manifest.artifacts, role)?;
-            }
-            let otadata_region = manifest.flash.as_ref().and_then(|flash| {
-                flash
-                    .partition_table
-                    .iter()
-                    .find(|entry| entry.name == "otadata")
-            });
-            let otadata_region = match otadata_region {
-                Some(entry) => Some((
-                    normalize_esptool_region_arg(&entry.offset, "otadata offset", true)?,
-                    normalize_esptool_region_arg(&entry.size, "otadata size", false)?,
-                )),
-                None => Some((
-                    WIRED_OTADATA_OFFSET.to_string(),
-                    WIRED_OTADATA_SIZE.to_string(),
-                )),
-            };
-            (
-                otadata_region,
-                vec![
-                    "Factory package: wired flash writes bootloader, partition table, and app."
-                        .to_string(),
-                    "Boot repair is available and writes only bootloader.bin at 0x0.".to_string(),
-                ],
-            )
-        }
-        WiredFirmwareTargetKind::Stm32WbSwd => {
-            require_artifact(&manifest.artifacts, "app")?;
-            (
-                None,
-                vec![
-                    "Companion STM32WB factory package: wired flash writes Intel HEX artifacts over ST-LINK/SWD with STM32CubeProgrammer.".to_string(),
-                    "Boot repair is not offered for STM32WB packages; use ROM DFU/SWD recovery if needed.".to_string(),
-                ],
-            )
-        }
+    let _ = wired_firmware_target_kind(&manifest.target)?;
+    for role in ["bootloader", "partition_table", "app"] {
+        require_artifact(&manifest.artifacts, role)?;
+    }
+    let otadata_region = manifest.flash.as_ref().and_then(|flash| {
+        flash
+            .partition_table
+            .iter()
+            .find(|entry| entry.name == "otadata")
+    });
+    let otadata_region = match otadata_region {
+        Some(entry) => Some((
+            normalize_esptool_region_arg(&entry.offset, "otadata offset", true)?,
+            normalize_esptool_region_arg(&entry.size, "otadata size", false)?,
+        )),
+        None => Some((
+            WIRED_OTADATA_OFFSET.to_string(),
+            WIRED_OTADATA_SIZE.to_string(),
+        )),
     };
+    let notes = vec![
+        "Factory package: wired flash writes bootloader, partition table, and app.".to_string(),
+        "Boot repair is available and writes only bootloader.bin at 0x0.".to_string(),
+    ];
     Ok(LoadedWiredFirmwarePackage {
         kind: WiredFirmwarePackageKind::Factory,
         project: manifest.project,
@@ -3676,7 +3645,6 @@ fn run_wired_firmware_flash_with_progress(
         "Loading wired firmware package",
     );
     let loaded = load_wired_firmware_package_internal(path)?;
-    let target_kind = wired_firmware_target_kind(&loaded.target)?;
     emit_wired_firmware_stage(
         progress_app_ref,
         "flash",
@@ -3686,13 +3654,6 @@ fn run_wired_firmware_flash_with_progress(
         4,
         "Wired firmware package loaded",
     );
-    if target_kind == WiredFirmwareTargetKind::Stm32WbSwd {
-        return run_stm32_wired_firmware_flash_with_progress(
-            loaded,
-            requested_port,
-            progress_app_ref,
-        );
-    }
 
     let chip = wired_target_chip(&loaded.target)?;
     let port_hint = resolve_wired_flash_port(requested_port)?;
@@ -3870,369 +3831,6 @@ fn run_wired_firmware_flash_with_progress(
         version: loaded.version,
         log: trim_command_output(&log, 24_000),
     })
-}
-
-fn run_stm32_wired_firmware_flash_with_progress(
-    loaded: LoadedWiredFirmwarePackage,
-    requested_port: Option<&str>,
-    progress_app_ref: Option<&AppHandle>,
-) -> Result<WiredFirmwareFlashResult, String> {
-    const STM32WB_OTA_HANDOFF_BASE_ADDRESS: &str = "0x20000000";
-    const STM32WB_OTA_FW_APP_HANDOFF_BYTES: [&str; 4] = ["0x00", "0x07", "0x00", "0xC3"];
-
-    require_artifact(&loaded.artifacts, "app")?;
-    let stm32_artifacts = loaded
-        .artifacts
-        .iter()
-        .filter(|artifact| {
-            artifact
-                .format
-                .as_deref()
-                .unwrap_or("intel_hex")
-                .eq_ignore_ascii_case("intel_hex")
-        })
-        .collect::<Vec<_>>();
-    if stm32_artifacts.is_empty() {
-        return Err("STM32WB wired flashing requires at least one Intel HEX artifact.".to_string());
-    }
-    for artifact in &stm32_artifacts {
-        if !artifact.file.to_ascii_lowercase().ends_with(".hex") {
-            return Err(format!(
-                "STM32WB wired flashing expects Intel HEX artifacts, got {}.",
-                artifact.file
-            ));
-        }
-    }
-
-    let requested = requested_port
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("COMx"));
-    let mut log = String::new();
-    log.push_str("> Listener Type STM32WB wired firmware flasher\n");
-    log.push_str("Transport: STM32CubeProgrammer CLI over ST-LINK/SWD.\n");
-    if let Some(port) = requested {
-        if !port.eq_ignore_ascii_case("SWD") {
-            log.push_str(&format!(
-                "Requested port {port} ignored; STM32WB package uses ST-LINK/SWD.\n"
-            ));
-        }
-    }
-    log.push_str(&format!(
-        "Package: {} ({})\nTarget: {}\n",
-        loaded.source_label, loaded.version, loaded.target
-    ));
-
-    emit_wired_firmware_stage(
-        progress_app_ref,
-        "flash",
-        "connecting",
-        Some(&loaded.version),
-        Some("SWD"),
-        8,
-        "Locating STM32CubeProgrammer CLI",
-    );
-    let programmer = find_stm32_programmer_cli().ok_or_else(|| {
-        "STM32CubeProgrammer CLI not found. Install STM32CubeProgrammer/STM32CubeIDE or set STM32CUBEPROGRAMMER_CLI.".to_string()
-    })?;
-    log.push_str(&format!(
-        "STM32CubeProgrammer CLI: {}\n",
-        programmer.display()
-    ));
-
-    emit_wired_firmware_stage(
-        progress_app_ref,
-        "flash",
-        "preparing",
-        Some(&loaded.version),
-        Some("SWD"),
-        18,
-        "Preparing STM32WB HEX images",
-    );
-    let total_artifacts = stm32_artifacts.len().max(1);
-    for (index, artifact) in stm32_artifacts.iter().enumerate() {
-        let image_bytes = loaded
-            .files
-            .get(&artifact.file)
-            .ok_or_else(|| format!("Factory artifact file is missing: {}", artifact.file))?;
-        let image_path = write_stm32_temp_image(&loaded, artifact, image_bytes)?;
-        log.push_str(&format!(
-            "Prepared HEX image {} ({}): {}\n",
-            artifact.role,
-            artifact.file,
-            image_path.display()
-        ));
-
-        let percent = 30u8.saturating_add(((index as u8) * 60u8) / (total_artifacts as u8));
-        emit_wired_firmware_stage(
-            progress_app_ref,
-            "flash",
-            "writing",
-            Some(&loaded.version),
-            Some("SWD"),
-            percent,
-            &format!("Flashing STM32WB {} over SWD", artifact.role),
-        );
-        let mut command = Command::new(&programmer);
-        command
-            .arg("-c")
-            .args(["port=SWD", "mode=UR", "reset=HWrst", "freq=4000"])
-            .arg("-w")
-            .arg(&image_path)
-            .arg("-v");
-        let output = command.output().map_err(|err| {
-            format!(
-                "Failed to launch STM32CubeProgrammer CLI at {}: {err}",
-                programmer.display()
-            )
-        })?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stdout.trim().is_empty() {
-            log.push_str(&format!(
-                "\n[STM32CubeProgrammer stdout: {}]\n",
-                artifact.role
-            ));
-            log.push_str(stdout.as_ref());
-            if !stdout.ends_with('\n') {
-                log.push('\n');
-            }
-        }
-        if !stderr.trim().is_empty() {
-            log.push_str(&format!(
-                "\n[STM32CubeProgrammer stderr: {}]\n",
-                artifact.role
-            ));
-            log.push_str(stderr.as_ref());
-            if !stderr.ends_with('\n') {
-                log.push('\n');
-            }
-        }
-        if !output.status.success() {
-            return Err(format!(
-                "STM32CubeProgrammer flash failed for {} with status {}.\n{}",
-                artifact.role,
-                output.status,
-                trim_command_output(&log, 12_000)
-            ));
-        }
-        log.push_str(&format!(
-            "Wrote STM32WB {} ({}) offset={} bytes={}.\n",
-            artifact.role,
-            artifact.file,
-            artifact.offset,
-            image_bytes.len()
-        ));
-    }
-
-    emit_wired_firmware_stage(
-        progress_app_ref,
-        "flash",
-        "finalizing",
-        Some(&loaded.version),
-        Some("SWD"),
-        96,
-        "Booting STM32WB Companion app",
-    );
-    let mut handoff_command = Command::new(&programmer);
-    handoff_command
-        .arg("-c")
-        .args(["port=SWD", "mode=UR", "reset=HWrst", "freq=4000"])
-        .arg("-w8")
-        .arg(STM32WB_OTA_HANDOFF_BASE_ADDRESS)
-        .args(STM32WB_OTA_FW_APP_HANDOFF_BYTES)
-        .arg("-r8")
-        .arg(STM32WB_OTA_HANDOFF_BASE_ADDRESS)
-        .arg("4")
-        .arg("-rst");
-    let handoff_output = handoff_command.output().map_err(|err| {
-        format!(
-            "Failed to launch STM32CubeProgrammer CLI for STM32WB app handoff at {}: {err}",
-            programmer.display()
-        )
-    })?;
-    let handoff_stdout = String::from_utf8_lossy(&handoff_output.stdout);
-    let handoff_stderr = String::from_utf8_lossy(&handoff_output.stderr);
-    if !handoff_stdout.trim().is_empty() {
-        log.push_str("\n[STM32CubeProgrammer stdout: app_handoff]\n");
-        log.push_str(handoff_stdout.as_ref());
-        if !handoff_stdout.ends_with('\n') {
-            log.push('\n');
-        }
-    }
-    if !handoff_stderr.trim().is_empty() {
-        log.push_str("\n[STM32CubeProgrammer stderr: app_handoff]\n");
-        log.push_str(handoff_stderr.as_ref());
-        if !handoff_stderr.ends_with('\n') {
-            log.push('\n');
-        }
-    }
-    if !handoff_output.status.success() {
-        return Err(format!(
-            "STM32CubeProgrammer STM32WB app handoff failed with status {}.\n{}",
-            handoff_output.status,
-            trim_command_output(&log, 12_000)
-        ));
-    }
-    log.push_str(&format!(
-        "Wrote STM32WB OTA FW_APP SRAM handoff {} = {} and reset into the Companion app.\n",
-        STM32WB_OTA_HANDOFF_BASE_ADDRESS,
-        STM32WB_OTA_FW_APP_HANDOFF_BYTES.join(" ")
-    ));
-
-    emit_wired_firmware_stage(
-        progress_app_ref,
-        "flash",
-        "finalizing",
-        Some(&loaded.version),
-        Some("SWD"),
-        99,
-        "Finalizing STM32WB flash",
-    );
-    log.push_str("STM32WB wired factory flash completed and verified by STM32CubeProgrammer.\n");
-
-    emit_wired_firmware_stage(
-        progress_app_ref,
-        "flash",
-        "done",
-        Some(&loaded.version),
-        Some("SWD"),
-        100,
-        "STM32WB wired factory flash completed",
-    );
-    Ok(WiredFirmwareFlashResult {
-        action: "flash".to_string(),
-        kind: loaded.kind.as_str().to_string(),
-        port: "SWD".to_string(),
-        version: loaded.version,
-        log: trim_command_output(&log, 24_000),
-    })
-}
-
-fn write_stm32_temp_image(
-    loaded: &LoadedWiredFirmwarePackage,
-    artifact: &FactoryFirmwareArtifact,
-    image_bytes: &[u8],
-) -> Result<PathBuf, String> {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let temp_dir = std::env::temp_dir().join(format!(
-        "listener-type-stm32-wired-{}-{}-{}",
-        std::process::id(),
-        safe_temp_component(&loaded.version),
-        now_ms
-    ));
-    std::fs::create_dir_all(&temp_dir).map_err(|err| {
-        format!(
-            "Failed to create STM32 flash temp dir {}: {err}",
-            temp_dir.display()
-        )
-    })?;
-    let image_path = temp_dir.join(&artifact.file);
-    std::fs::write(&image_path, image_bytes).map_err(|err| {
-        format!(
-            "Failed to write STM32 flash image {}: {err}",
-            image_path.display()
-        )
-    })?;
-    Ok(image_path)
-}
-
-fn safe_temp_component(value: &str) -> String {
-    let mut out = value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    if out.is_empty() {
-        out.push_str("package");
-    }
-    out.truncate(64);
-    out
-}
-
-fn find_stm32_programmer_cli() -> Option<PathBuf> {
-    for env_name in [
-        "STM32CUBEPROGRAMMER_CLI",
-        "STM32_CUBE_PROGRAMMER_CLI",
-        "STM32_PROGRAMMER_CLI",
-    ] {
-        if let Some(path) = std::env::var_os(env_name).map(PathBuf::from) {
-            if path.is_file() {
-                return Some(path);
-            }
-        }
-    }
-    if let Some(root) = std::env::var_os("STM32CUBEPROGRAMMER_PATH").map(PathBuf::from) {
-        let path = root.join("STM32_Programmer_CLI.exe");
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    if let Some(path_var) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path_var) {
-            let path = dir.join("STM32_Programmer_CLI.exe");
-            if path.is_file() {
-                return Some(path);
-            }
-        }
-    }
-    for candidate in [
-        PathBuf::from(
-            r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
-        ),
-        PathBuf::from(r"C:\ST\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
-    ] {
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    for root in [
-        PathBuf::from(r"C:\ST"),
-        PathBuf::from(r"C:\Program Files\STMicroelectronics"),
-    ] {
-        if let Some(path) = find_named_file_under(&root, "STM32_Programmer_CLI.exe", 8) {
-            return Some(path);
-        }
-    }
-    None
-}
-
-fn find_named_file_under(root: &Path, file_name: &str, depth: usize) -> Option<PathBuf> {
-    if depth == 0 || !root.is_dir() {
-        return None;
-    }
-    let mut entries = std::fs::read_dir(root)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .collect::<Vec<_>>();
-    entries.sort();
-    for path in &entries {
-        if path.is_file()
-            && path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .is_some_and(|name| name.eq_ignore_ascii_case(file_name))
-        {
-            return Some(path.clone());
-        }
-    }
-    for path in entries {
-        if path.is_dir() {
-            if let Some(found) = find_named_file_under(&path, file_name, depth - 1) {
-                return Some(found);
-            }
-        }
-    }
-    None
 }
 
 pub(crate) fn run_wired_bootloader_repair(
@@ -4418,9 +4016,6 @@ fn parse_baud_value(value: &Value) -> Option<u32> {
 fn wired_target_chip(target: &str) -> Result<Chip, String> {
     match wired_firmware_target_kind(target)? {
         WiredFirmwareTargetKind::Esp32S3 => Ok(Chip::Esp32s3),
-        WiredFirmwareTargetKind::Stm32WbSwd => Err(format!(
-            "STM32WB package target {target} uses STM32CubeProgrammer over SWD, not espflash."
-        )),
     }
 }
 
@@ -4432,11 +4027,8 @@ fn wired_firmware_target_kind(target: &str) -> Result<WiredFirmwareTargetKind, S
         .replace('_', "");
     match normalized.as_str() {
         "esp32s3" => Ok(WiredFirmwareTargetKind::Esp32S3),
-        "nucleowb55rg" | "stm32wb55rg" | "companionpendantce" | "stm32wb55ceux" => {
-            Ok(WiredFirmwareTargetKind::Stm32WbSwd)
-        }
         _ => Err(format!(
-            "Wired firmware flashing supports ESP32-S3 Listener packages and STM32WB Companion packages; package target is {target}."
+            "Wired firmware flashing supports ESP32-S3 Listener packages; package target is {target}."
         )),
     }
 }
@@ -4848,8 +4440,6 @@ pub async fn transfer_firmware_ota_ble(
     }
 
     coord.begin_firmware_ota_transfer();
-    let is_stm32wb_st_ota = manifest.is_stm32wb_st_ble_ota();
-    let is_companion_ota_v2 = manifest.is_companion_ota_v2();
     let is_listener_ota_v2 = manifest.is_listener_ble_ota_v2();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
@@ -4866,19 +4456,7 @@ pub async fn transfer_firmware_ota_ble(
                 }),
             );
         };
-        if is_stm32wb_st_ota {
-            crate::embedded_ble::transfer_stm32wb_st_ota(
-                &firmware_bytes,
-                manifest_chunk_bytes,
-                Some(&progress),
-            )
-        } else if is_companion_ota_v2 {
-            crate::embedded_ble::transfer_companion_ota_v2(
-                &firmware_bytes,
-                manifest_chunk_bytes,
-                Some(&progress),
-            )
-        } else if is_listener_ota_v2 {
+        if is_listener_ota_v2 {
             crate::embedded_ble::transfer_listener_ota_v2(
                 &firmware_bytes,
                 manifest_chunk_bytes,
@@ -4897,7 +4475,7 @@ pub async fn transfer_firmware_ota_ble(
     .await
     .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
     .and_then(|result| result);
-    let confirmed_version = if transfer.is_ok() && !is_stm32wb_st_ota && !is_companion_ota_v2 {
+    let confirmed_version = if transfer.is_ok() {
         confirm_firmware_ota_version(&version).await
     } else {
         None
@@ -8168,56 +7746,6 @@ mod tests {
         assert_eq!(payload.kind, "factory");
         assert!(payload.supports_full_flash);
         assert!(payload.supports_boot_repair);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn load_wired_firmware_package_reads_companion_stm32_factory_directory() {
-        let root = std::env::temp_dir().join(format!(
-            "companion-wired-factory-test-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).expect("create temp Companion factory package dir");
-
-        let hex = b":020000040800F2\r\n:0400000000010020DB\r\n:00000001FF\r\n".to_vec();
-        std::fs::write(root.join("Companion_Nucleo_WB55RG_Bringup.hex"), &hex)
-            .expect("write STM32 hex");
-        let manifest = format!(
-            r#"{{
-  "schema_version": 1,
-  "package_type": "companion-wired-factory",
-  "project": "Companion-Firmware",
-  "version": "nucleo-test",
-  "target": "NUCLEO-WB55RG",
-  "git_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-  "artifacts": [
-    {{"role": "app", "file": "Companion_Nucleo_WB55RG_Bringup.hex", "offset": "SWD", "format": "intel_hex", "size_bytes": {}, "sha256": "{}"}}
-  ]
-}}"#,
-            hex.len(),
-            crate::firmware_ota::sha256_hex(&hex)
-        );
-        std::fs::write(root.join("manifest.json"), manifest)
-            .expect("write Companion factory manifest");
-
-        let loaded = super::load_wired_firmware_package_internal(&root)
-            .expect("load Companion STM32 factory package");
-        assert_eq!(loaded.kind, super::WiredFirmwarePackageKind::Factory);
-        assert_eq!(loaded.project, "Companion-Firmware");
-        assert_eq!(loaded.target, "NUCLEO-WB55RG");
-        assert_eq!(loaded.otadata_region, None);
-        assert_eq!(loaded.artifacts.len(), 1);
-        assert_eq!(
-            loaded.files.get("Companion_Nucleo_WB55RG_Bringup.hex"),
-            Some(&hex)
-        );
-
-        let payload = loaded.to_payload();
-        assert_eq!(payload.kind, "factory");
-        assert!(payload.supports_full_flash);
-        assert!(!payload.supports_boot_repair);
         let _ = std::fs::remove_dir_all(&root);
     }
 

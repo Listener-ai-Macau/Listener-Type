@@ -11,14 +11,22 @@ pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3
 pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093b";
 pub const DIAGNOSTIC_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093c";
 pub const DIAGNOSTIC_COUNT_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093d";
+#[cfg(feature = "companion-dev")]
 pub const STM32WB_ST_OTA_SERVICE_UUID_TEXT: &str = "8f7a0007-7b7d-4f3d-9d6f-6c2d1b7c0000";
+#[cfg(feature = "companion-dev")]
 pub const STM32WB_ST_OTA_BASE_UUID_TEXT: &str = "8f7a7002-7b7d-4f3d-9d6f-6c2d1b7c0000";
+#[cfg(feature = "companion-dev")]
 pub const STM32WB_ST_OTA_CONFIRM_UUID_TEXT: &str = "8f7a7003-7b7d-4f3d-9d6f-6c2d1b7c0000";
+#[cfg(feature = "companion-dev")]
 pub const STM32WB_ST_OTA_RAW_UUID_TEXT: &str = "8f7a7004-7b7d-4f3d-9d6f-6c2d1b7c0000";
-pub const COMPANION_OTA_V2_SERVICE_UUID_TEXT: &str = "8f7a8007-7b7d-4f3d-9d6f-6c2d1b7c0000";
-pub const COMPANION_OTA_V2_CONTROL_UUID_TEXT: &str = "8f7a8002-7b7d-4f3d-9d6f-6c2d1b7c0000";
-pub const COMPANION_OTA_V2_DATA_UUID_TEXT: &str = "8f7a8004-7b7d-4f3d-9d6f-6c2d1b7c0000";
-pub const COMPANION_OTA_V2_STATUS_UUID_TEXT: &str = "8f7a8005-7b7d-4f3d-9d6f-6c2d1b7c0000";
+#[cfg(feature = "companion-dev")]
+pub const OTA_V2_SERVICE_UUID_TEXT: &str = "8f7a8007-7b7d-4f3d-9d6f-6c2d1b7c0000";
+#[cfg(feature = "companion-dev")]
+pub const OTA_V2_CONTROL_UUID_TEXT: &str = "8f7a8002-7b7d-4f3d-9d6f-6c2d1b7c0000";
+#[cfg(feature = "companion-dev")]
+pub const OTA_V2_DATA_UUID_TEXT: &str = "8f7a8004-7b7d-4f3d-9d6f-6c2d1b7c0000";
+#[cfg(feature = "companion-dev")]
+pub const OTA_V2_STATUS_UUID_TEXT: &str = "8f7a8005-7b7d-4f3d-9d6f-6c2d1b7c0000";
 pub const LISTENER_OTA_V2_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
 pub const LISTENER_OTA_V2_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092b";
 pub const LISTENER_OTA_V2_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092c";
@@ -558,29 +566,38 @@ mod windows_ble {
     const LISTENER_OTA_V2_STATUS_UUID: GUID = OTA_CONTROL_UUID;
     const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
     const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_SERVICE_UUID: GUID =
         GUID::from_u128(0x8f7a0007_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_BASE_UUID: GUID = GUID::from_u128(0x8f7a7002_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_CONFIRM_UUID: GUID =
         GUID::from_u128(0x8f7a7003_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_RAW_UUID: GUID = GUID::from_u128(0x8f7a7004_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_LEGACY_OTA_SERVICE_UUID: GUID =
         GUID::from_u128(0x0000fe20_cc7a_482a_984a_7f2ed5b3e58f);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_LEGACY_OTA_BASE_UUID: GUID =
         GUID::from_u128(0x0000fe22_8e22_4541_9d4c_21edae82ed19);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_LEGACY_OTA_CONFIRM_UUID: GUID =
         GUID::from_u128(0x0000fe23_8e22_4541_9d4c_21edae82ed19);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_LEGACY_OTA_RAW_UUID: GUID =
         GUID::from_u128(0x0000fe24_8e22_4541_9d4c_21edae82ed19);
-    const COMPANION_OTA_V2_SERVICE_UUID: GUID =
-        GUID::from_u128(0x8f7a8007_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    const COMPANION_OTA_V2_CONTROL_UUID: GUID =
-        GUID::from_u128(0x8f7a8002_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    const COMPANION_OTA_V2_DATA_UUID: GUID =
-        GUID::from_u128(0x8f7a8004_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    const COMPANION_OTA_V2_STATUS_UUID: GUID =
-        GUID::from_u128(0x8f7a8005_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    #[cfg(feature = "companion-dev")]
+    const OTA_V2_SERVICE_UUID: GUID = GUID::from_u128(0x8f7a8007_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    #[cfg(feature = "companion-dev")]
+    const OTA_V2_CONTROL_UUID: GUID = GUID::from_u128(0x8f7a8002_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    #[cfg(feature = "companion-dev")]
+    const OTA_V2_DATA_UUID: GUID = GUID::from_u128(0x8f7a8004_7b7d_4f3d_9d6f_6c2d1b7c0000);
+    #[cfg(feature = "companion-dev")]
+    const OTA_V2_STATUS_UUID: GUID = GUID::from_u128(0x8f7a8005_7b7d_4f3d_9d6f_6c2d1b7c0000);
 
+    #[cfg(feature = "companion-dev")]
     #[derive(Clone, Copy)]
     struct Stm32wbStOtaUuidSet {
         label: &'static str,
@@ -590,6 +607,7 @@ mod windows_ble {
         raw: GUID,
     }
 
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_UUID_SETS: [Stm32wbStOtaUuidSet; 2] = [
         Stm32wbStOtaUuidSet {
             label: "companion",
@@ -652,7 +670,9 @@ mod windows_ble {
     const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
     const OTA_DATA_WRITE_OPTION_ENV: &str = "LISTENER_OTA_DATA_WRITE_OPTION";
     const TYPE_READY_COMMAND_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_READY_COMMAND";
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_ADVERTISEMENT_NAME: &str = "companion";
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
     const OTA_DATA_CHUNK_BYTES_ENV: &str = "LISTENER_OTA_DATA_CHUNK_BYTES";
     const OTA_DATA_INTER_CHUNK_DELAY_MS_ENV: &str = "LISTENER_OTA_DATA_INTER_CHUNK_DELAY_MS";
@@ -664,40 +684,51 @@ mod windows_ble {
     const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
     const SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091a";
     const OTA_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_APP_BASE_ADDRESS: u32 = 0x0800_7000;
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_RAW_DATA_SIZE: usize = 248;
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_REBOOT_HANDOFF_TIMEOUT: Duration = Duration::from_secs(12);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_NO_RESPONSE_CHUNK_DELAY: Duration = Duration::from_millis(50);
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_APPLICATION_UPLOAD: u8 = 0x02;
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_UPLOAD_FINISHED: u8 = 0x07;
+    #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_REBOOT_CONFIRMED: u8 = 0x01;
-    const COMPANION_OTA_V2_MAGIC: &[u8; 4] = b"COV2";
+    #[cfg(feature = "companion-dev")]
+    const OTA_V2_MAGIC: &[u8; 4] = b"COV2";
     const LISTENER_OTA_V2_MAGIC: &[u8; 4] = b"LOV2";
-    const COMPANION_OTA_V2_PROTOCOL_VERSION: u8 = 1;
-    const COMPANION_OTA_V2_OP_BEGIN: u8 = 1;
-    const COMPANION_OTA_V2_OP_SYNC: u8 = 2;
-    const COMPANION_OTA_V2_OP_FINISH: u8 = 3;
-    const COMPANION_OTA_V2_OP_ABORT: u8 = 4;
-    const COMPANION_OTA_V2_STATUS_BYTES: usize = 24;
-    const COMPANION_OTA_V2_PACKET_HEADER_BYTES: usize = 4;
-    const COMPANION_OTA_V2_DATA_PACKET_BYTES: usize = 244;
-    const COMPANION_OTA_V2_CHUNK_PAYLOAD_BYTES: usize =
-        COMPANION_OTA_V2_DATA_PACKET_BYTES - COMPANION_OTA_V2_PACKET_HEADER_BYTES;
-    const COMPANION_OTA_V2_DEFAULT_WINDOW_CHUNKS: usize = 24;
-    const COMPANION_OTA_V2_WINDOW_ENV: &str = "COMPANION_OTA_V2_WINDOW_CHUNKS";
+    const OTA_V2_PROTOCOL_VERSION: u8 = 1;
+    const OTA_V2_OP_BEGIN: u8 = 1;
+    const OTA_V2_OP_SYNC: u8 = 2;
+    const OTA_V2_OP_FINISH: u8 = 3;
+    const OTA_V2_OP_ABORT: u8 = 4;
+    const OTA_V2_STATUS_BYTES: usize = 24;
+    const OTA_V2_PACKET_HEADER_BYTES: usize = 4;
+    const OTA_V2_DATA_PACKET_BYTES: usize = 244;
+    #[cfg(feature = "companion-dev")]
+    const OTA_V2_CHUNK_PAYLOAD_BYTES: usize = OTA_V2_DATA_PACKET_BYTES - OTA_V2_PACKET_HEADER_BYTES;
+    #[cfg(feature = "companion-dev")]
+    const OTA_V2_DEFAULT_WINDOW_CHUNKS: usize = 24;
+    #[cfg(feature = "companion-dev")]
+    const OTA_V2_WINDOW_ENV: &str = "LISTENER_COMPANION_DEV_OTA_V2_WINDOW_CHUNKS";
     const LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES: usize = 500;
     const LISTENER_OTA_V2_DEFAULT_WINDOW_CHUNKS: usize = 14;
     const LISTENER_OTA_V2_WINDOW_ENV: &str = "LISTENER_OTA_V2_WINDOW_CHUNKS";
-    const COMPANION_OTA_V2_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(15);
-    const COMPANION_OTA_V2_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(150);
-    const COMPANION_OTA_V2_STATE_IDLE: u8 = 0;
-    const COMPANION_OTA_V2_STATE_ERASING: u8 = 1;
-    const COMPANION_OTA_V2_STATE_RECEIVING: u8 = 2;
-    const COMPANION_OTA_V2_STATE_COMPLETE: u8 = 3;
-    const COMPANION_OTA_V2_STATE_ERROR: u8 = 4;
-    const COMPANION_OTA_V2_ERROR_NONE: u8 = 0;
-    const COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH: u8 = 4;
+    const OTA_V2_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(15);
+    const OTA_V2_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(150);
+    const OTA_V2_STATE_IDLE: u8 = 0;
+    const OTA_V2_STATE_ERASING: u8 = 1;
+    const OTA_V2_STATE_RECEIVING: u8 = 2;
+    const OTA_V2_STATE_COMPLETE: u8 = 3;
+    const OTA_V2_STATE_ERROR: u8 = 4;
+    const OTA_V2_ERROR_NONE: u8 = 0;
+    const OTA_V2_ERROR_OFFSET_MISMATCH: u8 = 4;
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
     const OTA_REQUIRED_DATA_CHUNK_BYTES: usize = 500;
 
@@ -1927,7 +1958,6 @@ mod windows_ble {
             || text.contains("stmicroelectronics")
             || text.contains("nucleo")
             || text.contains("wb55")
-            || text.contains("companion")
         {
             return false;
         }
@@ -2707,7 +2737,7 @@ mod windows_ble {
     ) -> bool {
         // One-shot captures only need the initial TYPE:READY command. Repeating
         // TYPE:HB while the app is doing ASR/cleanup has proven to destabilize
-        // back-to-back Companion A1/A2 sessions on Windows BLE.
+        // Keep back-to-back hardware A1/A2 sessions from reusing a stale Windows BLE link.
         terminal_behavior == CaptureTerminalBehavior::ContinueListening
     }
 
@@ -2875,13 +2905,14 @@ mod windows_ble {
         transfer_guard: BleCaptureGuard,
     }
 
+    #[cfg(feature = "companion-dev")]
     pub(super) struct PreparedStm32wbStOtaTransfer {
         target: OpenStm32wbStOtaTarget,
         snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
         transfer_guard: BleCaptureGuard,
     }
 
-    struct OpenCompanionOtaV2Target {
+    struct OpenOtaV2Target {
         control: GattCharacteristic,
         data: GattCharacteristic,
         status: GattCharacteristic,
@@ -2893,7 +2924,7 @@ mod windows_ble {
         bluetooth_address: Option<u64>,
     }
 
-    struct PreparedCompanionOtaV2Characteristics {
+    struct PreparedOtaV2Characteristics {
         control: GattCharacteristic,
         data: GattCharacteristic,
         status: GattCharacteristic,
@@ -2902,11 +2933,12 @@ mod windows_ble {
         session: Option<GattSession>,
     }
 
-    type OpenListenerOtaV2Target = OpenCompanionOtaV2Target;
-    type PreparedListenerOtaV2Characteristics = PreparedCompanionOtaV2Characteristics;
+    type OpenListenerOtaV2Target = OpenOtaV2Target;
+    type PreparedListenerOtaV2Characteristics = PreparedOtaV2Characteristics;
 
+    #[cfg(feature = "companion-dev")]
     pub(super) struct PreparedCompanionOtaV2Transfer {
-        target: OpenCompanionOtaV2Target,
+        target: OpenOtaV2Target,
         snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
         transfer_guard: BleCaptureGuard,
     }
@@ -2942,6 +2974,7 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     impl PreparedStm32wbStOtaTransfer {
         pub(super) fn snapshot(&self) -> &crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             &self.snapshot
@@ -2963,6 +2996,7 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     impl PreparedCompanionOtaV2Transfer {
         pub(super) fn snapshot(&self) -> &crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             &self.snapshot
@@ -3023,6 +3057,7 @@ mod windows_ble {
         })
     }
 
+    #[cfg(feature = "companion-dev")]
     pub(super) fn prepare_stm32wb_st_ota_transfer() -> Result<PreparedStm32wbStOtaTransfer, String>
     {
         log::info!("[embedded-ble] STM32WB ST OTA prepare: acquiring BLE capture guard");
@@ -3041,6 +3076,7 @@ mod windows_ble {
         })
     }
 
+    #[cfg(feature = "companion-dev")]
     pub(super) fn prepare_companion_ota_v2_transfer(
     ) -> Result<PreparedCompanionOtaV2Transfer, String> {
         log::info!("[embedded-ble] Companion OTA v2 prepare: acquiring BLE capture guard");
@@ -3216,6 +3252,7 @@ mod windows_ble {
             || (lower.contains("ota control finish") && lower.contains("timed out"))
     }
 
+    #[cfg(feature = "companion-dev")]
     pub fn transfer_stm32wb_st_ota(
         firmware_bytes: &[u8],
         manifest_chunk_bytes: usize,
@@ -3229,6 +3266,7 @@ mod windows_ble {
         prepared.transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
     }
 
+    #[cfg(feature = "companion-dev")]
     pub fn transfer_companion_ota_v2(
         firmware_bytes: &[u8],
         manifest_chunk_bytes: usize,
@@ -3256,7 +3294,7 @@ mod windows_ble {
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
-    struct CompanionOtaV2Status {
+    struct OtaV2Status {
         state: u8,
         last_error: u8,
         bytes_written: usize,
@@ -3266,23 +3304,24 @@ mod windows_ble {
         data_write_count: u32,
     }
 
+    #[cfg(feature = "companion-dev")]
     fn transfer_companion_ota_v2_to_target(
-        target: &OpenCompanionOtaV2Target,
+        target: &OpenOtaV2Target,
         transfer_id: u64,
         firmware_bytes: &[u8],
         manifest_chunk_bytes: usize,
         on_progress: Option<&dyn Fn(usize, usize)>,
     ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-        if manifest_chunk_bytes != COMPANION_OTA_V2_CHUNK_PAYLOAD_BYTES {
+        if manifest_chunk_bytes != OTA_V2_CHUNK_PAYLOAD_BYTES {
             return Err(format!(
-                "Companion OTA v2 manifest chunk size must be {COMPANION_OTA_V2_CHUNK_PAYLOAD_BYTES} bytes, got {manifest_chunk_bytes}."
+                "Companion OTA v2 manifest chunk size must be {OTA_V2_CHUNK_PAYLOAD_BYTES} bytes, got {manifest_chunk_bytes}."
             ));
         }
 
-        let configured_window = companion_ota_v2_window_chunks()?;
+        let configured_window = ota_v2_window_chunks()?;
         let begin_window = configured_window.min(u16::MAX as usize).max(1);
-        let begin = companion_ota_v2_control_command(
-            COMPANION_OTA_V2_OP_BEGIN,
+        let begin = ota_v2_control_command(
+            OTA_V2_OP_BEGIN,
             firmware_bytes.len() as u32,
             manifest_chunk_bytes as u16,
             begin_window as u16,
@@ -3291,7 +3330,7 @@ mod windows_ble {
         log::info!(
             "[embedded-ble] Companion OTA v2 #{transfer_id}: aborting previous transfer (if any)"
         );
-        let abort = companion_ota_v2_control_command(COMPANION_OTA_V2_OP_ABORT, 0, 0, 0);
+        let abort = ota_v2_control_command(OTA_V2_OP_ABORT, 0, 0, 0);
         let _ = write_gatt_value_with_timeout(
             &target.control,
             &abort,
@@ -3313,11 +3352,11 @@ mod windows_ble {
             "Companion OTA v2 begin",
         )?;
 
-        let mut status = wait_companion_ota_v2_status(
+        let mut status = wait_ota_v2_status(
             target,
             transfer_id,
             |status| {
-                status.state == COMPANION_OTA_V2_STATE_RECEIVING
+                status.state == OTA_V2_STATE_RECEIVING
                     && status.expected_size == firmware_bytes.len()
             },
             "begin erase",
@@ -3342,8 +3381,7 @@ mod windows_ble {
             let mut chunks_this_window = 0usize;
             while chunks_this_window < window_chunks && sent_until < firmware_bytes.len() {
                 let payload_len = chunk_payload_bytes.min(firmware_bytes.len() - sent_until);
-                let mut packet =
-                    Vec::with_capacity(COMPANION_OTA_V2_PACKET_HEADER_BYTES + payload_len);
+                let mut packet = Vec::with_capacity(OTA_V2_PACKET_HEADER_BYTES + payload_len);
                 packet.extend_from_slice(&(sent_until as u32).to_le_bytes());
                 packet.extend_from_slice(&firmware_bytes[sent_until..sent_until + payload_len]);
                 write_gatt_value_with_timeout(
@@ -3358,8 +3396,8 @@ mod windows_ble {
                 chunks_this_window += 1;
             }
 
-            let sync = companion_ota_v2_control_command(
-                COMPANION_OTA_V2_OP_SYNC,
+            let sync = ota_v2_control_command(
+                OTA_V2_OP_SYNC,
                 firmware_bytes.len() as u32,
                 manifest_chunk_bytes as u16,
                 window_chunks as u16,
@@ -3371,8 +3409,8 @@ mod windows_ble {
                 OTA_WRITE_TIMEOUT,
                 "Companion OTA v2 sync",
             )?;
-            status = read_companion_ota_v2_status(target)?;
-            companion_ota_v2_status_result(&status)?;
+            status = read_ota_v2_status(target)?;
+            ota_v2_status_result(&status)?;
             if status.expected_size != firmware_bytes.len() {
                 return Err(format!(
                     "Companion OTA v2 status expected_size={} does not match package size {}.",
@@ -3394,7 +3432,7 @@ mod windows_ble {
                     status.bytes_written,
                     status.last_error
                 );
-                if status.last_error == COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH {
+                if status.last_error == OTA_V2_ERROR_OFFSET_MISMATCH {
                     window_chunks = window_chunks.saturating_div(2).max(1);
                 }
             } else if window_chunks < configured_window {
@@ -3413,8 +3451,8 @@ mod windows_ble {
             }
         }
 
-        let finish = companion_ota_v2_control_command(
-            COMPANION_OTA_V2_OP_FINISH,
+        let finish = ota_v2_control_command(
+            OTA_V2_OP_FINISH,
             firmware_bytes.len() as u32,
             manifest_chunk_bytes as u16,
             window_chunks as u16,
@@ -3465,7 +3503,7 @@ mod windows_ble {
         let configured_window = listener_ota_v2_window_chunks()?;
         let begin_window = configured_window.min(u16::MAX as usize).max(1);
         let begin = listener_ota_v2_control_command(
-            COMPANION_OTA_V2_OP_BEGIN,
+            OTA_V2_OP_BEGIN,
             firmware_bytes.len() as u32,
             manifest_chunk_bytes as u16,
             begin_window as u16,
@@ -3475,7 +3513,7 @@ mod windows_ble {
         log::info!(
             "[embedded-ble] Listener OTA v2 #{transfer_id}: aborting previous transfer (if any)"
         );
-        let abort = listener_ota_v2_control_command(COMPANION_OTA_V2_OP_ABORT, 0, 0, 0);
+        let abort = listener_ota_v2_control_command(OTA_V2_OP_ABORT, 0, 0, 0);
         if let Ok(option) = write_listener_ota_v2_value_with_fallback(
             &target.data,
             &abort,
@@ -3503,7 +3541,7 @@ mod windows_ble {
             target,
             transfer_id,
             |status| {
-                status.state == COMPANION_OTA_V2_STATE_RECEIVING
+                status.state == OTA_V2_STATE_RECEIVING
                     && status.expected_size == firmware_bytes.len()
             },
             "begin",
@@ -3528,8 +3566,7 @@ mod windows_ble {
             let mut chunks_this_window = 0usize;
             while chunks_this_window < window_chunks && sent_until < firmware_bytes.len() {
                 let payload_len = chunk_payload_bytes.min(firmware_bytes.len() - sent_until);
-                let mut packet =
-                    Vec::with_capacity(COMPANION_OTA_V2_PACKET_HEADER_BYTES + payload_len);
+                let mut packet = Vec::with_capacity(OTA_V2_PACKET_HEADER_BYTES + payload_len);
                 packet.extend_from_slice(&(sent_until as u32).to_le_bytes());
                 packet.extend_from_slice(&firmware_bytes[sent_until..sent_until + payload_len]);
                 data_write_option = write_listener_ota_v2_value_with_fallback(
@@ -3545,7 +3582,7 @@ mod windows_ble {
             }
 
             let sync = listener_ota_v2_control_command(
-                COMPANION_OTA_V2_OP_SYNC,
+                OTA_V2_OP_SYNC,
                 firmware_bytes.len() as u32,
                 manifest_chunk_bytes as u16,
                 window_chunks as u16,
@@ -3558,7 +3595,7 @@ mod windows_ble {
                 "Listener OTA v2 sync",
             )?;
             status = read_listener_ota_v2_status(target)?;
-            companion_ota_v2_status_result(&status)?;
+            ota_v2_status_result(&status)?;
             if status.expected_size != firmware_bytes.len() {
                 return Err(format!(
                     "Listener OTA v2 status expected_size={} does not match package size {}.",
@@ -3580,7 +3617,7 @@ mod windows_ble {
                     status.bytes_written,
                     status.last_error
                 );
-                if status.last_error == COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH {
+                if status.last_error == OTA_V2_ERROR_OFFSET_MISMATCH {
                     window_chunks = window_chunks.saturating_div(2).max(1);
                 }
             } else if window_chunks < configured_window {
@@ -3600,7 +3637,7 @@ mod windows_ble {
         }
 
         let finish = listener_ota_v2_control_command(
-            COMPANION_OTA_V2_OP_FINISH,
+            OTA_V2_OP_FINISH,
             firmware_bytes.len() as u32,
             manifest_chunk_bytes as u16,
             window_chunks as u16,
@@ -3633,16 +3670,17 @@ mod windows_ble {
         })
     }
 
-    fn companion_ota_v2_control_command(
+    #[cfg(feature = "companion-dev")]
+    fn ota_v2_control_command(
         op: u8,
         expected_size: u32,
         chunk_payload_bytes: u16,
         window_chunks: u16,
     ) -> [u8; 16] {
         let mut bytes = [0u8; 16];
-        bytes[0..4].copy_from_slice(COMPANION_OTA_V2_MAGIC);
+        bytes[0..4].copy_from_slice(OTA_V2_MAGIC);
         bytes[4] = op;
-        bytes[5] = COMPANION_OTA_V2_PROTOCOL_VERSION;
+        bytes[5] = OTA_V2_PROTOCOL_VERSION;
         bytes[8..12].copy_from_slice(&expected_size.to_le_bytes());
         bytes[12..14].copy_from_slice(&chunk_payload_bytes.to_le_bytes());
         bytes[14..16].copy_from_slice(&window_chunks.to_le_bytes());
@@ -3656,10 +3694,10 @@ mod windows_ble {
         window_chunks: u16,
     ) -> Vec<u8> {
         let op_name = match op {
-            COMPANION_OTA_V2_OP_BEGIN => "begin_v2",
-            COMPANION_OTA_V2_OP_SYNC => "sync_v2",
-            COMPANION_OTA_V2_OP_FINISH => "finish_v2",
-            COMPANION_OTA_V2_OP_ABORT => "abort_v2",
+            OTA_V2_OP_BEGIN => "begin_v2",
+            OTA_V2_OP_SYNC => "sync_v2",
+            OTA_V2_OP_FINISH => "finish_v2",
+            OTA_V2_OP_ABORT => "abort_v2",
             _ => "abort_v2",
         };
         format!(
@@ -3668,19 +3706,20 @@ mod windows_ble {
         .into_bytes()
     }
 
-    fn companion_ota_v2_window_chunks() -> Result<usize, String> {
-        let configured = std::env::var(COMPANION_OTA_V2_WINDOW_ENV)
+    #[cfg(feature = "companion-dev")]
+    fn ota_v2_window_chunks() -> Result<usize, String> {
+        let configured = std::env::var(OTA_V2_WINDOW_ENV)
             .ok()
             .and_then(ota_env_value);
         match configured.as_deref() {
-            None => Ok(COMPANION_OTA_V2_DEFAULT_WINDOW_CHUNKS),
+            None => Ok(OTA_V2_DEFAULT_WINDOW_CHUNKS),
             Some(value) => value
                 .parse::<usize>()
                 .ok()
                 .filter(|window| (1..=64).contains(window))
                 .ok_or_else(|| {
                     format!(
-                        "Unsupported {COMPANION_OTA_V2_WINDOW_ENV}={value}; use a window from 1 to 64 chunks."
+                        "Unsupported {OTA_V2_WINDOW_ENV}={value}; use a window from 1 to 64 chunks."
                     )
                 }),
         }
@@ -3704,16 +3743,17 @@ mod windows_ble {
         }
     }
 
-    fn wait_companion_ota_v2_status(
-        target: &OpenCompanionOtaV2Target,
+    #[cfg(feature = "companion-dev")]
+    fn wait_ota_v2_status(
+        target: &OpenOtaV2Target,
         transfer_id: u64,
-        ready: impl Fn(&CompanionOtaV2Status) -> bool,
+        ready: impl Fn(&OtaV2Status) -> bool,
         label: &str,
-    ) -> Result<CompanionOtaV2Status, String> {
-        let deadline = Instant::now() + COMPANION_OTA_V2_STATUS_POLL_TIMEOUT;
+    ) -> Result<OtaV2Status, String> {
+        let deadline = Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT;
         loop {
-            let status = read_companion_ota_v2_status(target)?;
-            companion_ota_v2_status_result(&status)?;
+            let status = read_ota_v2_status(target)?;
+            ota_v2_status_result(&status)?;
             if ready(&status) {
                 return Ok(status);
             }
@@ -3722,31 +3762,30 @@ mod windows_ble {
                     "Companion OTA v2 #{transfer_id} timed out waiting for {label}; last_status={status:?}"
                 ));
             }
-            std::thread::sleep(COMPANION_OTA_V2_STATUS_POLL_INTERVAL);
+            std::thread::sleep(OTA_V2_STATUS_POLL_INTERVAL);
         }
     }
 
-    fn read_companion_ota_v2_status(
-        target: &OpenCompanionOtaV2Target,
-    ) -> Result<CompanionOtaV2Status, String> {
+    #[cfg(feature = "companion-dev")]
+    fn read_ota_v2_status(target: &OpenOtaV2Target) -> Result<OtaV2Status, String> {
         let bytes = read_characteristic_bytes(
             &target.status,
             BluetoothCacheMode::Uncached,
             "Companion OTA v2 status",
         )?;
-        parse_companion_ota_v2_status(&bytes)
+        parse_ota_v2_status(&bytes)
     }
 
     fn wait_listener_ota_v2_status(
         target: &OpenListenerOtaV2Target,
         transfer_id: u64,
-        ready: impl Fn(&CompanionOtaV2Status) -> bool,
+        ready: impl Fn(&OtaV2Status) -> bool,
         label: &str,
-    ) -> Result<CompanionOtaV2Status, String> {
-        let deadline = Instant::now() + COMPANION_OTA_V2_STATUS_POLL_TIMEOUT;
+    ) -> Result<OtaV2Status, String> {
+        let deadline = Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT;
         loop {
             let status = read_listener_ota_v2_status(target)?;
-            companion_ota_v2_status_result(&status)?;
+            ota_v2_status_result(&status)?;
             if ready(&status) {
                 return Ok(status);
             }
@@ -3755,13 +3794,13 @@ mod windows_ble {
                     "Listener OTA v2 #{transfer_id} timed out waiting for {label}; last_status={status:?}"
                 ));
             }
-            std::thread::sleep(COMPANION_OTA_V2_STATUS_POLL_INTERVAL);
+            std::thread::sleep(OTA_V2_STATUS_POLL_INTERVAL);
         }
     }
 
     fn read_listener_ota_v2_status(
         target: &OpenListenerOtaV2Target,
-    ) -> Result<CompanionOtaV2Status, String> {
+    ) -> Result<OtaV2Status, String> {
         let bytes = read_characteristic_bytes(
             &target.status,
             BluetoothCacheMode::Uncached,
@@ -3770,23 +3809,24 @@ mod windows_ble {
         parse_listener_ota_v2_status(&bytes)
     }
 
-    fn parse_companion_ota_v2_status(bytes: &[u8]) -> Result<CompanionOtaV2Status, String> {
-        if bytes.len() < COMPANION_OTA_V2_STATUS_BYTES {
+    #[cfg(feature = "companion-dev")]
+    fn parse_ota_v2_status(bytes: &[u8]) -> Result<OtaV2Status, String> {
+        if bytes.len() < OTA_V2_STATUS_BYTES {
             return Err(format!(
-                "Companion OTA v2 status is {} bytes; expected {COMPANION_OTA_V2_STATUS_BYTES}.",
+                "Companion OTA v2 status is {} bytes; expected {OTA_V2_STATUS_BYTES}.",
                 bytes.len()
             ));
         }
-        if &bytes[0..4] != COMPANION_OTA_V2_MAGIC {
+        if &bytes[0..4] != OTA_V2_MAGIC {
             return Err("Companion OTA v2 status magic mismatch.".to_string());
         }
-        if bytes[4] != COMPANION_OTA_V2_PROTOCOL_VERSION {
+        if bytes[4] != OTA_V2_PROTOCOL_VERSION {
             return Err(format!(
                 "Companion OTA v2 status protocol version {} is unsupported.",
                 bytes[4]
             ));
         }
-        Ok(CompanionOtaV2Status {
+        Ok(OtaV2Status {
             state: bytes[5],
             last_error: bytes[6],
             bytes_written: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize,
@@ -3798,23 +3838,23 @@ mod windows_ble {
         })
     }
 
-    fn parse_listener_ota_v2_status(bytes: &[u8]) -> Result<CompanionOtaV2Status, String> {
-        if bytes.len() < COMPANION_OTA_V2_STATUS_BYTES {
+    fn parse_listener_ota_v2_status(bytes: &[u8]) -> Result<OtaV2Status, String> {
+        if bytes.len() < OTA_V2_STATUS_BYTES {
             return Err(format!(
-                "Listener OTA v2 status is {} bytes; expected {COMPANION_OTA_V2_STATUS_BYTES}.",
+                "Listener OTA v2 status is {} bytes; expected {OTA_V2_STATUS_BYTES}.",
                 bytes.len()
             ));
         }
         if &bytes[0..4] != LISTENER_OTA_V2_MAGIC {
             return Err("Listener OTA v2 status magic mismatch.".to_string());
         }
-        if bytes[4] != COMPANION_OTA_V2_PROTOCOL_VERSION {
+        if bytes[4] != OTA_V2_PROTOCOL_VERSION {
             return Err(format!(
                 "Listener OTA v2 status version {} is unsupported.",
                 bytes[4]
             ));
         }
-        Ok(CompanionOtaV2Status {
+        Ok(OtaV2Status {
             state: bytes[5],
             last_error: bytes[6],
             bytes_written: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize,
@@ -3826,27 +3866,28 @@ mod windows_ble {
         })
     }
 
-    fn companion_ota_v2_status_result(status: &CompanionOtaV2Status) -> Result<(), String> {
-        if status.state == COMPANION_OTA_V2_STATE_ERROR {
+    fn ota_v2_status_result(status: &OtaV2Status) -> Result<(), String> {
+        if status.state == OTA_V2_STATE_ERROR {
             return Err(format!(
-                "Companion OTA v2 device entered error state last_error={} offset={} expected_size={} data_writes={}.",
+                "OTA v2 device entered error state last_error={} offset={} expected_size={} data_writes={}.",
                 status.last_error,
                 status.bytes_written,
                 status.expected_size,
                 status.data_write_count
             ));
         }
-        if status.last_error != COMPANION_OTA_V2_ERROR_NONE
-            && status.last_error != COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH
+        if status.last_error != OTA_V2_ERROR_NONE
+            && status.last_error != OTA_V2_ERROR_OFFSET_MISMATCH
         {
             return Err(format!(
-                "Companion OTA v2 device reported fatal last_error={} state={} offset={}.",
+                "OTA v2 device reported fatal last_error={} state={} offset={}.",
                 status.last_error, status.state, status.bytes_written
             ));
         }
         Ok(())
     }
 
+    #[cfg(feature = "companion-dev")]
     fn transfer_stm32wb_st_ota_to_target(
         target: &OpenStm32wbStOtaTarget,
         transfer_id: u64,
@@ -4017,6 +4058,7 @@ mod windows_ble {
         })
     }
 
+    #[cfg(feature = "companion-dev")]
     fn write_stm32wb_st_ota_value_with_fallback(
         characteristic: &GattCharacteristic,
         bytes: &[u8],
@@ -4075,6 +4117,7 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     fn wait_stm32wb_st_ota_completion(
         transfer_id: u64,
         target: &OpenStm32wbStOtaTarget,
@@ -4158,6 +4201,7 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     fn stm32wb_st_ota_target_rebooted(target: &OpenStm32wbStOtaTarget) -> bool {
         if let Some(session) = target.session.as_ref() {
             match session.SessionStatus() {
@@ -4190,6 +4234,7 @@ mod windows_ble {
         false
     }
 
+    #[cfg(feature = "companion-dev")]
     pub(super) fn is_stm32wb_st_ota_finish_reboot_handoff_error(err: &str) -> bool {
         let lower = err.to_ascii_lowercase();
         is_ota_finish_reboot_handoff_error(err)
@@ -4198,6 +4243,7 @@ mod windows_ble {
             || (lower.contains("stm32wb st ota finish") && lower.contains("timed out"))
     }
 
+    #[cfg(feature = "companion-dev")]
     fn stm32wb_st_ota_use_confirm_indication() -> bool {
         std::env::var("COMPANION_STM32WB_ST_OTA_CONFIRM")
             .ok()
@@ -4213,26 +4259,19 @@ mod windows_ble {
     pub fn firmware_ota_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         match open_ota_target() {
             Ok(target) => firmware_ota_device_snapshot_from_target(&target),
-            Err(listener_err) => match open_companion_ota_v2_target() {
-                Ok(target) => companion_ota_v2_device_snapshot_from_target(&target),
-                Err(v2_err) => match open_stm32wb_st_ota_target() {
-                    Ok(target) => stm32wb_st_ota_device_snapshot_from_target(&target),
-                    Err(st_err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-                        connected: false,
-                        hardware_revision: None,
-                        firmware_version: None,
-                        capabilities: Vec::new(),
-                        battery_percent: None,
-                        usb_powered: None,
-                        detail: Some(format!(
-                            "Listener OTA unavailable: {listener_err}; Companion OTA v2 unavailable: {v2_err}; STM32WB ST OTA unavailable: {st_err}"
-                        )),
-                    },
-                },
+            Err(listener_err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+                connected: false,
+                hardware_revision: None,
+                firmware_version: None,
+                capabilities: Vec::new(),
+                battery_percent: None,
+                usb_powered: None,
+                detail: Some(format!("Listener OTA unavailable: {listener_err}")),
             },
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     pub fn stm32wb_st_ota_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         match open_stm32wb_st_ota_target() {
             Ok(target) => stm32wb_st_ota_device_snapshot_from_target(&target),
@@ -4248,6 +4287,7 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     pub fn companion_ota_v2_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         match open_companion_ota_v2_target() {
             Ok(target) => companion_ota_v2_device_snapshot_from_target(&target),
@@ -4278,6 +4318,7 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     fn stm32wb_st_ota_device_snapshot_from_target(
         target: &OpenStm32wbStOtaTarget,
     ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
@@ -4297,8 +4338,9 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     fn companion_ota_v2_device_snapshot_from_target(
-        target: &OpenCompanionOtaV2Target,
+        target: &OpenOtaV2Target,
     ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             connected: true,
@@ -4929,8 +4971,8 @@ mod windows_ble {
             return Ok(vec![address]);
         }
 
-        let expected_name = configured_bluetooth_target_name()
-            .unwrap_or_else(|| STM32WB_ST_OTA_ADVERTISEMENT_NAME.to_string());
+        let expected_name =
+            configured_bluetooth_target_name().unwrap_or_else(|| "listener".to_string());
         scan_ble_advertisements_by_name(kind, &expected_name, AUDIO_ADVERTISEMENT_SCAN_TIMEOUT)
     }
 
@@ -5267,6 +5309,7 @@ mod windows_ble {
         Err(last_error.unwrap_or_else(|| "No writable Listener BLE OTA service found".to_string()))
     }
 
+    #[cfg(feature = "companion-dev")]
     fn open_stm32wb_st_ota_target() -> Result<OpenStm32wbStOtaTarget, String> {
         let mut errors = Vec::new();
         for uuid_set in STM32WB_ST_OTA_UUID_SETS.iter() {
@@ -5281,7 +5324,8 @@ mod windows_ble {
         ))
     }
 
-    fn open_companion_ota_v2_target() -> Result<OpenCompanionOtaV2Target, String> {
+    #[cfg(feature = "companion-dev")]
+    fn open_companion_ota_v2_target() -> Result<OpenOtaV2Target, String> {
         match open_companion_ota_v2_target_from_advertisement() {
             Ok(target) => return Ok(target),
             Err(err) => {
@@ -5289,7 +5333,7 @@ mod windows_ble {
             }
         }
 
-        let selector = GattDeviceService::GetDeviceSelectorFromUuid(COMPANION_OTA_V2_SERVICE_UUID)
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(OTA_V2_SERVICE_UUID)
             .map_err(|err| format!("Companion OTA v2 service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
             .map_err(|err| format!("Companion OTA v2 service discovery failed: {err}"))
@@ -5305,7 +5349,7 @@ mod windows_ble {
             .map_err(|err| format!("Companion OTA v2 service collection size failed: {err}"))?;
         if count == 0 {
             return Err(format!(
-                "Companion OTA v2 service {COMPANION_OTA_V2_SERVICE_UUID:?} not found; flash the new OTA loader or reset companion into OTA loader"
+                "Companion OTA v2 service {OTA_V2_SERVICE_UUID:?} not found; flash the new OTA loader or reset companion into OTA loader"
             ));
         }
 
@@ -5484,8 +5528,8 @@ mod windows_ble {
         })
     }
 
-    fn open_companion_ota_v2_target_from_advertisement() -> Result<OpenCompanionOtaV2Target, String>
-    {
+    #[cfg(feature = "companion-dev")]
+    fn open_companion_ota_v2_target_from_advertisement() -> Result<OpenOtaV2Target, String> {
         let addresses = scan_ble_advertisements_by_name(
             "Companion OTA v2",
             STM32WB_ST_OTA_ADVERTISEMENT_NAME,
@@ -5513,6 +5557,7 @@ mod windows_ble {
         }))
     }
 
+    #[cfg(feature = "companion-dev")]
     fn open_stm32wb_st_ota_target_for_uuid_set(
         uuid_set: &Stm32wbStOtaUuidSet,
     ) -> Result<OpenStm32wbStOtaTarget, String> {
@@ -5613,6 +5658,7 @@ mod windows_ble {
         Err(last_error.unwrap_or_else(|| "No writable STM32WB ST OTA service found".to_string()))
     }
 
+    #[cfg(feature = "companion-dev")]
     fn open_stm32wb_st_ota_target_from_advertisement(
         uuid_set: &Stm32wbStOtaUuidSet,
     ) -> Result<OpenStm32wbStOtaTarget, String> {
@@ -5640,6 +5686,7 @@ mod windows_ble {
         }))
     }
 
+    #[cfg(feature = "companion-dev")]
     fn scan_stm32wb_st_ota_advertisements() -> Result<Vec<u64>, String> {
         scan_ble_advertisements_by_name(
             "STM32WB ST OTA",
@@ -5731,6 +5778,7 @@ mod windows_ble {
         name.trim().eq_ignore_ascii_case(expected_name.trim())
     }
 
+    #[cfg(feature = "companion-dev")]
     fn stm32wb_st_ota_advertisement_name_matches(name: &str) -> bool {
         ble_advertisement_name_matches(name, STM32WB_ST_OTA_ADVERTISEMENT_NAME)
     }
@@ -5934,6 +5982,7 @@ mod windows_ble {
         }))
     }
 
+    #[cfg(feature = "companion-dev")]
     fn open_stm32wb_st_ota_target_for_device(
         address: u64,
         uuid_set: &Stm32wbStOtaUuidSet,
@@ -6038,9 +6087,8 @@ mod windows_ble {
         }))
     }
 
-    fn open_companion_ota_v2_target_for_device(
-        address: u64,
-    ) -> Result<OpenCompanionOtaV2Target, String> {
+    #[cfg(feature = "companion-dev")]
+    fn open_companion_ota_v2_target_for_device(address: u64) -> Result<OpenOtaV2Target, String> {
         let device = open_ble_device(address)?;
         if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
             wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Companion OTA v2 device access").ok()
@@ -6055,7 +6103,7 @@ mod windows_ble {
         let mut last_error = None;
         for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
             let services_result = match device
-                .GetGattServicesForUuidWithCacheModeAsync(COMPANION_OTA_V2_SERVICE_UUID, cache_mode)
+                .GetGattServicesForUuidWithCacheModeAsync(OTA_V2_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
                     format!("Companion OTA v2 {cache_mode:?} service discovery failed: {err}")
                 })
@@ -6095,7 +6143,7 @@ mod windows_ble {
             })?;
             if count == 0 {
                 last_error = Some(format!(
-                    "Companion OTA v2 service {COMPANION_OTA_V2_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
+                    "Companion OTA v2 service {OTA_V2_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
                 ));
                 continue;
             }
@@ -6112,7 +6160,7 @@ mod windows_ble {
                 };
                 match open_companion_ota_v2_characteristics_from_service(&service, cache_mode) {
                     Ok(prepared) => {
-                        return Ok(OpenCompanionOtaV2Target {
+                        return Ok(OpenOtaV2Target {
                             control: prepared.control,
                             data: prepared.data,
                             status: prepared.status,
@@ -6570,6 +6618,7 @@ mod windows_ble {
         })
     }
 
+    #[cfg(feature = "companion-dev")]
     fn open_stm32wb_st_ota_target_for_service(
         service_id: &HSTRING,
         uuid_set: &Stm32wbStOtaUuidSet,
@@ -6617,9 +6666,10 @@ mod windows_ble {
         }));
     }
 
+    #[cfg(feature = "companion-dev")]
     fn open_companion_ota_v2_target_for_service(
         service_id: &HSTRING,
-    ) -> Result<OpenCompanionOtaV2Target, String> {
+    ) -> Result<OpenOtaV2Target, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
             .map_err(|err| format!("Companion OTA v2 service open failed: {err}"))
             .and_then(|op| {
@@ -6642,7 +6692,7 @@ mod windows_ble {
         for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
             match open_companion_ota_v2_characteristics_from_service(&service, cache_mode) {
                 Ok(prepared) => {
-                    return Ok(OpenCompanionOtaV2Target {
+                    return Ok(OpenOtaV2Target {
                         control: prepared.control,
                         data: prepared.data,
                         status: prepared.status,
@@ -6816,6 +6866,7 @@ mod windows_ble {
         })
     }
 
+    #[cfg(feature = "companion-dev")]
     fn open_stm32wb_st_ota_characteristics_from_service(
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
@@ -6873,10 +6924,11 @@ mod windows_ble {
         })
     }
 
+    #[cfg(feature = "companion-dev")]
     fn open_companion_ota_v2_characteristics_from_service(
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
-    ) -> Result<PreparedCompanionOtaV2Characteristics, String> {
+    ) -> Result<PreparedOtaV2Characteristics, String> {
         if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
             wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Companion OTA v2 service access").ok()
         }) {
@@ -6889,31 +6941,31 @@ mod windows_ble {
         let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
         let control = open_write_characteristic_from_service(
             service,
-            COMPANION_OTA_V2_CONTROL_UUID,
+            OTA_V2_CONTROL_UUID,
             "Companion OTA v2 control",
             cache_mode,
         )?;
         let data = open_write_characteristic_from_service(
             service,
-            COMPANION_OTA_V2_DATA_UUID,
+            OTA_V2_DATA_UUID,
             "Companion OTA v2 data",
             cache_mode,
         )?;
         let status = open_read_characteristic_from_service(
             service,
-            COMPANION_OTA_V2_STATUS_UUID,
+            OTA_V2_STATUS_UUID,
             "Companion OTA v2 status",
             cache_mode,
         )?;
         let data_properties = data.CharacteristicProperties().map_err(|err| {
             format!("Companion OTA v2 data characteristic properties read failed: {err}")
         })?;
-        let data_write_option = companion_ota_v2_data_write_option(data_properties)?;
-        let payload_bytes = companion_ota_v2_data_chunk_payload_bytes(session.as_ref());
+        let data_write_option = ota_v2_data_write_option(data_properties)?;
+        let payload_bytes = ota_v2_data_chunk_payload_bytes(session.as_ref());
         log::info!(
             "[embedded-ble] Companion OTA v2 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes}"
         );
-        Ok(PreparedCompanionOtaV2Characteristics {
+        Ok(PreparedOtaV2Characteristics {
             control,
             data,
             status,
@@ -7114,6 +7166,7 @@ mod windows_ble {
         payload_bytes.max(1)
     }
 
+    #[cfg(feature = "companion-dev")]
     fn stm32wb_st_ota_write_option(
         properties: GattCharacteristicProperties,
     ) -> Result<GattWriteOption, String> {
@@ -7129,7 +7182,8 @@ mod windows_ble {
         }
     }
 
-    fn companion_ota_v2_data_write_option(
+    #[cfg(feature = "companion-dev")]
+    fn ota_v2_data_write_option(
         properties: GattCharacteristicProperties,
     ) -> Result<GattWriteOption, String> {
         if properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
@@ -7153,15 +7207,16 @@ mod windows_ble {
         }
     }
 
-    fn companion_ota_v2_data_chunk_payload_bytes(session: Option<&GattSession>) -> usize {
+    #[cfg(feature = "companion-dev")]
+    fn ota_v2_data_chunk_payload_bytes(session: Option<&GattSession>) -> usize {
         let payload_bytes = session
             .and_then(|session| session.MaxPduSize().ok())
             .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
-            .filter(|payload_bytes| *payload_bytes > COMPANION_OTA_V2_PACKET_HEADER_BYTES)
+            .filter(|payload_bytes| *payload_bytes > OTA_V2_PACKET_HEADER_BYTES)
             .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
         payload_bytes
-            .saturating_sub(COMPANION_OTA_V2_PACKET_HEADER_BYTES)
-            .min(COMPANION_OTA_V2_CHUNK_PAYLOAD_BYTES)
+            .saturating_sub(OTA_V2_PACKET_HEADER_BYTES)
+            .min(OTA_V2_CHUNK_PAYLOAD_BYTES)
             .max(1)
     }
 
@@ -7169,12 +7224,11 @@ mod windows_ble {
         session: Option<&GattSession>,
         write_option: GattWriteOption,
     ) -> usize {
-        let desired_payload =
-            LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES + COMPANION_OTA_V2_PACKET_HEADER_BYTES;
+        let desired_payload = LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES + OTA_V2_PACKET_HEADER_BYTES;
         let mut payload_bytes = session
             .and_then(|session| session.MaxPduSize().ok())
             .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
-            .filter(|payload_bytes| *payload_bytes > COMPANION_OTA_V2_PACKET_HEADER_BYTES)
+            .filter(|payload_bytes| *payload_bytes > OTA_V2_PACKET_HEADER_BYTES)
             .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
 
         if write_option == GattWriteOption::WriteWithoutResponse && payload_bytes < desired_payload
@@ -7187,7 +7241,7 @@ mod windows_ble {
                     .map(|max_pdu_size| {
                         usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES)
                     })
-                    .filter(|payload_bytes| *payload_bytes > COMPANION_OTA_V2_PACKET_HEADER_BYTES)
+                    .filter(|payload_bytes| *payload_bytes > OTA_V2_PACKET_HEADER_BYTES)
                 {
                     payload_bytes = payload_bytes.max(next_payload);
                 }
@@ -7201,11 +7255,12 @@ mod windows_ble {
         }
 
         payload_bytes
-            .saturating_sub(COMPANION_OTA_V2_PACKET_HEADER_BYTES)
+            .saturating_sub(OTA_V2_PACKET_HEADER_BYTES)
             .min(LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES)
             .max(1)
     }
 
+    #[cfg(feature = "companion-dev")]
     fn stm32wb_st_ota_base_address_command(base_address: u32) -> [u8; 4] {
         [
             STM32WB_ST_OTA_APPLICATION_UPLOAD,
@@ -7215,6 +7270,7 @@ mod windows_ble {
         ]
     }
 
+    #[cfg(feature = "companion-dev")]
     fn stm32wb_st_ota_raw_chunk_bytes(
         session: Option<&GattSession>,
         write_option: GattWriteOption,
@@ -7227,6 +7283,7 @@ mod windows_ble {
         stm32wb_st_ota_raw_chunk_bytes_from_payload(payload_bytes, write_option)
     }
 
+    #[cfg(feature = "companion-dev")]
     fn stm32wb_st_ota_raw_chunk_bytes_from_payload(
         payload_bytes: usize,
         write_option: GattWriteOption,
@@ -7240,6 +7297,7 @@ mod windows_ble {
         transport_limit.min(STM32WB_ST_OTA_RAW_DATA_SIZE).max(1)
     }
 
+    #[cfg(feature = "companion-dev")]
     fn stm32wb_st_ota_transfer_chunk_bytes(
         transport_limit_bytes: usize,
         manifest_chunk_bytes: usize,
@@ -8343,6 +8401,7 @@ mod windows_ble {
         bluetooth_address: Option<u64>,
     }
 
+    #[cfg(feature = "companion-dev")]
     struct OpenStm32wbStOtaTarget {
         base: GattCharacteristic,
         raw: GattCharacteristic,
@@ -8398,6 +8457,7 @@ mod windows_ble {
         session: Option<GattSession>,
     }
 
+    #[cfg(feature = "companion-dev")]
     struct PreparedStm32wbStOtaCharacteristics {
         base: GattCharacteristic,
         raw: GattCharacteristic,
@@ -8429,6 +8489,7 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     impl Drop for OpenStm32wbStOtaTarget {
         fn drop(&mut self) {
             if let Some(session) = self.session.take() {
@@ -8443,7 +8504,7 @@ mod windows_ble {
         }
     }
 
-    impl Drop for OpenCompanionOtaV2Target {
+    impl Drop for OpenOtaV2Target {
         fn drop(&mut self) {
             if let Some(session) = self.session.take() {
                 let _ = session.Close();
@@ -8457,6 +8518,7 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     struct Stm32wbStOtaHandoffCleanup {
         transfer_id: u64,
         device: Option<BluetoothLEDevice>,
@@ -8465,6 +8527,7 @@ mod windows_ble {
         session_status_token: Option<EventRegistrationToken>,
     }
 
+    #[cfg(feature = "companion-dev")]
     impl Stm32wbStOtaHandoffCleanup {
         fn install(
             transfer_id: u64,
@@ -8593,18 +8656,21 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     impl Drop for Stm32wbStOtaHandoffCleanup {
         fn drop(&mut self) {
             self.finish();
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     struct Stm32wbStOtaConfirmCleanup {
         characteristic: GattCharacteristic,
         token: Option<EventRegistrationToken>,
         cccd_enabled: bool,
     }
 
+    #[cfg(feature = "companion-dev")]
     impl Stm32wbStOtaConfirmCleanup {
         fn finish(&mut self) {
             if let Some(token) = self.token.take() {
@@ -8642,6 +8708,7 @@ mod windows_ble {
         }
     }
 
+    #[cfg(feature = "companion-dev")]
     impl Drop for Stm32wbStOtaConfirmCleanup {
         fn drop(&mut self) {
             self.finish();
@@ -9043,12 +9110,14 @@ mod windows_ble {
             LOCK.get_or_init(|| Mutex::new(()))
         }
 
+        #[cfg(feature = "companion-dev")]
         fn stm32wb_st_ota_confirm_env_test_lock() -> &'static Mutex<()> {
             static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
             LOCK.get_or_init(|| Mutex::new(()))
         }
 
         #[test]
+        #[cfg(feature = "companion-dev")]
         fn stm32wb_st_ota_confirm_indication_defaults_on_and_accepts_explicit_opt_out() {
             let _guard = stm32wb_st_ota_confirm_env_test_lock().lock().unwrap();
             const ENV_NAME: &str = "COMPANION_STM32WB_ST_OTA_CONFIRM";
@@ -9134,6 +9203,7 @@ mod windows_ble {
         }
 
         #[test]
+        #[cfg(feature = "companion-dev")]
         fn stm32wb_st_ota_prefers_with_response_when_available() {
             let both = GattCharacteristicProperties::Write
                 | GattCharacteristicProperties::WriteWithoutResponse;
@@ -9152,6 +9222,7 @@ mod windows_ble {
         }
 
         #[test]
+        #[cfg(feature = "companion-dev")]
         fn stm32wb_st_ota_advertisement_name_is_case_insensitive() {
             assert!(stm32wb_st_ota_advertisement_name_matches("companion"));
             assert!(stm32wb_st_ota_advertisement_name_matches(" Companion "));
@@ -9166,6 +9237,7 @@ mod windows_ble {
         }
 
         #[test]
+        #[cfg(feature = "companion-dev")]
         fn stm32wb_st_ota_base_address_command_uses_st_24bit_flash_offset() {
             assert_eq!(
                 stm32wb_st_ota_base_address_command(0x0800_7000),
@@ -9174,6 +9246,7 @@ mod windows_ble {
         }
 
         #[test]
+        #[cfg(feature = "companion-dev")]
         fn stm32wb_st_ota_uses_large_confirmed_chunks_and_caps_no_response() {
             assert_eq!(
                 stm32wb_st_ota_raw_chunk_bytes(None, GattWriteOption::WriteWithoutResponse),
@@ -9418,7 +9491,7 @@ pub fn transfer_firmware_ota(
     )
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub fn transfer_stm32wb_st_ota(
     firmware_bytes: &[u8],
     manifest_chunk_bytes: usize,
@@ -9427,7 +9500,7 @@ pub fn transfer_stm32wb_st_ota(
     windows_ble::transfer_stm32wb_st_ota(firmware_bytes, manifest_chunk_bytes, on_progress)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub fn transfer_companion_ota_v2(
     firmware_bytes: &[u8],
     manifest_chunk_bytes: usize,
@@ -9448,10 +9521,10 @@ pub fn transfer_listener_ota_v2(
 #[cfg(target_os = "windows")]
 pub struct FirmwareOtaPreparedTransfer(windows_ble::PreparedFirmwareOtaTransfer);
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub struct Stm32wbStOtaPreparedTransfer(windows_ble::PreparedStm32wbStOtaTransfer);
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub struct CompanionOtaV2PreparedTransfer(windows_ble::PreparedCompanionOtaV2Transfer);
 
 #[cfg(target_os = "windows")]
@@ -9481,7 +9554,7 @@ impl FirmwareOtaPreparedTransfer {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 impl Stm32wbStOtaPreparedTransfer {
     pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
         self.0.snapshot()
@@ -9498,7 +9571,7 @@ impl Stm32wbStOtaPreparedTransfer {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 impl CompanionOtaV2PreparedTransfer {
     pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
         self.0.snapshot()
@@ -9537,12 +9610,12 @@ pub fn prepare_firmware_ota_transfer() -> Result<FirmwareOtaPreparedTransfer, St
     windows_ble::prepare_firmware_ota_transfer().map(FirmwareOtaPreparedTransfer)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub fn prepare_stm32wb_st_ota_transfer() -> Result<Stm32wbStOtaPreparedTransfer, String> {
     windows_ble::prepare_stm32wb_st_ota_transfer().map(Stm32wbStOtaPreparedTransfer)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub fn prepare_companion_ota_v2_transfer() -> Result<CompanionOtaV2PreparedTransfer, String> {
     windows_ble::prepare_companion_ota_v2_transfer().map(CompanionOtaV2PreparedTransfer)
 }
@@ -9557,12 +9630,12 @@ pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     windows_ble::firmware_ota_device_snapshot()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     windows_ble::stm32wb_st_ota_device_snapshot()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     windows_ble::companion_ota_v2_device_snapshot()
 }
@@ -9681,7 +9754,7 @@ pub fn transfer_firmware_ota(
     Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 pub fn transfer_stm32wb_st_ota(
     _firmware_bytes: &[u8],
     _manifest_chunk_bytes: usize,
@@ -9690,7 +9763,7 @@ pub fn transfer_stm32wb_st_ota(
     Err("STM32WB ST BLE OTA is only supported on Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 pub fn transfer_companion_ota_v2(
     _firmware_bytes: &[u8],
     _manifest_chunk_bytes: usize,
@@ -9711,10 +9784,10 @@ pub fn transfer_listener_ota_v2(
 #[cfg(not(target_os = "windows"))]
 pub struct FirmwareOtaPreparedTransfer;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 pub struct Stm32wbStOtaPreparedTransfer;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 pub struct CompanionOtaV2PreparedTransfer;
 
 #[cfg(not(target_os = "windows"))]
@@ -9737,7 +9810,7 @@ impl FirmwareOtaPreparedTransfer {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 impl Stm32wbStOtaPreparedTransfer {
     pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
         unreachable!("prepare_stm32wb_st_ota_transfer is unsupported on this platform")
@@ -9753,7 +9826,7 @@ impl Stm32wbStOtaPreparedTransfer {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 impl CompanionOtaV2PreparedTransfer {
     pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
         unreachable!("prepare_companion_ota_v2_transfer is unsupported on this platform")
@@ -9790,12 +9863,12 @@ pub fn prepare_firmware_ota_transfer() -> Result<FirmwareOtaPreparedTransfer, St
     Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 pub fn prepare_stm32wb_st_ota_transfer() -> Result<Stm32wbStOtaPreparedTransfer, String> {
     Err("STM32WB ST BLE OTA is only supported on Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 pub fn prepare_companion_ota_v2_transfer() -> Result<CompanionOtaV2PreparedTransfer, String> {
     Err("Companion OTA v2 over BLE is only supported on Windows".to_string())
 }
@@ -9818,7 +9891,7 @@ pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
@@ -9831,7 +9904,7 @@ pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), feature = "companion-dev"))]
 pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
@@ -10153,7 +10226,7 @@ mod tests {
         ));
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "companion-dev"))]
     #[test]
     fn stm32wb_finish_reboot_handoff_accepts_windows_timeout_then_disconnect() {
         assert!(

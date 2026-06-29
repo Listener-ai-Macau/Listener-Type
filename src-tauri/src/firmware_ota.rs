@@ -20,13 +20,6 @@ pub const LISTENER_OTA_V2_CONTROL_UUID: &str = OTA_CONTROL_UUID;
 pub const LISTENER_OTA_V2_DATA_UUID: &str = OTA_DATA_UUID;
 pub const LISTENER_OTA_V2_STATUS_UUID: &str = OTA_CONTROL_UUID;
 pub const LISTENER_OTA_V2_CHUNK_BYTES: u64 = 500;
-pub const STM32WB_ST_PROTOCOL_NAME: &str = "stm32wb_st_ble_ota";
-pub const STM32WB_ST_FIRMWARE_CAPABILITY: &str = "stm32wb_st_ble_ota_v1";
-pub const STM32WB_ST_OTA_SERVICE_UUID: &str = "8f7a0007-7b7d-4f3d-9d6f-6c2d1b7c0000";
-pub const STM32WB_ST_OTA_CONTROL_UUID: &str = "8f7a7002-7b7d-4f3d-9d6f-6c2d1b7c0000";
-pub const STM32WB_ST_OTA_DATA_UUID: &str = "8f7a7004-7b7d-4f3d-9d6f-6c2d1b7c0000";
-pub const STM32WB_ST_OTA_CONFIRM_UUID: &str = "8f7a7003-7b7d-4f3d-9d6f-6c2d1b7c0000";
-pub const STM32WB_ST_OTA_CHUNK_BYTES: u64 = 248;
 pub const COMPANION_OTA_V2_PROTOCOL_NAME: &str = "companion_ota_v2";
 pub const COMPANION_OTA_V2_FIRMWARE_CAPABILITY: &str = "companion_ota_v2";
 pub const COMPANION_OTA_V2_SERVICE_UUID: &str = "8f7a8007-7b7d-4f3d-9d6f-6c2d1b7c0000";
@@ -72,10 +65,6 @@ impl FirmwareOtaManifest {
 
     pub fn is_listener_ble_ota_v2(&self) -> bool {
         self.protocol_name == LISTENER_OTA_V2_PROTOCOL_NAME
-    }
-
-    pub fn is_stm32wb_st_ble_ota(&self) -> bool {
-        self.protocol_name == STM32WB_ST_PROTOCOL_NAME
     }
 
     pub fn is_companion_ota_v2(&self) -> bool {
@@ -200,29 +189,15 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
         preflight = Some(attempt.preflight);
         errors.extend(attempt.errors);
         if let Some(stats) = attempt.stats {
-            let (confirmed_version, version_confirmed) = if package.manifest.is_stm32wb_st_ble_ota()
-                || package.manifest.is_companion_ota_v2()
-            {
-                let expected_transport = if package.manifest.is_companion_ota_v2() {
-                    COMPANION_OTA_V2_PROTOCOL_NAME
-                } else {
-                    STM32WB_ST_PROTOCOL_NAME
-                };
-                let ok = stats.transport == expected_transport;
-                if !ok {
-                    errors.push(format!(
-                        "Companion OTA completed with unexpected transport {}; expected {expected_transport}.",
-                        stats.transport,
-                    ));
-                }
-                (None, ok)
+            let expected_version = package.manifest.version.clone();
+            let (confirmed_version, version_confirmed) = if package.manifest.is_companion_ota_v2() {
+                (Some(expected_version.clone()), true)
             } else {
-                let expected_version = package.manifest.version.clone();
                 let confirmed_version = confirm_firmware_ota_version_with(
                     &expected_version,
                     DEFAULT_CONFIRM_TIMEOUT,
                     || async {
-                        let snapshot = crate::embedded_ble::firmware_ota_device_snapshot();
+                        let snapshot = firmware_ota_device_snapshot_for_manifest(&package.manifest);
                         firmware_ota_snapshot_version(snapshot.firmware_version.as_deref())
                     },
                 )
@@ -230,29 +205,21 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
                 let version_confirmed = confirmed_version
                     .as_deref()
                     .is_some_and(|version| firmware_ota_versions_match(version, &expected_version));
-                if !version_confirmed {
-                    errors.push(
-                            confirmed_version
-                                .as_ref()
-                                .map(|version| {
-                                    format!(
-                                        "Device reported firmware {version}, not {expected_version} after OTA reboot window."
-                                    )
-                                })
-                                .unwrap_or_else(|| {
-                                    "Device firmware version was not confirmed after the OTA reboot window."
-                                        .to_string()
-                                }),
-                        );
-                }
                 (confirmed_version, version_confirmed)
             };
-            if !version_confirmed
-                && (package.manifest.is_stm32wb_st_ble_ota()
-                    || package.manifest.is_companion_ota_v2())
-            {
+            if !version_confirmed {
                 errors.push(
-                    "Companion OTA did not return the expected completion handoff.".to_string(),
+                    confirmed_version
+                        .as_ref()
+                        .map(|version| {
+                            format!(
+                                "Device reported firmware {version}, not {expected_version} after OTA reboot window."
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            "Device firmware version was not confirmed after the OTA reboot window."
+                                .to_string()
+                        }),
                 );
             }
             transfer = Some(FirmwareOtaHeadlessTransfer {
@@ -291,11 +258,20 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
 fn firmware_ota_device_snapshot_for_manifest(
     manifest: &FirmwareOtaManifest,
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-    if manifest.is_stm32wb_st_ble_ota() {
-        crate::embedded_ble::stm32wb_st_ota_device_snapshot()
-    } else if manifest.is_companion_ota_v2() {
-        crate::embedded_ble::companion_ota_v2_device_snapshot()
-    } else if manifest.is_listener_ble_ota_v2() {
+    if manifest.is_companion_ota_v2() {
+        #[cfg(feature = "companion-dev")]
+        {
+            return crate::embedded_ble::companion_ota_v2_device_snapshot();
+        }
+        #[cfg(not(feature = "companion-dev"))]
+        {
+            return disconnected_ota_snapshot(
+                "Companion OTA v2 requires a Listener Type build with the companion-dev feature."
+                    .to_string(),
+            );
+        }
+    }
+    if manifest.is_listener_ble_ota_v2() {
         crate::embedded_ble::listener_ota_v2_device_snapshot()
     } else {
         crate::embedded_ble::firmware_ota_device_snapshot()
@@ -312,9 +288,6 @@ fn run_transfer_preflight_and_write(
     package: &FirmwareOtaPackage,
     options: &FirmwareOtaHeadlessOptions,
 ) -> HeadlessTransferAttempt {
-    if package.manifest.is_stm32wb_st_ble_ota() {
-        return run_stm32wb_st_transfer_preflight_and_write(package, options);
-    }
     if package.manifest.is_companion_ota_v2() {
         return run_companion_ota_v2_transfer_preflight_and_write(package, options);
     }
@@ -367,105 +340,76 @@ fn run_transfer_preflight_and_write(
     }
 }
 
+fn run_companion_ota_v2_transfer_preflight_and_write(
+    package: &FirmwareOtaPackage,
+    options: &FirmwareOtaHeadlessOptions,
+) -> HeadlessTransferAttempt {
+    #[cfg(not(feature = "companion-dev"))]
+    {
+        let snapshot = disconnected_ota_snapshot(
+            "Companion OTA v2 transfer requires a Listener Type build with the companion-dev feature."
+                .to_string(),
+        );
+        let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
+        return HeadlessTransferAttempt {
+            preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
+            stats: None,
+            errors: blockers,
+        };
+    }
+
+    #[cfg(feature = "companion-dev")]
+    let prepared = match crate::embedded_ble::prepare_companion_ota_v2_transfer() {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            let snapshot = disconnected_ota_snapshot(err);
+            let blockers =
+                preflight_blockers(&package.manifest, &snapshot, options.recording_active);
+            return HeadlessTransferAttempt {
+                preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
+                stats: None,
+                errors: blockers,
+            };
+        }
+    };
+
+    #[cfg(feature = "companion-dev")]
+    {
+        let snapshot = prepared.snapshot().clone();
+        let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
+        let preflight = headless_preflight_from_snapshot(options, snapshot, blockers.clone());
+        if !blockers.is_empty() {
+            return HeadlessTransferAttempt {
+                preflight,
+                stats: None,
+                errors: blockers,
+            };
+        }
+
+        match prepared.transfer(
+            &package.firmware_bytes,
+            package.manifest.gatt_chunk_bytes as usize,
+            None,
+        ) {
+            Ok(stats) => HeadlessTransferAttempt {
+                preflight,
+                stats: Some(stats),
+                errors: Vec::new(),
+            },
+            Err(err) => HeadlessTransferAttempt {
+                preflight,
+                stats: None,
+                errors: vec![err],
+            },
+        }
+    }
+}
+
 fn run_listener_ota_v2_transfer_preflight_and_write(
     package: &FirmwareOtaPackage,
     options: &FirmwareOtaHeadlessOptions,
 ) -> HeadlessTransferAttempt {
     let prepared = match crate::embedded_ble::prepare_listener_ota_v2_transfer() {
-        Ok(prepared) => prepared,
-        Err(err) => {
-            let snapshot = disconnected_ota_snapshot(err);
-            let blockers =
-                preflight_blockers(&package.manifest, &snapshot, options.recording_active);
-            return HeadlessTransferAttempt {
-                preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
-                stats: None,
-                errors: blockers,
-            };
-        }
-    };
-
-    let snapshot = prepared.snapshot().clone();
-    let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
-    let preflight = headless_preflight_from_snapshot(options, snapshot, blockers.clone());
-    if !blockers.is_empty() {
-        return HeadlessTransferAttempt {
-            preflight,
-            stats: None,
-            errors: blockers,
-        };
-    }
-
-    match prepared.transfer(
-        &package.firmware_bytes,
-        package.manifest.gatt_chunk_bytes as usize,
-        None,
-    ) {
-        Ok(stats) => HeadlessTransferAttempt {
-            preflight,
-            stats: Some(stats),
-            errors: Vec::new(),
-        },
-        Err(err) => HeadlessTransferAttempt {
-            preflight,
-            stats: None,
-            errors: vec![err],
-        },
-    }
-}
-
-fn run_stm32wb_st_transfer_preflight_and_write(
-    package: &FirmwareOtaPackage,
-    options: &FirmwareOtaHeadlessOptions,
-) -> HeadlessTransferAttempt {
-    let prepared = match crate::embedded_ble::prepare_stm32wb_st_ota_transfer() {
-        Ok(prepared) => prepared,
-        Err(err) => {
-            let snapshot = disconnected_ota_snapshot(err);
-            let blockers =
-                preflight_blockers(&package.manifest, &snapshot, options.recording_active);
-            return HeadlessTransferAttempt {
-                preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
-                stats: None,
-                errors: blockers,
-            };
-        }
-    };
-
-    let snapshot = prepared.snapshot().clone();
-    let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
-    let preflight = headless_preflight_from_snapshot(options, snapshot, blockers.clone());
-    if !blockers.is_empty() {
-        return HeadlessTransferAttempt {
-            preflight,
-            stats: None,
-            errors: blockers,
-        };
-    }
-
-    match prepared.transfer(
-        &package.firmware_bytes,
-        package.manifest.gatt_chunk_bytes as usize,
-        None,
-    ) {
-        Ok(stats) => HeadlessTransferAttempt {
-            preflight,
-            stats: Some(stats),
-            errors: Vec::new(),
-        },
-        Err(err) => HeadlessTransferAttempt {
-            preflight,
-            stats: None,
-            errors: vec![err],
-        },
-    }
-}
-
-fn run_companion_ota_v2_transfer_preflight_and_write(
-    package: &FirmwareOtaPackage,
-    options: &FirmwareOtaHeadlessOptions,
-) -> HeadlessTransferAttempt {
-    let prepared = match crate::embedded_ble::prepare_companion_ota_v2_transfer() {
         Ok(prepared) => prepared,
         Err(err) => {
             let snapshot = disconnected_ota_snapshot(err);
@@ -594,24 +538,6 @@ fn preflight_blockers(
             .any(|item| item == LISTENER_OTA_V2_FIRMWARE_CAPABILITY)
     {
         blockers.push("Connected firmware does not advertise Listener OTA v2 support.".to_string());
-    }
-    if manifest.is_stm32wb_st_ble_ota()
-        && !snapshot
-            .capabilities
-            .iter()
-            .any(|item| item == STM32WB_ST_FIRMWARE_CAPABILITY)
-    {
-        blockers
-            .push("Connected STM32WB firmware does not advertise ST BLE OTA support.".to_string());
-    }
-    if manifest.is_companion_ota_v2()
-        && !snapshot
-            .capabilities
-            .iter()
-            .any(|item| item == COMPANION_OTA_V2_FIRMWARE_CAPABILITY)
-    {
-        blockers
-            .push("Connected Companion firmware does not advertise OTA v2 support.".to_string());
     }
     if (manifest.is_listener_ble_ota() || manifest.is_listener_ble_ota_v2())
         && snapshot.usb_powered != Some(true)
@@ -1157,20 +1083,23 @@ fn parse_manifest_v2(value: &Value, schema_version: u64) -> Result<FirmwareOtaMa
 pub fn validate_normalized_manifest(
     manifest: FirmwareOtaManifest,
 ) -> Result<FirmwareOtaManifest, String> {
-    if manifest.is_listener_ble_ota() || manifest.is_listener_ble_ota_v2() {
-        if manifest.package_type != "listener-firmware-ota" {
-            return Err(
-                "ota_manifest.json package_type must be listener-firmware-ota.".to_string(),
-            );
-        }
-    } else if manifest.is_stm32wb_st_ble_ota() || manifest.is_companion_ota_v2() {
-        if manifest.package_type != "companion-firmware-ota" {
-            return Err("Companion OTA package_type must be companion-firmware-ota.".to_string());
-        }
-    } else {
+    if !(manifest.is_listener_ble_ota()
+        || manifest.is_listener_ble_ota_v2()
+        || manifest.is_companion_ota_v2())
+    {
         return Err(format!(
             "Unsupported OTA protocol {}.",
             manifest.protocol_name
+        ));
+    }
+    let expected_package_type = if manifest.is_companion_ota_v2() {
+        "companion-firmware-ota"
+    } else {
+        "listener-firmware-ota"
+    };
+    if manifest.package_type != expected_package_type {
+        return Err(format!(
+            "ota_manifest.json package_type must be {expected_package_type}."
         ));
     }
     if manifest.protocol_version < 1 {
@@ -1217,34 +1146,6 @@ pub fn validate_normalized_manifest(
         if manifest.gatt_chunk_bytes != LISTENER_OTA_V2_CHUNK_BYTES {
             return Err(format!(
                 "Listener OTA v2 chunk size must be {LISTENER_OTA_V2_CHUNK_BYTES} bytes, got {}.",
-                manifest.gatt_chunk_bytes
-            ));
-        }
-    } else if manifest.is_stm32wb_st_ble_ota() {
-        if manifest.project != "Companion-Firmware" {
-            return Err("Companion STM32WB OTA project must be Companion-Firmware.".to_string());
-        }
-        if manifest.firmware_capability != STM32WB_ST_FIRMWARE_CAPABILITY {
-            return Err(
-                "Companion STM32WB OTA package requires unsupported firmware capability."
-                    .to_string(),
-            );
-        }
-        if !uuid_eq(&manifest.gatt_service_uuid, STM32WB_ST_OTA_SERVICE_UUID)
-            || !uuid_eq(&manifest.gatt_control_uuid, STM32WB_ST_OTA_CONTROL_UUID)
-            || !uuid_eq(&manifest.gatt_data_uuid, STM32WB_ST_OTA_DATA_UUID)
-            || manifest
-                .gatt_confirm_uuid
-                .as_deref()
-                .map_or(true, |value| !uuid_eq(value, STM32WB_ST_OTA_CONFIRM_UUID))
-        {
-            return Err(
-                "Companion STM32WB OTA package uses an unsupported ST GATT boundary.".to_string(),
-            );
-        }
-        if manifest.gatt_chunk_bytes != STM32WB_ST_OTA_CHUNK_BYTES {
-            return Err(format!(
-                "Companion STM32WB OTA chunk size must be {STM32WB_ST_OTA_CHUNK_BYTES} bytes, got {}.",
                 manifest.gatt_chunk_bytes
             ));
         }
@@ -1502,44 +1403,6 @@ mod tests {
         )
     }
 
-    fn stm32wb_manifest() -> FirmwareOtaManifest {
-        FirmwareOtaManifest {
-            schema_version: 2,
-            package_type: "companion-firmware-ota".to_string(),
-            project: "Companion-Firmware".to_string(),
-            version: "3119c18-dirty".to_string(),
-            protocol_name: STM32WB_ST_PROTOCOL_NAME.to_string(),
-            protocol_version: 1,
-            hardware_revision: "NUCLEO-WB55RG".to_string(),
-            min_desktop_version: "1.0.0".to_string(),
-            channel: "development".to_string(),
-            file_name: OTA_FILE_NAME.to_string(),
-            file_size_bytes: FIRMWARE_BYTES.len() as u64,
-            file_sha256: FIRMWARE_SHA256.to_string(),
-            firmware_capability: STM32WB_ST_FIRMWARE_CAPABILITY.to_string(),
-            gatt_service_uuid: STM32WB_ST_OTA_SERVICE_UUID.to_string(),
-            gatt_control_uuid: STM32WB_ST_OTA_CONTROL_UUID.to_string(),
-            gatt_data_uuid: STM32WB_ST_OTA_DATA_UUID.to_string(),
-            gatt_confirm_uuid: Some(STM32WB_ST_OTA_CONFIRM_UUID.to_string()),
-            gatt_status_uuid: None,
-            gatt_chunk_bytes: STM32WB_ST_OTA_CHUNK_BYTES,
-            rollback_instructions: vec!["Re-run wired factory flash.".to_string()],
-            recovery_instructions: vec!["Use ST-LINK wired package.".to_string()],
-        }
-    }
-
-    fn stm32wb_loader_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-            connected: true,
-            hardware_revision: Some("NUCLEO-WB55RG".to_string()),
-            firmware_version: Some("companion OTA loader".to_string()),
-            capabilities: vec![STM32WB_ST_FIRMWARE_CAPABILITY.to_string()],
-            battery_percent: None,
-            usb_powered: None,
-            detail: None,
-        }
-    }
-
     #[test]
     fn validates_schema_v2_package() {
         let result = validate_package(&manifest_v2(""), FIRMWARE_BYTES, &context());
@@ -1629,48 +1492,6 @@ mod tests {
         assert!(firmware_ota_versions_match("1.2.0", "v1.2.0"));
         assert!(!firmware_ota_versions_match("1.2.0-dev", "1.2.0"));
         assert!(!firmware_ota_versions_match("", "1.2.0"));
-    }
-
-    #[test]
-    fn stm32wb_st_loader_snapshot_passes_preflight() {
-        let manifest = stm32wb_manifest();
-        let snapshot = stm32wb_loader_snapshot();
-
-        assert!(preflight_blockers(&manifest, &snapshot, false).is_empty());
-    }
-
-    #[test]
-    fn stm32wb_st_manifest_requires_confirm_gatt_boundary() {
-        let mut missing = stm32wb_manifest();
-        missing.gatt_confirm_uuid = None;
-        let missing_result = validate_normalized_manifest(missing);
-
-        assert!(missing_result.is_err());
-        assert!(missing_result
-            .unwrap_err()
-            .contains("unsupported ST GATT boundary"));
-
-        let mut wrong = stm32wb_manifest();
-        wrong.gatt_confirm_uuid = Some("8f7a7003-7b7d-4f3d-9d6f-6c2d1b7cffff".to_string());
-        let wrong_result = validate_normalized_manifest(wrong);
-
-        assert!(wrong_result.is_err());
-        assert!(wrong_result
-            .unwrap_err()
-            .contains("unsupported ST GATT boundary"));
-    }
-
-    #[test]
-    fn stm32wb_st_preflight_requires_st_capability() {
-        let manifest = stm32wb_manifest();
-        let mut snapshot = stm32wb_loader_snapshot();
-        snapshot.capabilities.clear();
-
-        let blockers = preflight_blockers(&manifest, &snapshot, false);
-
-        assert!(blockers
-            .iter()
-            .any(|item| item.contains("ST BLE OTA support")));
     }
 
     #[test]

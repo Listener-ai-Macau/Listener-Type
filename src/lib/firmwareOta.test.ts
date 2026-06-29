@@ -4,8 +4,6 @@ import {
   FIRMWARE_OTA_REQUIRED_PUBLIC_STATES,
   FIRMWARE_OTA_TRANSPORT_BOUNDARY,
   LISTENER_OTA_V2_TRANSPORT_BOUNDARY,
-  COMPANION_OTA_V2_TRANSPORT_BOUNDARY,
-  STM32WB_ST_OTA_TRANSPORT_BOUNDARY,
   compareVersionish,
   evaluateFirmwareOtaPreflight,
   firmwareOtaConfirmedVersionMatches,
@@ -108,80 +106,6 @@ function manifestV2(overrides: Record<string, unknown> = {}): string {
   });
 }
 
-function companionStm32wbManifest(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
-    schema_version: 1,
-    package_type: 'companion-firmware-ota',
-    project: 'Companion-Firmware',
-    version: '3119c18-dirty',
-    protocol: {
-      name: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName,
-      version: 1,
-      firmware_capability: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.firmwareCapability,
-      data_plane: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.dataPlane,
-      gatt: {
-        service_uuid: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-        control_uuid: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
-        data_uuid: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
-        confirm_uuid: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.confirmUuid,
-        chunk_bytes: STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
-      },
-    },
-    hardware_revision: 'NUCLEO-WB55RG',
-    min_desktop_version: '1.0.0',
-    channel: 'development',
-    file: {
-      name: 'firmware_ota.bin',
-      size_bytes: firmwareBytes.byteLength,
-      sha256: firmwareSha256,
-    },
-    rollback: {
-      instructions: ['Re-run the wired ST-LINK factory flash package.'],
-    },
-    recovery: {
-      instructions: ['Use the Companion wired package from the same release.'],
-    },
-    ...overrides,
-  });
-}
-
-function companionOtaV2Manifest(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
-    schema_version: 1,
-    package_type: 'companion-firmware-ota',
-    project: 'Companion-Firmware',
-    version: '3119c18-dirty',
-    protocol: {
-      name: COMPANION_OTA_V2_TRANSPORT_BOUNDARY.protocolName,
-      version: 1,
-      firmware_capability: COMPANION_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability,
-      data_plane: COMPANION_OTA_V2_TRANSPORT_BOUNDARY.dataPlane,
-      gatt: {
-        service_uuid: COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-        control_uuid: COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.controlUuid,
-        data_uuid: COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid,
-        status_uuid: COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid,
-        chunk_bytes: COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
-      },
-    },
-    hardware_revision: 'NUCLEO-WB55RG',
-    min_desktop_version: '1.0.0',
-    channel: 'development',
-    file: {
-      name: 'firmware_ota.bin',
-      size_bytes: firmwareBytes.byteLength,
-      sha256: firmwareSha256,
-    },
-    rollback: {
-      instructions: ['Re-run the wired ST-LINK factory flash package.'],
-    },
-    recovery: {
-      instructions: ['Use the Companion wired package from the same release.'],
-    },
-    ...overrides,
-  });
-}
-
 function listenerOtaV2Manifest(overrides: Record<string, unknown> = {}): string {
   return manifestV2({
     requirements: {
@@ -241,50 +165,6 @@ assert.equal(validListenerOtaV2.manifest?.protocolVersion, 2);
 assert.equal(validListenerOtaV2.manifest?.firmwareCapability, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability);
 assert.equal(validListenerOtaV2.manifest?.gattStatusUuid, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid);
 assert.equal(validListenerOtaV2.manifest?.gattConfirmUuid, null);
-
-const validCompanionStm32wb = await validateFirmwareOtaPackage(
-  companionStm32wbManifest(),
-  firmwareBytes,
-  contextV2,
-);
-assert.equal(validCompanionStm32wb.ok, true);
-assert.equal(validCompanionStm32wb.manifest?.packageType, 'companion-firmware-ota');
-assert.equal(validCompanionStm32wb.manifest?.protocolName, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName);
-assert.equal(validCompanionStm32wb.manifest?.hardwareRevision, 'NUCLEO-WB55RG');
-assert.equal(validCompanionStm32wb.manifest?.gattConfirmUuid, STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.confirmUuid);
-
-const validCompanionOtaV2 = await validateFirmwareOtaPackage(
-  companionOtaV2Manifest(),
-  firmwareBytes,
-  contextV2,
-);
-assert.equal(validCompanionOtaV2.ok, true);
-assert.equal(validCompanionOtaV2.manifest?.protocolName, COMPANION_OTA_V2_TRANSPORT_BOUNDARY.protocolName);
-assert.equal(validCompanionOtaV2.manifest?.hardwareRevision, 'NUCLEO-WB55RG');
-assert.equal(validCompanionOtaV2.manifest?.gattStatusUuid, COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid);
-assert.equal(validCompanionOtaV2.manifest?.gattConfirmUuid, null);
-
-const badCompanionStm32wbConfirmUuid = JSON.parse(companionStm32wbManifest()) as Record<string, unknown>;
-((badCompanionStm32wbConfirmUuid.protocol as Record<string, unknown>).gatt as Record<string, unknown>).confirm_uuid =
-  '8f7a7003-7b7d-4f3d-9d6f-6c2d1b7cffff';
-const badCompanionStm32wbConfirm = await validateFirmwareOtaPackage(
-  JSON.stringify(badCompanionStm32wbConfirmUuid),
-  firmwareBytes,
-  contextV2,
-);
-assert.equal(badCompanionStm32wbConfirm.ok, false);
-assert.ok(badCompanionStm32wbConfirm.errors.some(error => error.includes('ST GATT boundary')));
-
-const badCompanionOtaV2StatusUuid = JSON.parse(companionOtaV2Manifest()) as Record<string, unknown>;
-((badCompanionOtaV2StatusUuid.protocol as Record<string, unknown>).gatt as Record<string, unknown>).status_uuid =
-  '8f7a8005-7b7d-4f3d-9d6f-6c2d1b7cffff';
-const badCompanionOtaV2Status = await validateFirmwareOtaPackage(
-  JSON.stringify(badCompanionOtaV2StatusUuid),
-  firmwareBytes,
-  contextV2,
-);
-assert.equal(badCompanionOtaV2Status.ok, false);
-assert.ok(badCompanionOtaV2Status.errors.some(error => error.includes('OTA v2 package uses an unsupported GATT boundary')));
 
 const badListenerOtaV2StatusUuid = JSON.parse(listenerOtaV2Manifest()) as Record<string, unknown>;
 ((badListenerOtaV2StatusUuid.protocol as Record<string, unknown>).gatt as Record<string, unknown>).status_uuid =
@@ -450,8 +330,6 @@ assert.equal(firmwareOtaVersionNotConfirmedAction(null, 'v1.2.0').type, 'failed'
 const parsedManifest = valid.manifest as FirmwareOtaManifest;
 const parsedV2Manifest = validV2.manifest as FirmwareOtaManifest;
 const parsedListenerOtaV2Manifest = validListenerOtaV2.manifest as FirmwareOtaManifest;
-const parsedCompanionStm32wbManifest = validCompanionStm32wb.manifest as FirmwareOtaManifest;
-const parsedCompanionOtaV2Manifest = validCompanionOtaV2.manifest as FirmwareOtaManifest;
 const readyPreflight = evaluateFirmwareOtaPreflight({
   manifest: parsedManifest,
   desktopVersion: '1.0.0',
@@ -502,136 +380,6 @@ assert.equal(listenerOtaV2PreflightRequiresCapability.ok, false);
 assert.deepEqual(
   listenerOtaV2PreflightRequiresCapability.blockers.map(item => item.code),
   ['missingCapability'],
-);
-
-const companionStm32wbPreflightIgnoresListenerSnapshot = evaluateFirmwareOtaPreflight({
-  manifest: parsedCompanionStm32wbManifest,
-  desktopVersion: '1.0.0',
-  recordingActive: false,
-  transferActive: false,
-  device: {
-    connected: true,
-    hardwareRevision: 'keyboard-v2-n16r8',
-    firmwareVersion: '1.2.0',
-    capabilities: ['firmware_ota_v1'],
-    batteryPercent: 9,
-    usbPowered: false,
-  },
-});
-assert.equal(companionStm32wbPreflightIgnoresListenerSnapshot.ok, true);
-
-const companionStm32wbPreflightAllowsBackendDiscovery = evaluateFirmwareOtaPreflight({
-  manifest: parsedCompanionStm32wbManifest,
-  desktopVersion: '1.0.0',
-  recordingActive: false,
-  transferActive: false,
-  device: {
-    connected: false,
-    hardwareRevision: null,
-    firmwareVersion: null,
-    capabilities: [],
-    batteryPercent: null,
-    usbPowered: null,
-    detail: 'Listener BLE status is unavailable.',
-  },
-});
-assert.equal(companionStm32wbPreflightAllowsBackendDiscovery.ok, true);
-
-const companionStm32wbPreflightChecksMatchingStm32wbSnapshot = evaluateFirmwareOtaPreflight({
-  manifest: parsedCompanionStm32wbManifest,
-  desktopVersion: '1.0.0',
-  recordingActive: false,
-  transferActive: false,
-  device: {
-    connected: true,
-    hardwareRevision: 'companion-ce-v1',
-    firmwareVersion: 'companion OTA loader',
-    capabilities: [STM32WB_ST_OTA_TRANSPORT_BOUNDARY.firmwareCapability],
-    batteryPercent: null,
-    usbPowered: null,
-  },
-});
-assert.equal(companionStm32wbPreflightChecksMatchingStm32wbSnapshot.ok, false);
-assert.deepEqual(
-  companionStm32wbPreflightChecksMatchingStm32wbSnapshot.blockers.map(item => item.code),
-  ['hardwareMismatch'],
-);
-
-const companionStm32wbPreflightRequiresCapabilityForMatchingSnapshot = evaluateFirmwareOtaPreflight({
-  manifest: parsedCompanionStm32wbManifest,
-  desktopVersion: '1.0.0',
-  recordingActive: false,
-  transferActive: false,
-  device: {
-    connected: true,
-    hardwareRevision: 'NUCLEO-WB55RG',
-    firmwareVersion: 'companion OTA loader',
-    capabilities: [],
-    batteryPercent: null,
-    usbPowered: null,
-  },
-});
-assert.equal(companionStm32wbPreflightRequiresCapabilityForMatchingSnapshot.ok, false);
-assert.deepEqual(
-  companionStm32wbPreflightRequiresCapabilityForMatchingSnapshot.blockers.map(item => item.code),
-  ['missingCapability'],
-);
-
-const companionOtaV2PreflightReady = evaluateFirmwareOtaPreflight({
-  manifest: parsedCompanionOtaV2Manifest,
-  desktopVersion: '1.0.0',
-  recordingActive: false,
-  transferActive: false,
-  device: {
-    connected: true,
-    hardwareRevision: 'NUCLEO-WB55RG',
-    firmwareVersion: 'companion OTA v2 loader',
-    capabilities: [COMPANION_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability],
-    batteryPercent: null,
-    usbPowered: null,
-  },
-});
-assert.equal(companionOtaV2PreflightReady.ok, true);
-
-const companionOtaV2PreflightRequiresCapability = evaluateFirmwareOtaPreflight({
-  manifest: parsedCompanionOtaV2Manifest,
-  desktopVersion: '1.0.0',
-  recordingActive: false,
-  transferActive: false,
-  device: {
-    connected: true,
-    hardwareRevision: 'NUCLEO-WB55RG',
-    firmwareVersion: 'companion OTA v2 loader',
-    capabilities: [],
-    batteryPercent: null,
-    usbPowered: null,
-  },
-});
-assert.equal(companionOtaV2PreflightRequiresCapability.ok, false);
-assert.deepEqual(
-  companionOtaV2PreflightRequiresCapability.blockers.map(item => item.code),
-  ['missingCapability'],
-);
-
-const companionOtaV2PreflightRequiresConnection = evaluateFirmwareOtaPreflight({
-  manifest: parsedCompanionOtaV2Manifest,
-  desktopVersion: '1.0.0',
-  recordingActive: false,
-  transferActive: false,
-  device: {
-    connected: false,
-    hardwareRevision: null,
-    firmwareVersion: null,
-    capabilities: [],
-    batteryPercent: null,
-    usbPowered: null,
-    detail: 'Companion OTA v2 unavailable.',
-  },
-});
-assert.equal(companionOtaV2PreflightRequiresConnection.ok, false);
-assert.deepEqual(
-  companionOtaV2PreflightRequiresConnection.blockers.map(item => item.code),
-  ['deviceDisconnected'],
 );
 
 const unknownDeviceStatus = evaluateFirmwareOtaPreflight({
@@ -732,18 +480,6 @@ assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.controlUuid, '710af845-6d9f
 assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3092c');
 assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3092b');
 assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 500);
-assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.protocolName, 'stm32wb_st_ble_ota');
-assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid, '8f7a0007-7b7d-4f3d-9d6f-6c2d1b7c0000');
-assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid, '8f7a7002-7b7d-4f3d-9d6f-6c2d1b7c0000');
-assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid, '8f7a7004-7b7d-4f3d-9d6f-6c2d1b7c0000');
-assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.confirmUuid, '8f7a7003-7b7d-4f3d-9d6f-6c2d1b7c0000');
-assert.equal(STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 248);
-assert.equal(COMPANION_OTA_V2_TRANSPORT_BOUNDARY.protocolName, 'companion_ota_v2');
-assert.equal(COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.serviceUuid, '8f7a8007-7b7d-4f3d-9d6f-6c2d1b7c0000');
-assert.equal(COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.controlUuid, '8f7a8002-7b7d-4f3d-9d6f-6c2d1b7c0000');
-assert.equal(COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid, '8f7a8004-7b7d-4f3d-9d6f-6c2d1b7c0000');
-assert.equal(COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid, '8f7a8005-7b7d-4f3d-9d6f-6c2d1b7c0000');
-assert.equal(COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 240);
 assert.ok(FIRMWARE_OTA_TRANSPORT_BOUNDARY.notDataPlane.every(item => item.includes('BLE')));
 
 const rustFirmwareOtaSource = readFileSync('src-tauri/src/firmware_ota.rs', 'utf8');
@@ -752,17 +488,9 @@ for (const expected of [
   LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.controlUuid,
   LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid,
   LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid,
-  STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-  STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
-  STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
-  STM32WB_ST_OTA_TRANSPORT_BOUNDARY.gatt.confirmUuid,
-  COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-  COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.controlUuid,
-  COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid,
-  COMPANION_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid,
 ]) {
   assert.ok(
     rustFirmwareOtaSource.includes(expected),
-    `STM32WB OTA UUID ${expected} must match src-tauri/src/firmware_ota.rs`,
+    `Listener OTA UUID ${expected} must match src-tauri/src/firmware_ota.rs`,
   );
 }

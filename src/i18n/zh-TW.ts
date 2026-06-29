@@ -472,7 +472,6 @@ export const zhTW: typeof zhCN = {
     sections: {
       recording: '錄音',
       device: '裝置',
-      companion: 'Companion',
       providers: '提供商',
       shortcuts: '快捷鍵',
       permissions: '權限',
@@ -868,7 +867,6 @@ export const zhTW: typeof zhCN = {
         translation: '翻譯',
         selectionAsk: '劃詞問答',
         settingsDevice: '裝置設定',
-        settingsCompanion: 'Companion 設定',
         settingsRecording: '錄音設定',
         settingsProviders: '供應商設定',
         settingsShortcuts: '快捷鍵設定',

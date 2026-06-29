@@ -560,7 +560,7 @@ fn request_embedded_ble_capture_cancel(inner: &Arc<Inner>) -> bool {
     )
 }
 
-fn current_embedded_audio_partial_preview(inner: &Arc<Inner>) -> Option<String> {
+pub(super) fn current_embedded_audio_partial_preview(inner: &Arc<Inner>) -> Option<String> {
     inner.embedded_audio_partial_preview.lock().clone()
 }
 

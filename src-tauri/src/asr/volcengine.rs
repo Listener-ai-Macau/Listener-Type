@@ -82,7 +82,7 @@ type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
 use super::volcengine_transcript::{
     is_unstable_initial_partial, merge_streaming_candidate, normalize_cjk_final_spacing_and_echoes,
     normalized_result, transcript_candidate_from_result, trim_repeated_short_final_tail,
-    TranscriptSegment,
+    trim_repeated_short_streaming_tail, TranscriptSegment,
 };
 
 /// Sync state shared across the receive loop, the public API, and the
@@ -621,6 +621,15 @@ impl VolcengineStreamingASR {
                 &state.best_transcript_segments,
                 candidate,
             );
+            let cleaned_streaming_tail = trim_repeated_short_streaming_tail(&merged);
+            if cleaned_streaming_tail != merged {
+                log::info!(
+                    "[asr] trimmed repeated short streaming tail ({} -> {} chars)",
+                    merged.chars().count(),
+                    cleaned_streaming_tail.chars().count()
+                );
+                merged = cleaned_streaming_tail;
+            }
             if has_final {
                 let normalized = normalize_cjk_final_spacing_and_echoes(&merged);
                 if normalized != merged {

@@ -59,7 +59,7 @@ const NAV_BASE: Array<Omit<NavItem, 'name'>> = [
 
 const BLE_PAIRING_PROMPT_ACK_KEY = 'ol.blePairingPromptAck';
 const BLE_PAIRING_PROMPT_DEFERRED_KEY = 'ol.blePairingPromptDeferredThisSession';
-const DEV_SETTINGS_SECTIONS: SettingsSectionId[] = ['recording', 'device', 'companion', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
+const DEV_SETTINGS_SECTIONS: SettingsSectionId[] = ['recording', 'device', 'providers', 'shortcuts', 'permissions', 'language', 'advanced'];
 
 interface FloatingShellProps {
   os?: OS;
@@ -196,7 +196,6 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
   const openDeviceKeyAppPage = (page: DeviceCustomKeyAppPage) => {
     const settingsPages: Partial<Record<DeviceCustomKeyAppPage, SettingsSectionId>> = {
       settingsDevice: 'device',
-      settingsCompanion: 'companion',
       settingsRecording: 'recording',
       settingsProviders: 'providers',
       settingsShortcuts: 'shortcuts',
