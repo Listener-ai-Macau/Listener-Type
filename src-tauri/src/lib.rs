@@ -18,6 +18,7 @@ mod capsule_log;
 mod cli;
 mod combo_hotkey;
 mod commands;
+mod companion_v1;
 mod coordinator;
 mod coordinator_state;
 mod correction;
@@ -373,6 +374,8 @@ pub fn run() {
             commands::get_embedded_ble_runtime_status,
             commands::get_device_settings,
             commands::set_device_settings,
+            commands::get_companion_v1_snapshot,
+            commands::apply_companion_v1_control,
             commands::get_firmware_ota_preflight_snapshot,
             commands::load_firmware_ota_package,
             commands::list_wired_firmware_ports,
