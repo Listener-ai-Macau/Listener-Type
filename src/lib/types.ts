@@ -161,6 +161,23 @@ export interface BleDeviceUnpairResult {
   details: string[];
 }
 
+export type BleDevicePairingPromptStatus =
+  | 'notFound'
+  | 'paired'
+  | 'alreadyPaired'
+  | 'needsUserAction';
+
+export interface BleDevicePairingPromptResult {
+  status: BleDevicePairingPromptStatus;
+  attempted: boolean;
+  matchedDevices: number;
+  promptedDevices: number;
+  alreadyPairedDevices: number;
+  failedDevices: number;
+  openBluetoothSettings: boolean;
+  details: string[];
+}
+
 export interface EmbeddedBleRepairResult {
   recovered: boolean;
   userActionRequired: boolean;
@@ -169,6 +186,7 @@ export interface EmbeddedBleRepairResult {
   message: string;
   failure: EmbeddedBleFailureClassification | null;
   unpairResult?: BleDeviceUnpairResult | null;
+  pairingPromptResult?: BleDevicePairingPromptResult | null;
   runtime: EmbeddedBleRuntimeStatus;
   firmware: FirmwareOtaDeviceSnapshot;
 }

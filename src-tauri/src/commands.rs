@@ -1759,6 +1759,7 @@ pub struct EmbeddedBleRepairResult {
     pub message: String,
     pub failure: Option<crate::embedded_ble::BleFailureClassification>,
     pub unpair_result: Option<crate::embedded_ble::BleDeviceUnpairResult>,
+    pub pairing_prompt_result: Option<crate::embedded_ble::BleDevicePairingPromptResult>,
     pub runtime: EmbeddedBleRuntimeStatus,
     pub firmware: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
 }
@@ -1900,11 +1901,28 @@ fn runtime_error_text_suggests_low_power_idle(combined: &str) -> bool {
 fn embedded_ble_recovery_message(
     failure: &crate::embedded_ble::BleFailureClassification,
     unpair_result: Option<&crate::embedded_ble::BleDeviceUnpairResult>,
+    pairing_prompt_result: Option<&crate::embedded_ble::BleDevicePairingPromptResult>,
 ) -> String {
+    if let Some(pairing) = pairing_prompt_result {
+        match pairing.status {
+            crate::embedded_ble::BleDevicePairingPromptStatus::Paired => {
+                return "Windows 已完成 Listener 配对。Type 正在重新连接；如果状态没有恢复，请再点一次重试。".to_string();
+            }
+            crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired => {
+                return "Listener 在 Windows 里已经是已配对状态。Type 正在重新连接；如果仍失败，请重新打开蓝牙设置检查连接。".to_string();
+            }
+            crate::embedded_ble::BleDevicePairingPromptStatus::NotFound => {
+                return "旧配对已清理，但 Windows 当前没有看到可配对的 Listener。请保持设备唤醒，在打开的蓝牙设置里添加设备。".to_string();
+            }
+            crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction => {
+                return "Type 已尝试触发 Windows 系统配对提醒，但 Windows 仍需要你手动确认。请在打开的蓝牙设置里重新配对 Listener。".to_string();
+            }
+        }
+    }
     if let Some(unpair) = unpair_result {
         return match unpair.status {
             crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
-                "旧的 Listener 蓝牙配对已清理。请在打开的 Windows 蓝牙设置里重新配对 Listener，Type 会自动恢复。".to_string()
+                "旧的 Listener 蓝牙配对已清理。Type 会尝试触发 Windows 系统配对提醒；如果没有弹出，请在蓝牙设置里重新配对 Listener。".to_string()
             }
             crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
             | crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
@@ -1979,6 +1997,7 @@ pub async fn repair_embedded_ble_connection(
             message: snapshot.user_guidance,
             failure: None,
             unpair_result: None,
+            pairing_prompt_result: None,
             runtime,
             firmware,
         }),
@@ -1992,9 +2011,10 @@ pub async fn repair_embedded_ble_connection(
                 user_action_required,
                 open_bluetooth_settings,
                 recovery_action,
-                message: embedded_ble_recovery_message(&failure, None),
+                message: embedded_ble_recovery_message(&failure, None, None),
                 failure: Some(failure),
                 unpair_result: None,
+                pairing_prompt_result: None,
                 runtime,
                 firmware,
             })
@@ -2019,6 +2039,7 @@ pub async fn recover_embedded_ble_device(
                 message: snapshot.user_guidance,
                 failure: None,
                 unpair_result: None,
+                pairing_prompt_result: None,
                 runtime,
                 firmware,
             })
@@ -2029,6 +2050,7 @@ pub async fn recover_embedded_ble_device(
                 embedded_ble_repair_failure_action(&failure);
             let mut recovery_action = embedded_ble_recovery_action_for_failure(&failure);
             let mut unpair_result = None;
+            let mut pairing_prompt_result = None;
             let listener_last_error = coord.embedded_ble_listener_last_error();
             let wake_recovery = coord.embedded_ble_wake_recovery_snapshot();
             let runtime_requests_auto_unpair = runtime_suggests_embedded_ble_auto_unpair(
@@ -2069,12 +2091,35 @@ pub async fn recover_embedded_ble_device(
                     unpair.failed_devices,
                     unpair.needs_user_action,
                 );
-                let retry_after_cleanup =
+                let mut retry_after_cleanup =
                     unpair.status == crate::embedded_ble::BleDeviceUnpairStatus::Removed;
                 user_action_required = true;
-                open_bluetooth_settings = true;
                 recovery_action = EmbeddedBleRecoveryAction::RePairRequired;
                 unpair_result = Some(unpair.clone());
+                let expected_ble_name = coord.prefs().get().device_ble_name;
+                let pairing = tauri::async_runtime::spawn_blocking(move || {
+                    std::thread::sleep(Duration::from_millis(1200));
+                    crate::embedded_ble::prompt_listener_pairing(Some(expected_ble_name.as_str()))
+                })
+                .await
+                .map_err(|err| format!("Listener BLE pairing prompt task failed: {err}"))?;
+                log::info!(
+                    "[embedded-ble] one-click recovery Windows pairing prompt result status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
+                    pairing.status,
+                    pairing.matched_devices,
+                    pairing.prompted_devices,
+                    pairing.already_paired_devices,
+                    pairing.failed_devices,
+                    pairing.open_bluetooth_settings,
+                );
+                retry_after_cleanup = retry_after_cleanup
+                    || matches!(
+                        pairing.status,
+                        crate::embedded_ble::BleDevicePairingPromptStatus::Paired
+                            | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
+                    );
+                open_bluetooth_settings = pairing.open_bluetooth_settings;
+                pairing_prompt_result = Some(pairing.clone());
                 coord.refresh_embedded_ble_listener();
                 if retry_after_cleanup {
                     log::info!(
@@ -2092,6 +2137,7 @@ pub async fn recover_embedded_ble_device(
                                 message: snapshot.user_guidance,
                                 failure: None,
                                 unpair_result,
+                                pairing_prompt_result,
                                 runtime,
                                 firmware,
                             });
@@ -2111,9 +2157,14 @@ pub async fn recover_embedded_ble_device(
                 user_action_required,
                 open_bluetooth_settings,
                 recovery_action,
-                message: embedded_ble_recovery_message(&failure, unpair_result.as_ref()),
+                message: embedded_ble_recovery_message(
+                    &failure,
+                    unpair_result.as_ref(),
+                    pairing_prompt_result.as_ref(),
+                ),
                 failure: Some(failure),
                 unpair_result,
+                pairing_prompt_result,
                 runtime,
                 firmware,
             })
@@ -2280,6 +2331,7 @@ fn device_settings_sent_but_readback_unavailable_detail(error: &str) -> String {
 struct DeviceBleNameRecoveryOutcome {
     recovery_error: Option<String>,
     unpair_result: crate::embedded_ble::BleDeviceUnpairResult,
+    pairing_prompt_result: crate::embedded_ble::BleDevicePairingPromptResult,
 }
 
 fn device_ble_name_recovery_needed(
@@ -2294,7 +2346,9 @@ fn device_ble_name_recovery_needed(
         || windows_cache_needs_cleanup
 }
 
-fn apply_device_ble_name_recovery_blocking() -> DeviceBleNameRecoveryOutcome {
+fn apply_device_ble_name_recovery_blocking(
+    expected_ble_name: String,
+) -> DeviceBleNameRecoveryOutcome {
     let recovery_error = match crate::embedded_ble::send_recording_control_recovery(
         DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
     ) {
@@ -2320,9 +2374,22 @@ fn apply_device_ble_name_recovery_blocking() -> DeviceBleNameRecoveryOutcome {
         unpair_result.failed_devices,
         unpair_result.needs_user_action,
     );
+    std::thread::sleep(Duration::from_millis(1200));
+    let pairing_prompt_result =
+        crate::embedded_ble::prompt_listener_pairing(Some(expected_ble_name.as_str()));
+    log::info!(
+        "[device-settings] BLE name Windows pairing prompt status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
+        pairing_prompt_result.status,
+        pairing_prompt_result.matched_devices,
+        pairing_prompt_result.prompted_devices,
+        pairing_prompt_result.already_paired_devices,
+        pairing_prompt_result.failed_devices,
+        pairing_prompt_result.open_bluetooth_settings,
+    );
     DeviceBleNameRecoveryOutcome {
         recovery_error,
         unpair_result,
+        pairing_prompt_result,
     }
 }
 
@@ -2341,11 +2408,27 @@ fn device_ble_name_recovery_detail(outcome: &DeviceBleNameRecoveryOutcome) -> St
             "Windows did not allow every old pairing entry to be removed automatically."
         }
     };
+    let pairing_detail = match outcome.pairing_prompt_result.status {
+        crate::embedded_ble::BleDevicePairingPromptStatus::Paired => {
+            "Windows pairing completed after cleanup."
+        }
+        crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired => {
+            "Windows already has the Listener paired."
+        }
+        crate::embedded_ble::BleDevicePairingPromptStatus::NotFound => {
+            "Windows did not see an unpaired Listener advertisement; Bluetooth settings may be needed."
+        }
+        crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction => {
+            "Windows still requires manual Bluetooth pairing confirmation."
+        }
+    };
     if outcome.recovery_error.is_some() {
-        format!("BLE name was saved; advertising restart could not be confirmed. {cleanup_detail}")
+        format!(
+            "BLE name was saved; advertising restart could not be confirmed. {cleanup_detail} {pairing_detail}"
+        )
     } else {
         format!(
-            "BLE name was saved and automatic Windows stale-pairing cleanup ran. {cleanup_detail}"
+            "BLE name was saved and automatic Windows stale-pairing cleanup ran. {cleanup_detail} {pairing_detail}"
         )
     }
 }
@@ -2424,9 +2507,12 @@ pub async fn set_device_settings(
         log::info!(
             "[device-settings] background Listener capture stopped before BLE name cleanup={capture_stopped}"
         );
-        let outcome = tauri::async_runtime::spawn_blocking(apply_device_ble_name_recovery_blocking)
-            .await
-            .map_err(|err| format!("Listener BLE name cleanup task failed: {err}"))?;
+        let expected_ble_name = request.ble_name.clone();
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            apply_device_ble_name_recovery_blocking(expected_ble_name)
+        })
+        .await
+        .map_err(|err| format!("Listener BLE name cleanup task failed: {err}"))?;
         coord.refresh_embedded_ble_listener();
         Some(device_ble_name_recovery_detail(&outcome))
     } else {
@@ -7517,6 +7603,16 @@ mod tests {
                 needs_user_action: true,
                 details: vec!["Removed stale Listener pairing: Listener".to_string()],
             },
+            pairing_prompt_result: crate::embedded_ble::BleDevicePairingPromptResult {
+                status: crate::embedded_ble::BleDevicePairingPromptStatus::Paired,
+                attempted: true,
+                matched_devices: 1,
+                prompted_devices: 1,
+                already_paired_devices: 0,
+                failed_devices: 0,
+                open_bluetooth_settings: false,
+                details: vec!["Windows pairing completed for Listener".to_string()],
+            },
         };
 
         let detail = super::device_ble_name_recovery_detail(&outcome);
@@ -7742,7 +7838,7 @@ mod tests {
             details: vec!["Removed stale Listener pairing".to_string()],
         };
 
-        let message = super::embedded_ble_recovery_message(&failure, Some(&unpair));
+        let message = super::embedded_ble_recovery_message(&failure, Some(&unpair), None);
         assert!(message.contains("重新配对"));
         assert!(!message.to_ascii_lowercase().contains("cccd"));
         assert!(!message.to_ascii_lowercase().contains("gatt"));

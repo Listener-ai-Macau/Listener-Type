@@ -76,7 +76,8 @@ pub fn run() {
             | cli::CliIntent::SubmitEmbeddedAudioBleStream { .. }
             | cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. }
             | cli::CliIntent::SendEmbeddedAudioControlStop { .. }
-            | cli::CliIntent::ReadEmbeddedAudioBleStatus { .. } => {
+            | cli::CliIntent::ReadEmbeddedAudioBleStatus { .. }
+            | cli::CliIntent::PromptEmbeddedBlePairing { .. } => {
                 std::process::exit(run_embedded_ble_headless_cli(intent));
             }
             cli::CliIntent::FirmwareOta { .. } => {
@@ -1187,6 +1188,9 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
         cli::CliIntent::ReadEmbeddedAudioBleStatus { .. } => {
             log::warn!("[cli] embedded BLE status read is headless-only and was ignored by the running GUI instance");
         }
+        cli::CliIntent::PromptEmbeddedBlePairing { .. } => {
+            log::warn!("[cli] embedded BLE pairing prompt is headless-only and was ignored by the running GUI instance");
+        }
         cli::CliIntent::FirmwareOta {
             manifest_path,
             firmware_path,
@@ -1311,6 +1315,21 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                     log::warn!("[cli] read-embedded-audio-ble-status failed: {err}");
                     1
                 }
+            }
+        }
+        cli::CliIntent::PromptEmbeddedBlePairing { expected_name } => {
+            log::info!(
+                "[cli] headless prompt-embedded-ble-pairing: expected_name={expected_name:?}"
+            );
+            let result = crate::embedded_ble::prompt_listener_pairing(expected_name.as_deref());
+            let result_json = serde_json::to_string(&result)
+                .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+            println!("embedded_ble_pairing_prompt_json={result_json}");
+            log::info!("embedded_ble_pairing_prompt_json={result_json}");
+            if result.open_bluetooth_settings {
+                1
+            } else {
+                0
             }
         }
         cli::CliIntent::SubmitEmbeddedAudioBleOnce { timeout_ms } => {

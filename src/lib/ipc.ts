@@ -958,6 +958,7 @@ export function repairEmbeddedBleConnection(timeoutMs?: number): Promise<Embedde
       message: 'Listener BLE 已连接，音频 notify 已订阅。',
       failure: null,
       unpairResult: null,
+      pairingPromptResult: null,
       runtime: {
         backgroundListenerDisabledByEnv: false,
         backgroundListenerActive: true,
@@ -1009,6 +1010,7 @@ export function recoverEmbeddedBleDevice(timeoutMs?: number): Promise<EmbeddedBl
       message: 'Listener BLE 已连接，音频 notify 已订阅。',
       failure: null,
       unpairResult: null,
+      pairingPromptResult: null,
       runtime: {
         backgroundListenerDisabledByEnv: false,
         backgroundListenerActive: true,
