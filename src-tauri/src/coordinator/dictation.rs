@@ -2027,6 +2027,13 @@ pub(super) async fn submit_embedded_audio_ble_once(
     timeout_ms: Option<u64>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
+    if embedded_ble_stats_only_enabled() {
+        log::info!(
+            "[embedded-ble] headless stats-only one-shot enabled by {EMBEDDED_BLE_STATS_ONLY_ENV}"
+        );
+        return submit_embedded_audio_ble_stats_only(timeout).await;
+    }
+
     let notifications = tauri::async_runtime::spawn_blocking(move || {
         crate::embedded_ble::capture_notifications_once(timeout)
     })
@@ -2151,7 +2158,7 @@ fn start_embedded_ble_control_signal_worker_if_configured() {
         });
 }
 
-async fn submit_embedded_audio_ble_stream_stats_only(
+async fn submit_embedded_audio_ble_stats_only(
     timeout: Duration,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let notifications = tauri::async_runtime::spawn_blocking(move || {
@@ -2176,7 +2183,7 @@ async fn submit_embedded_audio_ble_stream_stats_only(
         return Err("嵌入式 BLE stats-only 会话没有可识别的 PCM 数据".to_string());
     }
     log::info!(
-        "[embedded-ble] stats-only stream done: pcm_bytes={} missing_packets={} received_packets={}",
+        "[embedded-ble] stats-only capture done: pcm_bytes={} missing_packets={} received_packets={}",
         stats.reconstructed_pcm_bytes,
         stats.missing_packet_count,
         stats.received_packet_count
@@ -2199,7 +2206,7 @@ async fn submit_embedded_audio_ble_stream_impl(
         log::info!(
             "[embedded-ble] headless stats-only stream enabled by {EMBEDDED_BLE_STATS_ONLY_ENV}"
         );
-        return submit_embedded_audio_ble_stream_stats_only(timeout).await;
+        return submit_embedded_audio_ble_stats_only(timeout).await;
     }
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<EmbeddedBleStreamSignal>();
