@@ -2418,6 +2418,18 @@ pub async fn set_device_settings(
     }
 }
 
+#[tauri::command]
+pub fn get_companion_v1_snapshot() -> crate::companion_v1::CompanionV1Snapshot {
+    crate::companion_v1::fixture_snapshot()
+}
+
+#[tauri::command]
+pub fn apply_companion_v1_control(
+    request: crate::companion_v1::CompanionV1ControlRequest,
+) -> Result<crate::companion_v1::CompanionV1Snapshot, String> {
+    crate::companion_v1::apply_fixture_control(request)
+}
+
 fn device_settings_snapshot_from_status(
     status: crate::embedded_ble::DeviceSettingsStatus,
 ) -> DeviceSettingsSnapshot {
