@@ -74,10 +74,6 @@ const DEVICE_KEY_ACTIONS: DeviceCustomKeyAction[] = [
   'disabled',
 ];
 
-type BleNamePairingPrompt = {
-  name: string;
-};
-
 const DEVICE_KEY_APP_PAGES: DeviceCustomKeyAppPage[] = [
   'overview',
   'history',
@@ -268,7 +264,6 @@ function DeviceFirmwareSettingsCard() {
   });
   const [status, setStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [message, setMessage] = useState('');
-  const [bleNamePairingPrompt, setBleNamePairingPrompt] = useState<BleNamePairingPrompt | null>(null);
 
   const refresh = async () => {
     setStatus(previous => (previous === 'saving' ? previous : 'loading'));
@@ -281,7 +276,6 @@ function DeviceFirmwareSettingsCard() {
       );
       setSnapshot(value);
       setForm(snapshotToForm(value));
-      setBleNamePairingPrompt(null);
       setStatus('idle');
     } catch (error) {
       setStatus('error');
@@ -306,8 +300,6 @@ function DeviceFirmwareSettingsCard() {
 
   const save = async () => {
     if (writeDisabled) return;
-    const requestedBleName = form.bleName;
-    const bleNameChanged = snapshot !== null && snapshot.bleName !== requestedBleName;
     setStatus('saving');
     setMessage('');
     try {
@@ -323,13 +315,7 @@ function DeviceFirmwareSettingsCard() {
       setSnapshot(value);
       setForm(snapshotToForm(value));
       setStatus('saved');
-      if (bleNameChanged) {
-        setBleNamePairingPrompt({ name: requestedBleName });
-        setMessage(t('settings.device.bleNameSavedNeedsPairing', '蓝牙名称已写入；设备会用新名称重新广播。'));
-      } else {
-        setBleNamePairingPrompt(null);
-        setMessage(t('settings.device.configSaved', '已发送到设备'));
-      }
+      setMessage(t('settings.device.configSaved', '已发送到设备'));
       window.setTimeout(() => setStatus(current => (current === 'saved' ? 'idle' : current)), 1800);
     } catch (error) {
       setStatus('error');
@@ -338,8 +324,6 @@ function DeviceFirmwareSettingsCard() {
   };
   const detailText = formatDeviceSnapshotDetail(snapshot, t);
   const footerText = validationError || message || formatDeviceSnapshotFooter(snapshot, t);
-  const showBleNamePairingPrompt = bleNamePairingPrompt !== null;
-  const bleNamePairingPromptName = bleNamePairingPrompt?.name ?? form.bleName;
 
   return (
     <Card className="ol-device-settings-card" style={{ padding: 20 }}>
@@ -387,21 +371,6 @@ function DeviceFirmwareSettingsCard() {
             style={{ ...inputStyle, flex: '0 1 320px', maxWidth: 320 }}
           />
         </div>
-        {showBleNamePairingPrompt && (
-          <div className="ol-device-ble-pairing-prompt" role="status" aria-live="polite">
-            <div className="ol-device-ble-pairing-copy">
-              <div style={{ fontSize: 11.5, fontWeight: 650, color: 'var(--ol-ink)' }}>
-                {t('settings.device.bleNamePairingTitle', '等待重新连接')}
-              </div>
-              <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.45, marginTop: 1 }}>
-                {t('settings.device.bleNamePairingBody', {
-                  name: bleNamePairingPromptName,
-                  defaultValue: '设备会以 {{name}} 重新出现；看到后重新连接即可。',
-                })}
-              </div>
-            </div>
-          </div>
-        )}
       </DeviceSettingsPanel>
 
       {detailText && (

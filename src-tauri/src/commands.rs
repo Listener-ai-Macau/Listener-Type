@@ -2326,23 +2326,23 @@ fn apply_device_ble_name_recovery_blocking() -> DeviceBleNameRecoveryOutcome {
 fn device_ble_name_recovery_detail(outcome: &DeviceBleNameRecoveryOutcome) -> String {
     let cleanup_detail = match outcome.unpair_result.status {
         crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
-            "Old Windows pairing entries were removed. Please re-pair in Windows Bluetooth."
+            "Old Windows pairing entries were removed automatically."
         }
         crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean => {
-            "Windows pairing entries were already clean. Please pair the new name in Windows Bluetooth."
+            "Windows pairing entries were already clean."
         }
         crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
-            "No old Windows pairing entry was found. Please pair the new name in Windows Bluetooth."
+            "No old Windows pairing entry was found."
         }
         crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
-            "Windows may still need manual pairing cleanup. Please remove the old entry and re-pair in Windows Bluetooth."
+            "Windows did not allow every old pairing entry to be removed automatically."
         }
     };
     if outcome.recovery_error.is_some() {
-        format!("BLE name was saved; recovery command could not be confirmed. {cleanup_detail}")
+        format!("BLE name was saved; advertising restart could not be confirmed. {cleanup_detail}")
     } else {
         format!(
-            "BLE name was saved and the device was asked to restart pairing advertising with the new name. {cleanup_detail}"
+            "BLE name was saved and automatic Windows stale-pairing cleanup ran. {cleanup_detail}"
         )
     }
 }
@@ -7487,7 +7487,8 @@ mod tests {
         };
 
         let detail = super::device_ble_name_recovery_detail(&outcome);
-        assert!(detail.contains("re-pair"));
+        assert!(detail.contains("Old Windows pairing entries were removed automatically"));
+        assert!(!detail.contains("re-pair"));
         assert!(!detail.to_ascii_lowercase().contains("cccd"));
         assert!(!detail.to_ascii_lowercase().contains("gatt"));
     }

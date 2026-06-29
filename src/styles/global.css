@@ -206,32 +206,6 @@ a { color: inherit; text-decoration: none; }
   padding: 10px 12px;
 }
 
-.ol-device-ble-pairing-prompt {
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 8px;
-  border: 0;
-  background: transparent;
-  padding: 2px 2px 0;
-}
-
-.ol-device-ble-pairing-prompt::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  flex: 0 0 auto;
-  margin-top: 5px;
-  background: color-mix(in srgb, var(--ol-blue) 72%, var(--ol-ink-4));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ol-blue-soft) 62%, transparent);
-}
-
-.ol-device-ble-pairing-copy {
-  min-width: 0;
-}
-
 .ol-device-power-mode-card {
   min-width: 0;
   border-radius: 9px;
