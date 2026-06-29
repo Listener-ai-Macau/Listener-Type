@@ -35,7 +35,7 @@ export const ja: typeof zhCN = {
     thinking: 'thinking',
     cancelled: 'キャンセルしました',
     error: 'エラーが発生しました',
-    inserted: '{{count}} 文字を入力しました',
+    inserted: '入力しました',
     translating: '翻訳中',
   },
   qa: {

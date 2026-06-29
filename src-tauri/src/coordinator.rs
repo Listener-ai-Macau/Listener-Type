@@ -8070,7 +8070,8 @@ fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
 }
 
 /// 终止态（Done / Cancelled / Error）后延迟 N ms 把胶囊改回 Idle，让浮窗自动消失。
-/// 硬件 BLE 听写的日常路径需要按键结束后立刻收起；详细结果可在历史记录里复盘。
+/// 硬件 BLE 听写的日常成功路径只保留一个短促完成反馈；详细结果可在历史记录里复盘。
+const CAPSULE_SUCCESS_HIDE_DELAY_MS: u64 = 850;
 const CAPSULE_AUTO_HIDE_DELAY_MS: u64 = 0;
 const CAPSULE_ACTIONABLE_ERROR_HIDE_DELAY_MS: u64 = 6_000;
 const CAPSULE_EMPTY_TRANSCRIPT_HIDE_DELAY_MS: u64 = 1_500;

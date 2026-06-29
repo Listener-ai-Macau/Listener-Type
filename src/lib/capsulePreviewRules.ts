@@ -43,15 +43,16 @@ export const PREVIEW_DEDUP_POLICY = 'exact-match' as const;
 /**
  * When ASR produces the final transcript, the capsule transitions:
  *   Recording(message=partialPreview) → Transcribing(message=partialPreview)
- *   → Polishing(message=partialPreview) → Done(message=finalInsertion)
+ *   → Polishing(message=partialPreview) → Done(successMark)
  *
  * On the Recording → Transcribing edge, the capsule shows a short stop
  * acknowledgement and enters the processing spinner as soon as the stop action
  * is accepted. The hardware AI LED follows that accepted-stop edge and remains
  * active through ASR/polish/insert work; host completion then drives the OK LED.
  * The preview text stays visible through transcribing/polishing so the user sees
- * continuity. Done state replaces it with insertion info.
- * After Done, the capsule lingers ~1.5s (schedule_capsule_idle) then
+ * continuity. Done state replaces it with a compact success mark; actionable
+ * fallback messages may still show text.
+ * After Done, the normal success path lingers ~850ms (schedule_capsule_idle) then
  * fades to Idle with EXIT_ANIM_MS = 140ms.
  */
 export const PREVIEW_FINAL_TRANSITION = {
@@ -59,10 +60,10 @@ export const PREVIEW_FINAL_TRANSITION = {
   previewStates: ['recording', 'transcribing', 'polishing'] as const,
   /** Immediate visual feedback after the stop key/button is accepted. */
   stopAckMs: 620,
-  /** Terminal state where preview is replaced by insertion count. */
+  /** Terminal state where preview is replaced by completion feedback. */
   finalState: 'done' as const,
-  /** How long the done/cancelled/error toast stays visible before idle (ms). */
-  lingerMs: 1500,
+  /** How long the normal success done toast stays visible before idle (ms). */
+  lingerMs: 850,
   /** Exit animation duration (ms). */
   exitAnimMs: 140,
 };

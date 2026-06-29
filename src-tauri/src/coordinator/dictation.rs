@@ -3993,7 +3993,7 @@ async fn finish_end_session_after_stop_transition(
         && !tsf_required_insert_failed
         && !wayland_session
     {
-        Some(polished.clone())
+        None
     } else if tsf_required_insert_failed {
         Some("TSF 未上屏，已禁止非 TSF 兜底".to_string())
     } else if wayland_session {
@@ -4021,7 +4021,7 @@ async fn finish_end_session_after_stop_transition(
             .await;
     }
 
-    schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS, Some(current_session_id));
+    schedule_capsule_idle(inner, CAPSULE_SUCCESS_HIDE_DELAY_MS, Some(current_session_id));
 
     Ok(())
 }
