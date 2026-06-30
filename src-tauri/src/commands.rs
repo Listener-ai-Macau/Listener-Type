@@ -2342,9 +2342,8 @@ fn device_ble_name_recovery_needed(
     previous_prefs_ble_name: Option<&str>,
     windows_cache_needs_cleanup: bool,
 ) -> bool {
-    previous_snapshot.is_some_and(|snapshot| {
-        snapshot.ble_name != request.ble_name
-    }) || previous_prefs_ble_name.is_some_and(|name| name != request.ble_name)
+    previous_snapshot.is_some_and(|snapshot| snapshot.ble_name != request.ble_name)
+        || previous_prefs_ble_name.is_some_and(|name| name != request.ble_name)
         || windows_cache_needs_cleanup
 }
 

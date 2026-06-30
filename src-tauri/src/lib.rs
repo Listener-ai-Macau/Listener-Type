@@ -77,7 +77,8 @@ pub fn run() {
             | cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. }
             | cli::CliIntent::SendEmbeddedAudioControlStop { .. }
             | cli::CliIntent::ReadEmbeddedAudioBleStatus { .. }
-            | cli::CliIntent::PromptEmbeddedBlePairing { .. } => {
+            | cli::CliIntent::PromptEmbeddedBlePairing { .. }
+            | cli::CliIntent::CleanupEmbeddedBlePairing { .. } => {
                 std::process::exit(run_embedded_ble_headless_cli(intent));
             }
             cli::CliIntent::FirmwareOta { .. } => {
@@ -1191,6 +1192,9 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
         cli::CliIntent::PromptEmbeddedBlePairing { .. } => {
             log::warn!("[cli] embedded BLE pairing prompt is headless-only and was ignored by the running GUI instance");
         }
+        cli::CliIntent::CleanupEmbeddedBlePairing { .. } => {
+            log::warn!("[cli] embedded BLE pairing cleanup is headless-only and was ignored by the running GUI instance");
+        }
         cli::CliIntent::FirmwareOta {
             manifest_path,
             firmware_path,
@@ -1268,12 +1272,12 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                 std::time::Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
             match crate::embedded_ble::probe_notify_subscription(timeout) {
                 Ok(()) => {
-                    println!("embedded_ble_probe_result=PASS");
+                    headless_print_line("embedded_ble_probe_result=PASS");
                     log::info!("[cli] probe-embedded-audio-ble-subscription PASS");
                     0
                 }
                 Err(err) => {
-                    println!("embedded_ble_probe_result=FAIL error={err}");
+                    headless_print_line(format!("embedded_ble_probe_result=FAIL error={err}"));
                     log::warn!("[cli] probe-embedded-audio-ble-subscription failed: {err}");
                     1
                 }
@@ -1287,12 +1291,14 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                 std::time::Duration::from_millis(timeout_ms.unwrap_or(5_000).clamp(500, 30_000));
             match crate::embedded_ble::send_recording_control_stop(timeout) {
                 Ok(()) => {
-                    println!("embedded_ble_control_stop_result=PASS");
+                    headless_print_line("embedded_ble_control_stop_result=PASS");
                     log::info!("[cli] send-embedded-audio-control-stop PASS");
                     0
                 }
                 Err(err) => {
-                    println!("embedded_ble_control_stop_result=FAIL error={err}");
+                    headless_print_line(format!(
+                        "embedded_ble_control_stop_result=FAIL error={err}"
+                    ));
                     log::warn!("[cli] send-embedded-audio-control-stop failed: {err}");
                     1
                 }
@@ -1306,12 +1312,14 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                 Ok(status) => {
                     let status_json = serde_json::to_string(&status)
                         .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
-                    println!("embedded_audio_ble_status_json={status_json}");
+                    headless_print_line(format!("embedded_audio_ble_status_json={status_json}"));
                     log::info!("embedded_audio_ble_status_json={status_json}");
                     0
                 }
                 Err(err) => {
-                    println!("embedded_audio_ble_status_result=FAIL error={err}");
+                    headless_print_line(format!(
+                        "embedded_audio_ble_status_result=FAIL error={err}"
+                    ));
                     log::warn!("[cli] read-embedded-audio-ble-status failed: {err}");
                     1
                 }
@@ -1324,9 +1332,28 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
             let result = crate::embedded_ble::prompt_listener_pairing(expected_name.as_deref());
             let result_json = serde_json::to_string(&result)
                 .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
-            println!("embedded_ble_pairing_prompt_json={result_json}");
+            headless_print_line(format!("embedded_ble_pairing_prompt_json={result_json}"));
             log::info!("embedded_ble_pairing_prompt_json={result_json}");
             if result.open_bluetooth_settings {
+                1
+            } else {
+                0
+            }
+        }
+        cli::CliIntent::CleanupEmbeddedBlePairing { expected_name } => {
+            log::info!(
+                "[cli] headless cleanup-embedded-ble-pairing: expected_name={expected_name:?}"
+            );
+            if let Some(name) = expected_name.as_deref() {
+                crate::embedded_ble::set_configured_bluetooth_target_name(name);
+            }
+            let extra_names = expected_name.iter().cloned().collect::<Vec<_>>();
+            let result = crate::embedded_ble::unpair_listener_devices_for_names(&extra_names);
+            let result_json = serde_json::to_string(&result)
+                .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+            headless_print_line(format!("embedded_ble_cleanup_json={result_json}"));
+            log::info!("embedded_ble_cleanup_json={result_json}");
+            if result.needs_user_action && result.failed_devices > 0 {
                 1
             } else {
                 0
@@ -1338,7 +1365,9 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                 Ok(result) => {
                     let result_json = serde_json::to_string(&result)
                         .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
-                    println!("embedded_audio_ble_once_result_json={result_json}");
+                    headless_print_line(format!(
+                        "embedded_audio_ble_once_result_json={result_json}"
+                    ));
                     log::info!("embedded_audio_ble_once_result_json={result_json}");
                     log::info!(
                         "[cli] submit-embedded-audio-ble-once done: pcm_bytes={} missing_packets={} final_text_chars={}",
@@ -1366,7 +1395,9 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                 Ok(result) => {
                     let result_json = serde_json::to_string(&result)
                         .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
-                    println!("embedded_audio_ble_stream_result_json={result_json}");
+                    headless_print_line(format!(
+                        "embedded_audio_ble_stream_result_json={result_json}"
+                    ));
                     log::info!("embedded_audio_ble_stream_result_json={result_json}");
                     log::info!(
                         "[cli] submit-embedded-audio-ble-stream done: pcm_bytes={} missing_packets={} final_text_chars={}",
@@ -1388,6 +1419,13 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
         }
         _ => 2,
     }
+}
+
+fn headless_print_line(line: impl AsRef<str>) {
+    use std::io::Write;
+
+    let mut stdout = std::io::stdout();
+    let _ = writeln!(stdout, "{}", line.as_ref());
 }
 
 fn run_firmware_ota_headless_cli(intent: cli::CliIntent) -> i32 {

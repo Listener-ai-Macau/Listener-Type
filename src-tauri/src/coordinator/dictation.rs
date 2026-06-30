@@ -4037,7 +4037,11 @@ async fn finish_end_session_after_stop_transition(
         Some(inserted_chars),
     );
 
-    schedule_capsule_idle(inner, CAPSULE_SUCCESS_HIDE_DELAY_MS, Some(current_session_id));
+    schedule_capsule_idle(
+        inner,
+        CAPSULE_SUCCESS_HIDE_DELAY_MS,
+        Some(current_session_id),
+    );
 
     Ok(())
 }

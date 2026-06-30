@@ -552,11 +552,13 @@ fn stop_drain_timeout_reason(stats: &crate::embedded_audio::SessionStats) -> Str
 mod windows_ble {
     use std::fmt;
     use std::io::{Read, Write};
+    use std::process::Command;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
     use std::time::{Duration, Instant};
 
+    use serde::Deserialize;
     use serialport::{SerialPortInfo, SerialPortType};
     use windows::core::{IInspectable, GUID, HSTRING, PCWSTR};
     use windows::Devices::Bluetooth::Advertisement::{
@@ -723,6 +725,11 @@ mod windows_ble {
     const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
     const SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091a";
     const OTA_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
+    const LISTENER_SERVICE_UUID_TEXTS: [&str; 3] = [
+        SERVICE_UUID_TEXT,
+        OTA_SERVICE_UUID_TEXT,
+        crate::embedded_ble::DIAGNOSTIC_SERVICE_UUID_TEXT,
+    ];
     #[cfg(feature = "companion-dev")]
     const STM32WB_ST_OTA_APP_BASE_ADDRESS: u32 = 0x0800_7000;
     #[cfg(feature = "companion-dev")]
@@ -1200,6 +1207,26 @@ mod windows_ble {
     struct ListenerPnpRemoveCandidate {
         label: String,
         instance_id: String,
+        name: String,
+        address: Option<u64>,
+        is_ble_device_root: bool,
+    }
+
+    #[derive(Clone)]
+    pub(super) struct ListenerPnpEntry {
+        pub(super) name: String,
+        pub(super) instance_id: String,
+        pub(super) address: Option<u64>,
+        pub(super) has_listener_service_signature: bool,
+        pub(super) is_ble_device_root: bool,
+    }
+
+    #[derive(Deserialize)]
+    struct PowerShellPnpDeviceEntry {
+        #[serde(rename = "FriendlyName")]
+        friendly_name: Option<String>,
+        #[serde(rename = "InstanceId")]
+        instance_id: Option<String>,
     }
 
     #[derive(Clone)]
@@ -1273,7 +1300,9 @@ mod windows_ble {
                 }
                 Ok(DevicePairingOutcome::AlreadyReachable(detail)) => {
                     result.already_paired_devices = result.already_paired_devices.saturating_add(1);
-                    result.details.push(format!("{}: {detail}", candidate.label));
+                    result
+                        .details
+                        .push(format!("{}: {detail}", candidate.label));
                 }
                 Err(err) => {
                     result.failed_devices = result.failed_devices.saturating_add(1);
@@ -1561,10 +1590,9 @@ mod windows_ble {
         match status {
             DevicePairingResultStatus::Paired => Ok(DevicePairingOutcome::Paired),
             DevicePairingResultStatus::AlreadyPaired => Ok(DevicePairingOutcome::AlreadyPaired),
-            DevicePairingResultStatus::OperationAlreadyInProgress => pairing_reachable_or_error(
-                expected_name,
-                "Windows is already pairing this device",
-            ),
+            DevicePairingResultStatus::OperationAlreadyInProgress => {
+                pairing_reachable_or_error(expected_name, "Windows is already pairing this device")
+            }
             DevicePairingResultStatus::AccessDenied => pairing_reachable_or_error(
                 expected_name,
                 "Windows requires user confirmation in Bluetooth settings before pairing",
@@ -1813,12 +1841,6 @@ mod windows_ble {
         let count = devices
             .Size()
             .map_err(|err| format!("Windows PnP device collection size failed: {err}"))?;
-        #[derive(Clone)]
-        struct PnpEntry {
-            name: String,
-            instance_id: String,
-            address: Option<u64>,
-        }
         let mut entries = Vec::new();
         let mut known_addresses = target_addresses.to_vec();
         for index in 0..count {
@@ -1833,20 +1855,25 @@ mod windows_ble {
                 .Id()
                 .map(|value| value.to_string_lossy())
                 .unwrap_or_default();
-            let Some(instance_id) = normalize_pnp_device_instance_id(&raw_id) else {
-                continue;
-            };
-            let address = parse_bluetooth_address_from_device_id(&instance_id);
-            if bluetooth_name_matches_any(&name, target_names) {
-                if let Some(address) = address {
-                    push_unique_address(&mut known_addresses, address);
+            if let Some(entry) = listener_pnp_entry_from_name_and_id(name, raw_id) {
+                push_listener_pnp_entry(&mut entries, &mut known_addresses, target_names, entry);
+            }
+        }
+
+        match powershell_listener_pnp_entries() {
+            Ok(powershell_entries) => {
+                for entry in powershell_entries {
+                    push_listener_pnp_entry(
+                        &mut entries,
+                        &mut known_addresses,
+                        target_names,
+                        entry,
+                    );
                 }
             }
-            entries.push(PnpEntry {
-                name,
-                instance_id,
-                address,
-            });
+            Err(err) => {
+                log::warn!("[embedded-ble] PowerShell PnP fallback enumeration failed: {err}");
+            }
         }
 
         let mut candidates = Vec::new();
@@ -1856,7 +1883,7 @@ mod windows_ble {
                 .address
                 .is_some_and(|value| known_addresses.contains(&value));
             let name_matches = bluetooth_name_matches_any(&entry.name, target_names);
-            if !address_matches && !name_matches {
+            if !listener_pnp_entry_matches_cleanup(&entry, address_matches, name_matches) {
                 continue;
             }
             if seen_ids.iter().any(|seen| seen == &entry.instance_id) {
@@ -1880,13 +1907,137 @@ mod windows_ble {
             };
             if name_matches {
                 log::info!("[embedded-ble] matched Listener PnP node by name: {label}");
+            } else if entry.has_listener_service_signature {
+                log::info!("[embedded-ble] matched Listener PnP node by service UUID: {label}");
             }
             candidates.push(ListenerPnpRemoveCandidate {
                 label,
                 instance_id: entry.instance_id,
+                name: entry.name,
+                address: entry.address,
+                is_ble_device_root: entry.is_ble_device_root,
             });
         }
         Ok(candidates)
+    }
+
+    fn push_listener_pnp_entry(
+        entries: &mut Vec<ListenerPnpEntry>,
+        known_addresses: &mut Vec<u64>,
+        target_names: &[String],
+        entry: ListenerPnpEntry,
+    ) {
+        if bluetooth_name_matches_any(&entry.name, target_names)
+            || entry.has_listener_service_signature
+        {
+            if let Some(address) = entry.address {
+                push_unique_address(known_addresses, address);
+            }
+        }
+        if entries.iter().any(|existing| {
+            existing
+                .instance_id
+                .eq_ignore_ascii_case(&entry.instance_id)
+        }) {
+            return;
+        }
+        entries.push(entry);
+    }
+
+    fn listener_pnp_entry_from_name_and_id(
+        name: String,
+        raw_id: String,
+    ) -> Option<ListenerPnpEntry> {
+        let instance_id = normalize_pnp_device_instance_id(&raw_id)?;
+        let address = parse_bluetooth_address_from_device_id(&instance_id);
+        Some(ListenerPnpEntry {
+            name,
+            is_ble_device_root: pnp_instance_is_ble_device_root(&instance_id),
+            has_listener_service_signature: pnp_instance_has_listener_service_signature(
+                &instance_id,
+            ),
+            instance_id,
+            address,
+        })
+    }
+
+    fn powershell_listener_pnp_entries() -> Result<Vec<ListenerPnpEntry>, String> {
+        let script = r#"
+$ProgressPreference = 'SilentlyContinue'
+Get-PnpDevice -ErrorAction SilentlyContinue |
+  Where-Object { $_.InstanceId -match '^(BTHLE|BTHLEDEVICE|HID)\\' } |
+  Select-Object FriendlyName,InstanceId |
+  ConvertTo-Json -Compress
+"#;
+        let output = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ])
+            .output()
+            .map_err(|err| format!("start powershell.exe failed: {err}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if stderr.is_empty() {
+                format!("powershell.exe exited with status {}", output.status)
+            } else {
+                format!(
+                    "powershell.exe exited with status {}: {stderr}",
+                    output.status
+                )
+            });
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if stdout.is_empty() {
+            return Ok(Vec::new());
+        }
+        let value: serde_json::Value = serde_json::from_str(&stdout)
+            .map_err(|err| format!("parse Get-PnpDevice JSON failed: {err}; output={stdout}"))?;
+        let raw_entries = match value {
+            serde_json::Value::Array(values) => values,
+            serde_json::Value::Null => Vec::new(),
+            other => vec![other],
+        };
+
+        let mut entries = Vec::new();
+        for value in raw_entries {
+            let device: PowerShellPnpDeviceEntry = serde_json::from_value(value)
+                .map_err(|err| format!("decode Get-PnpDevice entry failed: {err}"))?;
+            let Some(instance_id) = device.instance_id else {
+                continue;
+            };
+            if let Some(entry) = listener_pnp_entry_from_name_and_id(
+                device.friendly_name.unwrap_or_default(),
+                instance_id,
+            ) {
+                entries.push(entry);
+            }
+        }
+        Ok(entries)
+    }
+
+    pub(super) fn listener_pnp_entry_matches_cleanup(
+        entry: &ListenerPnpEntry,
+        address_matches: bool,
+        name_matches: bool,
+    ) -> bool {
+        address_matches || name_matches || entry.has_listener_service_signature
+    }
+
+    pub(super) fn pnp_instance_has_listener_service_signature(instance_id: &str) -> bool {
+        let upper = instance_id.to_ascii_uppercase();
+        LISTENER_SERVICE_UUID_TEXTS.iter().any(|uuid| {
+            let uuid_upper = uuid.to_ascii_uppercase();
+            upper.contains(&uuid_upper)
+        })
+    }
+
+    pub(super) fn pnp_instance_is_ble_device_root(instance_id: &str) -> bool {
+        instance_id.to_ascii_uppercase().starts_with(r"BTHLE\DEV_")
     }
 
     fn bthport_listener_cache_candidates(
@@ -2017,10 +2168,23 @@ mod windows_ble {
             return false;
         }
         let target_names = listener_target_names(extra_names);
-        match bthport_listener_cache_candidates(
-            &listener_recovery_target_addresses(),
-            &target_names,
-        ) {
+        let target_addresses = listener_recovery_target_addresses();
+        match listener_pnp_remove_candidates(&target_addresses, &target_names) {
+            Ok(candidates) => {
+                if candidates.iter().any(|candidate| {
+                    let name = candidate.name.trim();
+                    candidate.is_ble_device_root
+                        && !name.is_empty()
+                        && !name.eq_ignore_ascii_case(expected_name)
+                }) {
+                    return true;
+                }
+            }
+            Err(err) => {
+                log::warn!("[embedded-ble] BLE PnP stale-node mismatch check failed: {err}");
+            }
+        }
+        match bthport_listener_cache_candidates(&target_addresses, &target_names) {
             Ok(candidates) => candidates.iter().any(|candidate| {
                 let name = candidate.name.trim();
                 !name.is_empty() && !name.eq_ignore_ascii_case(expected_name)
@@ -2069,6 +2233,27 @@ mod windows_ble {
     fn remove_pnp_device_candidate(
         candidate: &ListenerPnpRemoveCandidate,
     ) -> Result<DeviceUnpairOutcome, String> {
+        let cm_outcome = remove_pnp_device_candidate_with_cfgmgr(candidate);
+        if !candidate.is_ble_device_root {
+            return cm_outcome;
+        }
+
+        match remove_pnp_device_candidate_with_pnputil(candidate) {
+            Ok(DeviceUnpairOutcome::Unpaired) => Ok(DeviceUnpairOutcome::Unpaired),
+            Ok(DeviceUnpairOutcome::AlreadyUnpaired) => cm_outcome,
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] pnputil root-node cleanup failed for {}: {err}",
+                    candidate.label
+                );
+                cm_outcome
+            }
+        }
+    }
+
+    fn remove_pnp_device_candidate_with_cfgmgr(
+        candidate: &ListenerPnpRemoveCandidate,
+    ) -> Result<DeviceUnpairOutcome, String> {
         let wide_id: Vec<u16> = candidate
             .instance_id
             .encode_utf16()
@@ -2109,6 +2294,37 @@ mod windows_ble {
             "remove failed: {}",
             configret_detail(remove, Some((&veto_type, &veto_name)))
         ))
+    }
+
+    fn remove_pnp_device_candidate_with_pnputil(
+        candidate: &ListenerPnpRemoveCandidate,
+    ) -> Result<DeviceUnpairOutcome, String> {
+        let output = Command::new("pnputil")
+            .args(["/remove-device", &candidate.instance_id])
+            .output()
+            .map_err(|err| format!("start pnputil failed: {err}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let combined = format!("{stdout}\n{stderr}");
+        let lower = combined.to_ascii_lowercase();
+        if output.status.success() {
+            if lower.contains("no devices were removed")
+                || lower.contains("not found")
+                || lower.contains("no matching devices")
+            {
+                return Ok(DeviceUnpairOutcome::AlreadyUnpaired);
+            }
+            return Ok(DeviceUnpairOutcome::Unpaired);
+        }
+        Err(if combined.trim().is_empty() {
+            format!("pnputil exited with status {}", output.status)
+        } else {
+            format!(
+                "pnputil exited with status {}: {}",
+                output.status,
+                combined.trim()
+            )
+        })
     }
 
     fn configret_detail(status: CONFIGRET, veto: Option<(&PNP_VETO_TYPE, &[u16])>) -> String {
@@ -11371,6 +11587,49 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    fn pnp_listener_service_signature_finds_arbitrary_renamed_device_tree() {
+        let service_id = r#"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3091A}_DEV_VID&0216C0_PID&05DF_REV&0001_FD2F988DB40D\9&2E60A20C&0&004B"#;
+        assert!(windows_ble::pnp_instance_has_listener_service_signature(
+            service_id
+        ));
+        assert_eq!(
+            windows_ble::parse_bluetooth_address_from_device_id(service_id),
+            Some(0xFD2F_988D_B40D)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn pnp_cleanup_match_uses_service_signature_without_name_fallback() {
+        let service_entry = windows_ble::ListenerPnpEntry {
+            name: "Bluetooth LE GATT Service".to_string(),
+            instance_id:
+                r#"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3092A}_DEV_VID&0216C0_PID&05DF_REV&0001_FD2F988DB40D\9&2E60A20C&0&004B"#
+                    .to_string(),
+            address: Some(0xFD2F_988D_B40D),
+            has_listener_service_signature: true,
+            is_ble_device_root: false,
+        };
+        assert!(windows_ble::listener_pnp_entry_matches_cleanup(
+            &service_entry,
+            false,
+            false
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn pnp_ble_device_root_detection_is_strict() {
+        assert!(windows_ble::pnp_instance_is_ble_device_root(
+            r#"BTHLE\DEV_FD2F988DB40D\8&25948282&0&FD2F988DB40D"#
+        ));
+        assert!(!windows_ble::pnp_instance_is_ble_device_root(
+            r#"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_FD2F988DB40D\9&2E60A20C&0&004B"#
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
     fn bthport_device_name_decoder_accepts_ascii_and_utf16() {
         assert_eq!(
             windows_ble::decode_bthport_device_name(b"Blistener\0\0"),
@@ -11680,7 +11939,10 @@ mod tests {
         super::windows_ble::set_configured_bluetooth_target_name(&target_name);
         let status = super::windows_ble::read_embedded_audio_status(Duration::from_secs(20))
             .expect("renamed Listener BLE audio status should be reachable");
-        assert!(status.connected, "renamed Listener BLE status should be connected");
+        assert!(
+            status.connected,
+            "renamed Listener BLE status should be connected"
+        );
         let settings = super::windows_ble::read_device_settings_status(Duration::from_secs(4))
             .expect("renamed Listener device settings should be readable");
         assert_eq!(settings.ble_name, target_name);

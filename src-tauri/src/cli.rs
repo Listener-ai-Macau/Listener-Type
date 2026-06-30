@@ -51,6 +51,8 @@ pub enum CliIntent {
     ReadEmbeddedAudioBleStatus { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：扫描未配对 Listener 并触发 Windows 系统配对体验。
     PromptEmbeddedBlePairing { expected_name: Option<String> },
+    /// 调试 / 自动化入口：清理 Windows 里残留的 Listener 配对和 PnP 缓存。
+    CleanupEmbeddedBlePairing { expected_name: Option<String> },
     /// 调试 / 自动化入口：校验固件 OTA 包，可选做 BLE preflight 或真实传输。
     FirmwareOta {
         manifest_path: PathBuf,
@@ -167,6 +169,17 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
                     let _ = args.next();
                 }
                 return Some(CliIntent::PromptEmbeddedBlePairing { expected_name });
+            }
+            "--cleanup-embedded-ble-pairing" => {
+                let expected_name = args
+                    .peek()
+                    .map(|value| value.as_ref())
+                    .filter(|value| !value.starts_with("--"))
+                    .map(ToOwned::to_owned);
+                if expected_name.is_some() {
+                    let _ = args.next();
+                }
+                return Some(CliIntent::CleanupEmbeddedBlePairing { expected_name });
             }
             "--firmware-ota-check" | "--firmware-ota-preflight" | "--firmware-ota-transfer" => {
                 let mode = arg.as_ref();
@@ -466,6 +479,21 @@ mod tests {
             parse_cli_intent(&args),
             Some(CliIntent::PromptEmbeddedBlePairing {
                 expected_name: Some("listenerB".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_ble_cleanup_with_name() {
+        let args = vec![
+            "listener-type",
+            "--cleanup-embedded-ble-pairing",
+            "OfficeType01",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::CleanupEmbeddedBlePairing {
+                expected_name: Some("OfficeType01".to_string()),
             })
         );
     }

@@ -4106,6 +4106,40 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                 unpair.failed_devices,
                 unpair.needs_user_action,
             );
+            let expected_ble_name = inner.prefs.get().device_ble_name;
+            let pairing = if unpair.failed_devices == 0 {
+                Some(
+                    async_runtime::spawn_blocking(move || {
+                        crate::embedded_ble::set_configured_bluetooth_target_name(
+                            &expected_ble_name,
+                        );
+                        crate::embedded_ble::prompt_listener_pairing(Some(&expected_ble_name))
+                    })
+                    .await,
+                )
+            } else {
+                None
+            };
+            let pairing_ready = pairing.as_ref().is_some_and(|result| {
+                result.as_ref().is_ok_and(|pairing| {
+                    !pairing.open_bluetooth_settings && pairing.failed_devices == 0
+                })
+            });
+            match &pairing {
+                Some(Ok(pairing)) => log::warn!(
+                    "[embedded-ble] background Windows pairing prompt result status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
+                    pairing.status,
+                    pairing.matched_devices,
+                    pairing.prompted_devices,
+                    pairing.already_paired_devices,
+                    pairing.failed_devices,
+                    pairing.open_bluetooth_settings,
+                ),
+                Some(Err(err)) => {
+                    log::warn!("[embedded-ble] background Windows pairing prompt task failed: {err}")
+                }
+                None => {}
+            }
             {
                 let mut wake = inner.embedded_ble_wake_recovery.lock();
                 wake.status = EmbeddedBleWakeRecoveryStatus::NeedsWakeKey;
@@ -4115,7 +4149,11 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                     unpair.status,
                     embedded_ble_log_preview(err),
                 ));
-                wake.user_guidance = match unpair.status {
+                wake.user_guidance = if pairing_ready {
+                    "旧的 Listener 蓝牙配对已清理，并已向 Windows 发起重新配对；Type 会继续自动恢复。"
+                        .to_string()
+                } else {
+                    match unpair.status {
                     crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
                         "旧的 Listener 蓝牙配对已清理。请在 Windows 蓝牙设置里重新配对 Listener，Type 会自动恢复。".to_string()
                     }
@@ -4126,12 +4164,17 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                     crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
                         "Windows 需要手动确认移除旧 Listener。请在蓝牙设置里删除 Listener 后重新配对。".to_string()
                     }
+                    }
                 };
             }
             emit_embedded_ble_recovery_capsule(
                 inner,
                 "reconnecting",
-                "请在 Windows 蓝牙里重新配对 Listener，Type 会自动恢复。",
+                if pairing_ready {
+                    "旧配对已清理，正在重新连接 Listener..."
+                } else {
+                    "请在 Windows 蓝牙里重新配对 Listener，Type 会自动恢复。"
+                },
                 Some(4200),
             );
             true
