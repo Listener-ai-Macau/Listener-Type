@@ -20,6 +20,13 @@ pub const LISTENER_OTA_V2_CONTROL_UUID: &str = OTA_CONTROL_UUID;
 pub const LISTENER_OTA_V2_DATA_UUID: &str = OTA_DATA_UUID;
 pub const LISTENER_OTA_V2_STATUS_UUID: &str = OTA_CONTROL_UUID;
 pub const LISTENER_OTA_V2_CHUNK_BYTES: u64 = 500;
+pub const STM32WB_ST_PROTOCOL_NAME: &str = "stm32wb_st_ble_ota";
+pub const STM32WB_ST_FIRMWARE_CAPABILITY: &str = "stm32wb_st_ble_ota_v1";
+pub const STM32WB_ST_OTA_SERVICE_UUID: &str = "8f7a0007-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_CONTROL_UUID: &str = "8f7a7002-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_DATA_UUID: &str = "8f7a7004-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_CONFIRM_UUID: &str = "8f7a7003-7b7d-4f3d-9d6f-6c2d1b7c0000";
+pub const STM32WB_ST_OTA_CHUNK_BYTES: u64 = 248;
 pub const COMPANION_OTA_V2_PROTOCOL_NAME: &str = "companion_ota_v2";
 pub const COMPANION_OTA_V2_FIRMWARE_CAPABILITY: &str = "companion_ota_v2";
 pub const COMPANION_OTA_V2_SERVICE_UUID: &str = "8f7a8007-7b7d-4f3d-9d6f-6c2d1b7c0000";
@@ -65,6 +72,10 @@ impl FirmwareOtaManifest {
 
     pub fn is_listener_ble_ota_v2(&self) -> bool {
         self.protocol_name == LISTENER_OTA_V2_PROTOCOL_NAME
+    }
+
+    pub fn is_stm32wb_st_ble_ota(&self) -> bool {
+        self.protocol_name == STM32WB_ST_PROTOCOL_NAME
     }
 
     pub fn is_companion_ota_v2(&self) -> bool {
@@ -191,7 +202,23 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
         if let Some(stats) = attempt.stats {
             let expected_version = package.manifest.version.clone();
             let (confirmed_version, version_confirmed) = if package.manifest.is_companion_ota_v2() {
-                (Some(expected_version.clone()), true)
+                let ok = stats.transport == COMPANION_OTA_V2_PROTOCOL_NAME;
+                if !ok {
+                    errors.push(format!(
+                        "Companion OTA v2 completed with unexpected transport {}.",
+                        stats.transport
+                    ));
+                }
+                (Some(expected_version.clone()), ok)
+            } else if package.manifest.is_stm32wb_st_ble_ota() {
+                let ok = stats.transport == STM32WB_ST_PROTOCOL_NAME;
+                if !ok {
+                    errors.push(format!(
+                        "STM32WB ST OTA completed with unexpected transport {}.",
+                        stats.transport
+                    ));
+                }
+                (None, ok)
             } else {
                 let confirmed_version = confirm_firmware_ota_version_with(
                     &expected_version,
@@ -207,6 +234,11 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
                     .is_some_and(|version| firmware_ota_versions_match(version, &expected_version));
                 (confirmed_version, version_confirmed)
             };
+            if !version_confirmed && package.manifest.is_stm32wb_st_ble_ota() {
+                errors.push(
+                    "STM32WB ST OTA did not return the expected reboot confirmation.".to_string(),
+                );
+            }
             if !version_confirmed {
                 errors.push(
                     confirmed_version
@@ -258,6 +290,9 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
 fn firmware_ota_device_snapshot_for_manifest(
     manifest: &FirmwareOtaManifest,
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+    if manifest.is_stm32wb_st_ble_ota() {
+        return crate::embedded_ble::stm32wb_st_ota_device_snapshot();
+    }
     if manifest.is_companion_ota_v2() {
         #[cfg(feature = "companion-dev")]
         {
@@ -288,6 +323,9 @@ fn run_transfer_preflight_and_write(
     package: &FirmwareOtaPackage,
     options: &FirmwareOtaHeadlessOptions,
 ) -> HeadlessTransferAttempt {
+    if package.manifest.is_stm32wb_st_ble_ota() {
+        return run_stm32wb_st_transfer_preflight_and_write(package, options);
+    }
     if package.manifest.is_companion_ota_v2() {
         return run_companion_ota_v2_transfer_preflight_and_write(package, options);
     }
@@ -323,6 +361,53 @@ fn run_transfer_preflight_and_write(
     match prepared.transfer(
         &package.manifest.version,
         &package.firmware_sha256,
+        &package.firmware_bytes,
+        package.manifest.gatt_chunk_bytes as usize,
+        None,
+    ) {
+        Ok(stats) => HeadlessTransferAttempt {
+            preflight,
+            stats: Some(stats),
+            errors: Vec::new(),
+        },
+        Err(err) => HeadlessTransferAttempt {
+            preflight,
+            stats: None,
+            errors: vec![err],
+        },
+    }
+}
+
+fn run_stm32wb_st_transfer_preflight_and_write(
+    package: &FirmwareOtaPackage,
+    options: &FirmwareOtaHeadlessOptions,
+) -> HeadlessTransferAttempt {
+    let prepared = match crate::embedded_ble::prepare_stm32wb_st_ota_transfer() {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            let snapshot = disconnected_ota_snapshot(err);
+            let blockers =
+                preflight_blockers(&package.manifest, &snapshot, options.recording_active);
+            return HeadlessTransferAttempt {
+                preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
+                stats: None,
+                errors: blockers,
+            };
+        }
+    };
+
+    let snapshot = prepared.snapshot().clone();
+    let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
+    let preflight = headless_preflight_from_snapshot(options, snapshot, blockers.clone());
+    if !blockers.is_empty() {
+        return HeadlessTransferAttempt {
+            preflight,
+            stats: None,
+            errors: blockers,
+        };
+    }
+
+    match prepared.transfer(
         &package.firmware_bytes,
         package.manifest.gatt_chunk_bytes as usize,
         None,
@@ -538,6 +623,24 @@ fn preflight_blockers(
             .any(|item| item == LISTENER_OTA_V2_FIRMWARE_CAPABILITY)
     {
         blockers.push("Connected firmware does not advertise Listener OTA v2 support.".to_string());
+    }
+    if manifest.is_stm32wb_st_ble_ota()
+        && !snapshot
+            .capabilities
+            .iter()
+            .any(|item| item == STM32WB_ST_FIRMWARE_CAPABILITY)
+    {
+        blockers
+            .push("Connected STM32WB firmware does not advertise ST BLE OTA support.".to_string());
+    }
+    if manifest.is_companion_ota_v2()
+        && !snapshot
+            .capabilities
+            .iter()
+            .any(|item| item == COMPANION_OTA_V2_FIRMWARE_CAPABILITY)
+    {
+        blockers
+            .push("Connected firmware does not advertise Companion OTA v2 support.".to_string());
     }
     if (manifest.is_listener_ble_ota() || manifest.is_listener_ble_ota_v2())
         && snapshot.usb_powered != Some(true)
@@ -1085,6 +1188,7 @@ pub fn validate_normalized_manifest(
 ) -> Result<FirmwareOtaManifest, String> {
     if !(manifest.is_listener_ble_ota()
         || manifest.is_listener_ble_ota_v2()
+        || manifest.is_stm32wb_st_ble_ota()
         || manifest.is_companion_ota_v2())
     {
         return Err(format!(
@@ -1092,11 +1196,12 @@ pub fn validate_normalized_manifest(
             manifest.protocol_name
         ));
     }
-    let expected_package_type = if manifest.is_companion_ota_v2() {
-        "companion-firmware-ota"
-    } else {
-        "listener-firmware-ota"
-    };
+    let expected_package_type =
+        if manifest.is_companion_ota_v2() || manifest.is_stm32wb_st_ble_ota() {
+            "companion-firmware-ota"
+        } else {
+            "listener-firmware-ota"
+        };
     if manifest.package_type != expected_package_type {
         return Err(format!(
             "ota_manifest.json package_type must be {expected_package_type}."
@@ -1146,6 +1251,34 @@ pub fn validate_normalized_manifest(
         if manifest.gatt_chunk_bytes != LISTENER_OTA_V2_CHUNK_BYTES {
             return Err(format!(
                 "Listener OTA v2 chunk size must be {LISTENER_OTA_V2_CHUNK_BYTES} bytes, got {}.",
+                manifest.gatt_chunk_bytes
+            ));
+        }
+    } else if manifest.is_stm32wb_st_ble_ota() {
+        if manifest.project != "Companion-Firmware" {
+            return Err("Companion STM32WB OTA project must be Companion-Firmware.".to_string());
+        }
+        if manifest.firmware_capability != STM32WB_ST_FIRMWARE_CAPABILITY {
+            return Err(
+                "Companion STM32WB OTA package requires unsupported firmware capability."
+                    .to_string(),
+            );
+        }
+        if !uuid_eq(&manifest.gatt_service_uuid, STM32WB_ST_OTA_SERVICE_UUID)
+            || !uuid_eq(&manifest.gatt_control_uuid, STM32WB_ST_OTA_CONTROL_UUID)
+            || !uuid_eq(&manifest.gatt_data_uuid, STM32WB_ST_OTA_DATA_UUID)
+            || manifest
+                .gatt_confirm_uuid
+                .as_deref()
+                .map_or(true, |value| !uuid_eq(value, STM32WB_ST_OTA_CONFIRM_UUID))
+        {
+            return Err(
+                "Companion STM32WB OTA package uses an unsupported ST GATT boundary.".to_string(),
+            );
+        }
+        if manifest.gatt_chunk_bytes != STM32WB_ST_OTA_CHUNK_BYTES {
+            return Err(format!(
+                "Companion STM32WB OTA chunk size must be {STM32WB_ST_OTA_CHUNK_BYTES} bytes, got {}.",
                 manifest.gatt_chunk_bytes
             ));
         }
@@ -1358,6 +1491,32 @@ mod tests {
         }
     }
 
+    fn stm32wb_manifest() -> FirmwareOtaManifest {
+        FirmwareOtaManifest {
+            schema_version: 1,
+            package_type: "companion-firmware-ota".to_string(),
+            project: "Companion-Firmware".to_string(),
+            version: "3119c18-dirty".to_string(),
+            protocol_name: STM32WB_ST_PROTOCOL_NAME.to_string(),
+            protocol_version: 1,
+            hardware_revision: "NUCLEO-WB55RG".to_string(),
+            min_desktop_version: "1.0.0".to_string(),
+            channel: "development".to_string(),
+            file_name: OTA_FILE_NAME.to_string(),
+            file_size_bytes: FIRMWARE_BYTES.len() as u64,
+            file_sha256: FIRMWARE_SHA256.to_string(),
+            firmware_capability: STM32WB_ST_FIRMWARE_CAPABILITY.to_string(),
+            gatt_service_uuid: STM32WB_ST_OTA_SERVICE_UUID.to_string(),
+            gatt_control_uuid: STM32WB_ST_OTA_CONTROL_UUID.to_string(),
+            gatt_data_uuid: STM32WB_ST_OTA_DATA_UUID.to_string(),
+            gatt_confirm_uuid: Some(STM32WB_ST_OTA_CONFIRM_UUID.to_string()),
+            gatt_status_uuid: None,
+            gatt_chunk_bytes: STM32WB_ST_OTA_CHUNK_BYTES,
+            rollback_instructions: vec!["Re-run wired factory flash.".to_string()],
+            recovery_instructions: vec!["Use ST-LINK wired package.".to_string()],
+        }
+    }
+
     fn manifest_v2(extra: &str) -> String {
         format!(
             r#"{{
@@ -1401,6 +1560,20 @@ mod tests {
 }}"#,
             git_commit = "a".repeat(40)
         )
+    }
+
+    #[test]
+    fn stm32wb_st_manifest_requires_confirm_gatt_boundary() {
+        let mut missing = stm32wb_manifest();
+        missing.gatt_confirm_uuid = None;
+        let missing_result = validate_normalized_manifest(missing);
+
+        assert!(missing_result.is_err());
+        assert!(missing_result
+            .unwrap_err()
+            .contains("unsupported ST GATT boundary"));
+
+        assert!(validate_normalized_manifest(stm32wb_manifest()).is_ok());
     }
 
     #[test]

@@ -7091,7 +7091,7 @@ mod tests {
             "BLE device connection status changed to Disconnected; transport_not_ready",
         ));
 
-        assert!(should_emit_embedded_ble_background_recovery_capsule(
+        assert!(!should_emit_embedded_ble_background_recovery_capsule(
             &coordinator.inner,
             "BLE CCCD write timed out after 8000 ms",
         ));

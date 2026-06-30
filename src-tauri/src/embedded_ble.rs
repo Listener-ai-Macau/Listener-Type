@@ -27,6 +27,10 @@ pub const OTA_V2_CONTROL_UUID_TEXT: &str = "8f7a8002-7b7d-4f3d-9d6f-6c2d1b7c0000
 pub const OTA_V2_DATA_UUID_TEXT: &str = "8f7a8004-7b7d-4f3d-9d6f-6c2d1b7c0000";
 #[cfg(feature = "companion-dev")]
 pub const OTA_V2_STATUS_UUID_TEXT: &str = "8f7a8005-7b7d-4f3d-9d6f-6c2d1b7c0000";
+#[cfg(feature = "companion-dev")]
+pub const COMPANION_OTA_V2_SERVICE_UUID: &str = OTA_V2_SERVICE_UUID_TEXT;
+#[cfg(feature = "companion-dev")]
+pub const COMPANION_OTA_V2_STATUS_UUID: &str = OTA_V2_STATUS_UUID_TEXT;
 pub const LISTENER_OTA_V2_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
 pub const LISTENER_OTA_V2_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092b";
 pub const LISTENER_OTA_V2_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092c";
@@ -573,12 +577,12 @@ mod windows_ble {
         GattValueChangedEventArgs, GattWriteOption, GattWriteResult,
     };
     use windows::Devices::Bluetooth::{
-        BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
+        BluetoothAddressType, BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
     };
     use windows::Devices::Enumeration::{
         DeviceAccessStatus, DeviceClass, DeviceInformation, DeviceInformationCustomPairing,
-        DevicePairingKinds, DevicePairingRequestedEventArgs, DevicePairingResultStatus,
-        DeviceUnpairingResultStatus,
+        DeviceInformationPairing, DevicePairingKinds, DevicePairingProtectionLevel,
+        DevicePairingRequestedEventArgs, DevicePairingResultStatus, DeviceUnpairingResultStatus,
     };
     use windows::Foundation::{
         AsyncStatus, EventRegistrationToken, IAsyncOperation, TypedEventHandler,
@@ -716,8 +720,8 @@ mod windows_ble {
     const OTA_DATA_INTER_CHUNK_DELAY_MS_ENV: &str = "LISTENER_OTA_DATA_INTER_CHUNK_DELAY_MS";
     const AUDIO_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
-    const BLE_PAIRING_PROMPT_TIMEOUT: Duration = Duration::from_secs(25);
-    const BLE_PAIRING_PROMPT_SUPPRESS_WINDOW: Duration = Duration::from_secs(90);
+    const BLE_PAIRING_PROMPT_TIMEOUT: Duration = Duration::from_secs(45);
+    const BLE_PAIRING_PROMPT_SUPPRESS_WINDOW: Duration = Duration::from_secs(60 * 60);
     const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
@@ -765,7 +769,9 @@ mod windows_ble {
     #[cfg(feature = "companion-dev")]
     const OTA_V2_DEFAULT_WINDOW_CHUNKS: usize = 24;
     #[cfg(feature = "companion-dev")]
-    const OTA_V2_WINDOW_ENV: &str = "LISTENER_COMPANION_DEV_OTA_V2_WINDOW_CHUNKS";
+    const COMPANION_OTA_V2_WINDOW_ENV: &str = "LISTENER_COMPANION_DEV_OTA_V2_WINDOW_CHUNKS";
+    #[cfg(feature = "companion-dev")]
+    const OTA_V2_WINDOW_ENV: &str = COMPANION_OTA_V2_WINDOW_ENV;
     const LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES: usize = 500;
     const LISTENER_OTA_V2_DEFAULT_WINDOW_CHUNKS: usize = 14;
     const LISTENER_OTA_V2_WINDOW_ENV: &str = "LISTENER_OTA_V2_WINDOW_CHUNKS";
@@ -778,6 +784,8 @@ mod windows_ble {
     const OTA_V2_STATE_ERROR: u8 = 4;
     const OTA_V2_ERROR_NONE: u8 = 0;
     const OTA_V2_ERROR_OFFSET_MISMATCH: u8 = 4;
+    #[cfg(feature = "companion-dev")]
+    const COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH: u8 = OTA_V2_ERROR_OFFSET_MISMATCH;
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
     const OTA_REQUIRED_DATA_CHUNK_BYTES: usize = 500;
     static RUNTIME_BLUETOOTH_TARGET_NAME: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -1041,8 +1049,10 @@ mod windows_ble {
         extra_names: &[String],
     ) -> Result<crate::embedded_ble::BleDeviceUnpairResult, String> {
         let target_names = listener_target_names(extra_names);
-        let candidates = listener_unpair_candidates(&target_names)?;
-        let mut target_addresses = listener_recovery_target_addresses_from_candidates(&candidates);
+        let mut target_addresses = listener_recovery_target_addresses();
+        push_listener_recovery_advertised_addresses(&mut target_addresses, &target_names);
+        let candidates = listener_unpair_candidates(&target_names, &mut target_addresses)?;
+        push_listener_recovery_target_addresses_from_candidates(&mut target_addresses, &candidates);
         let mut result = crate::embedded_ble::BleDeviceUnpairResult {
             status: crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction,
             attempted: true,
@@ -1193,6 +1203,8 @@ mod windows_ble {
         } else {
             crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction
         };
+        result.needs_user_action =
+            result.status == crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction;
         Ok(result)
     }
 
@@ -1210,7 +1222,6 @@ mod windows_ble {
 
     #[derive(Clone)]
     struct PairingPromptThrottleState {
-        target_name: String,
         attempted_at: Instant,
     }
 
@@ -1256,7 +1267,6 @@ mod windows_ble {
     enum DevicePairingOutcome {
         Paired,
         AlreadyPaired,
-        AlreadyReachable(String),
     }
 
     pub fn prompt_listener_pairing(
@@ -1320,12 +1330,6 @@ mod windows_ble {
                         .details
                         .push(format!("Listener was already paired: {}", candidate.label));
                 }
-                Ok(DevicePairingOutcome::AlreadyReachable(detail)) => {
-                    result.already_paired_devices = result.already_paired_devices.saturating_add(1);
-                    result
-                        .details
-                        .push(format!("{}: {detail}", candidate.label));
-                }
                 Err(err) => {
                     result.failed_devices = result.failed_devices.saturating_add(1);
                     result.details.push(format!(
@@ -1339,7 +1343,7 @@ mod windows_ble {
         if result.matched_devices == 0 {
             result.status = crate::embedded_ble::BleDevicePairingPromptStatus::NotFound;
             result.details.push(
-                "No unpaired Listener advertisement was visible to Windows. Bluetooth settings will open for manual pairing."
+                "No pairable Listener device object was visible to Windows. Bluetooth settings will open for native pairing."
                     .to_string(),
             );
             return Ok(result);
@@ -1360,13 +1364,10 @@ mod windows_ble {
         Ok(result)
     }
 
-    fn pairing_prompt_suppression_remaining(target_name: &str, now: Instant) -> Option<Duration> {
+    fn pairing_prompt_suppression_remaining(_target_name: &str, now: Instant) -> Option<Duration> {
         let prompt_lock = LAST_PAIRING_PROMPT.get_or_init(|| Mutex::new(None));
         let guard = prompt_lock.lock().ok()?;
         let last = guard.as_ref()?;
-        if !last.target_name.eq_ignore_ascii_case(target_name) {
-            return None;
-        }
         let elapsed = now.saturating_duration_since(last.attempted_at);
         if elapsed >= BLE_PAIRING_PROMPT_SUPPRESS_WINDOW {
             return None;
@@ -1374,13 +1375,10 @@ mod windows_ble {
         Some(BLE_PAIRING_PROMPT_SUPPRESS_WINDOW - elapsed)
     }
 
-    fn remember_pairing_prompt_attempt(target_name: &str, now: Instant) {
+    fn remember_pairing_prompt_attempt(_target_name: &str, now: Instant) {
         let prompt_lock = LAST_PAIRING_PROMPT.get_or_init(|| Mutex::new(None));
         if let Ok(mut guard) = prompt_lock.lock() {
-            *guard = Some(PairingPromptThrottleState {
-                target_name: target_name.trim().to_string(),
-                attempted_at: now,
-            });
+            *guard = Some(PairingPromptThrottleState { attempted_at: now });
         }
     }
 
@@ -1494,20 +1492,19 @@ mod windows_ble {
         expected_name: Option<&str>,
     ) -> Result<(), String> {
         let addresses = scan_listener_pairing_advertisements(expected_name)?;
-        for (address, name) in addresses {
-            let operation =
-                BluetoothLEDevice::FromBluetoothAddressAsync(address).map_err(|err| {
-                    format!("open advertised BLE device {address:012X} failed: {err}")
-                })?;
-            let device = wait_async_operation(
-                operation,
-                BLE_DISCOVERY_TIMEOUT,
-                "advertised BLE device open",
-            )?;
-            let info = device
-                .DeviceInformation()
-                .map_err(|err| format!("read advertised BLE device info failed: {err}"))?;
-            let _ = device.Close();
+        for (address, address_type, name) in addresses {
+            let Some(info) = pairing_device_information_from_bluetooth_address(
+                address,
+                Some(address_type),
+                "advertised BLE pairing device query",
+            )?
+            else {
+                log::warn!(
+                    "[embedded-ble] advertised pairing candidate {} had no DeviceInformation entry yet",
+                    crate::embedded_ble::format_bluetooth_address(address)
+                );
+                continue;
+            };
             let id = info
                 .Id()
                 .map(|value| value.to_string_lossy())
@@ -1520,6 +1517,63 @@ mod windows_ble {
             candidates.push(ListenerPairingCandidate { label, info });
         }
         Ok(())
+    }
+
+    fn pairing_device_information_from_bluetooth_address(
+        address: u64,
+        address_type: Option<BluetoothAddressType>,
+        label: &str,
+    ) -> Result<Option<DeviceInformation>, String> {
+        let address_text = crate::embedded_ble::format_bluetooth_address(address);
+        let selector = match address_type.filter(|kind| *kind != BluetoothAddressType::Unspecified)
+        {
+            Some(kind) => {
+                BluetoothLEDevice::GetDeviceSelectorFromBluetoothAddressWithBluetoothAddressType(
+                    address, kind,
+                )
+                .map_err(|err| {
+                    format!(
+                        "build typed BLE selector for {address_text} type={kind:?} failed: {err}"
+                    )
+                })?
+            }
+            None => BluetoothLEDevice::GetDeviceSelectorFromBluetoothAddress(address)
+                .map_err(|err| format!("build BLE selector for {address_text} failed: {err}"))?,
+        };
+        let operation = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .map_err(|err| format!("{label} for {address_text} failed to start: {err}"))?;
+        match wait_async_operation(operation, BLE_DISCOVERY_TIMEOUT, label) {
+            Ok(devices) => {
+                let count = devices
+                    .Size()
+                    .map_err(|err| format!("{label} collection size failed: {err}"))?;
+                for index in 0..count {
+                    let info = devices
+                        .GetAt(index)
+                        .map_err(|err| format!("{label} entry {index} read failed: {err}"))?;
+                    let id = info
+                        .Id()
+                        .map(|value| value.to_string_lossy())
+                        .unwrap_or_default();
+                    if parse_bluetooth_address_from_device_id(&id) == Some(address) {
+                        return Ok(Some(info));
+                    }
+                    if count == 1 {
+                        return Ok(Some(info));
+                    }
+                }
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] BLE pairing selector query for {address_text} failed: {err}; leaving pairing to Windows Bluetooth settings"
+                );
+            }
+        }
+
+        log::warn!(
+            "[embedded-ble] BLE pairing selector had no pairable DeviceInformation for {address_text}; opening Bluetooth settings instead of creating a transient GATT connection"
+        );
+        Ok(None)
     }
 
     fn listener_pairing_candidate_label(name: &str, address: Option<u64>) -> String {
@@ -1544,16 +1598,69 @@ mod windows_ble {
         candidate: &ListenerPairingCandidate,
         expected_name: Option<&str>,
     ) -> Result<DevicePairingOutcome, String> {
-        let pairing = candidate
-            .info
-            .Pairing()
-            .map_err(|err| format!("read pairing info failed: {err}"))?;
-        if pairing
-            .IsPaired()
-            .map_err(|err| format!("read pairing state failed: {err}"))?
-        {
-            return Ok(DevicePairingOutcome::AlreadyPaired);
+        let mut candidate = candidate.clone();
+        for stale_cleanup_attempt in 0..3 {
+            let pairing = candidate
+                .info
+                .Pairing()
+                .map_err(|err| format!("read pairing info failed: {err}"))?;
+            if pairing
+                .IsPaired()
+                .map_err(|err| format!("read pairing state failed: {err}"))?
+            {
+                if stale_cleanup_attempt >= 2 {
+                    return Err(format!(
+                        "Windows still reports {} as paired after stale pairing cleanup",
+                        candidate.label
+                    ));
+                }
+                log::warn!(
+                    "[embedded-ble] Windows reports {} is already paired during explicit pairing prompt; unpairing stale address cache before pairing",
+                    candidate.label
+                );
+                match unpair_device_information_pairing(&pairing, &candidate.label)? {
+                    DeviceUnpairOutcome::Unpaired => {}
+                    DeviceUnpairOutcome::AlreadyUnpaired => {}
+                }
+                let refresh_delay = if stale_cleanup_attempt == 0 {
+                    Duration::from_millis(1500)
+                } else {
+                    Duration::from_millis(3000)
+                };
+                std::thread::sleep(refresh_delay);
+                match refresh_listener_pairing_candidate(&candidate, expected_name)? {
+                    Some(refreshed) => {
+                        log::info!(
+                            "[embedded-ble] refreshed Windows pairing candidate after stale unpair: {} -> {}",
+                            candidate.label,
+                            refreshed.label
+                        );
+                        candidate = refreshed;
+                        continue;
+                    }
+                    None => {
+                        return Err(format!(
+                            "Windows removed stale pairing for {}, but a fresh pairable advertisement is not visible yet",
+                            candidate.label
+                        ));
+                    }
+                }
+            }
+
+            return pair_unpaired_listener_candidate(&candidate, &pairing, expected_name);
         }
+
+        Err(
+            "Windows stale pairing cleanup exhausted without a pairable Listener candidate"
+                .to_string(),
+        )
+    }
+
+    fn pair_unpaired_listener_candidate(
+        candidate: &ListenerPairingCandidate,
+        pairing: &DeviceInformationPairing,
+        expected_name: Option<&str>,
+    ) -> Result<DevicePairingOutcome, String> {
         if !pairing
             .CanPair()
             .map_err(|err| format!("read pairing capability failed: {err}"))?
@@ -1568,6 +1675,12 @@ mod windows_ble {
         match custom_pair_listener_candidate(&pairing, &candidate.label, expected_name) {
             Ok(outcome) => return Ok(outcome),
             Err(err) => {
+                if pairing_error_should_skip_standard_fallback(&err) {
+                    return Err(format!(
+                        "Windows custom pairing did not complete for {}: {err}",
+                        candidate.label
+                    ));
+                }
                 log::warn!(
                     "[embedded-ble] Windows custom pairing path failed for {}: {err}; falling back to standard PairAsync",
                     candidate.label
@@ -1576,8 +1689,8 @@ mod windows_ble {
         }
 
         let operation = pairing
-            .PairAsync()
-            .map_err(|err| format!("Windows pairing operation failed to start: {err}"))?;
+            .PairWithProtectionLevelAsync(DevicePairingProtectionLevel::Default)
+            .map_err(|err| format!("Windows encrypted pairing operation failed to start: {err}"))?;
         let pair = wait_async_operation(operation, BLE_PAIRING_PROMPT_TIMEOUT, "device pair")?;
         let status = pair
             .Status()
@@ -1624,8 +1737,13 @@ mod windows_ble {
         let supported_pairing_kinds =
             DevicePairingKinds::ConfirmOnly | DevicePairingKinds::ConfirmPinMatch;
         let pair_result = custom
-            .PairAsync(supported_pairing_kinds)
-            .map_err(|err| format!("Windows custom pairing operation failed to start: {err}"))
+            .PairWithProtectionLevelAsync(
+                supported_pairing_kinds,
+                DevicePairingProtectionLevel::Default,
+            )
+            .map_err(|err| {
+                format!("Windows encrypted custom pairing operation failed to start: {err}")
+            })
             .and_then(|operation| {
                 wait_async_operation(operation, BLE_PAIRING_PROMPT_TIMEOUT, "custom device pair")
             });
@@ -1647,57 +1765,79 @@ mod windows_ble {
         kind == DevicePairingKinds::ConfirmOnly || kind == DevicePairingKinds::ConfirmPinMatch
     }
 
+    fn pairing_error_should_skip_standard_fallback(error: &str) -> bool {
+        let lower = error.to_ascii_lowercase();
+        lower.contains("timed out after")
+            || lower.contains("already pairing")
+            || lower.contains("operationalreadyinprogress")
+            || lower.contains("operation already in progress")
+    }
+
     fn pairing_status_or_reachable(
         status: DevicePairingResultStatus,
-        expected_name: Option<&str>,
+        _expected_name: Option<&str>,
         error_message: &str,
     ) -> Result<DevicePairingOutcome, String> {
         match status {
             DevicePairingResultStatus::Paired => Ok(DevicePairingOutcome::Paired),
             DevicePairingResultStatus::AlreadyPaired => Ok(DevicePairingOutcome::AlreadyPaired),
             DevicePairingResultStatus::OperationAlreadyInProgress => {
-                pairing_reachable_or_error(expected_name, "Windows is already pairing this device")
+                Err("Windows is already pairing this device".to_string())
             }
-            DevicePairingResultStatus::AccessDenied => pairing_reachable_or_error(
-                expected_name,
-                "Windows requires user confirmation in Bluetooth settings before pairing",
+            DevicePairingResultStatus::AccessDenied => Err(
+                "Windows requires user confirmation in Bluetooth settings before pairing"
+                    .to_string(),
             ),
             DevicePairingResultStatus::PairingCanceled => {
-                pairing_reachable_or_error(expected_name, "Windows pairing was canceled")
+                Err("Windows pairing was canceled".to_string())
             }
-            _ => pairing_reachable_or_error(expected_name, error_message),
+            _ => Err(error_message.to_string()),
         }
     }
 
-    fn pairing_reachable_or_error(
+    fn refresh_listener_pairing_candidate(
+        stale_candidate: &ListenerPairingCandidate,
         expected_name: Option<&str>,
-        error_message: &str,
-    ) -> Result<DevicePairingOutcome, String> {
-        match listener_target_reachable_after_pairing_status(expected_name) {
-            Ok(detail) => Ok(DevicePairingOutcome::AlreadyReachable(format!(
-                "Windows pairing API did not confirm pairing ({error_message}), but exact-name BLE service is reachable: {detail}"
-            ))),
-            Err(reachability_error) => Err(format!(
-                "{error_message}; exact-name BLE reachability check failed: {reachability_error}"
-            )),
-        }
-    }
+    ) -> Result<Option<ListenerPairingCandidate>, String> {
+        let stale_id = stale_candidate
+            .info
+            .Id()
+            .map(|value| value.to_string_lossy())
+            .unwrap_or_default();
+        let stale_address = parse_bluetooth_address_from_device_id(&stale_id);
 
-    fn listener_target_reachable_after_pairing_status(
-        expected_name: Option<&str>,
-    ) -> Result<String, String> {
-        let target_name = effective_bluetooth_target_name(expected_name);
-        set_configured_bluetooth_target_name(&target_name);
-        let status = read_embedded_audio_status(Duration::from_secs(8))?;
-        if status.connected {
-            Ok(status
-                .detail
-                .unwrap_or_else(|| format!("{target_name} status service reachable")))
-        } else {
-            Err(status
-                .detail
-                .unwrap_or_else(|| format!("{target_name} status service was not connected")))
+        let candidates = listener_pairing_candidates(expected_name)?;
+        for candidate in candidates {
+            let candidate_id = candidate
+                .info
+                .Id()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let candidate_address = parse_bluetooth_address_from_device_id(&candidate_id);
+            let same_address = stale_address.is_some() && candidate_address == stale_address;
+            let same_id = !stale_id.is_empty() && candidate_id == stale_id;
+            if same_address || same_id {
+                return Ok(Some(candidate));
+            }
         }
+
+        let Some(address) = stale_address else {
+            return Ok(None);
+        };
+        let Some(info) = pairing_device_information_from_bluetooth_address(
+            address,
+            None,
+            "refreshed BLE pairing device query",
+        )?
+        else {
+            return Ok(None);
+        };
+        let name = info
+            .Name()
+            .map(|value| value.to_string_lossy())
+            .unwrap_or_default();
+        let label = listener_pairing_candidate_label(&name, Some(address));
+        Ok(Some(ListenerPairingCandidate { label, info }))
     }
 
     fn unpair_listener_candidate(
@@ -1707,12 +1847,20 @@ mod windows_ble {
             .info
             .Pairing()
             .map_err(|err| format!("read pairing info failed: {err}"))?;
+        unpair_device_information_pairing(&pairing, &candidate.label)
+    }
+
+    fn unpair_device_information_pairing(
+        pairing: &DeviceInformationPairing,
+        label: &str,
+    ) -> Result<DeviceUnpairOutcome, String> {
         let is_paired = pairing
             .IsPaired()
             .map_err(|err| format!("read pairing state failed: {err}"))?;
         if !is_paired {
             return Ok(DeviceUnpairOutcome::AlreadyUnpaired);
         }
+        log::info!("[embedded-ble] unpairing Windows BLE device cache for {label}");
 
         let operation = pairing
             .UnpairAsync()
@@ -1741,10 +1889,10 @@ mod windows_ble {
 
     fn listener_unpair_candidates(
         target_names: &[String],
+        target_addresses: &mut Vec<u64>,
     ) -> Result<Vec<ListenerUnpairCandidate>, String> {
         let mut candidates = Vec::new();
         let mut seen_ids = Vec::new();
-        let mut target_addresses = listener_recovery_target_addresses();
         let mut errors = Vec::new();
 
         for (label, service_uuid) in [
@@ -1755,7 +1903,7 @@ mod windows_ble {
             match push_service_unpair_candidates(
                 &mut candidates,
                 &mut seen_ids,
-                &mut target_addresses,
+                target_addresses,
                 label,
                 service_uuid,
             ) {
@@ -1764,10 +1912,15 @@ mod windows_ble {
             }
         }
 
+        match push_address_unpair_candidates(&mut candidates, &mut seen_ids, target_addresses) {
+            Ok(()) => {}
+            Err(err) => errors.push(err),
+        }
+
         match push_ble_device_unpair_candidates(
             &mut candidates,
             &mut seen_ids,
-            &target_addresses,
+            target_addresses,
             target_names,
         ) {
             Ok(()) => {}
@@ -1784,10 +1937,10 @@ mod windows_ble {
         configured_bluetooth_address().into_iter().collect()
     }
 
-    fn listener_recovery_target_addresses_from_candidates(
+    fn push_listener_recovery_target_addresses_from_candidates(
+        target_addresses: &mut Vec<u64>,
         candidates: &[ListenerUnpairCandidate],
-    ) -> Vec<u64> {
-        let mut target_addresses = listener_recovery_target_addresses();
+    ) {
         for candidate in candidates {
             let id = candidate
                 .info
@@ -1795,10 +1948,46 @@ mod windows_ble {
                 .map(|value| value.to_string_lossy())
                 .unwrap_or_default();
             if let Some(address) = parse_bluetooth_address_from_device_id(&id) {
-                push_unique_address(&mut target_addresses, address);
+                push_unique_address(target_addresses, address);
             }
         }
-        target_addresses
+    }
+
+    fn push_listener_recovery_advertised_addresses(
+        target_addresses: &mut Vec<u64>,
+        target_names: &[String],
+    ) {
+        let mut scanned_names: Vec<String> = Vec::new();
+        for target_name in target_names.iter().rev() {
+            if target_name.trim().is_empty()
+                || scanned_names
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(target_name))
+            {
+                continue;
+            }
+            scanned_names.push(target_name.clone());
+            match scan_listener_pairing_advertisements(Some(target_name)) {
+                Ok(candidates) => {
+                    if candidates.is_empty() {
+                        continue;
+                    }
+                    for (address, address_type, advertised_name) in candidates {
+                        log::info!(
+                            "[embedded-ble] matched Listener advertisement for stale-cache cleanup target={target_name:?} advertised_name={advertised_name:?} address={} address_type={address_type:?}",
+                            crate::embedded_ble::format_bluetooth_address(address)
+                        );
+                        push_unique_address(target_addresses, address);
+                    }
+                    break;
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] Listener advertisement address scan for stale-cache cleanup failed target={target_name:?}: {err}"
+                    );
+                }
+            }
+        }
     }
 
     fn push_service_unpair_candidates(
@@ -1828,6 +2017,49 @@ mod windows_ble {
                 push_unique_address(target_addresses, address);
             }
             push_unpair_candidate(candidates, seen_ids, info, label);
+        }
+        Ok(())
+    }
+
+    fn push_address_unpair_candidates(
+        candidates: &mut Vec<ListenerUnpairCandidate>,
+        seen_ids: &mut Vec<String>,
+        target_addresses: &[u64],
+    ) -> Result<(), String> {
+        for address in target_addresses.iter().copied() {
+            let address_text = crate::embedded_ble::format_bluetooth_address(address);
+            let operation =
+                BluetoothLEDevice::FromBluetoothAddressAsync(address).map_err(|err| {
+                    format!("BLE address cleanup query {address_text} failed to start: {err}")
+                })?;
+            let device = match wait_async_operation(
+                operation,
+                BLE_DISCOVERY_TIMEOUT,
+                "BLE address cleanup query",
+            ) {
+                Ok(device) => device,
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] BLE address cleanup query for {address_text} failed: {err}"
+                    );
+                    continue;
+                }
+            };
+            let info = match device.DeviceInformation() {
+                Ok(info) => info,
+                Err(err) => {
+                    let _ = device.Close();
+                    log::warn!(
+                        "[embedded-ble] BLE address cleanup DeviceInformation for {address_text} failed: {err}"
+                    );
+                    continue;
+                }
+            };
+            let _ = device.Close();
+            log::info!(
+                "[embedded-ble] opened BLE address object for stale pairing cleanup: {address_text}"
+            );
+            push_unpair_candidate(candidates, seen_ids, info, "BLE address");
         }
         Ok(())
     }
@@ -4548,7 +4780,7 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
                     status.bytes_written,
                     status.last_error
                 );
-                if status.last_error == OTA_V2_ERROR_OFFSET_MISMATCH {
+                if status.last_error == COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH {
                     window_chunks = window_chunks.saturating_div(2).max(1);
                 }
             } else if window_chunks < configured_window {
@@ -4868,7 +5100,7 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
     ) -> Result<OtaV2Status, String> {
         let deadline = Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT;
         loop {
-            let status = read_ota_v2_status(target)?;
+            let status = read_companion_ota_v2_status(target)?;
             ota_v2_status_result(&status)?;
             if ready(&status) {
                 return Ok(status);
@@ -4880,6 +5112,11 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             }
             std::thread::sleep(OTA_V2_STATUS_POLL_INTERVAL);
         }
+    }
+
+    #[cfg(feature = "companion-dev")]
+    fn read_companion_ota_v2_status(target: &OpenOtaV2Target) -> Result<OtaV2Status, String> {
+        read_ota_v2_status(target)
     }
 
     #[cfg(feature = "companion-dev")]
@@ -6904,7 +7141,7 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
 
     fn scan_listener_pairing_advertisements(
         expected_name: Option<&str>,
-    ) -> Result<Vec<(u64, String)>, String> {
+    ) -> Result<Vec<(u64, BluetoothAddressType, String)>, String> {
         scan_listener_advertisements(
             "Listener pairing",
             expected_name,
@@ -6920,7 +7157,7 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         let candidates = scan_listener_advertisements(context, Some(&expected_name), timeout)?;
         Ok(candidates
             .into_iter()
-            .map(|(address, _name)| address)
+            .map(|(address, _address_type, _name)| address)
             .collect())
     }
 
@@ -6928,14 +7165,14 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         context: &str,
         expected_name: Option<&str>,
         timeout: Duration,
-    ) -> Result<Vec<(u64, String)>, String> {
+    ) -> Result<Vec<(u64, BluetoothAddressType, String)>, String> {
         let watcher = BluetoothLEAdvertisementWatcher::new()
             .map_err(|err| format!("{context} advertisement watcher create failed: {err}"))?;
         watcher
             .SetScanningMode(BluetoothLEScanningMode::Active)
             .map_err(|err| format!("{context} advertisement active scan failed: {err}"))?;
 
-        let (tx, rx) = mpsc::channel::<(u64, String, i16)>();
+        let (tx, rx) = mpsc::channel::<(u64, BluetoothAddressType, String, i16)>();
         let expected_name_for_handler = expected_name.map(ToOwned::to_owned);
         let handler = TypedEventHandler::<
             BluetoothLEAdvertisementWatcher,
@@ -6958,8 +7195,11 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             if address == 0 {
                 return Ok(());
             }
+            let address_type = args
+                .BluetoothAddressType()
+                .unwrap_or(BluetoothAddressType::Unspecified);
             let rssi = args.RawSignalStrengthInDBm().unwrap_or_default();
-            let _ = tx.send((address, name, rssi));
+            let _ = tx.send((address, address_type, name, rssi));
             Ok(())
         });
 
@@ -6976,14 +7216,14 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             let remaining = deadline.saturating_duration_since(Instant::now());
             let timeout = remaining.min(Duration::from_millis(500));
             match rx.recv_timeout(timeout) {
-                Ok((address, name, rssi)) => {
-                    if addresses.iter().any(|(seen, _)| *seen == address) {
+                Ok((address, address_type, name, rssi)) => {
+                    if addresses.iter().any(|(seen, _, _)| *seen == address) {
                         continue;
                     }
                     log::info!(
-                        "[embedded-ble] {context} advertisement candidate name={name} address={address:012X} rssi={rssi}"
+                        "[embedded-ble] {context} advertisement candidate name={name} address={address:012X} address_type={address_type:?} rssi={rssi}"
                     );
-                    addresses.push((address, name));
+                    addresses.push((address, address_type, name));
                     break;
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -10947,6 +11187,18 @@ pub fn transfer_stm32wb_st_ota(
     windows_ble::transfer_stm32wb_st_ota(firmware_bytes, manifest_chunk_bytes, on_progress)
 }
 
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+pub fn transfer_stm32wb_st_ota(
+    _firmware_bytes: &[u8],
+    _manifest_chunk_bytes: usize,
+    _on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Result<FirmwareOtaTransferStats, String> {
+    Err(
+        "STM32WB ST BLE OTA requires a Listener Type build with the companion-dev feature."
+            .to_string(),
+    )
+}
+
 #[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub fn transfer_companion_ota_v2(
     firmware_bytes: &[u8],
@@ -10954,6 +11206,18 @@ pub fn transfer_companion_ota_v2(
     on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<FirmwareOtaTransferStats, String> {
     windows_ble::transfer_companion_ota_v2(firmware_bytes, manifest_chunk_bytes, on_progress)
+}
+
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+pub fn transfer_companion_ota_v2(
+    _firmware_bytes: &[u8],
+    _manifest_chunk_bytes: usize,
+    _on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Result<FirmwareOtaTransferStats, String> {
+    Err(
+        "Companion OTA v2 requires a Listener Type build with the companion-dev feature."
+            .to_string(),
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -10971,8 +11235,14 @@ pub struct FirmwareOtaPreparedTransfer(windows_ble::PreparedFirmwareOtaTransfer)
 #[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub struct Stm32wbStOtaPreparedTransfer(windows_ble::PreparedStm32wbStOtaTransfer);
 
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+pub struct Stm32wbStOtaPreparedTransfer;
+
 #[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub struct CompanionOtaV2PreparedTransfer(windows_ble::PreparedCompanionOtaV2Transfer);
+
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+pub struct CompanionOtaV2PreparedTransfer;
 
 #[cfg(target_os = "windows")]
 pub struct ListenerOtaV2PreparedTransfer(windows_ble::PreparedListenerOtaV2Transfer);
@@ -11018,6 +11288,25 @@ impl Stm32wbStOtaPreparedTransfer {
     }
 }
 
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+impl Stm32wbStOtaPreparedTransfer {
+    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+        unreachable!("prepare_stm32wb_st_ota_transfer requires companion-dev")
+    }
+
+    pub fn transfer(
+        self,
+        _firmware_bytes: &[u8],
+        _manifest_chunk_bytes: usize,
+        _on_progress: Option<&dyn Fn(usize, usize)>,
+    ) -> Result<FirmwareOtaTransferStats, String> {
+        Err(
+            "STM32WB ST BLE OTA requires a Listener Type build with the companion-dev feature."
+                .to_string(),
+        )
+    }
+}
+
 #[cfg(all(target_os = "windows", feature = "companion-dev"))]
 impl CompanionOtaV2PreparedTransfer {
     pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
@@ -11032,6 +11321,25 @@ impl CompanionOtaV2PreparedTransfer {
     ) -> Result<FirmwareOtaTransferStats, String> {
         self.0
             .transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
+    }
+}
+
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+impl CompanionOtaV2PreparedTransfer {
+    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
+        unreachable!("prepare_companion_ota_v2_transfer requires companion-dev")
+    }
+
+    pub fn transfer(
+        self,
+        _firmware_bytes: &[u8],
+        _manifest_chunk_bytes: usize,
+        _on_progress: Option<&dyn Fn(usize, usize)>,
+    ) -> Result<FirmwareOtaTransferStats, String> {
+        Err(
+            "Companion OTA v2 requires a Listener Type build with the companion-dev feature."
+                .to_string(),
+        )
     }
 }
 
@@ -11062,9 +11370,25 @@ pub fn prepare_stm32wb_st_ota_transfer() -> Result<Stm32wbStOtaPreparedTransfer,
     windows_ble::prepare_stm32wb_st_ota_transfer().map(Stm32wbStOtaPreparedTransfer)
 }
 
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+pub fn prepare_stm32wb_st_ota_transfer() -> Result<Stm32wbStOtaPreparedTransfer, String> {
+    Err(
+        "STM32WB ST BLE OTA requires a Listener Type build with the companion-dev feature."
+            .to_string(),
+    )
+}
+
 #[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub fn prepare_companion_ota_v2_transfer() -> Result<CompanionOtaV2PreparedTransfer, String> {
     windows_ble::prepare_companion_ota_v2_transfer().map(CompanionOtaV2PreparedTransfer)
+}
+
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+pub fn prepare_companion_ota_v2_transfer() -> Result<CompanionOtaV2PreparedTransfer, String> {
+    Err(
+        "Companion OTA v2 requires a Listener Type build with the companion-dev feature."
+            .to_string(),
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -11082,9 +11406,41 @@ pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     windows_ble::stm32wb_st_ota_device_snapshot()
 }
 
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+    FirmwareOtaDeviceSnapshot {
+        connected: false,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: Vec::new(),
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some(
+            "STM32WB ST BLE OTA requires a Listener Type build with the companion-dev feature."
+                .to_string(),
+        ),
+    }
+}
+
 #[cfg(all(target_os = "windows", feature = "companion-dev"))]
 pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     windows_ble::companion_ota_v2_device_snapshot()
+}
+
+#[cfg(all(target_os = "windows", not(feature = "companion-dev")))]
+pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+    FirmwareOtaDeviceSnapshot {
+        connected: false,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: Vec::new(),
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some(
+            "Companion OTA v2 requires a Listener Type build with the companion-dev feature."
+                .to_string(),
+        ),
+    }
 }
 
 #[cfg(target_os = "windows")]

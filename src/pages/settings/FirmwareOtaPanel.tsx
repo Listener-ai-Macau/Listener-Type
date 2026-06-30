@@ -25,6 +25,8 @@ import {
   firmwareOtaRollbackVersionFromText,
   firmwareOtaVersionNotConfirmedAction,
   initialFirmwareOtaState,
+  isCompanionOtaV2Manifest,
+  isStm32wbStBleOtaManifest,
   validateFirmwareOtaPackage,
   type FirmwareOtaBlocker,
   type FirmwareOtaDeviceSnapshot,
@@ -247,7 +249,16 @@ export function FirmwareOtaPanel({
       await delay(450);
       dispatch({ type: 'deviceReconnected' });
       await delay(450);
-      if (firmwareOtaConfirmedVersionMatches(transferResult?.confirmedVersion, selectedPackage.manifest.version)) {
+      if (
+        firmwareOtaConfirmedVersionMatches(transferResult?.confirmedVersion, selectedPackage.manifest.version) ||
+        (
+          (
+            isStm32wbStBleOtaManifest(selectedPackage.manifest) ||
+            isCompanionOtaV2Manifest(selectedPackage.manifest)
+          ) &&
+          transferResult?.transport === selectedPackage.manifest.protocolName
+        )
+      ) {
         const confirmedVersion = transferResult?.confirmedVersion?.trim() ?? null;
         if (confirmedVersion) {
           setOtaSnapshot(previous => snapshotWithFirmwareVersion(previous, confirmedVersion));
@@ -549,9 +560,10 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
   const [progress, setProgress] = useState<WiredFirmwareProgressPayload | null>(null);
 
   const selectedPayload = selection?.payload ?? null;
-  const activeWiredPort = port;
-  const activeWiredBaud = parseBaud(baud) ?? 460800;
-  const activePreserveOtaData = preserveOtaData;
+  const stm32WbSwd = isStm32WbSwdTarget(selectedPayload?.target);
+  const activeWiredPort = stm32WbSwd ? 'SWD' : port;
+  const activeWiredBaud = stm32WbSwd ? null : parseBaud(baud) ?? 460800;
+  const activePreserveOtaData = stm32WbSwd ? false : preserveOtaData;
   const busy = status === 'checking' || status === 'flashing' || status === 'repairing';
   const statusTone = wiredStatusTone(status);
   const statusLabel = wiredStatusLabel(status, t);
@@ -608,6 +620,11 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
       .then(payload => {
         if (cancelled) return;
         setSelection({ path: packagePath, payload });
+        if (isStm32WbSwdTarget(payload.target)) {
+          setPort('SWD');
+          setBaud('');
+          setPreserveOtaData(false);
+        }
         setStatus('ready');
       })
       .catch(error => {
@@ -715,10 +732,15 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
       </div>
 
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.55 }}>
-        {t(
-          'settings.recording.wiredFirmwareDesc',
-          '使用上方已选择的同一个固件发布包，通过 USB/串口读取其中的 factory 子包，写入 bootloader、分区表和 app；也可以单独执行 Boot 修复。',
-        )}
+        {stm32WbSwd
+          ? t(
+              'settings.recording.wiredFirmwareStm32Desc',
+              '使用上方已选择的同一个 Companion 固件发布包，通过 ST-LINK / SWD 写入 OTA loader 和 app。',
+            )
+          : t(
+              'settings.recording.wiredFirmwareDesc',
+              '使用上方已选择的同一个固件发布包，通过 USB/串口读取其中的 factory 子包，写入 bootloader、分区表和 app；也可以单独执行 Boot 修复。',
+            )}
       </div>
 
       {!packagePath && (
@@ -735,7 +757,7 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
             value={port}
             onChange={event => setPort(event.target.value)}
             placeholder="COMx"
-            disabled={busy || disabled || !packagePath}
+            disabled={busy || disabled || !packagePath || stm32WbSwd}
             style={wiredInputStyle}
           />
           <datalist id="listener-wired-firmware-ports">
@@ -749,7 +771,7 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
             value={baud}
             onChange={event => setBaud(event.target.value.replace(/[^\d]/g, '').slice(0, 7))}
             placeholder="460800"
-            disabled={busy || disabled || !packagePath}
+            disabled={busy || disabled || !packagePath || stm32WbSwd}
             inputMode="numeric"
             style={wiredInputStyle}
           />
@@ -759,7 +781,7 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
             type="checkbox"
             checked={preserveOtaData}
             onChange={event => setPreserveOtaData(event.target.checked)}
-            disabled={busy || disabled || !packagePath}
+            disabled={busy || disabled || !packagePath || stm32WbSwd}
           />
           <span>{t('settings.recording.wiredFirmwarePreserveOta', '保留 OTA 选择区')}</span>
         </label>
@@ -770,6 +792,14 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
           <FirmwareOtaFact label={t('settings.recording.wiredFirmwarePackageType', '包类型')} value="factory full flash" />
           <FirmwareOtaFact label={t('settings.recording.wiredFirmwareVersion', '版本')} value={selectedPayload.version} />
           <FirmwareOtaFact label={t('settings.recording.wiredFirmwareTarget', '芯片')} value={selectedPayload.target} />
+          {stm32WbSwd && <FirmwareOtaFact label={t('settings.recording.wiredFirmwareInterface', '接口')} value="SWD" />}
+          {stm32WbSwd && <FirmwareOtaFact label={t('settings.recording.wiredFirmwareProgrammer', '编程器')} value="ST-LINK" />}
+        </div>
+      )}
+
+      {stm32WbSwd && (
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
+          {t('settings.recording.wiredFirmwareStm32NoBootRepair', 'STM32WB / SWD package 不支持 Boot 修复按钮；请直接刷入同包 factory image。')}
         </div>
       )}
 
@@ -1093,6 +1123,14 @@ function formatBytes(bytes: number): string {
 function parseBaud(value: string): number | null {
   const parsed = Number.parseInt(value.trim(), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isStm32WbSwdTarget(target: string | null | undefined): boolean {
+  const normalized = (target ?? '').trim().toLowerCase().replace(/[-_]/g, '');
+  return normalized === 'nucleowb55rg'
+    || normalized === 'stm32wb55rg'
+    || normalized === 'companionpendantce'
+    || normalized === 'stm32wb55ceux';
 }
 
 const wiredInputStyle: React.CSSProperties = {
