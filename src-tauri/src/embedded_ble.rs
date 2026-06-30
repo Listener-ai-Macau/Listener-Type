@@ -573,7 +573,8 @@ mod windows_ble {
         BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
     };
     use windows::Devices::Enumeration::{
-        DeviceAccessStatus, DeviceClass, DeviceInformation, DevicePairingResultStatus,
+        DeviceAccessStatus, DeviceClass, DeviceInformation, DeviceInformationCustomPairing,
+        DevicePairingKinds, DevicePairingRequestedEventArgs, DevicePairingResultStatus,
         DeviceUnpairingResultStatus,
     };
     use windows::Foundation::{
@@ -715,6 +716,7 @@ mod windows_ble {
     const BLE_PAIRING_PROMPT_TIMEOUT: Duration = Duration::from_secs(25);
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
+    const DEFAULT_BLUETOOTH_TARGET_NAME: &str = "listener";
     const BTHPORT_DEVICE_CACHE_REGISTRY_PATH: &str =
         r"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices";
     const ATT_WRITE_HEADER_BYTES: usize = 3;
@@ -768,6 +770,7 @@ mod windows_ble {
     const OTA_V2_ERROR_OFFSET_MISMATCH: u8 = 4;
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
     const OTA_REQUIRED_DATA_CHUNK_BYTES: usize = 500;
+    static RUNTIME_BLUETOOTH_TARGET_NAME: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
     enum BleCaptureSignal {
         Notification(Vec<u8>),
@@ -998,7 +1001,13 @@ mod windows_ble {
     }
 
     pub fn unpair_listener_devices() -> crate::embedded_ble::BleDeviceUnpairResult {
-        match unpair_listener_devices_inner() {
+        unpair_listener_devices_for_names(&[])
+    }
+
+    pub fn unpair_listener_devices_for_names(
+        extra_names: &[String],
+    ) -> crate::embedded_ble::BleDeviceUnpairResult {
+        match unpair_listener_devices_inner(extra_names) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] automatic Listener unpair unavailable: {err}");
@@ -1016,9 +1025,11 @@ mod windows_ble {
         }
     }
 
-    fn unpair_listener_devices_inner() -> Result<crate::embedded_ble::BleDeviceUnpairResult, String>
-    {
-        let candidates = listener_unpair_candidates()?;
+    fn unpair_listener_devices_inner(
+        extra_names: &[String],
+    ) -> Result<crate::embedded_ble::BleDeviceUnpairResult, String> {
+        let target_names = listener_target_names(extra_names);
+        let candidates = listener_unpair_candidates(&target_names)?;
         let mut target_addresses = listener_recovery_target_addresses_from_candidates(&candidates);
         let mut result = crate::embedded_ble::BleDeviceUnpairResult {
             status: crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction,
@@ -1057,7 +1068,7 @@ mod windows_ble {
             }
         }
 
-        match listener_pnp_remove_candidates(&target_addresses) {
+        match listener_pnp_remove_candidates(&target_addresses, &target_names) {
             Ok(pnp_candidates) => {
                 result.matched_devices = result
                     .matched_devices
@@ -1102,7 +1113,7 @@ mod windows_ble {
             }
         }
 
-        match bthport_listener_cache_candidates(&target_addresses) {
+        match bthport_listener_cache_candidates(&target_addresses, &target_names) {
             Ok(cache_candidates) => {
                 result.matched_devices = result
                     .matched_devices
@@ -1207,6 +1218,7 @@ mod windows_ble {
     enum DevicePairingOutcome {
         Paired,
         AlreadyPaired,
+        AlreadyReachable(String),
     }
 
     pub fn prompt_listener_pairing(
@@ -1246,7 +1258,7 @@ mod windows_ble {
         };
 
         for candidate in candidates {
-            match pair_listener_candidate(&candidate) {
+            match pair_listener_candidate(&candidate, expected_name) {
                 Ok(DevicePairingOutcome::Paired) => {
                     result.prompted_devices = result.prompted_devices.saturating_add(1);
                     result
@@ -1258,6 +1270,10 @@ mod windows_ble {
                     result
                         .details
                         .push(format!("Listener was already paired: {}", candidate.label));
+                }
+                Ok(DevicePairingOutcome::AlreadyReachable(detail)) => {
+                    result.already_paired_devices = result.already_paired_devices.saturating_add(1);
+                    result.details.push(format!("{}: {detail}", candidate.label));
                 }
                 Err(err) => {
                     result.failed_devices = result.failed_devices.saturating_add(1);
@@ -1426,16 +1442,13 @@ mod windows_ble {
     }
 
     fn listener_pairing_name_matches(name: &str, expected_name: Option<&str>) -> bool {
-        let trimmed = name.trim();
-        if trimmed.is_empty() {
-            return false;
-        }
-        expected_name.is_some_and(|expected| trimmed.eq_ignore_ascii_case(expected))
-            || listener_device_name_matches(trimmed)
+        let expected_name = effective_bluetooth_target_name(expected_name);
+        bluetooth_name_matches_expected(name, &expected_name)
     }
 
     fn pair_listener_candidate(
         candidate: &ListenerPairingCandidate,
+        expected_name: Option<&str>,
     ) -> Result<DevicePairingOutcome, String> {
         let pairing = candidate
             .info
@@ -1451,7 +1464,21 @@ mod windows_ble {
             .CanPair()
             .map_err(|err| format!("read pairing capability failed: {err}"))?
         {
-            return Err("Windows reports the device is not ready to pair".to_string());
+            return pairing_status_or_reachable(
+                DevicePairingResultStatus::NotReadyToPair,
+                expected_name,
+                "Windows reports the device is not ready to pair",
+            );
+        }
+
+        match custom_pair_listener_candidate(&pairing, &candidate.label, expected_name) {
+            Ok(outcome) => return Ok(outcome),
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] Windows custom pairing path failed for {}: {err}; falling back to standard PairAsync",
+                    candidate.label
+                );
+            }
         }
 
         let operation = pairing
@@ -1461,20 +1488,122 @@ mod windows_ble {
         let status = pair
             .Status()
             .map_err(|err| format!("Windows pairing status read failed: {err}"))?;
+        pairing_status_or_reachable(
+            status,
+            expected_name,
+            &format!("Windows returned pairing status={status:?}"),
+        )
+    }
+
+    fn custom_pair_listener_candidate(
+        pairing: &windows::Devices::Enumeration::DeviceInformationPairing,
+        candidate_label: &str,
+        expected_name: Option<&str>,
+    ) -> Result<DevicePairingOutcome, String> {
+        let custom = pairing
+            .Custom()
+            .map_err(|err| format!("Windows custom pairing interface unavailable: {err}"))?;
+        let handler_label = candidate_label.to_string();
+        let handler = TypedEventHandler::<
+            DeviceInformationCustomPairing,
+            DevicePairingRequestedEventArgs,
+        >::new(move |_sender, args| {
+            let Some(args) = args.as_ref() else {
+                return Ok(());
+            };
+            let kind = args.PairingKind()?;
+            if pairing_kind_accepts_without_user(kind) {
+                log::info!(
+                    "[embedded-ble] accepting Windows custom BLE pairing request for {handler_label} kind={kind:?}"
+                );
+                args.Accept()?;
+            } else {
+                log::warn!(
+                    "[embedded-ble] Windows custom BLE pairing for {handler_label} needs unsupported ceremony kind={kind:?}"
+                );
+            }
+            Ok(())
+        });
+        let token = custom
+            .PairingRequested(&handler)
+            .map_err(|err| format!("register Windows custom pairing handler failed: {err}"))?;
+        let supported_pairing_kinds =
+            DevicePairingKinds::ConfirmOnly | DevicePairingKinds::ConfirmPinMatch;
+        let pair_result = custom
+            .PairAsync(supported_pairing_kinds)
+            .map_err(|err| format!("Windows custom pairing operation failed to start: {err}"))
+            .and_then(|operation| {
+                wait_async_operation(operation, BLE_PAIRING_PROMPT_TIMEOUT, "custom device pair")
+            });
+        if let Err(err) = custom.RemovePairingRequested(token) {
+            log::warn!("[embedded-ble] remove Windows custom pairing handler failed: {err}");
+        }
+        let pair = pair_result?;
+        let status = pair
+            .Status()
+            .map_err(|err| format!("Windows custom pairing status read failed: {err}"))?;
+        pairing_status_or_reachable(
+            status,
+            expected_name,
+            &format!("Windows custom pairing returned status={status:?}"),
+        )
+    }
+
+    fn pairing_kind_accepts_without_user(kind: DevicePairingKinds) -> bool {
+        kind == DevicePairingKinds::ConfirmOnly || kind == DevicePairingKinds::ConfirmPinMatch
+    }
+
+    fn pairing_status_or_reachable(
+        status: DevicePairingResultStatus,
+        expected_name: Option<&str>,
+        error_message: &str,
+    ) -> Result<DevicePairingOutcome, String> {
         match status {
             DevicePairingResultStatus::Paired => Ok(DevicePairingOutcome::Paired),
             DevicePairingResultStatus::AlreadyPaired => Ok(DevicePairingOutcome::AlreadyPaired),
-            DevicePairingResultStatus::OperationAlreadyInProgress => {
-                Err("Windows is already pairing this device".to_string())
-            }
-            DevicePairingResultStatus::AccessDenied => Err(
-                "Windows requires user confirmation in Bluetooth settings before pairing"
-                    .to_string(),
+            DevicePairingResultStatus::OperationAlreadyInProgress => pairing_reachable_or_error(
+                expected_name,
+                "Windows is already pairing this device",
+            ),
+            DevicePairingResultStatus::AccessDenied => pairing_reachable_or_error(
+                expected_name,
+                "Windows requires user confirmation in Bluetooth settings before pairing",
             ),
             DevicePairingResultStatus::PairingCanceled => {
-                Err("Windows pairing was canceled".to_string())
+                pairing_reachable_or_error(expected_name, "Windows pairing was canceled")
             }
-            other => Err(format!("Windows returned pairing status={other:?}")),
+            _ => pairing_reachable_or_error(expected_name, error_message),
+        }
+    }
+
+    fn pairing_reachable_or_error(
+        expected_name: Option<&str>,
+        error_message: &str,
+    ) -> Result<DevicePairingOutcome, String> {
+        match listener_target_reachable_after_pairing_status(expected_name) {
+            Ok(detail) => Ok(DevicePairingOutcome::AlreadyReachable(format!(
+                "Windows pairing API did not confirm pairing ({error_message}), but exact-name BLE service is reachable: {detail}"
+            ))),
+            Err(reachability_error) => Err(format!(
+                "{error_message}; exact-name BLE reachability check failed: {reachability_error}"
+            )),
+        }
+    }
+
+    fn listener_target_reachable_after_pairing_status(
+        expected_name: Option<&str>,
+    ) -> Result<String, String> {
+        let target_name = effective_bluetooth_target_name(expected_name);
+        set_configured_bluetooth_target_name(&target_name);
+        let status = read_embedded_audio_status(Duration::from_secs(8))?;
+        if status.connected {
+            Ok(status
+                .detail
+                .unwrap_or_else(|| format!("{target_name} status service reachable")))
+        } else {
+            Err(status
+                .detail
+                .unwrap_or_else(|| format!("{target_name} status service was not connected")))
         }
     }
 
@@ -1517,7 +1646,9 @@ mod windows_ble {
         }
     }
 
-    fn listener_unpair_candidates() -> Result<Vec<ListenerUnpairCandidate>, String> {
+    fn listener_unpair_candidates(
+        target_names: &[String],
+    ) -> Result<Vec<ListenerUnpairCandidate>, String> {
         let mut candidates = Vec::new();
         let mut seen_ids = Vec::new();
         let mut target_addresses = listener_recovery_target_addresses();
@@ -1540,7 +1671,12 @@ mod windows_ble {
             }
         }
 
-        match push_ble_device_unpair_candidates(&mut candidates, &mut seen_ids, &target_addresses) {
+        match push_ble_device_unpair_candidates(
+            &mut candidates,
+            &mut seen_ids,
+            &target_addresses,
+            target_names,
+        ) {
             Ok(()) => {}
             Err(err) => errors.push(err),
         }
@@ -1607,6 +1743,7 @@ mod windows_ble {
         candidates: &mut Vec<ListenerUnpairCandidate>,
         seen_ids: &mut Vec<String>,
         target_addresses: &[u64],
+        target_names: &[String],
     ) -> Result<(), String> {
         let selector = BluetoothLEDevice::GetDeviceSelector()
             .map_err(|err| format!("BLE device selector failed: {err}"))?;
@@ -1630,15 +1767,11 @@ mod windows_ble {
                 .unwrap_or_default();
             let address_matches = parse_bluetooth_address_from_device_id(&id)
                 .is_some_and(|address| target_addresses.contains(&address));
-            if address_matches || listener_device_name_matches(&name) {
+            if address_matches || bluetooth_name_matches_any(&name, target_names) {
                 push_unpair_candidate(candidates, seen_ids, info, "BLE device");
             }
         }
         Ok(())
-    }
-
-    fn listener_device_name_matches(name: &str) -> bool {
-        name.to_ascii_lowercase().contains("listener")
     }
 
     fn push_unpair_candidate(
@@ -1672,6 +1805,7 @@ mod windows_ble {
 
     fn listener_pnp_remove_candidates(
         target_addresses: &[u64],
+        target_names: &[String],
     ) -> Result<Vec<ListenerPnpRemoveCandidate>, String> {
         let devices = DeviceInformation::FindAllAsyncDeviceClass(DeviceClass::All)
             .map_err(|err| format!("Windows PnP device query failed: {err}"))
@@ -1703,7 +1837,7 @@ mod windows_ble {
                 continue;
             };
             let address = parse_bluetooth_address_from_device_id(&instance_id);
-            if listener_device_name_matches(&name) {
+            if bluetooth_name_matches_any(&name, target_names) {
                 if let Some(address) = address {
                     push_unique_address(&mut known_addresses, address);
                 }
@@ -1721,7 +1855,7 @@ mod windows_ble {
             let address_matches = entry
                 .address
                 .is_some_and(|value| known_addresses.contains(&value));
-            let name_matches = listener_device_name_matches(&entry.name);
+            let name_matches = bluetooth_name_matches_any(&entry.name, target_names);
             if !address_matches && !name_matches {
                 continue;
             }
@@ -1757,6 +1891,7 @@ mod windows_ble {
 
     fn bthport_listener_cache_candidates(
         target_addresses: &[u64],
+        target_names: &[String],
     ) -> Result<Vec<ListenerBthPortCacheCandidate>, String> {
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         let devices = hklm
@@ -1780,7 +1915,7 @@ mod windows_ble {
             };
             let name = read_bthport_device_name(&subkey).unwrap_or_default();
             let address_matches = address.is_some_and(|value| target_addresses.contains(&value));
-            if !address_matches && !listener_device_name_matches(&name) {
+            if !address_matches && !bluetooth_name_matches_any(&name, target_names) {
                 continue;
             }
             if seen_keys.iter().any(|seen| seen == &address_key) {
@@ -1870,11 +2005,22 @@ mod windows_ble {
     }
 
     pub fn listener_ble_name_cache_needs_cleanup(expected_name: &str) -> bool {
+        listener_ble_name_cache_needs_cleanup_for_names(expected_name, &[])
+    }
+
+    pub fn listener_ble_name_cache_needs_cleanup_for_names(
+        expected_name: &str,
+        extra_names: &[String],
+    ) -> bool {
         let expected_name = expected_name.trim();
         if expected_name.is_empty() {
             return false;
         }
-        match bthport_listener_cache_candidates(&listener_recovery_target_addresses()) {
+        let target_names = listener_target_names(extra_names);
+        match bthport_listener_cache_candidates(
+            &listener_recovery_target_addresses(),
+            &target_names,
+        ) {
             Ok(candidates) => candidates.iter().any(|candidate| {
                 let name = candidate.name.trim();
                 !name.is_empty() && !name.eq_ignore_ascii_case(expected_name)
@@ -5851,16 +5997,22 @@ mod windows_ble {
             .ok()?
             .get()
             .ok()?;
+        let expected_name = effective_bluetooth_target_name(None);
         for index in 0..services.Size().ok()? {
             let info = services.GetAt(index).ok()?;
             let name = info
                 .Name()
                 .map(|value| value.to_string_lossy())
                 .unwrap_or_default();
-            if !listener_device_name_matches(&name) {
+            let id = info.Id().ok()?;
+            let address_matches = bluetooth_address.is_some_and(|expected_address| {
+                parse_bluetooth_address_from_device_id(&id.to_string_lossy())
+                    .is_some_and(|address| address == expected_address)
+            });
+            let name_matches = bluetooth_name_matches_expected(&name, &expected_name);
+            if !address_matches && !name_matches {
                 continue;
             }
-            let id = info.Id().ok()?;
             if let Some(expected_address) = bluetooth_address {
                 match parse_bluetooth_address_from_device_id(&id.to_string_lossy()) {
                     Some(address) if address == expected_address => {}
@@ -6475,7 +6627,8 @@ mod windows_ble {
         context: &str,
         timeout: Duration,
     ) -> Result<Vec<u64>, String> {
-        let candidates = scan_listener_advertisements(context, None, timeout)?;
+        let expected_name = effective_bluetooth_target_name(None);
+        let candidates = scan_listener_advertisements(context, Some(&expected_name), timeout)?;
         Ok(candidates
             .into_iter()
             .map(|(address, _name)| address)
@@ -8664,6 +8817,22 @@ mod windows_ble {
         None
     }
 
+    pub fn set_configured_bluetooth_target_name(name: &str) {
+        let trimmed = name.trim();
+        let Ok(mut slot) = RUNTIME_BLUETOOTH_TARGET_NAME
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+        else {
+            log::warn!("[embedded-ble] target Bluetooth name slot is poisoned");
+            return;
+        };
+        if trimmed.is_empty() {
+            *slot = None;
+        } else {
+            *slot = Some(trimmed.to_string());
+        }
+    }
+
     fn configured_bluetooth_target_name() -> Option<String> {
         for key in [
             "LISTENER_TYPE_BLE_TARGET_NAME",
@@ -8677,7 +8846,59 @@ mod windows_ble {
                 return Some(trimmed.to_string());
             }
         }
-        None
+        RUNTIME_BLUETOOTH_TARGET_NAME
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+    }
+
+    fn effective_bluetooth_target_name(expected_name: Option<&str>) -> String {
+        expected_name
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(configured_bluetooth_target_name)
+            .unwrap_or_else(|| DEFAULT_BLUETOOTH_TARGET_NAME.to_string())
+    }
+
+    fn push_unique_target_name(names: &mut Vec<String>, name: &str) {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        if names
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+        {
+            return;
+        }
+        names.push(trimmed.to_string());
+    }
+
+    fn listener_target_names(extra_names: &[String]) -> Vec<String> {
+        let mut names = Vec::new();
+        if let Some(name) = configured_bluetooth_target_name() {
+            push_unique_target_name(&mut names, &name);
+        }
+        for name in extra_names {
+            push_unique_target_name(&mut names, name);
+        }
+        if names.is_empty() {
+            names.push(DEFAULT_BLUETOOTH_TARGET_NAME.to_string());
+        }
+        names
+    }
+
+    fn bluetooth_name_matches_expected(name: &str, expected_name: &str) -> bool {
+        let trimmed = name.trim();
+        !trimmed.is_empty() && trimmed.eq_ignore_ascii_case(expected_name.trim())
+    }
+
+    fn bluetooth_name_matches_any(name: &str, target_names: &[String]) -> bool {
+        target_names
+            .iter()
+            .any(|target| bluetooth_name_matches_expected(name, target))
     }
 
     fn ble_candidate_allowed(kind: &str, index: u32, name: &str, address: Option<u64>) -> bool {
@@ -10120,6 +10341,34 @@ mod windows_ble {
         }
 
         #[test]
+        fn listener_pairing_name_requires_exact_configured_target() {
+            assert!(listener_pairing_name_matches(
+                "OfficeType01",
+                Some("OfficeType01")
+            ));
+            assert!(!listener_pairing_name_matches(
+                "Blistener",
+                Some("OfficeType01")
+            ));
+            assert!(!listener_pairing_name_matches(
+                "listenerB",
+                Some("OfficeType01")
+            ));
+        }
+
+        #[test]
+        fn listener_target_name_set_does_not_fuzzy_match_listener_family() {
+            let target_names = vec!["Blistener".to_string(), "OfficeType01".to_string()];
+            assert!(bluetooth_name_matches_any("Blistener", &target_names));
+            assert!(bluetooth_name_matches_any("OfficeType01", &target_names));
+            assert!(!bluetooth_name_matches_any("listenerB", &target_names));
+            assert!(!bluetooth_name_matches_any(
+                "some-listener-device",
+                &target_names
+            ));
+        }
+
+        #[test]
         #[cfg(feature = "companion-dev")]
         fn stm32wb_st_ota_base_address_command_uses_st_24bit_flash_offset() {
             assert_eq!(
@@ -10570,6 +10819,11 @@ pub fn unpair_listener_devices() -> BleDeviceUnpairResult {
 }
 
 #[cfg(target_os = "windows")]
+pub fn unpair_listener_devices_for_names(extra_names: &[String]) -> BleDeviceUnpairResult {
+    windows_ble::unpair_listener_devices_for_names(extra_names)
+}
+
+#[cfg(target_os = "windows")]
 pub fn prompt_listener_pairing(expected_name: Option<&str>) -> BleDevicePairingPromptResult {
     windows_ble::prompt_listener_pairing(expected_name)
 }
@@ -10577,6 +10831,19 @@ pub fn prompt_listener_pairing(expected_name: Option<&str>) -> BleDevicePairingP
 #[cfg(target_os = "windows")]
 pub fn listener_ble_name_cache_needs_cleanup(expected_name: &str) -> bool {
     windows_ble::listener_ble_name_cache_needs_cleanup(expected_name)
+}
+
+#[cfg(target_os = "windows")]
+pub fn listener_ble_name_cache_needs_cleanup_for_names(
+    expected_name: &str,
+    extra_names: &[String],
+) -> bool {
+    windows_ble::listener_ble_name_cache_needs_cleanup_for_names(expected_name, extra_names)
+}
+
+#[cfg(target_os = "windows")]
+pub fn set_configured_bluetooth_target_name(name: &str) {
+    windows_ble::set_configured_bluetooth_target_name(name)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -10901,6 +11168,11 @@ pub fn unpair_listener_devices() -> BleDeviceUnpairResult {
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn unpair_listener_devices_for_names(_extra_names: &[String]) -> BleDeviceUnpairResult {
+    unpair_listener_devices()
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn prompt_listener_pairing(_expected_name: Option<&str>) -> BleDevicePairingPromptResult {
     BleDevicePairingPromptResult {
         status: BleDevicePairingPromptStatus::NeedsUserAction,
@@ -10918,6 +11190,17 @@ pub fn prompt_listener_pairing(_expected_name: Option<&str>) -> BleDevicePairing
 pub fn listener_ble_name_cache_needs_cleanup(_expected_name: &str) -> bool {
     false
 }
+
+#[cfg(not(target_os = "windows"))]
+pub fn listener_ble_name_cache_needs_cleanup_for_names(
+    _expected_name: &str,
+    _extra_names: &[String],
+) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_configured_bluetooth_target_name(_name: &str) {}
 
 #[cfg(test)]
 mod tests {
@@ -11356,6 +11639,56 @@ mod tests {
         super::windows_ble::send_recording_control_recovery(Duration::from_secs(4))
             .expect("BLE recovery control should be sent to firmware");
         std::thread::sleep(Duration::from_secs(2));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "renames the paired Listener hardware and clears Windows Bluetooth cache"]
+    fn ble_name_rename_hardware_roundtrip() {
+        let _guard = DEVICE_SETTINGS_HARDWARE_TEST_LOCK
+            .lock()
+            .expect("device settings hardware test mutex poisoned");
+        let old_name = std::env::var("LISTENER_BLE_NAME_RENAME_OLD")
+            .expect("set LISTENER_BLE_NAME_RENAME_OLD to the currently advertised BLE name");
+        let target_name = std::env::var("LISTENER_BLE_NAME_RENAME_TARGET")
+            .expect("set LISTENER_BLE_NAME_RENAME_TARGET to the desired BLE name");
+
+        super::windows_ble::set_configured_bluetooth_target_name(&old_name);
+        super::windows_ble::send_device_settings_command(
+            &format!("DEVICE:SET ble_name={target_name}"),
+            Duration::from_secs(4),
+        )
+        .expect("BLE name write should be acknowledged by firmware");
+        super::windows_ble::send_recording_control_recovery(Duration::from_secs(4))
+            .expect("BLE recovery control should restart advertising");
+        std::thread::sleep(Duration::from_secs(2));
+
+        let recovery_names = vec![old_name.clone(), target_name.clone()];
+        let unpair = super::windows_ble::unpair_listener_devices_for_names(&recovery_names);
+        assert!(
+            !unpair.needs_user_action || unpair.failed_devices == 0,
+            "automatic stale pairing cleanup should not fail: {unpair:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1200));
+
+        let pairing = super::windows_ble::prompt_listener_pairing(Some(&target_name));
+        assert!(
+            !pairing.open_bluetooth_settings,
+            "Windows pairing should be completed or already clean: {pairing:?}"
+        );
+
+        super::windows_ble::set_configured_bluetooth_target_name(&target_name);
+        let status = super::windows_ble::read_embedded_audio_status(Duration::from_secs(20))
+            .expect("renamed Listener BLE audio status should be reachable");
+        assert!(status.connected, "renamed Listener BLE status should be connected");
+        let settings = super::windows_ble::read_device_settings_status(Duration::from_secs(4))
+            .expect("renamed Listener device settings should be readable");
+        assert_eq!(settings.ble_name, target_name);
+        if settings.ble_name_pending_restart {
+            eprintln!(
+                "firmware still reports ble_name_pending_restart=1 after advertising {target_name}; Type treats exact-name BLE reachability as applied"
+            );
+        }
     }
 
     #[cfg(target_os = "windows")]

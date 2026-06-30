@@ -560,6 +560,7 @@ impl Coordinator {
             HistoryStore::new().expect("history store init")
         });
         let prefs = PreferencesStore::new().expect("preferences store init");
+        crate::embedded_ble::set_configured_bluetooth_target_name(&prefs.get().device_ble_name);
         let style_packs = StylePackStore::new(&prefs).expect("style pack store init");
         let vocab = DictionaryStore::new().expect("dictionary store init");
         let correction_rules = CorrectionRuleStore::new().expect("correction rule store init");

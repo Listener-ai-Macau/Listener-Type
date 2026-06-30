@@ -400,7 +400,9 @@ fn persist_settings<T: SettingsWriter>(
     validate_device_custom_keys(&prefs.device_custom_keys)?;
     validate_device_custom_keys(&prefs.device_custom_key_double_clicks)?;
     validate_device_custom_keys(&prefs.device_custom_key_long_presses)?;
+    let device_ble_name = prefs.device_ble_name.clone();
     coord.write_settings(prefs)?;
+    crate::embedded_ble::set_configured_bluetooth_target_name(&device_ble_name);
     coord.refresh_dictation_hotkey();
     coord.refresh_qa_hotkey();
     coord.refresh_combo_hotkey();
@@ -2341,13 +2343,44 @@ fn device_ble_name_recovery_needed(
     windows_cache_needs_cleanup: bool,
 ) -> bool {
     previous_snapshot.is_some_and(|snapshot| {
-        snapshot.ble_name != request.ble_name || snapshot.ble_name_pending_restart
+        snapshot.ble_name != request.ble_name
     }) || previous_prefs_ble_name.is_some_and(|name| name != request.ble_name)
         || windows_cache_needs_cleanup
 }
 
+fn push_unique_device_ble_name(names: &mut Vec<String>, name: &str) {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if names
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+    {
+        return;
+    }
+    names.push(trimmed.to_string());
+}
+
+fn device_ble_name_recovery_target_names(
+    request: &DeviceSettingsUpdateRequest,
+    previous_snapshot: Option<&DeviceSettingsSnapshot>,
+    previous_prefs_ble_name: Option<&str>,
+) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Some(name) = previous_prefs_ble_name {
+        push_unique_device_ble_name(&mut names, name);
+    }
+    if let Some(snapshot) = previous_snapshot {
+        push_unique_device_ble_name(&mut names, &snapshot.ble_name);
+    }
+    push_unique_device_ble_name(&mut names, &request.ble_name);
+    names
+}
+
 fn apply_device_ble_name_recovery_blocking(
     expected_ble_name: String,
+    recovery_target_names: Vec<String>,
 ) -> DeviceBleNameRecoveryOutcome {
     let recovery_error = match crate::embedded_ble::send_recording_control_recovery(
         DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
@@ -2364,7 +2397,8 @@ fn apply_device_ble_name_recovery_blocking(
         "[device-settings] BLE name recovery settle complete recovery_error={}",
         recovery_error.as_deref().unwrap_or("none")
     );
-    let unpair_result = crate::embedded_ble::unpair_listener_devices();
+    let unpair_result =
+        crate::embedded_ble::unpair_listener_devices_for_names(&recovery_target_names);
     log::info!(
         "[device-settings] BLE name stale pairing cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
         unpair_result.status,
@@ -2433,6 +2467,11 @@ fn device_ble_name_recovery_detail(outcome: &DeviceBleNameRecoveryOutcome) -> St
     }
 }
 
+fn device_ble_name_recovery_confirmed_runtime(outcome: &DeviceBleNameRecoveryOutcome) -> bool {
+    !outcome.pairing_prompt_result.open_bluetooth_settings
+        && outcome.pairing_prompt_result.failed_devices == 0
+}
+
 #[tauri::command]
 pub async fn set_device_settings(
     coord: CoordinatorState<'_>,
@@ -2460,8 +2499,16 @@ pub async fn set_device_settings(
         plugged_low_power_enabled,
     )?;
     let previous_prefs_ble_name = coord.prefs().get().device_ble_name;
+    let recovery_target_names = device_ble_name_recovery_target_names(
+        &request,
+        previous_snapshot.as_ref(),
+        Some(&previous_prefs_ble_name),
+    );
     let windows_cache_needs_cleanup =
-        crate::embedded_ble::listener_ble_name_cache_needs_cleanup(&request.ble_name);
+        crate::embedded_ble::listener_ble_name_cache_needs_cleanup_for_names(
+            &request.ble_name,
+            &recovery_target_names,
+        );
     let ble_name_recovery_needed = device_ble_name_recovery_needed(
         &request,
         previous_snapshot.as_ref(),
@@ -2495,9 +2542,9 @@ pub async fn set_device_settings(
         persist_settings(&*coord, prefs.clone())?;
         emit_prefs_changed(&app, &prefs);
     }
-    let recovery_detail = if ble_name_recovery_needed {
+    let (recovery_detail, recovery_confirmed_runtime) = if ble_name_recovery_needed {
         log::info!(
-            "[device-settings] BLE name changed or pending; applying recovery cleanup before final readback"
+            "[device-settings] BLE name changed or Windows cache is stale; applying recovery cleanup before final readback"
         );
         let capture_stopped = coord
             .pause_embedded_ble_listener_for_recovery_cleanup(
@@ -2508,18 +2555,31 @@ pub async fn set_device_settings(
             "[device-settings] background Listener capture stopped before BLE name cleanup={capture_stopped}"
         );
         let expected_ble_name = request.ble_name.clone();
+        let recovery_target_names = recovery_target_names.clone();
         let outcome = tauri::async_runtime::spawn_blocking(move || {
-            apply_device_ble_name_recovery_blocking(expected_ble_name)
+            apply_device_ble_name_recovery_blocking(expected_ble_name, recovery_target_names)
         })
         .await
         .map_err(|err| format!("Listener BLE name cleanup task failed: {err}"))?;
         coord.refresh_embedded_ble_listener();
-        Some(device_ble_name_recovery_detail(&outcome))
+        (
+            Some(device_ble_name_recovery_detail(&outcome)),
+            device_ble_name_recovery_confirmed_runtime(&outcome),
+        )
     } else {
-        None
+        (None, false)
     };
     match read_device_settings_snapshot_from_firmware().await {
         Ok(mut snapshot) => {
+            if recovery_confirmed_runtime
+                && snapshot.ble_name == request.ble_name
+                && snapshot.ble_name_pending_restart
+            {
+                log::info!(
+                    "[device-settings] firmware still reports BLE name pending after exact-name BLE recovery; normalizing UI snapshot"
+                );
+                snapshot.ble_name_pending_restart = false;
+            }
             if let Some(detail) = recovery_detail {
                 snapshot.detail = Some(detail);
             }
@@ -7511,7 +7571,7 @@ mod tests {
     }
 
     #[test]
-    fn device_ble_name_recovery_runs_only_for_changed_or_pending_name() {
+    fn device_ble_name_recovery_runs_only_for_changed_name_or_stale_cache() {
         let request = DeviceSettingsUpdateRequest {
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
@@ -7563,11 +7623,17 @@ mod tests {
         ));
         snapshot.ble_name = "listener-dev".to_string();
         snapshot.ble_name_pending_restart = true;
-        assert!(super::device_ble_name_recovery_needed(
+        assert!(!super::device_ble_name_recovery_needed(
             &request,
             Some(&snapshot),
             Some("listener-dev"),
             false,
+        ));
+        assert!(super::device_ble_name_recovery_needed(
+            &request,
+            Some(&snapshot),
+            Some("listener-dev"),
+            true,
         ));
         assert!(super::device_ble_name_recovery_needed(
             &request,
@@ -7587,6 +7653,61 @@ mod tests {
             Some("listener-dev"),
             true,
         ));
+    }
+
+    #[test]
+    fn device_ble_name_recovery_targets_old_and_new_exact_names() {
+        let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 70,
+            key_led_brightness_percent: 65,
+            knob_led_brightness_percent: 60,
+            edge_led_brightness_percent: 55,
+            plugged_low_power_idle_minutes: 2,
+            battery_low_power_idle_minutes: 3,
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_minutes: 0,
+            battery_auto_shutdown_minutes: 30,
+            ble_name: "OfficeType01".to_string(),
+        };
+        let mut snapshot = super::device_settings_snapshot_from_status(
+            crate::embedded_ble::DeviceSettingsStatus {
+                status_led_brightness_percent: 70,
+                key_led_brightness_percent: 65,
+                knob_led_brightness_percent: 60,
+                edge_led_brightness_percent: 55,
+                led_zone_brightness_supported: true,
+                low_power_idle_minutes: 3,
+                plugged_low_power_idle_minutes: 2,
+                battery_low_power_idle_minutes: 3,
+                plugged_low_power_enabled: true,
+                plugged_auto_shutdown_minutes: 0,
+                battery_auto_shutdown_minutes: 30,
+                knob_rotation_action: "screen_brightness".to_string(),
+                ble_name: "Blistener".to_string(),
+                ble_name_pending_restart: false,
+                external_power_present: true,
+                usb_power_present: true,
+                charging: false,
+                charge_full: false,
+                raw_line: "~DEVICE:SETTINGS result=OK".to_string(),
+            },
+        );
+        snapshot.ble_name = "Blistener".to_string();
+
+        let names = super::device_ble_name_recovery_target_names(
+            &request,
+            Some(&snapshot),
+            Some("listenerB"),
+        );
+
+        assert_eq!(
+            names,
+            vec![
+                "listenerB".to_string(),
+                "Blistener".to_string(),
+                "OfficeType01".to_string()
+            ]
+        );
     }
 
     #[test]

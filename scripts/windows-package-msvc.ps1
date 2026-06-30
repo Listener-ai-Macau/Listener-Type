@@ -8,6 +8,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ($env:NODE_TLS_REJECT_UNAUTHORIZED -eq "0") {
+  Remove-Item Env:NODE_TLS_REJECT_UNAUTHORIZED -ErrorAction SilentlyContinue
+}
+
 $appRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $releaseRoot = Join-Path $appRoot "src-tauri\target\x86_64-pc-windows-msvc\release"
 if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
@@ -145,8 +149,9 @@ function Find-BuiltMsiPath {
 
 function Test-WebView2Runtime {
   $paths = @(
-    "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1E7FBD4-9C4C-41A4-AB01-7C0F7A947F1A}",
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F1E7FBD4-9C4C-41A4-AB01-7C0F7A947F1A}"
+    "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+    "HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
   )
   foreach ($path in $paths) {
     if (Test-Path $path) {
@@ -207,7 +212,15 @@ function Repair-TauriMsiBundle {
   Remove-Item -LiteralPath $msiPath -Force -ErrorAction SilentlyContinue
 
   $light = Find-WixTool "light.exe"
-  & $light -nologo -ext WixUIExtension -ext WixUtilExtension -loc $locale -out $msiPath $mainObject $imeCleanupObject
+  $suppressedIce = @(
+    # Tauri's generated bootstrapper and same-version replacement MSI intentionally
+    # trip these ICE checks. Keep the installer behavior stable and the release log clean.
+    "-sice:ICE03",
+    "-sice:ICE40",
+    "-sice:ICE57",
+    "-sice:ICE61"
+  )
+  & $light -nologo @suppressedIce -ext WixUIExtension -ext WixUtilExtension -loc $locale -out $msiPath $mainObject $imeCleanupObject
   if ($LASTEXITCODE -ne 0) {
     throw "WiX light.exe failed with exit code $LASTEXITCODE."
   }
