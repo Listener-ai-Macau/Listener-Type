@@ -70,6 +70,7 @@ const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(3);
 const EMBEDDED_BLE_RETRY_OFFLINE_DELAY: Duration = Duration::from_secs(180);
+const EMBEDDED_BLE_RETRY_NOISY_CCCD_DELAY: Duration = Duration::from_secs(900);
 const EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD: u32 = 6;
 const EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN: Duration = Duration::from_secs(600);
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
@@ -4238,8 +4239,7 @@ fn is_embedded_ble_background_stale_pairing_cleanup_candidate(
     let failure = crate::embedded_ble::classify_ble_failure(err);
     matches!(
         failure.kind,
-        crate::embedded_ble::BleFailureKind::CccdProtocolError
-            | crate::embedded_ble::BleFailureKind::StaleGattService
+        crate::embedded_ble::BleFailureKind::StaleGattService
             | crate::embedded_ble::BleFailureKind::MissingPairing
     )
 }
@@ -4251,6 +4251,10 @@ fn next_embedded_ble_background_retry_delay(err: &str, current: Duration) -> Dur
 
     if is_embedded_ble_link_loss_error(err) {
         return EMBEDDED_BLE_RETRY_FAST_DELAY;
+    }
+
+    if is_embedded_ble_noisy_cccd_failure(err) {
+        return EMBEDDED_BLE_RETRY_NOISY_CCCD_DELAY;
     }
 
     if is_embedded_ble_background_offline_backoff_error(err) {
@@ -4275,13 +4279,25 @@ fn is_embedded_ble_automatic_recovery_error(err: &str) -> bool {
 
 fn is_embedded_ble_background_offline_backoff_error(err: &str) -> bool {
     let lower = err.to_ascii_lowercase();
-    lower.contains("gatt session did not become active")
+    is_embedded_ble_noisy_cccd_failure(err)
+        || lower.contains("gatt session did not become active")
         || lower.contains("paired device disconnected")
         || lower.contains("stale gatt/cache")
         || lower.contains("device is asleep")
         || lower.contains("device asleep")
         || lower.contains("wake key")
         || lower.contains("not found from service selector")
+}
+
+fn is_embedded_ble_noisy_cccd_failure(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    matches!(
+        crate::embedded_ble::classify_ble_failure(err).kind,
+        crate::embedded_ble::BleFailureKind::CccdProtocolError
+    ) && (lower.contains("hresult(0x800704c7)")
+        || lower.contains("gattcommunicationstatus(1)")
+        || lower.contains("protocol_error=3")
+        || lower.contains("protocol error=3"))
 }
 
 fn embedded_ble_usb_power_allows_low_power_idle(usb_powered: Option<bool>) -> bool {
@@ -6789,6 +6805,22 @@ mod tests {
     }
 
     #[test]
+    fn embedded_ble_background_retry_quiets_noisy_cccd_failures() {
+        for message in [
+            "BLE CCCD write async error: Some(HRESULT(0x800704C7))",
+            "BLE CCCD notify write returned status=GattCommunicationStatus(1)",
+            "BLE CCCD notify write returned status=ProtocolError protocol_error=3",
+        ] {
+            assert!(is_embedded_ble_noisy_cccd_failure(message));
+            assert!(is_embedded_ble_background_offline_backoff_error(message));
+            assert_eq!(
+                next_embedded_ble_background_retry_delay(message, EMBEDDED_BLE_RETRY_BASE_DELAY),
+                EMBEDDED_BLE_RETRY_NOISY_CCCD_DELAY
+            );
+        }
+    }
+
+    #[test]
     fn embedded_ble_background_retry_backs_off_for_offline_gatt_failures() {
         let message = "Embedded audio BLE service not found from service selector; device-address fallback failed: BLE device notify path D3B1B3DAC206 failed: BluetoothCacheMode(0): BLE GATT session did not become active after 8000 ms initial=Some(GattSessionStatus(0)) current=Some(GattSessionStatus(0)); stale GATT/cache or paired device disconnected";
 
@@ -7073,24 +7105,35 @@ mod tests {
             &coordinator.inner,
             "BLE GATT session did not become active after 8000 ms initial=Some(GattSessionStatus(0)) current=Some(GattSessionStatus(0)); stale GATT/cache or paired device disconnected",
         ));
+
+        assert!(!should_emit_embedded_ble_background_recovery_capsule(
+            &coordinator.inner,
+            "BLE CCCD write async error: Some(HRESULT(0x800704C7))",
+        ));
     }
 
     #[test]
-    fn embedded_ble_background_stale_cleanup_requires_powered_repeated_cache_failure() {
+    fn embedded_ble_background_stale_cleanup_requires_powered_repeated_gatt_failure() {
         let now = Instant::now();
         let snapshot = EmbeddedBleWakeRecoverySnapshot {
             reconnect_attempts: EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD,
             notify_subscription_state: EmbeddedBleNotifySubscriptionState::Failed,
             usb_powered: Some(true),
             recent_disconnect_reason: Some(
-                "BLE CCCD write async error: Some(HRESULT(0x800704C7))".to_string(),
+                "BLE GATT session did not become active after 8000 ms initial=Some(GattSessionStatus(0)) current=Some(GattSessionStatus(0)); stale GATT/cache or paired device disconnected".to_string(),
             ),
             ..Default::default()
         };
+        let gatt_error = "BLE GATT session did not become active after 8000 ms initial=Some(GattSessionStatus(0)) current=Some(GattSessionStatus(0)); stale GATT/cache or paired device disconnected";
         let cccd_error = "BLE CCCD write async error: Some(HRESULT(0x800704C7))";
 
         assert!(
             should_attempt_embedded_ble_background_stale_pairing_cleanup(
+                gatt_error, &snapshot, None, now,
+            )
+        );
+        assert!(
+            !should_attempt_embedded_ble_background_stale_pairing_cleanup(
                 cccd_error, &snapshot, None, now,
             )
         );
@@ -7101,7 +7144,7 @@ mod tests {
         };
         assert!(
             !should_attempt_embedded_ble_background_stale_pairing_cleanup(
-                cccd_error, &too_early, None, now,
+                gatt_error, &too_early, None, now,
             )
         );
 
@@ -7111,7 +7154,7 @@ mod tests {
         };
         assert!(
             !should_attempt_embedded_ble_background_stale_pairing_cleanup(
-                cccd_error, &battery, None, now,
+                gatt_error, &battery, None, now,
             )
         );
 
@@ -7121,7 +7164,7 @@ mod tests {
         };
         assert!(
             should_attempt_embedded_ble_background_stale_pairing_cleanup(
-                cccd_error,
+                gatt_error,
                 &unknown_power,
                 None,
                 now,
@@ -7137,7 +7180,7 @@ mod tests {
 
         assert!(
             !should_attempt_embedded_ble_background_stale_pairing_cleanup(
-                cccd_error,
+                gatt_error,
                 &snapshot,
                 Some(now - Duration::from_secs(60)),
                 now,
@@ -7145,6 +7188,14 @@ mod tests {
         );
         assert!(
             should_throttle_embedded_ble_background_stale_pairing_cleanup(
+                gatt_error,
+                &snapshot,
+                Some(now - Duration::from_secs(60)),
+                now,
+            )
+        );
+        assert!(
+            !should_throttle_embedded_ble_background_stale_pairing_cleanup(
                 cccd_error,
                 &snapshot,
                 Some(now - Duration::from_secs(60)),
@@ -7153,7 +7204,7 @@ mod tests {
         );
         assert!(
             should_attempt_embedded_ble_background_stale_pairing_cleanup(
-                cccd_error,
+                gatt_error,
                 &snapshot,
                 Some(now - EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN - Duration::from_secs(1)),
                 now,
@@ -7161,7 +7212,7 @@ mod tests {
         );
         assert!(
             !should_throttle_embedded_ble_background_stale_pairing_cleanup(
-                cccd_error,
+                gatt_error,
                 &snapshot,
                 Some(now - EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN - Duration::from_secs(1)),
                 now,
