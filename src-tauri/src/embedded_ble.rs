@@ -552,6 +552,7 @@ fn stop_drain_timeout_reason(stats: &crate::embedded_audio::SessionStats) -> Str
 mod windows_ble {
     use std::fmt;
     use std::io::{Read, Write};
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -716,6 +717,8 @@ mod windows_ble {
     const AUDIO_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const BLE_PAIRING_PROMPT_TIMEOUT: Duration = Duration::from_secs(25);
+    const BLE_PAIRING_PROMPT_SUPPRESS_WINDOW: Duration = Duration::from_secs(90);
+    const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
     const DEFAULT_BLUETOOTH_TARGET_NAME: &str = "listener";
@@ -778,6 +781,8 @@ mod windows_ble {
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
     const OTA_REQUIRED_DATA_CHUNK_BYTES: usize = 500;
     static RUNTIME_BLUETOOTH_TARGET_NAME: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    static LAST_PAIRING_PROMPT: OnceLock<Mutex<Option<PairingPromptThrottleState>>> =
+        OnceLock::new();
 
     enum BleCaptureSignal {
         Notification(Vec<u8>),
@@ -1204,6 +1209,12 @@ mod windows_ble {
     }
 
     #[derive(Clone)]
+    struct PairingPromptThrottleState {
+        target_name: String,
+        attempted_at: Instant,
+    }
+
+    #[derive(Clone)]
     struct ListenerPnpRemoveCandidate {
         label: String,
         instance_id: String,
@@ -1272,7 +1283,18 @@ mod windows_ble {
     fn prompt_listener_pairing_inner(
         expected_name: Option<&str>,
     ) -> Result<crate::embedded_ble::BleDevicePairingPromptResult, String> {
-        let candidates = listener_pairing_candidates(expected_name)?;
+        let target_name = effective_bluetooth_target_name(expected_name);
+        let now = Instant::now();
+        if let Some(remaining) = pairing_prompt_suppression_remaining(&target_name, now) {
+            log::info!(
+                "[embedded-ble] suppressing repeated Windows pairing prompt target={target_name:?} remaining_ms={}",
+                remaining.as_millis()
+            );
+            return Ok(suppressed_pairing_prompt_result(&target_name, remaining));
+        }
+        remember_pairing_prompt_attempt(&target_name, now);
+
+        let candidates = listener_pairing_candidates(Some(&target_name))?;
         let mut result = crate::embedded_ble::BleDevicePairingPromptResult {
             status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
             attempted: true,
@@ -1285,7 +1307,7 @@ mod windows_ble {
         };
 
         for candidate in candidates {
-            match pair_listener_candidate(&candidate, expected_name) {
+            match pair_listener_candidate(&candidate, Some(&target_name)) {
                 Ok(DevicePairingOutcome::Paired) => {
                     result.prompted_devices = result.prompted_devices.saturating_add(1);
                     result
@@ -1336,6 +1358,49 @@ mod windows_ble {
             crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction
         };
         Ok(result)
+    }
+
+    fn pairing_prompt_suppression_remaining(target_name: &str, now: Instant) -> Option<Duration> {
+        let prompt_lock = LAST_PAIRING_PROMPT.get_or_init(|| Mutex::new(None));
+        let guard = prompt_lock.lock().ok()?;
+        let last = guard.as_ref()?;
+        if !last.target_name.eq_ignore_ascii_case(target_name) {
+            return None;
+        }
+        let elapsed = now.saturating_duration_since(last.attempted_at);
+        if elapsed >= BLE_PAIRING_PROMPT_SUPPRESS_WINDOW {
+            return None;
+        }
+        Some(BLE_PAIRING_PROMPT_SUPPRESS_WINDOW - elapsed)
+    }
+
+    fn remember_pairing_prompt_attempt(target_name: &str, now: Instant) {
+        let prompt_lock = LAST_PAIRING_PROMPT.get_or_init(|| Mutex::new(None));
+        if let Ok(mut guard) = prompt_lock.lock() {
+            *guard = Some(PairingPromptThrottleState {
+                target_name: target_name.trim().to_string(),
+                attempted_at: now,
+            });
+        }
+    }
+
+    fn suppressed_pairing_prompt_result(
+        target_name: &str,
+        remaining: Duration,
+    ) -> crate::embedded_ble::BleDevicePairingPromptResult {
+        crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+            attempted: false,
+            matched_devices: 0,
+            prompted_devices: 0,
+            already_paired_devices: 0,
+            failed_devices: 0,
+            open_bluetooth_settings: false,
+            details: vec![format!(
+                "Windows pairing prompt for {target_name} was already requested recently; waiting {} ms before trying again.",
+                remaining.as_millis()
+            )],
+        }
     }
 
     fn listener_pairing_candidates(
@@ -1969,7 +2034,8 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
   Select-Object FriendlyName,InstanceId |
   ConvertTo-Json -Compress
 "#;
-        let output = Command::new("powershell.exe")
+        let mut command = hidden_command("powershell.exe");
+        let output = command
             .args([
                 "-NoProfile",
                 "-ExecutionPolicy",
@@ -2299,7 +2365,8 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
     fn remove_pnp_device_candidate_with_pnputil(
         candidate: &ListenerPnpRemoveCandidate,
     ) -> Result<DeviceUnpairOutcome, String> {
-        let output = Command::new("pnputil")
+        let mut command = hidden_command("pnputil");
+        let output = command
             .args(["/remove-device", &candidate.instance_id])
             .output()
             .map_err(|err| format!("start pnputil failed: {err}"))?;
@@ -2325,6 +2392,12 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
                 combined.trim()
             )
         })
+    }
+
+    fn hidden_command(program: &str) -> Command {
+        let mut command = Command::new(program);
+        command.creation_flags(WINDOWS_CREATE_NO_WINDOW);
+        command
     }
 
     fn configret_detail(status: CONFIGRET, veto: Option<(&PNP_VETO_TYPE, &[u16])>) -> String {

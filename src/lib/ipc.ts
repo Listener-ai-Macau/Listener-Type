@@ -43,6 +43,7 @@ import {
   type FirmwareOtaManifest,
   type FirmwareOtaPreflightSnapshot,
 } from './firmwareOta';
+import { applyMockDeviceSettingsWrite } from './deviceSettingsMock';
 import { OL_DATA } from './mockData';
 import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from './hotkey';
 
@@ -1096,40 +1097,9 @@ export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise
     'set_device_settings',
     { request },
     () => {
-      const batteryAutoShutdownMs = Math.round(request.batteryAutoShutdownMinutes * 60 * 1000);
-      const pluggedAutoShutdownMs = 0;
-      mockSettings = {
-        ...mockSettings,
-        deviceStatusLedBrightnessPercent: request.statusLedBrightnessPercent,
-        deviceKeyLedBrightnessPercent: request.keyLedBrightnessPercent,
-        deviceKnobLedBrightnessPercent: request.knobLedBrightnessPercent,
-        deviceEdgeLedBrightnessPercent: request.edgeLedBrightnessPercent,
-        deviceLowPowerIdleMinutes: request.batteryLowPowerIdleMinutes,
-        devicePluggedLowPowerEnabled: request.pluggedLowPowerEnabled,
-        deviceBatteryAutoShutdownMinutes: request.batteryAutoShutdownMinutes,
-        deviceBleName: request.bleName,
-      };
-      mockDeviceSettings = {
-        ...mockDeviceSettings,
-        statusLedBrightnessPercent: request.statusLedBrightnessPercent,
-        keyLedBrightnessPercent: request.keyLedBrightnessPercent,
-        knobLedBrightnessPercent: request.knobLedBrightnessPercent,
-        edgeLedBrightnessPercent: request.edgeLedBrightnessPercent,
-        ledZoneBrightnessSupported: true,
-        lowPowerIdleMinutes: mockDeviceSettings.activePowerSource === 'plugged'
-          ? request.pluggedLowPowerIdleMinutes
-          : request.batteryLowPowerIdleMinutes,
-        pluggedLowPowerIdleMinutes: request.pluggedLowPowerIdleMinutes,
-        batteryLowPowerIdleMinutes: request.batteryLowPowerIdleMinutes,
-        pluggedLowPowerEnabled: request.pluggedLowPowerEnabled,
-        pluggedAutoShutdownMs,
-        batteryAutoShutdownMs,
-        bleName: request.bleName,
-        bleNamePendingRestart: mockDeviceSettings.bleName !== request.bleName,
-        source: 'mock',
-        detail: 'Browser preview mock. Tauri builds use the firmware DEVICE command contract.',
-        lastUpdatedAt: new Date().toISOString(),
-      };
+      const next = applyMockDeviceSettingsWrite(mockSettings, mockDeviceSettings, request);
+      mockSettings = next.settings;
+      mockDeviceSettings = next.snapshot;
       return mockDeviceSettings;
     },
   );

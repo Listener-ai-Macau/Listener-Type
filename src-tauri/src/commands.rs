@@ -2342,9 +2342,23 @@ fn device_ble_name_recovery_needed(
     previous_prefs_ble_name: Option<&str>,
     windows_cache_needs_cleanup: bool,
 ) -> bool {
+    let name_changed =
+        device_ble_name_changed_for_request(request, previous_snapshot, previous_prefs_ble_name);
+    if windows_cache_needs_cleanup && !name_changed {
+        log::info!(
+            "[device-settings] Windows BLE cache may be stale, but BLE name is unchanged; skipping automatic re-pair for this settings write"
+        );
+    }
+    name_changed
+}
+
+fn device_ble_name_changed_for_request(
+    request: &DeviceSettingsUpdateRequest,
+    previous_snapshot: Option<&DeviceSettingsSnapshot>,
+    previous_prefs_ble_name: Option<&str>,
+) -> bool {
     previous_snapshot.is_some_and(|snapshot| snapshot.ble_name != request.ble_name)
         || previous_prefs_ble_name.is_some_and(|name| name != request.ble_name)
-        || windows_cache_needs_cleanup
 }
 
 fn push_unique_device_ble_name(names: &mut Vec<String>, name: &str) {
@@ -2498,13 +2512,18 @@ pub async fn set_device_settings(
         plugged_low_power_enabled,
     )?;
     let previous_prefs_ble_name = coord.prefs().get().device_ble_name;
+    let ble_name_changed = device_ble_name_changed_for_request(
+        &request,
+        previous_snapshot.as_ref(),
+        Some(&previous_prefs_ble_name),
+    );
     let recovery_target_names = device_ble_name_recovery_target_names(
         &request,
         previous_snapshot.as_ref(),
         Some(&previous_prefs_ble_name),
     );
-    let windows_cache_needs_cleanup =
-        crate::embedded_ble::listener_ble_name_cache_needs_cleanup_for_names(
+    let windows_cache_needs_cleanup = ble_name_changed
+        && crate::embedded_ble::listener_ble_name_cache_needs_cleanup_for_names(
             &request.ble_name,
             &recovery_target_names,
         );
@@ -2543,7 +2562,7 @@ pub async fn set_device_settings(
     }
     let (recovery_detail, recovery_confirmed_runtime) = if ble_name_recovery_needed {
         log::info!(
-            "[device-settings] BLE name changed or Windows cache is stale; applying recovery cleanup before final readback"
+            "[device-settings] BLE name changed; applying recovery cleanup before final readback"
         );
         let capture_stopped = coord
             .pause_embedded_ble_listener_for_recovery_cleanup(
@@ -7570,7 +7589,7 @@ mod tests {
     }
 
     #[test]
-    fn device_ble_name_recovery_runs_only_for_changed_name_or_stale_cache() {
+    fn device_ble_name_recovery_runs_only_for_changed_name() {
         let request = DeviceSettingsUpdateRequest {
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
@@ -7628,7 +7647,7 @@ mod tests {
             Some("listener-dev"),
             false,
         ));
-        assert!(super::device_ble_name_recovery_needed(
+        assert!(!super::device_ble_name_recovery_needed(
             &request,
             Some(&snapshot),
             Some("listener-dev"),
@@ -7646,7 +7665,7 @@ mod tests {
             Some("listener-dev"),
             false,
         ));
-        assert!(super::device_ble_name_recovery_needed(
+        assert!(!super::device_ble_name_recovery_needed(
             &request,
             None,
             Some("listener-dev"),
