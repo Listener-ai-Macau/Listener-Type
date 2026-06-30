@@ -4295,6 +4295,7 @@ fn is_embedded_ble_noisy_cccd_failure(err: &str) -> bool {
         crate::embedded_ble::classify_ble_failure(err).kind,
         crate::embedded_ble::BleFailureKind::CccdProtocolError
     ) && (lower.contains("hresult(0x800704c7)")
+        || lower.contains("cccd write timed out")
         || lower.contains("gattcommunicationstatus(1)")
         || lower.contains("protocol_error=3")
         || lower.contains("protocol error=3"))
@@ -6808,6 +6809,7 @@ mod tests {
     fn embedded_ble_background_retry_quiets_noisy_cccd_failures() {
         for message in [
             "BLE CCCD write async error: Some(HRESULT(0x800704C7))",
+            "BLE CCCD write timed out after 8000 ms",
             "BLE CCCD notify write returned status=GattCommunicationStatus(1)",
             "BLE CCCD notify write returned status=ProtocolError protocol_error=3",
         ] {
