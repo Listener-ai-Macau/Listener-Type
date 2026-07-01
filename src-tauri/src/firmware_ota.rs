@@ -294,15 +294,13 @@ fn firmware_ota_device_snapshot_for_manifest(
         return crate::embedded_ble::stm32wb_st_ota_device_snapshot();
     }
     if manifest.is_companion_ota_v2() {
-        #[cfg(feature = "companion-dev")]
+        #[cfg(any())]
         {
             return crate::embedded_ble::companion_ota_v2_device_snapshot();
         }
-        #[cfg(not(feature = "companion-dev"))]
         {
             return disconnected_ota_snapshot(
-                "Companion OTA v2 requires a Listener Type build with the companion-dev feature."
-                    .to_string(),
+                "Companion OTA v2 is handled by the separate Companion-Type app.".to_string(),
             );
         }
     }
@@ -429,11 +427,9 @@ fn run_companion_ota_v2_transfer_preflight_and_write(
     package: &FirmwareOtaPackage,
     options: &FirmwareOtaHeadlessOptions,
 ) -> HeadlessTransferAttempt {
-    #[cfg(not(feature = "companion-dev"))]
     {
         let snapshot = disconnected_ota_snapshot(
-            "Companion OTA v2 transfer requires a Listener Type build with the companion-dev feature."
-                .to_string(),
+            "Companion OTA v2 transfer is handled by the separate Companion-Type app.".to_string(),
         );
         let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
         return HeadlessTransferAttempt {
@@ -443,7 +439,7 @@ fn run_companion_ota_v2_transfer_preflight_and_write(
         };
     }
 
-    #[cfg(feature = "companion-dev")]
+    #[cfg(any())]
     let prepared = match crate::embedded_ble::prepare_companion_ota_v2_transfer() {
         Ok(prepared) => prepared,
         Err(err) => {
@@ -458,7 +454,7 @@ fn run_companion_ota_v2_transfer_preflight_and_write(
         }
     };
 
-    #[cfg(feature = "companion-dev")]
+    #[cfg(any())]
     {
         let snapshot = prepared.snapshot().clone();
         let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);

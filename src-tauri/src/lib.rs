@@ -1329,7 +1329,8 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
             log::info!(
                 "[cli] headless prompt-embedded-ble-pairing: expected_name={expected_name:?}"
             );
-            let result = crate::embedded_ble::prompt_listener_pairing(expected_name.as_deref());
+            let result =
+                crate::embedded_ble::prompt_listener_pairing_for_recovery(expected_name.as_deref());
             let result_json = serde_json::to_string(&result)
                 .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
             headless_print_line(format!("embedded_ble_pairing_prompt_json={result_json}"));

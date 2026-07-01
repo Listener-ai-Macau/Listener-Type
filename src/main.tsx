@@ -18,8 +18,6 @@ const isSettingsShortcutsVisual =
   import.meta.env.DEV && params.get("visual") === "settings-shortcuts";
 const isSettingsDeviceVisual =
   import.meta.env.DEV && params.get("visual") === "settings-device";
-const isSettingsCompanionVisual =
-  import.meta.env.DEV && params.get("visual") === "settings-companion";
 
 if (import.meta.env.DEV && params.get("theme") === "dark") {
   document.documentElement.setAttribute("data-theme", "dark");
@@ -44,10 +42,10 @@ const renderApp = () => {
               <Settings embedded initialSection="shortcuts" />
             </div>
           </HotkeySettingsProvider>
-        ) : isSettingsDeviceVisual || isSettingsCompanionVisual ? (
+        ) : isSettingsDeviceVisual ? (
           <HotkeySettingsProvider>
             <div className="ol-settings-visual-root" style={{ width: "100%", height: "100%", padding: 24, overflow: "auto", background: "var(--ol-window-bg)" }}>
-              <Settings embedded initialSection={isSettingsCompanionVisual ? "companion" : "device"} />
+              <Settings embedded initialSection="device" />
             </div>
           </HotkeySettingsProvider>
         ) : (

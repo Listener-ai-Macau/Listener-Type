@@ -34,9 +34,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/windows-ime-unregister.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-listener-type-lifecycle-e2e.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-microphone-privacy-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
-| `scripts/windows-open-companion-dev.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-open-dev.ps1` | Automation and audits | Node/PowerShell script tests |
-| `scripts/windows-package-companion-msvc.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-package-msvc.cmd` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-package-msvc.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-package-msvc.test.mjs` | Automation and audits | Node/PowerShell script tests |
@@ -164,6 +162,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/capsuleActionRules.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleEventOrdering.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleEventOrdering.ts` | Core app | Build and targeted tests |
+| `src/lib/capsuleDisplayMessage.test.ts` | Core app | Build and targeted tests |
+| `src/lib/capsuleDisplayMessage.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleLayout.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleLayout.ts` | Core app | Build and targeted tests |
 | `src/lib/capsulePreviewRules.test.ts` | Core app | Build and targeted tests |
@@ -172,6 +172,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/demoMode.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceHealth.test.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceHealth.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsMockWrite.test.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsMock.ts` | Core app | Build and targeted tests |
 | `src/lib/embeddedBleProbe.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.test.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.ts` | Core app | Build and targeted tests |
@@ -210,7 +212,6 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/pages/_atoms.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AboutUpdateControl.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/AdvancedSection.tsx` | React UI | TypeScript build and visual smoke |
-| `src/pages/settings/CompanionSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/DeviceSection.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/FirmwareOtaPanel.tsx` | React UI | TypeScript build and visual smoke |
 | `src/pages/settings/LanguageSection.tsx` | React UI | TypeScript build and visual smoke |
