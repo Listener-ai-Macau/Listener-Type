@@ -789,7 +789,12 @@ mod windows_ble {
     const COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH: u8 = OTA_V2_ERROR_OFFSET_MISMATCH;
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
     const OTA_REQUIRED_DATA_CHUNK_BYTES: usize = 500;
+    const BLE_TARGET_ADDRESS_CACHE_WINDOW: Duration = Duration::from_secs(60 * 60);
+    const BLE_RENAME_ADDRESS_GRACE_WINDOW: Duration = Duration::from_secs(10 * 60);
     static RUNTIME_BLUETOOTH_TARGET_NAME: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    static RUNTIME_BLUETOOTH_TARGET_ADDRESS: OnceLock<
+        Mutex<Option<RuntimeBluetoothTargetAddress>>,
+    > = OnceLock::new();
     static LAST_PAIRING_PROMPT: OnceLock<Mutex<Option<PairingPromptThrottleState>>> =
         OnceLock::new();
 
@@ -810,6 +815,14 @@ mod windows_ble {
     struct ActiveAudioControlSender {
         capture_id: u64,
         tx: mpsc::Sender<BleCaptureSignal>,
+    }
+
+    #[derive(Clone)]
+    struct RuntimeBluetoothTargetAddress {
+        address: u64,
+        target_name: String,
+        learned_at: Instant,
+        valid_for: Duration,
     }
 
     fn active_audio_control_slot() -> &'static Mutex<Option<ActiveAudioControlSender>> {
@@ -3395,6 +3408,14 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         let payload = format!("{command}\n");
         let payload_len = payload.as_bytes().len();
         let mut active_capture_error: Option<String> = None;
+        let ble_name_target = device_settings_command_ble_name_target(command);
+        if let Some(target_name) = ble_name_target.as_deref() {
+            let _ = remember_current_bluetooth_target_address_for_name(
+                target_name,
+                timeout,
+                "device settings BLE rename",
+            );
+        }
 
         if payload_len < 64 && device_settings_command_allows_active_capture(command) {
             if let Some(result) = send_audio_control_via_active_capture(
@@ -3483,6 +3504,18 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         })?;
         log::info!("[embedded-ble] device settings command sent");
         Ok(())
+    }
+
+    pub fn apply_pending_ble_name(timeout: Duration) -> Result<(), String> {
+        if !has_active_runtime_bluetooth_target_address(Instant::now()) {
+            let target_name = effective_bluetooth_target_name(None);
+            let _ = remember_current_bluetooth_target_address_for_name(
+                &target_name,
+                timeout,
+                "device settings BLE name apply",
+            );
+        }
+        send_device_settings_command("DEVICE:APPLY_BLE_NAME", timeout)
     }
 
     pub fn send_status_led_command(command: &str, timeout: Duration) -> Result<(), String> {
@@ -3576,12 +3609,28 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
     }
 
     fn device_settings_command_allows_active_capture(command: &str) -> bool {
+        !device_settings_command_updates_ble_name(command)
+    }
+
+    fn device_settings_command_updates_ble_name(command: &str) -> bool {
         let Some(arguments) = command.strip_prefix("DEVICE:SET ") else {
-            return true;
+            return false;
         };
-        !arguments
+        arguments
             .split_ascii_whitespace()
             .any(device_settings_token_updates_ble_name)
+    }
+
+    fn device_settings_command_ble_name_target(command: &str) -> Option<String> {
+        let arguments = command.strip_prefix("DEVICE:SET ")?;
+        arguments
+            .split_ascii_whitespace()
+            .find_map(|token| {
+                token
+                    .strip_prefix("ble_name=")
+                    .or_else(|| token.strip_prefix("name="))
+            })
+            .and_then(normalize_bluetooth_target_name)
     }
 
     fn device_settings_token_updates_ble_name(token: &str) -> bool {
@@ -6503,6 +6552,10 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
                 if let Some(address) = address {
                     match open_notify_target_for_device(address) {
                         Ok(target) => {
+                            remember_runtime_bluetooth_target_address_for_current(
+                                address,
+                                "audio notify device path",
+                            );
                             log::info!(
                                 "[embedded-ble] selected device path index={index} name={name} address={address:012X}"
                             );
@@ -6518,6 +6571,14 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
 
                 match open_notify_target_for_service(&id) {
                     Ok(target) => {
+                        if let Some(address) =
+                            parse_bluetooth_address_from_device_id(&id.to_string_lossy())
+                        {
+                            remember_runtime_bluetooth_target_address_for_current(
+                                address,
+                                "audio notify service-id fallback",
+                            );
+                        }
                         log::info!(
                             "[embedded-ble] selected service-id fallback index={index} name={name}"
                         );
@@ -6704,6 +6765,10 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
                 if let Some(address) = address {
                     match open_audio_control_target_for_device(address) {
                         Ok(target) => {
+                            remember_runtime_bluetooth_target_address_for_current(
+                                address,
+                                "audio control device path",
+                            );
                             log::info!(
                                 "[embedded-ble] selected audio control device path index={index} name={name} address={address:012X}"
                             );
@@ -6719,6 +6784,14 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
 
                 match open_audio_control_target_for_service(&id) {
                     Ok(target) => {
+                        if let Some(address) =
+                            parse_bluetooth_address_from_device_id(&id.to_string_lossy())
+                        {
+                            remember_runtime_bluetooth_target_address_for_current(
+                                address,
+                                "audio control service-id fallback",
+                            );
+                        }
                         log::info!(
                             "[embedded-ble] selected audio control service-id fallback index={index} name={name}"
                         );
@@ -6887,6 +6960,10 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         for address in addresses {
             match open_notify_target_for_device(address) {
                 Ok(target) => {
+                    remember_runtime_bluetooth_target_address_for_current(
+                        address,
+                        "known address audio notify",
+                    );
                     log::info!(
                         "[embedded-ble] {context}: selected known Listener address={address:012X}"
                     );
@@ -6910,6 +6987,10 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         for address in addresses {
             match open_notify_target_for_device(address) {
                 Ok(target) => {
+                    remember_runtime_bluetooth_target_address_for_current(
+                        address,
+                        "advertised audio notify",
+                    );
                     log::info!(
                         "[embedded-ble] selected audio notify advertisement address={address:012X}"
                     );
@@ -6935,6 +7016,10 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         for address in addresses {
             match open_audio_control_target_for_device(address) {
                 Ok(target) => {
+                    remember_runtime_bluetooth_target_address_for_current(
+                        address,
+                        "advertised audio control",
+                    );
                     log::info!(
                         "[embedded-ble] selected audio control advertisement address={address:012X}"
                     );
@@ -6971,6 +7056,132 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         }
 
         scan_listener_audio_advertisements(kind, AUDIO_ADVERTISEMENT_SCAN_TIMEOUT)
+    }
+
+    pub(super) fn remember_current_bluetooth_target_address_for_name(
+        next_target_name: &str,
+        timeout: Duration,
+        context: &str,
+    ) -> Option<u64> {
+        let next_target_name = normalize_bluetooth_target_name(next_target_name)?;
+        if let Some(address) = configured_bluetooth_address_from_env() {
+            remember_runtime_bluetooth_target_address_for_name(
+                address,
+                &next_target_name,
+                BLE_RENAME_ADDRESS_GRACE_WINDOW,
+                context,
+            );
+            return Some(address);
+        }
+
+        let current_target_name = effective_bluetooth_target_name(None);
+        let discovery_timeout = timeout.clamp(Duration::from_millis(300), Duration::from_secs(2));
+        let address = find_bluetooth_target_service_address(
+            SERVICE_UUID,
+            &current_target_name,
+            discovery_timeout,
+            context,
+        )
+        .or_else(|| {
+            find_bluetooth_target_service_address(
+                OTA_SERVICE_UUID,
+                &current_target_name,
+                discovery_timeout,
+                context,
+            )
+        })
+        .or_else(|| {
+            find_paired_bluetooth_target_address(&current_target_name, discovery_timeout, context)
+        })
+        .or_else(|| {
+            scan_ble_advertisements_by_name(context, &current_target_name, discovery_timeout)
+                .ok()
+                .and_then(|addresses| addresses.into_iter().next())
+        });
+
+        if let Some(address) = address {
+            remember_runtime_bluetooth_target_address_for_name(
+                address,
+                &next_target_name,
+                BLE_RENAME_ADDRESS_GRACE_WINDOW,
+                context,
+            );
+        } else {
+            log::info!(
+                "[embedded-ble] {context}: no current Listener address learned before target transition current={current_target_name:?} next={next_target_name:?}"
+            );
+        }
+        address
+    }
+
+    fn find_bluetooth_target_service_address(
+        service_uuid: GUID,
+        target_name: &str,
+        timeout: Duration,
+        context: &str,
+    ) -> Option<u64> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(service_uuid).ok()?;
+        let services = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .ok()
+            .and_then(|op| wait_async_operation(op, timeout, context).ok())?;
+        let mut service_addresses = Vec::new();
+        for index in 0..services.Size().ok()? {
+            let info = services.GetAt(index).ok()?;
+            let name = info
+                .Name()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let id = info.Id().ok()?.to_string_lossy();
+            if let Some(address) = parse_bluetooth_address_from_device_id(&id) {
+                push_unique_address(&mut service_addresses, address);
+            }
+            if !bluetooth_name_matches_expected(&name, target_name) {
+                continue;
+            }
+            if let Some(address) = parse_bluetooth_address_from_device_id(&id) {
+                log::info!(
+                    "[embedded-ble] {context}: learned Listener address from service target={target_name:?} name={name:?} address={address:012X}"
+                );
+                return Some(address);
+            }
+        }
+        if service_addresses.len() == 1 {
+            let address = service_addresses[0];
+            log::info!(
+                "[embedded-ble] {context}: learned sole Listener service address despite Windows name cache mismatch target={target_name:?} address={address:012X}"
+            );
+            return Some(address);
+        }
+        None
+    }
+
+    fn find_paired_bluetooth_target_address(
+        target_name: &str,
+        timeout: Duration,
+        context: &str,
+    ) -> Option<u64> {
+        let selector = BluetoothLEDevice::GetDeviceSelectorFromPairingState(true).ok()?;
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .ok()
+            .and_then(|op| wait_async_operation(op, timeout, context).ok())?;
+        for index in 0..devices.Size().ok()? {
+            let info = devices.GetAt(index).ok()?;
+            let name = info
+                .Name()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            if !bluetooth_name_matches_expected(&name, target_name) {
+                continue;
+            }
+            let id = info.Id().ok()?.to_string_lossy();
+            if let Some(address) = parse_bluetooth_address_from_device_id(&id) {
+                log::info!(
+                    "[embedded-ble] {context}: learned Listener address from paired device target={target_name:?} name={name:?} address={address:012X}"
+                );
+                return Some(address);
+            }
+        }
+        None
     }
 
     fn read_optional_string_characteristic(
@@ -7294,6 +7505,10 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             if let Some(address) = address {
                 match open_ota_target_for_device(address) {
                     Ok(target) => {
+                        remember_runtime_bluetooth_target_address_for_current(
+                            address,
+                            "OTA device path",
+                        );
                         log::info!(
                             "[embedded-ble] selected OTA device index={index} name={name} address={address:012X}"
                         );
@@ -7309,6 +7524,14 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
 
             match open_ota_target_for_service(&id) {
                 Ok(target) => {
+                    if let Some(address) =
+                        parse_bluetooth_address_from_device_id(&id.to_string_lossy())
+                    {
+                        remember_runtime_bluetooth_target_address_for_current(
+                            address,
+                            "OTA service-id fallback",
+                        );
+                    }
                     log::info!(
                         "[embedded-ble] selected OTA service-id fallback index={index} name={name}"
                     );
@@ -9960,7 +10183,7 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         None
     }
 
-    fn configured_bluetooth_address() -> Option<u64> {
+    fn configured_bluetooth_address_from_env() -> Option<u64> {
         for key in [
             "LISTENER_TYPE_BLE_ADDRESS",
             "LISTENER_TYPE_BLUETOOTH_ADDRESS",
@@ -9976,8 +10199,89 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         None
     }
 
+    fn configured_bluetooth_address() -> Option<u64> {
+        configured_bluetooth_address_from_env().or_else(runtime_bluetooth_target_address)
+    }
+
+    fn runtime_bluetooth_target_address() -> Option<u64> {
+        let target_name = effective_bluetooth_target_name(None);
+        let now = Instant::now();
+        let mut slot = RUNTIME_BLUETOOTH_TARGET_ADDRESS
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .ok()?;
+        let state = slot.as_ref()?.clone();
+        if now.saturating_duration_since(state.learned_at) >= state.valid_for {
+            *slot = None;
+            return None;
+        }
+        if !bluetooth_name_matches_expected(&state.target_name, &target_name) {
+            return None;
+        }
+        Some(state.address)
+    }
+
+    fn has_active_runtime_bluetooth_target_address(now: Instant) -> bool {
+        let Ok(mut slot) = RUNTIME_BLUETOOTH_TARGET_ADDRESS
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+        else {
+            return false;
+        };
+        let Some(state) = slot.as_ref() else {
+            return false;
+        };
+        if now.saturating_duration_since(state.learned_at) >= state.valid_for {
+            *slot = None;
+            return false;
+        }
+        true
+    }
+
+    fn remember_runtime_bluetooth_target_address_for_name(
+        address: u64,
+        target_name: &str,
+        valid_for: Duration,
+        context: &str,
+    ) {
+        let Some(target_name) = normalize_bluetooth_target_name(target_name) else {
+            return;
+        };
+        let Ok(mut slot) = RUNTIME_BLUETOOTH_TARGET_ADDRESS
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+        else {
+            log::warn!("[embedded-ble] target Bluetooth address slot is poisoned");
+            return;
+        };
+        let unchanged = slot
+            .as_ref()
+            .is_some_and(|state| state.address == address && state.target_name == target_name);
+        *slot = Some(RuntimeBluetoothTargetAddress {
+            address,
+            target_name: target_name.clone(),
+            learned_at: Instant::now(),
+            valid_for,
+        });
+        if !unchanged {
+            log::info!(
+                "[embedded-ble] remembered Listener BLE address {} for target={target_name:?} context={context}",
+                crate::embedded_ble::format_bluetooth_address(address)
+            );
+        }
+    }
+
+    fn remember_runtime_bluetooth_target_address_for_current(address: u64, context: &str) {
+        let target_name = effective_bluetooth_target_name(None);
+        remember_runtime_bluetooth_target_address_for_name(
+            address,
+            &target_name,
+            BLE_TARGET_ADDRESS_CACHE_WINDOW,
+            context,
+        );
+    }
+
     pub fn set_configured_bluetooth_target_name(name: &str) {
-        let trimmed = name.trim();
         let Ok(mut slot) = RUNTIME_BLUETOOTH_TARGET_NAME
             .get_or_init(|| Mutex::new(None))
             .lock()
@@ -9985,11 +10289,7 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             log::warn!("[embedded-ble] target Bluetooth name slot is poisoned");
             return;
         };
-        if trimmed.is_empty() {
-            *slot = None;
-        } else {
-            *slot = Some(trimmed.to_string());
-        }
+        *slot = normalize_bluetooth_target_name(name);
     }
 
     fn configured_bluetooth_target_name() -> Option<String> {
@@ -10000,9 +10300,8 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             let Ok(value) = std::env::var(key) else {
                 continue;
             };
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
+            if let Some(name) = normalize_bluetooth_target_name(&value) {
+                return Some(name);
             }
         }
         RUNTIME_BLUETOOTH_TARGET_NAME
@@ -10019,6 +10318,15 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             .map(ToOwned::to_owned)
             .or_else(configured_bluetooth_target_name)
             .unwrap_or_else(|| DEFAULT_BLUETOOTH_TARGET_NAME.to_string())
+    }
+
+    fn normalize_bluetooth_target_name(name: &str) -> Option<String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     }
 
     fn push_unique_target_name(names: &mut Vec<String>, name: &str) {
@@ -10061,6 +10369,7 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
     }
 
     fn ble_candidate_allowed(kind: &str, index: u32, name: &str, address: Option<u64>) -> bool {
+        let mut address_matched = false;
         if let Some(expected_address) = configured_bluetooth_address() {
             if address != Some(expected_address) {
                 log::info!(
@@ -10072,17 +10381,20 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
                 );
                 return false;
             }
+            address_matched = true;
         }
 
-        if let Some(expected_name) = configured_bluetooth_target_name() {
-            if !name.trim().eq_ignore_ascii_case(&expected_name) {
-                log::info!(
+        if !address_matched {
+            if let Some(expected_name) = configured_bluetooth_target_name() {
+                if !name.trim().eq_ignore_ascii_case(&expected_name) {
+                    log::info!(
                     "[embedded-ble] skipping {kind} candidate index={index} name={name:?} address={}: target name is {expected_name:?}",
                     address
                         .map(crate::embedded_ble::format_bluetooth_address)
                         .unwrap_or_else(|| "-".to_string())
                 );
-                return false;
+                    return false;
+                }
             }
         }
 
@@ -11802,6 +12114,68 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             assert!(device_settings_command_allows_active_capture(
                 "DEVICE:STATUS"
             ));
+            assert_eq!(
+                device_settings_command_ble_name_target("DEVICE:SET ble_name=Blistener"),
+                Some("Blistener".to_string())
+            );
+            assert_eq!(
+                device_settings_command_ble_name_target("DEVICE:SET name=OfficeType01"),
+                Some("OfficeType01".to_string())
+            );
+            assert_eq!(
+                device_settings_command_ble_name_target("DEVICE:SET knob_rotation=system_volume"),
+                None
+            );
+        }
+
+        #[test]
+        fn runtime_target_address_allows_windows_name_cache_mismatch() {
+            let _guard = bluetooth_target_name_test_lock().lock().unwrap();
+            if configured_bluetooth_address_from_env().is_some()
+                || std::env::var("LISTENER_TYPE_BLE_TARGET_NAME").is_ok()
+                || std::env::var("LISTENER_TYPE_BLUETOOTH_TARGET_NAME").is_ok()
+            {
+                return;
+            }
+
+            let previous_name = configured_bluetooth_target_name();
+            let previous_address = RUNTIME_BLUETOOTH_TARGET_ADDRESS
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone());
+
+            set_configured_bluetooth_target_name("OfficeType01");
+            remember_runtime_bluetooth_target_address_for_name(
+                0xA4CB8FF2B512,
+                "OfficeType01",
+                BLE_RENAME_ADDRESS_GRACE_WINDOW,
+                "unit test",
+            );
+
+            assert!(ble_candidate_allowed(
+                "test",
+                0,
+                "Blistener",
+                Some(0xA4CB8FF2B512)
+            ));
+            assert!(!ble_candidate_allowed(
+                "test",
+                1,
+                "Blistener",
+                Some(0xA4CB8FF2B513)
+            ));
+
+            match previous_name {
+                Some(name) => set_configured_bluetooth_target_name(&name),
+                None => set_configured_bluetooth_target_name(""),
+            }
+            if let Ok(mut slot) = RUNTIME_BLUETOOTH_TARGET_ADDRESS
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+            {
+                *slot = previous_address;
+            }
         }
 
         #[test]
@@ -11892,6 +12266,11 @@ pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), Stri
 #[cfg(target_os = "windows")]
 pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<(), String> {
     windows_ble::send_device_settings_command(command, timeout)
+}
+
+#[cfg(target_os = "windows")]
+pub fn apply_pending_ble_name(timeout: Duration) -> Result<(), String> {
+    windows_ble::apply_pending_ble_name(timeout)
 }
 
 #[cfg(target_os = "windows")]
@@ -12328,6 +12707,11 @@ pub fn send_ec11_rotation_mode(_mode: &str, _timeout: Duration) -> Result<(), St
 #[cfg(not(target_os = "windows"))]
 pub fn send_device_settings_command(_command: &str, _timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE device settings control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn apply_pending_ble_name(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE name apply is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -13180,8 +13564,8 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    #[ignore = "renames the paired Listener hardware and clears Windows Bluetooth cache"]
-    fn ble_name_rename_hardware_roundtrip() {
+    #[ignore = "renames the paired Listener hardware without clearing Windows Bluetooth cache"]
+    fn ble_name_apply_hardware_roundtrip() {
         let _guard = DEVICE_SETTINGS_HARDWARE_TEST_LOCK
             .lock()
             .expect("device settings hardware test mutex poisoned");
@@ -13191,28 +13575,24 @@ mod tests {
             .expect("set LISTENER_BLE_NAME_RENAME_TARGET to the desired BLE name");
 
         super::windows_ble::set_configured_bluetooth_target_name(&old_name);
+        let learned_address =
+            super::windows_ble::remember_current_bluetooth_target_address_for_name(
+                &target_name,
+                Duration::from_secs(4),
+                "BLE name hardware test",
+            );
+        assert!(
+            learned_address.is_some(),
+            "hardware test should learn current Listener address before renaming old={old_name} target={target_name}"
+        );
         super::windows_ble::send_device_settings_command(
             &format!("DEVICE:SET ble_name={target_name}"),
             Duration::from_secs(4),
         )
         .expect("BLE name write should be acknowledged by firmware");
-        super::windows_ble::send_recording_control_recovery(Duration::from_secs(4))
-            .expect("BLE recovery control should restart advertising");
+        super::windows_ble::apply_pending_ble_name(Duration::from_secs(4))
+            .expect("BLE name apply should refresh advertising without opening pairing recovery");
         std::thread::sleep(Duration::from_secs(2));
-
-        let recovery_names = vec![old_name.clone(), target_name.clone()];
-        let unpair = super::windows_ble::unpair_listener_devices_for_names(&recovery_names);
-        assert!(
-            !unpair.needs_user_action || unpair.failed_devices == 0,
-            "automatic stale pairing cleanup should not fail: {unpair:?}"
-        );
-        std::thread::sleep(Duration::from_millis(1200));
-
-        let pairing = super::windows_ble::prompt_listener_pairing_for_recovery(Some(&target_name));
-        assert!(
-            !pairing.open_bluetooth_settings,
-            "Windows pairing should be completed or already clean: {pairing:?}"
-        );
 
         super::windows_ble::set_configured_bluetooth_target_name(&target_name);
         let status = super::windows_ble::read_embedded_audio_status(Duration::from_secs(20))
@@ -13224,11 +13604,10 @@ mod tests {
         let settings = super::windows_ble::read_device_settings_status(Duration::from_secs(4))
             .expect("renamed Listener device settings should be readable");
         assert_eq!(settings.ble_name, target_name);
-        if settings.ble_name_pending_restart {
-            eprintln!(
-                "firmware still reports ble_name_pending_restart=1 after advertising {target_name}; Type treats exact-name BLE reachability as applied"
-            );
-        }
+        assert!(
+            !settings.ble_name_pending_restart,
+            "firmware should report the refreshed BLE name as applied"
+        );
     }
 
     #[cfg(target_os = "windows")]

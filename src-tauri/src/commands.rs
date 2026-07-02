@@ -462,6 +462,11 @@ fn sync_device_setting_packet_to_firmware(packet: DeviceSettingPacket) -> Result
         .map_err(|err| format!("设备设置写入固件失败（{}）：{err}", packet.id))
 }
 
+fn sync_device_ble_name_apply_to_firmware() -> Result<(), String> {
+    crate::embedded_ble::apply_pending_ble_name(Duration::from_secs(2))
+        .map_err(|err| format!("蓝牙名称应用到固件失败：{err}"))
+}
+
 fn device_setting_packets_for_changes(
     previous: &UserPreferences,
     next: &UserPreferences,
@@ -518,8 +523,12 @@ fn sync_device_firmware_preferences(
     previous: &UserPreferences,
     next: &UserPreferences,
 ) -> Result<(), String> {
+    let ble_name_changed = previous.device_ble_name != next.device_ble_name;
     for packet in device_setting_packets_for_changes(previous, next) {
         sync_device_setting_packet_to_firmware(packet)?;
+    }
+    if ble_name_changed {
+        sync_device_ble_name_apply_to_firmware()?;
     }
     Ok(())
 }
@@ -2259,6 +2268,7 @@ const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
 const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
 const DEVICE_SETTINGS_BLE_WRITE_TIMEOUT: Duration = Duration::from_secs(4);
 const DEVICE_SETTINGS_BLE_TASK_TIMEOUT: Duration = Duration::from_secs(10);
+const DEVICE_SETTINGS_BLE_NAME_APPLY_SETTLE_DELAY: Duration = Duration::from_millis(1200);
 const DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES: usize = 63;
 
 async fn read_device_settings_snapshot_from_firmware() -> Result<DeviceSettingsSnapshot, String> {
@@ -2353,6 +2363,21 @@ fn device_ble_name_changed_for_request(
     previous_prefs_ble_name.is_some_and(|name| name != request.ble_name)
 }
 
+fn device_ble_name_apply_needed(
+    request: &DeviceSettingsUpdateRequest,
+    previous_snapshot: Option<&DeviceSettingsSnapshot>,
+    ble_name_changed: bool,
+) -> bool {
+    if ble_name_changed {
+        return true;
+    }
+    previous_snapshot
+        .filter(|snapshot| device_settings_snapshot_has_authoritative_ble_name(snapshot))
+        .is_some_and(|snapshot| {
+            snapshot.ble_name == request.ble_name && snapshot.ble_name_pending_restart
+        })
+}
+
 #[tauri::command]
 pub async fn set_device_settings(
     coord: CoordinatorState<'_>,
@@ -2380,6 +2405,8 @@ pub async fn set_device_settings(
         previous_snapshot.as_ref(),
         Some(&previous_prefs_ble_name),
     );
+    let ble_name_apply_needed =
+        device_ble_name_apply_needed(&request, previous_snapshot.as_ref(), ble_name_changed);
     let commands = device_settings_update_commands(
         &request,
         led_zone_brightness_supported,
@@ -2413,19 +2440,74 @@ pub async fn set_device_settings(
         persist_settings(&*coord, prefs.clone())?;
         emit_prefs_changed(&app, &prefs);
     }
-    let ble_name_detail = if ble_name_changed {
+    let mut post_apply_snapshot = None;
+    let ble_name_detail = if ble_name_apply_needed {
         log::info!(
-            "[device-settings] BLE name changed; saved without automatic recovery, unpair, or Windows pairing prompt"
+            "[device-settings] applying BLE name without automatic unpair or Windows pairing prompt changed={ble_name_changed}"
         );
-        coord.refresh_embedded_ble_listener();
-        Some(
-            "BLE name was saved without resetting pairing or opening the Windows Add device prompt. The new name applies when Listener next advertises or reconnects."
-                .to_string(),
-        )
+        let apply_result = run_device_settings_blocking("apply_ble_name", || {
+            crate::embedded_ble::apply_pending_ble_name(DEVICE_SETTINGS_BLE_WRITE_TIMEOUT)
+        })
+        .await;
+        match apply_result {
+            Ok(()) => {
+                tokio::time::sleep(DEVICE_SETTINGS_BLE_NAME_APPLY_SETTLE_DELAY).await;
+                match read_device_settings_snapshot_from_firmware().await {
+                    Ok(snapshot) => {
+                        let confirmed = snapshot.ble_name == request.ble_name
+                            && !snapshot.ble_name_pending_restart;
+                        post_apply_snapshot = Some(snapshot);
+                        if confirmed {
+                            crate::embedded_ble::set_configured_bluetooth_target_name(
+                                &request.ble_name,
+                            );
+                            coord.refresh_embedded_ble_listener();
+                            Some(
+                                "BLE name was applied without resetting pairing or opening the Windows Add device prompt."
+                                    .to_string(),
+                            )
+                        } else {
+                            crate::embedded_ble::set_configured_bluetooth_target_name(
+                                &previous_prefs_ble_name,
+                            );
+                            coord.refresh_embedded_ble_listener();
+                            Some(
+                                "BLE name was saved, but firmware still reports it pending; Type kept the previous BLE target until Listener applies the new advertising name."
+                                    .to_string(),
+                            )
+                        }
+                    }
+                    Err(readback_error) => {
+                        log::warn!(
+                            "[device-settings] BLE name apply sent, but confirmation readback failed: {readback_error}"
+                        );
+                        crate::embedded_ble::set_configured_bluetooth_target_name(
+                            &request.ble_name,
+                        );
+                        coord.refresh_embedded_ble_listener();
+                        Some(format!(
+                            "BLE name apply was sent without opening the Windows Add device prompt; confirmation readback is unavailable ({readback_error})."
+                        ))
+                    }
+                }
+            }
+            Err(apply_error) => {
+                log::warn!("[device-settings] BLE name apply failed: {apply_error}");
+                crate::embedded_ble::set_configured_bluetooth_target_name(&previous_prefs_ble_name);
+                coord.refresh_embedded_ble_listener();
+                Some(format!(
+                    "BLE name was saved, but applying it without a pairing prompt failed ({apply_error}). Type kept the previous BLE target for this session."
+                ))
+            }
+        }
     } else {
         None
     };
-    match read_device_settings_snapshot_from_firmware().await {
+    let final_snapshot = match post_apply_snapshot {
+        Some(snapshot) => Ok(snapshot),
+        None => read_device_settings_snapshot_from_firmware().await,
+    };
+    match final_snapshot {
         Ok(mut snapshot) => {
             if let Some(detail) = ble_name_detail {
                 snapshot.detail = Some(detail);
@@ -7534,6 +7616,63 @@ mod tests {
             &request,
             Some(&snapshot),
             Some("listener-old"),
+        ));
+    }
+
+    #[test]
+    fn device_ble_name_apply_runs_for_pending_same_name() {
+        let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 70,
+            key_led_brightness_percent: 65,
+            knob_led_brightness_percent: 60,
+            edge_led_brightness_percent: 55,
+            plugged_low_power_idle_minutes: 2,
+            battery_low_power_idle_minutes: 3,
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_minutes: 0,
+            battery_auto_shutdown_minutes: 30,
+            ble_name: "Blistener".to_string(),
+        };
+        let mut snapshot = super::device_settings_snapshot_from_status(
+            crate::embedded_ble::DeviceSettingsStatus {
+                status_led_brightness_percent: 70,
+                key_led_brightness_percent: 65,
+                knob_led_brightness_percent: 60,
+                edge_led_brightness_percent: 55,
+                led_zone_brightness_supported: true,
+                low_power_idle_minutes: 3,
+                plugged_low_power_idle_minutes: 2,
+                battery_low_power_idle_minutes: 3,
+                plugged_low_power_enabled: true,
+                plugged_auto_shutdown_minutes: 0,
+                battery_auto_shutdown_minutes: 30,
+                knob_rotation_action: "screen_brightness".to_string(),
+                ble_name: "Blistener".to_string(),
+                ble_name_pending_restart: true,
+                external_power_present: true,
+                usb_power_present: true,
+                charging: false,
+                charge_full: false,
+                raw_line: "~DEVICE:SETTINGS result=OK".to_string(),
+            },
+        );
+
+        assert!(super::device_ble_name_apply_needed(
+            &request,
+            Some(&snapshot),
+            false,
+        ));
+
+        snapshot.ble_name_pending_restart = false;
+        assert!(!super::device_ble_name_apply_needed(
+            &request,
+            Some(&snapshot),
+            false,
+        ));
+        assert!(super::device_ble_name_apply_needed(
+            &request,
+            Some(&snapshot),
+            true,
         ));
     }
 
