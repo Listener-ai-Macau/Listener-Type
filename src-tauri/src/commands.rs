@@ -3396,7 +3396,7 @@ const WIRED_BOOT_REPAIR_BAUDS: &[u32] = &[115_200, 57_600, 9_600];
 const WIRED_FLASH_MODE: FlashMode = FlashMode::Dio;
 const WIRED_FLASH_FREQUENCY: FlashFrequency = FlashFrequency::_80Mhz;
 const WIRED_FLASH_SIZE: FlashSize = FlashSize::_16Mb;
-const WIRED_FULL_FLASH_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+const WIRED_FULL_FLASH_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const WIRED_BOOT_REPAIR_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const WIRED_FLASH_CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(120);
 const WIRED_FLASH_SERIAL_IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -4092,7 +4092,10 @@ fn run_wired_firmware_flash_with_progress(
     );
 
     let chip = wired_target_chip(&loaded.target)?;
-    let port_hint = resolve_wired_flash_port(requested_port)?;
+    let port_hint = match normalize_requested_wired_port(requested_port) {
+        Some(port) => port,
+        None => resolve_wired_flash_port(None)?,
+    };
     let baud = baud
         .or_else(|| package_manifest_baud(&loaded))
         .unwrap_or(WIRED_DEFAULT_BAUD);
@@ -4122,7 +4125,7 @@ fn run_wired_firmware_flash_with_progress(
         ResetBeforeOperation::DefaultReset,
         ResetAfterOperation::HardReset,
         WIRED_FULL_FLASH_CONNECT_TIMEOUT,
-        false,
+        true,
     )?;
     emit_wired_firmware_stage(
         progress_app_ref,
@@ -4763,6 +4766,37 @@ fn select_wired_flash_port_for_attempt(
     allow_auto_select: bool,
 ) -> Result<Option<String>, String> {
     if let Some(port) = normalize_requested_wired_port(requested_port) {
+        if allow_auto_select {
+            let ports = list_wired_firmware_ports_internal();
+            if ports
+                .iter()
+                .any(|candidate| candidate.port.eq_ignore_ascii_case(&port))
+            {
+                return Ok(Some(port));
+            }
+            if ports.is_empty() {
+                return Ok(None);
+            }
+            let esp32_ports = ports
+                .iter()
+                .filter(|candidate| candidate.is_likely_esp32)
+                .collect::<Vec<_>>();
+            if esp32_ports.len() == 1 {
+                return Ok(Some(esp32_ports[0].port.clone()));
+            }
+            if ports.len() == 1 {
+                return Ok(Some(ports[0].port.clone()));
+            }
+
+            let summary = ports
+                .iter()
+                .map(|candidate| candidate.label.clone())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(format!(
+                "Requested serial port {port} is not present, and multiple serial ports were detected after USB re-enumeration. Choose the Listener COM port explicitly. Ports: {summary}"
+            ));
+        }
         return Ok(Some(port));
     }
     if !allow_auto_select {
