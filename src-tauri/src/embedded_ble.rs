@@ -4919,6 +4919,7 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
     {
         log::info!("[embedded-ble] Listener OTA v2 prepare: acquiring BLE capture guard");
         let transfer_guard = BleCaptureGuard::enter(None)?;
+        let _fresh_guard = BleFreshGattGuard::enter("Listener OTA v2 prepare")?;
         log::info!("[embedded-ble] Listener OTA v2 prepare: discovering Listener OTA v2 service");
         let target = open_listener_ota_v2_target()?;
         let snapshot = listener_ota_v2_device_snapshot_from_target(&target);
@@ -8658,7 +8659,9 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
                         continue;
                     }
                 };
-                match open_listener_ota_v2_characteristics_from_service(&service, cache_mode) {
+                match open_listener_ota_v2_characteristics_from_service_with_retry(
+                    &service, cache_mode,
+                ) {
                     Ok(prepared) => {
                         return Ok(OpenListenerOtaV2Target {
                             control: prepared.control,
@@ -9140,7 +9143,9 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
 
         let mut last_error = None;
         for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
-            match open_listener_ota_v2_characteristics_from_service(&service, cache_mode) {
+            match open_listener_ota_v2_characteristics_from_service_with_retry(
+                &service, cache_mode,
+            ) {
                 Ok(prepared) => {
                     return Ok(OpenListenerOtaV2Target {
                         control: prepared.control,
@@ -9429,6 +9434,54 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             data_chunk_payload_bytes: payload_bytes,
             session,
         })
+    }
+
+    fn open_listener_ota_v2_characteristics_from_service_with_retry(
+        service: &GattDeviceService,
+        cache_mode: BluetoothCacheMode,
+    ) -> Result<PreparedListenerOtaV2Characteristics, String> {
+        let mut last_error = None;
+        for attempt in 1..=AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() + 1 {
+            match open_listener_ota_v2_characteristics_from_service(service, cache_mode) {
+                Ok(prepared) => {
+                    if attempt > 1 {
+                        log::info!(
+                            "[embedded-ble] Listener OTA v2 characteristics recovered via {cache_mode:?} on attempt {attempt}"
+                        );
+                    }
+                    return Ok(prepared);
+                }
+                Err(err) => {
+                    let transient = is_transient_listener_ota_v2_discovery_error(&err);
+                    if attempt > AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() || !transient {
+                        return Err(err);
+                    }
+                    let delay = AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS[attempt - 1];
+                    log::warn!(
+                        "[embedded-ble] Listener OTA v2 characteristic discovery attempt {attempt} via {cache_mode:?} returned transient error: {err}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    last_error = Some(err);
+                    std::thread::sleep(delay);
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            "Listener OTA v2 characteristic discovery did not complete".to_string()
+        }))
+    }
+
+    fn is_transient_listener_ota_v2_discovery_error(err: &str) -> bool {
+        err.contains("GattCommunicationStatus(1)")
+            || err.contains("GattCommunicationStatus(3)")
+            || err.contains("Unreachable")
+            || err.contains("unreachable")
+            || err.contains("timed out")
+            || err.contains("timeout")
+            || err.contains("GATT session did not become active")
+            || err.contains("characteristic discovery returned status")
+            || err.contains("characteristic discovery wait failed")
+            || err.contains("service access")
     }
 
     fn open_diagnostic_characteristics_from_service(

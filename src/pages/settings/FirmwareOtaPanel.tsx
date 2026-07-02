@@ -147,8 +147,8 @@ export function FirmwareOtaPanel({
     if (!selectedPackage) return [];
     const warnings = [...selectedPackage.warnings];
     const currentVersion = otaSnapshot?.device.firmwareVersion;
-    if (currentVersion && compareVersionish(selectedPackage.manifest.version, currentVersion) <= 0) {
-      warnings.push('Package version is not newer than the connected firmware version.');
+    if (currentVersion && compareVersionish(selectedPackage.manifest.version, currentVersion) < 0) {
+      warnings.push('Package version is older than the connected firmware version.');
     }
     return [...new Set(warnings)];
   }, [otaSnapshot?.device.firmwareVersion, selectedPackage]);
@@ -1165,8 +1165,8 @@ function formatFirmwareOtaBlocker(
       return localizeOtaText(language, '当前固件没有开放 OTA 能力，请先用 USB factory 包刷一次后再试 OTA。', 'Current firmware does not advertise OTA support. Flash the USB factory package once, then retry OTA.');
     case 'minDesktopVersion':
       return localizeOtaText(language, '当前 Listener Type 版本太旧，请先升级桌面端。', 'Listener Type is too old for this package. Update the desktop app first.');
-    case 'sameVersion':
-      return localizeOtaText(language, '升级包版本不高于当前设备固件。', 'The OTA package is not newer than the device firmware.');
+    case 'downgrade':
+      return localizeOtaText(language, '升级包版本低于当前设备固件；同版本可重刷，回退请用 USB factory 恢复。', 'The OTA package is older than the device firmware; same-version reflashing is allowed, but rollback should use USB factory recovery.');
   }
 }
 
@@ -1194,8 +1194,8 @@ function formatFirmwareOtaWarning(
   warning: string,
   language: string,
 ): string {
-  if (warning.includes('not newer than the connected firmware version')) {
-    return localizeOtaText(language, '升级包版本不高于当前设备固件。', 'The OTA package is not newer than the device firmware.');
+  if (warning.includes('older than the connected firmware version')) {
+    return localizeOtaText(language, '升级包版本低于当前设备固件；同版本 OTA 可直接重刷。', 'The OTA package is older than the device firmware; same-version OTA reflashing is allowed.');
   }
   return warning;
 }

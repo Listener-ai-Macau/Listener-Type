@@ -166,6 +166,22 @@ assert.equal(validListenerOtaV2.manifest?.firmwareCapability, LISTENER_OTA_V2_TR
 assert.equal(validListenerOtaV2.manifest?.gattStatusUuid, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid);
 assert.equal(validListenerOtaV2.manifest?.gattConfirmUuid, null);
 
+const sameVersionListenerOtaV2 = await validateFirmwareOtaPackage(
+  listenerOtaV2Manifest(),
+  firmwareBytes,
+  { ...contextV2, currentFirmwareVersion: '1.2.0' },
+);
+assert.equal(sameVersionListenerOtaV2.ok, true);
+assert.deepEqual(sameVersionListenerOtaV2.warnings, []);
+
+const olderListenerOtaV2 = await validateFirmwareOtaPackage(
+  listenerOtaV2Manifest(),
+  firmwareBytes,
+  { ...contextV2, currentFirmwareVersion: '1.2.1' },
+);
+assert.equal(olderListenerOtaV2.ok, true);
+assert.ok(olderListenerOtaV2.warnings.some(warning => warning.includes('older than the connected firmware version')));
+
 const badListenerOtaV2StatusUuid = JSON.parse(listenerOtaV2Manifest()) as Record<string, unknown>;
 ((badListenerOtaV2StatusUuid.protocol as Record<string, unknown>).gatt as Record<string, unknown>).status_uuid =
   '710af845-6d9f-6583-0c4d-9e5b3bc309ff';
@@ -362,6 +378,39 @@ const listenerOtaV2PreflightReady = evaluateFirmwareOtaPreflight({
 });
 assert.equal(listenerOtaV2PreflightReady.ok, true);
 
+const listenerOtaV2SameVersionPreflightReady = evaluateFirmwareOtaPreflight({
+  manifest: parsedListenerOtaV2Manifest,
+  desktopVersion: '1.0.0',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: true,
+    hardwareRevision: 'keyboard-v2-n16r8',
+    firmwareVersion: '1.2.0',
+    capabilities: ['firmware_ota_v2'],
+    batteryPercent: 65,
+    usbPowered: false,
+  },
+});
+assert.equal(listenerOtaV2SameVersionPreflightReady.ok, true);
+
+const listenerOtaV2DowngradeBlocked = evaluateFirmwareOtaPreflight({
+  manifest: parsedListenerOtaV2Manifest,
+  desktopVersion: '1.0.0',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: true,
+    hardwareRevision: 'keyboard-v2-n16r8',
+    firmwareVersion: '1.2.1',
+    capabilities: ['firmware_ota_v2'],
+    batteryPercent: 65,
+    usbPowered: false,
+  },
+});
+assert.equal(listenerOtaV2DowngradeBlocked.ok, false);
+assert.deepEqual(listenerOtaV2DowngradeBlocked.blockers.map(item => item.code), ['downgrade']);
+
 const listenerOtaV2PreflightRequiresCapability = evaluateFirmwareOtaPreflight({
   manifest: parsedListenerOtaV2Manifest,
   desktopVersion: '1.0.0',
@@ -413,6 +462,22 @@ const unknownPowerStatus = evaluateFirmwareOtaPreflight({
   },
 });
 assert.equal(unknownPowerStatus.ok, true);
+
+const unavailableBatteryStatus = evaluateFirmwareOtaPreflight({
+  manifest: parsedV2Manifest,
+  desktopVersion: '1.0.0',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: true,
+    hardwareRevision: 'keyboard-v2-n16r8',
+    firmwareVersion: '1.2.0',
+    capabilities: ['firmware_ota_v1'],
+    batteryPercent: null,
+    usbPowered: false,
+  },
+});
+assert.equal(unavailableBatteryStatus.ok, true);
 
 const blockedPreflight = evaluateFirmwareOtaPreflight({
   manifest: parsedManifest,

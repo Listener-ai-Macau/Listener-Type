@@ -442,11 +442,12 @@ fn preflight_blockers(
     {
         blockers.push("Connected firmware does not advertise Listener OTA v2 support.".to_string());
     }
-    if (manifest.is_listener_ble_ota() || manifest.is_listener_ble_ota_v2())
-        && snapshot.usb_powered != Some(true)
-        && snapshot.battery_percent.is_none()
-    {
-        blockers.push("Power state is unknown; connect USB power before OTA.".to_string());
+    if let Some(current) = snapshot.firmware_version.as_deref() {
+        if compare_versionish(&manifest.version, current) < 0 {
+            blockers.push(
+                "Package version is older than the connected firmware version; use USB factory recovery for rollback.".to_string(),
+            );
+        }
     }
     blockers
 }
@@ -522,9 +523,9 @@ pub fn validate_package(
         ));
     }
     if let Some(current) = context.current_firmware_version.as_deref() {
-        if compare_versionish(&manifest.version, current) <= 0 {
+        if compare_versionish(&manifest.version, current) < 0 {
             warnings.push(
-                "Package version is not newer than the connected firmware version.".to_string(),
+                "Package version is older than the connected firmware version.".to_string(),
             );
         }
     }
@@ -1351,6 +1352,29 @@ mod tests {
             .errors
             .iter()
             .any(|item| item.contains("recovery.serial_commands")));
+    }
+
+    #[test]
+    fn same_version_package_is_allowed_for_reflash() {
+        let mut context = context();
+        context.current_firmware_version = Some("v1.2.0".to_string());
+        let result = validate_package(&manifest_v2(""), FIRMWARE_BYTES, &context);
+
+        assert!(result.ok, "{:?}", result.errors);
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    }
+
+    #[test]
+    fn older_package_warns_as_downgrade() {
+        let mut context = context();
+        context.current_firmware_version = Some("1.2.1".to_string());
+        let result = validate_package(&manifest_v2(""), FIRMWARE_BYTES, &context);
+
+        assert!(result.ok, "{:?}", result.errors);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|item| item.contains("older than the connected firmware version")));
     }
 
     #[test]

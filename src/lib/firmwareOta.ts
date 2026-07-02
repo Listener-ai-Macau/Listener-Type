@@ -23,7 +23,7 @@ export type FirmwareOtaBlockerCode =
   | 'hardwareMismatch'
   | 'missingCapability'
   | 'minDesktopVersion'
-  | 'sameVersion';
+  | 'downgrade';
 
 export type FirmwareOtaFailureCode =
   | 'bleDisconnected'
@@ -204,8 +204,8 @@ export async function validateFirmwareOtaPackage(
   if ((isListenerBleOtaManifest(manifest) || isListenerOtaV2Manifest(manifest)) && manifest.hardwareRevision !== context.expectedHardwareRevision) {
     errors.push(`Hardware revision mismatch: package=${manifest.hardwareRevision}, expected=${context.expectedHardwareRevision}.`);
   }
-  if (context.currentFirmwareVersion && compareVersionish(manifest.version, context.currentFirmwareVersion) <= 0) {
-    warnings.push('Package version is not newer than the connected firmware version.');
+  if (context.currentFirmwareVersion && compareVersionish(manifest.version, context.currentFirmwareVersion) < 0) {
+    warnings.push('Package version is older than the connected firmware version.');
   }
 
   return {
@@ -441,6 +441,13 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       `Update Listener Type to ${manifest.minDesktopVersion} or newer first.`,
     ));
   }
+  if (device.firmwareVersion && compareVersionish(manifest.version, device.firmwareVersion) < 0) {
+    blockers.push(blocker(
+      'downgrade',
+      'Firmware package is older than the connected device firmware.',
+      'Use a same-version or newer OTA package, or use USB factory recovery for an intentional rollback.',
+    ));
+  }
   if (manifestDeviceSnapshot && device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {
     blockers.push(blocker(
       'hardwareMismatch',
@@ -461,12 +468,6 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       'batteryLow',
       'Battery is too low for firmware update.',
       'Connect USB power or charge the device above 20%.',
-    ));
-  } else if ((listenerBleOta || listenerOtaV2) && device.usbPowered === false && battery == null) {
-    blockers.push(blocker(
-      'powerUnknown',
-      'Power state is unknown.',
-      'Connect USB power before starting the update.',
     ));
   }
 
