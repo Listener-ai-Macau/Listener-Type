@@ -2259,8 +2259,6 @@ const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
 const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
 const DEVICE_SETTINGS_BLE_WRITE_TIMEOUT: Duration = Duration::from_secs(4);
 const DEVICE_SETTINGS_BLE_TASK_TIMEOUT: Duration = Duration::from_secs(10);
-const DEVICE_SETTINGS_BLE_NAME_RECOVERY_CLEANUP_TIMEOUT: Duration = Duration::from_secs(45);
-const DEVICE_SETTINGS_BLE_NAME_RECOVERY_SETTLE_DELAY: Duration = Duration::from_secs(2);
 const DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES: usize = 63;
 
 async fn read_device_settings_snapshot_from_firmware() -> Result<DeviceSettingsSnapshot, String> {
@@ -2338,29 +2336,6 @@ fn device_settings_sent_but_readback_unavailable_detail(error: &str) -> String {
     )
 }
 
-#[derive(Debug, Clone)]
-struct DeviceBleNameRecoveryOutcome {
-    recovery_error: Option<String>,
-    unpair_result: crate::embedded_ble::BleDeviceUnpairResult,
-    pairing_status_result: crate::embedded_ble::BleDevicePairingPromptResult,
-}
-
-fn device_ble_name_recovery_needed(
-    request: &DeviceSettingsUpdateRequest,
-    previous_snapshot: Option<&DeviceSettingsSnapshot>,
-    previous_prefs_ble_name: Option<&str>,
-    windows_cache_needs_cleanup: bool,
-) -> bool {
-    let name_changed =
-        device_ble_name_changed_for_request(request, previous_snapshot, previous_prefs_ble_name);
-    if windows_cache_needs_cleanup && !name_changed {
-        log::info!(
-            "[device-settings] Windows BLE cache may be stale, but BLE name is unchanged; skipping automatic re-pair for this settings write"
-        );
-    }
-    name_changed
-}
-
 fn device_settings_snapshot_has_authoritative_ble_name(snapshot: &DeviceSettingsSnapshot) -> bool {
     snapshot.source == "firmware" || snapshot.source == "lastKnown"
 }
@@ -2376,134 +2351,6 @@ fn device_ble_name_changed_for_request(
         return snapshot.ble_name != request.ble_name;
     }
     previous_prefs_ble_name.is_some_and(|name| name != request.ble_name)
-}
-
-fn push_unique_device_ble_name(names: &mut Vec<String>, name: &str) {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return;
-    }
-    if names
-        .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
-    {
-        return;
-    }
-    names.push(trimmed.to_string());
-}
-
-fn device_ble_name_recovery_target_names(
-    request: &DeviceSettingsUpdateRequest,
-    previous_snapshot: Option<&DeviceSettingsSnapshot>,
-    previous_prefs_ble_name: Option<&str>,
-) -> Vec<String> {
-    let mut names = Vec::new();
-    if let Some(name) = previous_prefs_ble_name {
-        push_unique_device_ble_name(&mut names, name);
-    }
-    if let Some(snapshot) = previous_snapshot {
-        push_unique_device_ble_name(&mut names, &snapshot.ble_name);
-    }
-    push_unique_device_ble_name(&mut names, &request.ble_name);
-    names
-}
-
-fn apply_device_ble_name_recovery_blocking(
-    expected_ble_name: String,
-    recovery_target_names: Vec<String>,
-) -> DeviceBleNameRecoveryOutcome {
-    let recovery_error = match crate::embedded_ble::send_recording_control_recovery(
-        DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
-    ) {
-        Ok(()) => None,
-        Err(err) => {
-            log::warn!("[device-settings] BLE name recovery command failed: {err}");
-            Some(err)
-        }
-    };
-
-    std::thread::sleep(DEVICE_SETTINGS_BLE_NAME_RECOVERY_SETTLE_DELAY);
-    log::info!(
-        "[device-settings] BLE name recovery settle complete recovery_error={}",
-        recovery_error.as_deref().unwrap_or("none")
-    );
-    let unpair_result =
-        crate::embedded_ble::unpair_listener_devices_for_names(&recovery_target_names);
-    log::info!(
-        "[device-settings] BLE name stale pairing cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
-        unpair_result.status,
-        unpair_result.matched_devices,
-        unpair_result.unpaired_devices,
-        unpair_result.already_unpaired_devices,
-        unpair_result.failed_devices,
-        unpair_result.needs_user_action,
-    );
-    std::thread::sleep(Duration::from_millis(1200));
-    let pairing_status_result =
-        crate::embedded_ble::query_listener_pairing(Some(expected_ble_name.as_str()));
-    log::info!(
-        "[device-settings] BLE name Windows pairing status query={:?} matched={} already_paired={} failed={} open_settings={} prompted={}",
-        pairing_status_result.status,
-        pairing_status_result.matched_devices,
-        pairing_status_result.already_paired_devices,
-        pairing_status_result.failed_devices,
-        pairing_status_result.open_bluetooth_settings,
-        pairing_status_result.prompted_devices,
-    );
-    DeviceBleNameRecoveryOutcome {
-        recovery_error,
-        unpair_result,
-        pairing_status_result,
-    }
-}
-
-fn device_ble_name_recovery_detail(outcome: &DeviceBleNameRecoveryOutcome) -> String {
-    let cleanup_detail = match outcome.unpair_result.status {
-        crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
-            "Old Windows pairing entries were removed automatically."
-        }
-        crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean => {
-            "Windows pairing entries were already clean."
-        }
-        crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
-            "No old Windows pairing entry was found."
-        }
-        crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
-            "Windows did not allow every old pairing entry to be removed automatically."
-        }
-    };
-    let pairing_detail = match outcome.pairing_status_result.status {
-        crate::embedded_ble::BleDevicePairingPromptStatus::Paired => {
-            "Windows reports the Listener paired after cleanup."
-        }
-        crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired => {
-            "Windows already has the Listener paired."
-        }
-        crate::embedded_ble::BleDevicePairingPromptStatus::NotFound => {
-            "Type did not start Windows pairing; Windows may rediscover the new name quietly."
-        }
-        crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction => {
-            "Windows pairing status is not clean yet; Type did not open a pairing prompt."
-        }
-    };
-    if outcome.recovery_error.is_some() {
-        format!(
-            "BLE name was saved without opening the pairing prompt; advertising restart could not be confirmed. {cleanup_detail} {pairing_detail}"
-        )
-    } else {
-        format!(
-            "BLE name was saved and automatic Windows stale-pairing cleanup ran without opening the pairing prompt. {cleanup_detail} {pairing_detail}"
-        )
-    }
-}
-
-fn device_ble_name_recovery_confirmed_runtime(outcome: &DeviceBleNameRecoveryOutcome) -> bool {
-    matches!(
-        outcome.pairing_status_result.status,
-        crate::embedded_ble::BleDevicePairingPromptStatus::Paired
-            | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
-    ) && !outcome.pairing_status_result.open_bluetooth_settings
-        && outcome.pairing_status_result.failed_devices == 0
 }
 
 #[tauri::command]
@@ -2539,22 +2386,6 @@ pub async fn set_device_settings(
         plugged_low_power_enabled,
         ble_name_changed,
     )?;
-    let recovery_target_names = device_ble_name_recovery_target_names(
-        &request,
-        previous_snapshot.as_ref(),
-        Some(&previous_prefs_ble_name),
-    );
-    let windows_cache_needs_cleanup = ble_name_changed
-        && crate::embedded_ble::listener_ble_name_cache_needs_cleanup_for_names(
-            &request.ble_name,
-            &recovery_target_names,
-        );
-    let ble_name_recovery_needed = device_ble_name_recovery_needed(
-        &request,
-        previous_snapshot.as_ref(),
-        Some(&previous_prefs_ble_name),
-        windows_cache_needs_cleanup,
-    );
     for command in commands {
         let command_for_error = command.clone();
         run_device_settings_blocking("write", move || {
@@ -2582,54 +2413,21 @@ pub async fn set_device_settings(
         persist_settings(&*coord, prefs.clone())?;
         emit_prefs_changed(&app, &prefs);
     }
-    let (recovery_detail, recovery_confirmed_runtime) = if ble_name_recovery_needed {
+    let ble_name_detail = if ble_name_changed {
         log::info!(
-            "[device-settings] BLE name changed; applying recovery cleanup before final readback"
+            "[device-settings] BLE name changed; saved without automatic recovery, unpair, or Windows pairing prompt"
         );
-        let capture_stopped = coord
-            .pause_embedded_ble_listener_for_recovery_cleanup(
-                DEVICE_SETTINGS_BLE_NAME_RECOVERY_CLEANUP_TIMEOUT,
-            )
-            .await;
-        log::info!(
-            "[device-settings] background Listener capture stopped before BLE name cleanup={capture_stopped}"
-        );
-        let expected_ble_name = request.ble_name.clone();
-        let recovery_target_names = recovery_target_names.clone();
-        let outcome = tauri::async_runtime::spawn_blocking(move || {
-            apply_device_ble_name_recovery_blocking(expected_ble_name, recovery_target_names)
-        })
-        .await
-        .map_err(|err| format!("Listener BLE name cleanup task failed: {err}"))?;
-        let recovery_confirmed_runtime = device_ble_name_recovery_confirmed_runtime(&outcome);
-        if recovery_confirmed_runtime {
-            log::info!("[device-settings] BLE name recovery confirmed by Windows pairing query");
-            coord.refresh_embedded_ble_listener();
-        } else {
-            log::info!(
-                "[device-settings] BLE name recovery ran without starting Windows pairing; refreshing background BLE listener"
-            );
-            coord.refresh_embedded_ble_listener();
-        }
-        (
-            Some(device_ble_name_recovery_detail(&outcome)),
-            recovery_confirmed_runtime,
+        coord.refresh_embedded_ble_listener();
+        Some(
+            "BLE name was saved without resetting pairing or opening the Windows Add device prompt. The new name applies when Listener next advertises or reconnects."
+                .to_string(),
         )
     } else {
-        (None, false)
+        None
     };
     match read_device_settings_snapshot_from_firmware().await {
         Ok(mut snapshot) => {
-            if recovery_confirmed_runtime
-                && snapshot.ble_name == request.ble_name
-                && snapshot.ble_name_pending_restart
-            {
-                log::info!(
-                    "[device-settings] firmware still reports BLE name pending after exact-name BLE recovery; normalizing UI snapshot"
-                );
-                snapshot.ble_name_pending_restart = false;
-            }
-            if let Some(detail) = recovery_detail {
+            if let Some(detail) = ble_name_detail {
                 snapshot.detail = Some(detail);
             }
             Ok(snapshot)
@@ -2643,7 +2441,7 @@ pub async fn set_device_settings(
             snapshot.detail = Some(device_settings_sent_but_readback_unavailable_detail(
                 &readback_error,
             ));
-            if let Some(detail) = recovery_detail {
+            if let Some(detail) = ble_name_detail {
                 snapshot.detail = Some(detail);
             }
             Ok(snapshot)
@@ -7676,7 +7474,7 @@ mod tests {
     }
 
     #[test]
-    fn device_ble_name_recovery_runs_only_for_changed_name() {
+    fn device_ble_name_change_detection_prefers_authoritative_snapshot() {
         let request = DeviceSettingsUpdateRequest {
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
@@ -7713,75 +7511,34 @@ mod tests {
             },
         );
 
-        assert!(!super::device_ble_name_recovery_needed(
-            &request,
-            Some(&snapshot),
-            Some("listener-dev"),
-            false,
-        ));
-        assert!(!super::device_ble_name_recovery_needed(
+        assert!(!super::device_ble_name_changed_for_request(
             &request,
             Some(&snapshot),
             Some("listener-old"),
-            false,
         ));
+
         snapshot.ble_name = "listener-old".to_string();
-        assert!(super::device_ble_name_recovery_needed(
+        assert!(super::device_ble_name_changed_for_request(
             &request,
             Some(&snapshot),
             Some("listener-dev"),
-            false,
         ));
-        snapshot.ble_name = "listener-dev".to_string();
-        snapshot.ble_name_pending_restart = true;
-        assert!(!super::device_ble_name_recovery_needed(
-            &request,
-            Some(&snapshot),
-            Some("listener-dev"),
-            false,
-        ));
-        assert!(!super::device_ble_name_recovery_needed(
-            &request,
-            Some(&snapshot),
-            Some("listener-dev"),
-            true,
-        ));
-        assert!(super::device_ble_name_recovery_needed(
-            &request,
-            None,
-            Some("listener-old"),
-            false,
-        ));
-        assert!(!super::device_ble_name_recovery_needed(
-            &request,
-            None,
-            Some("listener-dev"),
-            false,
-        ));
-        assert!(!super::device_ble_name_recovery_needed(
-            &request,
-            None,
-            Some("listener-dev"),
-            true,
-        ));
+
         snapshot.source = "defaults";
-        snapshot.ble_name = "listener".to_string();
-        assert!(!super::device_ble_name_recovery_needed(
+        assert!(!super::device_ble_name_changed_for_request(
             &request,
             Some(&snapshot),
             Some("listener-dev"),
-            true,
         ));
-        assert!(super::device_ble_name_recovery_needed(
+        assert!(super::device_ble_name_changed_for_request(
             &request,
             Some(&snapshot),
             Some("listener-old"),
-            false,
         ));
     }
 
     #[test]
-    fn device_ble_name_recovery_targets_old_and_new_exact_names() {
+    fn device_ble_name_change_writes_name_without_repair_command() {
         let request = DeviceSettingsUpdateRequest {
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
@@ -7794,79 +7551,23 @@ mod tests {
             battery_auto_shutdown_minutes: 30,
             ble_name: "OfficeType01".to_string(),
         };
-        let mut snapshot = super::device_settings_snapshot_from_status(
-            crate::embedded_ble::DeviceSettingsStatus {
-                status_led_brightness_percent: 70,
-                key_led_brightness_percent: 65,
-                knob_led_brightness_percent: 60,
-                edge_led_brightness_percent: 55,
-                led_zone_brightness_supported: true,
-                low_power_idle_minutes: 3,
-                plugged_low_power_idle_minutes: 2,
-                battery_low_power_idle_minutes: 3,
-                plugged_low_power_enabled: true,
-                plugged_auto_shutdown_minutes: 0,
-                battery_auto_shutdown_minutes: 30,
-                knob_rotation_action: "screen_brightness".to_string(),
-                ble_name: "Blistener".to_string(),
-                ble_name_pending_restart: false,
-                external_power_present: true,
-                usb_power_present: true,
-                charging: false,
-                charge_full: false,
-                raw_line: "~DEVICE:SETTINGS result=OK".to_string(),
-            },
-        );
-        snapshot.ble_name = "Blistener".to_string();
 
-        let names = super::device_ble_name_recovery_target_names(
+        let commands = device_settings_update_commands(
             &request,
-            Some(&snapshot),
-            Some("listenerB"),
-        );
+            false,
+            request.plugged_low_power_enabled,
+            true,
+        )
+        .expect("commands");
 
-        assert_eq!(
-            names,
-            vec![
-                "listenerB".to_string(),
-                "Blistener".to_string(),
-                "OfficeType01".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn device_ble_name_recovery_detail_hides_transport_jargon() {
-        let outcome = super::DeviceBleNameRecoveryOutcome {
-            recovery_error: Some("BLE CCCD write timed out after GATT cache failure".to_string()),
-            unpair_result: crate::embedded_ble::BleDeviceUnpairResult {
-                status: crate::embedded_ble::BleDeviceUnpairStatus::Removed,
-                attempted: true,
-                matched_devices: 1,
-                unpaired_devices: 1,
-                already_unpaired_devices: 0,
-                failed_devices: 0,
-                needs_user_action: true,
-                details: vec!["Removed stale Listener pairing: Listener".to_string()],
-            },
-            pairing_status_result: crate::embedded_ble::BleDevicePairingPromptResult {
-                status: crate::embedded_ble::BleDevicePairingPromptStatus::NotFound,
-                attempted: true,
-                matched_devices: 0,
-                prompted_devices: 0,
-                already_paired_devices: 0,
-                failed_devices: 0,
-                open_bluetooth_settings: false,
-                details: vec!["No paired Listener device found".to_string()],
-            },
-        };
-
-        let detail = super::device_ble_name_recovery_detail(&outcome);
-        assert!(detail.contains("Old Windows pairing entries were removed automatically"));
-        assert!(detail.contains("without opening the pairing prompt"));
-        assert!(!detail.contains("re-pair"));
-        assert!(!detail.to_ascii_lowercase().contains("cccd"));
-        assert!(!detail.to_ascii_lowercase().contains("gatt"));
+        assert!(commands
+            .iter()
+            .any(|command| command == "DEVICE:SET ble_name=OfficeType01"));
+        assert!(commands.iter().all(|command| {
+            !command.to_ascii_uppercase().contains("RECOVERY")
+                && !command.to_ascii_uppercase().contains("PAIR")
+                && !command.to_ascii_uppercase().contains("UNPAIR")
+        }));
     }
 
     #[test]
