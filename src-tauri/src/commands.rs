@@ -2342,7 +2342,7 @@ fn device_settings_sent_but_readback_unavailable_detail(error: &str) -> String {
 struct DeviceBleNameRecoveryOutcome {
     recovery_error: Option<String>,
     unpair_result: crate::embedded_ble::BleDeviceUnpairResult,
-    pairing_prompt_result: crate::embedded_ble::BleDevicePairingPromptResult,
+    pairing_status_result: crate::embedded_ble::BleDevicePairingPromptResult,
 }
 
 fn device_ble_name_recovery_needed(
@@ -2439,21 +2439,21 @@ fn apply_device_ble_name_recovery_blocking(
         unpair_result.needs_user_action,
     );
     std::thread::sleep(Duration::from_millis(1200));
-    let pairing_prompt_result =
-        crate::embedded_ble::prompt_listener_pairing_for_recovery(Some(expected_ble_name.as_str()));
+    let pairing_status_result =
+        crate::embedded_ble::query_listener_pairing(Some(expected_ble_name.as_str()));
     log::info!(
-        "[device-settings] BLE name Windows pairing prompt status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
-        pairing_prompt_result.status,
-        pairing_prompt_result.matched_devices,
-        pairing_prompt_result.prompted_devices,
-        pairing_prompt_result.already_paired_devices,
-        pairing_prompt_result.failed_devices,
-        pairing_prompt_result.open_bluetooth_settings,
+        "[device-settings] BLE name Windows pairing status query={:?} matched={} already_paired={} failed={} open_settings={} prompted={}",
+        pairing_status_result.status,
+        pairing_status_result.matched_devices,
+        pairing_status_result.already_paired_devices,
+        pairing_status_result.failed_devices,
+        pairing_status_result.open_bluetooth_settings,
+        pairing_status_result.prompted_devices,
     );
     DeviceBleNameRecoveryOutcome {
         recovery_error,
         unpair_result,
-        pairing_prompt_result,
+        pairing_status_result,
     }
 }
 
@@ -2472,38 +2472,38 @@ fn device_ble_name_recovery_detail(outcome: &DeviceBleNameRecoveryOutcome) -> St
             "Windows did not allow every old pairing entry to be removed automatically."
         }
     };
-    let pairing_detail = match outcome.pairing_prompt_result.status {
+    let pairing_detail = match outcome.pairing_status_result.status {
         crate::embedded_ble::BleDevicePairingPromptStatus::Paired => {
-            "Windows pairing completed after cleanup."
+            "Windows reports the Listener paired after cleanup."
         }
         crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired => {
             "Windows already has the Listener paired."
         }
         crate::embedded_ble::BleDevicePairingPromptStatus::NotFound => {
-            "Windows did not see an unpaired Listener advertisement; Bluetooth settings may be needed."
+            "Type did not start Windows pairing; Windows may rediscover the new name quietly."
         }
         crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction => {
-            "Windows still requires manual Bluetooth pairing confirmation."
+            "Windows pairing status is not clean yet; Type did not open a pairing prompt."
         }
     };
     if outcome.recovery_error.is_some() {
         format!(
-            "BLE name was saved; advertising restart could not be confirmed. {cleanup_detail} {pairing_detail}"
+            "BLE name was saved without opening the pairing prompt; advertising restart could not be confirmed. {cleanup_detail} {pairing_detail}"
         )
     } else {
         format!(
-            "BLE name was saved and automatic Windows stale-pairing cleanup ran. {cleanup_detail} {pairing_detail}"
+            "BLE name was saved and automatic Windows stale-pairing cleanup ran without opening the pairing prompt. {cleanup_detail} {pairing_detail}"
         )
     }
 }
 
 fn device_ble_name_recovery_confirmed_runtime(outcome: &DeviceBleNameRecoveryOutcome) -> bool {
     matches!(
-        outcome.pairing_prompt_result.status,
+        outcome.pairing_status_result.status,
         crate::embedded_ble::BleDevicePairingPromptStatus::Paired
             | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
-    ) && !outcome.pairing_prompt_result.open_bluetooth_settings
-        && outcome.pairing_prompt_result.failed_devices == 0
+    ) && !outcome.pairing_status_result.open_bluetooth_settings
+        && outcome.pairing_status_result.failed_devices == 0
 }
 
 #[tauri::command]
@@ -2594,9 +2594,6 @@ pub async fn set_device_settings(
         log::info!(
             "[device-settings] background Listener capture stopped before BLE name cleanup={capture_stopped}"
         );
-        coord.hold_embedded_ble_listener_for_pairing_confirmation(
-            "BLE name recovery pairing confirmation",
-        );
         let expected_ble_name = request.ble_name.clone();
         let recovery_target_names = recovery_target_names.clone();
         let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -2606,12 +2603,13 @@ pub async fn set_device_settings(
         .map_err(|err| format!("Listener BLE name cleanup task failed: {err}"))?;
         let recovery_confirmed_runtime = device_ble_name_recovery_confirmed_runtime(&outcome);
         if recovery_confirmed_runtime {
-            coord.clear_embedded_ble_pairing_confirmation_hold("BLE name recovery paired");
+            log::info!("[device-settings] BLE name recovery confirmed by Windows pairing query");
             coord.refresh_embedded_ble_listener();
         } else {
             log::info!(
-                "[device-settings] BLE name recovery pairing is not complete yet; keeping background BLE listener paused to avoid Windows connect/disconnect churn"
+                "[device-settings] BLE name recovery ran without starting Windows pairing; refreshing background BLE listener"
             );
+            coord.refresh_embedded_ble_listener();
         }
         (
             Some(device_ble_name_recovery_detail(&outcome)),
@@ -7851,20 +7849,21 @@ mod tests {
                 needs_user_action: true,
                 details: vec!["Removed stale Listener pairing: Listener".to_string()],
             },
-            pairing_prompt_result: crate::embedded_ble::BleDevicePairingPromptResult {
-                status: crate::embedded_ble::BleDevicePairingPromptStatus::Paired,
+            pairing_status_result: crate::embedded_ble::BleDevicePairingPromptResult {
+                status: crate::embedded_ble::BleDevicePairingPromptStatus::NotFound,
                 attempted: true,
-                matched_devices: 1,
-                prompted_devices: 1,
+                matched_devices: 0,
+                prompted_devices: 0,
                 already_paired_devices: 0,
                 failed_devices: 0,
                 open_bluetooth_settings: false,
-                details: vec!["Windows pairing completed for Listener".to_string()],
+                details: vec!["No paired Listener device found".to_string()],
             },
         };
 
         let detail = super::device_ble_name_recovery_detail(&outcome);
         assert!(detail.contains("Old Windows pairing entries were removed automatically"));
+        assert!(detail.contains("without opening the pairing prompt"));
         assert!(!detail.contains("re-pair"));
         assert!(!detail.to_ascii_lowercase().contains("cccd"));
         assert!(!detail.to_ascii_lowercase().contains("gatt"));
