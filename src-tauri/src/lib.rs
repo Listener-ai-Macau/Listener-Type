@@ -63,7 +63,9 @@ use tauri::menu::{
     CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, Submenu, SubmenuBuilder,
 };
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime, WebviewWindow,
+};
 
 use crate::types::{DictationInputSource, PolishMode};
 
@@ -225,16 +227,11 @@ pub fn run() {
                 let suppress_show = !force_show
                     && (hide_main_on_start || coordinator.prefs().get().start_minimized);
                 if suppress_show {
-                    let _ = main.set_skip_taskbar(true);
-                    let _ = main.hide();
                     log::info!(
-                        "[main] start minimized/hidden requested → 主窗口隐藏并移出任务栏，等用户点托盘"
+                        "[main] start minimized/hidden requested → 跳过初始 show，等用户点托盘"
                     );
-                } else {
-                    let _ = main.set_skip_taskbar(false);
-                    if let Err(e) = main.show() {
-                        log::warn!("[main] initial show failed: {e}");
-                    }
+                } else if let Err(e) = main.show() {
+                    log::warn!("[main] initial show failed: {e}");
                 }
             }
 
@@ -1013,13 +1010,62 @@ pub fn log_dir_path() -> std::path::PathBuf {
 pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     activate_window_mode(app);
     if let Some(w) = app.get_webview_window("main") {
-        let _ = w.set_skip_taskbar(false);
+        let _ = w.show();
+        restore_main_window_native(&w);
+        let _ = w.unminimize();
+        if main_window_needs_recenter(&w) {
+            let _ = w.center();
+            restore_main_window_native(&w);
+        }
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
     activate_app(app);
 }
+
+fn main_window_needs_recenter<R: Runtime>(window: &WebviewWindow<R>) -> bool {
+    if let Ok(position) = window.outer_position() {
+        if position.x <= -10_000 || position.y <= -10_000 {
+            return true;
+        }
+    }
+    if let Ok(size) = window.outer_size() {
+        if size.width < 400 || size.height < 300 {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn restore_main_window_native<R: Runtime>(window: &WebviewWindow<R>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST,
+        HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
+    };
+
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(raw) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = HWND(raw.hwnd.get() as *mut _);
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
+        let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+        let _ = SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+        let _ = BringWindowToTop(hwnd);
+        let _ = SetForegroundWindow(hwnd);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn restore_main_window_native<R: Runtime>(_window: &WebviewWindow<R>) {}
 
 /// 把 CLI intent 路由到 coordinator。两个入口共用：
 /// 1. 首次启动（lib.rs setup 末尾）
@@ -1568,7 +1614,6 @@ pub(crate) fn request_microphone_from_foreground<R: Runtime>(
 
 fn hide_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(w) = app.get_webview_window("main") {
-        let _ = w.set_skip_taskbar(true);
         let _ = w.hide();
     }
     activate_menu_bar_mode(app);
