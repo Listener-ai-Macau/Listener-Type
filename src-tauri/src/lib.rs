@@ -225,11 +225,16 @@ pub fn run() {
                 let suppress_show = !force_show
                     && (hide_main_on_start || coordinator.prefs().get().start_minimized);
                 if suppress_show {
+                    let _ = main.set_skip_taskbar(true);
+                    let _ = main.hide();
                     log::info!(
-                        "[main] start minimized/hidden requested → 跳过初始 show，等用户点托盘"
+                        "[main] start minimized/hidden requested → 主窗口隐藏并移出任务栏，等用户点托盘"
                     );
-                } else if let Err(e) = main.show() {
-                    log::warn!("[main] initial show failed: {e}");
+                } else {
+                    let _ = main.set_skip_taskbar(false);
+                    if let Err(e) = main.show() {
+                        log::warn!("[main] initial show failed: {e}");
+                    }
                 }
             }
 
@@ -1008,6 +1013,7 @@ pub fn log_dir_path() -> std::path::PathBuf {
 pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     activate_window_mode(app);
     if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_skip_taskbar(false);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -1562,6 +1568,7 @@ pub(crate) fn request_microphone_from_foreground<R: Runtime>(
 
 fn hide_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_skip_taskbar(true);
         let _ = w.hide();
     }
     activate_menu_bar_mode(app);
