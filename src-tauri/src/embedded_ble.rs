@@ -3485,6 +3485,96 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         Ok(())
     }
 
+    pub fn send_status_led_command(command: &str, timeout: Duration) -> Result<(), String> {
+        let command = command.strip_prefix('~').unwrap_or(command);
+        if !command.starts_with("LED:") {
+            return Err("status LED command must start with LED:".to_string());
+        }
+        if command.contains('\r') || command.contains('\n') {
+            return Err("status LED command must be a single line".to_string());
+        }
+
+        let payload = format!("{command}\n");
+        let payload_len = payload.as_bytes().len();
+        let mut active_capture_error: Option<String> = None;
+
+        if payload_len < 64 {
+            if let Some(result) =
+                send_audio_control_via_active_capture(payload.as_bytes(), timeout, "status LED")
+            {
+                match result {
+                    Ok(()) => {
+                        log::info!("[embedded-ble] status LED command sent via active capture");
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[embedded-ble] active status LED write failed; trying USB serial/fresh GATT fallback: {err}"
+                        );
+                        active_capture_error = Some(err);
+                    }
+                }
+            }
+        }
+
+        let serial_result = send_control_command_via_usb_serial(command, timeout);
+        match &serial_result {
+            Ok(()) => {
+                log::info!("[embedded-ble] status LED command acknowledged via USB serial");
+                return Ok(());
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] status LED USB serial path unavailable; trying BLE control: {err}"
+                );
+            }
+        }
+
+        if payload_len >= 64 {
+            return Err(format!(
+                "status LED command is too long for BLE control characteristic: {} bytes (max 63 including newline); USB serial fallback failed: {}",
+                payload_len,
+                serial_result
+                    .as_ref()
+                    .err()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "not attempted".to_string())
+            ));
+        }
+
+        let _fresh_guard = BleFreshGattGuard::enter("status LED")?;
+        let target = open_audio_control_target_with_retry("status LED").map_err(|err| {
+            format!(
+                "{err}; active BLE fallback failed: {}; USB serial fallback failed: {}",
+                active_capture_error.as_deref().unwrap_or("not attempted"),
+                serial_result
+                    .as_ref()
+                    .err()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "not attempted".to_string())
+            )
+        })?;
+        write_audio_control_value_with_timeout(
+            &target.control,
+            payload.as_bytes(),
+            timeout,
+            "status LED",
+        )
+        .map_err(|err| {
+            format!(
+                "{err}; active BLE fallback failed: {}; USB serial fallback failed: {}",
+                active_capture_error.as_deref().unwrap_or("not attempted"),
+                serial_result
+                    .as_ref()
+                    .err()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "not attempted".to_string())
+            )
+        })?;
+        log::info!("[embedded-ble] status LED command sent");
+        Ok(())
+    }
+
     fn device_settings_command_allows_active_capture(command: &str) -> bool {
         let Some(arguments) = command.strip_prefix("DEVICE:SET ") else {
             return true;
@@ -11805,6 +11895,11 @@ pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_status_led_command(command: &str, timeout: Duration) -> Result<(), String> {
+    windows_ble::send_status_led_command(command, timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn read_device_settings_status(timeout: Duration) -> Result<DeviceSettingsStatus, String> {
     windows_ble::read_device_settings_status(timeout)
 }
@@ -12233,6 +12328,11 @@ pub fn send_ec11_rotation_mode(_mode: &str, _timeout: Duration) -> Result<(), St
 #[cfg(not(target_os = "windows"))]
 pub fn send_device_settings_command(_command: &str, _timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE device settings control is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_status_led_command(_command: &str, _timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE status LED control is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

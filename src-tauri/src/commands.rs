@@ -2907,6 +2907,13 @@ pub async fn get_firmware_ota_preflight_snapshot(
     coord: CoordinatorState<'_>,
 ) -> Result<FirmwareOtaPreflightSnapshot, String> {
     let phase = coord.dictation_phase_for_cli();
+    if coord.firmware_ota_transfer_active() {
+        return Ok(FirmwareOtaPreflightSnapshot {
+            recording_active: phase != SessionPhase::Idle,
+            dictation_phase: format!("{phase:?}"),
+            device: firmware_ota_active_preflight_snapshot(),
+        });
+    }
     let device =
         tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
             .await
@@ -2936,6 +2943,8 @@ pub struct FirmwareOtaPackagePayload {
 
 const FIRMWARE_OTA_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 const FIRMWARE_OTA_CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
+const FIRMWARE_OTA_CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(1800);
+const FIRMWARE_OTA_LED_SYNC_TIMEOUT: Duration = Duration::from_millis(900);
 const FIRMWARE_OTA_PACKAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 fn normalize_firmware_ota_version(value: &str) -> String {
@@ -2959,11 +2968,36 @@ fn firmware_ota_snapshot_version(
         .map(str::to_string)
 }
 
+fn firmware_ota_active_preflight_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+    crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        connected: true,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: vec!["firmware_ota_transfer_active".to_string()],
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some(
+            "Firmware OTA is in progress; preflight GATT snapshot is paused to keep the BLE link exclusive."
+                .to_string(),
+        ),
+    }
+}
+
+fn sync_firmware_ota_led_preview(command: &'static str, reason: &'static str) {
+    if let Err(err) =
+        crate::embedded_ble::send_status_led_command(command, FIRMWARE_OTA_LED_SYNC_TIMEOUT)
+    {
+        log::warn!("[firmware-ota] status LED sync skipped reason={reason}: {err}");
+    }
+}
+
 async fn confirm_firmware_ota_version(expected_version: &str) -> Option<String> {
     if normalize_firmware_ota_version(expected_version).is_empty() || expected_version == "unknown"
     {
         return None;
     }
+
+    tokio::time::sleep(FIRMWARE_OTA_CONFIRM_REBOOT_GRACE).await;
 
     let deadline = Instant::now() + FIRMWARE_OTA_CONFIRM_TIMEOUT;
     let mut last_seen_version = None;
@@ -4767,6 +4801,7 @@ pub async fn transfer_firmware_ota_ble(
         return Err("firmware_ota.bin SHA256 does not match ota_manifest.json.".to_string());
     }
 
+    sync_firmware_ota_led_preview("LED:PREVIEW ota_led_only", "transfer_start");
     coord.begin_firmware_ota_transfer();
     let is_listener_ota_v2 = manifest.is_listener_ble_ota_v2();
     let version = manifest.version;
@@ -4809,6 +4844,9 @@ pub async fn transfer_firmware_ota_ble(
         None
     };
     coord.end_firmware_ota_transfer();
+    if transfer.is_err() {
+        sync_firmware_ota_led_preview("LED:PREVIEW warn", "transfer_failed");
+    }
     coord.refresh_embedded_ble_listener();
 
     let stats = transfer?;

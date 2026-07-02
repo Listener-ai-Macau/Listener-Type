@@ -1497,6 +1497,10 @@ impl Coordinator {
         pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
     }
 
+    pub fn firmware_ota_transfer_active(&self) -> bool {
+        self.inner.embedded_ble_ota_active.load(Ordering::SeqCst)
+    }
+
     pub fn end_firmware_ota_transfer(&self) {
         self.inner
             .embedded_ble_ota_active
