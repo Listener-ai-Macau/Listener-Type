@@ -300,20 +300,21 @@ function DeviceFirmwareSettingsCard() {
 
   const save = async () => {
     if (writeDisabled) return;
+    const submittedForm: DeviceSettingsUpdateRequest = {
+      ...form,
+      pluggedLowPowerEnabled: form.pluggedLowPowerIdleMinutes > 0,
+      pluggedAutoShutdownMinutes: 0,
+    };
     setStatus('saving');
     setMessage('');
     try {
       const value = await withTimeout(
-        setDeviceSettings({
-          ...form,
-          pluggedLowPowerEnabled: form.pluggedLowPowerIdleMinutes > 0,
-          pluggedAutoShutdownMinutes: 0,
-        }),
+        setDeviceSettings(submittedForm),
         DEVICE_SETTINGS_WRITE_TIMEOUT_MS,
         t('settings.device.writeTimeout', '写入超时，请确认设备仍连接后重试。'),
       );
       setSnapshot(value);
-      setForm(snapshotToForm(value));
+      setForm(submittedForm);
       setStatus('saved');
       setMessage(t('settings.device.configSaved', '已发送到设备'));
       window.setTimeout(() => setStatus(current => (current === 'saved' ? 'idle' : current)), 1800);
@@ -586,6 +587,22 @@ function MinuteInput({
     setDraft(String(clamped));
   };
 
+  const updateDraft = (raw: string) => {
+    setDraft(raw);
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) {
+      return;
+    }
+    const next = Number(trimmed);
+    if (!Number.isFinite(next)) {
+      return;
+    }
+    const clamped = clampMinuteValue(next, min);
+    if (clamped !== value) {
+      onChange(clamped);
+    }
+  };
+
   return (
     <div className="ol-device-minute-input">
       <input
@@ -598,7 +615,7 @@ function MinuteInput({
         disabled={disabled}
         onFocus={() => setEditing(true)}
         onChange={event => {
-          setDraft(event.target.value);
+          updateDraft(event.target.value);
         }}
         onKeyDown={event => {
           if (event.key === 'Enter') {

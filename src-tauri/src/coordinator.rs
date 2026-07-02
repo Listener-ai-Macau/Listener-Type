@@ -3654,13 +3654,18 @@ fn embedded_ble_pairing_prompt_waiting_for_windows(
     let Some(pairing) = pairing else {
         return true;
     };
-    !embedded_ble_pairing_prompt_ready(pairing)
-        && pairing.failed_devices == 0
-        && matches!(
-            pairing.status,
-            crate::embedded_ble::BleDevicePairingPromptStatus::NotFound
-                | crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction
-        )
+    if embedded_ble_pairing_prompt_ready(pairing) {
+        return false;
+    }
+    match pairing.status {
+        crate::embedded_ble::BleDevicePairingPromptStatus::NotFound => pairing.failed_devices == 0,
+        crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction => {
+            pairing.open_bluetooth_settings
+                || pairing.matched_devices > 0
+                || pairing.failed_devices == 0
+        }
+        _ => false,
+    }
 }
 
 fn mark_embedded_ble_pairing_link_reachable(inner: &Arc<Inner>, reason: &'static str) {
@@ -4543,7 +4548,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                         "Listener 已连接，正在恢复音频通道..."
                     },
                 );
-            } else if waiting_for_gatt {
+            } else if waiting_for_gatt || pairing_waiting_for_windows {
                 start_embedded_ble_pairing_confirmation_watch(
                     inner,
                     expected_ble_name_for_watch,
@@ -4557,7 +4562,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                 );
                 *last_cleanup_at = None;
             }
-            if recovery_ready || waiting_for_gatt {
+            if recovery_ready || waiting_for_gatt || pairing_waiting_for_windows {
                 EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation
             } else {
                 EmbeddedBleStalePairingCleanupOutcome::RetrySoon
@@ -6832,6 +6837,44 @@ mod tests {
             &prefs,
             &firmware_snapshot_for_auto_input_test(true)
         ));
+    }
+
+    #[test]
+    fn embedded_ble_pairing_prompt_waits_after_windows_user_action_failure() {
+        let pairing = crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+            attempted: true,
+            matched_devices: 1,
+            prompted_devices: 0,
+            already_paired_devices: 0,
+            failed_devices: 1,
+            open_bluetooth_settings: true,
+            details: vec!["Windows custom pairing returned status=Failed".to_string()],
+        };
+
+        assert!(embedded_ble_pairing_prompt_waiting_for_windows(Some(
+            &pairing
+        )));
+        assert!(!embedded_ble_pairing_prompt_ready(&pairing));
+    }
+
+    #[test]
+    fn embedded_ble_pairing_prompt_ready_does_not_wait_for_windows() {
+        let pairing = crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired,
+            attempted: true,
+            matched_devices: 1,
+            prompted_devices: 0,
+            already_paired_devices: 1,
+            failed_devices: 0,
+            open_bluetooth_settings: false,
+            details: vec!["Listener is paired".to_string()],
+        };
+
+        assert!(embedded_ble_pairing_prompt_ready(&pairing));
+        assert!(!embedded_ble_pairing_prompt_waiting_for_windows(Some(
+            &pairing
+        )));
     }
 
     #[test]

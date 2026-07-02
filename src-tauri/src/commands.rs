@@ -3117,7 +3117,6 @@ impl WiredFirmwarePackageKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WiredFirmwareTargetKind {
     Esp32S3,
-    Stm32WbSwd,
 }
 
 impl WiredFirmwareTargetKind {
@@ -3751,12 +3750,6 @@ fn parse_factory_firmware_manifest(text: &str) -> Result<FactoryFirmwareManifest
                 manifest.project
             ));
         }
-        WiredFirmwareTargetKind::Stm32WbSwd if manifest.project != "Companion-Firmware" => {
-            return Err(format!(
-                "Factory manifest project must be Companion-Firmware for STM32WB/SWD, got {}.",
-                manifest.project
-            ));
-        }
         _ => {}
     }
     Ok(manifest)
@@ -3796,41 +3789,6 @@ fn loaded_factory_package_from_manifest(
                     "Factory package: wired flash writes bootloader, partition table, and app."
                         .to_string(),
                     "Boot repair is available and writes only bootloader.bin at 0x0.".to_string(),
-                ],
-            )
-        }
-        WiredFirmwareTargetKind::Stm32WbSwd => {
-            for role in ["ota_loader", "app"] {
-                require_artifact(&manifest.artifacts, role)?;
-            }
-            let flash = manifest.flash.as_ref().ok_or_else(|| {
-                "Companion STM32WB factory manifest must include flash metadata.".to_string()
-            })?;
-            if !flash
-                .port
-                .as_deref()
-                .is_some_and(|port| port.eq_ignore_ascii_case("SWD"))
-            {
-                return Err(
-                    "Companion STM32WB factory manifest flash.port must be SWD.".to_string()
-                );
-            }
-            if !flash
-                .tool
-                .as_deref()
-                .is_some_and(|tool| tool.eq_ignore_ascii_case("STM32CubeProgrammer"))
-            {
-                return Err(
-                    "Companion STM32WB factory manifest flash.tool must be STM32CubeProgrammer."
-                        .to_string(),
-                );
-            }
-            (
-                None,
-                vec![
-                    "Companion factory package: wired flash writes the BLE OTA loader and app over ST-LINK / SWD."
-                        .to_string(),
-                    "Boot repair is not available for STM32WB/SWD packages.".to_string(),
                 ],
             )
         }
@@ -4386,10 +4344,6 @@ fn parse_baud_value(value: &Value) -> Option<u32> {
 fn wired_target_chip(target: &str) -> Result<Chip, String> {
     match wired_firmware_target_kind(target)? {
         WiredFirmwareTargetKind::Esp32S3 => Ok(Chip::Esp32s3),
-        WiredFirmwareTargetKind::Stm32WbSwd => Err(
-            "Companion STM32WB/SWD flashing is handled by the Companion STM32CubeProgrammer path."
-                .to_string(),
-        ),
     }
 }
 
@@ -4401,11 +4355,8 @@ fn wired_firmware_target_kind(target: &str) -> Result<WiredFirmwareTargetKind, S
         .replace('_', "");
     match normalized.as_str() {
         "esp32s3" => Ok(WiredFirmwareTargetKind::Esp32S3),
-        "nucleowb55rg" | "stm32wb55rg" | "companionpendantce" | "stm32wb55ceux" => {
-            Ok(WiredFirmwareTargetKind::Stm32WbSwd)
-        }
         _ => Err(format!(
-            "Wired firmware flashing supports ESP32-S3 Listener packages and STM32WB Companion SWD packages; package target is {target}."
+            "Wired firmware flashing supports ESP32-S3 Listener packages; package target is {target}."
         )),
     }
 }
@@ -4818,8 +4769,6 @@ pub async fn transfer_firmware_ota_ble(
 
     coord.begin_firmware_ota_transfer();
     let is_listener_ota_v2 = manifest.is_listener_ble_ota_v2();
-    let is_stm32wb_st_ble_ota = manifest.is_stm32wb_st_ble_ota();
-    let is_companion_ota_v2 = manifest.is_companion_ota_v2();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_version = version.clone();
@@ -4835,19 +4784,7 @@ pub async fn transfer_firmware_ota_ble(
                 }),
             );
         };
-        if is_companion_ota_v2 {
-            crate::embedded_ble::transfer_companion_ota_v2(
-                &firmware_bytes,
-                manifest_chunk_bytes,
-                Some(&progress),
-            )
-        } else if is_stm32wb_st_ble_ota {
-            crate::embedded_ble::transfer_stm32wb_st_ota(
-                &firmware_bytes,
-                manifest_chunk_bytes,
-                Some(&progress),
-            )
-        } else if is_listener_ota_v2 {
+        if is_listener_ota_v2 {
             crate::embedded_ble::transfer_listener_ota_v2(
                 &firmware_bytes,
                 manifest_chunk_bytes,
@@ -4866,9 +4803,7 @@ pub async fn transfer_firmware_ota_ble(
     .await
     .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
     .and_then(|result| result);
-    let confirmed_version = if transfer.is_ok() && is_companion_ota_v2 {
-        Some(version.clone())
-    } else if transfer.is_ok() && !is_stm32wb_st_ble_ota {
+    let confirmed_version = if transfer.is_ok() {
         confirm_firmware_ota_version(&version).await
     } else {
         None

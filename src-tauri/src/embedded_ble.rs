@@ -722,6 +722,7 @@ mod windows_ble {
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const BLE_PAIRING_PROMPT_TIMEOUT: Duration = Duration::from_secs(45);
     const BLE_PAIRING_PROMPT_SUPPRESS_WINDOW: Duration = Duration::from_secs(60 * 60);
+    const BLE_RECENT_PAIRING_FAST_GATT_WINDOW: Duration = Duration::from_secs(45);
     const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
@@ -1218,6 +1219,7 @@ mod windows_ble {
     struct ListenerPairingCandidate {
         label: String,
         info: DeviceInformation,
+        address: Option<u64>,
     }
 
     #[derive(Clone)]
@@ -1268,6 +1270,39 @@ mod windows_ble {
     enum DevicePairingOutcome {
         Paired,
         AlreadyPaired,
+    }
+
+    #[derive(Clone)]
+    struct RecentPairingFastGattState {
+        target_name: String,
+        address: Option<u64>,
+        attempted_at: Instant,
+    }
+
+    fn recent_pairing_fast_gatt_slot() -> &'static Mutex<Option<RecentPairingFastGattState>> {
+        static SLOT: OnceLock<Mutex<Option<RecentPairingFastGattState>>> = OnceLock::new();
+        SLOT.get_or_init(|| Mutex::new(None))
+    }
+
+    fn remember_recent_pairing_fast_gatt(target_name: &str, address: Option<u64>, now: Instant) {
+        if let Ok(mut guard) = recent_pairing_fast_gatt_slot().lock() {
+            *guard = Some(RecentPairingFastGattState {
+                target_name: target_name.to_string(),
+                address,
+                attempted_at: now,
+            });
+        }
+    }
+
+    fn recent_pairing_fast_gatt_active(now: Instant) -> Option<RecentPairingFastGattState> {
+        let mut guard = recent_pairing_fast_gatt_slot().lock().ok()?;
+        let state = guard.as_ref()?.clone();
+        if now.saturating_duration_since(state.attempted_at) >= BLE_RECENT_PAIRING_FAST_GATT_WINDOW
+        {
+            *guard = None;
+            return None;
+        }
+        Some(state)
     }
 
     pub fn prompt_listener_pairing(
@@ -1446,6 +1481,11 @@ mod windows_ble {
         for candidate in candidates {
             match pair_listener_candidate(&candidate, Some(&target_name)) {
                 Ok(DevicePairingOutcome::Paired) => {
+                    remember_recent_pairing_fast_gatt(
+                        &target_name,
+                        candidate.address,
+                        Instant::now(),
+                    );
                     result.prompted_devices = result.prompted_devices.saturating_add(1);
                     result
                         .details
@@ -1673,7 +1713,11 @@ mod windows_ble {
                         "[embedded-ble] recovery direct pairing candidate name={name:?} address={address_text}"
                     );
                     let label = listener_pairing_candidate_label(&name, Some(address));
-                    candidates.push(ListenerPairingCandidate { label, info });
+                    candidates.push(ListenerPairingCandidate {
+                        label,
+                        info,
+                        address: Some(address),
+                    });
                 }
                 Ok(None) => {
                     log::warn!(
@@ -1723,7 +1767,11 @@ mod windows_ble {
         }
         seen_ids.push(id);
         let label = listener_pairing_candidate_label(&name, address);
-        candidates.push(ListenerPairingCandidate { label, info });
+        candidates.push(ListenerPairingCandidate {
+            label,
+            info,
+            address,
+        });
     }
 
     fn push_listener_pairing_advertisement_candidates(
@@ -1754,7 +1802,11 @@ mod windows_ble {
             }
             seen_ids.push(id);
             let label = listener_pairing_candidate_label(&name, Some(address));
-            candidates.push(ListenerPairingCandidate { label, info });
+            candidates.push(ListenerPairingCandidate {
+                label,
+                info,
+                address: Some(address),
+            });
         }
         Ok(())
     }
@@ -2119,7 +2171,11 @@ mod windows_ble {
             .map(|value| value.to_string_lossy())
             .unwrap_or_default();
         let label = listener_pairing_candidate_label(&name, Some(address));
-        Ok(Some(ListenerPairingCandidate { label, info }))
+        Ok(Some(ListenerPairingCandidate {
+            label,
+            info,
+            address: Some(address),
+        }))
     }
 
     fn unpair_listener_candidate(
@@ -2240,16 +2296,16 @@ mod windows_ble {
         target_names: &[String],
     ) {
         let mut scanned_names: Vec<String> = Vec::new();
-        for target_name in target_names.iter().rev() {
+        for target_name in listener_recovery_advertisement_scan_names(target_names) {
             if target_name.trim().is_empty()
                 || scanned_names
                     .iter()
-                    .any(|name| name.eq_ignore_ascii_case(target_name))
+                    .any(|name| name.eq_ignore_ascii_case(&target_name))
             {
                 continue;
             }
             scanned_names.push(target_name.clone());
-            match scan_listener_pairing_advertisements(Some(target_name)) {
+            match scan_listener_pairing_advertisements(Some(&target_name)) {
                 Ok(candidates) => {
                     if candidates.is_empty() {
                         continue;
@@ -2270,6 +2326,20 @@ mod windows_ble {
                 }
             }
         }
+    }
+
+    fn listener_recovery_advertisement_scan_names(target_names: &[String]) -> Vec<String> {
+        let mut scan_names = Vec::new();
+        if let Some(name) = configured_bluetooth_target_name() {
+            push_unique_target_name(&mut scan_names, &name);
+        }
+        for target_name in target_names.iter().rev() {
+            push_unique_target_name(&mut scan_names, target_name);
+        }
+        for target_name in target_names {
+            push_unique_target_name(&mut scan_names, target_name);
+        }
+        scan_names
     }
 
     fn push_service_unpair_candidates(
@@ -3188,17 +3258,6 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         }
     }
 
-    fn send_type_bye_after_processing(timeout: Duration, label: &'static str) {
-        if let Err(err) = send_recording_control_command(
-            b"TYPE:BYE\n",
-            timeout,
-            label,
-            ActiveControlTransientFallback::TryFreshGatt,
-        ) {
-            log::warn!("[embedded-ble] {label} failed after processing LED sync: {err}");
-        }
-    }
-
     pub fn send_recording_control_toggle(timeout: Duration) -> Result<(), String> {
         send_recording_control_command(
             b"VREC:TOGGLE\n",
@@ -3259,16 +3318,12 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         } else {
             "audio processing stop"
         };
-        let result = send_recording_control_command(
+        send_recording_control_command(
             command,
             timeout,
             label,
             processing_state_active_transient_fallback(active),
-        );
-        if !active {
-            send_type_bye_after_processing(timeout, "audio type bye after processing stop");
-        }
-        result
+        )
     }
 
     pub fn send_recording_processing_done(timeout: Duration) -> Result<(), String> {
@@ -3276,14 +3331,12 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             timeout,
             "audio type ready before processing done",
         );
-        let result = send_recording_control_command(
+        send_recording_control_command(
             b"VREC:PROCESSING:DONE\n",
             timeout,
             "audio processing done",
             ActiveControlTransientFallback::TryFreshGatt,
-        );
-        send_type_bye_after_processing(timeout, "audio type bye after processing done");
-        result
+        )
     }
 
     pub fn send_recording_processing_warning(timeout: Duration) -> Result<(), String> {
@@ -3291,14 +3344,12 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             timeout,
             "audio type ready before processing warning",
         );
-        let result = send_recording_control_command(
+        send_recording_control_command(
             b"VREC:PROCESSING:WARN\n",
             timeout,
             "audio processing warning",
             ActiveControlTransientFallback::TryFreshGatt,
-        );
-        send_type_bye_after_processing(timeout, "audio type bye after processing warning");
-        result
+        )
     }
 
     pub fn send_ec11_rotation_mode(mode: &str, timeout: Duration) -> Result<(), String> {
@@ -6296,6 +6347,27 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
     }
 
     fn open_notify_target() -> Result<OpenNotifyTarget, String> {
+        let recent_pairing = recent_pairing_fast_gatt_active(Instant::now());
+        if let Some(state) = recent_pairing.as_ref() {
+            match open_notify_target_for_known_addresses("recent pairing fast GATT", state.address)
+            {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] selected recent-pairing fast GATT path target={:?}",
+                        state.target_name
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    log::info!(
+                        "[embedded-ble] recent-pairing fast GATT path not ready target={:?}: {}",
+                        state.target_name,
+                        err.chars().take(240).collect::<String>()
+                    );
+                }
+            }
+        }
+
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(SERVICE_UUID)
             .map_err(|err| format!("BLE service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
@@ -6371,6 +6443,17 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
                     }
                 }
             }
+        }
+
+        if let Some(state) = recent_pairing.as_ref() {
+            let service_error = last_error.unwrap_or_else(|| {
+                "No subscribable embedded audio BLE notify characteristic found by service selector"
+                    .to_string()
+            });
+            return Err(format!(
+                "{service_error}; recent pairing target={:?}; skipping 12s advertisement fallback so GATT can retry while Windows refreshes the paired service table",
+                state.target_name
+            ));
         }
 
         match open_notify_target_from_advertisement() {
@@ -6690,6 +6773,44 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         }
 
         Ok(false)
+    }
+
+    fn open_notify_target_for_known_addresses(
+        context: &str,
+        preferred_address: Option<u64>,
+    ) -> Result<OpenNotifyTarget, String> {
+        let mut addresses = Vec::new();
+        if let Some(address) = preferred_address {
+            push_unique_address(&mut addresses, address);
+        }
+        for address in listener_recovery_target_addresses() {
+            push_unique_address(&mut addresses, address);
+        }
+        if let Some(address) = configured_bluetooth_address() {
+            push_unique_address(&mut addresses, address);
+        }
+        if addresses.is_empty() {
+            return Err(format!("{context}: no known Listener BLE address"));
+        }
+
+        let mut last_error = None;
+        for address in addresses {
+            match open_notify_target_for_device(address) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] {context}: selected known Listener address={address:012X}"
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    last_error = Some(format!(
+                        "{context}: known Listener address {address:012X} failed: {err}"
+                    ));
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| format!("{context}: no usable known Listener address")))
     }
 
     fn open_notify_target_from_advertisement() -> Result<OpenNotifyTarget, String> {
@@ -11253,6 +11374,11 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
             LOCK.get_or_init(|| Mutex::new(()))
         }
 
+        fn bluetooth_target_name_test_lock() -> &'static Mutex<()> {
+            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+            LOCK.get_or_init(|| Mutex::new(()))
+        }
+
         #[cfg(any())]
         fn stm32wb_st_ota_confirm_env_test_lock() -> &'static Mutex<()> {
             static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -11433,6 +11559,28 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
                 "some-listener-device",
                 &target_names
             ));
+        }
+
+        #[test]
+        fn recovery_advertisement_scan_prefers_configured_current_name() {
+            let _guard = bluetooth_target_name_test_lock().lock().unwrap();
+            let previous = configured_bluetooth_target_name();
+            set_configured_bluetooth_target_name("listenerC");
+
+            let scan_names = listener_recovery_advertisement_scan_names(&[
+                "listenerB".to_string(),
+                "listenerC".to_string(),
+            ]);
+
+            match previous {
+                Some(name) => set_configured_bluetooth_target_name(&name),
+                None => set_configured_bluetooth_target_name(""),
+            }
+
+            assert_eq!(
+                scan_names,
+                vec!["listenerC".to_string(), "listenerB".to_string()]
+            );
         }
 
         #[test]
