@@ -36,4 +36,40 @@ if (!source.includes('write_type_heartbeat(b"TYPE:BYE\\n", "Type heartbeat bye")
   throw new Error("Real notify teardown must still send Type BYE");
 }
 
-console.log("PASS: embedded BLE processing LED sync keeps Type-ready across normal completion and reserves BYE for teardown.");
+const recoveryStart = source.indexOf("fn listener_recovery_pairing_candidates");
+const recoveryEnd = source.indexOf("fn push_listener_pairing_candidate_if_matching", recoveryStart);
+if (recoveryStart < 0 || recoveryEnd < 0) {
+  throw new Error("Could not locate embedded BLE recovery pairing candidate section");
+}
+
+const recoverySection = source.slice(recoveryStart, recoveryEnd);
+if (!recoverySection.includes("pairing_device_information_from_bluetooth_address_handle")) {
+  throw new Error("Recovery pairing must keep the direct Bluetooth address DeviceInformation fallback");
+}
+if (!recoverySection.includes("scan_listener_pairing_advertisements")) {
+  throw new Error("Recovery pairing must scan advertisements before direct address pairing");
+}
+if (!recoverySection.includes("recovery pairing using")) {
+  throw new Error("Recovery pairing must prefer direct advertisement/address candidates when visible");
+}
+if (!recoverySection.includes("listener_pairing_candidates_from_unpaired_selector")) {
+  throw new Error("Recovery pairing must keep Windows unpaired selector fallback after direct address lookup");
+}
+const selectorFallbackIndex = recoverySection.indexOf("listener_pairing_candidates_from_unpaired_selector");
+const directAddressIndex = recoverySection.indexOf("pairing_device_information_from_bluetooth_address_handle");
+if (selectorFallbackIndex < 0 || directAddressIndex < 0 || directAddressIndex > selectorFallbackIndex) {
+  throw new Error("Recovery pairing must try direct address lookup before Windows unpaired selector fallback");
+}
+
+if (
+  source.includes("BTHPORT cache contains advertised Listener address") ||
+  source.includes("allowing direct GATT fallback while WinRT paired device table refreshes")
+) {
+  throw new Error(
+    "BTHPORT cache entries are stale-host diagnostics only; they must not authorize direct audio GATT fallback before Windows exposes a paired BLE device.",
+  );
+}
+
+console.log(
+  "PASS: embedded BLE processing LED sync keeps Type-ready across normal completion, reserves BYE for teardown, recovery pairing appends direct address fallback, and stale BTHPORT cache does not bypass pairing.",
+);

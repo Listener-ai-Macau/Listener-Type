@@ -1381,6 +1381,21 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
             log::info!(
                 "[cli] headless prompt-embedded-ble-pairing: expected_name={expected_name:?}"
             );
+            match crate::embedded_ble::send_recording_control_recovery(
+                std::time::Duration::from_secs(5),
+            ) {
+                Ok(()) => {
+                    log::info!(
+                        "[cli] headless prompt-embedded-ble-pairing opened Listener recovery pairing window"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(700));
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[cli] headless prompt-embedded-ble-pairing recovery command skipped: {err}"
+                    );
+                }
+            }
             let result =
                 crate::embedded_ble::prompt_listener_pairing_for_recovery(expected_name.as_deref());
             let result_json = serde_json::to_string(&result)

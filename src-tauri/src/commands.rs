@@ -1926,7 +1926,7 @@ fn embedded_ble_recovery_message(
                 return "旧配对已清理，但 Windows 当前没有看到可配对的 Listener。请保持设备唤醒，在打开的蓝牙设置里添加设备。".to_string();
             }
             crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction => {
-                return "Type 已尝试触发 Windows 系统配对提醒，但 Windows 仍需要你手动确认。请在打开的蓝牙设置里重新配对 Listener。".to_string();
+                return "旧配对已清理。请在打开的 Windows 蓝牙设置里重新连接 Listener；Type 检测到配对后会自动恢复。".to_string();
             }
         }
     }
@@ -1961,6 +1961,24 @@ fn embedded_ble_recovery_message(
         EmbeddedBleRecoveryAction::None | EmbeddedBleRecoveryAction::Reconnected => {
             failure.user_action.to_string()
         }
+    }
+}
+
+fn embedded_ble_windows_native_pairing_handoff_result(
+    context: &str,
+    expected_ble_name: &str,
+) -> crate::embedded_ble::BleDevicePairingPromptResult {
+    crate::embedded_ble::BleDevicePairingPromptResult {
+        status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+        attempted: false,
+        matched_devices: 0,
+        prompted_devices: 0,
+        already_paired_devices: 0,
+        failed_devices: 0,
+        open_bluetooth_settings: true,
+        details: vec![format!(
+            "{context}: automatic Windows PairAsync skipped; use Windows Bluetooth to connect {expected_ble_name}."
+        )],
     }
 }
 
@@ -2110,16 +2128,12 @@ pub async fn recover_embedded_ble_device(
                 recovery_action = EmbeddedBleRecoveryAction::RePairRequired;
                 unpair_result = Some(unpair.clone());
                 let expected_ble_name = coord.prefs().get().device_ble_name;
-                let pairing = tauri::async_runtime::spawn_blocking(move || {
-                    std::thread::sleep(Duration::from_millis(1200));
-                    crate::embedded_ble::prompt_listener_pairing_for_recovery(Some(
-                        expected_ble_name.as_str(),
-                    ))
-                })
-                .await
-                .map_err(|err| format!("Listener BLE pairing prompt task failed: {err}"))?;
+                let pairing = embedded_ble_windows_native_pairing_handoff_result(
+                    "one-click recovery",
+                    expected_ble_name.as_str(),
+                );
                 log::info!(
-                    "[embedded-ble] one-click recovery Windows pairing prompt result status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
+                    "[embedded-ble] one-click recovery Windows native pairing handoff status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
                     pairing.status,
                     pairing.matched_devices,
                     pairing.prompted_devices,
@@ -2416,10 +2430,12 @@ fn apply_device_ble_name_windows_refresh_blocking(
         unpair_result.needs_user_action,
     );
     std::thread::sleep(DEVICE_SETTINGS_BLE_NAME_PAIRING_SETTLE_DELAY);
-    let pairing_prompt_result =
-        crate::embedded_ble::prompt_listener_pairing_for_recovery(Some(expected_ble_name.as_str()));
+    let pairing_prompt_result = embedded_ble_windows_native_pairing_handoff_result(
+        "device BLE name change",
+        expected_ble_name.as_str(),
+    );
     log::info!(
-        "[device-settings] BLE name Windows pairing prompt status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
+        "[device-settings] BLE name Windows native pairing handoff status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
         pairing_prompt_result.status,
         pairing_prompt_result.matched_devices,
         pairing_prompt_result.prompted_devices,

@@ -524,9 +524,8 @@ pub fn validate_package(
     }
     if let Some(current) = context.current_firmware_version.as_deref() {
         if compare_versionish(&manifest.version, current) < 0 {
-            warnings.push(
-                "Package version is older than the connected firmware version.".to_string(),
-            );
+            warnings
+                .push("Package version is older than the connected firmware version.".to_string());
         }
     }
 
