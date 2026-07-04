@@ -172,6 +172,12 @@ pub struct BleDevicePairingPromptResult {
     pub details: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ListenerRecoveryPairingAdvertisementProbe {
+    pub visible: bool,
+    pub has_random_identity: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BleDiagnosticServiceEntry {
@@ -2194,8 +2200,21 @@ mod windows_ble {
             }
         }
 
+        let direct_addresses = if fresh_advertised_addresses.is_empty() {
+            addresses.as_slice()
+        } else {
+            let fresh_labels = fresh_advertised_addresses
+                .iter()
+                .copied()
+                .map(crate::embedded_ble::format_bluetooth_address)
+                .collect::<Vec<_>>();
+            log::info!(
+                "[embedded-ble] recovery pairing using fresh advertised address(es) before stale configured/PnP addresses: {fresh_labels:?}"
+            );
+            fresh_advertised_addresses.as_slice()
+        };
         let candidates = listener_recovery_direct_pairing_candidates(
-            &addresses,
+            direct_addresses,
             &fresh_advertised_addresses,
             expected_name,
             &mut seen_ids,
@@ -2208,7 +2227,7 @@ mod windows_ble {
             return Ok(candidates);
         }
 
-        match listener_pairing_candidates_from_unpaired_selector(expected_name, &addresses) {
+        match listener_pairing_candidates_from_unpaired_selector(expected_name, direct_addresses) {
             Ok(selector_candidates) if !selector_candidates.is_empty() => {
                 log::info!(
                     "[embedded-ble] recovery pairing using {} Windows unpaired selector candidate(s) after direct address lookup found no candidate",
@@ -2241,6 +2260,7 @@ mod windows_ble {
             .map(str::trim)
             .filter(|value| !value.is_empty());
         let mut addresses = listener_recovery_target_addresses();
+        let mut fresh_advertised_addresses = Vec::new();
         match scan_listener_pairing_advertisements(expected_name) {
             Ok(advertised) => {
                 for (address, _address_type, name) in advertised {
@@ -2248,6 +2268,7 @@ mod windows_ble {
                         || addresses.contains(&address)
                     {
                         push_unique_address(&mut addresses, address);
+                        push_unique_address(&mut fresh_advertised_addresses, address);
                     }
                 }
             }
@@ -2256,15 +2277,33 @@ mod windows_ble {
             }
         }
 
-        match listener_pairing_candidates_from_unpaired_selector(expected_name, &addresses) {
+        let selector_addresses = if fresh_advertised_addresses.is_empty() {
+            addresses.as_slice()
+        } else {
+            fresh_advertised_addresses.as_slice()
+        };
+        match listener_pairing_candidates_from_unpaired_selector(expected_name, selector_addresses)
+        {
             Ok(candidates) if !candidates.is_empty() => Ok(candidates),
             Ok(_) => {
+                if !fresh_advertised_addresses.is_empty() {
+                    log::warn!(
+                        "[embedded-ble] recovery AEP fallback found no candidate for fresh advertised address; not falling back to stale same-name cache"
+                    );
+                    return Ok(Vec::new());
+                }
                 log::warn!(
                     "[embedded-ble] recovery AEP fallback found no filtered unpaired selector candidate; using normal pairing discovery"
                 );
                 listener_pairing_candidates(expected_name)
             }
             Err(err) => {
+                if !fresh_advertised_addresses.is_empty() {
+                    log::warn!(
+                        "[embedded-ble] recovery AEP fallback unpaired selector failed for fresh advertised address; not falling back to stale same-name cache: {err}"
+                    );
+                    return Ok(Vec::new());
+                }
                 log::warn!(
                     "[embedded-ble] recovery AEP fallback unpaired selector failed; using normal pairing discovery: {err}"
                 );
@@ -7942,6 +7981,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     pub(super) fn is_transient_notify_target_open_error(err: &str) -> bool {
+        if err.contains("No paired BLE device found in Windows Bluetooth pairing store") {
+            return false;
+        }
         err.contains("GattCommunicationStatus(3)")
             || err.contains("Unreachable")
             || err.contains("unreachable")
@@ -9279,6 +9321,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         expected_name: Option<&str>,
         timeout: Duration,
     ) -> bool {
+        listener_recovery_pairing_advertisement_probe(expected_name, timeout).visible
+    }
+
+    pub fn listener_recovery_pairing_advertisement_probe(
+        expected_name: Option<&str>,
+        timeout: Duration,
+    ) -> crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
         let expected_name = effective_bluetooth_target_name(expected_name);
         match scan_listener_advertisements(
             "Listener recovery pairing",
@@ -9290,21 +9339,26 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     "[embedded-ble] no recovery pairing advertisement visible target={expected_name:?} timeout_ms={}",
                     timeout.as_millis()
                 );
-                false
+                crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe::default()
             }
             Ok(candidates) => {
-                if let Some((address, _address_type, name)) = candidates.first() {
+                if let Some((address, address_type, name)) = candidates.first() {
                     log::info!(
-                        "[embedded-ble] recovery pairing advertisement visible target={expected_name:?} name={name:?} address={address:012X}"
+                        "[embedded-ble] recovery pairing advertisement visible target={expected_name:?} name={name:?} address={address:012X} address_type={address_type:?}"
                     );
                 }
-                true
+                crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
+                    visible: true,
+                    has_random_identity: candidates
+                        .iter()
+                        .any(|(_, address_type, _)| *address_type == BluetoothAddressType::Random),
+                }
             }
             Err(err) => {
                 log::warn!(
                     "[embedded-ble] recovery pairing advertisement probe failed target={expected_name:?}: {err}"
                 );
-                false
+                crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe::default()
             }
         }
     }
@@ -13517,16 +13571,62 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .expect("recovery pairing must scan advertisements");
             let selector_index = body
                 .find(
-                    "listener_pairing_candidates_from_unpaired_selector(expected_name, &addresses)",
+                    "listener_pairing_candidates_from_unpaired_selector(expected_name, direct_addresses)",
                 )
                 .expect(
                     "recovery pairing must pass freshly advertised addresses into Windows selector",
                 );
 
             assert!(
+                body.contains("let direct_addresses = if fresh_advertised_addresses.is_empty()"),
+                "recovery pairing must use fresh advertised addresses as the selector filter when present"
+            );
+            assert!(
                 scan_index < selector_index,
                 "recovery pairing must still pass freshly advertised BLE addresses into Windows selector filtering when direct lookup cannot produce a candidate"
             );
+        }
+
+        #[test]
+        fn recovery_pairing_limits_direct_candidates_to_fresh_advertisement_when_available() {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("fn listener_recovery_pairing_candidates")
+                .expect("recovery pairing candidate function should exist");
+            let end = source[start..]
+                .find("fn listener_recovery_pairing_selector_fallback_candidates")
+                .map(|offset| start + offset)
+                .expect("recovery pairing selector fallback boundary should exist");
+            let body = &source[start..end];
+
+            assert!(body.contains("fresh_advertised_addresses.as_slice()"));
+            assert!(body.contains("recovery pairing using fresh advertised address(es)"));
+            assert!(
+                body.contains(
+                    "listener_recovery_direct_pairing_candidates(\n            direct_addresses,"
+                ),
+                "direct pairing must not try stale configured/PnP addresses ahead of the current recovery advertisement"
+            );
+        }
+
+        #[test]
+        fn recovery_pairing_fallback_does_not_use_stale_same_name_cache_when_fresh_address_exists()
+        {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("fn listener_recovery_pairing_selector_fallback_candidates")
+                .expect("recovery pairing selector fallback should exist");
+            let end = source[start..]
+                .find("fn listener_recovery_direct_pairing_candidates")
+                .map(|offset| start + offset)
+                .expect("recovery direct pairing boundary should exist");
+            let body = &source[start..end];
+
+            assert!(body.contains("let mut fresh_advertised_addresses = Vec::new();"));
+            assert!(
+                body.contains("let selector_addresses = if fresh_advertised_addresses.is_empty()")
+            );
+            assert!(body.contains("not falling back to stale same-name cache"));
         }
 
         #[test]
@@ -15010,6 +15110,14 @@ pub fn listener_recovery_pairing_advertisement_visible(
 }
 
 #[cfg(target_os = "windows")]
+pub fn listener_recovery_pairing_advertisement_probe(
+    expected_name: Option<&str>,
+    timeout: Duration,
+) -> ListenerRecoveryPairingAdvertisementProbe {
+    windows_ble::listener_recovery_pairing_advertisement_probe(expected_name, timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn listener_ble_name_cache_needs_cleanup(expected_name: &str) -> bool {
     windows_ble::listener_ble_name_cache_needs_cleanup(expected_name)
 }
@@ -15428,6 +15536,14 @@ pub fn listener_recovery_pairing_advertisement_visible(
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn listener_recovery_pairing_advertisement_probe(
+    _expected_name: Option<&str>,
+    _timeout: Duration,
+) -> ListenerRecoveryPairingAdvertisementProbe {
+    ListenerRecoveryPairingAdvertisementProbe::default()
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn listener_ble_name_cache_needs_cleanup(_expected_name: &str) -> bool {
     false
 }
@@ -15591,6 +15707,9 @@ mod tests {
         ));
         assert!(windows_ble::is_transient_notify_target_open_error(
             "BLE service open wait failed: HRESULT(0x800706BA)"
+        ));
+        assert!(!windows_ble::is_transient_notify_target_open_error(
+            "Linda: BLE device path A4CB8FF2B512 failed: BluetoothCacheMode(0): BLE GATT session did not become active after 8000 ms; advertisement fallback failed: No paired BLE device found in Windows Bluetooth pairing store for advertised Listener address(es) D4E8768AB2EE; skipping audio notify advertisement GATT fallback until Windows pairing completes"
         ));
         assert!(!windows_ble::is_transient_notify_target_open_error(
             "notify characteristic not found"
