@@ -243,10 +243,75 @@ fn firmware_ota_device_snapshot_for_manifest(
     manifest: &FirmwareOtaManifest,
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
     if manifest.is_listener_ble_ota_v2() {
-        crate::embedded_ble::listener_ota_v2_device_snapshot()
+        listener_ota_v2_snapshot_with_identity_fallback(
+            crate::embedded_ble::listener_ota_v2_device_snapshot(),
+        )
     } else {
         crate::embedded_ble::firmware_ota_device_snapshot()
     }
+}
+
+fn listener_ota_v2_snapshot_with_identity_fallback(
+    snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+    if !snapshot.connected || !listener_ota_v2_snapshot_needs_identity_fallback(&snapshot) {
+        return snapshot;
+    }
+    merge_listener_ota_v2_snapshot_identity(
+        snapshot,
+        crate::embedded_ble::firmware_ota_device_snapshot(),
+    )
+}
+
+fn listener_ota_v2_snapshot_needs_identity_fallback(
+    snapshot: &crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+) -> bool {
+    snapshot.hardware_revision.is_none()
+        || snapshot.firmware_version.is_none()
+        || snapshot.battery_percent.is_none()
+        || snapshot.usb_powered.is_none()
+}
+
+fn merge_listener_ota_v2_snapshot_identity(
+    mut snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+    fallback: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+    if !fallback.connected {
+        return snapshot;
+    }
+
+    let mut recovered_identity = false;
+    if snapshot.hardware_revision.is_none() && fallback.hardware_revision.is_some() {
+        snapshot.hardware_revision = fallback.hardware_revision;
+        recovered_identity = true;
+    }
+    if snapshot.firmware_version.is_none() && fallback.firmware_version.is_some() {
+        snapshot.firmware_version = fallback.firmware_version;
+        recovered_identity = true;
+    }
+    if snapshot.battery_percent.is_none() {
+        snapshot.battery_percent = fallback.battery_percent;
+    }
+    if snapshot.usb_powered.is_none() {
+        snapshot.usb_powered = fallback.usb_powered;
+    }
+    for capability in fallback.capabilities {
+        if !snapshot
+            .capabilities
+            .iter()
+            .any(|existing| existing == &capability)
+        {
+            snapshot.capabilities.push(capability);
+        }
+    }
+
+    if recovered_identity {
+        snapshot.detail = Some(
+            "Listener OTA v2 service is reachable; device identity was recovered through the stable OTA anchor."
+                .to_string(),
+        );
+    }
+    snapshot
 }
 
 struct HeadlessTransferAttempt {
@@ -312,6 +377,7 @@ fn run_listener_ota_v2_transfer_preflight_and_write(
     package: &FirmwareOtaPackage,
     options: &FirmwareOtaHeadlessOptions,
 ) -> HeadlessTransferAttempt {
+    let identity_fallback = crate::embedded_ble::firmware_ota_device_snapshot();
     let prepared = match crate::embedded_ble::prepare_listener_ota_v2_transfer() {
         Ok(prepared) => prepared,
         Err(err) => {
@@ -326,7 +392,8 @@ fn run_listener_ota_v2_transfer_preflight_and_write(
         }
     };
 
-    let snapshot = prepared.snapshot().clone();
+    let snapshot =
+        merge_listener_ota_v2_snapshot_identity(prepared.snapshot().clone(), identity_fallback);
     let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
     let preflight = headless_preflight_from_snapshot(options, snapshot, blockers.clone());
     if !blockers.is_empty() {
@@ -1228,6 +1295,23 @@ mod tests {
         }
     }
 
+    fn ota_snapshot(
+        connected: bool,
+        hardware_revision: Option<&str>,
+        firmware_version: Option<&str>,
+        capabilities: Vec<&str>,
+    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+            connected,
+            hardware_revision: hardware_revision.map(str::to_string),
+            firmware_version: firmware_version.map(str::to_string),
+            capabilities: capabilities.into_iter().map(str::to_string).collect(),
+            battery_percent: None,
+            usb_powered: None,
+            detail: None,
+        }
+    }
+
     fn manifest_v2(extra: &str) -> String {
         format!(
             r#"{{
@@ -1385,6 +1469,59 @@ mod tests {
         assert!(firmware_ota_versions_match("1.2.0", "v1.2.0"));
         assert!(!firmware_ota_versions_match("1.2.0-dev", "1.2.0"));
         assert!(!firmware_ota_versions_match("", "1.2.0"));
+    }
+
+    #[test]
+    fn listener_ota_v2_snapshot_recovers_identity_from_stable_anchor() {
+        let snapshot = ota_snapshot(true, None, None, vec![LISTENER_OTA_V2_FIRMWARE_CAPABILITY]);
+        let mut fallback = ota_snapshot(
+            true,
+            Some("keyboard-v1"),
+            Some("1.0.2"),
+            vec![FIRMWARE_CAPABILITY],
+        );
+        fallback.battery_percent = Some(93);
+        fallback.usb_powered = Some(true);
+
+        let merged = merge_listener_ota_v2_snapshot_identity(snapshot, fallback);
+
+        assert_eq!(merged.hardware_revision.as_deref(), Some("keyboard-v1"));
+        assert_eq!(merged.firmware_version.as_deref(), Some("1.0.2"));
+        assert_eq!(merged.battery_percent, Some(93));
+        assert_eq!(merged.usb_powered, Some(true));
+        assert!(merged
+            .capabilities
+            .iter()
+            .any(|item| item == LISTENER_OTA_V2_FIRMWARE_CAPABILITY));
+        assert!(merged
+            .capabilities
+            .iter()
+            .any(|item| item == FIRMWARE_CAPABILITY));
+        assert!(merged
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("recovered")));
+    }
+
+    #[test]
+    fn listener_ota_v2_snapshot_keeps_primary_identity_when_present() {
+        let snapshot = ota_snapshot(
+            true,
+            Some("keyboard-v1"),
+            Some("1.0.2"),
+            vec![LISTENER_OTA_V2_FIRMWARE_CAPABILITY],
+        );
+        let fallback = ota_snapshot(
+            true,
+            Some("keyboard-v2"),
+            Some("1.0.3"),
+            vec![FIRMWARE_CAPABILITY],
+        );
+
+        let merged = merge_listener_ota_v2_snapshot_identity(snapshot, fallback);
+
+        assert_eq!(merged.hardware_revision.as_deref(), Some("keyboard-v1"));
+        assert_eq!(merged.firmware_version.as_deref(), Some("1.0.2"));
     }
 
     #[test]
