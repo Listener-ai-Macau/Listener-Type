@@ -79,7 +79,9 @@ pub fn run() {
             | cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. }
             | cli::CliIntent::SendEmbeddedAudioControlStop { .. }
             | cli::CliIntent::ReadEmbeddedAudioBleStatus { .. }
+            | cli::CliIntent::ProbeListenerOtaV2Gatt { .. }
             | cli::CliIntent::PromptEmbeddedBlePairing { .. }
+            | cli::CliIntent::PromptEmbeddedBlePairingOnly { .. }
             | cli::CliIntent::CleanupEmbeddedBlePairing { .. } => {
                 std::process::exit(run_embedded_ble_headless_cli(intent));
             }
@@ -298,7 +300,6 @@ pub fn run() {
             // Spin up hotkey listener; coordinator owns the lifecycle.
             coordinator.start_hotkey_listener();
             coordinator.auto_select_embedded_ble_input_source_in_background();
-            coordinator.refresh_embedded_ble_listener();
             // QA / custom combo hotkeys use `global-hotkey` (Carbon on macOS).
             // Start those after RunEvent::Ready, when the AppKit event loop is live.
             if should_force_show_main_on_start() {
@@ -977,34 +978,44 @@ fn app_profile_dir_name() -> &'static str {
 }
 
 pub fn log_dir_path() -> std::path::PathBuf {
-    #[cfg(target_os = "macos")]
+    #[cfg(test)]
     {
-        if let Ok(home) = std::env::var("HOME") {
-            return std::path::PathBuf::from(home)
-                .join("Library")
-                .join("Logs")
-                .join(app_profile_dir_name());
-        }
+        std::env::temp_dir()
+            .join("listener-type-test-logs")
+            .join(std::process::id().to_string())
     }
-    #[cfg(target_os = "windows")]
+
+    #[cfg(not(test))]
     {
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            return std::path::PathBuf::from(local)
-                .join(app_profile_dir_name())
-                .join("Logs");
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(home) = std::env::var("HOME") {
+                return std::path::PathBuf::from(home)
+                    .join("Library")
+                    .join("Logs")
+                    .join(app_profile_dir_name());
+            }
         }
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            return std::path::PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join(app_profile_dir_name())
-                .join("logs");
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                return std::path::PathBuf::from(local)
+                    .join(app_profile_dir_name())
+                    .join("Logs");
+            }
         }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            if let Ok(home) = std::env::var("HOME") {
+                return std::path::PathBuf::from(home)
+                    .join(".local")
+                    .join("share")
+                    .join(app_profile_dir_name())
+                    .join("logs");
+            }
+        }
+        std::env::temp_dir().join(app_profile_dir_name())
     }
-    std::env::temp_dir().join(app_profile_dir_name())
 }
 
 pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
@@ -1241,8 +1252,14 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
         cli::CliIntent::ReadEmbeddedAudioBleStatus { .. } => {
             log::warn!("[cli] embedded BLE status read is headless-only and was ignored by the running GUI instance");
         }
+        cli::CliIntent::ProbeListenerOtaV2Gatt { .. } => {
+            log::warn!("[cli] Listener OTA v2 GATT probe is headless-only and was ignored by the running GUI instance");
+        }
         cli::CliIntent::PromptEmbeddedBlePairing { .. } => {
             log::warn!("[cli] embedded BLE pairing prompt is headless-only and was ignored by the running GUI instance");
+        }
+        cli::CliIntent::PromptEmbeddedBlePairingOnly { .. } => {
+            log::warn!("[cli] embedded BLE pairing-only prompt is headless-only and was ignored by the running GUI instance");
         }
         cli::CliIntent::CleanupEmbeddedBlePairing { .. } => {
             log::warn!("[cli] embedded BLE pairing cleanup is headless-only and was ignored by the running GUI instance");
@@ -1314,8 +1331,38 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
     ));
     #[cfg(not(target_os = "windows"))]
     let coordinator = Arc::new(coordinator::Coordinator::new());
+    sync_headless_embedded_ble_target_name_from_firmware(&coordinator);
 
     match intent {
+        cli::CliIntent::ProbeListenerOtaV2Gatt { timeout_ms } => {
+            log::info!("[cli] headless probe-listener-ota-v2-gatt: timeout_ms={timeout_ms:?}");
+            let timeout_ms = timeout_ms.unwrap_or(20_000).clamp(1_000, 30_000);
+            let snapshot = crate::embedded_ble::listener_ota_v2_device_snapshot();
+            let has_capability = snapshot
+                .capabilities
+                .iter()
+                .any(|item| item == "firmware_ota_v2");
+            let status = if snapshot.connected && has_capability {
+                "PASS"
+            } else {
+                "FAIL"
+            };
+            let report = serde_json::json!({
+                "status": status,
+                "timeoutMs": timeout_ms,
+                "backend": "listener-type-rust-winrt",
+                "snapshot": snapshot,
+            });
+            let report_json = serde_json::to_string(&report)
+                .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+            headless_print_line(format!("listener_ota_v2_gatt_probe_json={report_json}"));
+            log::info!("listener_ota_v2_gatt_probe_json={report_json}");
+            if status == "PASS" {
+                0
+            } else {
+                1
+            }
+        }
         cli::CliIntent::ProbeEmbeddedAudioBleSubscription { timeout_ms } => {
             log::info!(
                 "[cli] headless probe-embedded-audio-ble-subscription: timeout_ms={timeout_ms:?}"
@@ -1381,21 +1428,45 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
             log::info!(
                 "[cli] headless prompt-embedded-ble-pairing: expected_name={expected_name:?}"
             );
-            match crate::embedded_ble::send_recording_control_recovery(
-                std::time::Duration::from_secs(5),
-            ) {
-                Ok(()) => {
-                    log::info!(
+            let type_recovery_command_confirmed =
+                match crate::embedded_ble::send_recording_control_recovery(
+                    std::time::Duration::from_secs(5),
+                ) {
+                    Ok(()) => {
+                        log::info!(
                         "[cli] headless prompt-embedded-ble-pairing opened Listener recovery pairing window"
                     );
-                    std::thread::sleep(std::time::Duration::from_millis(700));
-                }
-                Err(err) => {
-                    log::warn!(
+                        std::thread::sleep(std::time::Duration::from_millis(700));
+                        true
+                    }
+                    Err(err) => {
+                        log::warn!(
                         "[cli] headless prompt-embedded-ble-pairing recovery command skipped: {err}"
                     );
-                }
+                        false
+                    }
+                };
+            let result = if type_recovery_command_confirmed {
+                crate::embedded_ble::prompt_listener_pairing_after_type_recovery(
+                    expected_name.as_deref(),
+                )
+            } else {
+                crate::embedded_ble::prompt_listener_pairing_for_recovery(expected_name.as_deref())
+            };
+            let result_json = serde_json::to_string(&result)
+                .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+            headless_print_line(format!("embedded_ble_pairing_prompt_json={result_json}"));
+            log::info!("embedded_ble_pairing_prompt_json={result_json}");
+            if result.open_bluetooth_settings {
+                1
+            } else {
+                0
             }
+        }
+        cli::CliIntent::PromptEmbeddedBlePairingOnly { expected_name } => {
+            log::info!(
+                "[cli] headless prompt-embedded-ble-pairing-only: expected_name={expected_name:?}"
+            );
             let result =
                 crate::embedded_ble::prompt_listener_pairing_for_recovery(expected_name.as_deref());
             let result_json = serde_json::to_string(&result)
@@ -1488,6 +1559,47 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
         _ => 2,
     }
 }
+
+#[cfg(target_os = "windows")]
+fn sync_headless_embedded_ble_target_name_from_firmware(coordinator: &coordinator::Coordinator) {
+    let status = match crate::embedded_ble::read_device_settings_status(Duration::from_secs(2)) {
+        Ok(status) => status,
+        Err(err) => {
+            log::info!(
+                "[cli] headless BLE target name sync skipped; device settings unavailable: {err}"
+            );
+            return;
+        }
+    };
+    let firmware_name = status.ble_name.trim();
+    let valid = crate::types::device_ble_name_is_valid(firmware_name);
+    if status.ble_name_pending_restart || !valid {
+        log::info!(
+            "[cli] headless BLE target name sync skipped firmware_name={firmware_name:?} pending={} valid={valid}",
+            status.ble_name_pending_restart
+        );
+        return;
+    }
+
+    crate::embedded_ble::set_configured_bluetooth_target_name(firmware_name);
+    let mut prefs = coordinator.prefs().get();
+    if prefs.device_ble_name == firmware_name {
+        return;
+    }
+    let previous = prefs.device_ble_name.clone();
+    prefs.device_ble_name = firmware_name.to_string();
+    match coordinator.prefs().set(prefs) {
+        Ok(()) => log::warn!(
+            "[cli] headless BLE target name synced from firmware previous={previous:?} firmware_name={firmware_name:?}"
+        ),
+        Err(err) => log::warn!(
+            "[cli] headless BLE target name sync could not persist previous={previous:?} firmware_name={firmware_name:?}: {err}"
+        ),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn sync_headless_embedded_ble_target_name_from_firmware(_coordinator: &coordinator::Coordinator) {}
 
 fn headless_print_line(line: impl AsRef<str>) {
     use std::io::Write;
@@ -2020,13 +2132,47 @@ fn capsule_height_for_qa() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        capsule_height_for_qa, capsule_visual_height, capsule_window_bounds,
+        capsule_height_for_qa, capsule_visual_height, capsule_window_bounds, log_dir_path,
         parse_tray_polish_mode_id, rotate_log_if_too_large, should_hide_main_on_close,
         should_keep_alive_on_exit_request, tray_polish_mode_menu_entries, tray_style_menu_enabled,
         LOG_ROTATE_LIMIT_BYTES,
     };
     use crate::types::PolishMode;
     use std::io::Write;
+
+    #[test]
+    fn headless_recovery_command_uses_confirmed_type_recovery_pairing_path() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("cli::CliIntent::PromptEmbeddedBlePairing { expected_name }")
+            .expect("headless pairing CLI arm should exist");
+        let end = source[start..]
+            .find("cli::CliIntent::PromptEmbeddedBlePairingOnly")
+            .map(|offset| start + offset)
+            .expect("pairing-only CLI arm should exist");
+        let recovery_body = &source[start..end];
+        let command_index = recovery_body
+            .find("send_recording_control_recovery")
+            .expect("confirmed recovery CLI must command Listener into pairing first");
+        let forced_pairing_index = recovery_body
+            .find("prompt_listener_pairing_after_type_recovery")
+            .expect("confirmed recovery CLI must use the stale-cache cleanup pairing path");
+        assert!(
+            command_index < forced_pairing_index,
+            "Type must only force stale Windows cache cleanup after the firmware recovery command succeeds"
+        );
+
+        let only_start = end;
+        let only_end = source[only_start..]
+            .find("cli::CliIntent::CleanupEmbeddedBlePairing")
+            .map(|offset| only_start + offset)
+            .expect("cleanup CLI arm should exist");
+        let only_body = &source[only_start..only_end];
+        assert!(
+            !only_body.contains("prompt_listener_pairing_after_type_recovery"),
+            "pairing-only scan must stay conservative and must not force stale cache removal"
+        );
+    }
 
     #[test]
     fn tray_style_menu_is_windows_only() {
@@ -2196,5 +2342,18 @@ mod tests {
         assert!(!archive.exists());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unit_tests_do_not_write_runtime_app_log() {
+        let path = log_dir_path();
+        assert!(
+            path.starts_with(std::env::temp_dir()),
+            "test logger path must stay in temp, got {path:?}"
+        );
+        assert!(
+            path.to_string_lossy().contains("listener-type-test-logs"),
+            "test logger path should be visibly separated from runtime app logs"
+        );
     }
 }

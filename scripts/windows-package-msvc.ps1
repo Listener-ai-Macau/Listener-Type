@@ -162,6 +162,89 @@ function Test-WebView2Runtime {
   Write-Warning "WebView2 Runtime registry key not found. Install Evergreen runtime if the app window is blank."
 }
 
+function Invoke-CmdWithHeartbeat {
+  param(
+    [Parameter(Mandatory = $true)][string]$Command,
+    [Parameter(Mandatory = $true)][string]$Label,
+    [int]$HeartbeatSeconds = 60
+  )
+
+  New-Item -ItemType Directory -Force -Path $ArtifactsRoot | Out-Null
+  $safeLabel = ($Label -replace '[^A-Za-z0-9_.-]+', '_').Trim('_')
+  if ([string]::IsNullOrWhiteSpace($safeLabel)) {
+    $safeLabel = "cmd"
+  }
+  $logPath = Join-Path $ArtifactsRoot "$safeLabel.log"
+  $cmdPath = Join-Path $ArtifactsRoot "$safeLabel.cmd"
+  Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $cmdPath -Force -ErrorAction SilentlyContinue
+
+  function Write-LogDelta {
+    param(
+      [Parameter(Mandatory = $true)][string]$Path,
+      [long]$Offset
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+      return $Offset
+    }
+
+    $stream = [System.IO.File]::Open(
+      $Path,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::Read,
+      [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+    )
+    try {
+      if ($stream.Length -le $Offset) {
+        return $Offset
+      }
+      [void]$stream.Seek($Offset, [System.IO.SeekOrigin]::Begin)
+      $length = [int]($stream.Length - $Offset)
+      $buffer = New-Object byte[] $length
+      $read = $stream.Read($buffer, 0, $length)
+      if ($read -gt 0) {
+        Write-Host -NoNewline ([System.Text.Encoding]::UTF8.GetString($buffer, 0, $read))
+      }
+      return $stream.Position
+    } finally {
+      $stream.Dispose()
+    }
+  }
+
+  Set-Content -LiteralPath $cmdPath -Encoding ASCII -Value @(
+    "@echo off",
+    $Command,
+    "exit /b %ERRORLEVEL%"
+  )
+  $commandWithLog = "call `"$cmdPath`" 1> `"$logPath`" 2>&1"
+  $process = [System.Diagnostics.Process]::new()
+  $process.StartInfo.FileName = "cmd.exe"
+  $process.StartInfo.UseShellExecute = $false
+  $process.StartInfo.CreateNoWindow = $true
+  $process.StartInfo.Arguments = "/d /c $commandWithLog"
+
+  $started = Get-Date
+  $lastHeartbeat = $started
+  $logOffset = 0L
+  [void]$process.Start()
+  while (-not $process.WaitForExit(1000)) {
+    $logOffset = Write-LogDelta -Path $logPath -Offset $logOffset
+    $now = Get-Date
+    if (($now - $lastHeartbeat).TotalSeconds -ge $HeartbeatSeconds) {
+      $elapsed = [int]($now - $started).TotalSeconds
+      Write-Host "[info] $Label still running ($elapsed s elapsed); release builds can be quiet while rustc compiles a large crate."
+      $lastHeartbeat = $now
+    }
+  }
+  $process.WaitForExit()
+  $logOffset = Write-LogDelta -Path $logPath -Offset $logOffset
+
+  $exitCode = $process.ExitCode
+  $process.Dispose()
+  return $exitCode
+}
+
 function Invoke-MsvcBuild {
   param(
     [string]$VsDevCmd,
@@ -172,10 +255,10 @@ function Invoke-MsvcBuild {
   Remove-Item -LiteralPath $msiPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath (Get-TauriMsiPath) -Force -ErrorAction SilentlyContinue
 
-  $buildCommand = "call `"$VsDevCmd`" -arch=x64 -host_arch=x64 && set `"PATH=$CargoBin;%PATH%`" && npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
-  & cmd.exe /d /c $buildCommand
-  if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Tauri Windows MSI build returned exit code $LASTEXITCODE. Trying to finish MSI linking from generated WiX objects."
+  $buildCommand = "call `"$VsDevCmd`" -arch=x64 -host_arch=x64 && set `"PATH=$CargoBin;%PATH%`" && set `"CARGO_BUILD_JOBS=1`" && npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
+  $exitCode = Invoke-CmdWithHeartbeat -Command $buildCommand -Label "Tauri Windows MSI build"
+  if ($exitCode -ne 0) {
+    Write-Warning "Tauri Windows MSI build returned exit code $exitCode. Trying to finish MSI linking from generated WiX objects."
     Repair-TauriMsiBundle
   }
 }

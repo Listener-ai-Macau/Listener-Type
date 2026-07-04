@@ -113,9 +113,19 @@ try {
     Invoke-External "cargo" @("test", "firmware_ota", "--lib") $tauriRoot
   }
 
-  if (-not $SkipBuild.IsPresent) {
+  if (-not $SkipPackage.IsPresent) {
+    Invoke-Gate "MSVC MSI package without portable zip (single release build)" {
+      Invoke-External "pwsh" @(
+        "-NoProfile",
+        "-File", (Join-Path $PSScriptRoot "windows-package-msvc.ps1"),
+        "-SkipRustInstall",
+        "-SkipNpmCi",
+        "-CleanArtifacts"
+      ) $repoRoot
+    }
+  } elseif (-not $SkipBuild.IsPresent) {
     Invoke-Gate "MSVC release build" {
-      Invoke-External "cargo" @("build", "--release", "--target", "x86_64-pc-windows-msvc") $tauriRoot
+      Invoke-External "cargo" @("build", "--release", "--target", "x86_64-pc-windows-msvc", "-j", "1") $tauriRoot
     }
   }
 
@@ -135,19 +145,6 @@ try {
       log = ""
       error = "Skipped by -SkipHardware"
     }) | Out-Null
-  }
-
-  if (-not $SkipPackage.IsPresent) {
-    Invoke-Gate "MSVC MSI package without portable zip" {
-      Invoke-External "powershell" @(
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-File", (Join-Path $PSScriptRoot "windows-package-msvc.ps1"),
-        "-SkipRustInstall",
-        "-SkipNpmCi",
-        "-CleanArtifacts"
-      ) $repoRoot
-    }
   }
 } finally {
   $summaryPath = Join-Path $OutputDir "summary.json"

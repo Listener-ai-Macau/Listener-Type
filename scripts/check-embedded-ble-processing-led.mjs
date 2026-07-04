@@ -56,9 +56,19 @@ if (!recoverySection.includes("listener_pairing_candidates_from_unpaired_selecto
   throw new Error("Recovery pairing must keep Windows unpaired selector fallback after direct address lookup");
 }
 const selectorFallbackIndex = recoverySection.indexOf("listener_pairing_candidates_from_unpaired_selector");
-const directAddressIndex = recoverySection.indexOf("pairing_device_information_from_bluetooth_address_handle");
-if (selectorFallbackIndex < 0 || directAddressIndex < 0 || directAddressIndex > selectorFallbackIndex) {
+const directCandidateIndex = recoverySection.indexOf("listener_recovery_direct_pairing_candidates");
+if (selectorFallbackIndex < 0 || directCandidateIndex < 0 || directCandidateIndex > selectorFallbackIndex) {
   throw new Error("Recovery pairing must try direct address lookup before Windows unpaired selector fallback");
+}
+
+const directHelperStart = source.indexOf("fn listener_recovery_direct_pairing_candidates");
+const directHelperEnd = source.indexOf("fn push_listener_pairing_candidate_if_matching", directHelperStart);
+if (directHelperStart < 0 || directHelperEnd < 0) {
+  throw new Error("Could not locate embedded BLE direct recovery pairing helper section");
+}
+const directHelperSection = source.slice(directHelperStart, directHelperEnd);
+if (!directHelperSection.includes("pairing_device_information_from_bluetooth_address_handle")) {
+  throw new Error("Recovery direct pairing helper must use the Bluetooth address DeviceInformation handle");
 }
 
 if (

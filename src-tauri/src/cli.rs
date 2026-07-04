@@ -49,8 +49,12 @@ pub enum CliIntent {
     SendEmbeddedAudioControlStop { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：读取嵌入式 BLE 音频服务的 readiness/capabilities 状态。
     ReadEmbeddedAudioBleStatus { timeout_ms: Option<u64> },
+    /// 调试 / 自动化入口：只验证 Listener OTA v2 GATT 服务可达，不做版本升级判定。
+    ProbeListenerOtaV2Gatt { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：扫描未配对 Listener 并触发 Windows 系统配对体验。
     PromptEmbeddedBlePairing { expected_name: Option<String> },
+    /// 调试 / 自动化入口：只执行 Windows 配对体验，不先通过串口打开 recovery 窗口。
+    PromptEmbeddedBlePairingOnly { expected_name: Option<String> },
     /// 调试 / 自动化入口：清理 Windows 里残留的 Listener 配对和 PnP 缓存。
     CleanupEmbeddedBlePairing { expected_name: Option<String> },
     /// 调试 / 自动化入口：校验固件 OTA 包，可选做 BLE preflight 或真实传输。
@@ -159,6 +163,11 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
                     timeout_ms: next_u64_arg(&mut args),
                 });
             }
+            "--probe-listener-ota-v2-gatt" => {
+                return Some(CliIntent::ProbeListenerOtaV2Gatt {
+                    timeout_ms: next_u64_arg(&mut args),
+                });
+            }
             "--prompt-embedded-ble-pairing" => {
                 let expected_name = args
                     .peek()
@@ -169,6 +178,17 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
                     let _ = args.next();
                 }
                 return Some(CliIntent::PromptEmbeddedBlePairing { expected_name });
+            }
+            "--prompt-embedded-ble-pairing-only" => {
+                let expected_name = args
+                    .peek()
+                    .map(|value| value.as_ref())
+                    .filter(|value| !value.starts_with("--"))
+                    .map(ToOwned::to_owned);
+                if expected_name.is_some() {
+                    let _ = args.next();
+                }
+                return Some(CliIntent::PromptEmbeddedBlePairingOnly { expected_name });
             }
             "--cleanup-embedded-ble-pairing" => {
                 let expected_name = args
@@ -469,6 +489,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_recognizes_listener_ota_v2_gatt_probe_with_timeout() {
+        let args = vec!["listener-type", "--probe-listener-ota-v2-gatt", "20000"];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::ProbeListenerOtaV2Gatt {
+                timeout_ms: Some(20000),
+            })
+        );
+    }
+
+    #[test]
     fn parse_recognizes_embedded_ble_pairing_prompt_with_name() {
         let args = vec![
             "listener-type",
@@ -478,6 +509,21 @@ mod tests {
         assert_eq!(
             parse_cli_intent(&args),
             Some(CliIntent::PromptEmbeddedBlePairing {
+                expected_name: Some("listenerB".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_embedded_ble_pairing_only_prompt_with_name() {
+        let args = vec![
+            "listener-type",
+            "--prompt-embedded-ble-pairing-only",
+            "listenerB",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::PromptEmbeddedBlePairingOnly {
                 expected_name: Some("listenerB".to_string()),
             })
         );

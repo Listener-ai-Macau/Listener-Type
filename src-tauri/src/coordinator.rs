@@ -228,6 +228,9 @@ struct Inner {
     embedded_ble_listener_cancel: Mutex<Option<Arc<AtomicBool>>>,
     /// 当前 Listener BLE 后台订阅已完成 CCCD notify 写入，可以接收设备音频。
     embedded_ble_listener_ready: AtomicBool,
+    /// 启动时必须先把 Type 目标名同步到固件广播名，再允许后台 BLE 监听启动。
+    /// 否则前端/托盘的早期 refresh 会用旧 prefs 名字扫一轮，造成第一次连接失败。
+    embedded_ble_startup_name_sync_done: AtomicBool,
     /// 最近一次非空闲的 Listener BLE 后台订阅错误。Overview 读取它来区分
     /// 启动阶段的 CCCD/notify/subscription 失败，这类失败不会生成历史会话。
     embedded_ble_listener_last_error: Mutex<Option<String>>,
@@ -535,6 +538,7 @@ impl Coordinator {
                     embedded_ble_ota_active: AtomicBool::new(false),
                     embedded_ble_listener_cancel: Mutex::new(None),
                     embedded_ble_listener_ready: AtomicBool::new(false),
+                    embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                     embedded_ble_listener_last_error: Mutex::new(None),
                     embedded_ble_pairing_hold_until: Mutex::new(None),
                     embedded_ble_pairing_hold_generation: AtomicU64::new(0),
@@ -607,6 +611,7 @@ impl Coordinator {
                 embedded_ble_ota_active: AtomicBool::new(false),
                 embedded_ble_listener_cancel: Mutex::new(None),
                 embedded_ble_listener_ready: AtomicBool::new(false),
+                embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
                 embedded_ble_pairing_hold_until: Mutex::new(None),
                 embedded_ble_pairing_hold_generation: AtomicU64::new(0),
@@ -711,12 +716,17 @@ impl Coordinator {
                 prefs.dictation_input_source_user_overridden
             );
             async_runtime::spawn_blocking(move || {
+                sync_device_ble_name_from_firmware_settings(
+                    &inner,
+                    "startup_embedded_ble_power_probe",
+                );
                 let firmware = crate::embedded_ble::firmware_ota_device_snapshot();
                 record_embedded_ble_firmware_power_snapshot(
                     &inner,
                     &firmware,
                     "startup_embedded_ble_power_probe",
                 );
+                refresh_embedded_ble_listener(&inner);
             });
             return;
         }
@@ -731,6 +741,7 @@ impl Coordinator {
 
         let inner = Arc::clone(&self.inner);
         async_runtime::spawn_blocking(move || {
+            sync_device_ble_name_from_firmware_settings(&inner, "auto_input_source_probe");
             let firmware = crate::embedded_ble::firmware_ota_device_snapshot();
             record_embedded_ble_firmware_power_snapshot(
                 &inner,
@@ -3755,7 +3766,7 @@ async fn embedded_ble_pairing_recovery_link_reachable(
         return false;
     }
     let result = async_runtime::spawn_blocking(|| {
-        crate::embedded_ble::read_embedded_audio_status(Duration::from_secs(5))
+        crate::embedded_ble::read_embedded_audio_status(Duration::from_secs(20))
     })
     .await;
     match result {
@@ -3899,7 +3910,90 @@ fn start_embedded_ble_pairing_confirmation_watch(
     });
 }
 
+fn startup_ble_name_sync_reason(reason: &'static str) -> bool {
+    matches!(
+        reason,
+        "startup_embedded_ble_power_probe" | "auto_input_source_probe"
+    )
+}
+
+fn mark_startup_ble_name_sync_done(inner: &Arc<Inner>, reason: &'static str) {
+    if !startup_ble_name_sync_reason(reason) {
+        return;
+    }
+    let was_done = inner
+        .embedded_ble_startup_name_sync_done
+        .swap(true, Ordering::SeqCst);
+    if !was_done {
+        log::info!("[embedded-ble] startup BLE name sync gate opened reason={reason}");
+    }
+}
+
+fn sync_device_ble_name_from_firmware_settings(inner: &Arc<Inner>, reason: &'static str) -> bool {
+    let synced = match crate::embedded_ble::read_device_settings_status(Duration::from_secs(2)) {
+        Ok(status) => {
+            let firmware_name = status.ble_name.trim();
+            let valid = crate::types::device_ble_name_is_valid(firmware_name);
+            if status.ble_name_pending_restart || !valid {
+                log::info!(
+                    "[embedded-ble] startup BLE name sync skipped reason={reason} firmware_name={firmware_name:?} pending={} valid={valid}",
+                    status.ble_name_pending_restart
+                );
+                false
+            } else {
+                let mut prefs = inner.prefs.get();
+                if prefs.device_ble_name == firmware_name {
+                    crate::embedded_ble::set_configured_bluetooth_target_name(firmware_name);
+                    false
+                } else {
+                    let previous = prefs.device_ble_name.clone();
+                    prefs.device_ble_name = firmware_name.to_string();
+                    match inner.prefs.set(prefs.clone()) {
+                        Ok(()) => {
+                            crate::embedded_ble::set_configured_bluetooth_target_name(
+                                firmware_name,
+                            );
+                            log::warn!(
+                                "[embedded-ble] startup BLE name sync updated Type target from {previous:?} to firmware name {firmware_name:?} reason={reason}"
+                            );
+                            if let Some(app) = inner.app.lock().clone() {
+                                let _ = app.emit("prefs:changed", &prefs);
+                                let _ = app.emit_to("main", "prefs:changed", &prefs);
+                            }
+                            true
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "[embedded-ble] startup BLE name sync persist failed previous={previous:?} firmware_name={firmware_name:?} reason={reason}: {err}"
+                            );
+                            false
+                        }
+                    }
+                }
+            }
+        }
+        Err(err) => {
+            log::info!(
+                "[embedded-ble] startup BLE name sync skipped reason={reason} device settings unavailable: {}",
+                embedded_ble_log_preview(&err)
+            );
+            false
+        }
+    };
+    mark_startup_ble_name_sync_done(inner, reason);
+    synced
+}
+
 fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
+    if !inner
+        .embedded_ble_startup_name_sync_done
+        .load(Ordering::SeqCst)
+    {
+        log::info!(
+            "[embedded-ble] background listener refresh deferred until startup BLE name sync completes"
+        );
+        return;
+    }
     if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
         log::info!("[embedded-ble] background listener refresh skipped during firmware OTA");
         return;
@@ -4112,40 +4206,38 @@ fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationActio
     }
 }
 
-fn legacy_ec11_mode_for_device_knob_rotation_action(
-    action: DeviceKnobRotationAction,
-) -> &'static str {
-    match action {
-        DeviceKnobRotationAction::SystemVolume => "VOLUME",
-        DeviceKnobRotationAction::ScreenBrightness => "BRIGHTNESS",
-        DeviceKnobRotationAction::Disabled => "DISABLED",
-    }
-}
-
 fn sync_device_knob_rotation_action_to_firmware(inner: &Arc<Inner>, reason: &'static str) {
     let action = inner.prefs.get().device_knob_rotation_action;
     let mode = firmware_mode_for_device_knob_rotation_action(action);
-    let legacy_mode = legacy_ec11_mode_for_device_knob_rotation_action(action);
     async_runtime::spawn_blocking(move || {
         let command = format!("DEVICE:SET knob_rotation={mode}");
-        match crate::embedded_ble::send_device_settings_command(&command, Duration::from_secs(2)) {
-            Ok(()) => {
-                log::info!("[device-knob] synced knob_rotation setting mode={mode} reason={reason}")
-            }
-            Err(err) => {
-                log::warn!(
-                    "[device-knob] knob_rotation setting sync failed reason={reason}: {err}; trying legacy EC11 control"
-                );
-                match crate::embedded_ble::send_ec11_rotation_mode(legacy_mode, Duration::from_secs(2)) {
-                    Ok(()) => log::info!(
-                        "[device-knob] synced legacy EC11 rotation mode={legacy_mode} reason={reason}"
-                    ),
-                    Err(legacy_err) => log::warn!(
-                        "[device-knob] EC11 rotation mode sync skipped reason={reason}: {legacy_err}"
-                    ),
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let mut attempt = 0u32;
+        let last_err = loop {
+            attempt = attempt.saturating_add(1);
+            match crate::embedded_ble::send_device_settings_command_via_active_capture_only(
+                &command,
+                Duration::from_secs(2),
+                "device knob rotation sync",
+            ) {
+                Ok(()) => {
+                    log::info!(
+                        "[device-knob] synced knob_rotation setting via active capture mode={mode} reason={reason} attempts={attempt}"
+                    );
+                    return;
+                }
+                Err(err) => {
+                    if Instant::now() >= deadline {
+                        break err;
+                    }
+                    std::thread::sleep(Duration::from_secs(2));
                 }
             }
-        }
+        };
+        log::warn!(
+            "[device-knob] knob_rotation active-capture sync deferred reason={reason} mode={mode} attempts={attempt} last_error={}",
+            last_err
+        );
     });
 }
 
@@ -4484,6 +4576,12 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         }
         return EmbeddedBleStalePairingCleanupOutcome::Skipped;
     }
+    if crate::embedded_ble::listener_pairing_maintenance_active() {
+        log::warn!(
+            "[embedded-ble] background stale pairing cleanup deferred because Listener pairing/cache maintenance is already active"
+        );
+        return EmbeddedBleStalePairingCleanupOutcome::RetrySoon;
+    }
     *last_cleanup_at = Some(now);
 
     log::warn!(
@@ -4546,40 +4644,95 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                 unpair.failed_devices,
                 unpair.needs_user_action,
             );
-            log::warn!(
-                "[embedded-ble] background stale pairing cleanup suppressed automatic Windows PairAsync; waiting for explicit user/native pairing"
-            );
+            let expected_ble_name = inner.prefs.get().device_ble_name;
+            let pairing_expected_name = expected_ble_name.clone();
+            let pairing = async_runtime::spawn_blocking(move || {
+                crate::embedded_ble::prompt_listener_pairing_for_recovery(Some(
+                    pairing_expected_name.as_str(),
+                ))
+            })
+            .await;
+            let pairing = match pairing {
+                Ok(pairing) => {
+                    log::warn!(
+                        "[embedded-ble] background stale pairing cleanup pairing result status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
+                        pairing.status,
+                        pairing.matched_devices,
+                        pairing.prompted_devices,
+                        pairing.already_paired_devices,
+                        pairing.failed_devices,
+                        pairing.open_bluetooth_settings,
+                    );
+                    Some(pairing)
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] background stale pairing cleanup pairing task failed: {err}"
+                    );
+                    None
+                }
+            };
+            if pairing
+                .as_ref()
+                .is_some_and(embedded_ble_pairing_prompt_ready)
+            {
+                clear_embedded_ble_pairing_confirmation_hold(
+                    inner,
+                    "background stale pairing cleanup paired",
+                );
+                refresh_embedded_ble_listener(inner);
+                emit_embedded_ble_recovery_capsule(
+                    inner,
+                    "reconnecting",
+                    "Listener BLE 已重新配对，正在恢复连接...",
+                    Some(2200),
+                );
+                return EmbeddedBleStalePairingCleanupOutcome::RetrySoon;
+            }
             clear_embedded_ble_pairing_confirmation_hold(
                 inner,
-                "background stale pairing cleanup finished without automatic PairAsync",
+                "background stale pairing cleanup pairing still needs confirmation",
             );
             {
                 let mut wake = inner.embedded_ble_wake_recovery.lock();
                 wake.status = EmbeddedBleWakeRecoveryStatus::NeedsWakeKey;
                 wake.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Failed;
                 wake.recent_disconnect_reason = Some(format!(
-                    "background stale pairing cleanup status={:?} direct_gatt_instability_recovery={}; automatic PairAsync suppressed; previous error: {}",
+                    "background stale pairing cleanup status={:?} direct_gatt_instability_recovery={}; pairing_result={:?}; previous error: {}",
                     unpair.status,
                     direct_gatt_instability_recovery,
+                    pairing.as_ref().map(|value| &value.status),
                     embedded_ble_log_preview(err),
                 ));
-                wake.user_guidance = match unpair.status {
-                    crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
-                        "旧的 Listener 蓝牙配对已清理。请在 Windows 蓝牙里连接 Listener，Type 检测到配对后会自动恢复。".to_string()
+                wake.user_guidance = if let Some(pairing) = pairing.as_ref() {
+                    if pairing.open_bluetooth_settings {
+                        format!(
+                            "Type 已清理旧 Listener 配对并尝试重新配对，但 Windows 仍需要你在蓝牙里连接 {expected_ble_name}。"
+                        )
+                    } else {
+                        format!(
+                            "Type 已尝试重新配对 {expected_ble_name}，正在等待 Windows 完成连接。"
+                        )
                     }
-                    crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
-                    | crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
-                        "Windows 当前没有可清理的 Listener 旧配对。请在 Windows 蓝牙里连接 Listener，Type 检测到配对后会自动恢复。".to_string()
-                    }
-                    crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
-                        "Windows 暂时没有允许 Type 清理旧 Listener 配对。请打开 Windows 蓝牙手动移除/连接 Listener。".to_string()
+                } else {
+                    match unpair.status {
+                        crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
+                            "旧的 Listener 蓝牙配对已清理，但 Type 启动 Windows 配对任务失败。请在 Windows 蓝牙里连接 Listener，Type 检测到配对后会自动恢复。".to_string()
+                        }
+                        crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
+                        | crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
+                            "Windows 当前没有可清理的 Listener 旧配对，且 Type 暂时无法启动自动配对。请在 Windows 蓝牙里连接 Listener，Type 检测到配对后会自动恢复。".to_string()
+                        }
+                        crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
+                            "Windows 暂时没有允许 Type 清理旧 Listener 配对。请打开 Windows 蓝牙手动移除/连接 Listener。".to_string()
+                        }
                     }
                 };
             }
             emit_embedded_ble_recovery_capsule(
                 inner,
                 "reconnecting",
-                "旧配对已清理，请在 Windows 蓝牙里连接 Listener。",
+                "Type 已尝试重新配对；如 Windows 仍未连接，请在蓝牙里连接 Listener。",
                 Some(4200),
             );
             EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation
@@ -6766,6 +6919,81 @@ mod tests {
         Uuid::from_u128(n)
     }
 
+    #[test]
+    fn embedded_ble_startup_syncs_firmware_name_before_listener_refresh() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("pub fn auto_select_embedded_ble_input_source_in_background")
+            .expect("startup BLE helper should exist");
+        let end = source[start..]
+            .find("pub fn request_shutdown")
+            .map(|offset| start + offset)
+            .expect("startup BLE helper boundary should exist");
+        let body = &source[start..end];
+        let sync_index = body
+            .find("sync_device_ble_name_from_firmware_settings")
+            .expect("startup BLE helper must sync firmware BLE name");
+        let refresh_index = body
+            .find("refresh_embedded_ble_listener")
+            .expect("startup BLE helper must start listener after sync");
+
+        assert!(
+            sync_index < refresh_index,
+            "startup must not start background BLE listener with a stale local target name"
+        );
+    }
+
+    #[test]
+    fn embedded_ble_refresh_waits_for_startup_name_sync_gate() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("\nfn refresh_embedded_ble_listener")
+            .map(|offset| offset + 1)
+            .expect("refresh helper should exist");
+        let end = source[start..]
+            .find("fn embedded_ble_wake_recovery_snapshot")
+            .map(|offset| start + offset)
+            .expect("refresh helper boundary should exist");
+        let body = &source[start..end];
+        let gate_index = body
+            .find("embedded_ble_startup_name_sync_done")
+            .expect("refresh helper must check startup BLE name sync gate");
+        let generation_index = body
+            .find("fetch_add")
+            .expect("refresh helper should bump listener generation");
+
+        assert!(
+            gate_index < generation_index,
+            "refresh must not spawn the background BLE listener before startup name sync opens the gate"
+        );
+    }
+
+    #[test]
+    fn device_knob_rotation_sync_uses_active_capture_without_fresh_gatt_fallback() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("fn sync_device_knob_rotation_action_to_firmware")
+            .expect("device knob rotation sync helper should exist");
+        let end = source[start..]
+            .find("fn record_embedded_ble_listener_cancelled")
+            .map(|offset| start + offset)
+            .expect("device knob rotation sync helper boundary should exist");
+        let body = &source[start..end];
+
+        assert!(
+            body.contains("send_device_settings_command_via_active_capture_only"),
+            "startup/settings-save knob sync must use the existing BLE audio-control sender"
+        );
+        assert!(
+            !body.contains("send_device_settings_command(&command"),
+            "knob sync must not open a competing fresh GATT settings path while notify is connecting"
+        );
+        assert!(
+            !body.contains("send_ec11_rotation_mode"),
+            "knob sync must not fall back to legacy EC11 control during BLE startup"
+        );
+    }
+
     #[tokio::test]
     async fn extra_asr_hotwords_env_splits_and_enables_phrases() {
         let _guard = ENV_LOCK.lock().await;
@@ -6851,10 +7079,18 @@ mod tests {
         coordinator.inner.prefs.replace_for_tests(prefs);
     }
 
+    fn open_startup_ble_name_sync_gate_for_test(coordinator: &Coordinator) {
+        coordinator
+            .inner
+            .embedded_ble_startup_name_sync_done
+            .store(true, Ordering::SeqCst);
+    }
+
     fn force_embedded_ble_input_for_test(coordinator: &Coordinator) {
         let mut prefs = coordinator.inner.prefs.get();
         prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
         coordinator.inner.prefs.replace_for_tests(prefs);
+        open_startup_ble_name_sync_gate_for_test(coordinator);
     }
 
     fn firmware_snapshot_for_auto_input_test(
@@ -7291,6 +7527,7 @@ mod tests {
     #[tokio::test]
     async fn embedded_ble_foreground_probe_refreshes_ready_background_capture() {
         let coordinator = Coordinator::new();
+        open_startup_ble_name_sync_gate_for_test(&coordinator);
         let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
         mark_embedded_ble_listener_ready(&coordinator.inner, &active);
         record_embedded_ble_listener_last_error(
@@ -7740,7 +7977,12 @@ mod tests {
 
     #[test]
     fn embedded_ble_background_stale_cleanup_handles_gatt_and_cccd_pairing_cache_failures() {
-        let now = Instant::now();
+        let test_start = Instant::now();
+        let now =
+            test_start + EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN + Duration::from_secs(120);
+        let recent_cleanup_at = now - Duration::from_secs(60);
+        let cooled_cleanup_at =
+            now - EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN - Duration::from_secs(1);
         let snapshot = EmbeddedBleWakeRecoverySnapshot {
             reconnect_attempts: EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD,
             consecutive_reconnect_failures: EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD,
@@ -7830,7 +8072,7 @@ mod tests {
             !should_attempt_embedded_ble_background_stale_pairing_cleanup(
                 gatt_error,
                 &snapshot,
-                Some(now - Duration::from_secs(60)),
+                Some(recent_cleanup_at),
                 now,
             )
         );
@@ -7838,7 +8080,7 @@ mod tests {
             should_throttle_embedded_ble_background_stale_pairing_cleanup(
                 gatt_error,
                 &snapshot,
-                Some(now - Duration::from_secs(60)),
+                Some(recent_cleanup_at),
                 now,
             )
         );
@@ -7846,7 +8088,7 @@ mod tests {
             should_throttle_embedded_ble_background_stale_pairing_cleanup(
                 cccd_error,
                 &snapshot,
-                Some(now - Duration::from_secs(60)),
+                Some(recent_cleanup_at),
                 now,
             )
         );
@@ -7854,7 +8096,7 @@ mod tests {
             should_attempt_embedded_ble_background_stale_pairing_cleanup(
                 gatt_error,
                 &snapshot,
-                Some(now - EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN - Duration::from_secs(1)),
+                Some(cooled_cleanup_at),
                 now,
             )
         );
@@ -7862,7 +8104,7 @@ mod tests {
             !should_throttle_embedded_ble_background_stale_pairing_cleanup(
                 gatt_error,
                 &snapshot,
-                Some(now - EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN - Duration::from_secs(1)),
+                Some(cooled_cleanup_at),
                 now,
             )
         );
@@ -7870,9 +8112,50 @@ mod tests {
             !should_throttle_embedded_ble_background_stale_pairing_cleanup(
                 link_loss,
                 &snapshot,
-                Some(now - Duration::from_secs(60)),
+                Some(recent_cleanup_at),
                 now,
             )
+        );
+    }
+
+    #[test]
+    fn embedded_ble_background_stale_cleanup_attempts_type_pairing_after_unpair() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .expect("background stale cleanup helper should exist");
+        let end = source[start..]
+            .find("async fn maybe_probe_embedded_ble_recovery_pairing_advertisement")
+            .map(|offset| start + offset)
+            .expect("background stale cleanup helper boundary should exist");
+        let body = &source[start..end];
+
+        assert!(
+            body.contains("prompt_listener_pairing_for_recovery"),
+            "after Type cleans stale Windows pairing, it must immediately try Windows PairAsync instead of leaving users in manual pairing"
+        );
+        assert!(
+            body.contains("background stale pairing cleanup pairing result"),
+            "runtime logs should expose the automatic Type pairing result"
+        );
+        let active_gate_index = body
+            .find("listener_pairing_maintenance_active")
+            .expect("background cleanup must check for an active pairing/cache owner");
+        let unpair_index = body
+            .find("unpair_listener_devices")
+            .expect("background cleanup should still be able to clean stale Windows pairing");
+        assert!(
+            active_gate_index < unpair_index,
+            "background cleanup must not delete Windows link keys while explicit PairAsync/recovery is in progress"
+        );
+        let active_gate_body = &body[active_gate_index..unpair_index];
+        assert!(
+            active_gate_body.contains("EmbeddedBleStalePairingCleanupOutcome::RetrySoon"),
+            "cross-process pairing maintenance should make the tray retry soon after CLI pairing completes, not sleep for the offline confirmation window"
+        );
+        assert!(
+            !body.contains("suppressed automatic Windows PairAsync"),
+            "do not regress to clean-only behavior after stale pairing cleanup"
         );
     }
 
@@ -8034,6 +8317,24 @@ mod tests {
             EMBEDDED_BLE_STALE_PAIRING_CLEANUP_REASON,
             false,
         ));
+    }
+
+    #[test]
+    fn embedded_ble_pairing_recovery_status_probe_uses_windows_gatt_rebuild_budget() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn embedded_ble_pairing_recovery_link_reachable")
+            .expect("pairing recovery reachability helper should exist");
+        let end = source[start..]
+            .find("async fn handle_embedded_ble_pairing_prompt_result")
+            .map(|offset| start + offset)
+            .expect("pairing recovery helper boundary should exist");
+        let body = &source[start..end];
+
+        assert!(
+            body.contains("read_embedded_audio_status(Duration::from_secs(20))"),
+            "Windows BLE service rebuild after UnpairAsync/PairAsync can exceed a short 5s probe; recovery resume must keep a 20s GATT budget"
+        );
     }
 
     #[test]
