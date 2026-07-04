@@ -1507,11 +1507,21 @@ impl Coordinator {
         pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
     }
 
-    pub fn begin_firmware_ota_transfer(&self) {
-        self.inner
+    pub fn try_begin_firmware_ota_transfer(&self) -> bool {
+        if self
+            .inner
             .embedded_ble_ota_active
-            .store(true, Ordering::SeqCst);
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return false;
+        }
         pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
+        true
+    }
+
+    pub fn begin_firmware_ota_transfer(&self) {
+        let _ = self.try_begin_firmware_ota_transfer();
     }
 
     pub fn firmware_ota_transfer_active(&self) -> bool {

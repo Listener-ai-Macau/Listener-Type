@@ -2277,6 +2277,7 @@ const DEVICE_SETTINGS_MIN_AUTO_SHUTDOWN_MINUTES: u32 = 0;
 const DEVICE_SETTINGS_MAX_AUTO_SHUTDOWN_MINUTES: u32 = 1440;
 const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
 const DEVICE_SETTINGS_BLE_WRITE_TIMEOUT: Duration = Duration::from_secs(4);
+const DEVICE_SETTINGS_BLE_NAME_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const DEVICE_SETTINGS_BLE_TASK_TIMEOUT: Duration = Duration::from_secs(20);
 const DEVICE_SETTINGS_BLE_NAME_APPLY_SETTLE_DELAY: Duration = Duration::from_millis(1200);
 const DEVICE_SETTINGS_BLE_NAME_APPLY_ACK_LOST_SETTLE_DELAY: Duration = Duration::from_millis(700);
@@ -2327,6 +2328,7 @@ fn device_ble_name_apply_error_allows_deferred_confirmation(error: &str) -> bool
         || lower.contains("gattcommunicationstatus(1)")
         || lower.contains("operation canceled")
         || lower.contains("operation cancelled")
+        || (lower.contains("device settings") && lower.contains("timed out"))
 }
 
 fn apply_pending_ble_name_confirmed(
@@ -2664,16 +2666,33 @@ pub async fn set_device_settings(
         plugged_low_power_enabled,
         ble_name_changed,
     )?;
+    if ble_name_changed || ble_name_apply_needed {
+        let capture_stopped = coord
+            .pause_embedded_ble_listener_for_recovery_cleanup(
+                DEVICE_SETTINGS_BLE_NAME_CACHE_CLEANUP_TIMEOUT,
+            )
+            .await;
+        log::info!(
+            "[device-settings] background Listener capture stopped before BLE name settings write/apply={capture_stopped} changed={ble_name_changed} apply_needed={ble_name_apply_needed}"
+        );
+    }
     for command in commands {
         let command_for_error = command.clone();
-        run_device_settings_blocking("write", move || {
-            crate::embedded_ble::send_device_settings_command(
-                &command,
-                DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
-            )
+        let timeout = if command.contains("ble_name=") || command.contains("name=") {
+            DEVICE_SETTINGS_BLE_NAME_WRITE_TIMEOUT
+        } else {
+            DEVICE_SETTINGS_BLE_WRITE_TIMEOUT
+        };
+        if let Err(err) = run_device_settings_blocking("write", move || {
+            crate::embedded_ble::send_device_settings_command(&command, timeout)
         })
         .await
-        .map_err(|err| format!("{err}; command={command_for_error}"))?;
+        {
+            if ble_name_changed || ble_name_apply_needed {
+                coord.refresh_embedded_ble_listener();
+            }
+            return Err(format!("{err}; command={command_for_error}"));
+        }
     }
     {
         let _settings_guard = settings_update_lock().lock();
@@ -2700,7 +2719,7 @@ pub async fn set_device_settings(
         let apply_result = run_device_settings_blocking("apply_ble_name", move || {
             apply_pending_ble_name_confirmed(
                 &expected_ble_name_for_apply,
-                DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
+                DEVICE_SETTINGS_BLE_NAME_WRITE_TIMEOUT,
             )
         })
         .await;
@@ -5012,8 +5031,10 @@ pub async fn transfer_firmware_ota_ble(
         return Err("firmware_ota.bin SHA256 does not match ota_manifest.json.".to_string());
     }
 
+    if !coord.try_begin_firmware_ota_transfer() {
+        return Err("Firmware OTA is already in progress.".to_string());
+    }
     sync_firmware_ota_led_preview("LED:PREVIEW ota_led_only", "transfer_start");
-    coord.begin_firmware_ota_transfer();
     let is_listener_ota_v2 = manifest.is_listener_ble_ota_v2();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
@@ -8058,6 +8079,11 @@ mod tests {
         assert!(
             super::device_ble_name_apply_error_allows_deferred_confirmation(
                 "BLE device settings write async canceled"
+            )
+        );
+        assert!(
+            super::device_ble_name_apply_error_allows_deferred_confirmation(
+                "BLE device settings write timed out after 10000 ms"
             )
         );
         assert!(

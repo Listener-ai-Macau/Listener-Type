@@ -70,6 +70,7 @@ export function FirmwareOtaPanel({
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
   const [diagnosticStatus, setDiagnosticStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
   const [progressBytes, setProgressBytes] = useState<{ sent: number; total: number } | null>(null);
+  const otaStartInFlightRef = useRef(false);
 
   const transferActive = state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying';
   const firmwareActionBusy = transferActive || wiredBusy;
@@ -79,6 +80,13 @@ export function FirmwareOtaPanel({
   const refreshOtaSnapshot = useCallback(async (options: { waitForFirmwareVersion?: boolean } = {}) => {
     const waitForFirmwareVersion = options.waitForFirmwareVersion ?? false;
     setSnapshotRefreshing(true);
+    if (transferActive) {
+      const active = makeActiveFirmwareOtaSnapshot();
+      setOtaSnapshot(active);
+      setSnapshotError(null);
+      setSnapshotRefreshing(false);
+      return active;
+    }
     if (!supported) {
       const unsupported = makeDisconnectedSnapshot('Firmware OTA is only supported on Windows Listener BLE.');
       setOtaSnapshot(unsupported);
@@ -124,12 +132,12 @@ export function FirmwareOtaPanel({
     } finally {
       setSnapshotRefreshing(false);
     }
-  }, [supported, t]);
+  }, [supported, t, transferActive]);
 
   useEffect(() => {
-    if (!selectedPackage || bleStatus === 'checking') return;
+    if (!selectedPackage || bleStatus === 'checking' || transferActive) return;
     void refreshOtaSnapshot();
-  }, [bleStatus, refreshOtaSnapshot, selectedPackage]);
+  }, [bleStatus, refreshOtaSnapshot, selectedPackage, transferActive]);
 
   const preflight = useMemo(() => {
     if (!selectedPackage) return null;
@@ -201,26 +209,28 @@ export function FirmwareOtaPanel({
   };
 
   const startUpdate = async () => {
-    if (!selectedPackage) return;
-    const snapshot = await refreshOtaSnapshot();
-    const check = evaluateFirmwareOtaPreflight({
-      manifest: selectedPackage.manifest,
-      desktopVersion: APP_VERSION,
-      recordingActive: snapshot.recordingActive,
-      transferActive,
-      device: snapshot.device,
-    });
-    if (!check.ok) {
-      setBlockers(check.blockers);
-      dispatch({ type: 'failed', failureCode: 'deviceRejected', message: '' });
-      return;
-    }
-
-    setBlockers([]);
+    const packageForUpdate = selectedPackage;
+    if (!packageForUpdate || otaStartInFlightRef.current || transferActive) return;
+    otaStartInFlightRef.current = true;
     let bytesSentForFailureCheck = 0;
     try {
+      const snapshot = await refreshOtaSnapshot();
+      const check = evaluateFirmwareOtaPreflight({
+        manifest: packageForUpdate.manifest,
+        desktopVersion: APP_VERSION,
+        recordingActive: snapshot.recordingActive,
+        transferActive,
+        device: snapshot.device,
+      });
+      if (!check.ok) {
+        setBlockers(check.blockers);
+        dispatch({ type: 'failed', failureCode: 'deviceRejected', message: '' });
+        return;
+      }
+
+      setBlockers([]);
       dispatch({ type: 'startTransfer' });
-      setProgressBytes({ sent: 0, total: selectedPackage.firmwareBytes.byteLength });
+      setProgressBytes({ sent: 0, total: packageForUpdate.firmwareBytes.byteLength });
       let transferResult: Awaited<ReturnType<typeof transferFirmwareOtaBle>> | null = null;
       const unlisten = await listen<{ bytesSent: number; bytesTotal: number }>('firmware-ota:progress', event => {
         const bytesTotal = Math.max(1, event.payload.bytesTotal);
@@ -236,9 +246,9 @@ export function FirmwareOtaPanel({
       });
       try {
         transferResult = await transferFirmwareOtaBle({
-          manifest: selectedPackage.manifest,
-          firmwareBytes: selectedPackage.firmwareBytes,
-          expectedSha256: selectedPackage.firmwareSha256,
+          manifest: packageForUpdate.manifest,
+          firmwareBytes: packageForUpdate.firmwareBytes,
+          expectedSha256: packageForUpdate.firmwareSha256,
         });
       } finally {
         unlisten();
@@ -247,7 +257,7 @@ export function FirmwareOtaPanel({
       await delay(450);
       dispatch({ type: 'deviceReconnected' });
       await delay(450);
-      if (firmwareOtaConfirmedVersionMatches(transferResult?.confirmedVersion, selectedPackage.manifest.version)) {
+      if (firmwareOtaConfirmedVersionMatches(transferResult?.confirmedVersion, packageForUpdate.manifest.version)) {
         const confirmedVersion = transferResult?.confirmedVersion?.trim() ?? null;
         if (confirmedVersion) {
           setOtaSnapshot(previous => snapshotWithFirmwareVersion(previous, confirmedVersion));
@@ -256,18 +266,18 @@ export function FirmwareOtaPanel({
         void refreshOtaSnapshot();
       } else {
         const confirmedVersion = transferResult?.confirmedVersion?.trim();
-        dispatch(firmwareOtaVersionNotConfirmedAction(confirmedVersion, selectedPackage.manifest.version));
+        dispatch(firmwareOtaVersionNotConfirmedAction(confirmedVersion, packageForUpdate.manifest.version));
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const expectedVersion = selectedPackage.manifest.version;
+      const expectedVersion = packageForUpdate.manifest.version;
       const rollbackVersionFromError = firmwareOtaRollbackVersionFromText(message, expectedVersion);
       if (rollbackVersionFromError) {
         setOtaSnapshot(previous => snapshotWithFirmwareVersion(previous, rollbackVersionFromError));
         dispatch(firmwareOtaVersionNotConfirmedAction(rollbackVersionFromError, expectedVersion));
         return;
       }
-      const failedAfterFullTransfer = bytesSentForFailureCheck >= selectedPackage.firmwareBytes.byteLength;
+      const failedAfterFullTransfer = bytesSentForFailureCheck >= packageForUpdate.firmwareBytes.byteLength;
       if (failedAfterFullTransfer || looksLikePostRebootOtaError(message)) {
         const snapshotAfterFailure = await refreshOtaSnapshot({ waitForFirmwareVersion: true });
         const confirmedVersion = snapshotAfterFailure.device.firmwareVersion?.trim() ?? null;
@@ -285,6 +295,7 @@ export function FirmwareOtaPanel({
         message,
       });
     } finally {
+      otaStartInFlightRef.current = false;
       setProgressBytes(null);
     }
   };
@@ -1049,6 +1060,22 @@ function makeDisconnectedSnapshot(detail: string): FirmwareOtaPreflightSnapshot 
       batteryPercent: null,
       usbPowered: null,
       detail,
+    },
+  };
+}
+
+function makeActiveFirmwareOtaSnapshot(): FirmwareOtaPreflightSnapshot {
+  return {
+    recordingActive: false,
+    dictationPhase: 'firmware_ota',
+    device: {
+      connected: true,
+      hardwareRevision: null,
+      firmwareVersion: null,
+      capabilities: ['firmware_ota_transfer_active'],
+      batteryPercent: null,
+      usbPowered: null,
+      detail: 'Firmware OTA is in progress; device polling is paused until transfer completes.',
     },
   };
 }
