@@ -8,6 +8,29 @@ import i18n from "./i18n"; // 副作用：触发 i18next init
 import "./styles/tokens.css";
 import "./styles/global.css";
 
+declare global {
+  interface Window {
+    __TAURI_INTERNALS__?: unknown;
+  }
+}
+
+function reportStartup(event: string, detail?: Record<string, unknown>) {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+    return;
+  }
+  import("@tauri-apps/api/core")
+    .then(({ invoke }) =>
+      invoke("record_ui_timeline_event", {
+        payload: {
+          source: "frontend.startup",
+          event,
+          detail: detail ?? {},
+        },
+      }),
+    )
+    .catch(() => {});
+}
+
 const params = new URLSearchParams(window.location.search);
 const windowKind = params.get("window");
 const isCapsule = windowKind === "capsule";
@@ -26,7 +49,16 @@ if (import.meta.env.DEV && params.get("theme") === "dark") {
 
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
-const renderApp = () => {
+let rendered = false;
+
+const renderApp = (reason: string) => {
+  if (rendered) return;
+  rendered = true;
+  reportStartup("render", {
+    reason,
+    i18nInitialized: i18n.isInitialized,
+    windowKind: windowKind ?? "main",
+  });
   root.render(
     <React.StrictMode>
       <ErrorBoundary>
@@ -59,7 +91,11 @@ const renderApp = () => {
 // i18n 必须就绪后才能渲染：否则首次渲染拿到的 t() 返回 key 字面量。
 // react-i18next useSuspense=false 时不会自动等，只有事件触发后重渲染才能拿到译文。
 if (i18n.isInitialized) {
-  renderApp();
+  renderApp("i18n-ready");
 } else {
-  i18n.on("initialized", renderApp);
+  reportStartup("waiting-for-i18n", { windowKind: windowKind ?? "main" });
+  i18n.on("initialized", () => renderApp("i18n-initialized-event"));
+  window.setTimeout(() => {
+    renderApp("i18n-timeout-fallback");
+  }, 1500);
 }

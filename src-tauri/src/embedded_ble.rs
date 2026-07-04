@@ -7669,10 +7669,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 "No subscribable embedded audio BLE notify characteristic found by service selector"
                     .to_string()
             });
-            return Err(format!(
-                "{service_error}; recent pairing target={:?}; skipping 12s advertisement fallback so GATT can retry while Windows refreshes the paired service table",
-                state.target_name
-            ));
+            return match open_notify_target_from_recent_pairing_advertisement(state) {
+                Ok(target) => Ok(target),
+                Err(advertisement_error) => Err(format!(
+                    "{service_error}; recent pairing target={:?}; fresh paired advertisement fallback failed: {advertisement_error}",
+                    state.target_name
+                )),
+            };
         }
 
         match open_notify_target_from_advertisement() {
@@ -8335,6 +8338,66 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
         Err(last_error.unwrap_or_else(|| {
             "audio notify advertisement scan returned no usable addresses".to_string()
+        }))
+    }
+
+    fn open_notify_target_from_recent_pairing_advertisement(
+        state: &RecentPairingFastGattState,
+    ) -> Result<OpenNotifyTarget, String> {
+        let mut addresses = Vec::new();
+        if let Some(address) = state.address {
+            push_unique_address(&mut addresses, address);
+        }
+        match scan_ble_advertisements_by_name(
+            "recent pairing audio notify",
+            &state.target_name,
+            AUDIO_ADVERTISEMENT_SCAN_TIMEOUT,
+        ) {
+            Ok(scanned_addresses) => {
+                for address in scanned_addresses {
+                    push_unique_address(&mut addresses, address);
+                }
+            }
+            Err(err) => {
+                log::info!(
+                    "[embedded-ble] recent pairing audio notify advertisement refresh target={:?} failed: {}",
+                    state.target_name,
+                    err.chars().take(240).collect::<String>()
+                );
+            }
+        }
+        if addresses.is_empty() {
+            return Err(format!(
+                "recent pairing audio notify has no fresh address target={:?}",
+                state.target_name
+            ));
+        }
+        ensure_paired_listener_for_advertisement_gatt("recent pairing audio notify", &addresses)?;
+        let mut last_error = None;
+        for address in addresses {
+            match open_notify_target_for_device(address) {
+                Ok(target) => {
+                    remember_runtime_bluetooth_target_address_for_current(
+                        address,
+                        "recent pairing advertised audio notify",
+                    );
+                    log::info!(
+                        "[embedded-ble] selected recent-pairing advertised audio notify address={address:012X} target={:?}",
+                        state.target_name
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    last_error = Some(format!(
+                        "recent pairing advertised audio notify address {address:012X} failed: {err}"
+                    ));
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "recent pairing audio notify advertisement scan returned no usable addresses"
+                .to_string()
         }))
     }
 
@@ -11985,6 +12048,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         );
                         return true;
                     }
+                    if let Some(address) = address {
+                        let trusted_addresses = listener_recovery_target_addresses();
+                        if trusted_addresses.contains(&address) {
+                            log::warn!(
+                                "[embedded-ble] allowing {kind} candidate index={index} name={name:?} address={} despite target name {expected_name:?} because Windows PnP/service signature still points to the same Listener address",
+                                crate::embedded_ble::format_bluetooth_address(address)
+                            );
+                            return true;
+                        }
+                    }
                     log::info!(
                     "[embedded-ble] skipping {kind} candidate index={index} name={name:?} address={}: target name is {expected_name:?}",
                     address
@@ -14309,6 +14382,65 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 body.contains("allowing advertised GATT fallback while AEP pairing cache refreshes"),
                 "runtime logs should distinguish PnP-backed pairing evidence from unpaired advertisement access"
             );
+        }
+
+        #[test]
+        fn recent_pairing_notify_recovery_uses_fresh_advertisement_not_stale_configured_address() {
+            let source = include_str!("embedded_ble.rs");
+            let notify_start = source
+                .find("fn open_notify_target()")
+                .expect("notify target helper should exist");
+            let notify_end = source[notify_start..]
+                .find("fn open_notify_target_with_retry")
+                .map(|offset| notify_start + offset)
+                .expect("notify retry helper boundary should exist");
+            let notify_body = &source[notify_start..notify_end];
+            let helper_start = source
+                .find("fn open_notify_target_from_recent_pairing_advertisement")
+                .expect("recent pairing advertisement helper should exist");
+            let helper_end = source[helper_start..]
+                .find("fn open_audio_control_target_from_advertisement")
+                .map(|offset| helper_start + offset)
+                .expect("recent pairing advertisement helper boundary should exist");
+            let helper_body = &source[helper_start..helper_end];
+
+            assert!(
+                notify_body.contains("open_notify_target_from_recent_pairing_advertisement(state)"),
+                "after PairAsync succeeds, notify recovery must try the fresh paired advertisement path instead of waiting on Windows service-index cache"
+            );
+            assert!(
+                !notify_body.contains("skipping 12s advertisement fallback"),
+                "recent pairing must not block advertisement recovery while Windows refreshes the service table"
+            );
+            assert!(helper_body.contains("scan_ble_advertisements_by_name"));
+            assert!(helper_body.contains("&state.target_name"));
+            assert!(helper_body.contains(
+                "ensure_paired_listener_for_advertisement_gatt(\"recent pairing audio notify\""
+            ));
+            assert!(
+                !helper_body.contains("audio_target_advertisement_addresses"),
+                "recent pairing fallback must not reuse stale configured Bluetooth addresses"
+            );
+        }
+
+        #[test]
+        fn ble_candidate_filter_allows_trusted_address_when_windows_name_cache_lags() {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("fn ble_candidate_allowed")
+                .expect("BLE candidate filter should exist");
+            let end = source[start..]
+                .find("pub(super) fn parse_bluetooth_address_hex")
+                .map(|offset| start + offset)
+                .expect("BLE candidate filter boundary should exist");
+            let body = &source[start..end];
+
+            assert!(
+                body.contains("listener_recovery_target_addresses()"),
+                "Windows can expose the old BLE display name after a firmware rename; a trusted Listener address/service signature must still be allowed"
+            );
+            assert!(body.contains("trusted_addresses.contains(&address)"));
+            assert!(body.contains("despite target name"));
         }
 
         #[test]

@@ -6,7 +6,7 @@
 // - fallback 永远是 zh-CN：已知的产品权威文案，且 zh-CN.ts 是 source of truth。
 // - 不用 LanguageDetector 插件：它的异步 init 在 Tauri WebView 里会让首次渲染拿到的
 //   `t()` 返回 key（react-i18next useSuspense 默认 false 时返回 key 而非阻塞）。
-//   手写检测 + initImmediate: false 让 init 同步完成，渲染前 t 就能用。
+//   手写检测 + initAsync: false 让 init 同步完成，渲染前 t 就能用。
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -60,6 +60,7 @@ void i18n.use(initReactI18next).init({
   fallbackLng: 'zh-CN',
   supportedLngs: SUPPORTED_LOCALES as unknown as string[],
   partialBundledLanguages: true, // 告诉 i18next 我们的内联资源已完整，无需 backend 拉取
+  initAsync: false,
   interpolation: { escapeValue: false },
   react: { useSuspense: false }, // 不悬挂；首次渲染必须能拿到译文（无 backend 时 init 同步完成）
 });
