@@ -550,11 +550,11 @@ $lines.Add("- Output: $OutputDir") | Out-Null
 $lines.Add("- Session: $sessionPath") | Out-Null
 $lines.Add("- Random BLE name: $RandomName") | Out-Null
 $lines.Add("") | Out-Null
-$lines.Add("| # | Step | Result | Observation |") | Out-Null
-$lines.Add("|---:|---|---|---|") | Out-Null
+$lines.Add("| # | StepId | Step | Result | Observation |") | Out-Null
+$lines.Add("|---:|---|---|---|---|") | Out-Null
 foreach ($record in $records) {
     $obs = (($record.observation -replace "\|", "/") -replace "`r?`n", " ")
-    $lines.Add("| $($record.index) | $($record.title) | $($record.result) | $obs |") | Out-Null
+    $lines.Add("| $($record.index) | $($record.id) | $($record.title) | $($record.result) | $obs |") | Out-Null
 }
 $lines.Add("") | Out-Null
 $lines.Add("Release rule: only HUMAN_REVIEW_PASS can be used as final physical acceptance evidence for publishing v1.0.2.") | Out-Null
