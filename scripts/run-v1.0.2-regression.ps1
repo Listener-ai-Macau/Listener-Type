@@ -328,18 +328,22 @@ try {
       }
 
       $requiredStepIds = @(
+        "baseline-type-tray-ui",
         "same-name-write-no-repair",
         "random-name-exact-cache-refresh",
+        "restore-default-listener",
         "manual-windows-delete-no-type-autopair",
         "no-type-native-pairing",
         "type-takeover-no-forced-repair",
         "ec11-single-not-double",
         "ec11-double-repair-with-type",
+        "computer-switch-product-flow",
         "recording-response-and-led-priority",
         "ble-audio-type-link",
         "led-independent-contract",
         "ota-wireless-smoke",
-        "wired-flash-smoke"
+        "wired-flash-smoke",
+        "release-package-final-check"
       )
       $stepText = $steps -join "`n"
       foreach ($stepId in $requiredStepIds) {
@@ -349,7 +353,7 @@ try {
       }
 
       $dryRunDir = Join-Path $OutputDir "preproduction-human-review-dryrun"
-      & pwsh -NoProfile -File $humanGate -StepId "baseline-type-tray-ui" -NoPrompt -OutputDir $dryRunDir
+      & pwsh -NoProfile -File $humanGate -NoPrompt -NoSound -OutputDir $dryRunDir
       $exit = $LASTEXITCODE
       if ($exit -ne 2) {
         throw "Preproduction human review dry-run should return 2/HUMAN_REVIEW_INCOMPLETE, got $exit"
@@ -361,6 +365,19 @@ try {
       $dryRun = Get-Content -LiteralPath $dryRunSummary -Raw | ConvertFrom-Json
       if ($dryRun.status -ne "HUMAN_REVIEW_INCOMPLETE") {
         throw "Preproduction human review dry-run status should be HUMAN_REVIEW_INCOMPLETE, got $($dryRun.status)"
+      }
+      $dryRunRecords = @($dryRun.records)
+      if ($dryRunRecords.Count -ne $requiredStepIds.Count) {
+        throw "Preproduction human review dry-run must record all $($requiredStepIds.Count) final gates, got $($dryRunRecords.Count)"
+      }
+      foreach ($stepId in $requiredStepIds) {
+        $record = @($dryRunRecords | Where-Object { $_.id -eq $stepId })
+        if ($record.Count -ne 1) {
+          throw "Preproduction human review dry-run did not record exactly one '$stepId' step"
+        }
+        if ($record[0].result -ne "SKIP") {
+          throw "Preproduction human review dry-run step '$stepId' should be SKIP, got $($record[0].result)"
+        }
       }
       if (-not (Test-Path -LiteralPath $dryRun.session_jsonl)) {
         throw "Preproduction human review dry-run session not written: $($dryRun.session_jsonl)"
