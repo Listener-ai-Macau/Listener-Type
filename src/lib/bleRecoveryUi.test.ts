@@ -122,6 +122,22 @@ assert.equal(
   'ready',
 );
 
+assert.equal(
+  selectBleRecoveryUiState(input({
+    runtime: {
+      ...baseRuntime,
+      backgroundListenerLastError: 'BLE embedded audio notification wait failed: background listener stale GATT cache',
+      wakeRecovery: {
+        ...baseRuntime.wakeRecovery,
+        status: 'ready',
+        notifySubscriptionState: 'subscribed',
+        userGuidance: 'Listener BLE 已连接，音频 notify 已订阅。',
+      },
+    },
+  })),
+  'ready',
+);
+
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('staleGattService') })), 'needsRePair');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('windowsBluetoothServiceResetNeeded') })), 'needsBluetooth');
 assert.equal(selectBleRecoveryUiState(input({ lastRepairResult: repair('accessDenied') })), 'needsBluetooth');
@@ -206,7 +222,13 @@ assert.equal(
   selectBleRecoveryUiState(input({
     runtime: {
       ...baseRuntime,
+      backgroundListenerReady: false,
       backgroundListenerLastError: 'Unknown GATT service from stale cache',
+      wakeRecovery: {
+        ...baseRuntime.wakeRecovery,
+        status: 'reconnecting',
+        notifySubscriptionState: 'opening',
+      },
     },
   })),
   'needsRePair',
@@ -216,8 +238,14 @@ assert.equal(
   selectBleRecoveryUiState(input({
     runtime: {
       ...baseRuntime,
+      backgroundListenerReady: false,
       backgroundListenerLastError: 'Windows GATT disconnect reason=546 after low-power idle; transport_not_ready',
-      wakeRecovery: { ...baseRuntime.wakeRecovery, usbPowered: false },
+      wakeRecovery: {
+        ...baseRuntime.wakeRecovery,
+        status: 'reconnecting',
+        notifySubscriptionState: 'opening',
+        usbPowered: false,
+      },
     },
   })),
   'reconnecting',
@@ -227,8 +255,14 @@ assert.equal(
   selectBleRecoveryUiState(input({
     runtime: {
       ...baseRuntime,
+      backgroundListenerReady: false,
       backgroundListenerLastError: 'Stale cached GATT path after reason=546 returned transport_not_ready',
-      wakeRecovery: { ...baseRuntime.wakeRecovery, usbPowered: false },
+      wakeRecovery: {
+        ...baseRuntime.wakeRecovery,
+        status: 'reconnecting',
+        notifySubscriptionState: 'opening',
+        usbPowered: false,
+      },
     },
   })),
   'needsRePair',
@@ -249,7 +283,13 @@ assert.equal(
   selectBleRecoveryUiState(input({
     runtime: {
       ...baseRuntime,
+      backgroundListenerReady: false,
       backgroundListenerLastError: 'No paired BLE device for Listener',
+      wakeRecovery: {
+        ...baseRuntime.wakeRecovery,
+        status: 'reconnecting',
+        notifySubscriptionState: 'opening',
+      },
     },
   })),
   'needsRePair',
@@ -259,7 +299,13 @@ assert.equal(
   selectBleRecoveryUiState(input({
     runtime: {
       ...baseRuntime,
+      backgroundListenerReady: false,
       backgroundListenerLastError: 'DIS firmware revision missing',
+      wakeRecovery: {
+        ...baseRuntime.wakeRecovery,
+        status: 'reconnecting',
+        notifySubscriptionState: 'opening',
+      },
     },
   })),
   'diagnosticsAvailable',

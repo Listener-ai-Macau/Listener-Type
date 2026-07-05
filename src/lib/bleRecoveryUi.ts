@@ -214,6 +214,17 @@ function stateForFailure(failure: EmbeddedBleFailureClassification): BleRecovery
 
 function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRecoveryUiState | null {
   if (!runtime) return null;
+  const wakeStatus = runtime.wakeRecovery?.status;
+  const notifyState = runtime.wakeRecovery?.notifySubscriptionState;
+  if (
+    runtime.backgroundListenerActive
+    && runtime.backgroundListenerReady
+    && wakeStatus === 'ready'
+    && notifyState === 'subscribed'
+  ) {
+    return null;
+  }
+
   const combined = [
     runtime.backgroundListenerLastError,
     runtime.wakeRecovery?.recentDisconnectReason,
@@ -228,7 +239,6 @@ function classifyRuntimeFailure(runtime: EmbeddedBleRuntimeStatus | null): BleRe
     if (highConfidenceState) return highConfidenceState;
   }
 
-  const wakeStatus = runtime.wakeRecovery?.status;
   if (wakeStatus === 'reconnecting') return 'reconnecting';
   if (wakeStatus === 'needsWakeKey') return 'needsWakeKey';
 

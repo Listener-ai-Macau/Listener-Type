@@ -147,6 +147,30 @@ function Find-BuiltMsiPath {
   return Get-MsiPath
 }
 
+function Stop-RunningReleaseApp {
+  $releaseExe = Join-Path $releaseRoot "listener-type.exe"
+  $resolvedReleaseExe = $null
+  if (Test-Path -LiteralPath $releaseExe) {
+    $resolvedReleaseExe = (Resolve-Path -LiteralPath $releaseExe).Path
+  }
+
+  $running = @(Get-CimInstance Win32_Process -Filter "Name = 'listener-type.exe'" -ErrorAction SilentlyContinue)
+  foreach ($process in $running) {
+    $commandLine = [string]$process.CommandLine
+    $matchesReleaseExe = $false
+    if ($resolvedReleaseExe) {
+      $matchesReleaseExe = $commandLine.IndexOf($resolvedReleaseExe, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    }
+    if (-not $matchesReleaseExe -and $commandLine.IndexOf($appRoot, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+      Write-Host "[info] Leaving unrelated listener-type.exe running: pid=$($process.ProcessId)"
+      continue
+    }
+
+    Write-Host "[info] Stopping running Listener Type before MSI build: pid=$($process.ProcessId)"
+    Stop-Process -Id $process.ProcessId -Force
+  }
+}
+
 function Test-WebView2Runtime {
   $paths = @(
     "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
@@ -434,6 +458,7 @@ try {
 
   $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
   Write-Host "[info] Default Windows package does not bundle or register the optional TSF IME."
+  Stop-RunningReleaseApp
   Invoke-MsvcBuild -VsDevCmd $vsDevCmd -CargoBin $cargoBin
   Repair-TauriMsiBundle
   Copy-WindowsArtifacts

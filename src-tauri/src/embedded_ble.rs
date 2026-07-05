@@ -596,8 +596,9 @@ mod windows_ble {
     use windows::Storage::Streams::{DataReader, DataWriter, IBuffer};
     use windows::Win32::Devices::DeviceAndDriverInstallation::{
         CM_Locate_DevNodeW, CM_Query_And_Remove_SubTreeW, CM_LOCATE_DEVNODE_NORMAL,
-        CM_REMOVE_NO_RESTART, CM_REMOVE_UI_NOT_OK, CONFIGRET, CR_ACCESS_DENIED, CR_NO_SUCH_DEVINST,
-        CR_NO_SUCH_DEVNODE, CR_QUERY_VETOED, CR_REMOVE_VETOED, CR_SUCCESS, PNP_VETO_TYPE,
+        CM_LOCATE_DEVNODE_PHANTOM, CM_REMOVE_NO_RESTART, CM_REMOVE_UI_NOT_OK, CONFIGRET,
+        CR_ACCESS_DENIED, CR_NO_SUCH_DEVINST, CR_NO_SUCH_DEVNODE, CR_QUERY_VETOED,
+        CR_REMOVE_VETOED, CR_SUCCESS, PNP_VETO_TYPE,
     };
     use windows::Win32::Foundation::{
         CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
@@ -1743,6 +1744,28 @@ mod windows_ble {
         else {
             return Ok(pairing_maintenance_busy_prompt_result(&target_name));
         };
+
+        if type_recovery_command_confirmed {
+            match unpair_listener_devices_inner(std::slice::from_ref(&target_name)) {
+                Ok(unpair) => {
+                    log::warn!(
+                        "[embedded-ble] Type recovery pre-pair stale cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
+                        unpair.status,
+                        unpair.matched_devices,
+                        unpair.unpaired_devices,
+                        unpair.already_unpaired_devices,
+                        unpair.failed_devices,
+                        unpair.needs_user_action,
+                    );
+                    if unpair.unpaired_devices > 0 {
+                        std::thread::sleep(Duration::from_millis(700));
+                    }
+                }
+                Err(err) => log::warn!(
+                    "[embedded-ble] Type recovery pre-pair stale cleanup failed before PairAsync: {err}"
+                ),
+            }
+        }
 
         let mut candidates = if bypass_prompt_suppression {
             listener_recovery_pairing_candidates(Some(&target_name))?
@@ -3876,19 +3899,28 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         candidate: &ListenerPnpRemoveCandidate,
     ) -> Result<DeviceUnpairOutcome, String> {
         let cm_outcome = remove_pnp_device_candidate_with_cfgmgr(candidate);
-        if !candidate.is_ble_device_root {
+
+        if matches!(cm_outcome, Ok(DeviceUnpairOutcome::Unpaired)) {
             return cm_outcome;
         }
 
         match remove_pnp_device_candidate_with_pnputil(candidate) {
             Ok(DeviceUnpairOutcome::Unpaired) => Ok(DeviceUnpairOutcome::Unpaired),
             Ok(DeviceUnpairOutcome::AlreadyUnpaired) => cm_outcome,
-            Err(err) => {
+            Err(pnputil_err) => {
                 log::warn!(
-                    "[embedded-ble] pnputil root-node cleanup failed for {}: {err}",
+                    "[embedded-ble] pnputil stale-node cleanup failed for {}: {pnputil_err}",
                     candidate.label
                 );
-                cm_outcome
+                match cm_outcome {
+                    Ok(DeviceUnpairOutcome::AlreadyUnpaired) => Err(format!(
+                        "cfgmgr32 could not locate stale node and pnputil failed: {pnputil_err}"
+                    )),
+                    Err(cm_err) => Err(format!(
+                        "cfgmgr32 failed: {cm_err}; pnputil failed: {pnputil_err}"
+                    )),
+                    Ok(DeviceUnpairOutcome::Unpaired) => Ok(DeviceUnpairOutcome::Unpaired),
+                }
             }
         }
     }
@@ -3902,13 +3934,22 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             .chain(std::iter::once(0))
             .collect();
         let mut devinst = 0u32;
-        let locate = unsafe {
+        let mut locate = unsafe {
             CM_Locate_DevNodeW(
                 &mut devinst,
                 PCWSTR(wide_id.as_ptr()),
                 CM_LOCATE_DEVNODE_NORMAL,
             )
         };
+        if locate == CR_NO_SUCH_DEVINST || locate == CR_NO_SUCH_DEVNODE {
+            locate = unsafe {
+                CM_Locate_DevNodeW(
+                    &mut devinst,
+                    PCWSTR(wide_id.as_ptr()),
+                    CM_LOCATE_DEVNODE_PHANTOM,
+                )
+            };
+        }
         if locate == CR_NO_SUCH_DEVINST || locate == CR_NO_SUCH_DEVNODE {
             return Ok(DeviceUnpairOutcome::AlreadyUnpaired);
         }
@@ -3943,7 +3984,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     ) -> Result<DeviceUnpairOutcome, String> {
         let mut command = hidden_command("pnputil");
         let output = command
-            .args(["/remove-device", &candidate.instance_id])
+            .args(["/remove-device", &candidate.instance_id, "/subtree"])
             .output()
             .map_err(|err| format!("start pnputil failed: {err}"))?;
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -4318,6 +4359,15 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             b"VREC:RECOVERY:TYPE\n",
             timeout,
             "audio control recovery",
+            ActiveControlTransientFallback::TryFreshGatt,
+        )
+    }
+
+    pub fn send_recording_control_type_bye(timeout: Duration) -> Result<(), String> {
+        send_recording_control_command(
+            b"TYPE:BYE\n",
+            timeout,
+            "audio type bye",
             ActiveControlTransientFallback::TryFreshGatt,
         )
     }
@@ -13949,6 +13999,18 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .expect("Type recovery promotion block boundary should exist");
             let body = &source[start..end];
 
+            let pre_cleanup_index = body
+                .find("unpair_listener_devices_inner(std::slice::from_ref(&target_name))")
+                .expect(
+                    "confirmed Type recovery must clean stale Windows pairing before PairAsync",
+                );
+            let candidate_scan_index = body
+                .find("listener_recovery_pairing_candidates(Some(&target_name))")
+                .expect("confirmed Type recovery must still scan fresh recovery advertisements");
+            assert!(
+                pre_cleanup_index < candidate_scan_index,
+                "confirmed Type recovery must remove stale Windows PnP/bond cache before pairing the fresh recovery address"
+            );
             assert!(body.contains("let trusted_addresses = listener_recovery_target_addresses();"));
             assert!(body.contains("listener_pairing_candidate_has_trusted_address"));
             assert!(
@@ -14339,6 +14401,25 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 "Type-controlled recovery must not expose the Windows native pairing toast command"
             );
             assert!(!production.contains("send_recording_control_native_pairing_recovery"));
+        }
+
+        #[test]
+        fn type_bye_is_a_separate_shutdown_heartbeat_command() {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("pub fn send_recording_control_type_bye")
+                .expect("Type bye command should exist");
+            let end = source[start..]
+                .find("pub fn send_recording_processing_state")
+                .map(|offset| start + offset)
+                .expect("Type bye command boundary should exist");
+            let body = &source[start..end];
+
+            assert!(body.contains("b\"TYPE:BYE\\n\""));
+            assert!(
+                !body.contains("VREC:RECOVERY"),
+                "Type shutdown must only clear Type-ready heartbeat, not open pairing recovery"
+            );
         }
 
         #[test]
@@ -14833,6 +14914,11 @@ pub fn send_recording_control_recovery(timeout: Duration) -> Result<(), String> 
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_type_bye(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_control_type_bye(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_processing_state(active, timeout)
 }
@@ -15300,6 +15386,11 @@ pub fn send_recording_control_stop(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_recovery(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recovery is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_type_bye(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE Type heartbeat is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

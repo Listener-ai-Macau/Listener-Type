@@ -76,13 +76,17 @@ pub fn run() {
         match intent {
             cli::CliIntent::SubmitEmbeddedAudioBleOnce { .. }
             | cli::CliIntent::SubmitEmbeddedAudioBleStream { .. }
-            | cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. }
             | cli::CliIntent::SendEmbeddedAudioControlStop { .. }
             | cli::CliIntent::ReadEmbeddedAudioBleStatus { .. }
             | cli::CliIntent::ProbeListenerOtaV2Gatt { .. }
             | cli::CliIntent::PromptEmbeddedBlePairing { .. }
             | cli::CliIntent::PromptEmbeddedBlePairingOnly { .. }
             | cli::CliIntent::CleanupEmbeddedBlePairing { .. } => {
+                std::process::exit(run_embedded_ble_headless_cli(intent));
+            }
+            cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. }
+                if std::env::var_os("LISTENER_TYPE_FORCE_HEADLESS_BLE_CLI").is_some() =>
+            {
                 std::process::exit(run_embedded_ble_headless_cli(intent));
             }
             cli::CliIntent::FirmwareOta { .. } => {
@@ -113,7 +117,13 @@ pub fn run() {
         // 桌面环境快捷键执行 `listener-type --toggle-dictation` 时，第二个进程被本插件
         // 拦截 → argv 直接转给主实例 coordinator。详见 issue #420 / `cli.rs`。
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            if let Some(intent) = cli::parse_cli_intent(&argv) {
+            // tauri-plugin-single-instance may pass only the forwarded arguments on
+            // Windows, while `parse_cli_intent` accepts a normal argv vector and
+            // skips argv[0]. Prefix a harmless dummy so both shapes parse the same.
+            let mut forwarded_argv = Vec::with_capacity(argv.len() + 1);
+            forwarded_argv.push("listener-type".to_string());
+            forwarded_argv.extend(argv);
+            if let Some(intent) = cli::parse_cli_intent(&forwarded_argv) {
                 log::info!(
                     "[single-instance] another instance launched with intent={intent:?}, dispatching"
                 );
@@ -491,6 +501,7 @@ pub fn run() {
                 log::info!("[main] exit");
                 TRAY_MICROPHONE_WATCHER_STOPPING.store(true, Ordering::Relaxed);
                 let coordinator = app.state::<Arc<coordinator::Coordinator>>();
+                coordinator.request_shutdown();
                 coordinator.stop_hotkey_listener();
                 coordinator.stop_qa_hotkey_listener();
                 coordinator.stop_combo_hotkey_listener();
@@ -507,6 +518,8 @@ fn request_app_quit(app: &AppHandle) {
     log::info!("[main] explicit quit requested");
     APP_QUIT_REQUESTED.store(true, Ordering::Relaxed);
     TRAY_MICROPHONE_WATCHER_STOPPING.store(true, Ordering::Relaxed);
+    let coordinator = app.state::<Arc<coordinator::Coordinator>>();
+    coordinator.request_shutdown();
     app.exit(0);
 }
 
@@ -1436,7 +1449,7 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
                         log::info!(
                         "[cli] headless prompt-embedded-ble-pairing opened Listener recovery pairing window"
                     );
-                        std::thread::sleep(std::time::Duration::from_millis(700));
+                        std::thread::sleep(std::time::Duration::from_millis(2600));
                         true
                     }
                     Err(err) => {
@@ -2157,9 +2170,16 @@ mod tests {
         let forced_pairing_index = recovery_body
             .find("prompt_listener_pairing_after_type_recovery")
             .expect("confirmed recovery CLI must use the stale-cache cleanup pairing path");
+        let settle_index = recovery_body.find("from_millis(2600)").expect(
+            "confirmed recovery CLI must wait for firmware async bond deletion before PairAsync",
+        );
         assert!(
             command_index < forced_pairing_index,
             "Type must only force stale Windows cache cleanup after the firmware recovery command succeeds"
+        );
+        assert!(
+            command_index < settle_index && settle_index < forced_pairing_index,
+            "Type recovery must let firmware finish async bond deletion before starting Windows PairAsync"
         );
 
         let only_start = end;
@@ -2191,6 +2211,28 @@ mod tests {
 
         assert!(should_hide_main_on_close(false));
         assert!(!should_hide_main_on_close(true));
+    }
+
+    #[test]
+    fn explicit_quit_requests_coordinator_shutdown_before_exit() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("fn request_app_quit")
+            .expect("explicit quit helper should exist");
+        let end = source[start..]
+            .find("fn should_keep_alive_on_exit_request")
+            .map(|offset| start + offset)
+            .expect("explicit quit helper boundary should exist");
+        let body = &source[start..end];
+        let shutdown_index = body
+            .find("coordinator.request_shutdown();")
+            .expect("explicit quit must ask the coordinator to shut down BLE first");
+        let exit_index = body.find("app.exit(0);").expect("explicit quit must exit");
+
+        assert!(
+            shutdown_index < exit_index,
+            "Type must send its BLE shutdown signal before exiting the process"
+        );
     }
 
     #[test]
