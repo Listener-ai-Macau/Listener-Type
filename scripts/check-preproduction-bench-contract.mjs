@@ -44,9 +44,15 @@ if (!human.includes("Assert-StepsMatchCanonicalScenarios")) {
   failures.push("human review must fail fast when its detailed steps drift from the canonical scenario manifest");
 }
 
-for (const requiredToken of ["initialObservation", "现象栏还是原始模板"]) {
+for (const requiredToken of ["实际操作和结果", "operator_note"]) {
   if (!human.includes(requiredToken)) {
-    failures.push(`human review must reject unchanged observation templates and include ${requiredToken}`);
+    failures.push(`human review must use one operator note field and include ${requiredToken}`);
+  }
+}
+
+for (const forbiddenToken of ["填写现象", "initialObservation", "现象栏还是原始模板"]) {
+  if (human.includes(forbiddenToken)) {
+    failures.push(`human review must not restore the removed separate observation field/token: ${forbiddenToken}`);
   }
 }
 

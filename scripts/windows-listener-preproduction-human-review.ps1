@@ -385,6 +385,7 @@ function Show-ReviewStep {
             id = $Step.id
             title = $Step.title
             result = "SKIP"
+            operator_note = "NoPrompt dry run"
             operator_action = "NoPrompt dry run"
             observation = "NoPrompt dry run"
             started_at = $startedAt.ToString("o")
@@ -455,7 +456,7 @@ function Show-ReviewStep {
     $form.Controls.Add($expectedBox)
 
     $operatorActionLabel = [System.Windows.Forms.Label]::new()
-    $operatorActionLabel.Text = "我实际做了什么 / 点了什么 / 等了多久"
+    $operatorActionLabel.Text = "实际操作和结果"
     $operatorActionLabel.AutoSize = $false
     $operatorActionLabel.Location = [System.Drawing.Point]::new(16, 268)
     $operatorActionLabel.Size = [System.Drawing.Size]::new(668, 22)
@@ -465,26 +466,9 @@ function Show-ReviewStep {
     $operatorAction.Multiline = $true
     $operatorAction.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
     $operatorAction.Location = [System.Drawing.Point]::new(16, 292)
-    $operatorAction.Size = [System.Drawing.Size]::new(668, 74)
-    $operatorAction.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Top
+    $operatorAction.Size = [System.Drawing.Size]::new(668, 210)
+    $operatorAction.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom
     $form.Controls.Add($operatorAction)
-
-    $obsLabel = [System.Windows.Forms.Label]::new()
-    $obsLabel.Text = "填写现象"
-    $obsLabel.AutoSize = $false
-    $obsLabel.Location = [System.Drawing.Point]::new(16, 374)
-    $obsLabel.Size = [System.Drawing.Size]::new(668, 22)
-    $form.Controls.Add($obsLabel)
-
-    $observation = [System.Windows.Forms.TextBox]::new()
-    $observation.Multiline = $true
-    $observation.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $observation.Location = [System.Drawing.Point]::new(16, 398)
-    $observation.Size = [System.Drawing.Size]::new(668, 104)
-    $observation.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom
-    $initialObservation = Convert-ReviewText $Step.observation_template
-    $observation.Text = $initialObservation
-    $form.Controls.Add($observation)
 
     $buttonPanel = [System.Windows.Forms.FlowLayoutPanel]::new()
     $buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
@@ -511,32 +495,12 @@ function Show-ReviewStep {
             if ($selectedResult -in @("PASS", "FAIL")) {
                 if ([string]::IsNullOrWhiteSpace($operatorAction.Text)) {
                     [System.Windows.Forms.MessageBox]::Show(
-                        "先写一下你刚才实际做了什么。比如：点了 Windows 连接通知、等了 20 秒、按了 EC11 两次。",
-                        "缺少实际操作记录",
+                        "写一下你刚才实际做了什么，以及结果/现象。比如：点了 Windows 连接通知，等 20 秒后 Type 恢复，蓝牙灯稳定。",
+                        "缺少实际操作和结果",
                         [System.Windows.Forms.MessageBoxButtons]::OK,
                         [System.Windows.Forms.MessageBoxIcon]::Information
                     ) | Out-Null
                     $operatorAction.Focus()
-                    return
-                }
-                if ([string]::IsNullOrWhiteSpace($observation.Text)) {
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "再写一下你看到的现象/结果，失败时尤其要写灯效、弹窗和 Type 状态。",
-                        "缺少现象记录",
-                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                        [System.Windows.Forms.MessageBoxIcon]::Information
-                    ) | Out-Null
-                    $observation.Focus()
-                    return
-                }
-                if ($observation.Text.Trim() -eq $initialObservation.Trim()) {
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "现象栏还是原始模板。请把你实际看到的状态填进去，例如：窗口正常、蓝牙稳定、灯效正常；失败时写具体弹窗/灯效/Type 状态。",
-                        "现象还没有填写",
-                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                        [System.Windows.Forms.MessageBoxIcon]::Information
-                    ) | Out-Null
-                    $observation.Focus()
                     return
                 }
             }
@@ -548,7 +512,7 @@ function Show-ReviewStep {
 
     $form.Add_Shown({
         $form.Activate()
-        $observation.Focus()
+        $operatorAction.Focus()
     })
     [void]$form.ShowDialog()
 
@@ -561,8 +525,9 @@ function Show-ReviewStep {
         id = $Step.id
         title = $Step.title
         result = $script:preproductionReviewResult
+        operator_note = $operatorAction.Text
         operator_action = $operatorAction.Text
-        observation = $observation.Text
+        observation = $operatorAction.Text
         action = $Step.action
         expected = $Step.expected
         evidence_hint = $Step.evidence_hint
@@ -867,13 +832,12 @@ $lines.Add("- Random BLE name: $RandomName") | Out-Null
 $lines.Add("- Type HEAD: $($typeHeadInfo.head) $($typeHeadInfo.commit_time)") | Out-Null
 $lines.Add("- Firmware HEAD: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time)") | Out-Null
 $lines.Add("") | Out-Null
-$lines.Add("| # | StepId | Step | Result | Operator action | Observation | Evidence |") | Out-Null
-$lines.Add("|---:|---|---|---|---|---|---|") | Out-Null
+$lines.Add("| # | StepId | Step | Result | Operator note | Evidence |") | Out-Null
+$lines.Add("|---:|---|---|---|---|---|") | Out-Null
 foreach ($record in $records) {
-    $operatorAction = Format-MarkdownCell $record.operator_action
-    $obs = Format-MarkdownCell $record.observation
+    $operatorNote = Format-MarkdownCell $record.operator_note
     $evidence = "before/during/after logs in output dir"
-    $lines.Add("| $($record.index) | $($record.id) | $($record.title) | $($record.result) | $operatorAction | $obs | $evidence |") | Out-Null
+    $lines.Add("| $($record.index) | $($record.id) | $($record.title) | $($record.result) | $operatorNote | $evidence |") | Out-Null
 }
 $lines.Add("") | Out-Null
 $lines.Add("Each step JSON record contains before/during/after snapshots with Bluetooth PnP, Type process, USB/serial, desktop screenshot, Listener Type log tail, capsule timeline tail, and Windows Bluetooth/device event logs.") | Out-Null
