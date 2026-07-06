@@ -407,9 +407,10 @@ function Show-ReviewStep {
             id = $Step.id
             title = $Step.title
             result = "SKIP"
-            operator_note = "NoPrompt dry run"
-            operator_action = "NoPrompt dry run"
-            observation = "NoPrompt dry run"
+            operator_note = ""
+            operator_action = ""
+            observation = ""
+            dry_run_note = "NoPrompt dry run"
             started_at = $startedAt.ToString("o")
             ended_at = $endedAt.ToString("o")
             before = $before
@@ -424,8 +425,8 @@ function Show-ReviewStep {
     $form = [System.Windows.Forms.Form]::new()
     $form.Text = "Listener 1.0.2 准量产验收"
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
-    $form.ClientSize = [System.Drawing.Size]::new(680, 500)
-    $form.MinimumSize = [System.Drawing.Size]::new(640, 460)
+    $form.ClientSize = [System.Drawing.Size]::new(760, 540)
+    $form.MinimumSize = [System.Drawing.Size]::new(720, 500)
     $form.MaximizeBox = $false
     $form.TopMost = $true
     $form.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 10)
@@ -442,14 +443,14 @@ function Show-ReviewStep {
     $title.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 12, [System.Drawing.FontStyle]::Bold)
     $title.AutoSize = $false
     $title.Location = [System.Drawing.Point]::new(16, 12)
-    $title.Size = [System.Drawing.Size]::new(648, 28)
+    $title.Size = [System.Drawing.Size]::new(728, 28)
     $form.Controls.Add($title)
 
     $actionLabel = [System.Windows.Forms.Label]::new()
     $actionLabel.Text = "你现在做"
     $actionLabel.AutoSize = $false
     $actionLabel.Location = [System.Drawing.Point]::new(16, 52)
-    $actionLabel.Size = [System.Drawing.Size]::new(648, 20)
+    $actionLabel.Size = [System.Drawing.Size]::new(728, 20)
     $form.Controls.Add($actionLabel)
 
     $actionBox = [System.Windows.Forms.TextBox]::new()
@@ -457,46 +458,46 @@ function Show-ReviewStep {
     $actionBox.ReadOnly = $true
     $actionBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
     $actionBox.Location = [System.Drawing.Point]::new(16, 74)
-    $actionBox.Size = [System.Drawing.Size]::new(648, 86)
+    $actionBox.Size = [System.Drawing.Size]::new(728, 96)
     $actionBox.Text = Convert-ReviewText $Step.action
     $form.Controls.Add($actionBox)
 
     $expectedLabel = [System.Windows.Forms.Label]::new()
     $expectedLabel.Text = "通过标准"
     $expectedLabel.AutoSize = $false
-    $expectedLabel.Location = [System.Drawing.Point]::new(16, 168)
-    $expectedLabel.Size = [System.Drawing.Size]::new(648, 20)
+    $expectedLabel.Location = [System.Drawing.Point]::new(16, 178)
+    $expectedLabel.Size = [System.Drawing.Size]::new(728, 20)
     $form.Controls.Add($expectedLabel)
 
     $expectedBox = [System.Windows.Forms.TextBox]::new()
     $expectedBox.Multiline = $true
     $expectedBox.ReadOnly = $true
     $expectedBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $expectedBox.Location = [System.Drawing.Point]::new(16, 190)
-    $expectedBox.Size = [System.Drawing.Size]::new(648, 78)
+    $expectedBox.Location = [System.Drawing.Point]::new(16, 200)
+    $expectedBox.Size = [System.Drawing.Size]::new(728, 86)
     $expectedBox.Text = Convert-ReviewText $Step.expected
     $form.Controls.Add($expectedBox)
 
     $operatorActionLabel = [System.Windows.Forms.Label]::new()
-    $operatorActionLabel.Text = "实际操作和结果（可留空；有异常、疑问或小瑕疵就写下来）"
+    $operatorActionLabel.Text = "备注（可留空；有异常、疑问或小瑕疵就写下来，我会当作需求处理）"
     $operatorActionLabel.AutoSize = $false
-    $operatorActionLabel.Location = [System.Drawing.Point]::new(16, 278)
-    $operatorActionLabel.Size = [System.Drawing.Size]::new(648, 20)
+    $operatorActionLabel.Location = [System.Drawing.Point]::new(16, 296)
+    $operatorActionLabel.Size = [System.Drawing.Size]::new(728, 20)
     $form.Controls.Add($operatorActionLabel)
 
     $operatorAction = [System.Windows.Forms.TextBox]::new()
     $operatorAction.Multiline = $true
     $operatorAction.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $operatorAction.Location = [System.Drawing.Point]::new(16, 300)
-    $operatorAction.Size = [System.Drawing.Size]::new(648, 112)
+    $operatorAction.Location = [System.Drawing.Point]::new(16, 318)
+    $operatorAction.Size = [System.Drawing.Size]::new(728, 126)
     $operatorAction.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom
     $form.Controls.Add($operatorAction)
 
     $buttonPanel = [System.Windows.Forms.FlowLayoutPanel]::new()
     $buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
     $buttonPanel.WrapContents = $false
-    $buttonPanel.Location = [System.Drawing.Point]::new(16, 426)
-    $buttonPanel.Size = [System.Drawing.Size]::new(648, 40)
+    $buttonPanel.Location = [System.Drawing.Point]::new(16, 458)
+    $buttonPanel.Size = [System.Drawing.Size]::new(728, 44)
     $buttonPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Bottom
     $form.Controls.Add($buttonPanel)
 
@@ -894,8 +895,12 @@ function Get-OperatorNoteText {
 
     foreach ($fieldName in @("operator_note", "operator_action", "observation")) {
         $value = Get-ReviewRecordField -Record $Record -Name $fieldName
-        if (-not [string]::IsNullOrWhiteSpace([string]$value)) {
-            return [string]$value
+        $text = ([string]$value).Trim()
+        if ($text -eq "NoPrompt dry run") {
+            continue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($text)) {
+            return $text
         }
     }
     return ""

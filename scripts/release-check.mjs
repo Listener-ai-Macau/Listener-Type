@@ -4,6 +4,8 @@ import process from 'node:process';
 
 const checks = [
   ['version consistency', 'npm run check:version'],
+  ['operator note triage gate', 'npm run check:preproduction-operator-notes'],
+  ['preproduction bench contract', 'npm run check:preproduction-bench-contract'],
   ['frontend verification', 'npm run verify'],
   ['updater manifest generation', 'node scripts/write-updater-manifest.test.mjs'],
   ['tauri library tests', 'cargo test --manifest-path src-tauri/Cargo.toml --lib'],

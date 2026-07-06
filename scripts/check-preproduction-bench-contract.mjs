@@ -97,6 +97,22 @@ for (const requiredToken of [
   }
 }
 
+for (const forbiddenToken of [
+  'operator_note = "NoPrompt dry run"',
+  'operator_action = "NoPrompt dry run"',
+  'observation = "NoPrompt dry run"',
+]) {
+  if (human.includes(forbiddenToken)) {
+    failures.push(`dry-run sentinels must not be written into human operator note fields: ${forbiddenToken}`);
+  }
+}
+
+for (const requiredToken of ['dry_run_note = "NoPrompt dry run"', 'text === "NoPrompt dry run"']) {
+  if (!human.includes(requiredToken) && !operatorNoteTriage.includes(requiredToken)) {
+    failures.push(`dry-run NoPrompt placeholders must stay internal and ignored by operator-note gates: ${requiredToken}`);
+  }
+}
+
 for (const requiredToken of [
   "triage status must be PASS",
   "missing triage for",
@@ -112,7 +128,7 @@ for (const requiredToken of [
   }
 }
 
-for (const requiredToken of ["实际操作和结果", "operator_note"]) {
+for (const requiredToken of ["备注（可留空", "我会当作需求处理", "operator_note"]) {
   if (!human.includes(requiredToken)) {
     failures.push(`human review must use one operator note field and include ${requiredToken}`);
   }
@@ -137,7 +153,7 @@ for (const requiredToken of ["FormStartPosition]::Manual", "PrimaryScreen.Workin
   }
 }
 
-if (!human.includes("[System.Drawing.Size]::new(680, 500)") || !human.includes("[System.Drawing.Size]::new(640, 460)")) {
+if (!human.includes("[System.Drawing.Size]::new(760, 540)") || !human.includes("[System.Drawing.Size]::new(720, 500)")) {
   failures.push("human review window must stay readable but bounded enough to leave Type/Windows Bluetooth visible");
 }
 

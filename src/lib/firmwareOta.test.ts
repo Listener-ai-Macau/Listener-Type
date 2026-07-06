@@ -594,6 +594,15 @@ assert.ok(
   'firmware package selection must preserve the previous package while a new dialog/load/validation attempt is pending',
 );
 assert.ok(
+  firmwareOtaPanelSource.includes('className="ol-firmware-selected-package"'),
+  'selected firmware package must remain visibly pinned after selection',
+);
+assert.ok(
+  firmwareOtaPanelSource.indexOf('className="ol-firmware-selected-package"') <
+    firmwareOtaPanelSource.indexOf("{firmwareMode === 'ble' && ("),
+  'selected firmware package summary must be outside the BLE/wired mode-specific panels',
+);
+assert.ok(
   firmwareOtaPanelSource.includes("dispatch(previousPackage\n        ? { type: 'ready' }"),
   'failed new firmware selection should restore ready state when an older package is still selected',
 );

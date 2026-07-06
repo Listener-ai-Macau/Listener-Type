@@ -23,6 +23,7 @@ const distIndexPath = join(appRoot, "dist", "index.html");
 const nsisHookPath = join(appRoot, "src-tauri", "nsis", "listener-type-ime-hooks.nsh");
 const nsisCleanupHookPath = join(appRoot, "src-tauri", "nsis", "listener-type-ime-cleanup-hooks.nsh");
 const regressionGatePath = join(scriptsDir, "run-v1.0.2-regression.ps1");
+const releaseCheckPath = join(scriptsDir, "release-check.mjs");
 const wixFragmentPath = join(appRoot, "src-tauri", "wix", "listener-type-ime.wxs");
 const wixCleanupFragmentPath = join(appRoot, "src-tauri", "wix", "listener-type-ime-cleanup.wxs");
 
@@ -43,6 +44,7 @@ const distIndex = readFileSync(distIndexPath, "utf8");
 const nsisHook = readFileSync(nsisHookPath, "utf8");
 const nsisCleanupHook = readFileSync(nsisCleanupHookPath, "utf8");
 const regressionGate = readFileSync(regressionGatePath, "utf8");
+const releaseCheck = readFileSync(releaseCheckPath, "utf8");
 const wixFragment = readFileSync(wixFragmentPath, "utf8");
 const wixCleanupFragment = readFileSync(wixCleanupFragmentPath, "utf8");
 
@@ -87,6 +89,8 @@ assert.match(script, /\[switch\]\$ReuseExistingExe/, "script should support fast
 assert.match(script, /\[switch\]\$UseSccache/, "script should support opt-in sccache acceleration");
 assert.match(script, /\[switch\]\$IncrementalReleaseBuild/, "script should support opt-in local incremental release builds");
 assert.match(regressionGate, /-IncrementalReleaseBuild/, "v1.0.2 regression packaging should use incremental release builds to avoid repeated long relinks");
+assert.match(releaseCheck, /check:preproduction-operator-notes/, "release:check must reject untriaged operator notes before publishing");
+assert.match(releaseCheck, /check:preproduction-bench-contract/, "release:check must keep the preproduction bench/human workflow contract in the default release gate");
 assert.match(script, /Test-ReusableReleaseExe/, "script should guard the fast MSI relink path");
 assert.match(script, /Cargo build jobs left at Cargo default parallelism/, "script should advertise default Cargo parallelism");
 assert.doesNotMatch(script, /set `"CARGO_BUILD_JOBS=1`"/, "default packaging must not force serial Cargo builds");

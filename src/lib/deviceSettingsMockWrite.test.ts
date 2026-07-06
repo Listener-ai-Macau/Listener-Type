@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { applyMockDeviceSettingsWrite } from './deviceSettingsMock.ts';
 import type {
@@ -89,4 +90,14 @@ assert.equal(
   renamedWrite.bleNamePendingRestart,
   true,
   'mock settings write should request BLE re-pair only when the BLE name changes',
+);
+
+const deviceSectionSource = readFileSync('src/pages/settings/DeviceSection.tsx', 'utf8');
+assert.ok(
+  deviceSectionSource.includes('Math.floor(value / 60000)'),
+  'device settings form must not round millisecond readback up to the next displayed minute',
+);
+assert.ok(
+  !deviceSectionSource.includes('Math.round(value / 60000)'),
+  'device settings form must preserve the backend no-round-up minute contract',
 );

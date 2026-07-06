@@ -1211,7 +1211,7 @@ function clampMinuteValue(value: number, min: 0 | 1): number {
 
 function minutesFromMsForDeviceForm(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.max(1, Math.min(1440, Math.round(value / 60000)));
+  return Math.max(1, Math.min(1440, Math.floor(value / 60000)));
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {

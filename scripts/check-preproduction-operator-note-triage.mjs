@@ -33,7 +33,10 @@ function field(record, name) {
 function noteText(record) {
   for (const name of ["operator_note", "operator_action", "observation"]) {
     const value = field(record, name);
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value !== "string") continue;
+    const text = value.trim();
+    if (!text || text === "NoPrompt dry run") continue;
+    return text;
   }
   return "";
 }
@@ -67,16 +70,7 @@ if (!summaryPath || !fs.existsSync(summaryPath)) {
   process.exit(1);
 }
 
-const triagePath = path.resolve(
-  argValue("--triage") || path.join(path.dirname(summaryPath), "preproduction-operator-note-triage.json"),
-);
-if (!fs.existsSync(triagePath)) {
-  console.error(`FAIL: operator note triage missing: ${triagePath}`);
-  process.exit(1);
-}
-
 const summary = readJson(summaryPath);
-const triage = readJson(triagePath);
 const records = Array.isArray(summary.records) ? summary.records : [];
 const recordNotes = records.map((record) => ({
     id: String(field(record, "id") ?? ""),
@@ -86,6 +80,31 @@ const recordNotes = records.map((record) => ({
   }));
 const notes = recordNotes.filter((record) => record.operator_note);
 
+const failures = [];
+if (records.length === 0) {
+  failures.push("human review summary has no records");
+}
+
+if (notes.length === 0) {
+  if (failures.length) {
+    console.error("FAIL: operator note triage is incomplete");
+    for (const failure of failures) console.error(`- ${failure}`);
+    process.exit(1);
+  }
+  console.log(`PASS: operator note triage has no non-empty human notes in ${summaryPath}; blank notes are treated as normal pass.`);
+  process.exit(0);
+}
+
+const triagePath = path.resolve(
+  argValue("--triage") || path.join(path.dirname(summaryPath), "preproduction-operator-note-triage.json"),
+);
+if (!fs.existsSync(triagePath)) {
+  console.error(`FAIL: operator note triage missing: ${triagePath}`);
+  process.exit(1);
+}
+
+const triage = readJson(triagePath);
+
 const triageEntries = Array.isArray(triage.operator_notes) ? triage.operator_notes : [];
 const triageByKey = new Map();
 for (const entry of triageEntries) {
@@ -93,10 +112,6 @@ for (const entry of triageEntries) {
   triageByKey.set(`${entry.id}:${hash}`, entry);
 }
 
-const failures = [];
-if (records.length === 0) {
-  failures.push("human review summary has no records");
-}
 if (triage.status !== "PASS") {
   failures.push(`triage status must be PASS, got ${triage.status ?? "missing"}`);
 }

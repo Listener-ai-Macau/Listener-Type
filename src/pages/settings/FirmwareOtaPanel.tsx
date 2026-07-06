@@ -385,6 +385,14 @@ export function FirmwareOtaPanel({
         )}
       </div>
 
+      {selectedPackage && (
+        <div className="ol-firmware-selected-package" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(156px, 1fr))', gap: 8 }}>
+          <FirmwareOtaFact label={t('settings.recording.firmwareSelectedPackage', '已选固件')} value={selectedPackage.sourceLabel} />
+          <FirmwareOtaFact label={t('settings.recording.firmwareOtaPackageVersion', '升级包版本')} value={selectedPackage.manifest.version} />
+          <FirmwareOtaFact label={t('settings.recording.firmwareOtaSize', '升级包大小')} value={formatBytes(selectedPackage.manifest.fileSizeBytes)} />
+        </div>
+      )}
+
       <div className="ol-firmware-control-bar">
         <div className="ol-firmware-mode-switch" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <Btn variant={firmwareMode === 'ble' ? 'blue' : 'soft'} size="sm" icon="cloud" onClick={() => setFirmwareMode('ble')} disabled={firmwareActionBusy}>
