@@ -20,6 +20,21 @@ review. It does not pair or unpair Windows devices. If the physical bench,
 Windows pair/unpair automation, audio fixture, LED optical capture, or second
 BLE host are missing, review must remain `BENCH_REVIEW_NO_GO`.
 
+Windows BLE pair/unpair automation is split into an explicit active script so a
+read-only evidence pass cannot silently mutate the operator's host:
+
+```powershell
+pwsh -NoProfile -File .\scripts\windows-listener-preproduction-ble-active-bench.ps1 -OutputDir .cache\validation\ble-active -Mode DryRun
+pwsh -NoProfile -File .\scripts\windows-listener-preproduction-ble-active-bench.ps1 -OutputDir .cache\validation\ble-active -Mode CleanupThenPair -ClickWindowsNotification -Execute
+pwsh -NoProfile -File .\scripts\windows-listener-preproduction-bench-collect.ps1 -OutputDir .cache\validation\bench-collect -ActiveBleSummaryPath .cache\validation\ble-active\preproduction-ble-active-summary.json
+```
+
+The active script reuses the Type release executable's Windows pairing CLI paths
+for cleanup, pairing, and GATT/audio status probing. `DryRun` writes the planned
+mutating steps plus before/after Windows BLE state, but it must not claim
+`windows_ble_automation`. Only an executed active run that records PASS for the
+cleanup/pairing path and GATT probe can satisfy that capability.
+
 Without a capability manifest, the bench review exits with
 `BENCH_REVIEW_NO_GO` and writes the missing capabilities/evidence for every
 step. This is intentional: a dry-run must not masquerade as physical acceptance.

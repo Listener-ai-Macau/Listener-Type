@@ -5,6 +5,7 @@ param(
   [string]$FirmwareRoot = "",
   [string]$TypeExe = "",
   [string]$ExpectedName = "listener",
+  [string]$ActiveBleSummaryPath = "",
   [int]$LiveBleTimeoutMs = 8000,
   [switch]$SkipLiveBle,
   [switch]$SkipScreenshot,
@@ -94,6 +95,55 @@ function Add-Evidence {
     $Manifest.evidence[$StepId] = [ordered]@{}
   }
   $Manifest.evidence[$StepId][$Key] = Get-RelativeEvidencePath $Path
+}
+
+function Get-ActiveBleRecordEvidence {
+  param(
+    [AllowNull()]$Summary,
+    [Parameter(Mandatory = $true)][string]$Stage
+  )
+  if ($null -eq $Summary) {
+    return ""
+  }
+  $record = @($Summary.records | Where-Object { $_.stage -eq $Stage } | Select-Object -First 1)
+  if ($record.Count -eq 0 -or $null -eq $record[0].PSObject.Properties["evidence"]) {
+    return ""
+  }
+  $path = [string]$record[0].evidence
+  if ([string]::IsNullOrWhiteSpace($path)) {
+    return ""
+  }
+  if ([System.IO.Path]::IsPathRooted($path)) {
+    return $path
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ActiveBleSummaryPath)) {
+    return Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $ActiveBleSummaryPath).Path) $path
+  }
+  return ""
+}
+
+function Get-ActiveBleEvidencePath {
+  param(
+    [AllowNull()]$Summary,
+    [Parameter(Mandatory = $true)][string]$Key
+  )
+  if ($null -eq $Summary -or $null -eq $Summary.PSObject.Properties["evidence"]) {
+    return ""
+  }
+  if ($null -eq $Summary.evidence.PSObject.Properties[$Key]) {
+    return ""
+  }
+  $path = [string]$Summary.evidence.PSObject.Properties[$Key].Value
+  if ([string]::IsNullOrWhiteSpace($path)) {
+    return ""
+  }
+  if ([System.IO.Path]::IsPathRooted($path)) {
+    return $path
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ActiveBleSummaryPath)) {
+    return Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $ActiveBleSummaryPath).Path) $path
+  }
+  return ""
 }
 
 function Get-TypeProcesses {
@@ -393,10 +443,28 @@ Write-JsonFile -Path $releaseArtifactsPath -Value $releaseArtifacts -Depth 8
 $manifest.capabilities.release_artifacts = [bool]$releaseArtifacts.all_expected_present
 $manifest.capabilities.ota_package = -not [string]::IsNullOrWhiteSpace([string]$releaseArtifacts.firmware_zip)
 
+$activeBle = $null
+$resolvedActiveBleSummaryPath = ""
+if (-not [string]::IsNullOrWhiteSpace($ActiveBleSummaryPath)) {
+  try {
+    $resolvedActiveBleSummaryPath = (Resolve-Path -LiteralPath $ActiveBleSummaryPath).Path
+    $activeBle = Get-Content -LiteralPath $resolvedActiveBleSummaryPath -Raw | ConvertFrom-Json
+    if ($activeBle.status -eq "WINDOWS_BLE_AUTOMATION_PASS") {
+      $manifest.capabilities.windows_ble_automation = $true
+      $notes.Add("windows_ble_automation capability accepted from active BLE summary: $resolvedActiveBleSummaryPath") | Out-Null
+    } else {
+      $notes.Add("Active BLE summary was provided but not PASS: status=$($activeBle.status)") | Out-Null
+    }
+  } catch {
+    $notes.Add("Active BLE summary could not be read: $($_.Exception.Message)") | Out-Null
+  }
+}
+
 Add-Evidence -Manifest $manifest -StepId "baseline-type-tray-ui" -Key "type_process" -Path $typeProcessPath
 Add-Evidence -Manifest $manifest -StepId "baseline-type-tray-ui" -Key "window_screenshot" -Path $screenshotPath
 Add-Evidence -Manifest $manifest -StepId "baseline-type-tray-ui" -Key "type_log" -Path $typeLogPath
 Add-Evidence -Manifest $manifest -StepId "same-name-write-no-repair" -Key "before_ble_state" -Path $bleStatePath
+Add-Evidence -Manifest $manifest -StepId "same-name-write-no-repair" -Key "after_ble_state" -Path (Get-ActiveBleEvidencePath -Summary $activeBle -Key "after_ble_state")
 Add-Evidence -Manifest $manifest -StepId "same-name-write-no-repair" -Key "type_log" -Path $typeLogPath
 Add-Evidence -Manifest $manifest -StepId "random-name-exact-cache-refresh" -Key "windows_ble_state" -Path $bleStatePath
 Add-Evidence -Manifest $manifest -StepId "restore-default-listener" -Key "windows_ble_state" -Path $bleStatePath
@@ -404,7 +472,9 @@ Add-Evidence -Manifest $manifest -StepId "manual-windows-delete-no-type-autopair
 Add-Evidence -Manifest $manifest -StepId "manual-windows-delete-no-type-autopair" -Key "type_log" -Path $typeLogPath
 Add-Evidence -Manifest $manifest -StepId "no-type-native-pairing" -Key "windows_ble_state" -Path $bleStatePath
 Add-Evidence -Manifest $manifest -StepId "no-type-native-pairing" -Key "hid_presence" -Path $bleStatePath
+Add-Evidence -Manifest $manifest -StepId "type-takeover-no-forced-repair" -Key "takeover_log" -Path $(if ($activeBle) { $resolvedActiveBleSummaryPath } else { "" })
 Add-Evidence -Manifest $manifest -StepId "type-takeover-no-forced-repair" -Key "gatt_probe" -Path $(if ($audioStatus) { $audioStatus.path } else { "" })
+Add-Evidence -Manifest $manifest -StepId "type-takeover-no-forced-repair" -Key "gatt_probe" -Path (Get-ActiveBleRecordEvidence -Summary $activeBle -Stage "gatt_audio_status")
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "ble_audio_probe" -Path $(if ($audioStatus) { $audioStatus.path } else { "" })
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "type_log" -Path $typeLogPath
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "windows_ble_state" -Path $bleStatePath
@@ -441,6 +511,7 @@ $summary = [ordered]@{
   repo_base_root = $RepoBaseRoot
   firmware_root = $FirmwareRoot
   type_exe = $TypeExe
+  active_ble_summary = $resolvedActiveBleSummaryPath
   output_dir = $OutputDir
   manifest = $manifestPath
   review_summary = if (Test-Path -LiteralPath $reviewSummaryPath) { $reviewSummaryPath } else { "" }

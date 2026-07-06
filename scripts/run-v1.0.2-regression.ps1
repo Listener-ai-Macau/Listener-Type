@@ -430,14 +430,59 @@ try {
       }
     }
 
+    Invoke-Gate "preproduction BLE active automation dry-run smoke" {
+      $activeBleGate = Join-Path $PSScriptRoot "windows-listener-preproduction-ble-active-bench.ps1"
+      if (-not (Test-Path -LiteralPath $activeBleGate)) {
+        throw "Active Windows BLE bench script not found: $activeBleGate"
+      }
+
+      $null = [scriptblock]::Create((Get-Content -LiteralPath $activeBleGate -Raw))
+      $dryRunDir = Join-Path $OutputDir "preproduction-ble-active-dryrun"
+      & pwsh -NoProfile -File $activeBleGate -OutputDir $dryRunDir -Mode DryRun
+      $exit = $LASTEXITCODE
+      if ($exit -ne 0) {
+        throw "Active Windows BLE bench dry-run failed with code $exit"
+      }
+
+      $summaryPath = Join-Path $dryRunDir "preproduction-ble-active-summary.json"
+      $beforeState = Join-Path $dryRunDir "before-windows-ble-state.json"
+      $afterState = Join-Path $dryRunDir "after-windows-ble-state.json"
+      $plan = Join-Path $dryRunDir "dry-run-plan.json"
+      foreach ($path in @($summaryPath, $beforeState, $afterState, $plan)) {
+        if (-not (Test-Path -LiteralPath $path)) {
+          throw "Active Windows BLE bench dry-run did not write required artifact: $path"
+        }
+      }
+
+      $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+      if ($summary.status -ne "WINDOWS_BLE_AUTOMATION_DRY_RUN") {
+        throw "Active Windows BLE bench dry-run should report WINDOWS_BLE_AUTOMATION_DRY_RUN, got $($summary.status)"
+      }
+      if ($summary.execute -ne $false) {
+        throw "Active Windows BLE bench dry-run must not execute pairing mutations"
+      }
+      if ($summary.capabilities.windows_ble_automation -ne $false) {
+        throw "Active Windows BLE bench dry-run must not claim windows_ble_automation capability"
+      }
+
+      $dryRunPlan = Get-Content -LiteralPath $plan -Raw | ConvertFrom-Json
+      $planText = $dryRunPlan.planned_actions | ConvertTo-Json -Depth 5
+      foreach ($token in @("--cleanup-embedded-ble-pairing", "--prompt-embedded-ble-pairing-only", "--read-embedded-audio-ble-status")) {
+        if ($planText -notmatch [regex]::Escape($token)) {
+          throw "Active Windows BLE bench dry-run plan is missing $token"
+        }
+      }
+    }
+
     Invoke-Gate "preproduction bench evidence collect smoke" {
       $benchCollect = Join-Path $PSScriptRoot "windows-listener-preproduction-bench-collect.ps1"
       if (-not (Test-Path -LiteralPath $benchCollect)) {
         throw "Preproduction bench evidence collector not found: $benchCollect"
       }
 
+      $activeBleSummary = Join-Path $OutputDir "preproduction-ble-active-dryrun\preproduction-ble-active-summary.json"
       $collectDir = Join-Path $OutputDir "preproduction-bench-collect-smoke"
-      & pwsh -NoProfile -File $benchCollect -OutputDir $collectDir -SkipLiveBle -SkipScreenshot -SkipNotificationScan
+      & pwsh -NoProfile -File $benchCollect -OutputDir $collectDir -ActiveBleSummaryPath $activeBleSummary -SkipLiveBle -SkipScreenshot -SkipNotificationScan
       $exit = $LASTEXITCODE
       if ($exit -ne 0) {
         throw "Preproduction bench evidence collector smoke failed with code $exit"
@@ -457,6 +502,13 @@ try {
       }
       if ($collect.review_status -ne "BENCH_REVIEW_NO_GO") {
         throw "Offline bench collector smoke should still leave bench review NO_GO, got $($collect.review_status)"
+      }
+      if ($collect.capabilities.windows_ble_automation -ne $false) {
+        throw "Offline bench collector must not accept a dry-run active BLE summary as windows_ble_automation PASS"
+      }
+      $collectNoteText = @($collect.notes) -join "`n"
+      if ($collectNoteText -notmatch "Active BLE summary was provided but not PASS") {
+        throw "Bench collector should record why dry-run active BLE evidence did not satisfy windows_ble_automation"
       }
       $bench = Get-Content -LiteralPath $reviewSummary -Raw | ConvertFrom-Json
       $releaseRecord = @($bench.records | Where-Object { $_.id -eq "release-package-final-check" })

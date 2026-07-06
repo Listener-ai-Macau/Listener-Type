@@ -5,10 +5,12 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const benchScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-bench-review.ps1");
 const collectScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-bench-collect.ps1");
+const activeBleScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-ble-active-bench.ps1");
 const humanScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-human-review.ps1");
 
 const bench = fs.readFileSync(benchScript, "utf8");
 const collect = fs.readFileSync(collectScript, "utf8");
+const activeBle = fs.readFileSync(activeBleScript, "utf8");
 const human = fs.readFileSync(humanScript, "utf8");
 
 const requiredStepIds = [
@@ -81,6 +83,8 @@ if (!bench.includes("missing_capabilities") || !bench.includes("missing_evidence
 
 for (const requiredToken of [
   "BENCH_COLLECT_COMPLETE",
+  "ActiveBleSummaryPath",
+  "windows_ble_automation capability accepted",
   "preproduction-bench-capabilities.json",
   "preproduction-bench-review-summary.json",
   "windows-ble-state.json",
@@ -93,6 +97,28 @@ for (const requiredToken of [
 
 if (collect.includes("PairAsync") || collect.includes("UnpairAsync")) {
   failures.push("passive bench evidence collection must not pair or unpair Windows devices");
+}
+
+for (const requiredToken of [
+  "WINDOWS_BLE_AUTOMATION_DRY_RUN",
+  "WINDOWS_BLE_AUTOMATION_PASS",
+  "--cleanup-embedded-ble-pairing",
+  "--prompt-embedded-ble-pairing-only",
+  "--read-embedded-audio-ble-status",
+  "ClickWindowsNotification",
+  "-Execute",
+]) {
+  if (!activeBle.includes(requiredToken)) {
+    failures.push(`active Windows BLE bench script is missing ${requiredToken}`);
+  }
+}
+
+if (!activeBle.includes("PairAsync") && !activeBle.includes("--prompt-embedded-ble-pairing-only")) {
+  failures.push("active Windows BLE bench script must exercise the Type pairing path");
+}
+
+if (activeBle.includes("System.Windows.Forms") || activeBle.includes("MessageBox") || activeBle.includes("ShowDialog")) {
+  failures.push("active Windows BLE bench script must not use custom blocking dialog UI");
 }
 
 if (failures.length > 0) {
