@@ -62,6 +62,10 @@ for (const requiredToken of ["FormStartPosition]::Manual", "PrimaryScreen.Workin
   }
 }
 
+if (!human.includes("[System.Drawing.Size]::new(560, 500)")) {
+  failures.push("human review window must remain compact enough to leave Type/Windows Bluetooth visible");
+}
+
 for (const stepId of requiredStepIds) {
   if (!human.includes(stepId)) {
     failures.push(`human review is missing step ${stepId}`);
