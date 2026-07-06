@@ -8,9 +8,17 @@ the same 16 user scenarios currently covered by
 ## Bench Entrypoint
 
 ```powershell
+pwsh -NoProfile -File .\scripts\windows-listener-preproduction-bench-collect.ps1 -OutputDir .cache\validation\bench-collect
 pwsh -NoProfile -File .\scripts\windows-listener-preproduction-bench-review.ps1 -WriteTemplate -OutputDir .cache\validation\bench-template
 pwsh -NoProfile -File .\scripts\windows-listener-preproduction-bench-review.ps1 -CapabilityManifest <bench-capabilities.json>
 ```
+
+The collector is read-only by default: it records Type runtime state, a desktop
+screenshot, Windows BLE PnP/event state, optional live BLE/GATT probes, Type log
+tail, and package hashes, then feeds the generated manifest into the bench
+review. It does not pair or unpair Windows devices. If the physical bench,
+Windows pair/unpair automation, audio fixture, LED optical capture, or second
+BLE host are missing, review must remain `BENCH_REVIEW_NO_GO`.
 
 Without a capability manifest, the bench review exits with
 `BENCH_REVIEW_NO_GO` and writes the missing capabilities/evidence for every

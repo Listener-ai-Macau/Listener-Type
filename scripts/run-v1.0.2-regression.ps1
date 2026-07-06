@@ -430,6 +430,48 @@ try {
       }
     }
 
+    Invoke-Gate "preproduction bench evidence collect smoke" {
+      $benchCollect = Join-Path $PSScriptRoot "windows-listener-preproduction-bench-collect.ps1"
+      if (-not (Test-Path -LiteralPath $benchCollect)) {
+        throw "Preproduction bench evidence collector not found: $benchCollect"
+      }
+
+      $collectDir = Join-Path $OutputDir "preproduction-bench-collect-smoke"
+      & pwsh -NoProfile -File $benchCollect -OutputDir $collectDir -SkipLiveBle -SkipScreenshot -SkipNotificationScan
+      $exit = $LASTEXITCODE
+      if ($exit -ne 0) {
+        throw "Preproduction bench evidence collector smoke failed with code $exit"
+      }
+      $collectSummary = Join-Path $collectDir "preproduction-bench-collect-summary.json"
+      $manifest = Join-Path $collectDir "preproduction-bench-capabilities.json"
+      $reviewSummary = Join-Path $collectDir "preproduction-bench-review-summary.json"
+      foreach ($path in @($collectSummary, $manifest, $reviewSummary)) {
+        if (-not (Test-Path -LiteralPath $path)) {
+          throw "Preproduction bench evidence collector did not write required artifact: $path"
+        }
+      }
+
+      $collect = Get-Content -LiteralPath $collectSummary -Raw | ConvertFrom-Json
+      if ($collect.status -ne "BENCH_COLLECT_COMPLETE") {
+        throw "Bench collector status should be BENCH_COLLECT_COMPLETE, got $($collect.status)"
+      }
+      if ($collect.review_status -ne "BENCH_REVIEW_NO_GO") {
+        throw "Offline bench collector smoke should still leave bench review NO_GO, got $($collect.review_status)"
+      }
+      $bench = Get-Content -LiteralPath $reviewSummary -Raw | ConvertFrom-Json
+      $releaseRecord = @($bench.records | Where-Object { $_.id -eq "release-package-final-check" })
+      if ($releaseRecord.Count -ne 1) {
+        throw "Bench collector review should include exactly one release-package-final-check record"
+      }
+      if ($releaseRecord[0].status -ne "PASS") {
+        throw "Bench collector should provide enough package evidence for release-package-final-check, got $($releaseRecord[0].status)"
+      }
+      $remainingNoGo = @($bench.records | Where-Object { $_.status -eq "NO_GO" })
+      if ($remainingNoGo.Count -eq 0) {
+        throw "Offline bench collector must not make the full physical bench pass without hardware capabilities"
+      }
+    }
+
     if (-not $SkipPackage.IsPresent) {
       Invoke-Gate "MSVC MSI package without portable zip (single release build)" {
         Invoke-External "pwsh" @(
