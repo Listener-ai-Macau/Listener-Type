@@ -6,8 +6,10 @@ param(
   [string]$TypeExe = "",
   [string]$ExpectedName = "listener",
   [string]$ActiveBleSummaryPath = "",
+  [string]$SerialPort = "",
   [int]$LiveBleTimeoutMs = 20000,
   [switch]$SkipLiveBle,
+  [switch]$SkipSerialSnapshot,
   [switch]$SkipScreenshot,
   [switch]$SkipNotificationScan,
   [switch]$NoReview
@@ -178,6 +180,46 @@ function Get-TypeLogTail {
     }
   } finally {
     $stream.Dispose()
+  }
+}
+
+function Resolve-SerialPortName {
+  if (-not [string]::IsNullOrWhiteSpace($SerialPort)) {
+    return $SerialPort
+  }
+  try {
+    $ports = @(Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue |
+      Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.DeviceID) } |
+      Select-Object -ExpandProperty DeviceID)
+    if ($ports.Count -eq 1) {
+      return [string]$ports[0]
+    }
+  } catch {
+  }
+  return ""
+}
+
+function Invoke-SerialLedStatusSnapshot {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$PortName
+  )
+  if ([string]::IsNullOrWhiteSpace($FirmwareRoot)) {
+    throw "FirmwareRoot is not set."
+  }
+  $sendSerial = Join-Path $FirmwareRoot "tools\send_serial_and_capture.ps1"
+  if (-not (Test-Path -LiteralPath $sendSerial)) {
+    throw "Missing firmware serial helper: $sendSerial"
+  }
+  & pwsh -NoProfile -File $sendSerial `
+    -Port $PortName `
+    -Command "~LED:STATUS detail=summary" `
+    -InitialReadMs 200 `
+    -CommandReadMs 1200 `
+    -CommandDelayMs 0 `
+    -OutputPath $Path | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "serial LED status helper exited with code $LASTEXITCODE"
   }
 }
 
@@ -428,6 +470,25 @@ if (-not $SkipNotificationScan.IsPresent) {
   $notes.Add("Windows notification scan skipped by -SkipNotificationScan.") | Out-Null
 }
 
+$serialLedStatusPath = ""
+$resolvedSerialPort = Resolve-SerialPortName
+if (-not $SkipSerialSnapshot.IsPresent -and -not [string]::IsNullOrWhiteSpace($resolvedSerialPort)) {
+  $serialLedStatusPath = Join-Path $OutputDir "serial-led-status.txt"
+  try {
+    Invoke-SerialLedStatusSnapshot -Path $serialLedStatusPath -PortName $resolvedSerialPort
+    $manifest.capabilities.wired_flash_port = $true
+    $notes.Add("serial LED status captured from $resolvedSerialPort; wired_flash_port capability records serial port availability only, not a wired flash smoke PASS.") | Out-Null
+  } catch {
+    $serialErrorPath = Join-Path $OutputDir "serial-led-status-error.txt"
+    Write-TextFile -Path $serialErrorPath -Text $_.Exception.ToString()
+    $notes.Add("serial LED status snapshot failed on $resolvedSerialPort`: $($_.Exception.Message)") | Out-Null
+  }
+} elseif ($SkipSerialSnapshot.IsPresent) {
+  $notes.Add("serial LED status snapshot skipped by -SkipSerialSnapshot.") | Out-Null
+} else {
+  $notes.Add("serial LED status snapshot skipped because no unique serial port was resolved.") | Out-Null
+}
+
 $audioStatus = $null
 $otaProbe = $null
 if (-not $SkipLiveBle.IsPresent -and -not [string]::IsNullOrWhiteSpace($TypeExe) -and (Test-Path -LiteralPath $TypeExe)) {
@@ -476,6 +537,7 @@ Add-Evidence -Manifest $manifest -StepId "type-takeover-no-forced-repair" -Key "
 Add-Evidence -Manifest $manifest -StepId "type-takeover-no-forced-repair" -Key "gatt_probe" -Path $(if ($audioStatus) { $audioStatus.path } else { "" })
 Add-Evidence -Manifest $manifest -StepId "type-takeover-no-forced-repair" -Key "gatt_probe" -Path (Get-ActiveBleRecordEvidence -Summary $activeBle -Stage "gatt_audio_status")
 Add-Evidence -Manifest $manifest -StepId "ec11-long-press-shutdown-led" -Key "type_log" -Path $typeLogPath
+Add-Evidence -Manifest $manifest -StepId "ec11-rotate-ring-feedback" -Key "serial_led_status" -Path $serialLedStatusPath
 Add-Evidence -Manifest $manifest -StepId "ec11-single-not-double" -Key "windows_ble_events" -Path $bleEventsPath
 Add-Evidence -Manifest $manifest -StepId "ec11-double-repair-with-type" -Key "type_unpair_log" -Path $(if ($activeBle) { $resolvedActiveBleSummaryPath } else { "" })
 Add-Evidence -Manifest $manifest -StepId "ec11-double-repair-with-type" -Key "windows_native_pair_log" -Path $(if ($activeBle) { $resolvedActiveBleSummaryPath } else { "" })
@@ -483,6 +545,7 @@ Add-Evidence -Manifest $manifest -StepId "ec11-double-repair-with-type" -Key "ga
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "ble_audio_probe" -Path $(if ($audioStatus) { $audioStatus.path } else { "" })
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "type_log" -Path $typeLogPath
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "windows_ble_state" -Path $bleStatePath
+Add-Evidence -Manifest $manifest -StepId "led-independent-contract" -Key "serial_led_status" -Path $serialLedStatusPath
 Add-Evidence -Manifest $manifest -StepId "ota-wireless-smoke" -Key "ota_probe" -Path $(if ($otaProbe) { $otaProbe.path } else { "" })
 Add-Evidence -Manifest $manifest -StepId "ota-wireless-smoke" -Key "ota_log" -Path $(if ($otaProbe) { $otaProbe.path } else { "" })
 Add-Evidence -Manifest $manifest -StepId "release-package-final-check" -Key "msi_hash" -Path $releaseArtifactsPath
