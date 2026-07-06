@@ -2,6 +2,7 @@
 param(
     [string]$OutputDir = "",
     [string]$StepId = "",
+    [string[]]$StepIds = @(),
     [string]$DeviceName = "listener",
     [string]$RandomName = "",
     [switch]$ListSteps,
@@ -37,8 +38,21 @@ if (-not $singleInstanceCreated) {
     exit 3
 }
 
+$requestedStepIds = [System.Collections.Generic.List[string]]::new()
+if (-not [string]::IsNullOrWhiteSpace($StepId)) {
+    $requestedStepIds.Add($StepId.Trim()) | Out-Null
+}
+foreach ($rawStepIds in $StepIds) {
+    foreach ($rawStepId in ([string]$rawStepIds -split ",")) {
+        $trimmedStepId = $rawStepId.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($trimmedStepId)) {
+            $requestedStepIds.Add($trimmedStepId) | Out-Null
+        }
+    }
+}
+
 $resumeExistingFullReview = (
-    [string]::IsNullOrWhiteSpace($StepId) -and
+    $requestedStepIds.Count -eq 0 -and
     -not $NoPrompt.IsPresent -and
     (Test-Path -LiteralPath $sessionPath) -and
     -not (Test-Path -LiteralPath $summaryJsonPath)
@@ -121,7 +135,6 @@ function New-ReviewStep {
         [Parameter(Mandatory = $true)][string]$Title,
         [Parameter(Mandatory = $true)][string]$Action,
         [Parameter(Mandatory = $true)][string]$Expected,
-        [string]$ObservationTemplate = "",
         [string]$EvidenceHint = "",
         [string]$ClipboardText = ""
     )
@@ -131,7 +144,6 @@ function New-ReviewStep {
         title = $Title
         action = $Action
         expected = $Expected
-        observation_template = $ObservationTemplate
         evidence_hint = $EvidenceHint
         clipboard_text = $ClipboardText
     }
@@ -412,8 +424,8 @@ function Show-ReviewStep {
     $form = [System.Windows.Forms.Form]::new()
     $form.Text = "Listener 1.0.2 准量产验收"
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
-    $form.ClientSize = [System.Drawing.Size]::new(480, 320)
-    $form.MinimumSize = [System.Drawing.Size]::new(480, 320)
+    $form.ClientSize = [System.Drawing.Size]::new(680, 500)
+    $form.MinimumSize = [System.Drawing.Size]::new(640, 460)
     $form.MaximizeBox = $false
     $form.TopMost = $true
     $form.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 10)
@@ -430,61 +442,61 @@ function Show-ReviewStep {
     $title.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 12, [System.Drawing.FontStyle]::Bold)
     $title.AutoSize = $false
     $title.Location = [System.Drawing.Point]::new(16, 12)
-    $title.Size = [System.Drawing.Size]::new(448, 26)
+    $title.Size = [System.Drawing.Size]::new(648, 28)
     $form.Controls.Add($title)
 
     $actionLabel = [System.Windows.Forms.Label]::new()
     $actionLabel.Text = "你现在做"
     $actionLabel.AutoSize = $false
-    $actionLabel.Location = [System.Drawing.Point]::new(16, 44)
-    $actionLabel.Size = [System.Drawing.Size]::new(448, 20)
+    $actionLabel.Location = [System.Drawing.Point]::new(16, 52)
+    $actionLabel.Size = [System.Drawing.Size]::new(648, 20)
     $form.Controls.Add($actionLabel)
 
     $actionBox = [System.Windows.Forms.TextBox]::new()
     $actionBox.Multiline = $true
     $actionBox.ReadOnly = $true
     $actionBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $actionBox.Location = [System.Drawing.Point]::new(16, 64)
-    $actionBox.Size = [System.Drawing.Size]::new(448, 48)
+    $actionBox.Location = [System.Drawing.Point]::new(16, 74)
+    $actionBox.Size = [System.Drawing.Size]::new(648, 86)
     $actionBox.Text = Convert-ReviewText $Step.action
     $form.Controls.Add($actionBox)
 
     $expectedLabel = [System.Windows.Forms.Label]::new()
     $expectedLabel.Text = "通过标准"
     $expectedLabel.AutoSize = $false
-    $expectedLabel.Location = [System.Drawing.Point]::new(16, 116)
-    $expectedLabel.Size = [System.Drawing.Size]::new(448, 20)
+    $expectedLabel.Location = [System.Drawing.Point]::new(16, 168)
+    $expectedLabel.Size = [System.Drawing.Size]::new(648, 20)
     $form.Controls.Add($expectedLabel)
 
     $expectedBox = [System.Windows.Forms.TextBox]::new()
     $expectedBox.Multiline = $true
     $expectedBox.ReadOnly = $true
     $expectedBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $expectedBox.Location = [System.Drawing.Point]::new(16, 136)
-    $expectedBox.Size = [System.Drawing.Size]::new(448, 44)
+    $expectedBox.Location = [System.Drawing.Point]::new(16, 190)
+    $expectedBox.Size = [System.Drawing.Size]::new(648, 78)
     $expectedBox.Text = Convert-ReviewText $Step.expected
     $form.Controls.Add($expectedBox)
 
     $operatorActionLabel = [System.Windows.Forms.Label]::new()
     $operatorActionLabel.Text = "实际操作和结果"
     $operatorActionLabel.AutoSize = $false
-    $operatorActionLabel.Location = [System.Drawing.Point]::new(16, 184)
-    $operatorActionLabel.Size = [System.Drawing.Size]::new(448, 20)
+    $operatorActionLabel.Location = [System.Drawing.Point]::new(16, 278)
+    $operatorActionLabel.Size = [System.Drawing.Size]::new(648, 20)
     $form.Controls.Add($operatorActionLabel)
 
     $operatorAction = [System.Windows.Forms.TextBox]::new()
     $operatorAction.Multiline = $true
     $operatorAction.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $operatorAction.Location = [System.Drawing.Point]::new(16, 204)
-    $operatorAction.Size = [System.Drawing.Size]::new(448, 54)
+    $operatorAction.Location = [System.Drawing.Point]::new(16, 300)
+    $operatorAction.Size = [System.Drawing.Size]::new(648, 112)
     $operatorAction.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom
     $form.Controls.Add($operatorAction)
 
     $buttonPanel = [System.Windows.Forms.FlowLayoutPanel]::new()
     $buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
     $buttonPanel.WrapContents = $false
-    $buttonPanel.Location = [System.Drawing.Point]::new(16, 270)
-    $buttonPanel.Size = [System.Drawing.Size]::new(448, 36)
+    $buttonPanel.Location = [System.Drawing.Point]::new(16, 426)
+    $buttonPanel.Size = [System.Drawing.Size]::new(648, 40)
     $buttonPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Bottom
     $form.Controls.Add($buttonPanel)
 
@@ -498,14 +510,14 @@ function Show-ReviewStep {
         $button = [System.Windows.Forms.Button]::new()
         $button.Text = $spec.text
         $button.Tag = $spec.value
-        $button.Size = [System.Drawing.Size]::new(86, 30)
+        $button.Size = [System.Drawing.Size]::new(94, 32)
         $button.Add_Click({
             param($sender, $eventArgs)
             $selectedResult = [string]$sender.Tag
             if ($selectedResult -in @("PASS", "FAIL")) {
                 if ([string]::IsNullOrWhiteSpace($operatorAction.Text)) {
                     [System.Windows.Forms.MessageBox]::Show(
-                        "写一下你刚才实际做了什么，以及结果/现象。比如：点了 Windows 连接通知，等 20 秒后 Type 恢复，蓝牙灯稳定。",
+                        "写一下你刚才实际做了什么，以及最后结果。比如：点了 Windows 连接通知，等 20 秒后 Type 恢复，蓝牙灯稳定。",
                         "缺少实际操作和结果",
                         [System.Windows.Forms.MessageBoxButtons]::OK,
                         [System.Windows.Forms.MessageBoxIcon]::Information
@@ -558,8 +570,7 @@ $steps = @(
             "从托盘打开主窗口。不要继续下一步，直到窗口不是空白 WebView。")) `
         -Expected (Join-Text @(
             "主窗口能打开，界面不空白。"
-            "Windows 蓝牙和 Type 状态稳定，不在已连接/未连接之间循环。")) `
-        -ObservationTemplate "窗口：正常/空白；托盘：正常/异常；Windows蓝牙状态：；灯效："
+            "Windows 蓝牙和 Type 状态稳定，不在已连接/未连接之间循环。"))
     New-ReviewStep `
         -Id "same-name-write-no-repair" `
         -Title "同名写入不重配" `
@@ -569,8 +580,7 @@ $steps = @(
         -Expected (Join-Text @(
             "不能触发重新配对。"
             "不能弹 Windows 添加设备通知。"
-            "Type 保持连接，录音通道不被破坏。")) `
-        -ObservationTemplate "当前名字：；写入后是否断连/弹窗/重配："
+            "Type 保持连接，录音通道不被破坏。"))
     New-ReviewStep `
         -Id "random-name-exact-cache-refresh" `
         -Title "随机名改名和缓存刷新" `
@@ -582,7 +592,6 @@ $steps = @(
             "任意 1-29 个可见 ASCII 名字都能写入。"
             "Windows 最终显示精确新名字：$RandomName。"
             "不能继续显示旧缓存名，不能无限弹添加设备，Type 最终能恢复。")) `
-        -ObservationTemplate "写入名字：$RandomName；Windows最终显示：；弹窗次数：；Type恢复耗时：约  秒；现象：" `
         -ClipboardText $RandomName
     New-ReviewStep `
         -Id "restore-default-listener" `
@@ -594,7 +603,6 @@ $steps = @(
             "默认名字 listener 能恢复。"
             "Windows 最终显示 listener，Type 恢复连接。"
             "不能截断名字，不能缓存成旧名。")) `
-        -ObservationTemplate "Windows最终显示：；Type状态：；现象：" `
         -ClipboardText "listener"
     New-ReviewStep `
         -Id "manual-windows-delete-no-type-autopair" `
@@ -606,8 +614,7 @@ $steps = @(
         -Expected (Join-Text @(
             "Type 不能自动把旧电脑配回来。"
             "Windows 不能自己重新出现已连接。"
-            "可以提示用户手动恢复，但不能自动 PairAsync 抢回，这用于换电脑。")) `
-        -ObservationTemplate "删除结果：；20秒后Windows状态：；有没有自动恢复/弹窗：；Type提示："
+            "可以提示用户手动恢复，但不能自动 PairAsync 抢回，这用于换电脑。"))
     New-ReviewStep `
         -Id "no-type-native-pairing" `
         -Title "没有 Type 的原生配对" `
@@ -618,8 +625,7 @@ $steps = @(
         -Expected (Join-Text @(
             "没有 Type 的电脑也能把 Listener 当蓝牙键盘连上。"
             "不能一直显示请尝试重新连接设备。"
-            "不能卡在已连接/未连接循环。")) `
-        -ObservationTemplate "删除旧设备：成功/失败；添加看到名字：；最终状态：；灯效："
+            "不能卡在已连接/未连接循环。"))
     New-ReviewStep `
         -Id "type-takeover-no-forced-repair" `
         -Title "Type 接管已配对设备" `
@@ -629,8 +635,7 @@ $steps = @(
         -Expected (Join-Text @(
             "Type 应该接管已配对设备并恢复 BLE 控制/录音通道。"
             "不应该强制重新配对。"
-            "不应该重复弹 Windows 添加设备通知。")) `
-        -ObservationTemplate "Type恢复：成功/失败；耗时：约  秒；有没有弹窗：；现象："
+            "不应该重复弹 Windows 添加设备通知。"))
     New-ReviewStep `
         -Id "ec11-long-press-shutdown-led" `
         -Title "EC11 长按关机确认灯" `
@@ -642,8 +647,7 @@ $steps = @(
             "长按期间进入 1.0.1 已验收的关机确认灯效：warm amber PWR/状态灯亮起，EC11 旋钮环用同色按顺时针方向约 1.2 秒走满/亮满。"
             "松开后退出关机确认，不应该触发单击录音、双击重配或 Windows 连接通知。"
             "Type 不应该重启、白屏、反复重建后台录音，也不应该把长按识别成多个 EC11 单击。"
-            "key1-key4 不能被带着红/绿乱闪。")) `
-        -ObservationTemplate "长按时长：约  秒；PWR amber：有/无；EC11 amber环走满：有/无/不稳定；松开后灯效：；Type是否重启/白屏/后台重建：；是否误触发单击/双击/蓝牙弹窗：；key灯："
+            "key1-key4 不能被带着红/绿乱闪。"))
     New-ReviewStep `
         -Id "ec11-rotate-ring-feedback" `
         -Title "EC11 旋转环形追光" `
@@ -655,9 +659,8 @@ $steps = @(
         -Expected (Join-Text @(
             "旋转时 EC11 环出现白色方向性追光/转一圈反馈，保持约 2 到 3 秒。"
             "顺时针和逆时针方向不能反，不能只闪一下就没了。"
-            "如果误按下 EC11，或者日志/现象只有 EC11 push、long press、shutdown_confirm、warm amber 关机确认灯，本步骤必须重来，不能算通过。"
-            "PWR/BLE/REC/AI/key1-key4 不应该被带着乱闪；录音态下录音灯优先覆盖旋钮白色反馈是允许的。")) `
-        -ObservationTemplate "是否只转外圈：是/否；顺时针追光：有/无/方向反/不稳定；逆时针追光：有/无/方向反/不稳定；是否误按下或出现 EC11 push/long press/shutdown_confirm：；是否被其他灯干扰：；备注："
+            "如果误按下 EC11，或者日志/实际行为只有 EC11 push、long press、shutdown_confirm、warm amber 关机确认灯，本步骤必须重来，不能算通过。"
+            "PWR/BLE/REC/AI/key1-key4 不应该被带着乱闪；录音态下录音灯优先覆盖旋钮白色反馈是允许的。"))
     New-ReviewStep `
         -Id "ec11-single-not-double" `
         -Title "EC11 单击不误判双击" `
@@ -667,8 +670,7 @@ $steps = @(
         -Expected (Join-Text @(
             "只触发单击/本地反馈。"
             "不能打开重配流程，不能弹 Windows 连接通知。"
-            "EC11 的按键行为要和 key1-key4 的单/双击窗口一致。")) `
-        -ObservationTemplate "是否误触发双击：是/否；灯效：；Windows/Type现象："
+            "EC11 的按键行为要和 key1-key4 的单/双击窗口一致。"))
     New-ReviewStep `
         -Id "ec11-double-repair-with-type" `
         -Title "有 Type 的双击重配" `
@@ -683,8 +685,7 @@ $steps = @(
             "如果未清旧配对就直接点连接，出现连接失败不能算通过。"
             "不能长时间卡在已连接/未连接循环。"
             "灯效时机正确：重配提示和找 Type 提示不能互相错用。"
-            "Type 必须在真实 BLE GATT 恢复后再显示已恢复。")) `
-        -ObservationTemplate "Type是否先清旧配对：；弹窗次数：；连接方式/结果：；Windows状态：；Type恢复：；灯效："
+            "Type 必须在真实 BLE GATT 恢复后再显示已恢复。"))
     New-ReviewStep `
         -Id "computer-switch-product-flow" `
         -Title "换电脑产品流程" `
@@ -697,8 +698,7 @@ $steps = @(
             "没有 Type 的电脑也能作为普通蓝牙键盘配对，但旧缓存必须由用户自己删除。"
             "有 Type 的电脑可以帮本机清旧配对，但仍需要用户点 Windows 原生连接。"
             "旧电脑缓存不会被旧 Type 自动抢回。"
-            "有 Type 场景能恢复 BLE 控制和录音。")) `
-        -ObservationTemplate "无Type是否先删旧设备：；原生配对结果：；有Type接管：；旧电脑是否被抢回：；问题："
+            "有 Type 场景能恢复 BLE 控制和录音。"))
     New-ReviewStep `
         -Id "recording-response-and-led-priority" `
         -Title "录音响应和灯效优先级" `
@@ -709,8 +709,7 @@ $steps = @(
             "录音胶囊快速出现。"
             "录音灯要优先覆盖旋钮白灯，不能先亮白灯很久。"
             "录音中不能中途灭一下再亮。"
-            "key 灯不能出现之前类似未开 DMA 的红/绿乱闪。")) `
-        -ObservationTemplate "第一轮开始响应：约  秒；第二轮：；白灯覆盖：；中途断灯：；key灯："
+            "key 灯不能出现之前类似未开 DMA 的红/绿乱闪。"))
     New-ReviewStep `
         -Id "ble-audio-type-link" `
         -Title "BLE 音频链路和 Type-ready" `
@@ -721,8 +720,7 @@ $steps = @(
         -Expected (Join-Text @(
             "Windows 已连接不足以通过，Type 必须真的到达 BLE 音频 GATT。"
             "录音数据能传输，Type-ready 灯效和实际 Type 连接一致。"
-            "不能出现 Windows 已连接但蓝牙灯一直是未连接/配对状态。")) `
-        -ObservationTemplate "Type BLE状态：；录音结果：；蓝牙灯：；日志/错误："
+            "不能出现 Windows 已连接但蓝牙灯一直是未连接/配对状态。"))
     New-ReviewStep `
         -Id "led-independent-contract" `
         -Title "灯效独立和防回退" `
@@ -732,8 +730,7 @@ $steps = @(
         -Expected (Join-Text @(
             "状态灯、旋钮灯、按键灯、边框灯相互独立。"
             "key 灯不能被 EC11/录音/蓝牙状态带着闪。"
-            "已确认的蓝色双闪、找 Type、录音金色、shutdown/idle 灯效不能回退。")) `
-        -ObservationTemplate "独立性：；key灯：；EC11：；BLE：；录音：；其它："
+            "已确认的蓝色双闪、找 Type、录音金色、shutdown/idle 灯效不能回退。"))
     New-ReviewStep `
         -Id "ota-wireless-smoke" `
         -Title "无线 OTA smoke" `
@@ -743,8 +740,7 @@ $steps = @(
         -Expected (Join-Text @(
             "OTA v2 服务和控制特征可发现。"
             "OTA 过程中设备有 OTA 灯效。"
-            "界面状态、设备灯效和日志一致；不能报旧版本/低版本误判。")) `
-        -ObservationTemplate "OTA包：；preflight/GATT：；传输：；灯效：；错误："
+            "界面状态、设备灯效和日志一致；不能报旧版本/低版本误判。"))
     New-ReviewStep `
         -Id "wired-flash-smoke" `
         -Title "有线刷机 smoke" `
@@ -754,8 +750,7 @@ $steps = @(
         -Expected (Join-Text @(
             "有线刷机能完成，设备能重启到当前版本。"
             "不能再次出现 ESP-IDF shell 缺 esp_idf_monitor 的环境问题。"
-            "刷机后蓝牙/录音/灯效仍然通过。")) `
-        -ObservationTemplate "端口：；刷机结果：；启动版本：；回归现象："
+            "刷机后蓝牙/录音/灯效仍然通过。"))
     New-ReviewStep `
         -Id "release-package-final-check" `
         -Title "发布包最终检查" `
@@ -766,8 +761,7 @@ $steps = @(
         -Expected (Join-Text @(
             "Type MSI 是最新 v1.0.2。"
             "Firmware OTA zip 是最新 v1.0.2。"
-            "根目录没有旧包或 portable 包。")) `
-        -ObservationTemplate "MSI：；Firmware zip：；根目录旧包：；是否可发布："
+            "根目录没有旧包或 portable 包。"))
 )
 Assert-StepsMatchCanonicalScenarios -ReviewSteps $steps
 
@@ -778,10 +772,22 @@ if ($ListSteps.IsPresent) {
     exit 0
 }
 
-if (-not [string]::IsNullOrWhiteSpace($StepId)) {
-    $selectedSteps = @($steps | Where-Object { $_.id -eq $StepId })
+if ($requestedStepIds.Count -gt 0) {
+    $knownStepIds = @{}
+    foreach ($step in $steps) {
+        $knownStepIds[[string]$step.id] = $true
+    }
+    $unknownStepIds = @(
+        $requestedStepIds |
+            Select-Object -Unique |
+            Where-Object { -not $knownStepIds.ContainsKey([string]$_) }
+    )
+    if ($unknownStepIds.Count -gt 0) {
+        throw "Unknown StepIds '$($unknownStepIds -join ', ')'. Use -ListSteps to see valid steps."
+    }
+    $selectedSteps = @($steps | Where-Object { $requestedStepIds -contains [string]$_.id })
     if ($selectedSteps.Count -eq 0) {
-        throw "Unknown StepId '$StepId'. Use -ListSteps to see valid steps."
+        throw "No steps selected. Use -ListSteps to see valid steps."
     }
     $steps = $selectedSteps
 }
@@ -813,6 +819,7 @@ $startLines = @(
     "DeviceName: $DeviceName"
     "RandomName: $RandomName"
     "NoPrompt: $($NoPrompt.IsPresent)"
+    "FocusStepIds: $(if ($requestedStepIds.Count -gt 0) { ($requestedStepIds -join ',') } else { 'FULL' })"
     "TypeHead: $($typeHeadInfo.head) $($typeHeadInfo.commit_time) $($typeHeadInfo.subject)"
     "FirmwareHead: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time) $($firmwareHeadInfo.subject)"
 )

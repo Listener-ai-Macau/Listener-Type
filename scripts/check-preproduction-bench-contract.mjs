@@ -9,6 +9,7 @@ const activeBleScript = path.join(repoRoot, "scripts", "windows-listener-preprod
 const humanScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-human-review.ps1");
 const scenarioManifestPath = path.join(repoRoot, "scripts", "listener-preproduction-scenarios.json");
 const deviceSectionPath = path.join(repoRoot, "src", "pages", "settings", "DeviceSection.tsx");
+const firmwareOtaPanelPath = path.join(repoRoot, "src", "pages", "settings", "FirmwareOtaPanel.tsx");
 const commandsPath = path.join(repoRoot, "src-tauri", "src", "commands.rs");
 const coordinatorPath = path.join(repoRoot, "src-tauri", "src", "coordinator.rs");
 
@@ -18,6 +19,7 @@ const activeBle = fs.readFileSync(activeBleScript, "utf8");
 const human = fs.readFileSync(humanScript, "utf8");
 const scenarioManifest = JSON.parse(fs.readFileSync(scenarioManifestPath, "utf8"));
 const deviceSection = fs.readFileSync(deviceSectionPath, "utf8");
+const firmwareOtaPanel = fs.readFileSync(firmwareOtaPanelPath, "utf8");
 const commands = fs.readFileSync(commandsPath, "utf8");
 const coordinator = fs.readFileSync(coordinatorPath, "utf8");
 
@@ -62,13 +64,26 @@ for (const requiredToken of ["resumeExistingFullReview", "ResumedExistingRecords
   }
 }
 
+for (const requiredToken of ["[string[]]$StepIds", "FocusStepIds:", "$requestedStepIds.Count -gt 0"]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review must support focused re-review without repeating already-passed steps: ${requiredToken}`);
+  }
+}
+
 for (const requiredToken of ["实际操作和结果", "operator_note"]) {
   if (!human.includes(requiredToken)) {
     failures.push(`human review must use one operator note field and include ${requiredToken}`);
   }
 }
 
-for (const forbiddenToken of ["填写现象", "initialObservation", "现象栏还是原始模板"]) {
+for (const forbiddenToken of [
+  "填写现象",
+  "initialObservation",
+  "现象栏还是原始模板",
+  "ObservationTemplate",
+  "observation_template",
+  "结果/现象",
+]) {
   if (human.includes(forbiddenToken)) {
     failures.push(`human review must not restore the removed separate observation field/token: ${forbiddenToken}`);
   }
@@ -80,12 +95,25 @@ for (const requiredToken of ["FormStartPosition]::Manual", "PrimaryScreen.Workin
   }
 }
 
-if (!human.includes("[System.Drawing.Size]::new(480, 320)")) {
-  failures.push("human review window must stay compact enough to leave Type/Windows Bluetooth visible");
+if (!human.includes("[System.Drawing.Size]::new(680, 500)") || !human.includes("[System.Drawing.Size]::new(640, 460)")) {
+  failures.push("human review window must stay readable but bounded enough to leave Type/Windows Bluetooth visible");
 }
 
 if (!deviceSection.includes("onWheel={event => {\n          event.currentTarget.blur();\n        }}")) {
   failures.push("device minute inputs must blur on mouse wheel so scrolling the settings page cannot silently change saved minutes");
+}
+
+for (const requiredToken of [
+  "const [selectedPackage, setSelectedPackage]",
+  "selectedPackage && (",
+  "FirmwareOtaFact label={t('settings.recording.firmwareOtaPackageVersion'",
+  "FirmwareWiredFlashPanel ref={wiredRef} packagePath={selectedPackage?.path ?? null}",
+  "wiredFirmwareNeedsSharedPackage",
+  "firmwareOtaNeedsSharedPackage",
+]) {
+  if (!firmwareOtaPanel.includes(requiredToken)) {
+    failures.push(`firmware OTA/wired UI must keep one visible selected package across modes: ${requiredToken}`);
+  }
 }
 
 const oneClickStart = commands.indexOf("pub async fn recover_embedded_ble_device");
