@@ -26,6 +26,9 @@ $sessionPath = Join-Path $OutputDir "preproduction-human-review-session.jsonl"
 $summaryPath = Join-Path $OutputDir "preproduction-human-review-summary.md"
 $summaryJsonPath = Join-Path $OutputDir "preproduction-human-review-summary.json"
 $startInfoPath = Join-Path $OutputDir "preproduction-human-review-start.txt"
+foreach ($staleOutput in @($sessionPath, $summaryPath, $summaryJsonPath, $startInfoPath)) {
+    Remove-Item -LiteralPath $staleOutput -Force -ErrorAction SilentlyContinue
+}
 
 $singleInstanceCreated = $false
 $singleInstanceMutex = [System.Threading.Mutex]::new(
@@ -397,7 +400,7 @@ function Show-ReviewStep {
 
     $form = [System.Windows.Forms.Form]::new()
     $form.Text = "Listener 1.0.2 准量产验收"
-    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
     $form.ClientSize = [System.Drawing.Size]::new(700, 620)
     $form.MinimumSize = [System.Drawing.Size]::new(660, 560)
     $form.MaximizeBox = $false
@@ -405,6 +408,11 @@ function Show-ReviewStep {
     $form.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 10)
     $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
     $form.AutoScroll = $true
+    $workingArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $form.Location = [System.Drawing.Point]::new(
+        $workingArea.Left + 12,
+        [Math]::Max($workingArea.Top + 12, $workingArea.Bottom - $form.Height - 12)
+    )
 
     $title = [System.Windows.Forms.Label]::new()
     $title.Text = "$Index/$Total  $($Step.title)"
@@ -474,7 +482,8 @@ function Show-ReviewStep {
     $observation.Location = [System.Drawing.Point]::new(16, 398)
     $observation.Size = [System.Drawing.Size]::new(668, 104)
     $observation.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom
-    $observation.Text = Convert-ReviewText $Step.observation_template
+    $initialObservation = Convert-ReviewText $Step.observation_template
+    $observation.Text = $initialObservation
     $form.Controls.Add($observation)
 
     $buttonPanel = [System.Windows.Forms.FlowLayoutPanel]::new()
@@ -514,6 +523,16 @@ function Show-ReviewStep {
                     [System.Windows.Forms.MessageBox]::Show(
                         "再写一下你看到的现象/结果，失败时尤其要写灯效、弹窗和 Type 状态。",
                         "缺少现象记录",
+                        [System.Windows.Forms.MessageBoxButtons]::OK,
+                        [System.Windows.Forms.MessageBoxIcon]::Information
+                    ) | Out-Null
+                    $observation.Focus()
+                    return
+                }
+                if ($observation.Text.Trim() -eq $initialObservation.Trim()) {
+                    [System.Windows.Forms.MessageBox]::Show(
+                        "现象栏还是原始模板。请把你实际看到的状态填进去，例如：窗口正常、蓝牙稳定、灯效正常；失败时写具体弹窗/灯效/Type 状态。",
+                        "现象还没有填写",
                         [System.Windows.Forms.MessageBoxButtons]::OK,
                         [System.Windows.Forms.MessageBoxIcon]::Information
                     ) | Out-Null

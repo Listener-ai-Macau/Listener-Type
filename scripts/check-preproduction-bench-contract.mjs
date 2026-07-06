@@ -44,6 +44,18 @@ if (!human.includes("Assert-StepsMatchCanonicalScenarios")) {
   failures.push("human review must fail fast when its detailed steps drift from the canonical scenario manifest");
 }
 
+for (const requiredToken of ["initialObservation", "现象栏还是原始模板"]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review must reject unchanged observation templates and include ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of ["FormStartPosition]::Manual", "PrimaryScreen.WorkingArea", "$workingArea.Left + 12"]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review window must stay anchored at the lower-left operator workspace and include ${requiredToken}`);
+  }
+}
+
 for (const stepId of requiredStepIds) {
   if (!human.includes(stepId)) {
     failures.push(`human review is missing step ${stepId}`);
