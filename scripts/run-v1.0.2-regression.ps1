@@ -302,6 +302,7 @@ try {
       Invoke-External "npm.cmd" @("run", "verify") $repoRoot
       Invoke-External "npm.cmd" @("run", "release:check") $repoRoot
       Invoke-External "npm.cmd" @("run", "check:embedded-ble-processing-led") $repoRoot
+      Invoke-External "npm.cmd" @("run", "check:preproduction-bench-contract") $repoRoot
     }
 
     Invoke-Gate "rust format and BLE/OTA tests" {
@@ -381,6 +382,51 @@ try {
       }
       if (-not (Test-Path -LiteralPath $dryRun.session_jsonl)) {
         throw "Preproduction human review dry-run session not written: $($dryRun.session_jsonl)"
+      }
+    }
+
+    Invoke-Gate "preproduction bench review contract smoke" {
+      $benchGate = Join-Path $PSScriptRoot "windows-listener-preproduction-bench-review.ps1"
+      if (-not (Test-Path -LiteralPath $benchGate)) {
+        throw "Final preproduction bench review script not found: $benchGate"
+      }
+
+      $steps = @(& pwsh -NoProfile -File $benchGate -ListSteps)
+      $exit = $LASTEXITCODE
+      if ($null -ne $exit -and $exit -ne 0) {
+        throw "Preproduction bench review -ListSteps exited with code $exit"
+      }
+      if ($steps.Count -lt 16) {
+        throw "Preproduction bench review must expose all final user gates; expected at least 16 steps, got $($steps.Count)"
+      }
+
+      $templateDir = Join-Path $OutputDir "preproduction-bench-review-template"
+      & pwsh -NoProfile -File $benchGate -WriteTemplate -OutputDir $templateDir
+      $exit = $LASTEXITCODE
+      if ($exit -ne 0) {
+        throw "Preproduction bench review template generation failed with code $exit"
+      }
+
+      $dryRunDir = Join-Path $OutputDir "preproduction-bench-review-no-go"
+      & pwsh -NoProfile -File $benchGate -OutputDir $dryRunDir
+      $exit = $LASTEXITCODE
+      if ($exit -ne 2) {
+        throw "Preproduction bench review without capability manifest should return 2/BENCH_REVIEW_NO_GO, got $exit"
+      }
+      $summary = Join-Path $dryRunDir "preproduction-bench-review-summary.json"
+      if (-not (Test-Path -LiteralPath $summary)) {
+        throw "Preproduction bench review summary not written: $summary"
+      }
+      $bench = Get-Content -LiteralPath $summary -Raw | ConvertFrom-Json
+      if ($bench.status -ne "BENCH_REVIEW_NO_GO") {
+        throw "Preproduction bench review dry-run should be BENCH_REVIEW_NO_GO, got $($bench.status)"
+      }
+      $records = @($bench.records)
+      if ($records.Count -lt 16) {
+        throw "Preproduction bench review dry-run must record all release scenarios, got $($records.Count)"
+      }
+      if (@($records | Where-Object { $_.missing_capabilities.Count -gt 0 -or $_.missing_evidence.Count -gt 0 }).Count -eq 0) {
+        throw "Preproduction bench review dry-run must report missing capabilities/evidence when no bench manifest is provided"
       }
     }
 

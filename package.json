@@ -16,6 +16,7 @@
     "check:tauri-info": "node scripts/check-tauri-info.mjs",
     "check:version": "node scripts/check-release-version.mjs",
     "check:embedded-ble-processing-led": "node scripts/check-embedded-ble-processing-led.mjs",
+    "check:preproduction-bench-contract": "node scripts/check-preproduction-bench-contract.mjs",
     "test:rules": "node --experimental-strip-types src/lib/capsulePreviewRules.test.ts",
     "test:capsule-actions": "node --experimental-strip-types src/lib/capsuleActionRules.test.ts",
     "test:capsule-ordering": "node --experimental-strip-types src/lib/capsuleEventOrdering.test.ts",
