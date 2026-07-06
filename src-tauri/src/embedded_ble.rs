@@ -78,6 +78,9 @@ pub struct EmbeddedAudioBleStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSettingsStatus {
+    pub brightness_percent: u8,
+    pub plugged_brightness_percent: u8,
+    pub battery_brightness_percent: u8,
     pub status_led_brightness_percent: u8,
     pub key_led_brightness_percent: u8,
     pub knob_led_brightness_percent: u8,
@@ -5017,6 +5020,19 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             ));
         }
         let fields = parse_device_settings_fields(line);
+        let default_brightness = crate::types::DEFAULT_DEVICE_BRIGHTNESS_PERCENT;
+        let plugged_brightness_percent =
+            optional_u8_field(&fields, "plugged_brightness").unwrap_or(default_brightness);
+        let battery_brightness_percent =
+            optional_u8_field(&fields, "battery_brightness").unwrap_or(plugged_brightness_percent);
+        let brightness_percent =
+            optional_u8_field(&fields, "active_brightness").unwrap_or_else(|| {
+                if require_field(&fields, "active_power").unwrap_or("battery") == "external" {
+                    plugged_brightness_percent
+                } else {
+                    battery_brightness_percent
+                }
+            });
         let led_zone_brightness_supported = fields.contains_key("led_status")
             || fields.contains_key("led_key")
             || fields.contains_key("led_ec11")
@@ -5063,6 +5079,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 battery_low_power_idle_minutes
             };
         Ok(crate::embedded_ble::DeviceSettingsStatus {
+            brightness_percent,
+            plugged_brightness_percent,
+            battery_brightness_percent,
             status_led_brightness_percent,
             key_led_brightness_percent,
             knob_led_brightness_percent,
@@ -16436,6 +16455,9 @@ mod tests {
             "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 led_status=70 led_key=65 led_ec11=60 led_edge=55 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,led_zone_brightness_0_100,low_power_idle_ms_0_86400000"
         )
         .expect("parse device settings");
+        assert_eq!(status.brightness_percent, 80);
+        assert_eq!(status.plugged_brightness_percent, 80);
+        assert_eq!(status.battery_brightness_percent, 50);
         assert_eq!(status.status_led_brightness_percent, 70);
         assert_eq!(status.key_led_brightness_percent, 65);
         assert_eq!(status.knob_led_brightness_percent, 60);
@@ -16463,6 +16485,9 @@ mod tests {
             "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK active_power=external low_power_idle_ms=60000 knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=0 external_power_present=1 usb_power_present=1 charging=0 charge_full=1"
         )
         .expect("parse legacy device settings");
+        assert_eq!(status.brightness_percent, 80);
+        assert_eq!(status.plugged_brightness_percent, 80);
+        assert_eq!(status.battery_brightness_percent, 80);
         assert_eq!(status.status_led_brightness_percent, 100);
         assert_eq!(status.key_led_brightness_percent, 100);
         assert_eq!(status.knob_led_brightness_percent, 100);
@@ -16479,6 +16504,9 @@ mod tests {
             .expect("device settings hardware test mutex poisoned");
         let status = super::windows_ble::read_device_settings_status(Duration::from_secs(4))
             .expect("device settings status should be read from firmware");
+        assert!(status.brightness_percent <= 100);
+        assert!(status.plugged_brightness_percent <= 100);
+        assert!(status.battery_brightness_percent <= 100);
         assert!(!status.ble_name.is_empty());
         assert!(status.status_led_brightness_percent <= 100);
         assert!(status.key_led_brightness_percent <= 100);

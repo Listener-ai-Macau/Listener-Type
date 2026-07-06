@@ -22,6 +22,7 @@ const viteConfigPath = join(appRoot, "vite.config.ts");
 const distIndexPath = join(appRoot, "dist", "index.html");
 const nsisHookPath = join(appRoot, "src-tauri", "nsis", "listener-type-ime-hooks.nsh");
 const nsisCleanupHookPath = join(appRoot, "src-tauri", "nsis", "listener-type-ime-cleanup-hooks.nsh");
+const regressionGatePath = join(scriptsDir, "run-v1.0.2-regression.ps1");
 const wixFragmentPath = join(appRoot, "src-tauri", "wix", "listener-type-ime.wxs");
 const wixCleanupFragmentPath = join(appRoot, "src-tauri", "wix", "listener-type-ime-cleanup.wxs");
 
@@ -41,6 +42,7 @@ const viteConfig = readFileSync(viteConfigPath, "utf8");
 const distIndex = readFileSync(distIndexPath, "utf8");
 const nsisHook = readFileSync(nsisHookPath, "utf8");
 const nsisCleanupHook = readFileSync(nsisCleanupHookPath, "utf8");
+const regressionGate = readFileSync(regressionGatePath, "utf8");
 const wixFragment = readFileSync(wixFragmentPath, "utf8");
 const wixCleanupFragment = readFileSync(wixCleanupFragmentPath, "utf8");
 
@@ -84,6 +86,7 @@ assert.match(script, /\[int\]\$CargoBuildJobs = 0/, "script should leave Cargo p
 assert.match(script, /\[switch\]\$ReuseExistingExe/, "script should support fast MSI relink for docs/scripts-only commits");
 assert.match(script, /\[switch\]\$UseSccache/, "script should support opt-in sccache acceleration");
 assert.match(script, /\[switch\]\$IncrementalReleaseBuild/, "script should support opt-in local incremental release builds");
+assert.match(regressionGate, /-IncrementalReleaseBuild/, "v1.0.2 regression packaging should use incremental release builds to avoid repeated long relinks");
 assert.match(script, /Test-ReusableReleaseExe/, "script should guard the fast MSI relink path");
 assert.match(script, /Cargo build jobs left at Cargo default parallelism/, "script should advertise default Cargo parallelism");
 assert.doesNotMatch(script, /set `"CARGO_BUILD_JOBS=1`"/, "default packaging must not force serial Cargo builds");

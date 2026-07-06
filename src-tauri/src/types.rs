@@ -486,6 +486,7 @@ fn default_true() -> bool {
 }
 
 pub const DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT: u8 = 100;
+pub const DEFAULT_DEVICE_BRIGHTNESS_PERCENT: u8 = 80;
 pub const DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 1;
 pub const DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 10;
 pub const DEFAULT_DEVICE_BLE_NAME: &str = "listener";
@@ -494,6 +495,10 @@ pub const MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 24 * 60;
 
 fn default_device_led_zone_brightness_percent() -> u8 {
     DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT
+}
+
+fn default_device_brightness_percent() -> u8 {
+    DEFAULT_DEVICE_BRIGHTNESS_PERCENT
 }
 
 fn default_device_low_power_idle_minutes() -> u32 {
@@ -1164,6 +1169,9 @@ pub struct UserPreferences {
     /// syncs this preference over the BLE audio control characteristic.
     #[serde(default)]
     pub device_knob_rotation_action: DeviceKnobRotationAction,
+    /// Overall device LED brightness. Firmware applies this before per-zone caps.
+    #[serde(default = "default_device_brightness_percent")]
+    pub device_brightness_percent: u8,
     /// Status LED zone brightness ceiling. Requires firmware led_status support.
     #[serde(default = "default_device_led_zone_brightness_percent")]
     pub device_status_led_brightness_percent: u8,
@@ -1379,6 +1387,8 @@ struct UserPreferencesWire {
     device_custom_keys_default_migrated: bool,
     #[serde(default)]
     device_knob_rotation_action: DeviceKnobRotationAction,
+    #[serde(default = "default_device_brightness_percent")]
+    device_brightness_percent: u8,
     #[serde(default = "default_device_led_zone_brightness_percent")]
     device_status_led_brightness_percent: u8,
     #[serde(default = "default_device_led_zone_brightness_percent")]
@@ -1477,6 +1487,7 @@ impl Default for UserPreferencesWire {
             device_custom_key_long_presses: prefs.device_custom_key_long_presses,
             device_custom_keys_default_migrated: prefs.device_custom_keys_default_migrated,
             device_knob_rotation_action: prefs.device_knob_rotation_action,
+            device_brightness_percent: prefs.device_brightness_percent,
             device_status_led_brightness_percent: prefs.device_status_led_brightness_percent,
             device_key_led_brightness_percent: prefs.device_key_led_brightness_percent,
             device_knob_led_brightness_percent: prefs.device_knob_led_brightness_percent,
@@ -1594,6 +1605,9 @@ impl<'de> Deserialize<'de> for UserPreferences {
             device_custom_key_long_presses,
             device_custom_keys_default_migrated: true,
             device_knob_rotation_action: wire.device_knob_rotation_action,
+            device_brightness_percent: clamp_device_brightness_percent(
+                wire.device_brightness_percent,
+            ),
             device_status_led_brightness_percent: clamp_device_brightness_percent(
                 wire.device_status_led_brightness_percent,
             ),
@@ -2018,6 +2032,7 @@ impl Default for UserPreferences {
             device_custom_key_long_presses: DeviceCustomKeys::disabled(),
             device_custom_keys_default_migrated: true,
             device_knob_rotation_action: DeviceKnobRotationAction::default(),
+            device_brightness_percent: default_device_brightness_percent(),
             device_status_led_brightness_percent: default_device_led_zone_brightness_percent(),
             device_key_led_brightness_percent: default_device_led_zone_brightness_percent(),
             device_knob_led_brightness_percent: default_device_led_zone_brightness_percent(),

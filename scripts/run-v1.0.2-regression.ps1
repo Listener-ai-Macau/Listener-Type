@@ -534,6 +534,7 @@ try {
           "-File", (Join-Path $PSScriptRoot "windows-package-msvc.ps1"),
           "-SkipRustInstall",
           "-SkipNpmCi",
+          "-IncrementalReleaseBuild",
           "-CleanArtifacts"
         ) $repoRoot
       }

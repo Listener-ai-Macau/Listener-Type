@@ -25,7 +25,7 @@ Use a Windows runner with Visual Studio Build Tools and Rust installed.
 npm ci
 npm run build
 node scripts/windows-package-msvc.test.mjs
-pwsh -NoProfile -File scripts/windows-package-msvc.ps1 -SkipRustInstall -SkipNpmCi -CleanArtifacts
+pwsh -NoProfile -File scripts/windows-package-msvc.ps1 -SkipRustInstall -SkipNpmCi -IncrementalReleaseBuild -CleanArtifacts
 ```
 
 The generated installer is the user-facing artifact. A clean target machine should only need Windows, the installer, and network access for WebView2 Evergreen Runtime bootstrap if the runtime is not already installed. It must not require Node.js, Rust, ESP-IDF, this repository, or firmware flashing tools.
@@ -42,10 +42,13 @@ manifests, icons, WiX inputs, or other product inputs. The script refuses dirty
 or stale product inputs, but final publish builds should still use the full
 command above.
 
-The packaging script leaves Cargo at its default parallelism. If the local
-machine is memory constrained or a toolchain bug appears, pass
-`-CargoBuildJobs 1` to reproduce the old serial build behavior. If `sccache` is
-installed, pass `-UseSccache` to set `RUSTC_WRAPPER` for that run.
+The packaging script writes command output to `.artifacts/windows-msvc/*.log`
+and prints heartbeats while Rust is quiet, so a long `Compiling ...` line is not
+treated as a frozen terminal. Local package refreshes should keep
+`-IncrementalReleaseBuild`; if the machine is memory constrained or a toolchain
+bug appears, pass `-CargoBuildJobs 1` to reproduce the old serial build
+behavior. If `sccache` is installed, pass `-UseSccache` to set `RUSTC_WRAPPER`
+for that run.
 
 The default package path intentionally skips `ListenerTypeIme.dll` and the TSF
 registration hooks. It may unregister and remove stale IME files from a previous

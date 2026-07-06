@@ -14,6 +14,7 @@ export function applyMockDeviceSettingsWrite(
   const pluggedAutoShutdownMs = 0;
   const settings: UserPreferences = {
     ...currentSettings,
+    deviceBrightnessPercent: request.brightnessPercent,
     deviceStatusLedBrightnessPercent: request.statusLedBrightnessPercent,
     deviceKeyLedBrightnessPercent: request.keyLedBrightnessPercent,
     deviceKnobLedBrightnessPercent: request.knobLedBrightnessPercent,
@@ -25,6 +26,7 @@ export function applyMockDeviceSettingsWrite(
   };
   const snapshot: DeviceSettingsSnapshot = {
     ...currentSnapshot,
+    brightnessPercent: request.brightnessPercent,
     statusLedBrightnessPercent: request.statusLedBrightnessPercent,
     keyLedBrightnessPercent: request.keyLedBrightnessPercent,
     knobLedBrightnessPercent: request.knobLedBrightnessPercent,

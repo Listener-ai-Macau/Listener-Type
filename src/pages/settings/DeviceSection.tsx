@@ -250,6 +250,7 @@ function DeviceFirmwareSettingsCard() {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<DeviceSettingsSnapshot | null>(null);
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
+    brightnessPercent: 80,
     statusLedBrightnessPercent: 100,
     keyLedBrightnessPercent: 100,
     knobLedBrightnessPercent: 100,
@@ -290,7 +291,6 @@ function DeviceFirmwareSettingsCard() {
   const writeDisabled = status === 'loading' || status === 'saving' || !!validationError || !snapshot?.writeSupported;
   const readDisabled = status === 'loading' || status === 'saving';
   const controlsDisabled = !snapshot?.writeSupported || status === 'saving';
-  const ledControlsDisabled = controlsDisabled || !(snapshot?.ledZoneBrightnessSupported ?? false);
   const busyText = status === 'loading'
     ? t('settings.device.readingDetail', '正在读取设备设置...')
     : status === 'saving'
@@ -420,7 +420,7 @@ function DeviceFirmwareSettingsCard() {
 
       <DeviceLedBrightnessGroup
         supported={snapshot?.ledZoneBrightnessSupported ?? false}
-        disabled={ledControlsDisabled}
+        disabled={controlsDisabled}
         values={form}
         onChange={(field, value) => setForm(current => ({ ...current, [field]: value }))}
         t={t}
@@ -642,6 +642,7 @@ function MinuteInput({
 }
 
 type LedBrightnessField =
+  | 'brightnessPercent'
   | 'statusLedBrightnessPercent'
   | 'keyLedBrightnessPercent'
   | 'knobLedBrightnessPercent'
@@ -662,38 +663,45 @@ function DeviceLedBrightnessGroup({
 }) {
   return (
     <DeviceSettingsPanel
-      title={t('settings.device.ledZoneTitle', '灯区亮度')}
+      title={t('settings.device.ledZoneTitle', '灯光亮度')}
       desc={supported
-        ? t('settings.device.ledZoneDesc', '按灯区限制最大亮度，写入后同步到设备。')
-        : t('settings.device.ledZoneUnsupported', '当前固件未回读四区亮度；更新固件后可写入。')}
+        ? t('settings.device.ledZoneDesc', '整体亮度会先限制所有灯，再按灯区限制最大亮度。')
+        : t('settings.device.ledZoneUnsupported', '整体亮度可写入；当前固件未回读四区亮度，灯区上限暂不可写入。')}
     >
       <div className="ol-device-led-grid">
+        <LedBrightnessControl
+          label={t('settings.device.brightnessLabel', '整体亮度')}
+          desc={t('settings.device.brightnessDesc', '所有状态灯/按键灯/旋钮灯的总上限')}
+          value={values.brightnessPercent}
+          disabled={disabled}
+          onChange={value => onChange('brightnessPercent', value)}
+        />
         <LedBrightnessControl
           label={t('settings.device.statusLedBrightnessLabel', '状态灯')}
           desc={t('settings.device.statusLedBrightnessDesc', 'PWR / BLE / REC / AI / OK / WARN')}
           value={values.statusLedBrightnessPercent}
-          disabled={disabled}
+          disabled={disabled || !supported}
           onChange={value => onChange('statusLedBrightnessPercent', value)}
         />
         <LedBrightnessControl
           label={t('settings.device.keyLedBrightnessLabel', '按键灯')}
           desc={t('settings.device.keyLedBrightnessDesc', 'KEY1-KEY4')}
           value={values.keyLedBrightnessPercent}
-          disabled={disabled}
+          disabled={disabled || !supported}
           onChange={value => onChange('keyLedBrightnessPercent', value)}
         />
         <LedBrightnessControl
           label={t('settings.device.knobLedBrightnessLabel', '旋钮灯')}
           desc={t('settings.device.knobLedBrightnessDesc', 'EC11 环灯')}
           value={values.knobLedBrightnessPercent}
-          disabled={disabled}
+          disabled={disabled || !supported}
           onChange={value => onChange('knobLedBrightnessPercent', value)}
         />
         <LedBrightnessControl
           label={t('settings.device.edgeLedBrightnessLabel', '板框灯')}
           desc={t('settings.device.edgeLedBrightnessDesc', '边框氛围灯')}
           value={values.edgeLedBrightnessPercent}
-          disabled={disabled}
+          disabled={disabled || !supported}
           onChange={value => onChange('edgeLedBrightnessPercent', value)}
         />
       </div>
@@ -1133,6 +1141,7 @@ function DeviceKeyMappingControl({
 
 function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateRequest {
   return {
+    brightnessPercent: snapshot.brightnessPercent,
     statusLedBrightnessPercent: snapshot.statusLedBrightnessPercent,
     keyLedBrightnessPercent: snapshot.keyLedBrightnessPercent,
     knobLedBrightnessPercent: snapshot.knobLedBrightnessPercent,
@@ -1151,12 +1160,13 @@ function validateDeviceSettingsForm(
   t: ReturnType<typeof useTranslation>['t'],
 ): string {
   if (
+    !Number.isFinite(form.brightnessPercent) || form.brightnessPercent < 0 || form.brightnessPercent > 100 ||
     !Number.isFinite(form.statusLedBrightnessPercent) || form.statusLedBrightnessPercent < 0 || form.statusLedBrightnessPercent > 100 ||
     !Number.isFinite(form.keyLedBrightnessPercent) || form.keyLedBrightnessPercent < 0 || form.keyLedBrightnessPercent > 100 ||
     !Number.isFinite(form.knobLedBrightnessPercent) || form.knobLedBrightnessPercent < 0 || form.knobLedBrightnessPercent > 100 ||
     !Number.isFinite(form.edgeLedBrightnessPercent) || form.edgeLedBrightnessPercent < 0 || form.edgeLedBrightnessPercent > 100
   ) {
-    return t('settings.device.errorZoneBrightness', '灯区亮度必须在 0-100 之间。');
+    return t('settings.device.errorZoneBrightness', '灯光亮度必须在 0-100 之间。');
   }
   if (!Number.isFinite(form.pluggedLowPowerIdleMinutes) || form.pluggedLowPowerIdleMinutes < 0 || form.pluggedLowPowerIdleMinutes > 1440) {
     return t('settings.device.errorLowPowerIdle', '低功耗等待时间必须在 0-1440 分钟之间。');
