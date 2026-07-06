@@ -170,8 +170,14 @@ if (!bench.includes("BENCH_REVIEW_NO_GO") || !bench.includes("BENCH_REVIEW_PASS"
   failures.push("bench review must emit explicit BENCH_REVIEW_NO_GO/PASS states");
 }
 
-if (!bench.includes("missing_capabilities") || !bench.includes("missing_evidence")) {
-  failures.push("bench review must report missing capabilities and missing evidence per step");
+if (!bench.includes("missing_capabilities") || !bench.includes("missing_evidence") || !bench.includes("failed_evidence")) {
+  failures.push("bench review must report missing capabilities, missing evidence, and failed evidence per step");
+}
+
+for (const requiredToken of ["timed_out", "exit_code", "*.summary.json"]) {
+  if (!bench.includes(requiredToken)) {
+    failures.push(`bench review must validate process-capture summary evidence health: ${requiredToken}`);
+  }
 }
 
 for (const requiredToken of [

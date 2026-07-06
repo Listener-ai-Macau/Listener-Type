@@ -126,10 +126,50 @@ function Resolve-EvidencePath {
   return (Join-Path $repoRoot $Path)
 }
 
+function Test-EvidenceHealthy {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Key
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+    return [pscustomobject]@{ ok = $false; reason = "missing" }
+  }
+
+  $fileName = [System.IO.Path]::GetFileName($Path)
+  if ($fileName -notlike "*.summary.json") {
+    return [pscustomobject]@{ ok = $true; reason = "" }
+  }
+
+  try {
+    $summary = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+  } catch {
+    return [pscustomobject]@{ ok = $false; reason = "summary_json_parse_failed" }
+  }
+
+  $timedOutProperty = $summary.PSObject.Properties["timed_out"]
+  if ($null -ne $timedOutProperty -and [bool]$timedOutProperty.Value) {
+    return [pscustomobject]@{ ok = $false; reason = "timed_out" }
+  }
+
+  $exitCodeProperty = $summary.PSObject.Properties["exit_code"]
+  if ($null -ne $exitCodeProperty -and [int]$exitCodeProperty.Value -ne 0) {
+    return [pscustomobject]@{ ok = $false; reason = "exit_code=$($exitCodeProperty.Value)" }
+  }
+
+  $statusProperty = $summary.PSObject.Properties["status"]
+  if ($null -ne $statusProperty -and [string]$statusProperty.Value -match "(?i)(FAIL|NO_GO|INCOMPLETE|TIMEOUT)") {
+    return [pscustomobject]@{ ok = $false; reason = "status=$($statusProperty.Value)" }
+  }
+
+  return [pscustomobject]@{ ok = $true; reason = "" }
+}
+
 $records = [System.Collections.Generic.List[object]]::new()
 foreach ($step in $steps) {
   $missingCapabilities = @($step.capabilities | Where-Object { -not (Get-ManifestBool $_) })
   $missingEvidence = [System.Collections.Generic.List[string]]::new()
+  $failedEvidence = [System.Collections.Generic.List[string]]::new()
   $evidenceOut = [ordered]@{}
   foreach ($key in $step.evidence) {
     $value = ""
@@ -143,6 +183,13 @@ foreach ($step in $steps) {
     $evidenceOut[$key] = $resolved
     if ([string]::IsNullOrWhiteSpace($resolved) -or -not (Test-Path -LiteralPath $resolved)) {
       $missingEvidence.Add($key) | Out-Null
+      continue
+    }
+
+    $health = Test-EvidenceHealthy -Path $resolved -Key $key
+    if (-not $health.ok) {
+      $missingEvidence.Add($key) | Out-Null
+      $failedEvidence.Add(("{0}:{1}" -f $key, $health.reason)) | Out-Null
     }
   }
 
@@ -155,6 +202,7 @@ foreach ($step in $steps) {
       missing_capabilities = $missingCapabilities
       required_evidence = $step.evidence
       missing_evidence = @($missingEvidence)
+      failed_evidence = @($failedEvidence)
       evidence = $evidenceOut
     }) | Out-Null
 }
