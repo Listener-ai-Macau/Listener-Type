@@ -6,7 +6,7 @@ param(
   [string]$TypeExe = "",
   [string]$ExpectedName = "listener",
   [string]$ActiveBleSummaryPath = "",
-  [int]$LiveBleTimeoutMs = 8000,
+  [int]$LiveBleTimeoutMs = 20000,
   [switch]$SkipLiveBle,
   [switch]$SkipScreenshot,
   [switch]$SkipNotificationScan,

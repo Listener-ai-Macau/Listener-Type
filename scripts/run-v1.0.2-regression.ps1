@@ -482,7 +482,7 @@ try {
 
       $activeBleSummary = Join-Path $OutputDir "preproduction-ble-active-dryrun\preproduction-ble-active-summary.json"
       $collectDir = Join-Path $OutputDir "preproduction-bench-collect-smoke"
-      & pwsh -NoProfile -File $benchCollect -OutputDir $collectDir -ActiveBleSummaryPath $activeBleSummary -SkipLiveBle -SkipScreenshot -SkipNotificationScan
+      & pwsh -NoProfile -File $benchCollect -OutputDir $collectDir -ActiveBleSummaryPath $activeBleSummary -LiveBleTimeoutMs 20000 -SkipLiveBle -SkipScreenshot -SkipNotificationScan
       $exit = $LASTEXITCODE
       if ($exit -ne 0) {
         throw "Preproduction bench evidence collector smoke failed with code $exit"

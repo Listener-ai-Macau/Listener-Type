@@ -20,6 +20,12 @@ review. It does not pair or unpair Windows devices. If the physical bench,
 Windows pair/unpair automation, audio fixture, LED optical capture, or second
 BLE host are missing, review must remain `BENCH_REVIEW_NO_GO`.
 
+Live BLE probes use a 20 second timeout by default. Shorter 8 second probes can
+misclassify Windows GATT service discovery as a timeout while the service becomes
+reachable a few seconds later. For the actual BLE audio path, the release gate
+uses the tray-owned notify subscription probe; fresh one-shot status reads are
+diagnostic only when the tray already owns the background notify session.
+
 Windows BLE pair/unpair automation is split into an explicit active script so a
 read-only evidence pass cannot silently mutate the operator's host:
 
