@@ -23,6 +23,12 @@ pub const LISTENER_OTA_V2_CHUNK_BYTES: u64 = 500;
 pub const OTA_MAX_VERSION_CHARS: usize = 31;
 pub const DEFAULT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 pub const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
+pub const CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(1800);
+pub const LISTENER_OTA_V2_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
+
+fn elapsed_ms_u64(started: Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -124,9 +130,14 @@ pub struct FirmwareOtaHeadlessPreflight {
 #[serde(rename_all = "camelCase")]
 pub struct FirmwareOtaHeadlessTransfer {
     pub bytes_transferred: usize,
+    pub chunks_sent: usize,
     pub transport: String,
     pub confirmed_version: Option<String>,
     pub version_confirmed: bool,
+    pub preflight_elapsed_ms: u64,
+    pub transfer_elapsed_ms: u64,
+    pub confirm_elapsed_ms: u64,
+    pub total_elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,20 +185,27 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
     let mut transfer = None;
 
     if options.transfer {
+        let total_started = Instant::now();
         let attempt = run_transfer_preflight_and_write(&package, &options);
         preflight = Some(attempt.preflight);
         errors.extend(attempt.errors);
         if let Some(stats) = attempt.stats {
             let expected_version = package.manifest.version.clone();
-            let confirmed_version = confirm_firmware_ota_version_with(
-                &expected_version,
-                DEFAULT_CONFIRM_TIMEOUT,
-                || async {
-                    let snapshot = firmware_ota_device_snapshot_for_manifest(&package.manifest);
-                    firmware_ota_snapshot_version(snapshot.firmware_version.as_deref())
-                },
-            )
-            .await;
+            let confirm_started = Instant::now();
+            let confirmed_version = if package.manifest.is_listener_ble_ota_v2() {
+                confirm_listener_ota_v2_reachable_version(&expected_version).await
+            } else {
+                confirm_firmware_ota_version_with(
+                    &expected_version,
+                    DEFAULT_CONFIRM_TIMEOUT,
+                    || async {
+                        let snapshot = firmware_ota_device_snapshot_for_manifest(&package.manifest);
+                        firmware_ota_snapshot_version(snapshot.firmware_version.as_deref())
+                    },
+                )
+                .await
+            };
+            let confirm_elapsed_ms = elapsed_ms_u64(confirm_started);
             let version_confirmed = confirmed_version
                 .as_deref()
                 .is_some_and(|version| firmware_ota_versions_match(version, &expected_version));
@@ -208,9 +226,14 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
             }
             transfer = Some(FirmwareOtaHeadlessTransfer {
                 bytes_transferred: stats.bytes_transferred,
+                chunks_sent: stats.chunks_sent,
                 transport: stats.transport.to_string(),
                 confirmed_version,
                 version_confirmed,
+                preflight_elapsed_ms: attempt.preflight_elapsed_ms,
+                transfer_elapsed_ms: attempt.transfer_elapsed_ms,
+                confirm_elapsed_ms,
+                total_elapsed_ms: elapsed_ms_u64(total_started),
             });
         }
     } else if options.preflight_only {
@@ -243,80 +266,17 @@ fn firmware_ota_device_snapshot_for_manifest(
     manifest: &FirmwareOtaManifest,
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
     if manifest.is_listener_ble_ota_v2() {
-        listener_ota_v2_snapshot_with_identity_fallback(
-            crate::embedded_ble::listener_ota_v2_device_snapshot(),
-        )
+        crate::embedded_ble::listener_ota_v2_device_snapshot()
     } else {
         crate::embedded_ble::firmware_ota_device_snapshot()
     }
 }
 
-fn listener_ota_v2_snapshot_with_identity_fallback(
-    snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
-) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-    if !snapshot.connected || !listener_ota_v2_snapshot_needs_identity_fallback(&snapshot) {
-        return snapshot;
-    }
-    merge_listener_ota_v2_snapshot_identity(
-        snapshot,
-        crate::embedded_ble::firmware_ota_device_snapshot(),
-    )
-}
-
-fn listener_ota_v2_snapshot_needs_identity_fallback(
-    snapshot: &crate::embedded_ble::FirmwareOtaDeviceSnapshot,
-) -> bool {
-    snapshot.hardware_revision.is_none()
-        || snapshot.firmware_version.is_none()
-        || snapshot.battery_percent.is_none()
-        || snapshot.usb_powered.is_none()
-}
-
-fn merge_listener_ota_v2_snapshot_identity(
-    mut snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
-    fallback: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
-) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-    if !fallback.connected {
-        return snapshot;
-    }
-
-    let mut recovered_identity = false;
-    if snapshot.hardware_revision.is_none() && fallback.hardware_revision.is_some() {
-        snapshot.hardware_revision = fallback.hardware_revision;
-        recovered_identity = true;
-    }
-    if snapshot.firmware_version.is_none() && fallback.firmware_version.is_some() {
-        snapshot.firmware_version = fallback.firmware_version;
-        recovered_identity = true;
-    }
-    if snapshot.battery_percent.is_none() {
-        snapshot.battery_percent = fallback.battery_percent;
-    }
-    if snapshot.usb_powered.is_none() {
-        snapshot.usb_powered = fallback.usb_powered;
-    }
-    for capability in fallback.capabilities {
-        if !snapshot
-            .capabilities
-            .iter()
-            .any(|existing| existing == &capability)
-        {
-            snapshot.capabilities.push(capability);
-        }
-    }
-
-    if recovered_identity {
-        snapshot.detail = Some(
-            "Listener OTA v2 service is reachable; device identity was recovered through the stable OTA anchor."
-                .to_string(),
-        );
-    }
-    snapshot
-}
-
 struct HeadlessTransferAttempt {
     preflight: FirmwareOtaHeadlessPreflight,
     stats: Option<crate::embedded_ble::FirmwareOtaTransferStats>,
+    preflight_elapsed_ms: u64,
+    transfer_elapsed_ms: u64,
     errors: Vec<String>,
 }
 
@@ -328,6 +288,7 @@ fn run_transfer_preflight_and_write(
         return run_listener_ota_v2_transfer_preflight_and_write(package, options);
     }
 
+    let preflight_started = Instant::now();
     let prepared = match crate::embedded_ble::prepare_firmware_ota_transfer() {
         Ok(prepared) => prepared,
         Err(err) => {
@@ -337,6 +298,8 @@ fn run_transfer_preflight_and_write(
             return HeadlessTransferAttempt {
                 preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
                 stats: None,
+                preflight_elapsed_ms: elapsed_ms_u64(preflight_started),
+                transfer_elapsed_ms: 0,
                 errors: blockers,
             };
         }
@@ -349,10 +312,14 @@ fn run_transfer_preflight_and_write(
         return HeadlessTransferAttempt {
             preflight,
             stats: None,
+            preflight_elapsed_ms: elapsed_ms_u64(preflight_started),
+            transfer_elapsed_ms: 0,
             errors: blockers,
         };
     }
 
+    let preflight_elapsed_ms = elapsed_ms_u64(preflight_started);
+    let transfer_started = Instant::now();
     match prepared.transfer(
         &package.manifest.version,
         &package.firmware_sha256,
@@ -363,11 +330,15 @@ fn run_transfer_preflight_and_write(
         Ok(stats) => HeadlessTransferAttempt {
             preflight,
             stats: Some(stats),
+            preflight_elapsed_ms,
+            transfer_elapsed_ms: elapsed_ms_u64(transfer_started),
             errors: Vec::new(),
         },
         Err(err) => HeadlessTransferAttempt {
             preflight,
             stats: None,
+            preflight_elapsed_ms,
+            transfer_elapsed_ms: elapsed_ms_u64(transfer_started),
             errors: vec![err],
         },
     }
@@ -377,7 +348,7 @@ fn run_listener_ota_v2_transfer_preflight_and_write(
     package: &FirmwareOtaPackage,
     options: &FirmwareOtaHeadlessOptions,
 ) -> HeadlessTransferAttempt {
-    let identity_fallback = crate::embedded_ble::firmware_ota_device_snapshot();
+    let preflight_started = Instant::now();
     let prepared = match crate::embedded_ble::prepare_listener_ota_v2_transfer() {
         Ok(prepared) => prepared,
         Err(err) => {
@@ -387,23 +358,28 @@ fn run_listener_ota_v2_transfer_preflight_and_write(
             return HeadlessTransferAttempt {
                 preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
                 stats: None,
+                preflight_elapsed_ms: elapsed_ms_u64(preflight_started),
+                transfer_elapsed_ms: 0,
                 errors: blockers,
             };
         }
     };
 
-    let snapshot =
-        merge_listener_ota_v2_snapshot_identity(prepared.snapshot().clone(), identity_fallback);
+    let snapshot = prepared.snapshot().clone();
     let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
     let preflight = headless_preflight_from_snapshot(options, snapshot, blockers.clone());
     if !blockers.is_empty() {
         return HeadlessTransferAttempt {
             preflight,
             stats: None,
+            preflight_elapsed_ms: elapsed_ms_u64(preflight_started),
+            transfer_elapsed_ms: 0,
             errors: blockers,
         };
     }
 
+    let preflight_elapsed_ms = elapsed_ms_u64(preflight_started);
+    let transfer_started = Instant::now();
     match prepared.transfer(
         &package.firmware_bytes,
         package.manifest.gatt_chunk_bytes as usize,
@@ -412,11 +388,15 @@ fn run_listener_ota_v2_transfer_preflight_and_write(
         Ok(stats) => HeadlessTransferAttempt {
             preflight,
             stats: Some(stats),
+            preflight_elapsed_ms,
+            transfer_elapsed_ms: elapsed_ms_u64(transfer_started),
             errors: Vec::new(),
         },
         Err(err) => HeadlessTransferAttempt {
             preflight,
             stats: None,
+            preflight_elapsed_ms,
+            transfer_elapsed_ms: elapsed_ms_u64(transfer_started),
             errors: vec![err],
         },
     }
@@ -486,9 +466,7 @@ fn preflight_blockers(
             "Hardware revision mismatch: device={hardware}, package={}.",
             manifest.hardware_revision
         )),
-        None if snapshot.connected
-            && (manifest.is_listener_ble_ota() || manifest.is_listener_ble_ota_v2()) =>
-        {
+        None if snapshot.connected && manifest.is_listener_ble_ota() => {
             blockers.push("Device hardware revision is unknown.".to_string())
         }
         _ => {}
@@ -686,6 +664,32 @@ where
 
         if Instant::now() >= deadline {
             return last_seen_version;
+        }
+        tokio::time::sleep(CONFIRM_INTERVAL).await;
+    }
+}
+
+pub async fn confirm_listener_ota_v2_reachable_version(expected_version: &str) -> Option<String> {
+    if normalize_firmware_ota_version(expected_version).is_empty() || expected_version == "unknown"
+    {
+        return None;
+    }
+
+    tokio::time::sleep(CONFIRM_REBOOT_GRACE).await;
+
+    let deadline = Instant::now() + LISTENER_OTA_V2_REACHABLE_CONFIRM_TIMEOUT;
+    loop {
+        let snapshot = crate::embedded_ble::listener_ota_v2_device_snapshot();
+        let reachable = snapshot.connected
+            && snapshot
+                .capabilities
+                .iter()
+                .any(|item| item == LISTENER_OTA_V2_FIRMWARE_CAPABILITY);
+        if reachable {
+            return Some(expected_version.to_string());
+        }
+        if Instant::now() >= deadline {
+            return None;
         }
         tokio::time::sleep(CONFIRM_INTERVAL).await;
     }
@@ -1357,6 +1361,63 @@ mod tests {
         )
     }
 
+    fn listener_ota_v2_manifest(hardware_revision: &str, version: &str) -> String {
+        format!(
+            r#"{{
+  "schema_version": 2,
+  "created_at_utc": "2026-07-06T00:00:00Z",
+  "channel": "development",
+  "firmware": {{
+    "project": "voice-keyboard-firmware",
+    "version": "{version}",
+    "git_commit": "{git_commit}",
+    "git_dirty": false,
+    "target": "esp32s3",
+    "file": "firmware_ota.bin",
+    "size_bytes": 6,
+    "sha256": "{FIRMWARE_SHA256}"
+  }},
+  "requirements": {{
+    "hardware_revision": "{hardware_revision}",
+    "protocol_version": 2,
+    "min_desktop_version": "1.0.0",
+    "gatt_chunk_bytes": 500
+  }},
+  "protocol": {{
+    "name": "{LISTENER_OTA_V2_PROTOCOL_NAME}",
+    "version": 2,
+    "firmware_capability": "{LISTENER_OTA_V2_FIRMWARE_CAPABILITY}",
+    "gatt": {{
+      "service_uuid": "{LISTENER_OTA_V2_SERVICE_UUID}",
+      "control_uuid": "{LISTENER_OTA_V2_CONTROL_UUID}",
+      "data_uuid": "{LISTENER_OTA_V2_DATA_UUID}",
+      "status_uuid": "{LISTENER_OTA_V2_STATUS_UUID}",
+      "chunk_bytes": 500
+    }}
+  }},
+  "ble_identity": {{
+    "name": "listener",
+    "appearance": "0x03C1",
+    "dis": {{
+      "model": "keyboard-v2",
+      "hardware_revision": "esp32s3-wroom-1-n16r8",
+      "firmware_revision": "{version}"
+    }}
+  }},
+  "rollback": {{
+    "supported": true,
+    "method": "esp_idf_bootloader_rollback",
+    "instructions": "Rollback on failed pending verify."
+  }},
+  "recovery": {{
+    "factory_reflash": "Use USB factory package.",
+    "serial_commands": "~OTA:STATUS"
+  }}
+}}"#,
+            git_commit = "a".repeat(40)
+        )
+    }
+
     #[test]
     fn validates_schema_v2_package() {
         let result = validate_package(&manifest_v2(""), FIRMWARE_BYTES, &context());
@@ -1472,56 +1533,45 @@ mod tests {
     }
 
     #[test]
-    fn listener_ota_v2_snapshot_recovers_identity_from_stable_anchor() {
+    fn listener_ota_v2_preflight_allows_reachable_device_without_identity_metadata() {
+        let manifest = validate_package(
+            &listener_ota_v2_manifest("keyboard-v1", "1.2.0"),
+            FIRMWARE_BYTES,
+            &context(),
+        )
+        .manifest
+        .expect("valid Listener OTA v2 manifest");
         let snapshot = ota_snapshot(true, None, None, vec![LISTENER_OTA_V2_FIRMWARE_CAPABILITY]);
-        let mut fallback = ota_snapshot(
-            true,
-            Some("keyboard-v1"),
-            Some("1.0.2"),
-            vec![FIRMWARE_CAPABILITY],
+
+        let blockers = preflight_blockers(&manifest, &snapshot, false);
+
+        assert!(
+            blockers.is_empty(),
+            "Listener OTA v2 service reachability and capability should be enough when Windows does not expose identity metadata: {blockers:?}"
         );
-        fallback.battery_percent = Some(93);
-        fallback.usb_powered = Some(true);
-
-        let merged = merge_listener_ota_v2_snapshot_identity(snapshot, fallback);
-
-        assert_eq!(merged.hardware_revision.as_deref(), Some("keyboard-v1"));
-        assert_eq!(merged.firmware_version.as_deref(), Some("1.0.2"));
-        assert_eq!(merged.battery_percent, Some(93));
-        assert_eq!(merged.usb_powered, Some(true));
-        assert!(merged
-            .capabilities
-            .iter()
-            .any(|item| item == LISTENER_OTA_V2_FIRMWARE_CAPABILITY));
-        assert!(merged
-            .capabilities
-            .iter()
-            .any(|item| item == FIRMWARE_CAPABILITY));
-        assert!(merged
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains("recovered")));
     }
 
     #[test]
-    fn listener_ota_v2_snapshot_keeps_primary_identity_when_present() {
+    fn listener_ota_v2_preflight_still_rejects_wrong_identity_when_present() {
+        let manifest = validate_package(
+            &listener_ota_v2_manifest("keyboard-v1", "1.2.0"),
+            FIRMWARE_BYTES,
+            &context(),
+        )
+        .manifest
+        .expect("valid Listener OTA v2 manifest");
         let snapshot = ota_snapshot(
             true,
-            Some("keyboard-v1"),
-            Some("1.0.2"),
+            Some("keyboard-v2"),
+            None,
             vec![LISTENER_OTA_V2_FIRMWARE_CAPABILITY],
         );
-        let fallback = ota_snapshot(
-            true,
-            Some("keyboard-v2"),
-            Some("1.0.3"),
-            vec![FIRMWARE_CAPABILITY],
-        );
 
-        let merged = merge_listener_ota_v2_snapshot_identity(snapshot, fallback);
+        let blockers = preflight_blockers(&manifest, &snapshot, false);
 
-        assert_eq!(merged.hardware_revision.as_deref(), Some("keyboard-v1"));
-        assert_eq!(merged.firmware_version.as_deref(), Some("1.0.2"));
+        assert!(blockers
+            .iter()
+            .any(|item| item.contains("Hardware revision mismatch")));
     }
 
     #[test]

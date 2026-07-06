@@ -1105,10 +1105,16 @@ export function setDeviceSettings(request: DeviceSettingsUpdateRequest): Promise
   );
 }
 
-export function getFirmwareOtaPreflightSnapshot(): Promise<FirmwareOtaPreflightSnapshot> {
+export interface FirmwareOtaPreflightSnapshotRequest {
+  protocolName?: string | null;
+}
+
+export function getFirmwareOtaPreflightSnapshot(
+  request: FirmwareOtaPreflightSnapshotRequest = {},
+): Promise<FirmwareOtaPreflightSnapshot> {
   return invokeOrMock(
     'get_firmware_ota_preflight_snapshot',
-    undefined,
+    { protocolName: request.protocolName ?? null },
     () => ({
       recordingActive: false,
       dictationPhase: 'Idle',
@@ -1151,8 +1157,12 @@ export function loadFirmwareOtaPackage(path: string): Promise<FirmwareOtaPackage
 
 export interface FirmwareOtaBleTransferResult {
   bytesTransferred: number;
+  chunksSent: number;
   confirmedVersion: string | null;
   transport: FirmwareOtaBleTransferTransport;
+  transferElapsedMs: number;
+  confirmElapsedMs: number;
+  totalElapsedMs: number;
 }
 
 export type FirmwareOtaBleTransferTransport =
@@ -1171,10 +1181,14 @@ export function transferFirmwareOtaBle(
     },
     () => ({
       bytesTransferred: request.firmwareBytes.byteLength,
+      chunksSent: Math.ceil(request.firmwareBytes.byteLength / Math.max(1, request.manifest.gattChunkBytes)),
       confirmedVersion: null,
       transport: request.manifest.protocolName === LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName
         ? LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName
         : FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName,
+      transferElapsedMs: 0,
+      confirmElapsedMs: 0,
+      totalElapsedMs: 0,
     }),
   );
 }

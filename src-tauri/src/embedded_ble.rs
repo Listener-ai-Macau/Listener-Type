@@ -7327,60 +7327,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             usb_powered: None,
             detail: None,
         };
-        if let Some(service) = target.service.as_ref() {
-            if let Some(readiness) = read_optional_string_characteristic_from_service(
-                service,
-                OTA_READINESS_UUID,
-                BluetoothCacheMode::Uncached,
-            )
-            .or_else(|| {
-                read_optional_string_characteristic_from_service(
-                    service,
-                    OTA_CONTROL_UUID,
-                    BluetoothCacheMode::Uncached,
-                )
-            }) {
-                snapshot.hardware_revision =
-                    readiness_hardware_revision(&readiness).or(snapshot.hardware_revision);
-                snapshot.firmware_version =
-                    readiness_field(&readiness, "fw_version").or(snapshot.firmware_version);
-                snapshot.usb_powered = readiness_bool(&readiness, "external_power_present")
-                    .or_else(|| readiness_bool(&readiness, "usb_power_present"))
-                    .or_else(|| readiness_bool(&readiness, "charging"))
-                    .or(snapshot.usb_powered);
-                if snapshot.battery_percent.is_none()
-                    && readiness_bool(&readiness, "battery_valid") != Some(false)
-                {
-                    snapshot.battery_percent = readiness_u8(&readiness, "battery_level");
-                }
-            } else {
-                log::info!(
-                    "[embedded-ble] Listener OTA v2 readiness identity not readable from current OTA service"
-                );
-            }
-
-            if let Some(capabilities) = read_optional_string_characteristic_from_service(
-                service,
-                OTA_CAPABILITIES_UUID,
-                BluetoothCacheMode::Uncached,
-            )
-            .or_else(|| {
-                read_optional_string_characteristic_from_service(
-                    service,
-                    OTA_DATA_UUID,
-                    BluetoothCacheMode::Uncached,
-                )
-            }) {
-                let parsed = split_capability_tokens(&capabilities);
-                if parsed.iter().any(|item| item == "firmware_ota_v2") {
-                    snapshot.capabilities = parsed;
-                }
-            } else {
-                log::info!(
-                    "[embedded-ble] Listener OTA v2 capabilities not readable from current OTA service"
-                );
-            }
-        }
+        // The OTA v2 service itself is the capability proof. Windows may not expose
+        // the separate readiness/DIS metadata in this session, and probing missing
+        // optional characteristics costs seconds per UUID before every transfer.
         if !snapshot
             .capabilities
             .iter()
@@ -7389,10 +7338,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             snapshot.capabilities.push("firmware_ota_v2".to_string());
         }
         if snapshot.hardware_revision.is_none() && snapshot.firmware_version.is_none() {
-            snapshot.detail = Some(
-                "Listener OTA v2 service is reachable, but readiness identity was not exposed in this BLE session."
-                    .to_string(),
-            );
+            let address = target.bluetooth_address.map(|value| {
+                format!(
+                    " at {}",
+                    crate::embedded_ble::format_bluetooth_address(value)
+                )
+            });
+            snapshot.detail = Some(format!(
+                "Listener OTA v2 service is reachable{}, but readiness identity was not exposed in this BLE session.",
+                address.as_deref().unwrap_or("")
+            ));
         }
         log::info!(
             "[embedded-ble] Listener OTA v2 snapshot connected={} hardware={:?} firmware={:?} battery={:?} usb_powered={:?} detail={:?}",
@@ -9935,7 +9890,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(uuid_set.service, cache_mode)
                 .map_err(|err| {
@@ -10037,7 +9992,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(OTA_V2_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
@@ -10136,7 +10091,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V2_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
@@ -10335,7 +10290,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, cache_mode)
                 .map_err(|err| format!("BLE status {cache_mode:?} service discovery failed: {err}"))
@@ -10764,7 +10719,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         });
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
             match open_listener_ota_v2_characteristics_from_service_with_retry(&service, cache_mode)
             {
                 Ok(prepared) => {

@@ -566,14 +566,144 @@ assert.ok(
   'FirmwareOtaPanel must not auto-refresh OTA GATT snapshots from background BLE status polling',
 );
 assert.ok(
-  /setSelectedPackage\([\s\S]*?\);\s*void refreshOtaSnapshot\(\);\s*dispatch\(\{ type: 'ready' \}\);/.test(firmwareOtaPanelSource),
-  'selecting a firmware package should refresh the OTA snapshot once',
+  /setSelectedPackage\([\s\S]*?\);\s*void refreshOtaSnapshot\(\{ protocolName: result\.manifest\.protocolName \}\);\s*dispatch\(\{ type: 'ready' \}\);/.test(firmwareOtaPanelSource),
+  'selecting a firmware package should refresh the OTA snapshot once with the package protocol',
 );
 assert.ok(
-  firmwareOtaPanelSource.includes('const snapshot = await refreshOtaSnapshot();'),
-  'starting OTA must still run a fresh preflight snapshot',
+  firmwareOtaPanelSource.includes('const OTA_PREFLIGHT_SNAPSHOT_FRESH_MS = 10_000;'),
+  'OTA start should reuse a very recent package-selection preflight instead of immediately querying GATT again',
 );
 assert.ok(
-  firmwareOtaPanelSource.includes('onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true })}'),
-  'manual OTA snapshot refresh must remain available',
+  firmwareOtaPanelSource.includes('const [otaSnapshotFetchedAtMs, setOtaSnapshotFetchedAtMs] = useState<number | null>(null);'),
+  'OTA preflight freshness must be tracked explicitly',
 );
+assert.ok(
+  firmwareOtaPanelSource.includes('setOtaSnapshotFetchedAtMs(Date.now());'),
+  'OTA preflight freshness timestamp must update whenever the UI receives a snapshot',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('const getFreshOtaSnapshot = useCallback(() => {'),
+  'OTA start must have a bounded fresh-snapshot fast path',
+);
+assert.ok(
+  !firmwareOtaPanelSource.includes('setSelectedPackage(null)'),
+  'opening/canceling/rejecting a new firmware package must not clear the previously selected shared OTA/wired package',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('const previousPackage = selectedPackage;'),
+  'firmware package selection must preserve the previous package while a new dialog/load/validation attempt is pending',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes("dispatch(previousPackage\n        ? { type: 'ready' }"),
+  'failed new firmware selection should restore ready state when an older package is still selected',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('const snapshot = getFreshOtaSnapshot() ?? await refreshOtaSnapshot({ protocolName: packageForUpdate.manifest.protocolName });'),
+  'starting OTA must reuse the package-selection preflight when it is still fresh and pass the package protocol on fallback refresh',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('withTimeout(getFirmwareOtaPreflightSnapshot({ protocolName }), rpcTimeoutMs, timeoutMessage)'),
+  'OTA snapshot refresh must pass the selected package protocol and have a UI timeout so the 查询中 state cannot hang forever',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('protocolName: result.manifest.protocolName'),
+  'selecting a firmware package must run the preflight snapshot with that package protocol',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('protocolName: packageForUpdate.manifest.protocolName'),
+  'starting OTA must run any fallback preflight snapshot with the selected package protocol',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true, protocolName: selectedPackage?.manifest.protocolName ?? null })}'),
+  'manual OTA snapshot refresh must remain available and use the selected package protocol',
+);
+
+const commandsSource = readFileSync('src-tauri/src/commands.rs', 'utf8');
+assert.ok(
+  commandsSource.includes('FIRMWARE_OTA_PREFLIGHT_SNAPSHOT_TIMEOUT'),
+  'firmware OTA preflight IPC must keep an outer timeout around Windows BLE snapshot probing',
+);
+assert.ok(
+  commandsSource.includes('tokio::time::timeout(FIRMWARE_OTA_PREFLIGHT_SNAPSHOT_TIMEOUT'),
+  'firmware OTA preflight IPC timeout must wrap the blocking BLE snapshot task',
+);
+assert.ok(
+  commandsSource.includes('protocol_name: Option<String>'),
+  'firmware OTA preflight IPC must accept the selected package protocol',
+);
+assert.ok(
+  commandsSource.includes('crate::embedded_ble::listener_ota_v2_device_snapshot()'),
+  'Listener OTA v2 preflight must use the v2 snapshot path instead of the legacy OTA snapshot',
+);
+assert.ok(
+  commandsSource.includes('confirm_listener_ota_v2_reachable(&version).await'),
+  'Listener OTA v2 UI transfer confirmation must use the fast reachable-service confirmation path',
+);
+assert.ok(
+  commandsSource.includes('FIRMWARE_OTA_LISTENER_V2_REACHABLE_CONFIRM_TIMEOUT'),
+  'Listener OTA v2 UI transfer confirmation must have a bounded short timeout separate from version polling',
+);
+assert.ok(
+  commandsSource.includes('struct FirmwareOtaConfirmOutcome'),
+  'firmware OTA must record confirmation timing separately from transfer timing',
+);
+for (const expectedTimingField of ['transfer_elapsed_ms', 'confirm_elapsed_ms', 'total_elapsed_ms']) {
+  assert.ok(
+    commandsSource.includes(expectedTimingField),
+    `firmware OTA transfer result must include ${expectedTimingField}`,
+  );
+}
+assert.ok(
+  commandsSource.includes('[firmware-ota] BLE OTA result transport='),
+  'firmware OTA backend logs must include transfer/confirm/total timing evidence',
+);
+for (const expectedHeadlessTimingField of ['preflight_elapsed_ms', 'transfer_elapsed_ms', 'confirm_elapsed_ms', 'total_elapsed_ms']) {
+  assert.ok(
+    rustFirmwareOtaSource.includes(expectedHeadlessTimingField),
+    `firmware OTA headless report must include ${expectedHeadlessTimingField}`,
+  );
+}
+for (const removedSlowFallback of ['listener_ota_v2_snapshot_with_identity_fallback', 'merge_listener_ota_v2_snapshot_identity']) {
+  assert.ok(
+    !rustFirmwareOtaSource.includes(removedSlowFallback),
+    `Listener OTA v2 preflight must not restore slow stable-anchor identity fallback: ${removedSlowFallback}`,
+  );
+}
+assert.ok(
+  rustFirmwareOtaSource.includes('listener_ota_v2_preflight_allows_reachable_device_without_identity_metadata'),
+  'Listener OTA v2 preflight must allow reachable v2 service when Windows omits optional identity metadata',
+);
+assert.ok(
+  rustFirmwareOtaSource.includes('confirm_listener_ota_v2_reachable_version(&expected_version).await'),
+  'Listener OTA v2 headless transfer confirmation must use the fast reachable-service confirmation path',
+);
+assert.ok(
+  rustFirmwareOtaSource.includes('LISTENER_OTA_V2_REACHABLE_CONFIRM_TIMEOUT'),
+  'Listener OTA v2 headless transfer confirmation must have a bounded short timeout separate from version polling',
+);
+
+const embeddedBleSource = readFileSync('src-tauri/src/embedded_ble.rs', 'utf8');
+const listenerOtaV2SnapshotStart = embeddedBleSource.indexOf('fn listener_ota_v2_device_snapshot_from_target');
+const listenerOtaV2SnapshotEnd = embeddedBleSource.indexOf('fn firmware_ota_device_snapshot_from_target', listenerOtaV2SnapshotStart);
+assert.ok(listenerOtaV2SnapshotStart >= 0 && listenerOtaV2SnapshotEnd > listenerOtaV2SnapshotStart);
+const listenerOtaV2SnapshotBody = embeddedBleSource.slice(listenerOtaV2SnapshotStart, listenerOtaV2SnapshotEnd);
+assert.ok(
+  embeddedBleSource.includes('The OTA v2 service itself is the capability proof.'),
+  'Listener OTA v2 snapshot must document why it skips slow optional metadata probes',
+);
+assert.ok(
+  embeddedBleSource.includes('for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]'),
+  'Listener OTA v2 discovery must try the Windows GATT cache before falling back to uncached discovery',
+);
+assert.ok(
+  !listenerOtaV2SnapshotBody.includes('read_optional_string_characteristic_from_service'),
+  'Listener OTA v2 snapshot must not probe optional readiness/capability characteristics before transfer',
+);
+
+const ipcSource = readFileSync('src/lib/ipc.ts', 'utf8');
+for (const expectedTimingField of ['transferElapsedMs', 'confirmElapsedMs', 'totalElapsedMs']) {
+  assert.ok(
+    ipcSource.includes(expectedTimingField),
+    `firmware OTA IPC type must expose ${expectedTimingField}`,
+  );
+}

@@ -37,6 +37,7 @@ import { Btn, Pill, type PillTone } from '../_atoms';
 const EXPECTED_HARDWARE_REVISION = 'keyboard-v2-n16r8';
 const OTA_VERSION_QUERY_TIMEOUT_MS = 15_000;
 const OTA_VERSION_QUERY_POLL_MS = 700;
+const OTA_PREFLIGHT_SNAPSHOT_FRESH_MS = 10_000;
 
 interface SelectedPackage {
   path: string;
@@ -63,6 +64,7 @@ export function FirmwareOtaPanel({
   const [blockers, setBlockers] = useState<FirmwareOtaBlocker[]>([]);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [otaSnapshot, setOtaSnapshot] = useState<FirmwareOtaPreflightSnapshot | null>(null);
+  const [otaSnapshotFetchedAtMs, setOtaSnapshotFetchedAtMs] = useState<number | null>(null);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
   const [diagnosticStatus, setDiagnosticStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
@@ -74,33 +76,39 @@ export function FirmwareOtaPanel({
   const statusTone = userStateTone(state.userState);
   const statusLabel = userStateLabel(state.userState, t);
 
-  const refreshOtaSnapshot = useCallback(async (options: { waitForFirmwareVersion?: boolean } = {}) => {
+  const setSnapshotResult = useCallback((snapshot: FirmwareOtaPreflightSnapshot, error: string | null) => {
+    setOtaSnapshot(snapshot);
+    setOtaSnapshotFetchedAtMs(Date.now());
+    setSnapshotError(error);
+  }, []);
+
+  const refreshOtaSnapshot = useCallback(async (options: { waitForFirmwareVersion?: boolean; protocolName?: string | null } = {}) => {
     const waitForFirmwareVersion = options.waitForFirmwareVersion ?? false;
+    const protocolName = options.protocolName ?? selectedPackage?.manifest.protocolName ?? null;
     setSnapshotRefreshing(true);
     if (transferActive) {
       const active = makeActiveFirmwareOtaSnapshot();
-      setOtaSnapshot(active);
-      setSnapshotError(null);
+      setSnapshotResult(active, null);
       setSnapshotRefreshing(false);
       return active;
     }
     if (!supported) {
       const unsupported = makeDisconnectedSnapshot('Firmware OTA is only supported on Windows Listener BLE.');
-      setOtaSnapshot(unsupported);
-      setSnapshotError(null);
+      setSnapshotResult(unsupported, null);
       setSnapshotRefreshing(false);
       return unsupported;
     }
+    const timeoutMessage = t('settings.recording.firmwareOtaRefreshTimeout', '查询固件版本超时，请重试。');
     const deadline = Date.now() + OTA_VERSION_QUERY_TIMEOUT_MS;
     let lastSnapshot: FirmwareOtaPreflightSnapshot | null = null;
     let lastError: string | null = null;
     try {
       do {
         try {
-          const snapshot = await getFirmwareOtaPreflightSnapshot();
+          const rpcTimeoutMs = Math.max(500, Math.min(OTA_VERSION_QUERY_TIMEOUT_MS, deadline - Date.now()));
+          const snapshot = await withTimeout(getFirmwareOtaPreflightSnapshot({ protocolName }), rpcTimeoutMs, timeoutMessage);
           lastSnapshot = snapshot;
-          setOtaSnapshot(snapshot);
-          setSnapshotError(null);
+          setSnapshotResult(snapshot, null);
           if (!waitForFirmwareVersion || snapshot.device.firmwareVersion) {
             return snapshot;
           }
@@ -108,28 +116,30 @@ export function FirmwareOtaPanel({
           lastError = error instanceof Error ? error.message : String(error);
           if (!waitForFirmwareVersion) {
             const failed = makeDisconnectedSnapshot(lastError);
-            setOtaSnapshot(failed);
-            setSnapshotError(lastError);
+            setSnapshotResult(failed, lastError);
             return failed;
           }
         }
         await delay(OTA_VERSION_QUERY_POLL_MS);
       } while (Date.now() <= deadline);
 
-      const timeoutMessage = t('settings.recording.firmwareOtaRefreshTimeout', '查询固件版本超时，请重试。');
       if (lastSnapshot) {
-        setOtaSnapshot(lastSnapshot);
-        setSnapshotError(timeoutMessage);
+        setSnapshotResult(lastSnapshot, timeoutMessage);
         return lastSnapshot;
       }
       const failed = makeDisconnectedSnapshot(lastError ?? timeoutMessage);
-      setOtaSnapshot(failed);
-      setSnapshotError(lastError ?? timeoutMessage);
+      setSnapshotResult(failed, lastError ?? timeoutMessage);
       return failed;
     } finally {
       setSnapshotRefreshing(false);
     }
-  }, [supported, t, transferActive]);
+  }, [selectedPackage?.manifest.protocolName, setSnapshotResult, supported, t, transferActive]);
+
+  const getFreshOtaSnapshot = useCallback(() => {
+    if (!otaSnapshot || snapshotError || otaSnapshotFetchedAtMs === null) return null;
+    if (Date.now() - otaSnapshotFetchedAtMs > OTA_PREFLIGHT_SNAPSHOT_FRESH_MS) return null;
+    return otaSnapshot;
+  }, [otaSnapshot, otaSnapshotFetchedAtMs, snapshotError]);
 
   const preflight = useMemo(() => {
     if (!selectedPackage) return null;
@@ -155,9 +165,9 @@ export function FirmwareOtaPanel({
   const canStart = !!selectedPackage && state.userState === 'ready' && effectiveBlockers.length === 0 && !transferActive;
 
   const choosePackage = async (directory: boolean) => {
+    const previousPackage = selectedPackage;
     setValidationErrors([]);
     setBlockers([]);
-    setSelectedPackage(null);
     setProgressBytes(null);
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
@@ -169,15 +179,20 @@ export function FirmwareOtaPanel({
       if (typeof selected !== 'string') return;
       dispatch({ type: 'check' });
       const payload = await loadFirmwareOtaPackage(selected);
-      await acceptPackage(selected, payload.manifestText, new Uint8Array(payload.firmwareBytes), payload.sourceLabel);
+      const accepted = await acceptPackage(selected, payload.manifestText, new Uint8Array(payload.firmwareBytes), payload.sourceLabel);
+      if (!accepted && previousPackage) {
+        dispatch({ type: 'ready' });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      dispatch({ type: 'failed', failureCode: 'manifestMismatch', message });
       setValidationErrors([message]);
+      dispatch(previousPackage
+        ? { type: 'ready' }
+        : { type: 'failed', failureCode: 'manifestMismatch', message });
     }
   };
 
-  const acceptPackage = async (path: string, manifestText: string, firmwareBytes: Uint8Array, sourceLabel: string) => {
+  const acceptPackage = async (path: string, manifestText: string, firmwareBytes: Uint8Array, sourceLabel: string): Promise<boolean> => {
     const result = await validateFirmwareOtaPackage(manifestText, firmwareBytes, {
       desktopVersion: APP_VERSION,
       expectedHardwareRevision: EXPECTED_HARDWARE_REVISION,
@@ -185,7 +200,7 @@ export function FirmwareOtaPanel({
     if (!result.ok || !result.manifest || !result.firmwareSha256) {
       dispatch({ type: 'failed', failureCode: result.errors.some(error => error.includes('SHA256')) ? 'hashFailure' : 'manifestMismatch', message: result.errors[0] ?? 'Invalid OTA package.' });
       setValidationErrors(result.errors);
-      return;
+      return false;
     }
     setSelectedPackage({
       path,
@@ -196,8 +211,9 @@ export function FirmwareOtaPanel({
       warnings: result.warnings,
       sourceLabel,
     });
-    void refreshOtaSnapshot();
+    void refreshOtaSnapshot({ protocolName: result.manifest.protocolName });
     dispatch({ type: 'ready' });
+    return true;
   };
 
   const startUpdate = async () => {
@@ -206,7 +222,7 @@ export function FirmwareOtaPanel({
     otaStartInFlightRef.current = true;
     let bytesSentForFailureCheck = 0;
     try {
-      const snapshot = await refreshOtaSnapshot();
+      const snapshot = getFreshOtaSnapshot() ?? await refreshOtaSnapshot({ protocolName: packageForUpdate.manifest.protocolName });
       const check = evaluateFirmwareOtaPreflight({
         manifest: packageForUpdate.manifest,
         desktopVersion: APP_VERSION,
@@ -255,7 +271,7 @@ export function FirmwareOtaPanel({
           setOtaSnapshot(previous => snapshotWithFirmwareVersion(previous, confirmedVersion));
         }
         dispatch({ type: 'verified' });
-        void refreshOtaSnapshot();
+        void refreshOtaSnapshot({ protocolName: packageForUpdate.manifest.protocolName });
       } else {
         const confirmedVersion = transferResult?.confirmedVersion?.trim();
         dispatch(firmwareOtaVersionNotConfirmedAction(confirmedVersion, packageForUpdate.manifest.version));
@@ -271,7 +287,7 @@ export function FirmwareOtaPanel({
       }
       const failedAfterFullTransfer = bytesSentForFailureCheck >= packageForUpdate.firmwareBytes.byteLength;
       if (failedAfterFullTransfer || looksLikePostRebootOtaError(message)) {
-        const snapshotAfterFailure = await refreshOtaSnapshot({ waitForFirmwareVersion: true });
+        const snapshotAfterFailure = await refreshOtaSnapshot({ waitForFirmwareVersion: true, protocolName: packageForUpdate.manifest.protocolName });
         const confirmedVersion = snapshotAfterFailure.device.firmwareVersion?.trim() ?? null;
         if (firmwareOtaConfirmedVersionLooksRolledBack(confirmedVersion, expectedVersion)) {
           if (confirmedVersion) {
@@ -425,7 +441,7 @@ export function FirmwareOtaPanel({
               snapshot={otaSnapshot}
               snapshotError={snapshotError}
               refreshing={snapshotRefreshing}
-              onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true })}
+              onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true, protocolName: selectedPackage?.manifest.protocolName ?? null })}
               t={t}
             />
           )}
@@ -1266,4 +1282,16 @@ function userStateLabel(state: FirmwareOtaUserState, t: ReturnType<typeof useTra
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  let timer: number | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+    }
+  });
 }
