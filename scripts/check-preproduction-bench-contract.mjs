@@ -7,6 +7,7 @@ const benchScript = path.join(repoRoot, "scripts", "windows-listener-preproducti
 const collectScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-bench-collect.ps1");
 const activeBleScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-ble-active-bench.ps1");
 const humanScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-human-review.ps1");
+const operatorNoteTriageScript = path.join(repoRoot, "scripts", "check-preproduction-operator-note-triage.mjs");
 const scenarioManifestPath = path.join(repoRoot, "scripts", "listener-preproduction-scenarios.json");
 const deviceSectionPath = path.join(repoRoot, "src", "pages", "settings", "DeviceSection.tsx");
 const firmwareOtaPanelPath = path.join(repoRoot, "src", "pages", "settings", "FirmwareOtaPanel.tsx");
@@ -17,6 +18,7 @@ const bench = fs.readFileSync(benchScript, "utf8");
 const collect = fs.readFileSync(collectScript, "utf8");
 const activeBle = fs.readFileSync(activeBleScript, "utf8");
 const human = fs.readFileSync(humanScript, "utf8");
+const operatorNoteTriage = fs.readFileSync(operatorNoteTriageScript, "utf8");
 const scenarioManifest = JSON.parse(fs.readFileSync(scenarioManifestPath, "utf8"));
 const deviceSection = fs.readFileSync(deviceSectionPath, "utf8");
 const firmwareOtaPanel = fs.readFileSync(firmwareOtaPanelPath, "utf8");
@@ -78,6 +80,35 @@ for (const requiredToken of [
 ]) {
   if (!human.includes(requiredToken)) {
     failures.push(`focused human review must merge old PASS records instead of forcing all 18 steps to be repeated: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  "operator_note_review_status",
+  "operator_note_review_required_count",
+  "preproduction-operator-note-triage.template.json",
+  "Blank operator_note means the step had no extra operator remarks",
+  "Every non-empty operator note is treated as a human prompt",
+  "operator_note_acknowledged",
+  "parsed_requests",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review must treat every operator note as a prompt requiring triage: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  "triage status must be PASS",
+  "missing triage for",
+  "fixed",
+  "accepted_benign",
+  "deferred_by_human",
+  "operator_note_acknowledged=true",
+  "parsed_requests",
+  "blank notes are treated as normal pass",
+]) {
+  if (!operatorNoteTriage.includes(requiredToken)) {
+    failures.push(`operator note triage gate must reject unreviewed human notes: ${requiredToken}`);
   }
 }
 

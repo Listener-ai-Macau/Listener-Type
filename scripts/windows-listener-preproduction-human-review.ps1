@@ -356,7 +356,7 @@ function Save-Snapshot {
     $windowsEventPath = Save-WindowsEventSnapshot -Index $Index -SafeStep $safeStep -SafePhase $safePhase -StartTime $StartTime -EndTime $EndTime
     $desktopPath = Save-DesktopScreenshot -Index $Index -SafeStep $safeStep -SafePhase $safePhase
 
-    [ordered]@{
+    [pscustomobject][ordered]@{
         bluetooth = $devicePath
         process = $processPath
         usb_ports = $usbPath
@@ -478,7 +478,7 @@ function Show-ReviewStep {
     $form.Controls.Add($expectedBox)
 
     $operatorActionLabel = [System.Windows.Forms.Label]::new()
-    $operatorActionLabel.Text = "实际操作和结果"
+    $operatorActionLabel.Text = "实际操作和结果（可留空；有异常、疑问或小瑕疵就写下来）"
     $operatorActionLabel.AutoSize = $false
     $operatorActionLabel.Location = [System.Drawing.Point]::new(16, 278)
     $operatorActionLabel.Size = [System.Drawing.Size]::new(648, 20)
@@ -513,19 +513,6 @@ function Show-ReviewStep {
         $button.Size = [System.Drawing.Size]::new(94, 32)
         $button.Add_Click({
             param($sender, $eventArgs)
-            $selectedResult = [string]$sender.Tag
-            if ($selectedResult -in @("PASS", "FAIL")) {
-                if ([string]::IsNullOrWhiteSpace($operatorAction.Text)) {
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "写一下你刚才实际做了什么，以及最后结果。比如：点了 Windows 连接通知，等 20 秒后 Type 恢复，蓝牙灯稳定。",
-                        "缺少实际操作和结果",
-                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                        [System.Windows.Forms.MessageBoxIcon]::Information
-                    ) | Out-Null
-                    $operatorAction.Focus()
-                    return
-                }
-            }
             $script:preproductionReviewResult = [string]$sender.Tag
             $form.Close()
         })
@@ -831,8 +818,24 @@ function Copy-ReviewRecordForSummary {
     )
 
     $copy = [ordered]@{}
-    foreach ($property in $Record.PSObject.Properties) {
-        $copy[$property.Name] = $property.Value
+    if ($Record -is [System.Collections.IDictionary]) {
+        foreach ($key in $Record.Keys) {
+            $copy[[string]$key] = $Record[$key]
+        }
+    } else {
+        $keysProperty = $Record.PSObject.Properties["Keys"]
+        $valuesProperty = $Record.PSObject.Properties["Values"]
+        $keyList = @($keysProperty.Value)
+        $valueList = @($valuesProperty.Value)
+        if ($keysProperty -and $valuesProperty -and ($keyList -contains "id") -and $keyList.Count -eq $valueList.Count) {
+            for ($recordFieldIndex = 0; $recordFieldIndex -lt $keyList.Count; $recordFieldIndex++) {
+                $copy[[string]$keyList[$recordFieldIndex]] = $valueList[$recordFieldIndex]
+            }
+        } else {
+            foreach ($property in $Record.PSObject.Properties) {
+                $copy[$property.Name] = $property.Value
+            }
+        }
     }
     $copy["index"] = $Index
     if ($CarriedForward) {
@@ -842,6 +845,67 @@ function Copy-ReviewRecordForSummary {
         $copy["carried_forward_reason"] = "Previously PASS and not selected for this focused re-review."
     }
     return [pscustomobject]$copy
+}
+
+function Get-ReviewRecordField {
+    param(
+        [Parameter(Mandatory = $true)]$Record,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($Record -is [System.Collections.IDictionary]) {
+        if ($Record.Contains($Name)) {
+            return $Record[$Name]
+        }
+    }
+
+    $property = $Record.PSObject.Properties[$Name]
+    if ($property) {
+        return $property.Value
+    }
+
+    $keysProperty = $Record.PSObject.Properties["Keys"]
+    $valuesProperty = $Record.PSObject.Properties["Values"]
+    if ($keysProperty -and $valuesProperty) {
+        $keyList = @($keysProperty.Value)
+        $valueList = @($valuesProperty.Value)
+        for ($recordFieldIndex = 0; $recordFieldIndex -lt $keyList.Count; $recordFieldIndex++) {
+            if ([string]$keyList[$recordFieldIndex] -eq $Name) {
+                return $valueList[$recordFieldIndex]
+            }
+        }
+    }
+
+    $syncRoot = $Record.PSObject.Properties["SyncRoot"]
+    if ($syncRoot -and $null -ne $syncRoot.Value -and $syncRoot.Value -ne $Record) {
+        return Get-ReviewRecordField -Record $syncRoot.Value -Name $Name
+    }
+
+    return $null
+}
+
+function Get-OperatorNoteText {
+    param([Parameter(Mandatory = $true)]$Record)
+
+    foreach ($fieldName in @("operator_note", "operator_action", "observation")) {
+        $value = Get-ReviewRecordField -Record $Record -Name $fieldName
+        if (-not [string]::IsNullOrWhiteSpace([string]$value)) {
+            return [string]$value
+        }
+    }
+    return ""
+}
+
+function Get-TextSha256 {
+    param([string]$Text = "")
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+        return ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace "-", "").ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
 }
 
 if ($ListSteps.IsPresent) {
@@ -992,6 +1056,53 @@ $status = if ($failCount -gt 0) {
     "HUMAN_REVIEW_PASS"
 }
 
+$operatorNotes = [System.Collections.Generic.List[object]]::new()
+foreach ($record in $summaryRecordArray) {
+    $noteText = (Get-OperatorNoteText -Record $record).Trim()
+    if ([string]::IsNullOrWhiteSpace($noteText)) {
+        continue
+    }
+    $operatorNotes.Add([pscustomobject][ordered]@{
+        id = [string](Get-ReviewRecordField -Record $record -Name "id")
+        title = [string](Get-ReviewRecordField -Record $record -Name "title")
+        result = [string](Get-ReviewRecordField -Record $record -Name "result")
+        carried_forward = [bool](Get-ReviewRecordField -Record $record -Name "carried_forward")
+        operator_note = $noteText
+        operator_note_sha256 = Get-TextSha256 $noteText
+    }) | Out-Null
+}
+$operatorNoteArray = @(
+    for ($operatorNoteIndex = 0; $operatorNoteIndex -lt $operatorNotes.Count; $operatorNoteIndex++) {
+        $operatorNotes[$operatorNoteIndex]
+    }
+)
+$triageTemplatePath = Join-Path $OutputDir "preproduction-operator-note-triage.template.json"
+$triageTemplate = [ordered]@{
+    schema_version = 1
+    status = "PENDING"
+    source_summary = $summaryJsonPath
+    generated_at = (Get-Date).ToString("o")
+    rule = "Blank operator_note means the step had no extra operator remarks. Every non-empty operator note is treated as a human prompt, not a keyword hint. Read the whole note, split every requested action, uncertainty, or observation into work items, then decide whether each item needs a fix, can be accepted_benign with evidence, or must be deferred_by_human."
+    operator_notes = @(
+        foreach ($noteRecord in $operatorNoteArray) {
+            [ordered]@{
+                id = $noteRecord.id
+                title = $noteRecord.title
+                result = $noteRecord.result
+                carried_forward = $noteRecord.carried_forward
+                operator_note_sha256 = $noteRecord.operator_note_sha256
+                operator_note = $noteRecord.operator_note
+                operator_note_acknowledged = $false
+                disposition = "open"
+                evidence = @()
+                parsed_requests = @()
+                notes = "Treat operator_note as prompt text. Do not rely on keyword matching; preserve and address the full meaning."
+            }
+        }
+    )
+}
+$triageTemplate | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $triageTemplatePath -Encoding UTF8
+
 [ordered]@{
     schema_version = 1
     status = $status
@@ -1004,6 +1115,11 @@ $status = if ($failCount -gt 0) {
     focus_step_ids = @($requestedStepIds)
     carried_forward_summary = $(if ($carryForwardSummary) { $carryForwardSummary.path } else { "" })
     carried_forward_count = $carriedForwardCount
+    operator_note_review_status = $(if ($operatorNoteArray.Count -gt 0) { "PENDING" } else { "PASS" })
+    operator_note_review_required_count = $operatorNoteArray.Count
+    operator_note_recorded_count = $operatorNoteArray.Count
+    operator_note_triage_template = $triageTemplatePath
+    operator_notes = @($operatorNoteArray)
     type_git_head = $typeHeadInfo
     firmware_git_head = $firmwareHeadInfo
     records = @($summaryRecordArray)
@@ -1018,30 +1134,29 @@ $lines.Add("- Session: $sessionPath") | Out-Null
 $lines.Add("- Random BLE name: $RandomName") | Out-Null
 $lines.Add("- Focus steps: $(if ($requestedStepIds.Count -gt 0) { $requestedStepIds -join ', ' } else { 'FULL' })") | Out-Null
 $lines.Add("- Carried forward: $carriedForwardCount") | Out-Null
+$lines.Add("- Operator notes requiring triage: $($operatorNoteArray.Count)") | Out-Null
+$lines.Add("- Blank operator notes mean normal pass with no extra remarks.") | Out-Null
+$lines.Add("- Operator note triage template: $triageTemplatePath") | Out-Null
 $lines.Add("- Type HEAD: $($typeHeadInfo.head) $($typeHeadInfo.commit_time)") | Out-Null
 $lines.Add("- Firmware HEAD: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time)") | Out-Null
 $lines.Add("") | Out-Null
 $lines.Add("| # | StepId | Step | Result | Operator note | Evidence |") | Out-Null
 $lines.Add("|---:|---|---|---|---|---|") | Out-Null
 foreach ($record in $summaryRecordArray) {
-    $operatorNoteValue = if ($record.PSObject.Properties["operator_note"]) {
-        $record.operator_note
-    } elseif ($record.PSObject.Properties["operator_action"]) {
-        $record.operator_action
-    } elseif ($record.PSObject.Properties["observation"]) {
-        $record.observation
-    } else {
-        ""
-    }
+    $operatorNoteValue = Get-OperatorNoteText -Record $record
     $operatorNote = Format-MarkdownCell $operatorNoteValue
-    $isCarriedForward = $record.PSObject.Properties["carried_forward"] -and $record.carried_forward
+    $isCarriedForward = [bool](Get-ReviewRecordField -Record $record -Name "carried_forward")
     $evidence = if ($isCarriedForward) { "carried forward from previous PASS summary" } else { "before/during/after logs in output dir" }
-    $lines.Add("| $($record.index) | $($record.id) | $($record.title) | $($record.result) | $operatorNote | $evidence |") | Out-Null
+    $recordIndex = Get-ReviewRecordField -Record $record -Name "index"
+    $recordId = Get-ReviewRecordField -Record $record -Name "id"
+    $recordTitle = Get-ReviewRecordField -Record $record -Name "title"
+    $recordResult = Get-ReviewRecordField -Record $record -Name "result"
+    $lines.Add("| $recordIndex | $recordId | $recordTitle | $recordResult | $operatorNote | $evidence |") | Out-Null
 }
 $lines.Add("") | Out-Null
 $lines.Add("Each step JSON record contains before/during/after snapshots with Bluetooth PnP, Type process, USB/serial, desktop screenshot, Listener Type log tail, capsule timeline tail, and Windows Bluetooth/device event logs.") | Out-Null
 $lines.Add("") | Out-Null
-$lines.Add("Release rule: only HUMAN_REVIEW_PASS can be used as final physical acceptance evidence for publishing v1.0.2.") | Out-Null
+$lines.Add("Release rule: HUMAN_REVIEW_PASS alone is not publishable when any non-empty operator note exists. Every non-empty note must be triaged as full prompt text in preproduction-operator-note-triage.json with evidence before release; blank notes mean normal pass with no extra remarks.") | Out-Null
 $lines | Set-Content -LiteralPath $summaryPath -Encoding UTF8
 
 Write-Host "preproduction_human_review_status=$status"
