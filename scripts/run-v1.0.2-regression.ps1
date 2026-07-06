@@ -324,8 +324,8 @@ try {
       if ($null -ne $exit -and $exit -ne 0) {
         throw "Preproduction human review -ListSteps exited with code $exit"
       }
-      if ($steps.Count -lt 16) {
-        throw "Preproduction human review must expose all final user gates; expected at least 16 steps, got $($steps.Count)"
+      if ($steps.Count -lt 18) {
+        throw "Preproduction human review must expose all final user gates; expected at least 18 steps, got $($steps.Count)"
       }
 
       $requiredStepIds = @(
@@ -336,6 +336,8 @@ try {
         "manual-windows-delete-no-type-autopair",
         "no-type-native-pairing",
         "type-takeover-no-forced-repair",
+        "ec11-long-press-shutdown-led",
+        "ec11-rotate-ring-feedback",
         "ec11-single-not-double",
         "ec11-double-repair-with-type",
         "computer-switch-product-flow",
@@ -396,8 +398,8 @@ try {
       if ($null -ne $exit -and $exit -ne 0) {
         throw "Preproduction bench review -ListSteps exited with code $exit"
       }
-      if ($steps.Count -lt 16) {
-        throw "Preproduction bench review must expose all final user gates; expected at least 16 steps, got $($steps.Count)"
+      if ($steps.Count -lt 18) {
+        throw "Preproduction bench review must expose all final user gates; expected at least 18 steps, got $($steps.Count)"
       }
 
       $templateDir = Join-Path $OutputDir "preproduction-bench-review-template"
@@ -422,7 +424,7 @@ try {
         throw "Preproduction bench review dry-run should be BENCH_REVIEW_NO_GO, got $($bench.status)"
       }
       $records = @($bench.records)
-      if ($records.Count -lt 16) {
+      if ($records.Count -lt 18) {
         throw "Preproduction bench review dry-run must record all release scenarios, got $($records.Count)"
       }
       if (@($records | Where-Object { $_.missing_capabilities.Count -gt 0 -or $_.missing_evidence.Count -gt 0 }).Count -eq 0) {

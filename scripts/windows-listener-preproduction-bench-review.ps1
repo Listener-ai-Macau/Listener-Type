@@ -47,6 +47,8 @@ $steps = @(
   New-BenchStep "manual-windows-delete-no-type-autopair" "Manual Windows delete must not autopair with Type" @("type_runtime", "windows_ble_automation") @("delete_log", "twenty_second_state", "type_log")
   New-BenchStep "no-type-native-pairing" "No-Type native Windows pairing" @("windows_ble_automation") @("native_pair_log", "windows_ble_state", "hid_presence")
   New-BenchStep "type-takeover-no-forced-repair" "Type takeover without forced repair" @("type_runtime", "windows_ble_automation") @("takeover_log", "gatt_probe", "notification_count")
+  New-BenchStep "ec11-long-press-shutdown-led" "EC11 long-press shutdown confirmation LED" @("physical_input_fixture", "type_runtime", "led_optical_capture") @("physical_input_trace", "led_capture", "type_log")
+  New-BenchStep "ec11-rotate-ring-feedback" "EC11 rotate ring feedback" @("physical_input_fixture", "led_optical_capture") @("physical_input_trace", "led_capture", "serial_led_status")
   New-BenchStep "ec11-single-not-double" "EC11 single is not double" @("physical_input_fixture", "windows_ble_automation", "led_optical_capture") @("physical_input_trace", "windows_ble_events", "led_capture")
   New-BenchStep "ec11-double-repair-with-type" "EC11 double-click repair with Type" @("physical_input_fixture", "type_runtime", "windows_ble_automation", "led_optical_capture") @("physical_input_trace", "pairing_flow_log", "led_capture", "gatt_probe")
   New-BenchStep "computer-switch-product-flow" "Computer switch flow" @("windows_ble_automation", "second_ble_host") @("old_host_state", "new_host_pair_log", "takeover_log")

@@ -21,6 +21,8 @@ const requiredStepIds = [
   "manual-windows-delete-no-type-autopair",
   "no-type-native-pairing",
   "type-takeover-no-forced-repair",
+  "ec11-long-press-shutdown-led",
+  "ec11-rotate-ring-feedback",
   "ec11-single-not-double",
   "ec11-double-repair-with-type",
   "computer-switch-product-flow",
@@ -129,4 +131,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("PASS: preproduction bench contract covers all 16 release scenarios with machine capabilities and evidence.");
+console.log(`PASS: preproduction bench contract covers all ${requiredStepIds.length} release scenarios with machine capabilities and evidence.`);

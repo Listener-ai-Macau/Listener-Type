@@ -42,6 +42,49 @@ if ([string]::IsNullOrWhiteSpace($RandomName)) {
     $RandomName = "listener-$suffix"
 }
 
+function Get-GitHeadInfo {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [PSCustomObject]@{
+            path = $Path
+            exists = $false
+            head = ""
+            commit_time = ""
+            subject = ""
+            error = "path not found"
+        }
+    }
+
+    try {
+        $head = (& git -C $Path rev-parse HEAD 2>$null)
+        $commitTime = (& git -C $Path log -1 --format=%cI 2>$null)
+        $subject = (& git -C $Path log -1 --format=%s 2>$null)
+        return [PSCustomObject]@{
+            path = $Path
+            exists = $true
+            head = [string]$head
+            commit_time = [string]$commitTime
+            subject = [string]$subject
+            error = ""
+        }
+    } catch {
+        return [PSCustomObject]@{
+            path = $Path
+            exists = $true
+            head = ""
+            commit_time = ""
+            subject = ""
+            error = $_.Exception.Message
+        }
+    }
+}
+
+$listenerRoot = (Split-Path -Parent $repoRoot)
+$firmwareRoot = Join-Path $listenerRoot "Listener-Firmware"
+$typeHeadInfo = Get-GitHeadInfo -Path $repoRoot
+$firmwareHeadInfo = Get-GitHeadInfo -Path $firmwareRoot
+
 function Join-Text {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Lines)
     return ($Lines -join [Environment]::NewLine)
@@ -117,6 +160,35 @@ function Get-UsbAndPortSnapshot {
         }
     } catch {
         [PSCustomObject]@{ error = $_.Exception.Message }
+    }
+}
+
+function Save-DesktopScreenshot {
+    param(
+        [Parameter(Mandatory = $true)][int]$Index,
+        [Parameter(Mandatory = $true)][string]$SafeStep,
+        [Parameter(Mandatory = $true)][string]$SafePhase
+    )
+
+    $screenshotPath = Join-Path $OutputDir ("step-{0:D2}-{1}-{2}-desktop.png" -f $Index, $SafeStep, $SafePhase)
+    $errorPath = Join-Path $OutputDir ("step-{0:D2}-{1}-{2}-desktop-screenshot-error.txt" -f $Index, $SafeStep, $SafePhase)
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bounds.Size)
+            $bitmap.Save($screenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+            return $screenshotPath
+        } finally {
+            $graphics.Dispose()
+            $bitmap.Dispose()
+        }
+    } catch {
+        $_.Exception.Message | Set-Content -LiteralPath $errorPath -Encoding UTF8
+        return $errorPath
     }
 }
 
@@ -225,6 +297,7 @@ function Save-Snapshot {
         Set-Content -LiteralPath $usbPath -Encoding UTF8
     $typeLogPath = Save-TypeLogTail -Index $Index -SafeStep $safeStep -SafePhase $safePhase
     $windowsEventPath = Save-WindowsEventSnapshot -Index $Index -SafeStep $safeStep -SafePhase $safePhase -StartTime $StartTime -EndTime $EndTime
+    $desktopPath = Save-DesktopScreenshot -Index $Index -SafeStep $safeStep -SafePhase $safePhase
 
     [ordered]@{
         bluetooth = $devicePath
@@ -232,6 +305,7 @@ function Save-Snapshot {
         usb_ports = $usbPath
         type_log_tail = $typeLogPath
         windows_events = $windowsEventPath
+        desktop_screenshot = $desktopPath
     }
 }
 
@@ -686,6 +760,8 @@ if (-not [string]::IsNullOrWhiteSpace($StepId)) {
     "DeviceName: $DeviceName"
     "RandomName: $RandomName"
     "NoPrompt: $($NoPrompt.IsPresent)"
+    "TypeHead: $($typeHeadInfo.head) $($typeHeadInfo.commit_time) $($typeHeadInfo.subject)"
+    "FirmwareHead: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time) $($firmwareHeadInfo.subject)"
 ) | Set-Content -LiteralPath $startInfoPath -Encoding UTF8
 
 $records = [System.Collections.Generic.List[object]]::new()
@@ -724,6 +800,8 @@ $status = if ($failCount -gt 0) {
     session_jsonl = $sessionPath
     device_name = $DeviceName
     random_name = $RandomName
+    type_git_head = $typeHeadInfo
+    firmware_git_head = $firmwareHeadInfo
     records = @($records)
 } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $summaryJsonPath -Encoding UTF8
 
@@ -734,6 +812,8 @@ $lines.Add("- Status: $status") | Out-Null
 $lines.Add("- Output: $OutputDir") | Out-Null
 $lines.Add("- Session: $sessionPath") | Out-Null
 $lines.Add("- Random BLE name: $RandomName") | Out-Null
+$lines.Add("- Type HEAD: $($typeHeadInfo.head) $($typeHeadInfo.commit_time)") | Out-Null
+$lines.Add("- Firmware HEAD: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time)") | Out-Null
 $lines.Add("") | Out-Null
 $lines.Add("| # | StepId | Step | Result | Operator action | Observation | Evidence |") | Out-Null
 $lines.Add("|---:|---|---|---|---|---|---|") | Out-Null
@@ -744,7 +824,7 @@ foreach ($record in $records) {
     $lines.Add("| $($record.index) | $($record.id) | $($record.title) | $($record.result) | $operatorAction | $obs | $evidence |") | Out-Null
 }
 $lines.Add("") | Out-Null
-$lines.Add("Each step JSON record contains before/during/after snapshots with Bluetooth PnP, Type process, USB/serial, Listener Type log tail, capsule timeline tail, and Windows Bluetooth/device event logs.") | Out-Null
+$lines.Add("Each step JSON record contains before/during/after snapshots with Bluetooth PnP, Type process, USB/serial, desktop screenshot, Listener Type log tail, capsule timeline tail, and Windows Bluetooth/device event logs.") | Out-Null
 $lines.Add("") | Out-Null
 $lines.Add("Release rule: only HUMAN_REVIEW_PASS can be used as final physical acceptance evidence for publishing v1.0.2.") | Out-Null
 $lines | Set-Content -LiteralPath $summaryPath -Encoding UTF8
