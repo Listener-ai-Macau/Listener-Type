@@ -109,7 +109,11 @@ export function FirmwareOtaPanel({
           const snapshot = await withTimeout(getFirmwareOtaPreflightSnapshot({ protocolName }), rpcTimeoutMs, timeoutMessage);
           lastSnapshot = snapshot;
           setSnapshotResult(snapshot, null);
-          if (!waitForFirmwareVersion || snapshot.device.firmwareVersion) {
+          if (
+            !waitForFirmwareVersion ||
+            snapshot.device.firmwareVersion ||
+            snapshotSatisfiesVersionRefreshFallback(snapshot, protocolName)
+          ) {
             return snapshot;
           }
         } catch (error) {
@@ -1054,6 +1058,15 @@ function formatPower(device: FirmwareOtaDeviceSnapshot | null | undefined): stri
     return `${device.batteryPercent}%`;
   }
   return 'unknown';
+}
+
+function snapshotSatisfiesVersionRefreshFallback(
+  snapshot: FirmwareOtaPreflightSnapshot,
+  protocolName: string | null,
+): boolean {
+  return protocolName === 'listener_ota_v2'
+    && snapshot.device.connected
+    && snapshot.device.capabilities.includes('firmware_ota_v2');
 }
 
 function makeDisconnectedSnapshot(detail: string): FirmwareOtaPreflightSnapshot {

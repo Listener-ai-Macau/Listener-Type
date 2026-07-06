@@ -138,7 +138,6 @@ let mockSettings: UserPreferences = {
   },
   deviceCustomKeysDefaultMigrated: true,
   deviceKnobRotationAction: 'systemVolume',
-  deviceBrightnessPercent: 80,
   deviceStatusLedBrightnessPercent: 100,
   deviceKeyLedBrightnessPercent: 100,
   deviceKnobLedBrightnessPercent: 100,
@@ -182,7 +181,6 @@ let mockDeviceSettings: DeviceSettingsSnapshot = {
   connected: true,
   writeSupported: true,
   source: 'mock',
-  brightnessPercent: 80,
   statusLedBrightnessPercent: 100,
   keyLedBrightnessPercent: 100,
   knobLedBrightnessPercent: 100,
@@ -269,7 +267,6 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     },
     deviceCustomKeysDefaultMigrated: prefs.deviceCustomKeysDefaultMigrated ?? true,
     deviceKnobRotationAction: prefs.deviceKnobRotationAction ?? 'systemVolume',
-    deviceBrightnessPercent: clampNumber(prefs.deviceBrightnessPercent, 80, 0, 100),
     deviceStatusLedBrightnessPercent: clampNumber(prefs.deviceStatusLedBrightnessPercent, 100, 0, 100),
     deviceKeyLedBrightnessPercent: clampNumber(prefs.deviceKeyLedBrightnessPercent, 100, 0, 100),
     deviceKnobLedBrightnessPercent: clampNumber(prefs.deviceKnobLedBrightnessPercent, 100, 0, 100),
@@ -643,7 +640,6 @@ export function setSettings(prefs: UserPreferences): Promise<void> {
     mockSettings = { ...nextPrefs };
     mockDeviceSettings = {
       ...mockDeviceSettings,
-      brightnessPercent: nextPrefs.deviceBrightnessPercent,
       statusLedBrightnessPercent: nextPrefs.deviceStatusLedBrightnessPercent,
       keyLedBrightnessPercent: nextPrefs.deviceKeyLedBrightnessPercent,
       knobLedBrightnessPercent: nextPrefs.deviceKnobLedBrightnessPercent,
@@ -676,9 +672,6 @@ export function setSettings(prefs: UserPreferences): Promise<void> {
 
 export function refreshDeviceSettingsStatus(): Promise<DeviceFirmwareSettingsStatus> {
   return invokeOrMock('refresh_device_settings_status', undefined, () => ({
-    brightnessPercent: mockSettings.deviceBrightnessPercent,
-    pluggedBrightnessPercent: mockSettings.deviceBrightnessPercent,
-    batteryBrightnessPercent: mockSettings.deviceBrightnessPercent,
     statusLedBrightnessPercent: mockSettings.deviceStatusLedBrightnessPercent,
     keyLedBrightnessPercent: mockSettings.deviceKeyLedBrightnessPercent,
     knobLedBrightnessPercent: mockSettings.deviceKnobLedBrightnessPercent,
@@ -1095,10 +1088,7 @@ export function getDeviceSettings(): Promise<DeviceSettingsSnapshot> {
   return invokeOrMock(
     'get_device_settings',
     undefined,
-    () => ({
-      ...mockDeviceSettings,
-      brightnessPercent: mockSettings.deviceBrightnessPercent,
-    }),
+    () => ({ ...mockDeviceSettings }),
   );
 }
 

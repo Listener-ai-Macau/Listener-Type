@@ -14,7 +14,6 @@ const initial: DeviceSettingsSnapshot = {
   connected: true,
   writeSupported: true,
   source: 'mock',
-  brightnessPercent: 80,
   statusLedBrightnessPercent: 100,
   keyLedBrightnessPercent: 100,
   knobLedBrightnessPercent: 100,
@@ -40,7 +39,6 @@ function requestFromSnapshot(
   overrides: Partial<DeviceSettingsUpdateRequest> = {},
 ): DeviceSettingsUpdateRequest {
   return {
-    brightnessPercent: snapshot.brightnessPercent,
     statusLedBrightnessPercent: snapshot.statusLedBrightnessPercent,
     keyLedBrightnessPercent: snapshot.keyLedBrightnessPercent,
     knobLedBrightnessPercent: snapshot.knobLedBrightnessPercent,
@@ -61,7 +59,6 @@ function nextBleName(current: string): string {
 
 const currentSettings = {
   deviceBleName: initial.bleName,
-  deviceBrightnessPercent: initial.brightnessPercent,
 } as UserPreferences;
 const sameNameWrite = applyMockDeviceSettingsWrite(
   currentSettings,

@@ -825,9 +825,14 @@ function Copy-ReviewRecordForSummary {
     } else {
         $keysProperty = $Record.PSObject.Properties["Keys"]
         $valuesProperty = $Record.PSObject.Properties["Values"]
-        $keyList = @($keysProperty.Value)
-        $valueList = @($valuesProperty.Value)
-        if ($keysProperty -and $valuesProperty -and ($keyList -contains "id") -and $keyList.Count -eq $valueList.Count) {
+        if ($keysProperty -and $valuesProperty) {
+            $keyList = @($keysProperty.Value)
+            $valueList = @($valuesProperty.Value)
+        } else {
+            $keyList = @()
+            $valueList = @()
+        }
+        if (($keyList -contains "id") -and $keyList.Count -eq $valueList.Count) {
             for ($recordFieldIndex = 0; $recordFieldIndex -lt $keyList.Count; $recordFieldIndex++) {
                 $copy[[string]$keyList[$recordFieldIndex]] = $valueList[$recordFieldIndex]
             }

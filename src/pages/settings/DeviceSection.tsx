@@ -250,7 +250,6 @@ function DeviceFirmwareSettingsCard() {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<DeviceSettingsSnapshot | null>(null);
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
-    brightnessPercent: 80,
     statusLedBrightnessPercent: 100,
     keyLedBrightnessPercent: 100,
     knobLedBrightnessPercent: 100,
@@ -642,7 +641,6 @@ function MinuteInput({
 }
 
 type LedBrightnessField =
-  | 'brightnessPercent'
   | 'statusLedBrightnessPercent'
   | 'keyLedBrightnessPercent'
   | 'knobLedBrightnessPercent'
@@ -665,17 +663,10 @@ function DeviceLedBrightnessGroup({
     <DeviceSettingsPanel
       title={t('settings.device.ledZoneTitle', '灯光亮度')}
       desc={supported
-        ? t('settings.device.ledZoneDesc', '整体亮度会先限制所有灯，再按灯区限制最大亮度。')
-        : t('settings.device.ledZoneUnsupported', '整体亮度可写入；当前固件未回读四区亮度，灯区上限暂不可写入。')}
+        ? t('settings.device.ledZoneDesc', '四个灯区分别设置最大亮度，互不作为全局上限。')
+        : t('settings.device.ledZoneUnsupported', '当前固件未回读四区亮度，灯区上限暂不可写入。')}
     >
       <div className="ol-device-led-grid">
-        <LedBrightnessControl
-          label={t('settings.device.brightnessLabel', '整体亮度')}
-          desc={t('settings.device.brightnessDesc', '所有状态灯/按键灯/旋钮灯的总上限')}
-          value={values.brightnessPercent}
-          disabled={disabled}
-          onChange={value => onChange('brightnessPercent', value)}
-        />
         <LedBrightnessControl
           label={t('settings.device.statusLedBrightnessLabel', '状态灯')}
           desc={t('settings.device.statusLedBrightnessDesc', 'PWR / BLE / REC / AI / OK / WARN')}
@@ -1141,7 +1132,6 @@ function DeviceKeyMappingControl({
 
 function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateRequest {
   return {
-    brightnessPercent: snapshot.brightnessPercent,
     statusLedBrightnessPercent: snapshot.statusLedBrightnessPercent,
     keyLedBrightnessPercent: snapshot.keyLedBrightnessPercent,
     knobLedBrightnessPercent: snapshot.knobLedBrightnessPercent,
@@ -1160,7 +1150,6 @@ function validateDeviceSettingsForm(
   t: ReturnType<typeof useTranslation>['t'],
 ): string {
   if (
-    !Number.isFinite(form.brightnessPercent) || form.brightnessPercent < 0 || form.brightnessPercent > 100 ||
     !Number.isFinite(form.statusLedBrightnessPercent) || form.statusLedBrightnessPercent < 0 || form.statusLedBrightnessPercent > 100 ||
     !Number.isFinite(form.keyLedBrightnessPercent) || form.keyLedBrightnessPercent < 0 || form.keyLedBrightnessPercent > 100 ||
     !Number.isFinite(form.knobLedBrightnessPercent) || form.knobLedBrightnessPercent < 0 || form.knobLedBrightnessPercent > 100 ||

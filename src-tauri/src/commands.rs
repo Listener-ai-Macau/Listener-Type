@@ -415,7 +415,6 @@ fn persist_settings<T: SettingsWriter>(
 
 fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPreferences) -> bool {
     previous.device_knob_rotation_action != next.device_knob_rotation_action
-        || previous.device_brightness_percent != next.device_brightness_percent
         || previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes
         || previous.device_plugged_low_power_enabled != next.device_plugged_low_power_enabled
         || previous.device_battery_auto_shutdown_minutes
@@ -424,8 +423,7 @@ fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPrefe
 }
 
 fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), String> {
-    if prefs.device_brightness_percent > 100
-        || prefs.device_status_led_brightness_percent > 100
+    if prefs.device_status_led_brightness_percent > 100
         || prefs.device_key_led_brightness_percent > 100
         || prefs.device_knob_led_brightness_percent > 100
         || prefs.device_edge_led_brightness_percent > 100
@@ -486,15 +484,6 @@ fn device_setting_packets_for_changes(
         packets.push(DeviceSettingPacket {
             id: "knob_rotation",
             command: format!("DEVICE:SET knob_rotation={mode}"),
-        });
-    }
-    if previous.device_brightness_percent != next.device_brightness_percent {
-        packets.push(DeviceSettingPacket {
-            id: "brightness",
-            command: format!(
-                "DEVICE:SET plugged_brightness={} battery_brightness={}",
-                next.device_brightness_percent, next.device_brightness_percent
-            ),
         });
     }
     if previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes {
@@ -2209,7 +2198,6 @@ pub struct DeviceSettingsSnapshot {
     connected: bool,
     write_supported: bool,
     source: &'static str,
-    brightness_percent: u8,
     status_led_brightness_percent: u8,
     key_led_brightness_percent: u8,
     knob_led_brightness_percent: u8,
@@ -2233,7 +2221,6 @@ pub struct DeviceSettingsSnapshot {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSettingsUpdateRequest {
-    brightness_percent: u8,
     status_led_brightness_percent: u8,
     key_led_brightness_percent: u8,
     knob_led_brightness_percent: u8,
@@ -2506,7 +2493,6 @@ pub async fn set_device_settings(
     {
         let _settings_guard = settings_update_lock().lock();
         let mut prefs = coord.prefs().get();
-        prefs.device_brightness_percent = request.brightness_percent;
         if led_zone_brightness_supported {
             prefs.device_status_led_brightness_percent = request.status_led_brightness_percent;
             prefs.device_key_led_brightness_percent = request.key_led_brightness_percent;
@@ -2647,7 +2633,6 @@ fn device_settings_snapshot_from_status(
         connected: true,
         write_supported: true,
         source: "firmware",
-        brightness_percent: status.brightness_percent,
         status_led_brightness_percent: status.status_led_brightness_percent,
         key_led_brightness_percent: status.key_led_brightness_percent,
         knob_led_brightness_percent: status.knob_led_brightness_percent,
@@ -2704,7 +2689,6 @@ fn device_settings_snapshot_from_device(
         } else {
             "unavailable"
         },
-        brightness_percent: crate::types::DEFAULT_DEVICE_BRIGHTNESS_PERCENT,
         status_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         key_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         knob_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
@@ -2738,7 +2722,6 @@ fn device_settings_snapshot_from_request(
         connected: true,
         write_supported: true,
         source: "lastKnown",
-        brightness_percent: crate::types::DEFAULT_DEVICE_BRIGHTNESS_PERCENT,
         status_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         key_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         knob_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
@@ -2764,7 +2747,6 @@ fn device_settings_snapshot_from_request(
     snapshot.connected = true;
     snapshot.write_supported = true;
     snapshot.source = "lastKnown";
-    snapshot.brightness_percent = request.brightness_percent;
     if snapshot.led_zone_brightness_supported {
         snapshot.status_led_brightness_percent = request.status_led_brightness_percent;
         snapshot.key_led_brightness_percent = request.key_led_brightness_percent;
@@ -2797,10 +2779,6 @@ fn device_settings_update_commands(
     write_ble_name: bool,
 ) -> Result<Vec<String>, String> {
     let mut commands = Vec::new();
-    commands.push(format!(
-        "DEVICE:SET plugged_brightness={} battery_brightness={}",
-        request.brightness_percent, request.brightness_percent
-    ));
     if led_zone_brightness_supported {
         commands.push(format!(
             "DEVICE:SET led_status={} led_key={}",
@@ -2845,9 +2823,6 @@ fn device_settings_update_commands(
 }
 
 fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Result<(), String> {
-    if request.brightness_percent > 100 {
-        return Err("Device LED brightness must be between 0 and 100 percent.".to_string());
-    }
     if request.status_led_brightness_percent > 100
         || request.key_led_brightness_percent > 100
         || request.knob_led_brightness_percent > 100
@@ -7717,7 +7692,6 @@ mod tests {
     #[test]
     fn device_settings_request_accepts_safe_values() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -7736,7 +7710,6 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_unsafe_ble_name() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -7755,7 +7728,6 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_ble_name_spaces() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -7774,7 +7746,6 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_ble_name_too_long_for_advertising() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -7793,7 +7764,6 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_invalid_low_power_idle() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -7812,7 +7782,6 @@ mod tests {
     #[test]
     fn device_settings_request_rejects_plugged_auto_shutdown() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -7858,7 +7827,6 @@ mod tests {
         );
 
         assert_eq!(snapshot.source, "firmware");
-        assert_eq!(snapshot.brightness_percent, 80);
         assert_eq!(snapshot.status_led_brightness_percent, 70);
         assert_eq!(snapshot.key_led_brightness_percent, 65);
         assert_eq!(snapshot.knob_led_brightness_percent, 60);
@@ -7878,7 +7846,6 @@ mod tests {
     #[test]
     fn device_ble_name_change_detection_prefers_authoritative_snapshot() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -7946,7 +7913,6 @@ mod tests {
     #[test]
     fn device_ble_name_apply_runs_for_pending_same_name() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -8232,7 +8198,6 @@ mod tests {
                 .expect("device settings should be readable before same-name smoke");
         let snapshot = super::device_settings_snapshot_from_status(status.clone());
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: status.brightness_percent,
             status_led_brightness_percent: status.status_led_brightness_percent,
             key_led_brightness_percent: status.key_led_brightness_percent,
             knob_led_brightness_percent: status.knob_led_brightness_percent,
@@ -8290,7 +8255,6 @@ mod tests {
     #[test]
     fn device_ble_name_change_writes_name_without_repair_command() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -8324,7 +8288,6 @@ mod tests {
     #[test]
     fn device_settings_update_commands_fit_ble_audio_control() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 100,
             key_led_brightness_percent: 100,
             knob_led_brightness_percent: 100,
@@ -8344,10 +8307,13 @@ mod tests {
         )
         .expect("commands");
 
-        assert_eq!(commands.len(), 9);
-        assert!(commands.iter().any(|command| {
-            command == "DEVICE:SET plugged_brightness=80 battery_brightness=80"
-        }));
+        assert_eq!(commands.len(), 8);
+        assert!(
+            commands.iter().all(|command| {
+                !command.contains("plugged_brightness") && !command.contains("battery_brightness")
+            }),
+            "Type settings writes must not reintroduce a global brightness cap"
+        );
         assert!(commands
             .iter()
             .any(|command| { command == "DEVICE:SET plugged_low_power_enabled=0" }));
@@ -8365,13 +8331,18 @@ mod tests {
             true,
         )
         .expect("commands");
-        assert_eq!(legacy_commands.len(), 7);
+        assert_eq!(legacy_commands.len(), 6);
+        assert!(
+            legacy_commands.iter().all(|command| {
+                !command.contains("plugged_brightness") && !command.contains("battery_brightness")
+            }),
+            "legacy settings writes must not reintroduce a global brightness cap"
+        );
     }
 
     #[test]
     fn device_settings_update_commands_skip_unchanged_ble_name() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
             knob_led_brightness_percent: 60,
@@ -8398,12 +8369,18 @@ mod tests {
                 .any(|command| command.starts_with("DEVICE:SET ble_name=")),
             "unchanged BLE name writes must not trigger re-pair recovery"
         );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| command.contains("plugged_brightness")
+                    || command.contains("battery_brightness")),
+            "unchanged BLE name writes must stay scoped and must not touch global brightness"
+        );
     }
 
     #[test]
     fn device_settings_zero_low_power_disables_plugged_low_power_command() {
         let request = DeviceSettingsUpdateRequest {
-            brightness_percent: 80,
             status_led_brightness_percent: 100,
             key_led_brightness_percent: 100,
             knob_led_brightness_percent: 100,

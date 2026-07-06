@@ -439,8 +439,6 @@ export interface UserPreferences {
   deviceCustomKeysDefaultMigrated: boolean;
   /** EC11 旋钮旋转动作。默认调电脑音量；可切换为屏幕亮度或禁用。 */
   deviceKnobRotationAction: DeviceKnobRotationAction;
-  /** 设备整体灯光亮度，0-100；固件会在灯区上限前先应用该总亮度。 */
-  deviceBrightnessPercent: number;
   /** 状态灯区域最大亮度，0-100；需要支持 led_status 的固件。 */
   deviceStatusLedBrightnessPercent: number;
   /** 按键灯区域最大亮度，0-100；需要支持 led_key 的固件。 */
@@ -566,9 +564,6 @@ export interface DeviceCustomKeys {
 export type DeviceKnobRotationAction = 'systemVolume' | 'screenBrightness' | 'disabled';
 
 export interface DeviceFirmwareSettingsStatus {
-  brightnessPercent: number;
-  pluggedBrightnessPercent: number;
-  batteryBrightnessPercent: number;
   statusLedBrightnessPercent: number;
   keyLedBrightnessPercent: number;
   knobLedBrightnessPercent: number;
@@ -598,7 +593,6 @@ export interface DeviceSettingsSnapshot {
   connected: boolean;
   writeSupported: boolean;
   source: DeviceSettingsSource;
-  brightnessPercent: number;
   statusLedBrightnessPercent: number;
   keyLedBrightnessPercent: number;
   knobLedBrightnessPercent: number;
@@ -620,7 +614,6 @@ export interface DeviceSettingsSnapshot {
 }
 
 export interface DeviceSettingsUpdateRequest {
-  brightnessPercent: number;
   statusLedBrightnessPercent: number;
   keyLedBrightnessPercent: number;
   knobLedBrightnessPercent: number;

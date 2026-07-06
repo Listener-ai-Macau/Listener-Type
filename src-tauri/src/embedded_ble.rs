@@ -5020,7 +5020,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             ));
         }
         let fields = parse_device_settings_fields(line);
-        let default_brightness = crate::types::DEFAULT_DEVICE_BRIGHTNESS_PERCENT;
+        let default_brightness = crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT;
         let plugged_brightness_percent =
             optional_u8_field(&fields, "plugged_brightness").unwrap_or(default_brightness);
         let battery_brightness_percent =
@@ -7346,15 +7346,50 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             usb_powered: None,
             detail: None,
         };
-        // The OTA v2 service itself is the capability proof. Windows may not expose
-        // the separate readiness/DIS metadata in this session, and probing missing
-        // optional characteristics costs seconds per UUID before every transfer.
+        // The OTA v2 service itself is the capability proof. DIS metadata is best-effort:
+        // read it once when Windows exposes it, but do not make it a hard preflight blocker.
         if !snapshot
             .capabilities
             .iter()
             .any(|item| item == "firmware_ota_v2")
         {
             snapshot.capabilities.push("firmware_ota_v2".to_string());
+        }
+        let (dis_model, dis_hardware, dis_firmware, dis_battery) =
+            read_dis_metadata_from_discovered_services(target.bluetooth_address);
+        snapshot.hardware_revision =
+            normalize_optional_hardware_revision(dis_hardware).or(dis_model);
+        snapshot.firmware_version = dis_firmware;
+        snapshot.battery_percent = dis_battery;
+        if let Some(device) = target.device.as_ref() {
+            if snapshot.hardware_revision.is_none() {
+                let model = read_optional_string_characteristic(
+                    device,
+                    DIS_SERVICE_UUID,
+                    DIS_MODEL_NUMBER_UUID,
+                );
+                let hardware = read_optional_string_characteristic(
+                    device,
+                    DIS_SERVICE_UUID,
+                    DIS_HARDWARE_REVISION_UUID,
+                );
+                snapshot.hardware_revision =
+                    normalize_optional_hardware_revision(hardware).or(model);
+            }
+            if snapshot.firmware_version.is_none() {
+                snapshot.firmware_version = read_optional_string_characteristic(
+                    device,
+                    DIS_SERVICE_UUID,
+                    DIS_FIRMWARE_REVISION_UUID,
+                );
+            }
+            if snapshot.battery_percent.is_none() {
+                snapshot.battery_percent = read_optional_u8_characteristic(
+                    device,
+                    BATTERY_SERVICE_UUID,
+                    BATTERY_LEVEL_UUID,
+                );
+            }
         }
         if snapshot.hardware_revision.is_none() && snapshot.firmware_version.is_none() {
             let address = target.bluetooth_address.map(|value| {
@@ -7364,9 +7399,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 )
             });
             snapshot.detail = Some(format!(
-                "Listener OTA v2 service is reachable{}, but readiness identity was not exposed in this BLE session.",
+                "Listener OTA v2 service is reachable{}, but DIS identity metadata was not exposed in this BLE session.",
                 address.as_deref().unwrap_or("")
             ));
+        } else {
+            snapshot.detail = Some("Listener OTA v2 service is reachable; DIS metadata was read when Windows exposed it.".to_string());
         }
         log::info!(
             "[embedded-ble] Listener OTA v2 snapshot connected={} hardware={:?} firmware={:?} battery={:?} usb_powered={:?} detail={:?}",
@@ -16485,9 +16522,9 @@ mod tests {
             "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK active_power=external low_power_idle_ms=60000 knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=0 external_power_present=1 usb_power_present=1 charging=0 charge_full=1"
         )
         .expect("parse legacy device settings");
-        assert_eq!(status.brightness_percent, 80);
-        assert_eq!(status.plugged_brightness_percent, 80);
-        assert_eq!(status.battery_brightness_percent, 80);
+        assert_eq!(status.brightness_percent, 100);
+        assert_eq!(status.plugged_brightness_percent, 100);
+        assert_eq!(status.battery_brightness_percent, 100);
         assert_eq!(status.status_led_brightness_percent, 100);
         assert_eq!(status.key_led_brightness_percent, 100);
         assert_eq!(status.knob_led_brightness_percent, 100);

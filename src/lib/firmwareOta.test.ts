@@ -617,6 +617,10 @@ assert.ok(
   firmwareOtaPanelSource.includes('onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true, protocolName: selectedPackage?.manifest.protocolName ?? null })}'),
   'manual OTA snapshot refresh must remain available and use the selected package protocol',
 );
+assert.ok(
+  firmwareOtaPanelSource.includes('snapshotSatisfiesVersionRefreshFallback(snapshot, protocolName)'),
+  'manual Listener OTA v2 refresh must stop polling when the v2 service is reachable even if DIS firmware version is unavailable',
+);
 
 const commandsSource = readFileSync('src-tauri/src/commands.rs', 'utf8');
 assert.ok(
@@ -688,8 +692,8 @@ const listenerOtaV2SnapshotEnd = embeddedBleSource.indexOf('fn firmware_ota_devi
 assert.ok(listenerOtaV2SnapshotStart >= 0 && listenerOtaV2SnapshotEnd > listenerOtaV2SnapshotStart);
 const listenerOtaV2SnapshotBody = embeddedBleSource.slice(listenerOtaV2SnapshotStart, listenerOtaV2SnapshotEnd);
 assert.ok(
-  embeddedBleSource.includes('The OTA v2 service itself is the capability proof.'),
-  'Listener OTA v2 snapshot must document why it skips slow optional metadata probes',
+  embeddedBleSource.includes('DIS metadata is best-effort'),
+  'Listener OTA v2 snapshot must document that DIS metadata is best-effort and not a hard blocker',
 );
 assert.ok(
   embeddedBleSource.includes('for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]'),
@@ -698,6 +702,10 @@ assert.ok(
 assert.ok(
   !listenerOtaV2SnapshotBody.includes('read_optional_string_characteristic_from_service'),
   'Listener OTA v2 snapshot must not probe optional readiness/capability characteristics before transfer',
+);
+assert.ok(
+  listenerOtaV2SnapshotBody.includes('read_dis_metadata_from_discovered_services(target.bluetooth_address)'),
+  'Listener OTA v2 snapshot should fill hardware/firmware metadata from bounded DIS discovery when Windows exposes it',
 );
 
 const ipcSource = readFileSync('src/lib/ipc.ts', 'utf8');
