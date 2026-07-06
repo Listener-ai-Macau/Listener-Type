@@ -102,7 +102,7 @@ if ($NoPrompt.IsPresent) {
         $form = [System.Windows.Forms.Form]::new()
         $form.Text = "Listener 蓝牙验收"
         $form.StartPosition = "Manual"
-        $form.ClientSize = [System.Drawing.Size]::new(500, 300)
+        $form.ClientSize = [System.Drawing.Size]::new(480, 300)
         $form.MinimumSize = [System.Drawing.Size]::new(480, 300)
         $form.TopMost = $true
         $form.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 10)
@@ -117,28 +117,28 @@ if ($NoPrompt.IsPresent) {
         $title.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 13, [System.Drawing.FontStyle]::Bold)
         $title.AutoSize = $false
         $title.Location = [System.Drawing.Point]::new(18, 14)
-        $title.Size = [System.Drawing.Size]::new(460, 30)
+        $title.Size = [System.Drawing.Size]::new(448, 30)
         $form.Controls.Add($title)
 
         $prompt = [System.Windows.Forms.Label]::new()
         $prompt.Text = $step.prompt
         $prompt.AutoSize = $false
         $prompt.Location = [System.Drawing.Point]::new(18, 50)
-        $prompt.Size = [System.Drawing.Size]::new(462, 98)
+        $prompt.Size = [System.Drawing.Size]::new(448, 98)
         $form.Controls.Add($prompt)
 
         $box = [System.Windows.Forms.TextBox]::new()
         $box.Multiline = $true
         $box.ScrollBars = "Vertical"
         $box.Location = [System.Drawing.Point]::new(18, 156)
-        $box.Size = [System.Drawing.Size]::new(462, 70)
+        $box.Size = [System.Drawing.Size]::new(448, 70)
         $box.Anchor = "Left,Right,Top,Bottom"
         $form.Controls.Add($box)
 
         $buttonPanel = [System.Windows.Forms.FlowLayoutPanel]::new()
         $buttonPanel.FlowDirection = "RightToLeft"
         $buttonPanel.Location = [System.Drawing.Point]::new(18, 240)
-        $buttonPanel.Size = [System.Drawing.Size]::new(462, 42)
+        $buttonPanel.Size = [System.Drawing.Size]::new(448, 42)
         $buttonPanel.Anchor = "Left,Right,Bottom"
         $form.Controls.Add($buttonPanel)
 

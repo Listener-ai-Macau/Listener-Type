@@ -80,8 +80,8 @@ for (const requiredToken of ["FormStartPosition]::Manual", "PrimaryScreen.Workin
   }
 }
 
-if (!human.includes("[System.Drawing.Size]::new(480, 390)")) {
-  failures.push("human review window must stay small enough to leave Type/Windows Bluetooth visible");
+if (!human.includes("[System.Drawing.Size]::new(480, 320)")) {
+  failures.push("human review window must stay compact enough to leave Type/Windows Bluetooth visible");
 }
 
 if (!deviceSection.includes("onWheel={event => {\n          event.currentTarget.blur();\n        }}")) {
