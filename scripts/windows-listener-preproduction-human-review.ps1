@@ -402,7 +402,7 @@ function Show-ReviewStep {
 
     if ($NoPrompt.IsPresent) {
         $endedAt = Get-Date
-        return [ordered]@{
+        return [pscustomobject][ordered]@{
             index = $Index
             id = $Step.id
             title = $Step.title
@@ -764,6 +764,85 @@ $steps = @(
             "根目录没有旧包或 portable 包。"))
 )
 Assert-StepsMatchCanonicalScenarios -ReviewSteps $steps
+$allSteps = @($steps)
+
+function Find-CarryForwardHumanSummary {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$RequiredStepIds,
+        [Parameter(Mandatory = $true)][string[]]$FocusStepIds
+    )
+
+    $roots = @(
+        (Join-Path $repoRoot ".cache\validation"),
+        (Join-Path $repoRoot ".artifacts\v1.0.2-regression")
+    ) | Where-Object { Test-Path -LiteralPath $_ }
+
+    $candidates = foreach ($root in $roots) {
+        Get-ChildItem -LiteralPath $root -Recurse -File -Filter "preproduction-human-review-summary.json" -ErrorAction SilentlyContinue
+    }
+
+    foreach ($candidate in @($candidates | Sort-Object LastWriteTime -Descending)) {
+        try {
+            $summary = Get-Content -Raw -LiteralPath $candidate.FullName | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        if ($summary.status -ne "HUMAN_REVIEW_PASS") {
+            continue
+        }
+
+        $records = @($summary.records)
+        $recordById = @{}
+        foreach ($record in $records) {
+            $recordById[[string]$record.id] = $record
+        }
+
+        $usable = $true
+        foreach ($stepId in $RequiredStepIds) {
+            if ($FocusStepIds -contains $stepId) {
+                continue
+            }
+            if (-not $recordById.ContainsKey($stepId)) {
+                $usable = $false
+                break
+            }
+            if ($recordById[$stepId].result -ne "PASS") {
+                $usable = $false
+                break
+            }
+        }
+        if ($usable) {
+            return [pscustomobject]@{
+                path = $candidate.FullName
+                summary = $summary
+            }
+        }
+    }
+
+    return $null
+}
+
+function Copy-ReviewRecordForSummary {
+    param(
+        [Parameter(Mandatory = $true)]$Record,
+        [Parameter(Mandatory = $true)][int]$Index,
+        [bool]$CarriedForward = $false,
+        [string]$CarriedForwardFrom = ""
+    )
+
+    $copy = [ordered]@{}
+    foreach ($property in $Record.PSObject.Properties) {
+        $copy[$property.Name] = $property.Value
+    }
+    $copy["index"] = $Index
+    if ($CarriedForward) {
+        $copy["carried_forward"] = $true
+        $copy["carried_forward_from_summary"] = $CarriedForwardFrom
+        $copy["carried_forward_at"] = (Get-Date).ToString("o")
+        $copy["carried_forward_reason"] = "Previously PASS and not selected for this focused re-review."
+    }
+    return [pscustomobject]$copy
+}
 
 if ($ListSteps.IsPresent) {
     foreach ($step in $steps) {
@@ -790,6 +869,13 @@ if ($requestedStepIds.Count -gt 0) {
         throw "No steps selected. Use -ListSteps to see valid steps."
     }
     $steps = $selectedSteps
+}
+
+$carryForwardSummary = $null
+if ($requestedStepIds.Count -gt 0) {
+    $carryForwardSummary = Find-CarryForwardHumanSummary `
+        -RequiredStepIds @($allSteps | ForEach-Object { [string]$_.id }) `
+        -FocusStepIds @($requestedStepIds)
 }
 
 $existingRecords = @()
@@ -820,6 +906,7 @@ $startLines = @(
     "RandomName: $RandomName"
     "NoPrompt: $($NoPrompt.IsPresent)"
     "FocusStepIds: $(if ($requestedStepIds.Count -gt 0) { ($requestedStepIds -join ',') } else { 'FULL' })"
+    "CarryForwardSummary: $(if ($carryForwardSummary) { $carryForwardSummary.path } else { 'NONE' })"
     "TypeHead: $($typeHeadInfo.head) $($typeHeadInfo.commit_time) $($typeHeadInfo.subject)"
     "FirmwareHead: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time) $($firmwareHeadInfo.subject)"
 )
@@ -851,11 +938,55 @@ try {
     }
 }
 
-$failCount = @($records | Where-Object { $_.result -eq "FAIL" }).Count
-$incompleteCount = @($records | Where-Object { $_.result -in @("SKIP", "ABORT") }).Count
+$summaryRecords = [System.Collections.Generic.List[object]]::new()
+$carriedForwardCount = 0
+if ($requestedStepIds.Count -gt 0) {
+    $newRecordById = @{}
+    foreach ($record in $records) {
+        $newRecordById[[string]$record.id] = $record
+    }
+    $carryRecordById = @{}
+    if ($carryForwardSummary) {
+        foreach ($record in @($carryForwardSummary.summary.records)) {
+            $carryRecordById[[string]$record.id] = $record
+        }
+    }
+
+    for ($summaryIndex = 0; $summaryIndex -lt $allSteps.Count; $summaryIndex++) {
+        $stepId = [string]$allSteps[$summaryIndex].id
+        if ($newRecordById.ContainsKey($stepId)) {
+            $summaryRecords.Add((Copy-ReviewRecordForSummary -Record $newRecordById[$stepId] -Index ($summaryIndex + 1))) | Out-Null
+        } elseif ($carryRecordById.ContainsKey($stepId)) {
+            $summaryRecords.Add((Copy-ReviewRecordForSummary -Record $carryRecordById[$stepId] -Index ($summaryIndex + 1) -CarriedForward $true -CarriedForwardFrom $carryForwardSummary.path)) | Out-Null
+            $carriedForwardCount += 1
+        }
+    }
+} else {
+    foreach ($record in $records) {
+        $summaryRecords.Add($record) | Out-Null
+    }
+}
+
+$summaryRecordArray = @(
+    for ($summaryRecordIndex = 0; $summaryRecordIndex -lt $summaryRecords.Count; $summaryRecordIndex++) {
+        $item = $summaryRecords[$summaryRecordIndex]
+        if ($item -is [System.Array]) {
+            foreach ($innerItem in $item) {
+                $innerItem
+            }
+        } else {
+            $item
+        }
+    }
+)
+$expectedRecordCount = if ($requestedStepIds.Count -gt 0) { $allSteps.Count } else { $steps.Count }
+$recordsWithResult = @($summaryRecordArray | Where-Object { $null -ne $_.PSObject.Properties["result"] })
+$missingResultCount = $summaryRecordArray.Count - $recordsWithResult.Count
+$failCount = @($recordsWithResult | Where-Object { $_.result -eq "FAIL" }).Count
+$incompleteCount = @($recordsWithResult | Where-Object { $_.result -in @("SKIP", "ABORT") }).Count + $missingResultCount
 $status = if ($failCount -gt 0) {
     "HUMAN_REVIEW_FAIL"
-} elseif ($incompleteCount -gt 0 -or $records.Count -ne $steps.Count) {
+} elseif ($incompleteCount -gt 0 -or $summaryRecordArray.Count -ne $expectedRecordCount) {
     "HUMAN_REVIEW_INCOMPLETE"
 } else {
     "HUMAN_REVIEW_PASS"
@@ -870,9 +1001,12 @@ $status = if ($failCount -gt 0) {
     session_jsonl = $sessionPath
     device_name = $DeviceName
     random_name = $RandomName
+    focus_step_ids = @($requestedStepIds)
+    carried_forward_summary = $(if ($carryForwardSummary) { $carryForwardSummary.path } else { "" })
+    carried_forward_count = $carriedForwardCount
     type_git_head = $typeHeadInfo
     firmware_git_head = $firmwareHeadInfo
-    records = @($records)
+    records = @($summaryRecordArray)
 } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $summaryJsonPath -Encoding UTF8
 
 $lines = [System.Collections.Generic.List[string]]::new()
@@ -882,14 +1016,26 @@ $lines.Add("- Status: $status") | Out-Null
 $lines.Add("- Output: $OutputDir") | Out-Null
 $lines.Add("- Session: $sessionPath") | Out-Null
 $lines.Add("- Random BLE name: $RandomName") | Out-Null
+$lines.Add("- Focus steps: $(if ($requestedStepIds.Count -gt 0) { $requestedStepIds -join ', ' } else { 'FULL' })") | Out-Null
+$lines.Add("- Carried forward: $carriedForwardCount") | Out-Null
 $lines.Add("- Type HEAD: $($typeHeadInfo.head) $($typeHeadInfo.commit_time)") | Out-Null
 $lines.Add("- Firmware HEAD: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time)") | Out-Null
 $lines.Add("") | Out-Null
 $lines.Add("| # | StepId | Step | Result | Operator note | Evidence |") | Out-Null
 $lines.Add("|---:|---|---|---|---|---|") | Out-Null
-foreach ($record in $records) {
-    $operatorNote = Format-MarkdownCell $record.operator_note
-    $evidence = "before/during/after logs in output dir"
+foreach ($record in $summaryRecordArray) {
+    $operatorNoteValue = if ($record.PSObject.Properties["operator_note"]) {
+        $record.operator_note
+    } elseif ($record.PSObject.Properties["operator_action"]) {
+        $record.operator_action
+    } elseif ($record.PSObject.Properties["observation"]) {
+        $record.observation
+    } else {
+        ""
+    }
+    $operatorNote = Format-MarkdownCell $operatorNoteValue
+    $isCarriedForward = $record.PSObject.Properties["carried_forward"] -and $record.carried_forward
+    $evidence = if ($isCarriedForward) { "carried forward from previous PASS summary" } else { "before/during/after logs in output dir" }
     $lines.Add("| $($record.index) | $($record.id) | $($record.title) | $($record.result) | $operatorNote | $evidence |") | Out-Null
 }
 $lines.Add("") | Out-Null

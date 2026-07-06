@@ -70,6 +70,17 @@ for (const requiredToken of ["[string[]]$StepIds", "FocusStepIds:", "$requestedS
   }
 }
 
+for (const requiredToken of [
+  "Find-CarryForwardHumanSummary",
+  "carried_forward_summary",
+  "carried_forward_count",
+  "carried forward from previous PASS summary",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`focused human review must merge old PASS records instead of forcing all 18 steps to be repeated: ${requiredToken}`);
+  }
+}
+
 for (const requiredToken of ["实际操作和结果", "operator_note"]) {
   if (!human.includes(requiredToken)) {
     failures.push(`human review must use one operator note field and include ${requiredToken}`);
