@@ -80,6 +80,44 @@ if (
   );
 }
 
+const advertisementAddressStart = source.indexOf("fn audio_target_advertisement_addresses");
+const advertisementAddressEnd = source.indexOf(
+  "pub(super) fn remember_current_bluetooth_target_address_for_name",
+  advertisementAddressStart,
+);
+if (advertisementAddressStart < 0 || advertisementAddressEnd < 0) {
+  throw new Error("Could not locate audio target advertisement address helper");
+}
+const advertisementAddressSection = source.slice(advertisementAddressStart, advertisementAddressEnd);
+if (!advertisementAddressSection.includes("configured_bluetooth_address_from_env()")) {
+  throw new Error("Advertisement address selection must only short-circuit for an explicit env-pinned BLE address");
+}
+if (advertisementAddressSection.includes("if let Some(address) = configured_bluetooth_address()")) {
+  throw new Error("Runtime cached BLE addresses must not short-circuit fresh advertisement/PnP discovery");
+}
+if (!advertisementAddressSection.includes("listener_pnp_service_signature_addresses()")) {
+  throw new Error("Advertisement fallback must include current Windows PnP/service-signature addresses before runtime cache");
+}
+if (!advertisementAddressSection.includes("runtime_bluetooth_target_address()")) {
+  throw new Error("Runtime cached BLE address should remain only as a late fallback candidate");
+}
+
+const candidateAllowedStart = source.indexOf("fn ble_candidate_allowed");
+const candidateAllowedEnd = source.indexOf("pub(super) fn parse_bluetooth_address_hex", candidateAllowedStart);
+if (candidateAllowedStart < 0 || candidateAllowedEnd < 0) {
+  throw new Error("Could not locate BLE candidate filter helper");
+}
+const candidateAllowedSection = source.slice(candidateAllowedStart, candidateAllowedEnd);
+if (!candidateAllowedSection.includes("configured_bluetooth_address_from_env()")) {
+  throw new Error("BLE candidate filter must still honor explicit env-pinned BLE addresses");
+}
+if (candidateAllowedSection.includes("configured_bluetooth_address()")) {
+  throw new Error("BLE candidate filter must not hard-reject current Windows candidates by runtime cache");
+}
+if (!candidateAllowedSection.includes("listener_recovery_target_addresses()")) {
+  throw new Error("BLE candidate filter must keep Windows PnP/service addresses as a positive trust signal");
+}
+
 console.log(
-  "PASS: embedded BLE processing LED sync keeps Type-ready across normal completion, reserves BYE for teardown, recovery pairing appends direct address fallback, and stale BTHPORT cache does not bypass pairing.",
+  "PASS: embedded BLE processing LED sync keeps Type-ready across normal completion, recovery pairing appends direct address fallback, stale BTHPORT cache does not bypass pairing, and runtime BLE address cache cannot outrank current Windows evidence.",
 );

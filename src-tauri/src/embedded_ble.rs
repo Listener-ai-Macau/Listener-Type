@@ -8481,23 +8481,63 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     fn audio_target_advertisement_addresses(kind: &str) -> Result<Vec<u64>, String> {
-        if let Some(address) = configured_bluetooth_address() {
+        if let Some(address) = configured_bluetooth_address_from_env() {
             log::info!(
-                "[embedded-ble] using configured {kind} BLE address {}",
+                "[embedded-ble] using pinned env-configured {kind} BLE address {}",
                 crate::embedded_ble::format_bluetooth_address(address)
             );
             return Ok(vec![address]);
         }
 
-        if let Some(expected_name) = configured_bluetooth_target_name() {
-            return scan_ble_advertisements_by_name(
-                kind,
-                &expected_name,
-                AUDIO_ADVERTISEMENT_SCAN_TIMEOUT,
-            );
+        let mut addresses = Vec::new();
+        let scan_result = if let Some(expected_name) = configured_bluetooth_target_name() {
+            scan_ble_advertisements_by_name(kind, &expected_name, AUDIO_ADVERTISEMENT_SCAN_TIMEOUT)
+        } else {
+            scan_listener_audio_advertisements(kind, AUDIO_ADVERTISEMENT_SCAN_TIMEOUT)
+        };
+        let mut errors = Vec::new();
+        match scan_result {
+            Ok(scanned_addresses) => {
+                for address in scanned_addresses {
+                    push_unique_address(&mut addresses, address);
+                }
+            }
+            Err(err) => errors.push(err),
         }
 
-        scan_listener_audio_advertisements(kind, AUDIO_ADVERTISEMENT_SCAN_TIMEOUT)
+        match listener_pnp_service_signature_addresses() {
+            Ok(pnp_addresses) => {
+                for address in pnp_addresses {
+                    push_unique_address(&mut addresses, address);
+                }
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] {kind}: Windows PnP address refresh failed during advertisement fallback: {err}"
+                );
+            }
+        }
+
+        if let Some(address) = runtime_bluetooth_target_address() {
+            let was_empty = addresses.is_empty();
+            push_unique_address(&mut addresses, address);
+            log::info!(
+                "[embedded-ble] appended cached runtime {kind} BLE address {} after fresh Windows candidates",
+                crate::embedded_ble::format_bluetooth_address(address)
+            );
+            if was_empty {
+                log::warn!(
+                    "[embedded-ble] using cached runtime {kind} BLE address only because fresh advertisement/PnP discovery returned no address"
+                );
+            }
+        }
+
+        if addresses.is_empty() {
+            return Err(errors.pop().unwrap_or_else(|| {
+                format!("{kind} address discovery returned no usable address")
+            }));
+        }
+        Ok(addresses)
     }
 
     pub(super) fn remember_current_bluetooth_target_address_for_name(
@@ -12072,10 +12112,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
     fn ble_candidate_allowed(kind: &str, index: u32, name: &str, address: Option<u64>) -> bool {
         let mut address_matched = false;
-        if let Some(expected_address) = configured_bluetooth_address() {
+        if let Some(expected_address) = configured_bluetooth_address_from_env() {
             if address != Some(expected_address) {
                 log::info!(
-                    "[embedded-ble] skipping {kind} candidate index={index} name={name} address={}: configured address is {}",
+                    "[embedded-ble] skipping {kind} candidate index={index} name={name} address={}: pinned env-configured address is {}",
                     address
                         .map(crate::embedded_ble::format_bluetooth_address)
                         .unwrap_or_else(|| "-".to_string()),
@@ -14505,6 +14545,36 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
+        fn advertisement_address_selection_does_not_short_circuit_on_runtime_cache() {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("fn audio_target_advertisement_addresses")
+                .expect("advertisement address helper should exist");
+            let end = source[start..]
+                .find("pub(super) fn remember_current_bluetooth_target_address_for_name")
+                .map(|offset| start + offset)
+                .expect("advertisement address helper boundary should exist");
+            let body = &source[start..end];
+
+            assert!(
+                body.contains("configured_bluetooth_address_from_env()"),
+                "only an explicit env-pinned BLE address may bypass fresh Windows discovery"
+            );
+            assert!(
+                !body.contains("if let Some(address) = configured_bluetooth_address()"),
+                "runtime cached BLE addresses must not short-circuit advertisement/PnP discovery"
+            );
+            assert!(
+                body.contains("listener_pnp_service_signature_addresses()"),
+                "current Windows PnP/service evidence must be considered before runtime cache"
+            );
+            assert!(
+                body.contains("runtime_bluetooth_target_address()"),
+                "runtime cache may remain a late fallback after fresh Windows candidates"
+            );
+        }
+
+        #[test]
         fn ble_candidate_filter_allows_trusted_address_when_windows_name_cache_lags() {
             let source = include_str!("embedded_ble.rs");
             let start = source
@@ -14522,6 +14592,32 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             );
             assert!(body.contains("trusted_addresses.contains(&address)"));
             assert!(body.contains("despite target name"));
+        }
+
+        #[test]
+        fn ble_candidate_filter_does_not_hard_reject_by_runtime_cache() {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("fn ble_candidate_allowed")
+                .expect("BLE candidate filter should exist");
+            let end = source[start..]
+                .find("pub(super) fn parse_bluetooth_address_hex")
+                .map(|offset| start + offset)
+                .expect("BLE candidate filter boundary should exist");
+            let body = &source[start..end];
+
+            assert!(
+                body.contains("configured_bluetooth_address_from_env()"),
+                "explicit env-pinned addresses may still hard-filter candidates"
+            );
+            assert!(
+                !body.contains("configured_bluetooth_address()"),
+                "runtime cached addresses must not hard-filter current Windows service candidates"
+            );
+            assert!(
+                body.contains("listener_recovery_target_addresses()"),
+                "Windows PnP/service addresses should remain a positive trust signal"
+            );
         }
 
         #[test]

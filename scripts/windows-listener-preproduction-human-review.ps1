@@ -53,6 +53,12 @@ function Convert-ReviewText {
     return (($Text -replace "\\r\\n", [Environment]::NewLine) -replace "\\n", [Environment]::NewLine)
 }
 
+function Format-MarkdownCell {
+    param([AllowNull()][string]$Text)
+    if ($null -eq $Text) { return "" }
+    return (($Text -replace "\|", "/") -replace "`r?`n", " ").Trim()
+}
+
 function New-ReviewStep {
     param(
         [Parameter(Mandatory = $true)][string]$Id,
@@ -99,26 +105,133 @@ function Get-BluetoothDeviceSnapshot {
     }
 }
 
+function Get-UsbAndPortSnapshot {
+    try {
+        $pnpPorts = @(Get-PnpDevice -Class Ports -ErrorAction SilentlyContinue |
+            Select-Object Status, Class, FriendlyName, InstanceId)
+        $serialPorts = @(Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue |
+            Select-Object DeviceID, Name, Description, PNPDeviceID)
+        [PSCustomObject]@{
+            pnp_ports = $pnpPorts
+            serial_ports = $serialPorts
+        }
+    } catch {
+        [PSCustomObject]@{ error = $_.Exception.Message }
+    }
+}
+
+function Get-KnownTypeLogPaths {
+    $paths = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        $paths.Add((Join-Path $env:LOCALAPPDATA "Listener Type\Logs\listener-type.log")) | Out-Null
+        $paths.Add((Join-Path $env:LOCALAPPDATA "Listener Type\Logs\capsule-timeline.log")) | Out-Null
+        $paths.Add((Join-Path $env:LOCALAPPDATA "com.listener.type\EBWebView\chrome_debug.log")) | Out-Null
+    }
+    return @($paths | Select-Object -Unique)
+}
+
+function Save-TypeLogTail {
+    param(
+        [Parameter(Mandatory = $true)][int]$Index,
+        [Parameter(Mandatory = $true)][string]$SafeStep,
+        [Parameter(Mandatory = $true)][string]$SafePhase
+    )
+
+    $tailPath = Join-Path $OutputDir ("step-{0:D2}-{1}-{2}-type-log-tail.txt" -f $Index, $SafeStep, $SafePhase)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($logPath in Get-KnownTypeLogPaths) {
+        $lines.Add("===== $logPath =====") | Out-Null
+        if (Test-Path -LiteralPath $logPath) {
+            try {
+                Get-Content -LiteralPath $logPath -Tail 260 -ErrorAction Stop |
+                    ForEach-Object { $lines.Add([string]$_) | Out-Null }
+            } catch {
+                $lines.Add("ERROR: $($_.Exception.Message)") | Out-Null
+            }
+        } else {
+            $lines.Add("MISSING") | Out-Null
+        }
+        $lines.Add("") | Out-Null
+    }
+    $lines | Set-Content -LiteralPath $tailPath -Encoding UTF8
+    return $tailPath
+}
+
+function Save-WindowsEventSnapshot {
+    param(
+        [Parameter(Mandatory = $true)][int]$Index,
+        [Parameter(Mandatory = $true)][string]$SafeStep,
+        [Parameter(Mandatory = $true)][string]$SafePhase,
+        [datetime]$StartTime = (Get-Date).AddMinutes(-2),
+        [datetime]$EndTime = (Get-Date)
+    )
+
+    $eventPath = Join-Path $OutputDir ("step-{0:D2}-{1}-{2}-windows-events.txt" -f $Index, $SafeStep, $SafePhase)
+    $logs = @(
+        "Microsoft-Windows-Bluetooth-Policy/Operational",
+        "Microsoft-Windows-Bluetooth-BthLEPrepairing/Operational",
+        "Microsoft-Windows-Bluetooth-Bthmini/Operational",
+        "Microsoft-Windows-DeviceSetupManager/Admin",
+        "Microsoft-Windows-Kernel-PnP/Configuration"
+    )
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("Window: $($StartTime.ToString('o')) .. $($EndTime.ToString('o'))") | Out-Null
+    foreach ($logName in $logs) {
+        $lines.Add("") | Out-Null
+        $lines.Add("===== $logName =====") | Out-Null
+        try {
+            $events = @(Get-WinEvent -FilterHashtable @{
+                    LogName = $logName
+                    StartTime = $StartTime
+                    EndTime = $EndTime
+                } -MaxEvents 160 -ErrorAction Stop |
+                Sort-Object TimeCreated |
+                Select-Object TimeCreated, ProviderName, Id, LevelDisplayName,
+                    @{ Name = "Message"; Expression = { (($_.Message -replace "\s+", " ").Trim()) } })
+            if ($events.Count -eq 0) {
+                $lines.Add("NO_EVENTS") | Out-Null
+            } else {
+                $events | Format-List | Out-String -Width 240 |
+                    ForEach-Object { $lines.Add([string]$_) | Out-Null }
+            }
+        } catch {
+            $lines.Add("ERROR: $($_.Exception.Message)") | Out-Null
+        }
+    }
+    $lines | Set-Content -LiteralPath $eventPath -Encoding UTF8
+    return $eventPath
+}
+
 function Save-Snapshot {
     param(
         [Parameter(Mandatory = $true)][int]$Index,
         [Parameter(Mandatory = $true)][string]$StepId,
-        [Parameter(Mandatory = $true)][string]$Phase
+        [Parameter(Mandatory = $true)][string]$Phase,
+        [datetime]$StartTime = (Get-Date).AddMinutes(-2),
+        [datetime]$EndTime = (Get-Date)
     )
 
     $safeStep = $StepId -replace "[^A-Za-z0-9_.-]", "_"
     $safePhase = $Phase -replace "[^A-Za-z0-9_.-]", "_"
     $devicePath = Join-Path $OutputDir ("step-{0:D2}-{1}-{2}-bluetooth.txt" -f $Index, $safeStep, $safePhase)
     $processPath = Join-Path $OutputDir ("step-{0:D2}-{1}-{2}-process.txt" -f $Index, $safeStep, $safePhase)
+    $usbPath = Join-Path $OutputDir ("step-{0:D2}-{1}-{2}-usb-ports.txt" -f $Index, $safeStep, $safePhase)
 
     Get-BluetoothDeviceSnapshot | Format-Table -AutoSize | Out-String |
         Set-Content -LiteralPath $devicePath -Encoding UTF8
     Get-TypeProcessSnapshot | Format-Table -AutoSize | Out-String |
         Set-Content -LiteralPath $processPath -Encoding UTF8
+    Get-UsbAndPortSnapshot | ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath $usbPath -Encoding UTF8
+    $typeLogPath = Save-TypeLogTail -Index $Index -SafeStep $safeStep -SafePhase $safePhase
+    $windowsEventPath = Save-WindowsEventSnapshot -Index $Index -SafeStep $safeStep -SafePhase $safePhase -StartTime $StartTime -EndTime $EndTime
 
     [ordered]@{
         bluetooth = $devicePath
         process = $processPath
+        usb_ports = $usbPath
+        type_log_tail = $typeLogPath
+        windows_events = $windowsEventPath
     }
 }
 
@@ -157,15 +270,18 @@ function Show-ReviewStep {
     }
 
     if ($NoPrompt.IsPresent) {
+        $endedAt = Get-Date
         return [ordered]@{
             index = $Index
             id = $Step.id
             title = $Step.title
             result = "SKIP"
+            operator_action = "NoPrompt dry run"
             observation = "NoPrompt dry run"
             started_at = $startedAt.ToString("o")
-            ended_at = (Get-Date).ToString("o")
+            ended_at = $endedAt.ToString("o")
             before = $before
+            during = Save-Snapshot -Index $Index -StepId $Step.id -Phase "during" -StartTime $startedAt -EndTime $endedAt
             after = Save-Snapshot -Index $Index -StepId $Step.id -Phase "after"
         }
     }
@@ -176,26 +292,27 @@ function Show-ReviewStep {
     $form = [System.Windows.Forms.Form]::new()
     $form.Text = "Listener 1.0.2 准量产验收"
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-    $form.ClientSize = [System.Drawing.Size]::new(660, 500)
-    $form.MinimumSize = [System.Drawing.Size]::new(620, 460)
+    $form.ClientSize = [System.Drawing.Size]::new(700, 620)
+    $form.MinimumSize = [System.Drawing.Size]::new(660, 560)
     $form.MaximizeBox = $false
     $form.TopMost = $true
     $form.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 10)
     $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+    $form.AutoScroll = $true
 
     $title = [System.Windows.Forms.Label]::new()
     $title.Text = "$Index/$Total  $($Step.title)"
     $title.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 12, [System.Drawing.FontStyle]::Bold)
     $title.AutoSize = $false
     $title.Location = [System.Drawing.Point]::new(16, 12)
-    $title.Size = [System.Drawing.Size]::new(628, 30)
+    $title.Size = [System.Drawing.Size]::new(668, 30)
     $form.Controls.Add($title)
 
     $actionLabel = [System.Windows.Forms.Label]::new()
     $actionLabel.Text = "你现在做"
     $actionLabel.AutoSize = $false
     $actionLabel.Location = [System.Drawing.Point]::new(16, 50)
-    $actionLabel.Size = [System.Drawing.Size]::new(628, 22)
+    $actionLabel.Size = [System.Drawing.Size]::new(668, 22)
     $form.Controls.Add($actionLabel)
 
     $actionBox = [System.Windows.Forms.TextBox]::new()
@@ -203,38 +320,53 @@ function Show-ReviewStep {
     $actionBox.ReadOnly = $true
     $actionBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
     $actionBox.Location = [System.Drawing.Point]::new(16, 74)
-    $actionBox.Size = [System.Drawing.Size]::new(628, 96)
+    $actionBox.Size = [System.Drawing.Size]::new(668, 82)
     $actionBox.Text = Convert-ReviewText $Step.action
     $form.Controls.Add($actionBox)
 
     $expectedLabel = [System.Windows.Forms.Label]::new()
     $expectedLabel.Text = "通过标准"
     $expectedLabel.AutoSize = $false
-    $expectedLabel.Location = [System.Drawing.Point]::new(16, 178)
-    $expectedLabel.Size = [System.Drawing.Size]::new(628, 22)
+    $expectedLabel.Location = [System.Drawing.Point]::new(16, 164)
+    $expectedLabel.Size = [System.Drawing.Size]::new(668, 22)
     $form.Controls.Add($expectedLabel)
 
     $expectedBox = [System.Windows.Forms.TextBox]::new()
     $expectedBox.Multiline = $true
     $expectedBox.ReadOnly = $true
     $expectedBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $expectedBox.Location = [System.Drawing.Point]::new(16, 202)
-    $expectedBox.Size = [System.Drawing.Size]::new(628, 80)
+    $expectedBox.Location = [System.Drawing.Point]::new(16, 188)
+    $expectedBox.Size = [System.Drawing.Size]::new(668, 72)
     $expectedBox.Text = Convert-ReviewText $Step.expected
     $form.Controls.Add($expectedBox)
+
+    $operatorActionLabel = [System.Windows.Forms.Label]::new()
+    $operatorActionLabel.Text = "我实际做了什么 / 点了什么 / 等了多久"
+    $operatorActionLabel.AutoSize = $false
+    $operatorActionLabel.Location = [System.Drawing.Point]::new(16, 268)
+    $operatorActionLabel.Size = [System.Drawing.Size]::new(668, 22)
+    $form.Controls.Add($operatorActionLabel)
+
+    $operatorAction = [System.Windows.Forms.TextBox]::new()
+    $operatorAction.Multiline = $true
+    $operatorAction.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+    $operatorAction.Location = [System.Drawing.Point]::new(16, 292)
+    $operatorAction.Size = [System.Drawing.Size]::new(668, 74)
+    $operatorAction.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Top
+    $form.Controls.Add($operatorAction)
 
     $obsLabel = [System.Windows.Forms.Label]::new()
     $obsLabel.Text = "填写现象"
     $obsLabel.AutoSize = $false
-    $obsLabel.Location = [System.Drawing.Point]::new(16, 290)
-    $obsLabel.Size = [System.Drawing.Size]::new(628, 22)
+    $obsLabel.Location = [System.Drawing.Point]::new(16, 374)
+    $obsLabel.Size = [System.Drawing.Size]::new(668, 22)
     $form.Controls.Add($obsLabel)
 
     $observation = [System.Windows.Forms.TextBox]::new()
     $observation.Multiline = $true
     $observation.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $observation.Location = [System.Drawing.Point]::new(16, 314)
-    $observation.Size = [System.Drawing.Size]::new(628, 88)
+    $observation.Location = [System.Drawing.Point]::new(16, 398)
+    $observation.Size = [System.Drawing.Size]::new(668, 104)
     $observation.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom
     $observation.Text = Convert-ReviewText $Step.observation_template
     $form.Controls.Add($observation)
@@ -242,8 +374,8 @@ function Show-ReviewStep {
     $buttonPanel = [System.Windows.Forms.FlowLayoutPanel]::new()
     $buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
     $buttonPanel.WrapContents = $false
-    $buttonPanel.Location = [System.Drawing.Point]::new(16, 420)
-    $buttonPanel.Size = [System.Drawing.Size]::new(628, 46)
+    $buttonPanel.Location = [System.Drawing.Point]::new(16, 522)
+    $buttonPanel.Size = [System.Drawing.Size]::new(668, 46)
     $buttonPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Bottom
     $form.Controls.Add($buttonPanel)
 
@@ -260,6 +392,29 @@ function Show-ReviewStep {
         $button.Size = [System.Drawing.Size]::new(96, 34)
         $button.Add_Click({
             param($sender, $eventArgs)
+            $selectedResult = [string]$sender.Tag
+            if ($selectedResult -in @("PASS", "FAIL")) {
+                if ([string]::IsNullOrWhiteSpace($operatorAction.Text)) {
+                    [System.Windows.Forms.MessageBox]::Show(
+                        "先写一下你刚才实际做了什么。比如：点了 Windows 连接通知、等了 20 秒、按了 EC11 两次。",
+                        "缺少实际操作记录",
+                        [System.Windows.Forms.MessageBoxButtons]::OK,
+                        [System.Windows.Forms.MessageBoxIcon]::Information
+                    ) | Out-Null
+                    $operatorAction.Focus()
+                    return
+                }
+                if ([string]::IsNullOrWhiteSpace($observation.Text)) {
+                    [System.Windows.Forms.MessageBox]::Show(
+                        "再写一下你看到的现象/结果，失败时尤其要写灯效、弹窗和 Type 状态。",
+                        "缺少现象记录",
+                        [System.Windows.Forms.MessageBoxButtons]::OK,
+                        [System.Windows.Forms.MessageBoxIcon]::Information
+                    ) | Out-Null
+                    $observation.Focus()
+                    return
+                }
+            }
             $script:preproductionReviewResult = [string]$sender.Tag
             $form.Close()
         })
@@ -273,6 +428,7 @@ function Show-ReviewStep {
     [void]$form.ShowDialog()
 
     $endedAt = Get-Date
+    $during = Save-Snapshot -Index $Index -StepId $Step.id -Phase "during" -StartTime $startedAt -EndTime $endedAt
     $after = Save-Snapshot -Index $Index -StepId $Step.id -Phase "after"
 
     [ordered]@{
@@ -280,6 +436,7 @@ function Show-ReviewStep {
         id = $Step.id
         title = $Step.title
         result = $script:preproductionReviewResult
+        operator_action = $operatorAction.Text
         observation = $observation.Text
         action = $Step.action
         expected = $Step.expected
@@ -287,6 +444,7 @@ function Show-ReviewStep {
         started_at = $startedAt.ToString("o")
         ended_at = $endedAt.ToString("o")
         before = $before
+        during = $during
         after = $after
     }
 }
@@ -550,12 +708,16 @@ $lines.Add("- Output: $OutputDir") | Out-Null
 $lines.Add("- Session: $sessionPath") | Out-Null
 $lines.Add("- Random BLE name: $RandomName") | Out-Null
 $lines.Add("") | Out-Null
-$lines.Add("| # | StepId | Step | Result | Observation |") | Out-Null
-$lines.Add("|---:|---|---|---|---|") | Out-Null
+$lines.Add("| # | StepId | Step | Result | Operator action | Observation | Evidence |") | Out-Null
+$lines.Add("|---:|---|---|---|---|---|---|") | Out-Null
 foreach ($record in $records) {
-    $obs = (($record.observation -replace "\|", "/") -replace "`r?`n", " ")
-    $lines.Add("| $($record.index) | $($record.id) | $($record.title) | $($record.result) | $obs |") | Out-Null
+    $operatorAction = Format-MarkdownCell $record.operator_action
+    $obs = Format-MarkdownCell $record.observation
+    $evidence = "before/during/after logs in output dir"
+    $lines.Add("| $($record.index) | $($record.id) | $($record.title) | $($record.result) | $operatorAction | $obs | $evidence |") | Out-Null
 }
+$lines.Add("") | Out-Null
+$lines.Add("Each step JSON record contains before/during/after snapshots with Bluetooth PnP, Type process, USB/serial, Listener Type log tail, capsule timeline tail, and Windows Bluetooth/device event logs.") | Out-Null
 $lines.Add("") | Out-Null
 $lines.Add("Release rule: only HUMAN_REVIEW_PASS can be used as final physical acceptance evidence for publishing v1.0.2.") | Out-Null
 $lines | Set-Content -LiteralPath $summaryPath -Encoding UTF8
