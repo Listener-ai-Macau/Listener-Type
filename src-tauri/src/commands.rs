@@ -1933,7 +1933,7 @@ fn embedded_ble_recovery_message(
     if let Some(unpair) = unpair_result {
         return match unpair.status {
             crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
-                "Type 已清理这台电脑上的旧 Listener 配对。请点击 Windows 连接通知，或在 Windows 蓝牙里手动添加 Listener；Type 检测到新配对后会恢复。".to_string()
+                "Type 已清理这台电脑上的旧 Listener 配对。请点击 Windows 连接通知重新配对，或在 Windows 蓝牙里手动添加 Listener；Type 检测到新配对后会恢复。".to_string()
             }
             crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
             | crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
