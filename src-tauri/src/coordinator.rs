@@ -8770,7 +8770,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_ble_stale_unpaired_windows_node_allows_local_cleanup_without_pairasync() {
+    fn embedded_ble_stale_unpaired_windows_node_stays_user_controlled() {
         let source = include_str!("coordinator.rs");
         let start = source
             .find("let local_stale_cache_recovery_allows_cleanup")
