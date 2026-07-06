@@ -4799,16 +4799,19 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             direct_gatt_instability_recovery,
         )
     });
-    let paired_cache_recovery_allows_cleanup = recovery_pairing_window_visible
-        && pairing_before_cleanup
-            .as_ref()
-            .is_some_and(|pairing| !manual_unpair_hold && pairing.already_paired_devices > 0);
+    let local_stale_cache_recovery_allows_cleanup = recovery_pairing_window_visible
+        && pairing_before_cleanup.as_ref().is_some_and(|pairing| {
+            !manual_unpair_hold
+                && (pairing.already_paired_devices > 0
+                    || pairing.matched_devices > 0
+                    || pairing.failed_devices > 0)
+        });
     let automatic_cleanup_allowed = visible_recovery_allows_cleanup
         || stale_cleanup_candidate
         || recovery_advertisement_allows_cleanup
-        || paired_cache_recovery_allows_cleanup;
+        || local_stale_cache_recovery_allows_cleanup;
     if recovery_pairing_probe.has_random_identity {
-        if recovery_advertisement_allows_cleanup || paired_cache_recovery_allows_cleanup {
+        if recovery_advertisement_allows_cleanup || local_stale_cache_recovery_allows_cleanup {
             log::warn!(
                 "[embedded-ble] random-identity recovery advertisement visible with stale Windows cache evidence; entering Windows pairing cleanup err={}",
                 embedded_ble_log_preview(err),
@@ -5155,6 +5158,9 @@ fn should_hold_embedded_ble_background_recovery_after_manual_unpair(
         return false;
     }
     if pairing.already_paired_devices > 0 {
+        return false;
+    }
+    if pairing.matched_devices > 0 || pairing.failed_devices > 0 {
         return false;
     }
     matches!(
@@ -8639,12 +8645,14 @@ mod tests {
             "background stale-cache recovery must not start Type PairAsync; the user should complete Windows native pairing after Type cleans the local stale cache"
         );
         assert!(
-            body.contains("paired_cache_recovery_allows_cleanup"),
-            "background recovery must keep an automatic path only when Windows still proves paired-cache ownership"
+            body.contains("local_stale_cache_recovery_allows_cleanup"),
+            "background recovery must keep an automatic local cleanup path when Windows exposes stale local Listener cache evidence"
         );
         assert!(
-            body.contains("pairing.already_paired_devices > 0"),
-            "automatic cleanup needs Windows paired-cache proof; a matched but unpaired stale node can be a deliberate manual removal or computer-switch flow"
+            body.contains("pairing.already_paired_devices > 0")
+                && body.contains("pairing.matched_devices > 0")
+                && body.contains("pairing.failed_devices > 0"),
+            "automatic cleanup must cover paired cache, stale PnP/cache matches, and failed stale nodes before Windows native pairing"
         );
         let query_index = body
             .find("query_listener_pairing")
@@ -8753,32 +8761,34 @@ mod tests {
             details: vec![],
         };
         assert!(
-            should_hold_embedded_ble_background_recovery_after_manual_unpair(
+            !should_hold_embedded_ble_background_recovery_after_manual_unpair(
                 &stale_failed_node,
                 false
             ),
-            "a visible but unpaired stale Windows Listener node must stay user-controlled so manual removal and computer-switch flows are not auto-paired back"
+            "a visible but unpaired stale Windows Listener node is local cleanup evidence; user-controlled means Type skips PairAsync, not that Type leaves stale cache untouched"
         );
     }
 
     #[test]
-    fn embedded_ble_stale_unpaired_windows_node_stays_user_controlled() {
+    fn embedded_ble_stale_unpaired_windows_node_allows_local_cleanup_without_pairasync() {
         let source = include_str!("coordinator.rs");
         let start = source
-            .find("let paired_cache_recovery_allows_cleanup")
-            .expect("paired-cache recovery gate should exist");
+            .find("let local_stale_cache_recovery_allows_cleanup")
+            .expect("local stale-cache recovery gate should exist");
         let end = source[start..]
             .find("if recovery_pairing_window_visible")
             .map(|offset| start + offset)
-            .expect("paired-cache recovery gate should precede the hardware hold branch");
+            .expect("local stale-cache recovery gate should precede the hardware hold branch");
         let body = &source[start..end];
         assert!(
-            body.contains("|pairing| !manual_unpair_hold && pairing.already_paired_devices > 0"),
-            "Type may auto-clean only when Windows still has paired-cache proof; matched unpaired nodes are user-controlled pairing/switching evidence"
+            body.contains("pairing.already_paired_devices > 0")
+                && body.contains("pairing.matched_devices > 0")
+                && body.contains("pairing.failed_devices > 0"),
+            "Type cleanup must run for any local stale-cache evidence so users do not click a Windows notification against an uncleared stale node"
         );
         assert!(
-            !body.contains("|pairing| !manual_unpair_hold && pairing.matched_devices > 0"),
-            "matched_devices alone regresses manual Windows removal by letting Type pair the old PC back"
+            body.contains("!manual_unpair_hold"),
+            "manual NotFound removal still stays user-controlled; the cleanup path must not turn into PairAsync"
         );
     }
 
@@ -8898,7 +8908,7 @@ mod tests {
         );
         assert!(
             body.contains("recovery_advertisement_allows_cleanup")
-                && body.contains("paired_cache_recovery_allows_cleanup"),
+                && body.contains("local_stale_cache_recovery_allows_cleanup"),
             "MissingPairing/StaleGatt recovery advertisements and stale Windows cache evidence must still reach Type-controlled cleanup"
         );
     }

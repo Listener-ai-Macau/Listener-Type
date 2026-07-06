@@ -10,6 +10,7 @@ const humanScript = path.join(repoRoot, "scripts", "windows-listener-preproducti
 const scenarioManifestPath = path.join(repoRoot, "scripts", "listener-preproduction-scenarios.json");
 const deviceSectionPath = path.join(repoRoot, "src", "pages", "settings", "DeviceSection.tsx");
 const commandsPath = path.join(repoRoot, "src-tauri", "src", "commands.rs");
+const coordinatorPath = path.join(repoRoot, "src-tauri", "src", "coordinator.rs");
 
 const bench = fs.readFileSync(benchScript, "utf8");
 const collect = fs.readFileSync(collectScript, "utf8");
@@ -18,6 +19,7 @@ const human = fs.readFileSync(humanScript, "utf8");
 const scenarioManifest = JSON.parse(fs.readFileSync(scenarioManifestPath, "utf8"));
 const deviceSection = fs.readFileSync(deviceSectionPath, "utf8");
 const commands = fs.readFileSync(commandsPath, "utf8");
+const coordinator = fs.readFileSync(coordinatorPath, "utf8");
 
 const scenarios = Array.isArray(scenarioManifest.scenarios) ? scenarioManifest.scenarios : [];
 const requiredStepIds = scenarios.map((scenario) => scenario.id);
@@ -112,6 +114,16 @@ for (const requiredToken of [
 ]) {
   if (!human.includes(requiredToken)) {
     failures.push(`human Bluetooth acceptance must state the Type/no-Type native pairing contract: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  "local_stale_cache_recovery_allows_cleanup",
+  "pairing.matched_devices > 0",
+  "pairing.failed_devices > 0",
+]) {
+  if (!coordinator.includes(requiredToken)) {
+    failures.push(`Type-present repair must clean local stale Windows cache evidence before native pairing: ${requiredToken}`);
   }
 }
 
