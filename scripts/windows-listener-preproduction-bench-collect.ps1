@@ -475,6 +475,11 @@ Add-Evidence -Manifest $manifest -StepId "no-type-native-pairing" -Key "hid_pres
 Add-Evidence -Manifest $manifest -StepId "type-takeover-no-forced-repair" -Key "takeover_log" -Path $(if ($activeBle) { $resolvedActiveBleSummaryPath } else { "" })
 Add-Evidence -Manifest $manifest -StepId "type-takeover-no-forced-repair" -Key "gatt_probe" -Path $(if ($audioStatus) { $audioStatus.path } else { "" })
 Add-Evidence -Manifest $manifest -StepId "type-takeover-no-forced-repair" -Key "gatt_probe" -Path (Get-ActiveBleRecordEvidence -Summary $activeBle -Stage "gatt_audio_status")
+Add-Evidence -Manifest $manifest -StepId "ec11-long-press-shutdown-led" -Key "type_log" -Path $typeLogPath
+Add-Evidence -Manifest $manifest -StepId "ec11-single-not-double" -Key "windows_ble_events" -Path $bleEventsPath
+Add-Evidence -Manifest $manifest -StepId "ec11-double-repair-with-type" -Key "type_unpair_log" -Path $(if ($activeBle) { $resolvedActiveBleSummaryPath } else { "" })
+Add-Evidence -Manifest $manifest -StepId "ec11-double-repair-with-type" -Key "windows_native_pair_log" -Path $(if ($activeBle) { $resolvedActiveBleSummaryPath } else { "" })
+Add-Evidence -Manifest $manifest -StepId "ec11-double-repair-with-type" -Key "gatt_probe" -Path (Get-ActiveBleRecordEvidence -Summary $activeBle -Stage "gatt_audio_status")
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "ble_audio_probe" -Path $(if ($audioStatus) { $audioStatus.path } else { "" })
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "type_log" -Path $typeLogPath
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "windows_ble_state" -Path $bleStatePath
