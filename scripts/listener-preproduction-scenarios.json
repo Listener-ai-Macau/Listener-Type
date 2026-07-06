@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "version": "1.0.2",
+  "purpose": "Canonical Listener 1.0.2 preproduction physical acceptance scenarios. Human, bench, regression, and release audit gates must use this file as the scenario source of truth.",
+  "scenarios": [
+    {
+      "id": "baseline-type-tray-ui",
+      "bench_title": "Type tray/UI baseline",
+      "bench_capabilities": ["type_runtime", "desktop_visual_capture"],
+      "bench_evidence": ["type_process", "window_screenshot", "type_log"]
+    },
+    {
+      "id": "same-name-write-no-repair",
+      "bench_title": "Same-name write does not repair",
+      "bench_capabilities": ["type_runtime", "windows_ble_automation"],
+      "bench_evidence": ["before_ble_state", "after_ble_state", "type_log"]
+    },
+    {
+      "id": "random-name-exact-cache-refresh",
+      "bench_title": "Random BLE name exact cache refresh",
+      "bench_capabilities": ["type_runtime", "windows_ble_automation"],
+      "bench_evidence": ["name_write_log", "windows_ble_state", "gatt_probe"]
+    },
+    {
+      "id": "restore-default-listener",
+      "bench_title": "Restore default listener name",
+      "bench_capabilities": ["type_runtime", "windows_ble_automation"],
+      "bench_evidence": ["name_write_log", "windows_ble_state", "gatt_probe"]
+    },
+    {
+      "id": "manual-windows-delete-no-type-autopair",
+      "bench_title": "Manual Windows delete must not autopair with Type",
+      "bench_capabilities": ["type_runtime", "windows_ble_automation"],
+      "bench_evidence": ["delete_log", "twenty_second_state", "type_log"]
+    },
+    {
+      "id": "no-type-native-pairing",
+      "bench_title": "No-Type native Windows pairing",
+      "bench_capabilities": ["windows_ble_automation"],
+      "bench_evidence": ["native_pair_log", "windows_ble_state", "hid_presence"]
+    },
+    {
+      "id": "type-takeover-no-forced-repair",
+      "bench_title": "Type takeover without forced repair",
+      "bench_capabilities": ["type_runtime", "windows_ble_automation"],
+      "bench_evidence": ["takeover_log", "gatt_probe", "notification_count"]
+    },
+    {
+      "id": "ec11-long-press-shutdown-led",
+      "bench_title": "EC11 long-press shutdown confirmation LED",
+      "bench_capabilities": ["physical_input_fixture", "type_runtime", "led_optical_capture"],
+      "bench_evidence": ["physical_input_trace", "led_capture", "type_log"]
+    },
+    {
+      "id": "ec11-rotate-ring-feedback",
+      "bench_title": "EC11 rotate ring feedback",
+      "bench_capabilities": ["physical_input_fixture", "led_optical_capture"],
+      "bench_evidence": ["physical_input_trace", "led_capture", "serial_led_status"]
+    },
+    {
+      "id": "ec11-single-not-double",
+      "bench_title": "EC11 single is not double",
+      "bench_capabilities": ["physical_input_fixture", "windows_ble_automation", "led_optical_capture"],
+      "bench_evidence": ["physical_input_trace", "windows_ble_events", "led_capture"]
+    },
+    {
+      "id": "ec11-double-repair-with-type",
+      "bench_title": "EC11 double-click repair with Type",
+      "bench_capabilities": ["physical_input_fixture", "type_runtime", "windows_ble_automation", "led_optical_capture"],
+      "bench_evidence": ["physical_input_trace", "pairing_flow_log", "led_capture", "gatt_probe"]
+    },
+    {
+      "id": "computer-switch-product-flow",
+      "bench_title": "Computer switch flow",
+      "bench_capabilities": ["windows_ble_automation", "second_ble_host"],
+      "bench_evidence": ["old_host_state", "new_host_pair_log", "takeover_log"]
+    },
+    {
+      "id": "recording-response-and-led-priority",
+      "bench_title": "Recording response and LED priority",
+      "bench_capabilities": ["physical_input_fixture", "audio_fixture", "type_runtime", "led_optical_capture"],
+      "bench_evidence": ["input_trace", "capsule_timeline", "audio_wav", "led_capture"]
+    },
+    {
+      "id": "ble-audio-type-link",
+      "bench_title": "BLE audio Type link",
+      "bench_capabilities": ["audio_fixture", "type_runtime", "windows_ble_automation"],
+      "bench_evidence": ["ble_audio_probe", "type_log", "windows_ble_state"]
+    },
+    {
+      "id": "led-independent-contract",
+      "bench_title": "LED independence contract",
+      "bench_capabilities": ["physical_input_fixture", "led_optical_capture", "power_relay"],
+      "bench_evidence": ["led_matrix_capture", "serial_led_status", "power_cycle_log"]
+    },
+    {
+      "id": "ota-wireless-smoke",
+      "bench_title": "Wireless OTA smoke",
+      "bench_capabilities": ["type_runtime", "windows_ble_automation", "led_optical_capture", "ota_package"],
+      "bench_evidence": ["ota_probe", "ota_log", "led_capture"]
+    },
+    {
+      "id": "wired-flash-smoke",
+      "bench_title": "Wired flash smoke",
+      "bench_capabilities": ["usb_power_relay", "wired_flash_port"],
+      "bench_evidence": ["flash_log", "post_flash_serial_status"]
+    },
+    {
+      "id": "release-package-final-check",
+      "bench_title": "Release package final check",
+      "bench_capabilities": ["release_artifacts"],
+      "bench_evidence": ["msi_hash", "firmware_zip_hash", "root_package_listing"]
+    }
+  ]
+}

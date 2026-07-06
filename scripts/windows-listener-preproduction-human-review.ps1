@@ -124,6 +124,38 @@ function New-ReviewStep {
     }
 }
 
+function Get-CanonicalScenarioIds {
+    $path = Join-Path $PSScriptRoot "listener-preproduction-scenarios.json"
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Canonical preproduction scenario manifest is missing: $path"
+    }
+    $manifest = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
+    $ids = @($manifest.scenarios | ForEach-Object { [string]$_.id })
+    if ($ids.Count -eq 0) {
+        throw "Canonical preproduction scenario manifest has no scenarios: $path"
+    }
+    return $ids
+}
+
+function Assert-StepsMatchCanonicalScenarios {
+    param([Parameter(Mandatory = $true)][object[]]$ReviewSteps)
+
+    $canonicalIds = @(Get-CanonicalScenarioIds)
+    $reviewIds = @($ReviewSteps | ForEach-Object { [string]$_.id })
+    $missing = @($canonicalIds | Where-Object { $reviewIds -notcontains $_ })
+    $extra = @($reviewIds | Where-Object { $canonicalIds -notcontains $_ })
+    $duplicates = @($reviewIds | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
+
+    if ($missing.Count -gt 0 -or $extra.Count -gt 0 -or $duplicates.Count -gt 0 -or $canonicalIds.Count -ne $reviewIds.Count) {
+        throw ("Human review scenario drift from canonical manifest. missing=[{0}] extra=[{1}] duplicates=[{2}] canonical_count={3} human_count={4}" -f `
+            ($missing -join ","),
+            ($extra -join ","),
+            ($duplicates -join ","),
+            $canonicalIds.Count,
+            $reviewIds.Count)
+    }
+}
+
 function Get-TypeProcessSnapshot {
     try {
         @(Get-Process | Where-Object {
@@ -736,6 +768,7 @@ $steps = @(
             "根目录没有旧包或 portable 包。")) `
         -ObservationTemplate "MSI：；Firmware zip：；根目录旧包：；是否可发布："
 )
+Assert-StepsMatchCanonicalScenarios -ReviewSteps $steps
 
 if ($ListSteps.IsPresent) {
     foreach ($step in $steps) {

@@ -7,65 +7,64 @@ const benchScript = path.join(repoRoot, "scripts", "windows-listener-preproducti
 const collectScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-bench-collect.ps1");
 const activeBleScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-ble-active-bench.ps1");
 const humanScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-human-review.ps1");
+const scenarioManifestPath = path.join(repoRoot, "scripts", "listener-preproduction-scenarios.json");
 
 const bench = fs.readFileSync(benchScript, "utf8");
 const collect = fs.readFileSync(collectScript, "utf8");
 const activeBle = fs.readFileSync(activeBleScript, "utf8");
 const human = fs.readFileSync(humanScript, "utf8");
+const scenarioManifest = JSON.parse(fs.readFileSync(scenarioManifestPath, "utf8"));
 
-const requiredStepIds = [
-  "baseline-type-tray-ui",
-  "same-name-write-no-repair",
-  "random-name-exact-cache-refresh",
-  "restore-default-listener",
-  "manual-windows-delete-no-type-autopair",
-  "no-type-native-pairing",
-  "type-takeover-no-forced-repair",
-  "ec11-long-press-shutdown-led",
-  "ec11-rotate-ring-feedback",
-  "ec11-single-not-double",
-  "ec11-double-repair-with-type",
-  "computer-switch-product-flow",
-  "recording-response-and-led-priority",
-  "ble-audio-type-link",
-  "led-independent-contract",
-  "ota-wireless-smoke",
-  "wired-flash-smoke",
-  "release-package-final-check",
-];
-
-const requiredCapabilities = [
-  "type_runtime",
-  "desktop_visual_capture",
-  "windows_ble_automation",
-  "second_ble_host",
-  "usb_power_relay",
-  "power_relay",
-  "physical_input_fixture",
-  "led_optical_capture",
-  "audio_fixture",
-  "wired_flash_port",
-  "ota_package",
-  "release_artifacts",
-];
+const scenarios = Array.isArray(scenarioManifest.scenarios) ? scenarioManifest.scenarios : [];
+const requiredStepIds = scenarios.map((scenario) => scenario.id);
+const requiredCapabilities = [...new Set(scenarios.flatMap((scenario) => scenario.bench_capabilities ?? []))];
 
 const failures = [];
+
+if (requiredStepIds.length < 18) {
+  failures.push(`canonical scenario manifest must contain at least 18 release scenarios, got ${requiredStepIds.length}`);
+}
+
+for (const requiredId of ["ec11-long-press-shutdown-led", "ec11-rotate-ring-feedback"]) {
+  if (!requiredStepIds.includes(requiredId)) {
+    failures.push(`canonical scenario manifest is missing ${requiredId}`);
+  }
+}
+
+const duplicatedStepIds = requiredStepIds.filter((id, index) => requiredStepIds.indexOf(id) !== index);
+if (duplicatedStepIds.length > 0) {
+  failures.push(`canonical scenario manifest has duplicate IDs: ${[...new Set(duplicatedStepIds)].join(",")}`);
+}
+
+if (!bench.includes("listener-preproduction-scenarios.json")) {
+  failures.push("bench review must load the canonical scenario manifest");
+}
+
+if (!human.includes("Assert-StepsMatchCanonicalScenarios")) {
+  failures.push("human review must fail fast when its detailed steps drift from the canonical scenario manifest");
+}
 
 for (const stepId of requiredStepIds) {
   if (!human.includes(stepId)) {
     failures.push(`human review is missing step ${stepId}`);
   }
-  if (!bench.includes(stepId)) {
-    failures.push(`bench review is missing step ${stepId}`);
-  }
 }
 
 for (const capability of requiredCapabilities) {
-  if (!bench.includes(capability)) {
-    failures.push(`bench review is missing capability ${capability}`);
-  }
   if (!collect.includes(capability)) {
     failures.push(`bench evidence collector is missing capability ${capability}`);
+  }
+}
+
+for (const scenario of scenarios) {
+  if (!scenario.bench_title || !Array.isArray(scenario.bench_capabilities) || !Array.isArray(scenario.bench_evidence)) {
+    failures.push(`canonical scenario ${scenario.id} must define bench_title, bench_capabilities, and bench_evidence`);
+  }
+}
+
+for (const requiredToken of ["bench_capabilities", "bench_evidence"]) {
+  if (!bench.includes(requiredToken)) {
+    failures.push(`bench review must derive ${requiredToken} from the canonical scenario manifest`);
   }
 }
 

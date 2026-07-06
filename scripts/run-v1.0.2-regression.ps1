@@ -33,6 +33,19 @@ function ConvertTo-SafeName {
   return ($Name -replace '[^A-Za-z0-9_.-]+', '_').Trim('_')
 }
 
+function Get-RequiredPreproductionStepIds {
+  $manifestPath = Join-Path $PSScriptRoot "listener-preproduction-scenarios.json"
+  if (-not (Test-Path -LiteralPath $manifestPath)) {
+    throw "Canonical preproduction scenario manifest is missing: $manifestPath"
+  }
+  $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+  $ids = @($manifest.scenarios | ForEach-Object { [string]$_.id })
+  if ($ids.Count -eq 0) {
+    throw "Canonical preproduction scenario manifest has no scenarios: $manifestPath"
+  }
+  return $ids
+}
+
 function Invoke-External {
   param(
     [Parameter(Mandatory = $true)][string]$File,
@@ -314,6 +327,7 @@ try {
 
     Invoke-Gate "preproduction human review script smoke" {
       $humanGate = Join-Path $PSScriptRoot "windows-listener-preproduction-human-review.ps1"
+      $requiredStepIds = @(Get-RequiredPreproductionStepIds)
       if (-not (Test-Path -LiteralPath $humanGate)) {
         throw "Final preproduction human review script not found: $humanGate"
       }
@@ -324,30 +338,10 @@ try {
       if ($null -ne $exit -and $exit -ne 0) {
         throw "Preproduction human review -ListSteps exited with code $exit"
       }
-      if ($steps.Count -lt 18) {
-        throw "Preproduction human review must expose all final user gates; expected at least 18 steps, got $($steps.Count)"
+      if ($steps.Count -lt $requiredStepIds.Count) {
+        throw "Preproduction human review must expose all final user gates; expected at least $($requiredStepIds.Count) steps, got $($steps.Count)"
       }
 
-      $requiredStepIds = @(
-        "baseline-type-tray-ui",
-        "same-name-write-no-repair",
-        "random-name-exact-cache-refresh",
-        "restore-default-listener",
-        "manual-windows-delete-no-type-autopair",
-        "no-type-native-pairing",
-        "type-takeover-no-forced-repair",
-        "ec11-long-press-shutdown-led",
-        "ec11-rotate-ring-feedback",
-        "ec11-single-not-double",
-        "ec11-double-repair-with-type",
-        "computer-switch-product-flow",
-        "recording-response-and-led-priority",
-        "ble-audio-type-link",
-        "led-independent-contract",
-        "ota-wireless-smoke",
-        "wired-flash-smoke",
-        "release-package-final-check"
-      )
       $stepText = $steps -join "`n"
       foreach ($stepId in $requiredStepIds) {
         if ($stepText -notmatch [regex]::Escape($stepId)) {
@@ -389,6 +383,7 @@ try {
 
     Invoke-Gate "preproduction bench review contract smoke" {
       $benchGate = Join-Path $PSScriptRoot "windows-listener-preproduction-bench-review.ps1"
+      $requiredStepIds = @(Get-RequiredPreproductionStepIds)
       if (-not (Test-Path -LiteralPath $benchGate)) {
         throw "Final preproduction bench review script not found: $benchGate"
       }
@@ -398,8 +393,14 @@ try {
       if ($null -ne $exit -and $exit -ne 0) {
         throw "Preproduction bench review -ListSteps exited with code $exit"
       }
-      if ($steps.Count -lt 18) {
-        throw "Preproduction bench review must expose all final user gates; expected at least 18 steps, got $($steps.Count)"
+      if ($steps.Count -lt $requiredStepIds.Count) {
+        throw "Preproduction bench review must expose all final user gates; expected at least $($requiredStepIds.Count) steps, got $($steps.Count)"
+      }
+      $stepText = $steps -join "`n"
+      foreach ($stepId in $requiredStepIds) {
+        if ($stepText -notmatch [regex]::Escape($stepId)) {
+          throw "Preproduction bench review missing required step '$stepId'"
+        }
       }
 
       $templateDir = Join-Path $OutputDir "preproduction-bench-review-template"
@@ -424,7 +425,7 @@ try {
         throw "Preproduction bench review dry-run should be BENCH_REVIEW_NO_GO, got $($bench.status)"
       }
       $records = @($bench.records)
-      if ($records.Count -lt 18) {
+      if ($records.Count -lt $requiredStepIds.Count) {
         throw "Preproduction bench review dry-run must record all release scenarios, got $($records.Count)"
       }
       if (@($records | Where-Object { $_.missing_capabilities.Count -gt 0 -or $_.missing_evidence.Count -gt 0 }).Count -eq 0) {

@@ -39,26 +39,27 @@ function New-BenchStep {
   }
 }
 
-$steps = @(
-  New-BenchStep "baseline-type-tray-ui" "Type tray/UI baseline" @("type_runtime", "desktop_visual_capture") @("type_process", "window_screenshot", "type_log")
-  New-BenchStep "same-name-write-no-repair" "Same-name write does not repair" @("type_runtime", "windows_ble_automation") @("before_ble_state", "after_ble_state", "type_log")
-  New-BenchStep "random-name-exact-cache-refresh" "Random BLE name exact cache refresh" @("type_runtime", "windows_ble_automation") @("name_write_log", "windows_ble_state", "gatt_probe")
-  New-BenchStep "restore-default-listener" "Restore default listener name" @("type_runtime", "windows_ble_automation") @("name_write_log", "windows_ble_state", "gatt_probe")
-  New-BenchStep "manual-windows-delete-no-type-autopair" "Manual Windows delete must not autopair with Type" @("type_runtime", "windows_ble_automation") @("delete_log", "twenty_second_state", "type_log")
-  New-BenchStep "no-type-native-pairing" "No-Type native Windows pairing" @("windows_ble_automation") @("native_pair_log", "windows_ble_state", "hid_presence")
-  New-BenchStep "type-takeover-no-forced-repair" "Type takeover without forced repair" @("type_runtime", "windows_ble_automation") @("takeover_log", "gatt_probe", "notification_count")
-  New-BenchStep "ec11-long-press-shutdown-led" "EC11 long-press shutdown confirmation LED" @("physical_input_fixture", "type_runtime", "led_optical_capture") @("physical_input_trace", "led_capture", "type_log")
-  New-BenchStep "ec11-rotate-ring-feedback" "EC11 rotate ring feedback" @("physical_input_fixture", "led_optical_capture") @("physical_input_trace", "led_capture", "serial_led_status")
-  New-BenchStep "ec11-single-not-double" "EC11 single is not double" @("physical_input_fixture", "windows_ble_automation", "led_optical_capture") @("physical_input_trace", "windows_ble_events", "led_capture")
-  New-BenchStep "ec11-double-repair-with-type" "EC11 double-click repair with Type" @("physical_input_fixture", "type_runtime", "windows_ble_automation", "led_optical_capture") @("physical_input_trace", "pairing_flow_log", "led_capture", "gatt_probe")
-  New-BenchStep "computer-switch-product-flow" "Computer switch flow" @("windows_ble_automation", "second_ble_host") @("old_host_state", "new_host_pair_log", "takeover_log")
-  New-BenchStep "recording-response-and-led-priority" "Recording response and LED priority" @("physical_input_fixture", "audio_fixture", "type_runtime", "led_optical_capture") @("input_trace", "capsule_timeline", "audio_wav", "led_capture")
-  New-BenchStep "ble-audio-type-link" "BLE audio Type link" @("audio_fixture", "type_runtime", "windows_ble_automation") @("ble_audio_probe", "type_log", "windows_ble_state")
-  New-BenchStep "led-independent-contract" "LED independence contract" @("physical_input_fixture", "led_optical_capture", "power_relay") @("led_matrix_capture", "serial_led_status", "power_cycle_log")
-  New-BenchStep "ota-wireless-smoke" "Wireless OTA smoke" @("type_runtime", "windows_ble_automation", "led_optical_capture", "ota_package") @("ota_probe", "ota_log", "led_capture")
-  New-BenchStep "wired-flash-smoke" "Wired flash smoke" @("usb_power_relay", "wired_flash_port") @("flash_log", "post_flash_serial_status")
-  New-BenchStep "release-package-final-check" "Release package final check" @("release_artifacts") @("msi_hash", "firmware_zip_hash", "root_package_listing")
-)
+function Get-ScenarioManifest {
+  $path = Join-Path $PSScriptRoot "listener-preproduction-scenarios.json"
+  if (-not (Test-Path -LiteralPath $path)) {
+    throw "Canonical preproduction scenario manifest is missing: $path"
+  }
+  $manifest = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
+  $scenarios = @($manifest.scenarios)
+  if ($scenarios.Count -eq 0) {
+    throw "Canonical preproduction scenario manifest has no scenarios: $path"
+  }
+  return $manifest
+}
+
+$scenarioManifest = Get-ScenarioManifest
+$steps = @($scenarioManifest.scenarios | ForEach-Object {
+    New-BenchStep `
+      -Id ([string]$_.id) `
+      -Title ([string]$_.bench_title) `
+      -Capabilities @($_.bench_capabilities) `
+      -Evidence @($_.bench_evidence)
+  })
 
 if ($ListSteps.IsPresent) {
   foreach ($step in $steps) {
@@ -78,21 +79,13 @@ if (-not [string]::IsNullOrWhiteSpace($StepId)) {
 $template = [ordered]@{
   schema_version = 1
   purpose = "Listener 1.0.2 unattended preproduction bench capabilities and evidence"
-  capabilities = [ordered]@{
-    type_runtime = $false
-    desktop_visual_capture = $false
-    windows_ble_automation = $false
-    second_ble_host = $false
-    usb_power_relay = $false
-    power_relay = $false
-    physical_input_fixture = $false
-    led_optical_capture = $false
-    audio_fixture = $false
-    wired_flash_port = $false
-    ota_package = $false
-    release_artifacts = $false
-  }
+  scenario_manifest = (Join-Path $PSScriptRoot "listener-preproduction-scenarios.json")
+  capabilities = [ordered]@{}
   evidence = [ordered]@{}
+}
+$capabilityNames = @($steps | ForEach-Object { $_.capabilities } | Sort-Object -Unique)
+foreach ($capability in $capabilityNames) {
+  $template.capabilities[$capability] = $false
 }
 foreach ($step in $steps) {
   $template.evidence[$step.id] = [ordered]@{}
