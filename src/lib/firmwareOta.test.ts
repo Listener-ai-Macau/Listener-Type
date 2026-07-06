@@ -559,3 +559,21 @@ for (const expected of [
     `Listener OTA UUID ${expected} must match src-tauri/src/firmware_ota.rs`,
   );
 }
+
+const firmwareOtaPanelSource = readFileSync('src/pages/settings/FirmwareOtaPanel.tsx', 'utf8');
+assert.ok(
+  !firmwareOtaPanelSource.includes('bleStatus'),
+  'FirmwareOtaPanel must not auto-refresh OTA GATT snapshots from background BLE status polling',
+);
+assert.ok(
+  /setSelectedPackage\([\s\S]*?\);\s*void refreshOtaSnapshot\(\);\s*dispatch\(\{ type: 'ready' \}\);/.test(firmwareOtaPanelSource),
+  'selecting a firmware package should refresh the OTA snapshot once',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('const snapshot = await refreshOtaSnapshot();'),
+  'starting OTA must still run a fresh preflight snapshot',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('onRefresh={() => void refreshOtaSnapshot({ waitForFirmwareVersion: true })}'),
+  'manual OTA snapshot refresh must remain available',
+);

@@ -33,7 +33,6 @@ import {
   type FirmwareOtaUserState,
 } from '../../lib/firmwareOta';
 import { Btn, Pill, type PillTone } from '../_atoms';
-import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusPanel';
 
 const EXPECTED_HARDWARE_REVISION = 'keyboard-v2-n16r8';
 const OTA_VERSION_QUERY_TIMEOUT_MS = 15_000;
@@ -51,10 +50,8 @@ interface SelectedPackage {
 
 export function FirmwareOtaPanel({
   supported,
-  bleStatus,
 }: {
   supported: boolean;
-  bleStatus: EmbeddedBleProbeStatus;
 }) {
   const { t, i18n } = useTranslation();
   const [state, dispatch] = useReducer(firmwareOtaReducer, initialFirmwareOtaState);
@@ -133,11 +130,6 @@ export function FirmwareOtaPanel({
       setSnapshotRefreshing(false);
     }
   }, [supported, t, transferActive]);
-
-  useEffect(() => {
-    if (!selectedPackage || bleStatus === 'checking' || transferActive) return;
-    void refreshOtaSnapshot();
-  }, [bleStatus, refreshOtaSnapshot, selectedPackage, transferActive]);
 
   const preflight = useMemo(() => {
     if (!selectedPackage) return null;

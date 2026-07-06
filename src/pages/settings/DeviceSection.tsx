@@ -241,7 +241,6 @@ export function DeviceSection() {
 
       <FirmwareOtaPanel
         supported={bleSupported}
-        bleStatus={bleStatus}
       />
     </>
   );

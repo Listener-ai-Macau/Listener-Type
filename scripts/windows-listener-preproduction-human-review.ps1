@@ -532,6 +532,33 @@ $steps = @(
             "不应该重复弹 Windows 添加设备通知。")) `
         -ObservationTemplate "Type恢复：成功/失败；耗时：约  秒；有没有弹窗：；现象："
     New-ReviewStep `
+        -Id "ec11-long-press-shutdown-led" `
+        -Title "EC11 长按关机确认灯" `
+        -Action (Join-Text @(
+            "保持 Type 打开或关闭都可以，但不要点击 Windows 蓝牙弹窗。"
+            "长按 EC11 旋钮约 1.2 到 1.5 秒，看到确认灯后松开；不要按到硬件关机边界。"
+            "只做这一次长按，不要单击或双击。重点观察 PWR/状态灯、EC11 旋钮环、key1-key4 和 Type 是否像重启/重建。")) `
+        -Expected (Join-Text @(
+            "长按期间进入 1.0.1 已验收的关机确认灯效：warm amber PWR/状态灯亮起，EC11 旋钮环用同色按顺时针方向约 1.2 秒走满/亮满。"
+            "松开后退出关机确认，不应该触发单击录音、双击重配或 Windows 连接通知。"
+            "Type 不应该重启、白屏、反复重建后台录音，也不应该把长按识别成多个 EC11 单击。"
+            "key1-key4 不能被带着红/绿乱闪。")) `
+        -ObservationTemplate "长按时长：约  秒；PWR amber：有/无；EC11 amber环走满：有/无/不稳定；松开后灯效：；Type是否重启/白屏/后台重建：；是否误触发单击/双击/蓝牙弹窗：；key灯："
+    New-ReviewStep `
+        -Id "ec11-rotate-ring-feedback" `
+        -Title "EC11 旋转环形追光" `
+        -Action (Join-Text @(
+            "保持空闲，不要录音，不要 OTA。"
+            "只转 EC11 外圈，不要向下按。"
+            "顺时针慢慢转 EC11 旋钮一整圈，再逆时针慢慢转一整圈。"
+            "重点看 EC11 旋钮环，不看 Windows 音量是否变化。")) `
+        -Expected (Join-Text @(
+            "旋转时 EC11 环出现白色方向性追光/转一圈反馈，保持约 2 到 3 秒。"
+            "顺时针和逆时针方向不能反，不能只闪一下就没了。"
+            "如果误按下 EC11，或者日志/现象只有 EC11 push、long press、shutdown_confirm、warm amber 关机确认灯，本步骤必须重来，不能算通过。"
+            "PWR/BLE/REC/AI/key1-key4 不应该被带着乱闪；录音态下录音灯优先覆盖旋钮白色反馈是允许的。")) `
+        -ObservationTemplate "是否只转外圈：是/否；顺时针追光：有/无/方向反/不稳定；逆时针追光：有/无/方向反/不稳定；是否误按下或出现 EC11 push/long press/shutdown_confirm：；是否被其他灯干扰：；备注："
+    New-ReviewStep `
         -Id "ec11-single-not-double" `
         -Title "EC11 单击不误判双击" `
         -Action (Join-Text @(

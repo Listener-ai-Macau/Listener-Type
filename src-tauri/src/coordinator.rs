@@ -721,18 +721,12 @@ impl Coordinator {
         if prefs.dictation_input_source == DictationInputSource::EmbeddedBle {
             let inner = Arc::clone(&self.inner);
             log::info!(
-                "[embedded-ble] firmware power probe running for existing embedded BLE source user_overridden={}",
+                "[embedded-ble] startup BLE name/power sync running for existing embedded BLE source user_overridden={}",
                 prefs.dictation_input_source_user_overridden
             );
             async_runtime::spawn_blocking(move || {
                 sync_device_ble_name_from_firmware_settings(
                     &inner,
-                    "startup_embedded_ble_power_probe",
-                );
-                let firmware = crate::embedded_ble::firmware_ota_device_snapshot();
-                record_embedded_ble_firmware_power_snapshot(
-                    &inner,
-                    &firmware,
                     "startup_embedded_ble_power_probe",
                 );
                 refresh_embedded_ble_listener(&inner);
@@ -4081,6 +4075,7 @@ fn mark_startup_ble_name_sync_done(inner: &Arc<Inner>, reason: &'static str) {
 fn sync_device_ble_name_from_firmware_settings(inner: &Arc<Inner>, reason: &'static str) -> bool {
     let synced = match crate::embedded_ble::read_device_settings_status(Duration::from_secs(2)) {
         Ok(status) => {
+            record_embedded_ble_device_settings_power_status(inner, &status, reason);
             let firmware_name = status.ble_name.trim();
             let valid = crate::types::device_ble_name_is_valid(firmware_name);
             if status.ble_name_pending_restart || !valid {
@@ -4131,6 +4126,26 @@ fn sync_device_ble_name_from_firmware_settings(inner: &Arc<Inner>, reason: &'sta
     };
     mark_startup_ble_name_sync_done(inner, reason);
     synced
+}
+
+fn record_embedded_ble_device_settings_power_status(
+    inner: &Arc<Inner>,
+    status: &crate::embedded_ble::DeviceSettingsStatus,
+    reason: &'static str,
+) {
+    let usb_powered = status.external_power_present
+        || status.usb_power_present
+        || status.charging
+        || status.charge_full;
+    let mut snapshot = inner.embedded_ble_wake_recovery.lock();
+    snapshot.usb_powered = Some(usb_powered);
+    log::info!(
+        "[embedded-ble] cached device settings power state reason={reason} usb_powered={usb_powered} external_power={} usb_power={} charging={} charge_full={}",
+        status.external_power_present,
+        status.usb_power_present,
+        status.charging,
+        status.charge_full
+    );
 }
 
 fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
@@ -7329,6 +7344,14 @@ mod tests {
             .map(|offset| start + offset)
             .expect("startup BLE helper boundary should exist");
         let body = &source[start..end];
+        let existing_source_start = body
+            .find("if prefs.dictation_input_source == DictationInputSource::EmbeddedBle")
+            .expect("existing embedded BLE source branch should exist");
+        let existing_source_end = body[existing_source_start..]
+            .find("return;")
+            .map(|offset| existing_source_start + offset)
+            .expect("existing embedded BLE source branch should return after refresh");
+        let existing_source_body = &body[existing_source_start..existing_source_end];
         let sync_index = body
             .find("sync_device_ble_name_from_firmware_settings")
             .expect("startup BLE helper must sync firmware BLE name");
@@ -7339,6 +7362,14 @@ mod tests {
         assert!(
             sync_index < refresh_index,
             "startup must not start background BLE listener with a stale local target name"
+        );
+        assert!(
+            !existing_source_body.contains("firmware_ota_device_snapshot"),
+            "an already-selected Listener BLE source must start the notify listener without a startup OTA GATT snapshot"
+        );
+        assert!(
+            source.contains("fn record_embedded_ble_device_settings_power_status"),
+            "startup should cache power context from DEVICE:SETTINGS instead of the OTA service"
         );
     }
 

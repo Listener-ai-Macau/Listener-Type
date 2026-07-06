@@ -34,12 +34,13 @@ assertEqual(capsuleWindow.width, 220, 'windows capsule config keeps translation-
 assertEqual(capsuleWindow.height, 110, 'windows capsule config keeps translation-capable height baseline');
 assertEqual(capsuleWindow.transparent, true, 'capsule window should keep transparent visuals');
 assertEqual(capsuleWindow.alwaysOnTop, true, 'capsule window should stay above the focused app while recording');
+assertEqual(mainWindow.url, 'index.html', 'main window should explicitly load the frontend entry instead of relying on platform defaults');
 assertEqual(mainWindow.decorations, true, 'shared main window config should keep the native OS window chrome');
 assertEqual(mainWindow.visible, false, 'windows main window should stay hidden until the intended first show point');
 
 assertMatch(
   libRs,
-  /#\[cfg\(target_os = "windows"\)\]\s*\{[\s\S]*?apply_mica\(&main, None\)[\s\S]*?apply_windows_caption_color\(&main\);/,
+  /#\[cfg\(target_os = "windows"\)\]\s*\{[\s\S]*?apply_mica\(&main, None\)[\s\S]*?apply_windows_caption_color_for_theme\(&main,\s*coordinator\.prefs\(\)\.get\(\)\.dark_mode\);/,
   'windows runtime should keep native chrome while applying Mica and caption color',
 );
 
@@ -140,7 +141,7 @@ if (!/hostMetrics\.bottomInset \+ metrics\.height \+ hostMetrics\.badgeGap/.test
   throw new Error('windows translation badge should anchor from the shared host inset instead of a fixed center-based offset');
 }
 
-if (!/#\[cfg\(target_os = "windows"\)\][\s\S]*?const WINDOWS_CAPSULE_PILL_WIDTH: f64 = 196\.0;[\s\S]*?const WINDOWS_CAPSULE_SIDE_INSET: f64 = 12\.0;[\s\S]*?width: WINDOWS_CAPSULE_PILL_WIDTH \+ WINDOWS_CAPSULE_SIDE_INSET \* 2\.0,[\s\S]*?height: if translation_active \{ 118\.0 \} else \{ 84\.0 \},[\s\S]*?bottom_inset: 12\.0,/.test(libRs)) {
+if (!/#\[cfg\(target_os = "windows"\)\][\s\S]*?const WINDOWS_CAPSULE_PILL_WIDTH: f64 = 280\.0;[\s\S]*?const WINDOWS_CAPSULE_SIDE_INSET: f64 = 12\.0;[\s\S]*?width: WINDOWS_CAPSULE_PILL_WIDTH \+ WINDOWS_CAPSULE_SIDE_INSET \* 2\.0,[\s\S]*?height: if translation_active \{ 118\.0 \} else \{ 84\.0 \},[\s\S]*?bottom_inset: 12\.0,/.test(libRs)) {
   throw new Error('windows runtime capsule bounds should leave room for the native shadow while keeping a fixed visual pill');
 }
 

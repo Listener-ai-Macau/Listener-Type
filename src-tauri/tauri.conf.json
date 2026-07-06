@@ -15,6 +15,7 @@
     "windows": [
       {
         "label": "main",
+        "url": "index.html",
         "title": "Listener Type",
         "width": 1240,
         "height": 800,
