@@ -8,12 +8,16 @@ const collectScript = path.join(repoRoot, "scripts", "windows-listener-preproduc
 const activeBleScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-ble-active-bench.ps1");
 const humanScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-human-review.ps1");
 const scenarioManifestPath = path.join(repoRoot, "scripts", "listener-preproduction-scenarios.json");
+const deviceSectionPath = path.join(repoRoot, "src", "pages", "settings", "DeviceSection.tsx");
+const commandsPath = path.join(repoRoot, "src-tauri", "src", "commands.rs");
 
 const bench = fs.readFileSync(benchScript, "utf8");
 const collect = fs.readFileSync(collectScript, "utf8");
 const activeBle = fs.readFileSync(activeBleScript, "utf8");
 const human = fs.readFileSync(humanScript, "utf8");
 const scenarioManifest = JSON.parse(fs.readFileSync(scenarioManifestPath, "utf8"));
+const deviceSection = fs.readFileSync(deviceSectionPath, "utf8");
+const commands = fs.readFileSync(commandsPath, "utf8");
 
 const scenarios = Array.isArray(scenarioManifest.scenarios) ? scenarioManifest.scenarios : [];
 const requiredStepIds = scenarios.map((scenario) => scenario.id);
@@ -44,6 +48,18 @@ if (!human.includes("Assert-StepsMatchCanonicalScenarios")) {
   failures.push("human review must fail fast when its detailed steps drift from the canonical scenario manifest");
 }
 
+const mutexIndex = human.indexOf("singleInstanceMutex");
+const cleanupIndex = human.indexOf("Remove-Item -LiteralPath $staleOutput");
+if (mutexIndex === -1 || cleanupIndex === -1 || mutexIndex > cleanupIndex) {
+  failures.push("human review must take the single-instance mutex before cleaning review outputs");
+}
+
+for (const requiredToken of ["resumeExistingFullReview", "ResumedExistingRecords"]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review must preserve unfinished operator records when the window is relaunched: ${requiredToken}`);
+  }
+}
+
 for (const requiredToken of ["实际操作和结果", "operator_note"]) {
   if (!human.includes(requiredToken)) {
     failures.push(`human review must use one operator note field and include ${requiredToken}`);
@@ -62,8 +78,50 @@ for (const requiredToken of ["FormStartPosition]::Manual", "PrimaryScreen.Workin
   }
 }
 
-if (!human.includes("[System.Drawing.Size]::new(560, 500)")) {
-  failures.push("human review window must remain compact enough to leave Type/Windows Bluetooth visible");
+if (!human.includes("[System.Drawing.Size]::new(480, 390)")) {
+  failures.push("human review window must stay small enough to leave Type/Windows Bluetooth visible");
+}
+
+if (!deviceSection.includes("onWheel={event => {\n          event.currentTarget.blur();\n        }}")) {
+  failures.push("device minute inputs must blur on mouse wheel so scrolling the settings page cannot silently change saved minutes");
+}
+
+const oneClickStart = commands.indexOf("pub async fn recover_embedded_ble_device");
+const oneClickEnd = commands.indexOf("#[derive(Debug, Clone, Serialize)]\n#[serde(rename_all = \"camelCase\")]\npub struct EmbeddedBleRuntimeStatus", oneClickStart);
+if (oneClickStart === -1 || oneClickEnd === -1) {
+  failures.push("recover_embedded_ble_device boundary must stay discoverable for the stale-pairing regression gate");
+} else {
+  const oneClickBody = commands.slice(oneClickStart, oneClickEnd);
+  if (oneClickBody.includes("embedded_ble_windows_pairing_result(")) {
+    failures.push("one-click/double-click stale cleanup must not call Type PairAsync; Windows native pairing must be user-confirmed after cleanup");
+  }
+  for (const requiredToken of [
+    "hold_embedded_ble_listener_for_native_pairing_handoff",
+    "skipped Type PairAsync after stale cleanup",
+  ]) {
+    if (!oneClickBody.includes(requiredToken)) {
+      failures.push(`one-click recovery must hand off to Windows native pairing after Type cleanup: ${requiredToken}`);
+    }
+  }
+}
+
+for (const requiredToken of [
+  "Type 只负责清理旧配对和等待确认，不能自己 PairAsync 抢配。",
+  "如果未清旧配对就直接点连接，出现连接失败不能算通过。",
+  "没有 Type 的电脑也能作为普通蓝牙键盘配对，但旧缓存必须由用户自己删除。",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human Bluetooth acceptance must state the Type/no-Type native pairing contract: ${requiredToken}`);
+  }
+}
+
+for (const requiredContract of [
+  "Type must not call PairAsync",
+  "Without Type, the user must manually remove stale Windows pairing",
+]) {
+  if (!JSON.stringify(scenarioManifest).includes(requiredContract)) {
+    failures.push(`canonical scenario manifest must encode the Bluetooth repair product contract: ${requiredContract}`);
+  }
 }
 
 for (const stepId of requiredStepIds) {

@@ -65,15 +65,17 @@
     },
     {
       "id": "ec11-double-repair-with-type",
-      "bench_title": "EC11 double-click repair with Type",
+      "bench_title": "EC11 double-click repair with Type cleanup and Windows native connect",
       "bench_capabilities": ["physical_input_fixture", "type_runtime", "windows_ble_automation", "led_optical_capture"],
-      "bench_evidence": ["physical_input_trace", "pairing_flow_log", "led_capture", "gatt_probe"]
+      "bench_evidence": ["physical_input_trace", "type_unpair_log", "windows_native_pair_log", "led_capture", "gatt_probe"],
+      "product_contract": "With Type present, double-click repair lets Type clear this PC's stale Windows pairing cache, then the user must complete Windows native pairing via the system notification or Add device. Type must not call PairAsync for this handoff."
     },
     {
       "id": "computer-switch-product-flow",
-      "bench_title": "Computer switch flow",
+      "bench_title": "Computer switch flow with and without Type",
       "bench_capabilities": ["windows_ble_automation", "second_ble_host"],
-      "bench_evidence": ["old_host_state", "new_host_pair_log", "takeover_log"]
+      "bench_evidence": ["old_host_state", "no_type_manual_delete_log", "new_host_native_pair_log", "takeover_log"],
+      "product_contract": "Without Type, the user must manually remove stale Windows pairing before native pairing. With Type on the target PC, Type may clear local stale pairing but still waits for Windows native user-confirmed pairing."
     },
     {
       "id": "recording-response-and-led-priority",

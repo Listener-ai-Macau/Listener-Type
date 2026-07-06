@@ -26,9 +26,6 @@ $sessionPath = Join-Path $OutputDir "preproduction-human-review-session.jsonl"
 $summaryPath = Join-Path $OutputDir "preproduction-human-review-summary.md"
 $summaryJsonPath = Join-Path $OutputDir "preproduction-human-review-summary.json"
 $startInfoPath = Join-Path $OutputDir "preproduction-human-review-start.txt"
-foreach ($staleOutput in @($sessionPath, $summaryPath, $summaryJsonPath, $startInfoPath)) {
-    Remove-Item -LiteralPath $staleOutput -Force -ErrorAction SilentlyContinue
-}
 
 $singleInstanceCreated = $false
 $singleInstanceMutex = [System.Threading.Mutex]::new(
@@ -38,6 +35,19 @@ $singleInstanceMutex = [System.Threading.Mutex]::new(
 if (-not $singleInstanceCreated) {
     Write-Warning "Another Listener preproduction review window is already running."
     exit 3
+}
+
+$resumeExistingFullReview = (
+    [string]::IsNullOrWhiteSpace($StepId) -and
+    -not $NoPrompt.IsPresent -and
+    (Test-Path -LiteralPath $sessionPath) -and
+    -not (Test-Path -LiteralPath $summaryJsonPath)
+)
+
+if (-not $resumeExistingFullReview) {
+    foreach ($staleOutput in @($sessionPath, $summaryPath, $summaryJsonPath, $startInfoPath)) {
+        Remove-Item -LiteralPath $staleOutput -Force -ErrorAction SilentlyContinue
+    }
 }
 
 if ([string]::IsNullOrWhiteSpace($RandomName)) {
@@ -402,8 +412,8 @@ function Show-ReviewStep {
     $form = [System.Windows.Forms.Form]::new()
     $form.Text = "Listener 1.0.2 准量产验收"
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
-    $form.ClientSize = [System.Drawing.Size]::new(560, 500)
-    $form.MinimumSize = [System.Drawing.Size]::new(540, 460)
+    $form.ClientSize = [System.Drawing.Size]::new(480, 390)
+    $form.MinimumSize = [System.Drawing.Size]::new(460, 360)
     $form.MaximizeBox = $false
     $form.TopMost = $true
     $form.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 10)
@@ -420,61 +430,61 @@ function Show-ReviewStep {
     $title.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 12, [System.Drawing.FontStyle]::Bold)
     $title.AutoSize = $false
     $title.Location = [System.Drawing.Point]::new(16, 12)
-    $title.Size = [System.Drawing.Size]::new(528, 30)
+    $title.Size = [System.Drawing.Size]::new(448, 26)
     $form.Controls.Add($title)
 
     $actionLabel = [System.Windows.Forms.Label]::new()
     $actionLabel.Text = "你现在做"
     $actionLabel.AutoSize = $false
-    $actionLabel.Location = [System.Drawing.Point]::new(16, 50)
-    $actionLabel.Size = [System.Drawing.Size]::new(528, 22)
+    $actionLabel.Location = [System.Drawing.Point]::new(16, 44)
+    $actionLabel.Size = [System.Drawing.Size]::new(448, 20)
     $form.Controls.Add($actionLabel)
 
     $actionBox = [System.Windows.Forms.TextBox]::new()
     $actionBox.Multiline = $true
     $actionBox.ReadOnly = $true
     $actionBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $actionBox.Location = [System.Drawing.Point]::new(16, 74)
-    $actionBox.Size = [System.Drawing.Size]::new(528, 68)
+    $actionBox.Location = [System.Drawing.Point]::new(16, 66)
+    $actionBox.Size = [System.Drawing.Size]::new(448, 50)
     $actionBox.Text = Convert-ReviewText $Step.action
     $form.Controls.Add($actionBox)
 
     $expectedLabel = [System.Windows.Forms.Label]::new()
     $expectedLabel.Text = "通过标准"
     $expectedLabel.AutoSize = $false
-    $expectedLabel.Location = [System.Drawing.Point]::new(16, 150)
-    $expectedLabel.Size = [System.Drawing.Size]::new(528, 22)
+    $expectedLabel.Location = [System.Drawing.Point]::new(16, 122)
+    $expectedLabel.Size = [System.Drawing.Size]::new(448, 20)
     $form.Controls.Add($expectedLabel)
 
     $expectedBox = [System.Windows.Forms.TextBox]::new()
     $expectedBox.Multiline = $true
     $expectedBox.ReadOnly = $true
     $expectedBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $expectedBox.Location = [System.Drawing.Point]::new(16, 174)
-    $expectedBox.Size = [System.Drawing.Size]::new(528, 58)
+    $expectedBox.Location = [System.Drawing.Point]::new(16, 144)
+    $expectedBox.Size = [System.Drawing.Size]::new(448, 48)
     $expectedBox.Text = Convert-ReviewText $Step.expected
     $form.Controls.Add($expectedBox)
 
     $operatorActionLabel = [System.Windows.Forms.Label]::new()
     $operatorActionLabel.Text = "实际操作和结果"
     $operatorActionLabel.AutoSize = $false
-    $operatorActionLabel.Location = [System.Drawing.Point]::new(16, 240)
-    $operatorActionLabel.Size = [System.Drawing.Size]::new(528, 22)
+    $operatorActionLabel.Location = [System.Drawing.Point]::new(16, 198)
+    $operatorActionLabel.Size = [System.Drawing.Size]::new(448, 20)
     $form.Controls.Add($operatorActionLabel)
 
     $operatorAction = [System.Windows.Forms.TextBox]::new()
     $operatorAction.Multiline = $true
     $operatorAction.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-    $operatorAction.Location = [System.Drawing.Point]::new(16, 264)
-    $operatorAction.Size = [System.Drawing.Size]::new(528, 154)
+    $operatorAction.Location = [System.Drawing.Point]::new(16, 220)
+    $operatorAction.Size = [System.Drawing.Size]::new(448, 98)
     $operatorAction.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom
     $form.Controls.Add($operatorAction)
 
     $buttonPanel = [System.Windows.Forms.FlowLayoutPanel]::new()
     $buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
     $buttonPanel.WrapContents = $false
-    $buttonPanel.Location = [System.Drawing.Point]::new(16, 432)
-    $buttonPanel.Size = [System.Drawing.Size]::new(528, 42)
+    $buttonPanel.Location = [System.Drawing.Point]::new(16, 332)
+    $buttonPanel.Size = [System.Drawing.Size]::new(448, 36)
     $buttonPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Bottom
     $form.Controls.Add($buttonPanel)
 
@@ -488,7 +498,7 @@ function Show-ReviewStep {
         $button = [System.Windows.Forms.Button]::new()
         $button.Text = $spec.text
         $button.Tag = $spec.value
-        $button.Size = [System.Drawing.Size]::new(96, 34)
+        $button.Size = [System.Drawing.Size]::new(86, 30)
         $button.Add_Click({
             param($sender, $eventArgs)
             $selectedResult = [string]$sender.Tag
@@ -661,27 +671,34 @@ $steps = @(
         -ObservationTemplate "是否误触发双击：是/否；灯效：；Windows/Type现象："
     New-ReviewStep `
         -Id "ec11-double-repair-with-type" `
-        -Title "EC11 双击重配和恢复" `
+        -Title "有 Type 的双击重配" `
         -Action (Join-Text @(
             "保持 Type 打开。快速双击 EC11 旋钮。"
-            "如果 Windows 右下角只出现一次连接通知，可以点一次；如果没有通知，打开蓝牙页观察。")) `
+            "等 Type 先清理这台电脑上的旧 Listener 配对。"
+            "看到 Windows 右下角连接通知后，只点一次连接；如果没有通知，就打开 Windows 蓝牙页手动添加当前 Listener 名字。"
+            "不要在 Type 里点别的恢复按钮，不要重复双击。")) `
         -Expected (Join-Text @(
-            "双击进入明确重新配对/恢复流程。"
+            "Type 只负责清理旧配对和等待确认，不能自己 PairAsync 抢配。"
+            "Windows 连接通知最多出现一次；点连接或手动添加后应成功。"
+            "如果未清旧配对就直接点连接，出现连接失败不能算通过。"
             "不能长时间卡在已连接/未连接循环。"
-            "灯效时机正确：重配提示和找 Type 提示不能互相错用。")) `
-        -ObservationTemplate "弹窗：有/无；点连接结果：；Windows状态：；Type恢复：；灯效："
+            "灯效时机正确：重配提示和找 Type 提示不能互相错用。"
+            "Type 必须在真实 BLE GATT 恢复后再显示已恢复。")) `
+        -ObservationTemplate "Type是否先清旧配对：；弹窗次数：；连接方式/结果：；Windows状态：；Type恢复：；灯效："
     New-ReviewStep `
         -Id "computer-switch-product-flow" `
         -Title "换电脑产品流程" `
         -Action (Join-Text @(
-            "模拟换电脑：旧电脑如果已经手动删除，Type 不能抢回。"
-            "在没有 Type 的电脑/场景里，只走 Windows 原生配对。"
-            "有 Type 的新电脑打开 Type 后，再接管已配对设备。")) `
+            "模拟换电脑/没有 Type：先退出 Type。"
+            "如果这台 Windows 里已经有旧 Listener 条目，先手动删除旧设备；不删除直接点连接失败是预期问题，不算通过。"
+            "删除旧设备后，用 Windows 原生添加设备或右下角连接通知配对 Listener。"
+            "再模拟有 Type 的电脑：打开 Type，确认它只接管已配对设备，不抢回旧电脑。")) `
         -Expected (Join-Text @(
+            "没有 Type 的电脑也能作为普通蓝牙键盘配对，但旧缓存必须由用户自己删除。"
+            "有 Type 的电脑可以帮本机清旧配对，但仍需要用户点 Windows 原生连接。"
             "旧电脑缓存不会被旧 Type 自动抢回。"
-            "无 Type 场景仍然能连键盘。"
             "有 Type 场景能恢复 BLE 控制和录音。")) `
-        -ObservationTemplate "旧电脑：；无Type配对：；有Type接管：；问题："
+        -ObservationTemplate "无Type是否先删旧设备：；原生配对结果：；有Type接管：；旧电脑是否被抢回：；问题："
     New-ReviewStep `
         -Id "recording-response-and-led-priority" `
         -Title "录音响应和灯效优先级" `
@@ -769,7 +786,26 @@ if (-not [string]::IsNullOrWhiteSpace($StepId)) {
     $steps = $selectedSteps
 }
 
-@(
+$existingRecords = @()
+if ($resumeExistingFullReview) {
+    $existingRecords = @(
+        Get-Content -LiteralPath $sessionPath -ErrorAction SilentlyContinue |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { $_ | ConvertFrom-Json }
+    )
+
+    if ($existingRecords.Count -gt $steps.Count) {
+        throw "Existing review session has more records ($($existingRecords.Count)) than current steps ($($steps.Count)). Use a new OutputDir."
+    }
+
+    for ($j = 0; $j -lt $existingRecords.Count; $j++) {
+        if ($existingRecords[$j].id -ne $steps[$j].id) {
+            throw "Existing review session step $($j + 1) is '$($existingRecords[$j].id)', expected '$($steps[$j].id)'. Use a new OutputDir."
+        }
+    }
+}
+
+$startLines = @(
     "Listener 1.0.2 preproduction human review"
     "Generated: $((Get-Date).ToString('o'))"
     "Repo: $repoRoot"
@@ -779,11 +815,21 @@ if (-not [string]::IsNullOrWhiteSpace($StepId)) {
     "NoPrompt: $($NoPrompt.IsPresent)"
     "TypeHead: $($typeHeadInfo.head) $($typeHeadInfo.commit_time) $($typeHeadInfo.subject)"
     "FirmwareHead: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time) $($firmwareHeadInfo.subject)"
-) | Set-Content -LiteralPath $startInfoPath -Encoding UTF8
+)
+if ($resumeExistingFullReview) {
+    $startLines += "ResumedExistingRecords: $($existingRecords.Count)"
+    $startLines | Add-Content -LiteralPath $startInfoPath -Encoding UTF8
+} else {
+    $startLines | Set-Content -LiteralPath $startInfoPath -Encoding UTF8
+}
 
 $records = [System.Collections.Generic.List[object]]::new()
 try {
-    for ($i = 0; $i -lt $steps.Count; $i++) {
+    foreach ($existingRecord in $existingRecords) {
+        $records.Add($existingRecord) | Out-Null
+    }
+
+    for ($i = $existingRecords.Count; $i -lt $steps.Count; $i++) {
         $record = Show-ReviewStep -Index ($i + 1) -Total $steps.Count -Step $steps[$i]
         $records.Add($record) | Out-Null
         ($record | ConvertTo-Json -Depth 10 -Compress) | Add-Content -LiteralPath $sessionPath -Encoding UTF8

@@ -14420,7 +14420,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        fn type_controlled_recovery_is_the_only_type_pairing_command() {
+        fn type_controlled_recovery_uses_single_type_command() {
             let source = include_str!("embedded_ble.rs");
             let production = &source[..source
                 .find("    mod tests {")
@@ -14438,7 +14438,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             assert!(body.contains("b\"VREC:RECOVERY:TYPE\\n\""));
             assert!(
                 !body.contains("b\"VREC:RECOVERY\\n\""),
-                "Type-controlled recovery must not expose the Windows native pairing toast command"
+                "Type-controlled recovery should use one explicit firmware command; firmware decides whether the bounded Windows Swift Pair prompt is advertised"
             );
             assert!(!production.contains("send_recording_control_native_pairing_recovery"));
         }

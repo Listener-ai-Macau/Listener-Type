@@ -629,6 +629,9 @@ function MinuteInput({
           setEditing(false);
           commit(event.target.value, value);
         }}
+        onWheel={event => {
+          event.currentTarget.blur();
+        }}
         style={{ ...inputStyle, flex: '0 1 96px', maxWidth: 120 }}
       />
       <span style={{ fontSize: 12, color: 'var(--ol-ink-4)' }}>

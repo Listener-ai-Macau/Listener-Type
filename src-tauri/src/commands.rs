@@ -1933,14 +1933,14 @@ fn embedded_ble_recovery_message(
     if let Some(unpair) = unpair_result {
         return match unpair.status {
             crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
-                "旧的 Listener 蓝牙配对已清理。Type 会尝试触发 Windows 系统配对提醒；如果没有弹出，请在蓝牙设置里重新配对 Listener。".to_string()
+                "Type 已清理这台电脑上的旧 Listener 配对。请点击 Windows 连接通知，或在 Windows 蓝牙里手动添加 Listener；Type 检测到新配对后会恢复。".to_string()
             }
             crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
             | crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
-                "Type 没找到可自动清理的旧配对。请在打开的 Windows 蓝牙设置里配对 Listener，Type 会自动恢复。".to_string()
+                "这台电脑没有可自动清理的旧 Listener 配对。请点击 Windows 连接通知，或在 Windows 蓝牙里手动添加 Listener；如果连接失败，请先删除旧设备再连接。".to_string()
             }
             crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
-                "Windows 需要你确认移除 Listener。请在打开的蓝牙设置里删除 Listener 后重新配对，Type 会自动恢复。".to_string()
+                "Windows 没有允许 Type 自动清理旧 Listener 配对。请先在 Windows 蓝牙里删除旧设备，再点击连接通知或手动添加 Listener。".to_string()
             }
         };
     }
@@ -2084,7 +2084,7 @@ pub async fn recover_embedded_ble_device(
                 embedded_ble_repair_failure_action(&failure);
             let mut recovery_action = embedded_ble_recovery_action_for_failure(&failure);
             let mut unpair_result = None;
-            let mut pairing_prompt_result = None;
+            let pairing_prompt_result = None;
             let listener_last_error = coord.embedded_ble_listener_last_error();
             let wake_recovery = coord.embedded_ble_wake_recovery_snapshot();
             let runtime_requests_auto_unpair = runtime_suggests_embedded_ble_auto_unpair(
@@ -2105,8 +2105,9 @@ pub async fn recover_embedded_ble_device(
                 log::info!(
                     "[embedded-ble] one-click recovery capture stop before device cleanup stopped={capture_stopped}"
                 );
-                coord.hold_embedded_ble_listener_for_pairing_confirmation(
-                    "one-click recovery stale pairing cleanup",
+                let expected_ble_name = coord.prefs().get().device_ble_name;
+                coord.hold_embedded_ble_listener_for_native_pairing_handoff(
+                    expected_ble_name.clone(),
                 );
                 log::info!(
                     "[embedded-ble] one-click recovery attempting automatic Listener unpair failure_kind={:?} runtime_escalated={runtime_requests_auto_unpair} reconnect_attempts={} notify_state={:?}",
@@ -2131,54 +2132,10 @@ pub async fn recover_embedded_ble_device(
                 user_action_required = true;
                 recovery_action = EmbeddedBleRecoveryAction::RePairRequired;
                 unpair_result = Some(unpair.clone());
-                let expected_ble_name = coord.prefs().get().device_ble_name;
-                let pairing = embedded_ble_windows_pairing_result(
-                    "one-click recovery",
-                    expected_ble_name.as_str(),
-                    false,
+                open_bluetooth_settings = true;
+                log::info!(
+                    "[embedded-ble] one-click recovery skipped Type PairAsync after stale cleanup target={expected_ble_name:?}; waiting for Windows native pairing notification or manual add-device flow"
                 );
-                let retry_after_cleanup = matches!(
-                    pairing.status,
-                    crate::embedded_ble::BleDevicePairingPromptStatus::Paired
-                        | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
-                ) && !pairing.open_bluetooth_settings
-                    && pairing.failed_devices == 0;
-                open_bluetooth_settings = pairing.open_bluetooth_settings;
-                pairing_prompt_result = Some(pairing.clone());
-                if retry_after_cleanup {
-                    coord.clear_embedded_ble_pairing_confirmation_hold("one-click recovery paired");
-                    coord.refresh_embedded_ble_listener();
-                    log::info!(
-                        "[embedded-ble] one-click recovery retrying Listener connection after stale device cleanup"
-                    );
-                    match coord.repair_embedded_ble_connection(timeout_ms).await {
-                        Ok(snapshot) => {
-                            let (runtime, firmware) =
-                                embedded_ble_runtime_and_firmware(&coord).await?;
-                            return Ok(EmbeddedBleRepairResult {
-                                recovered: true,
-                                user_action_required: false,
-                                open_bluetooth_settings: false,
-                                recovery_action: EmbeddedBleRecoveryAction::Reconnected,
-                                message: snapshot.user_guidance,
-                                failure: None,
-                                unpair_result,
-                                pairing_prompt_result,
-                                runtime,
-                                firmware,
-                            });
-                        }
-                        Err(retry_err) => {
-                            log::warn!(
-                                "[embedded-ble] one-click recovery reconnect after stale device cleanup failed: {retry_err}"
-                            );
-                        }
-                    }
-                } else {
-                    log::info!(
-                        "[embedded-ble] one-click recovery pairing is not complete yet; keeping background BLE listener paused to avoid Windows connect/disconnect churn"
-                    );
-                }
             }
 
             let (runtime, firmware) = embedded_ble_runtime_and_firmware(&coord).await?;
@@ -8763,7 +8720,7 @@ mod tests {
     }
 
     #[test]
-    fn ble_name_refresh_and_one_click_recovery_run_windows_pairasync() {
+    fn ble_name_refresh_uses_pairasync_but_one_click_hands_off_to_native_pairing() {
         let source = include_str!("commands.rs");
         let helper_start = source
             .find("fn embedded_ble_windows_pairing_result")
@@ -8775,10 +8732,7 @@ mod tests {
         let helper = &source[helper_start..helper_end];
         assert!(helper.contains("prompt_listener_pairing_after_type_recovery"));
         assert!(helper.contains("prompt_listener_pairing_for_recovery"));
-        assert!(
-            !helper.contains("automatic Windows PairAsync skipped"),
-            "recovery paths must not regress to a handoff-only placeholder"
-        );
+        assert!(helper.contains("PairAsync"));
 
         let rename_start = source
             .find("fn apply_device_ble_name_windows_refresh_blocking")
@@ -8807,10 +8761,17 @@ mod tests {
             .map(|offset| one_click_start + offset)
             .expect("one-click recovery command boundary should exist");
         let one_click = &source[one_click_start..one_click_end];
-        assert!(one_click.contains("embedded_ble_windows_pairing_result"));
         assert!(
-            one_click.contains("expected_ble_name.as_str(),\n                    false"),
-            "one-click cleanup does not prove a Type recovery command was sent, so it must use the conservative PairAsync path"
+            !one_click.contains("embedded_ble_windows_pairing_result"),
+            "one-click recovery must not start Type PairAsync after cleanup; users finish with the Windows native pairing notification"
+        );
+        assert!(
+            one_click.contains("hold_embedded_ble_listener_for_native_pairing_handoff"),
+            "one-click recovery should hold Type BLE and watch for the user's Windows native pairing"
+        );
+        assert!(
+            one_click.contains("skipped Type PairAsync after stale cleanup"),
+            "one-click recovery logs must prove it handed pairing to Windows instead of auto-pairing"
         );
     }
 
