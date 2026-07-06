@@ -1,9 +1,14 @@
 param(
   [string]$ArtifactsRoot = "",
+  [ValidateRange(0, 64)]
+  [int]$CargoBuildJobs = 0,
   [switch]$SkipRustInstall,
   [switch]$SkipNpmCi,
   [switch]$IncludePortable,
-  [switch]$CleanArtifacts
+  [switch]$CleanArtifacts,
+  [switch]$ReuseExistingExe,
+  [switch]$UseSccache,
+  [switch]$IncrementalReleaseBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -171,6 +176,58 @@ function Stop-RunningReleaseApp {
   }
 }
 
+function Test-ReusableReleaseExe {
+  $releaseExe = Join-Path $releaseRoot "listener-type.exe"
+  if (-not (Test-Path -LiteralPath $releaseExe)) {
+    throw "-ReuseExistingExe requires an existing release exe: $releaseExe"
+  }
+
+  $wixRoot = Join-Path $releaseRoot "wix\x64"
+  foreach ($required in @(
+      (Join-Path $wixRoot "main.wxs"),
+      (Join-Path $wixRoot "locale.wxl"),
+      (Join-Path $appRoot "src-tauri\wix\listener-type-ime-cleanup.wxs")
+    )) {
+    if (-not (Test-Path -LiteralPath $required)) {
+      throw "-ReuseExistingExe requires an existing generated WiX bundle file: $required"
+    }
+  }
+
+  $productPaths = @(
+    "package.json",
+    "package-lock.json",
+    "index.html",
+    "public",
+    "src",
+    "src-tauri\Cargo.toml",
+    "src-tauri\Cargo.lock",
+    "src-tauri\build.rs",
+    "src-tauri\capabilities",
+    "src-tauri\icons",
+    "src-tauri\src",
+    "src-tauri\tauri.conf.json",
+    "src-tauri\wix",
+    "windows-ime"
+  )
+
+  $dirty = @(& git -C $appRoot status --porcelain -- @productPaths)
+  if ($dirty.Count -gt 0) {
+    throw "-ReuseExistingExe refused because product inputs are dirty:`n$($dirty -join "`n")"
+  }
+
+  $latestEpochText = (& git -C $appRoot log -1 --format=%ct -- @productPaths) -join ""
+  if (-not [string]::IsNullOrWhiteSpace($latestEpochText)) {
+    $latestEpoch = [int64]$latestEpochText.Trim()
+    $latestProductCommitUtc = [DateTimeOffset]::FromUnixTimeSeconds($latestEpoch).UtcDateTime
+    $exeUtc = (Get-Item -LiteralPath $releaseExe).LastWriteTimeUtc
+    if ($exeUtc -lt $latestProductCommitUtc) {
+      throw ("-ReuseExistingExe refused because release exe is older than the latest product-input commit. exe={0:o} product_commit={1:o}" -f $exeUtc, $latestProductCommitUtc)
+    }
+  }
+
+  Write-Host "[ok] Reusing existing release exe; product inputs are clean and newer docs/scripts-only commits do not require Rust rebuild."
+}
+
 function Test-WebView2Runtime {
   $paths = @(
     "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
@@ -279,7 +336,35 @@ function Invoke-MsvcBuild {
   Remove-Item -LiteralPath $msiPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath (Get-TauriMsiPath) -Force -ErrorAction SilentlyContinue
 
-  $buildCommand = "call `"$VsDevCmd`" -arch=x64 -host_arch=x64 && set `"PATH=$CargoBin;%PATH%`" && set `"CARGO_BUILD_JOBS=1`" && npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
+  $commandParts = @(
+    "call `"$VsDevCmd`" -arch=x64 -host_arch=x64",
+    "set `"PATH=$CargoBin;%PATH%`""
+  )
+
+  if ($CargoBuildJobs -gt 0) {
+    $commandParts += "set `"CARGO_BUILD_JOBS=$CargoBuildJobs`""
+    Write-Host "[info] Cargo build jobs forced to $CargoBuildJobs"
+  } else {
+    Write-Host "[info] Cargo build jobs left at Cargo default parallelism"
+  }
+
+  if ($UseSccache.IsPresent) {
+    $sccache = Get-Command "sccache" -ErrorAction SilentlyContinue
+    if (-not $sccache) {
+      throw "-UseSccache was set, but sccache is not installed or not on PATH."
+    }
+    $commandParts += "set `"RUSTC_WRAPPER=$($sccache.Source)`""
+    $commandParts += "set `"SCCACHE_IGNORE_SERVER_IO_ERROR=1`""
+    Write-Host "[info] Using sccache rustc wrapper: $($sccache.Source)"
+  }
+
+  if ($IncrementalReleaseBuild.IsPresent) {
+    $commandParts += "set `"CARGO_INCREMENTAL=1`""
+    Write-Host "[info] CARGO_INCREMENTAL=1 enabled for this release build"
+  }
+
+  $commandParts += "npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
+  $buildCommand = $commandParts -join " && "
   $exitCode = Invoke-CmdWithHeartbeat -Command $buildCommand -Label "Tauri Windows MSI build"
   if ($exitCode -ne 0) {
     Write-Warning "Tauri Windows MSI build returned exit code $exitCode. Trying to finish MSI linking from generated WiX objects."
@@ -459,7 +544,11 @@ try {
   $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
   Write-Host "[info] Default Windows package does not bundle or register the optional TSF IME."
   Stop-RunningReleaseApp
-  Invoke-MsvcBuild -VsDevCmd $vsDevCmd -CargoBin $cargoBin
+  if ($ReuseExistingExe.IsPresent) {
+    Test-ReusableReleaseExe
+  } else {
+    Invoke-MsvcBuild -VsDevCmd $vsDevCmd -CargoBin $cargoBin
+  }
   Repair-TauriMsiBundle
   Copy-WindowsArtifacts
 } finally {

@@ -25,10 +25,27 @@ Use a Windows runner with Visual Studio Build Tools and Rust installed.
 npm ci
 npm run build
 node scripts/windows-package-msvc.test.mjs
-powershell -ExecutionPolicy Bypass -File scripts/windows-package-msvc.ps1
+pwsh -NoProfile -File scripts/windows-package-msvc.ps1 -SkipRustInstall -SkipNpmCi -CleanArtifacts
 ```
 
 The generated installer is the user-facing artifact. A clean target machine should only need Windows, the installer, and network access for WebView2 Evergreen Runtime bootstrap if the runtime is not already installed. It must not require Node.js, Rust, ESP-IDF, this repository, or firmware flashing tools.
+
+For fast package refreshes after docs/scripts/workflow-only commits, reuse the
+already-built release executable and only relink the MSI:
+
+```powershell
+pwsh -NoProfile -File scripts/windows-package-msvc.ps1 -SkipRustInstall -SkipNpmCi -CleanArtifacts -ReuseExistingExe
+```
+
+Do not use `-ReuseExistingExe` after changes under `src`, `src-tauri`, package
+manifests, icons, WiX inputs, or other product inputs. The script refuses dirty
+or stale product inputs, but final publish builds should still use the full
+command above.
+
+The packaging script leaves Cargo at its default parallelism. If the local
+machine is memory constrained or a toolchain bug appears, pass
+`-CargoBuildJobs 1` to reproduce the old serial build behavior. If `sccache` is
+installed, pass `-UseSccache` to set `RUSTC_WRAPPER` for that run.
 
 The default package path intentionally skips `ListenerTypeIme.dll` and the TSF
 registration hooks. It may unregister and remove stale IME files from a previous

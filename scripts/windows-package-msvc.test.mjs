@@ -80,6 +80,13 @@ assert.match(script, /\[switch\]\$SkipRustInstall/, "script should support optin
 assert.match(script, /\[switch\]\$SkipNpmCi/, "script should support reusing existing node_modules");
 assert.match(script, /\[switch\]\$IncludePortable/, "portable zip generation should require an explicit opt-in switch");
 assert.match(script, /\[switch\]\$CleanArtifacts/, "script should support cleaning the output directory");
+assert.match(script, /\[int\]\$CargoBuildJobs = 0/, "script should leave Cargo parallelism at the default unless explicitly limited");
+assert.match(script, /\[switch\]\$ReuseExistingExe/, "script should support fast MSI relink for docs/scripts-only commits");
+assert.match(script, /\[switch\]\$UseSccache/, "script should support opt-in sccache acceleration");
+assert.match(script, /\[switch\]\$IncrementalReleaseBuild/, "script should support opt-in local incremental release builds");
+assert.match(script, /Test-ReusableReleaseExe/, "script should guard the fast MSI relink path");
+assert.match(script, /Cargo build jobs left at Cargo default parallelism/, "script should advertise default Cargo parallelism");
+assert.doesNotMatch(script, /set `"CARGO_BUILD_JOBS=1`"/, "default packaging must not force serial Cargo builds");
 assert.doesNotMatch(script, /WixTools314/, "MSVC packaging must not hard-code a single Tauri WiX tools version");
 assert.doesNotMatch(ciWorkflow, /WixTools314/, "CI MSI repair must not hard-code a single Tauri WiX tools version");
 assert.match(script, /-Filter "WixTools\*"/, "MSVC packaging should discover Tauri WiX tools by WixTools* glob");
