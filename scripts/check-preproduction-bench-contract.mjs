@@ -177,14 +177,21 @@ for (const forbiddenToken of [
   }
 }
 
-for (const requiredToken of ["FormStartPosition]::Manual", "PrimaryScreen.WorkingArea", "$workingArea.Left + 12"]) {
+for (const requiredToken of ["FormStartPosition]::Manual", "PrimaryScreen.WorkingArea", "$workingArea.Left + 12", "$workingArea.Top + 72"]) {
   if (!human.includes(requiredToken)) {
-    failures.push(`human review window must stay anchored at the lower-left operator workspace and include ${requiredToken}`);
+    failures.push(`human review window must stay anchored inside the operator workspace and include ${requiredToken}`);
   }
 }
 
-if (!human.includes("[System.Drawing.Size]::new(760, 540)") || !human.includes("[System.Drawing.Size]::new(720, 500)")) {
-  failures.push("human review window must stay readable but bounded enough to leave Type/Windows Bluetooth visible");
+for (const requiredToken of [
+  "[System.Drawing.Size]::new(680, 360)",
+  "[System.Drawing.Size]::new(640, 340)",
+  "$form.AutoScroll = $false",
+  "$buttonPanel.Location = [System.Drawing.Point]::new(16, 318)",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review window must stay compact and keep its buttons visible on the operator screen: ${requiredToken}`);
+  }
 }
 
 if (!deviceSection.includes("onWheel={event => {\n          event.currentTarget.blur();\n        }}")) {
