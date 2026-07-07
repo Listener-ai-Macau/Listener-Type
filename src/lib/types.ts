@@ -447,6 +447,8 @@ export interface UserPreferences {
   deviceKnobLedBrightnessPercent: number;
   /** 板框灯区域最大亮度，0-100；需要支持 led_edge 的固件。 */
   deviceEdgeLedBrightnessPercent: number;
+  /** 状态灯旧默认迁移标记。false/缺失时旧的四区 100 默认会迁到状态灯 80。 */
+  deviceStatusLedDefaultMigrated: boolean;
   /** 进入低功耗 idle 的等待时间，单位分钟。 */
   deviceLowPowerIdleMinutes: number;
   /** 插电/外部供电时是否允许进入低功耗 idle。 */

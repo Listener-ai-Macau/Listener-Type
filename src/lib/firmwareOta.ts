@@ -474,6 +474,15 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
   return { ok: blockers.length === 0, blockers };
 }
 
+export function firmwareOtaSnapshotSatisfiesVersionRefreshFallback(
+  snapshot: FirmwareOtaPreflightSnapshot,
+  protocolName: string | null,
+): boolean {
+  return protocolName === LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName
+    && snapshot.device.connected
+    && snapshot.device.capabilities.includes(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability);
+}
+
 export const initialFirmwareOtaState: FirmwareOtaState = {
   userState: 'idle',
   progress: 0,

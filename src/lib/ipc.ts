@@ -44,6 +44,10 @@ import {
   type FirmwareOtaPreflightSnapshot,
 } from './firmwareOta';
 import { applyMockDeviceSettingsWrite } from './deviceSettingsMock';
+import {
+  DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
+} from './deviceSettingsDefaults';
 import { OL_DATA } from './mockData';
 import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from './hotkey';
 
@@ -138,10 +142,11 @@ let mockSettings: UserPreferences = {
   },
   deviceCustomKeysDefaultMigrated: true,
   deviceKnobRotationAction: 'systemVolume',
-  deviceStatusLedBrightnessPercent: 100,
-  deviceKeyLedBrightnessPercent: 100,
-  deviceKnobLedBrightnessPercent: 100,
-  deviceEdgeLedBrightnessPercent: 100,
+  deviceStatusLedBrightnessPercent: DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
+  deviceKeyLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  deviceKnobLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  deviceEdgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  deviceStatusLedDefaultMigrated: true,
   deviceLowPowerIdleMinutes: 1,
   devicePluggedLowPowerEnabled: true,
   deviceBatteryAutoShutdownMinutes: 10,
@@ -181,10 +186,10 @@ let mockDeviceSettings: DeviceSettingsSnapshot = {
   connected: true,
   writeSupported: true,
   source: 'mock',
-  statusLedBrightnessPercent: 100,
-  keyLedBrightnessPercent: 100,
-  knobLedBrightnessPercent: 100,
-  edgeLedBrightnessPercent: 100,
+  statusLedBrightnessPercent: DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
+  keyLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  knobLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  edgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   ledZoneBrightnessSupported: true,
   lowPowerIdleMinutes: 1,
   pluggedLowPowerIdleMinutes: 1,
@@ -236,6 +241,40 @@ const normalizeDeviceBleName = (value: unknown) => {
 function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
   const fallbackDeviceKeys = mockSettings.deviceCustomKeys;
   const fallbackDisabledDeviceKeys = mockSettings.deviceCustomKeyDoubleClicks;
+  const deviceStatusLedDefaultMigrated = prefs.deviceStatusLedDefaultMigrated ?? false;
+  const deviceKeyLedBrightnessPercent = clampNumber(
+    prefs.deviceKeyLedBrightnessPercent,
+    DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+    0,
+    100,
+  );
+  const deviceKnobLedBrightnessPercent = clampNumber(
+    prefs.deviceKnobLedBrightnessPercent,
+    DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+    0,
+    100,
+  );
+  const deviceEdgeLedBrightnessPercent = clampNumber(
+    prefs.deviceEdgeLedBrightnessPercent,
+    DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+    0,
+    100,
+  );
+  let deviceStatusLedBrightnessPercent = clampNumber(
+    prefs.deviceStatusLedBrightnessPercent,
+    DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
+    0,
+    100,
+  );
+  if (
+    !deviceStatusLedDefaultMigrated &&
+    prefs.deviceStatusLedBrightnessPercent === DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT &&
+    deviceKeyLedBrightnessPercent === DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT &&
+    deviceKnobLedBrightnessPercent === DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT &&
+    deviceEdgeLedBrightnessPercent === DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT
+  ) {
+    deviceStatusLedBrightnessPercent = DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT;
+  }
   return {
     ...prefs,
     hotkey: {
@@ -267,10 +306,11 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     },
     deviceCustomKeysDefaultMigrated: prefs.deviceCustomKeysDefaultMigrated ?? true,
     deviceKnobRotationAction: prefs.deviceKnobRotationAction ?? 'systemVolume',
-    deviceStatusLedBrightnessPercent: clampNumber(prefs.deviceStatusLedBrightnessPercent, 100, 0, 100),
-    deviceKeyLedBrightnessPercent: clampNumber(prefs.deviceKeyLedBrightnessPercent, 100, 0, 100),
-    deviceKnobLedBrightnessPercent: clampNumber(prefs.deviceKnobLedBrightnessPercent, 100, 0, 100),
-    deviceEdgeLedBrightnessPercent: clampNumber(prefs.deviceEdgeLedBrightnessPercent, 100, 0, 100),
+    deviceStatusLedBrightnessPercent,
+    deviceKeyLedBrightnessPercent,
+    deviceKnobLedBrightnessPercent,
+    deviceEdgeLedBrightnessPercent,
+    deviceStatusLedDefaultMigrated: true,
     deviceLowPowerIdleMinutes: clampNumber(prefs.deviceLowPowerIdleMinutes, 1, 1, 1440),
     devicePluggedLowPowerEnabled: prefs.devicePluggedLowPowerEnabled ?? true,
     deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 10, 0, 1440),

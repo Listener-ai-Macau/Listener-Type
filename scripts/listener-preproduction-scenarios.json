@@ -19,13 +19,15 @@
       "id": "random-name-exact-cache-refresh",
       "bench_title": "Random BLE name exact cache refresh",
       "bench_capabilities": ["type_runtime", "windows_ble_automation"],
-      "bench_evidence": ["name_write_log", "windows_ble_state", "gatt_probe"]
+      "bench_evidence": ["name_write_log", "windows_ble_state", "gatt_probe"],
+      "product_contract": "Writing a different valid BLE name must update firmware, refresh this PC's stale Windows Bluetooth cache, and leave Windows/Type displaying the exact new name. Same-name writes remain no-repair/no-prompt."
     },
     {
       "id": "restore-default-listener",
       "bench_title": "Restore default listener name",
       "bench_capabilities": ["type_runtime", "windows_ble_automation"],
-      "bench_evidence": ["name_write_log", "windows_ble_state", "gatt_probe"]
+      "bench_evidence": ["name_write_log", "windows_ble_state", "gatt_probe"],
+      "product_contract": "Restoring the default BLE name listener is a different-name rename when the current name is not listener, so it must run the same Windows cache refresh and exact display-name confirmation path."
     },
     {
       "id": "manual-windows-delete-no-type-autopair",

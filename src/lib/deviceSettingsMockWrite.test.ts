@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
+import {
+  DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
+} from './deviceSettingsDefaults.ts';
 import { applyMockDeviceSettingsWrite } from './deviceSettingsMock.ts';
 import type {
   DeviceSettingsSnapshot,
@@ -15,10 +19,10 @@ const initial: DeviceSettingsSnapshot = {
   connected: true,
   writeSupported: true,
   source: 'mock',
-  statusLedBrightnessPercent: 100,
-  keyLedBrightnessPercent: 100,
-  knobLedBrightnessPercent: 100,
-  edgeLedBrightnessPercent: 100,
+  statusLedBrightnessPercent: DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
+  keyLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  knobLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  edgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   ledZoneBrightnessSupported: true,
   lowPowerIdleMinutes: 1,
   pluggedLowPowerIdleMinutes: 1,
@@ -61,6 +65,16 @@ function nextBleName(current: string): string {
 const currentSettings = {
   deviceBleName: initial.bleName,
 } as UserPreferences;
+assert.equal(
+  initial.statusLedBrightnessPercent,
+  DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
+  'Type frontend mock/default status LED brightness must start at 80 percent',
+);
+assert.equal(
+  initial.keyLedBrightnessPercent,
+  DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  'Type frontend mock/default non-status LED zones must start at 100 percent',
+);
 const sameNameWrite = applyMockDeviceSettingsWrite(
   currentSettings,
   initial,
@@ -100,4 +114,8 @@ assert.ok(
 assert.ok(
   !deviceSectionSource.includes('Math.round(value / 60000)'),
   'device settings form must preserve the backend no-round-up minute contract',
+);
+assert.ok(
+  deviceSectionSource.includes('DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT'),
+  'device settings form must use the shared Type status LED default instead of a local literal',
 );

@@ -754,6 +754,106 @@ $steps = @(
 Assert-StepsMatchCanonicalScenarios -ReviewSteps $steps
 $allSteps = @($steps)
 
+function Get-NormalizedExistingPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ""
+    }
+    try {
+        return ([System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $Path).Path)).TrimEnd('\')
+    } catch {
+        return ""
+    }
+}
+
+function Test-CarryForwardHumanSummaryCandidate {
+    param(
+        [Parameter(Mandatory = $true)]$Candidate,
+        [Parameter(Mandatory = $true)]$Summary,
+        [Parameter(Mandatory = $true)][string[]]$RequiredStepIds
+    )
+
+    $candidateDir = Get-NormalizedExistingPath -Path $Candidate.Directory.FullName
+    if ([string]::IsNullOrWhiteSpace($candidateDir)) {
+        return $false
+    }
+
+    $candidateLeaf = Split-Path -Leaf $candidateDir
+    if ($candidateLeaf -notlike "preproduction-human-review*") {
+        return $false
+    }
+
+    $candidatePathText = $Candidate.FullName.ToLowerInvariant()
+    foreach ($fixtureMarker in @("operator-note", "dryrun", "dry-run", "smoke", "fixture", "script-gate", "format-check", "no-hardware")) {
+        if ($candidatePathText.Contains($fixtureMarker)) {
+            return $false
+        }
+    }
+
+    $summaryOutputDir = Get-NormalizedExistingPath -Path ([string]$Summary.output_dir)
+    if ($summaryOutputDir -ne $candidateDir) {
+        return $false
+    }
+
+    $sessionPath = Get-NormalizedExistingPath -Path ([string]$Summary.session_jsonl)
+    if ([string]::IsNullOrWhiteSpace($sessionPath) -or (Split-Path -Parent $sessionPath) -ne $candidateDir) {
+        return $false
+    }
+
+    if ($Summary.status -notin @("HUMAN_REVIEW_PASS", "HUMAN_REVIEW_INCOMPLETE")) {
+        return $false
+    }
+
+    $records = @($Summary.records)
+    if ($records.Count -lt $RequiredStepIds.Count) {
+        return $false
+    }
+
+    $recordById = @{}
+    foreach ($record in $records) {
+        if ($null -eq $record -or $null -eq $record.PSObject.Properties["id"]) {
+            return $false
+        }
+        $recordId = [string]$record.id
+        if ([string]::IsNullOrWhiteSpace($recordId)) {
+            return $false
+        }
+        $recordById[$recordId] = $record
+        $recordJson = $record | ConvertTo-Json -Depth 10 -Compress
+        if ($recordJson -match "NoPrompt dry run" -or $recordJson -match "dryrun" -or $recordJson -match "operator-note") {
+            return $false
+        }
+    }
+    foreach ($stepId in $RequiredStepIds) {
+        if (-not $recordById.ContainsKey($stepId)) {
+            return $false
+        }
+    }
+
+    $operatorNoteCount = @($Summary.operator_notes).Count
+    if ($operatorNoteCount -gt 0) {
+        $triagePath = Join-Path $candidateDir "preproduction-operator-note-triage.json"
+        if (-not (Test-Path -LiteralPath $triagePath)) {
+            return $false
+        }
+        try {
+            $triage = Get-Content -Raw -LiteralPath $triagePath | ConvertFrom-Json
+        } catch {
+            return $false
+        }
+        if ($triage.status -ne "PASS") {
+            return $false
+        }
+        $triageSource = Get-NormalizedExistingPath -Path ([string]$triage.source_summary)
+        if ($triageSource -ne (Get-NormalizedExistingPath -Path $Candidate.FullName)) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Find-CarryForwardHumanSummary {
     param(
         [Parameter(Mandatory = $true)][string[]]$RequiredStepIds,
@@ -775,7 +875,7 @@ function Find-CarryForwardHumanSummary {
         } catch {
             continue
         }
-        if ($summary.status -ne "HUMAN_REVIEW_PASS") {
+        if (-not (Test-CarryForwardHumanSummaryCandidate -Candidate $candidate -Summary $summary -RequiredStepIds $RequiredStepIds)) {
             continue
         }
 

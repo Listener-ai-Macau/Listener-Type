@@ -23,6 +23,7 @@ import {
   firmwareOtaConfirmedVersionLooksRolledBack,
   firmwareOtaReducer,
   firmwareOtaRollbackVersionFromText,
+  firmwareOtaSnapshotSatisfiesVersionRefreshFallback,
   firmwareOtaVersionNotConfirmedAction,
   initialFirmwareOtaState,
   validateFirmwareOtaPackage,
@@ -32,6 +33,7 @@ import {
   type FirmwareOtaPreflightSnapshot,
   type FirmwareOtaUserState,
 } from '../../lib/firmwareOta';
+import { Icon } from '../../components/Icon';
 import { Btn, Pill, type PillTone } from '../_atoms';
 
 const EXPECTED_HARDWARE_REVISION = 'keyboard-v2-n16r8';
@@ -47,6 +49,7 @@ interface SelectedPackage {
   firmwareSha256: string;
   warnings: string[];
   sourceLabel: string;
+  sourceKind: 'zip' | 'directory';
 }
 
 export function FirmwareOtaPanel({
@@ -112,7 +115,7 @@ export function FirmwareOtaPanel({
           if (
             !waitForFirmwareVersion ||
             snapshot.device.firmwareVersion ||
-            snapshotSatisfiesVersionRefreshFallback(snapshot, protocolName)
+            firmwareOtaSnapshotSatisfiesVersionRefreshFallback(snapshot, protocolName)
           ) {
             return snapshot;
           }
@@ -183,7 +186,13 @@ export function FirmwareOtaPanel({
       if (typeof selected !== 'string') return;
       dispatch({ type: 'check' });
       const payload = await loadFirmwareOtaPackage(selected);
-      const accepted = await acceptPackage(selected, payload.manifestText, new Uint8Array(payload.firmwareBytes), payload.sourceLabel);
+      const accepted = await acceptPackage(
+        selected,
+        payload.manifestText,
+        new Uint8Array(payload.firmwareBytes),
+        payload.sourceLabel,
+        directory ? 'directory' : 'zip',
+      );
       if (!accepted && previousPackage) {
         dispatch({ type: 'ready' });
       }
@@ -196,7 +205,13 @@ export function FirmwareOtaPanel({
     }
   };
 
-  const acceptPackage = async (path: string, manifestText: string, firmwareBytes: Uint8Array, sourceLabel: string): Promise<boolean> => {
+  const acceptPackage = async (
+    path: string,
+    manifestText: string,
+    firmwareBytes: Uint8Array,
+    sourceLabel: string,
+    sourceKind: SelectedPackage['sourceKind'],
+  ): Promise<boolean> => {
     const result = await validateFirmwareOtaPackage(manifestText, firmwareBytes, {
       desktopVersion: APP_VERSION,
       expectedHardwareRevision: EXPECTED_HARDWARE_REVISION,
@@ -214,6 +229,7 @@ export function FirmwareOtaPanel({
       firmwareSha256: result.firmwareSha256,
       warnings: result.warnings,
       sourceLabel,
+      sourceKind,
     });
     void refreshOtaSnapshot({ protocolName: result.manifest.protocolName });
     dispatch({ type: 'ready' });
@@ -347,6 +363,16 @@ export function FirmwareOtaPanel({
       ? statusLabel
       : t('settings.recording.wiredFirmwareFlashing', '刷入中')
     : t('settings.recording.firmwareStartSelected', '开始刷入');
+  const selectedPackageDisplayName = selectedPackage
+    ? formatFirmwarePackageDisplayName(selectedPackage.sourceLabel || selectedPackage.path)
+    : '';
+  const selectedPackageAriaLabel = selectedPackage
+    ? t(
+      'settings.recording.firmwareOtaReselectPackage',
+      '重新选择固件包 {{name}}',
+      { name: selectedPackageDisplayName },
+    )
+    : undefined;
 
   return (
     <>
@@ -369,9 +395,33 @@ export function FirmwareOtaPanel({
           </div>
         </div>
         <div className="ol-firmware-ota-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Btn variant="ghost" size="sm" icon="doc" onClick={() => void choosePackage(false)} disabled={firmwareActionBusy}>
-            {t('settings.recording.firmwareOtaChoosePackage', '选择固件 zip')}
-          </Btn>
+          {selectedPackage ? (
+            <button
+              type="button"
+              className="ol-firmware-selected-package"
+              onClick={firmwareActionBusy ? undefined : () => void choosePackage(selectedPackage.sourceKind === 'directory')}
+              disabled={firmwareActionBusy}
+              aria-label={selectedPackageAriaLabel}
+              title={selectedPackage.path}
+            >
+              <span className="ol-firmware-selected-package-icon">
+                <Icon name="archive" size={16} />
+              </span>
+              <span className="ol-firmware-selected-package-copy">
+                <span className="ol-firmware-selected-package-kicker">
+                  {t('settings.recording.firmwareSelectedPackage', '已选固件')}
+                </span>
+                <span className="ol-firmware-selected-package-name">{selectedPackageDisplayName}</span>
+              </span>
+              <span className="ol-firmware-selected-package-meta">
+                v{selectedPackage.manifest.version} · {formatBytes(selectedPackage.manifest.fileSizeBytes)}
+              </span>
+            </button>
+          ) : (
+            <Btn variant="ghost" size="sm" icon="doc" onClick={() => void choosePackage(false)} disabled={firmwareActionBusy}>
+              {t('settings.recording.firmwareOtaChoosePackage', '选择固件 zip')}
+            </Btn>
+          )}
           <Btn variant="soft" size="sm" icon="archive" onClick={() => void choosePackage(true)} disabled={firmwareActionBusy}>
             {t('settings.recording.firmwareOtaChoosePackageDir', '目录')}
           </Btn>
@@ -384,14 +434,6 @@ export function FirmwareOtaPanel({
           '选择 firmware repo 生成的同一个固件发布包，然后选择蓝牙 OTA 或有线刷机。',
         )}
       </div>
-
-      {selectedPackage && (
-        <div className="ol-firmware-selected-package" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(156px, 1fr))', gap: 8 }}>
-          <FirmwareOtaFact label={t('settings.recording.firmwareSelectedPackage', '已选固件')} value={selectedPackage.sourceLabel} />
-          <FirmwareOtaFact label={t('settings.recording.firmwareOtaPackageVersion', '升级包版本')} value={selectedPackage.manifest.version} />
-          <FirmwareOtaFact label={t('settings.recording.firmwareOtaSize', '升级包大小')} value={formatBytes(selectedPackage.manifest.fileSizeBytes)} />
-        </div>
-      )}
 
       <div className="ol-firmware-control-bar">
         <div className="ol-firmware-mode-switch" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1068,15 +1110,6 @@ function formatPower(device: FirmwareOtaDeviceSnapshot | null | undefined): stri
   return 'unknown';
 }
 
-function snapshotSatisfiesVersionRefreshFallback(
-  snapshot: FirmwareOtaPreflightSnapshot,
-  protocolName: string | null,
-): boolean {
-  return protocolName === 'listener_ota_v2'
-    && snapshot.device.connected
-    && snapshot.device.capabilities.includes('firmware_ota_v2');
-}
-
 function makeDisconnectedSnapshot(detail: string): FirmwareOtaPreflightSnapshot {
   return {
     recordingActive: false,
@@ -1144,6 +1177,13 @@ function formatBytes(bytes: number): string {
     return `${kib.toFixed(1)} KB`;
   }
   return `${(kib / 1024).toFixed(2)} MB`;
+}
+
+function formatFirmwarePackageDisplayName(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return 'firmware package';
+  const parts = trimmed.split(/[\\/]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : trimmed;
 }
 
 function parseBaud(value: string): number | null {

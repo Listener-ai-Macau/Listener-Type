@@ -4367,12 +4367,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     pub fn send_recording_control_type_bye(timeout: Duration) -> Result<(), String> {
-        send_recording_control_command(
-            b"TYPE:BYE\n",
-            timeout,
-            "audio type bye",
-            ActiveControlTransientFallback::TryFreshGatt,
-        )
+        if let Some(result) =
+            send_audio_control_via_active_capture(b"TYPE:BYE\n", timeout, "audio type bye")
+        {
+            return result;
+        }
+        Err("active Listener BLE audio control unavailable for shutdown bye".to_string())
     }
 
     pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
@@ -5037,9 +5037,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             || fields.contains_key("led_key")
             || fields.contains_key("led_ec11")
             || fields.contains_key("led_edge");
+        let default_status_brightness = crate::types::DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT;
         let default_zone_brightness = crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT;
         let status_led_brightness_percent =
-            optional_u8_field(&fields, "led_status").unwrap_or(default_zone_brightness);
+            optional_u8_field(&fields, "led_status").unwrap_or(default_status_brightness);
         let key_led_brightness_percent =
             optional_u8_field(&fields, "led_key").unwrap_or(default_zone_brightness);
         let knob_led_brightness_percent =
@@ -14467,6 +14468,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             let body = &source[start..end];
 
             assert!(body.contains("b\"TYPE:BYE\\n\""));
+            assert!(body.contains("send_audio_control_via_active_capture"));
+            assert!(
+                !body.contains("send_recording_control_command"),
+                "Type shutdown bye must not open a fresh GATT control target; tray quit should not run the long reconnect retry chain"
+            );
             assert!(
                 !body.contains("VREC:RECOVERY"),
                 "Type shutdown must only clear Type-ready heartbeat, not open pairing recovery"
@@ -16525,7 +16531,7 @@ mod tests {
         assert_eq!(status.brightness_percent, 100);
         assert_eq!(status.plugged_brightness_percent, 100);
         assert_eq!(status.battery_brightness_percent, 100);
-        assert_eq!(status.status_led_brightness_percent, 100);
+        assert_eq!(status.status_led_brightness_percent, 80);
         assert_eq!(status.key_led_brightness_percent, 100);
         assert_eq!(status.knob_led_brightness_percent, 100);
         assert_eq!(status.edge_led_brightness_percent, 100);

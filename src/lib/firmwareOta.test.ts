@@ -11,6 +11,7 @@ import {
   firmwareOtaFailureNextStep,
   firmwareOtaReducer,
   firmwareOtaRollbackVersionFromText,
+  firmwareOtaSnapshotSatisfiesVersionRefreshFallback,
   firmwareOtaVersionNotConfirmedAction,
   initialFirmwareOtaState,
   validateFirmwareOtaPackage,
@@ -546,6 +547,40 @@ assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid, '710af845-6d9f-65
 assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3092b');
 assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 500);
 assert.ok(FIRMWARE_OTA_TRANSPORT_BOUNDARY.notDataPlane.every(item => item.includes('BLE')));
+assert.equal(
+  firmwareOtaSnapshotSatisfiesVersionRefreshFallback(
+    {
+      recordingActive: false,
+      dictationPhase: 'idle',
+      device: {
+        connected: true,
+        hardwareRevision: null,
+        firmwareVersion: null,
+        capabilities: [LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability],
+      },
+    },
+    LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName,
+  ),
+  true,
+  'Listener OTA v2 refresh fallback must accept a reachable v2 service even when DIS firmware version is unavailable',
+);
+assert.equal(
+  firmwareOtaSnapshotSatisfiesVersionRefreshFallback(
+    {
+      recordingActive: false,
+      dictationPhase: 'idle',
+      device: {
+        connected: true,
+        hardwareRevision: null,
+        firmwareVersion: null,
+        capabilities: [LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability],
+      },
+    },
+    'listener_ota_v2',
+  ),
+  false,
+  'old Listener OTA v2 protocol strings must not satisfy the package-selected refresh fallback',
+);
 
 const rustFirmwareOtaSource = readFileSync('src-tauri/src/firmware_ota.rs', 'utf8');
 for (const expected of [
@@ -598,6 +633,14 @@ assert.ok(
   'selected firmware package must remain visibly pinned after selection',
 );
 assert.ok(
+  /<button[\s\S]*?className="ol-firmware-selected-package"[\s\S]*?choosePackage\(selectedPackage\.sourceKind === 'directory'\)/.test(firmwareOtaPanelSource),
+  'selected firmware package must replace the picker with a clickable package control that can reselect the same source kind',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes("sourceKind: 'zip' | 'directory'"),
+  'selected firmware package must remember whether the chosen package came from a zip or directory picker',
+);
+assert.ok(
   firmwareOtaPanelSource.indexOf('className="ol-firmware-selected-package"') <
     firmwareOtaPanelSource.indexOf("{firmwareMode === 'ble' && ("),
   'selected firmware package summary must be outside the BLE/wired mode-specific panels',
@@ -627,8 +670,12 @@ assert.ok(
   'manual OTA snapshot refresh must remain available and use the selected package protocol',
 );
 assert.ok(
-  firmwareOtaPanelSource.includes('snapshotSatisfiesVersionRefreshFallback(snapshot, protocolName)'),
+  firmwareOtaPanelSource.includes('firmwareOtaSnapshotSatisfiesVersionRefreshFallback(snapshot, protocolName)'),
   'manual Listener OTA v2 refresh must stop polling when the v2 service is reachable even if DIS firmware version is unavailable',
+);
+assert.ok(
+  !firmwareOtaPanelSource.includes("protocolName === 'listener_ota_v2'"),
+  'manual Listener OTA v2 refresh must not use stale protocol-name strings',
 );
 
 const commandsSource = readFileSync('src-tauri/src/commands.rs', 'utf8');

@@ -74,12 +74,28 @@ for (const requiredToken of ["[string[]]$StepIds", "FocusStepIds:", "$requestedS
 
 for (const requiredToken of [
   "Find-CarryForwardHumanSummary",
+  "Test-CarryForwardHumanSummaryCandidate",
+  "Get-NormalizedExistingPath",
   "carried_forward_summary",
   "carried_forward_count",
   "carried forward from previous PASS summary",
 ]) {
   if (!human.includes(requiredToken)) {
     failures.push(`focused human review must merge old PASS records instead of forcing all 18 steps to be repeated: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  'preproduction-human-review*',
+  'operator-note", "dryrun", "dry-run", "smoke", "fixture", "script-gate", "format-check", "no-hardware"',
+  "Summary.output_dir",
+  "Summary.session_jsonl",
+  "preproduction-operator-note-triage.json",
+  "triage.source_summary",
+  'HUMAN_REVIEW_INCOMPLETE',
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`focused human review carry-forward must reject fixture/dry-run summaries and allow only triaged real human records: ${requiredToken}`);
   }
 }
 
@@ -125,6 +141,20 @@ for (const requiredToken of [
 ]) {
   if (!operatorNoteTriage.includes(requiredToken)) {
     failures.push(`operator note triage gate must reject unreviewed human notes: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  "isReleaseCandidateSummary",
+  "normalizedExistingPath",
+  "pathLooksSynthetic",
+  "hasDryRunRecord",
+  "dry_run_note",
+  "summary.output_dir",
+  "summary.session_jsonl",
+]) {
+  if (!operatorNoteTriage.includes(requiredToken)) {
+    failures.push(`operator note triage gate must ignore NoPrompt/fixture summaries when choosing latest release evidence: ${requiredToken}`);
   }
 }
 

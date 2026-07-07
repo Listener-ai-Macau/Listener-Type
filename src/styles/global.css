@@ -175,6 +175,89 @@ a { color: inherit; text-decoration: none; }
   min-width: 0;
 }
 
+.ol-firmware-selected-package {
+  min-width: min(360px, 100%);
+  max-width: 460px;
+  min-height: 42px;
+  padding: 7px 10px;
+  border: 0.5px solid var(--ol-line-strong);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ol-surface) 86%, transparent), var(--ol-control-track));
+  color: var(--ol-ink);
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.08);
+  cursor: pointer;
+  transition:
+    background 0.16s var(--ol-motion-quick),
+    border-color 0.16s var(--ol-motion-quick),
+    box-shadow 0.18s var(--ol-motion-soft),
+    transform 0.12s var(--ol-motion-quick);
+}
+
+.ol-firmware-selected-package:hover:not(:disabled) {
+  border-color: var(--ol-blue);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ol-blue-soft) 46%, var(--ol-surface)), var(--ol-control-track));
+  box-shadow: 0 2px 8px rgba(0,0,0,.10);
+}
+
+.ol-firmware-selected-package:active:not(:disabled) {
+  transform: translateY(1px) scale(0.992);
+}
+
+.ol-firmware-selected-package:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ol-firmware-selected-package-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ol-blue-soft);
+  color: var(--ol-blue);
+  flex: 0 0 auto;
+}
+
+.ol-firmware-selected-package-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+}
+
+.ol-firmware-selected-package-kicker {
+  color: var(--ol-ink-4);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.ol-firmware-selected-package-name {
+  color: var(--ol-ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-firmware-selected-package-meta {
+  color: var(--ol-ink-3);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .ol-device-settings-panel {
   margin-top: 12px;
   padding-top: 14px;
@@ -360,6 +443,17 @@ a { color: inherit; text-decoration: none; }
   .ol-firmware-ota-actions {
     justify-content: flex-start !important;
     width: 100% !important;
+  }
+
+  .ol-firmware-selected-package {
+    grid-template-columns: 28px minmax(0, 1fr);
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .ol-firmware-selected-package-meta {
+    grid-column: 2;
+    justify-self: flex-start;
   }
 
   .ol-firmware-control-bar {

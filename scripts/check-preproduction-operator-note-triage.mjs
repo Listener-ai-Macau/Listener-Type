@@ -41,6 +41,62 @@ function noteText(record) {
   return "";
 }
 
+function normalizedExistingPath(filePath) {
+  if (!filePath || typeof filePath !== "string") return "";
+  try {
+    return fs.realpathSync.native(path.resolve(filePath));
+  } catch {
+    return "";
+  }
+}
+
+function pathLooksSynthetic(filePath) {
+  const normalized = String(filePath ?? "").toLowerCase();
+  return [
+    "operator-note",
+    "dryrun",
+    "dry-run",
+    "smoke",
+    "fixture",
+    "script-gate",
+    "format-check",
+    "no-hardware",
+  ].some((marker) => normalized.includes(marker));
+}
+
+function hasDryRunRecord(records) {
+  return records.some((record) => {
+    const dryRunNote = field(record, "dry_run_note");
+    if (typeof dryRunNote === "string" && dryRunNote.trim() === "NoPrompt dry run") {
+      return true;
+    }
+    return JSON.stringify(record ?? {}).includes("NoPrompt dry run");
+  });
+}
+
+function isReleaseCandidateSummary(summaryPath) {
+  if (pathLooksSynthetic(summaryPath)) return false;
+  let summary;
+  try {
+    summary = readJson(summaryPath);
+  } catch {
+    return false;
+  }
+  const records = Array.isArray(summary.records) ? summary.records : [];
+  if (records.length === 0 || hasDryRunRecord(records)) return false;
+
+  const summaryDir = normalizedExistingPath(path.dirname(summaryPath));
+  const outputDir = normalizedExistingPath(summary.output_dir);
+  if (!summaryDir || outputDir !== summaryDir) return false;
+
+  const sessionPath = normalizedExistingPath(summary.session_jsonl);
+  if (!sessionPath || normalizedExistingPath(path.dirname(sessionPath)) !== summaryDir) {
+    return false;
+  }
+
+  return true;
+}
+
 function latestSummary() {
   const roots = [
     path.join(repoRoot, ".cache", "validation"),
@@ -55,7 +111,9 @@ function latestSummary() {
         const full = path.join(current, entry.name);
         if (entry.isDirectory()) stack.push(full);
         if (entry.isFile() && entry.name === "preproduction-human-review-summary.json") {
-          matches.push(full);
+          if (isReleaseCandidateSummary(full)) {
+            matches.push(full);
+          }
         }
       }
     }

@@ -366,7 +366,18 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
         .as_ref()
         .and_then(|value| value.get("dictationInputSourceUserOverridden"))
         .is_some();
-    if !streaming_default_migrated || !dictation_input_source_has_user_override_marker {
+    let device_status_led_default_migrated = raw_prefs
+        .as_ref()
+        .and_then(|value| {
+            value
+                .get("deviceStatusLedDefaultMigrated")
+                .and_then(|flag| flag.as_bool())
+        })
+        .unwrap_or(false);
+    if !streaming_default_migrated
+        || !dictation_input_source_has_user_override_marker
+        || !device_status_led_default_migrated
+    {
         match serde_json::to_vec_pretty(&prefs)
             .context("encode prefs failed")
             .and_then(|json| atomic_write(path, &json))
@@ -2495,6 +2506,51 @@ mod tests {
         assert_eq!(
             saved
                 .get("streamingInsertDefaultMigrated")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn legacy_status_led_all_full_default_is_migrated_and_marker_is_persisted() {
+        let tmp: PathBuf = std::env::temp_dir().join(format!(
+            "listener-type-status-led-prefs-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("preferences.json");
+        fs::write(
+            &path,
+            r#"{
+                "deviceStatusLedBrightnessPercent": 100,
+                "deviceKeyLedBrightnessPercent": 100,
+                "deviceKnobLedBrightnessPercent": 100,
+                "deviceEdgeLedBrightnessPercent": 100
+            }"#,
+        )
+        .expect("write legacy prefs");
+
+        let prefs = read_preferences(&path).expect("read prefs");
+        assert_eq!(prefs.device_status_led_brightness_percent, 80);
+        assert_eq!(prefs.device_key_led_brightness_percent, 100);
+        assert_eq!(prefs.device_knob_led_brightness_percent, 100);
+        assert_eq!(prefs.device_edge_led_brightness_percent, 100);
+        assert!(prefs.device_status_led_default_migrated);
+
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("read saved prefs"))
+                .expect("decode saved prefs");
+        assert_eq!(
+            saved
+                .get("deviceStatusLedBrightnessPercent")
+                .and_then(|value| value.as_u64()),
+            Some(80)
+        );
+        assert_eq!(
+            saved
+                .get("deviceStatusLedDefaultMigrated")
                 .and_then(|value| value.as_bool()),
             Some(true)
         );

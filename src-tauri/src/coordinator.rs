@@ -768,7 +768,7 @@ impl Coordinator {
             #[cfg(target_os = "windows")]
             {
                 match crate::embedded_ble::send_recording_control_type_bye(
-                    Duration::from_millis(900),
+                    Duration::from_millis(250),
                 ) {
                     Ok(()) => log::info!(
                         "[embedded-ble] Type heartbeat bye sent before coordinator shutdown"
@@ -4657,7 +4657,16 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 } else {
                     record_embedded_ble_listener_last_error(&inner, &err);
                     record_embedded_ble_recovery_failure(&inner, &err);
-                    if should_emit_embedded_ble_background_recovery_capsule(&inner, &err) {
+                    let stale_cleanup_outcome =
+                        maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
+                            &inner,
+                            &err,
+                            &mut last_stale_cleanup_at,
+                        )
+                        .await;
+                    if stale_cleanup_outcome == EmbeddedBleStalePairingCleanupOutcome::Skipped
+                        && should_emit_embedded_ble_background_recovery_capsule(&inner, &err)
+                    {
                         emit_embedded_ble_recovery_capsule(
                             &inner,
                             "reconnecting",
@@ -4666,16 +4675,10 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                         );
                     } else if is_embedded_ble_automatic_recovery_error(&err) {
                         log::info!(
-                            "[embedded-ble] background recovery capsule suppressed; see recovery decision log"
+                            "[embedded-ble] background recovery capsule suppressed by pairing/recovery decision outcome={:?}",
+                            stale_cleanup_outcome
                         );
                     }
-                    let stale_cleanup_outcome =
-                        maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
-                            &inner,
-                            &err,
-                            &mut last_stale_cleanup_at,
-                        )
-                        .await;
                     let stale_cleanup_retry_soon =
                         stale_cleanup_outcome == EmbeddedBleStalePairingCleanupOutcome::RetrySoon;
                     let stale_cleanup_holding = stale_cleanup_outcome
@@ -7330,6 +7333,10 @@ mod tests {
             .expect("shutdown must cancel the background listener");
 
         assert!(
+            body.contains("Duration::from_millis(250)"),
+            "explicit tray quit must use a bounded fast bye, not the normal BLE reconnect window"
+        );
+        assert!(
             bye_index < cancel_index,
             "Type exit must clear firmware TYPE_READY before tearing down the background listener"
         );
@@ -8471,6 +8478,36 @@ mod tests {
             &coordinator.inner,
             "BLE CCCD write async error: Some(HRESULT(0x800704C7))",
         ));
+    }
+
+    #[test]
+    fn embedded_ble_background_pairing_decision_precedes_generic_reconnect_capsule() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn embedded_ble_background_listener_loop")
+            .expect("background listener loop should exist");
+        let end = source[start..]
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .map(|offset| start + offset)
+            .expect("background pairing decision should follow listener loop");
+        let body = &source[start..end];
+        let pairing_decision = body
+            .find("maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .expect("background loop must evaluate pairing/recovery state");
+        let generic_capsule = body
+            .find("Listener BLE 正在自动重连音频通道")
+            .expect("background loop should still have a generic reconnect capsule");
+
+        assert!(
+            pairing_decision < generic_capsule,
+            "user-requested re-pair and stale-cache cleanup must decide first so the generic reconnect capsule does not race Windows pairing UX"
+        );
+        assert!(
+            body.contains(
+                "stale_cleanup_outcome == EmbeddedBleStalePairingCleanupOutcome::Skipped"
+            ),
+            "generic reconnect capsule should only appear when pairing/recovery handling did not take over"
+        );
     }
 
     #[test]

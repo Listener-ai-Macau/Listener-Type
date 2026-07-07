@@ -2247,6 +2247,9 @@ const DEVICE_SETTINGS_BLE_NAME_APPLY_SETTLE_DELAY: Duration = Duration::from_mil
 const DEVICE_SETTINGS_BLE_NAME_APPLY_ACK_LOST_SETTLE_DELAY: Duration = Duration::from_millis(700);
 const DEVICE_SETTINGS_BLE_NAME_APPLY_ACK_LOST_READBACK_ATTEMPTS: u8 = 3;
 const DEVICE_SETTINGS_BLE_NAME_CACHE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(45);
+const DEVICE_SETTINGS_BLE_RECOVERY_PAIRING_SETTLE_DELAY: Duration = Duration::from_millis(2600);
+const DEVICE_SETTINGS_BLE_NAME_PAIRING_SETTLE_DELAY: Duration = Duration::from_millis(1200);
+const DEVICE_SETTINGS_BLE_NAME_PAIRING_RETRY_DELAY: Duration = Duration::from_millis(2200);
 const DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES: usize = 63;
 
 async fn read_device_settings_snapshot_from_firmware() -> Result<DeviceSettingsSnapshot, String> {
@@ -2395,6 +2398,252 @@ fn device_settings_sent_but_readback_unavailable_detail(error: &str) -> String {
     )
 }
 
+#[derive(Debug, Clone)]
+struct DeviceBleNameWindowsRefreshOutcome {
+    recovery_error: Option<String>,
+    unpair_result: crate::embedded_ble::BleDeviceUnpairResult,
+    pairing_prompt_result: crate::embedded_ble::BleDevicePairingPromptResult,
+}
+
+fn push_unique_device_ble_name(names: &mut Vec<String>, name: &str) {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if names
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+    {
+        return;
+    }
+    names.push(trimmed.to_string());
+}
+
+fn device_ble_name_windows_refresh_target_names(
+    request: &DeviceSettingsUpdateRequest,
+    previous_snapshot: Option<&DeviceSettingsSnapshot>,
+    previous_prefs_ble_name: Option<&str>,
+) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Some(name) = previous_prefs_ble_name {
+        push_unique_device_ble_name(&mut names, name);
+    }
+    if let Some(snapshot) = previous_snapshot {
+        push_unique_device_ble_name(&mut names, &snapshot.ble_name);
+    }
+    push_unique_device_ble_name(&mut names, &request.ble_name);
+    names
+}
+
+fn apply_device_ble_name_windows_refresh_blocking(
+    expected_ble_name: String,
+    cleanup_target_names: Vec<String>,
+) -> DeviceBleNameWindowsRefreshOutcome {
+    let recovery_error = match crate::embedded_ble::send_recording_control_recovery(
+        DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
+    ) {
+        Ok(()) => None,
+        Err(err) => {
+            log::warn!("[device-settings] BLE name pairing recovery command failed: {err}");
+            Some(err)
+        }
+    };
+
+    if recovery_error.is_none() {
+        std::thread::sleep(DEVICE_SETTINGS_BLE_RECOVERY_PAIRING_SETTLE_DELAY);
+    } else {
+        std::thread::sleep(DEVICE_SETTINGS_BLE_NAME_PAIRING_SETTLE_DELAY);
+    }
+    log::info!(
+        "[device-settings] BLE name Windows cache refresh settle complete recovery_error={}",
+        recovery_error.as_deref().unwrap_or("none")
+    );
+    let unpair_result =
+        crate::embedded_ble::unpair_listener_devices_for_names(&cleanup_target_names);
+    log::info!(
+        "[device-settings] BLE name Windows cache cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
+        unpair_result.status,
+        unpair_result.matched_devices,
+        unpair_result.unpaired_devices,
+        unpair_result.already_unpaired_devices,
+        unpair_result.failed_devices,
+        unpair_result.needs_user_action,
+    );
+    std::thread::sleep(DEVICE_SETTINGS_BLE_NAME_PAIRING_SETTLE_DELAY);
+    let mut pairing_prompt_result = embedded_ble_windows_pairing_result(
+        "device BLE name change",
+        expected_ble_name.as_str(),
+        recovery_error.is_none(),
+    );
+    if recovery_error.is_none()
+        && device_ble_name_windows_refresh_pairing_retry_needed(&pairing_prompt_result)
+    {
+        log::warn!(
+            "[device-settings] BLE name Windows PairAsync did not reach a user confirmation or paired state; retrying once after {} ms",
+            DEVICE_SETTINGS_BLE_NAME_PAIRING_RETRY_DELAY.as_millis()
+        );
+        std::thread::sleep(DEVICE_SETTINGS_BLE_NAME_PAIRING_RETRY_DELAY);
+        let retry_pairing_prompt_result = embedded_ble_windows_pairing_result(
+            "device BLE name change retry",
+            expected_ble_name.as_str(),
+            true,
+        );
+        if device_ble_name_pairing_retry_result_is_better(
+            &retry_pairing_prompt_result,
+            &pairing_prompt_result,
+        ) {
+            pairing_prompt_result = retry_pairing_prompt_result;
+        } else {
+            pairing_prompt_result.details.push(format!(
+                "Retry PairAsync result status={:?} matched={} prompted={} already_paired={} failed={} open_settings={}",
+                retry_pairing_prompt_result.status,
+                retry_pairing_prompt_result.matched_devices,
+                retry_pairing_prompt_result.prompted_devices,
+                retry_pairing_prompt_result.already_paired_devices,
+                retry_pairing_prompt_result.failed_devices,
+                retry_pairing_prompt_result.open_bluetooth_settings,
+            ));
+            pairing_prompt_result
+                .details
+                .extend(retry_pairing_prompt_result.details);
+        }
+    }
+    DeviceBleNameWindowsRefreshOutcome {
+        recovery_error,
+        unpair_result,
+        pairing_prompt_result,
+    }
+}
+
+fn device_ble_name_windows_refresh_detail(outcome: &DeviceBleNameWindowsRefreshOutcome) -> String {
+    let cleanup_detail = match outcome.unpair_result.status {
+        crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
+            "Old Windows Bluetooth entries were removed."
+        }
+        crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean => {
+            "Windows Bluetooth entries were already clean."
+        }
+        crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
+            "No old Windows Bluetooth entry was found."
+        }
+        crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
+            "Windows did not allow every old Bluetooth entry to be removed automatically."
+        }
+    };
+    let pairing_detail = match outcome.pairing_prompt_result.status {
+        crate::embedded_ble::BleDevicePairingPromptStatus::Paired => {
+            "Windows pairing completed for the new name."
+        }
+        crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired => {
+            "Windows already has the new Listener name paired."
+        }
+        crate::embedded_ble::BleDevicePairingPromptStatus::NotFound => {
+            "Windows did not see the new pairable Listener name yet."
+        }
+        crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction => {
+            "Windows still needs Bluetooth pairing confirmation."
+        }
+    };
+    if outcome.recovery_error.is_some() {
+        format!(
+            "BLE name was applied; Windows cache refresh could not fully prepare the pairing window. {cleanup_detail} {pairing_detail}"
+        )
+    } else {
+        format!(
+            "BLE name was applied and Windows Bluetooth cache refresh ran. {cleanup_detail} {pairing_detail}"
+        )
+    }
+}
+
+fn device_ble_name_windows_refresh_confirmed(outcome: &DeviceBleNameWindowsRefreshOutcome) -> bool {
+    matches!(
+        outcome.pairing_prompt_result.status,
+        crate::embedded_ble::BleDevicePairingPromptStatus::Paired
+            | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
+    ) && !outcome.pairing_prompt_result.open_bluetooth_settings
+        && outcome.pairing_prompt_result.failed_devices == 0
+}
+
+fn device_ble_name_windows_refresh_pairing_retry_needed(
+    pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
+) -> bool {
+    !matches!(
+        pairing.status,
+        crate::embedded_ble::BleDevicePairingPromptStatus::Paired
+            | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
+    ) && pairing.attempted
+        && pairing.matched_devices > 0
+        && pairing.prompted_devices == 0
+        && pairing.already_paired_devices == 0
+        && pairing.failed_devices > 0
+}
+
+fn device_ble_name_pairing_retry_result_is_better(
+    retry: &crate::embedded_ble::BleDevicePairingPromptResult,
+    previous: &crate::embedded_ble::BleDevicePairingPromptResult,
+) -> bool {
+    matches!(
+        retry.status,
+        crate::embedded_ble::BleDevicePairingPromptStatus::Paired
+            | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
+    ) || retry.prompted_devices > previous.prompted_devices
+        || retry.already_paired_devices > previous.already_paired_devices
+        || (retry.failed_devices < previous.failed_devices && retry.matched_devices > 0)
+}
+
+fn device_ble_name_windows_refresh_should_release_hold_for_followup(
+    outcome: &DeviceBleNameWindowsRefreshOutcome,
+) -> bool {
+    outcome.recovery_error.is_none()
+        && !device_ble_name_windows_refresh_confirmed(outcome)
+        && (matches!(
+            outcome.pairing_prompt_result.status,
+            crate::embedded_ble::BleDevicePairingPromptStatus::NotFound
+        ) || device_ble_name_windows_refresh_pairing_retry_needed(
+            &outcome.pairing_prompt_result,
+        ))
+}
+
+async fn refresh_windows_ble_cache_after_device_ble_name_change(
+    coord: &CoordinatorState<'_>,
+    expected_ble_name: String,
+    cleanup_target_names: Vec<String>,
+) -> Result<String, String> {
+    log::info!(
+        "[device-settings] BLE name changed; refreshing Windows Bluetooth cache before final readback"
+    );
+    let capture_stopped = coord
+        .pause_embedded_ble_listener_for_recovery_cleanup(
+            DEVICE_SETTINGS_BLE_NAME_CACHE_CLEANUP_TIMEOUT,
+        )
+        .await;
+    log::info!(
+        "[device-settings] background Listener capture stopped before BLE name Windows cache refresh={capture_stopped}"
+    );
+    coord.hold_embedded_ble_listener_for_pairing_confirmation("BLE name Windows cache refresh");
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        apply_device_ble_name_windows_refresh_blocking(expected_ble_name, cleanup_target_names)
+    })
+    .await
+    .map_err(|err| format!("Listener BLE name Windows cache refresh task failed: {err}"))?;
+    if device_ble_name_windows_refresh_confirmed(&outcome) {
+        coord.clear_embedded_ble_pairing_confirmation_hold("BLE name Windows cache refreshed");
+    } else if device_ble_name_windows_refresh_should_release_hold_for_followup(&outcome) {
+        log::warn!(
+            "[device-settings] BLE name Windows cache refresh still needs pairing follow-up after Type recovery; releasing listener hold so bounded background recovery can continue"
+        );
+        coord.clear_embedded_ble_pairing_confirmation_hold(
+            "BLE name Windows cache refresh follow-up",
+        );
+    } else {
+        log::info!(
+            "[device-settings] BLE name Windows cache refresh did not finish pairing; keeping background BLE listener held briefly to avoid connect/disconnect churn"
+        );
+    }
+    coord.refresh_embedded_ble_listener();
+    Ok(device_ble_name_windows_refresh_detail(&outcome))
+}
+
 fn device_settings_snapshot_has_authoritative_ble_name(snapshot: &DeviceSettingsSnapshot) -> bool {
     snapshot.source == "firmware" || snapshot.source == "lastKnown"
 }
@@ -2454,6 +2703,11 @@ pub async fn set_device_settings(
         previous_snapshot.as_ref(),
         Some(&previous_prefs_ble_name),
     );
+    let ble_name_windows_refresh_target_names = device_ble_name_windows_refresh_target_names(
+        &request,
+        previous_snapshot.as_ref(),
+        Some(&previous_prefs_ble_name),
+    );
     let ble_name_apply_needed =
         device_ble_name_apply_needed(&request, previous_snapshot.as_ref(), ble_name_changed);
     let commands = device_settings_update_commands(
@@ -2509,7 +2763,7 @@ pub async fn set_device_settings(
     let mut post_apply_snapshot = None;
     let ble_name_detail = if ble_name_apply_needed {
         log::info!(
-            "[device-settings] applying BLE name without automatic unpair or Windows pairing prompt changed={ble_name_changed}"
+            "[device-settings] applying BLE name and refreshing Windows Bluetooth cache when changed={ble_name_changed}"
         );
         let expected_ble_name_for_apply = request.ble_name.clone();
         let apply_result = run_device_settings_blocking("apply_ble_name", move || {
@@ -2532,11 +2786,24 @@ pub async fn set_device_settings(
                                 &request.ble_name,
                             );
                             if ble_name_changed {
-                                coord.refresh_embedded_ble_listener();
-                                Some(
-                                    "BLE name was applied. Type will reconnect using the new name without resetting Windows pairing."
-                                        .to_string(),
+                                match refresh_windows_ble_cache_after_device_ble_name_change(
+                                    &coord,
+                                    request.ble_name.clone(),
+                                    ble_name_windows_refresh_target_names.clone(),
                                 )
+                                .await
+                                {
+                                    Ok(detail) => Some(detail),
+                                    Err(err) => {
+                                        log::warn!(
+                                            "[device-settings] BLE name Windows cache refresh failed: {err}"
+                                        );
+                                        coord.refresh_embedded_ble_listener();
+                                        Some(format!(
+                                            "BLE name was applied, but Windows Bluetooth cache refresh failed ({err})."
+                                        ))
+                                    }
+                                }
                             } else {
                                 coord.refresh_embedded_ble_listener();
                                 Some(
@@ -2563,10 +2830,26 @@ pub async fn set_device_settings(
                             &request.ble_name,
                         );
                         if ble_name_changed {
-                            coord.refresh_embedded_ble_listener();
-                            Some(format!(
-                                "BLE name apply confirmation readback was unavailable ({readback_error}). Type will reconnect using the new name without resetting Windows pairing."
-                            ))
+                            match refresh_windows_ble_cache_after_device_ble_name_change(
+                                &coord,
+                                request.ble_name.clone(),
+                                ble_name_windows_refresh_target_names.clone(),
+                            )
+                            .await
+                            {
+                                Ok(detail) => Some(format!(
+                                    "BLE name apply confirmation readback was unavailable ({readback_error}). {detail}"
+                                )),
+                                Err(err) => {
+                                    log::warn!(
+                                        "[device-settings] BLE name Windows cache refresh after deferred apply failed: {err}"
+                                    );
+                                    coord.refresh_embedded_ble_listener();
+                                    Some(format!(
+                                        "BLE name apply was sent, but confirmation readback is unavailable ({readback_error}) and Windows Bluetooth cache refresh failed ({err})."
+                                    ))
+                                }
+                            }
                         } else {
                             coord.refresh_embedded_ble_listener();
                             Some(format!(
@@ -2689,7 +2972,7 @@ fn device_settings_snapshot_from_device(
         } else {
             "unavailable"
         },
-        status_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        status_led_brightness_percent: crate::types::DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
         key_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         knob_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         edge_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
@@ -2722,7 +3005,7 @@ fn device_settings_snapshot_from_request(
         connected: true,
         write_supported: true,
         source: "lastKnown",
-        status_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        status_led_brightness_percent: crate::types::DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
         key_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         knob_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         edge_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
@@ -8037,7 +8320,7 @@ mod tests {
     }
 
     #[test]
-    fn ble_name_readback_unavailable_still_does_not_run_windows_pairing_refresh() {
+    fn ble_name_readback_unavailable_still_refreshes_windows_when_name_changed() {
         let source = include_str!("commands.rs");
         let start = source
             .find("Err(readback_error) =>")
@@ -8052,16 +8335,13 @@ mod tests {
         assert!(body.contains("if ble_name_changed"));
         assert!(body.contains("coord.refresh_embedded_ble_listener"));
         assert!(
-            !body.contains("send_recording_control_recovery")
-                && !body.contains("unpair_listener_devices")
-                && !body.contains("embedded_ble_windows_pairing_result")
-                && !body.contains("refresh_windows_ble_cache_after_device_ble_name_change"),
-            "BLE rename must not open a recovery/pairing window when apply readback is unavailable; it only updates the Type target and reconnects"
+            body.contains("refresh_windows_ble_cache_after_device_ble_name_change"),
+            "BLE rename must still refresh Windows Bluetooth cache when apply readback is unavailable but the requested name changed"
         );
     }
 
     #[test]
-    fn device_ble_name_change_path_never_calls_pairing_recovery() {
+    fn device_ble_name_change_path_refreshes_windows_cache_after_apply() {
         let source = include_str!("commands.rs");
         let start = source
             .find("pub async fn set_device_settings")
@@ -8072,18 +8352,31 @@ mod tests {
             .expect("set_device_settings boundary should exist");
         let body = &source[start..end];
         assert!(
-            !body.contains("send_recording_control_recovery")
-                && !body.contains("unpair_listener_devices")
-                && !body.contains("embedded_ble_windows_pairing_result")
-                && !body.contains("refresh_windows_ble_cache_after_device_ble_name_change"),
-            "device BLE rename must not use recovery, UnpairAsync, or PairAsync; re-pair is only the explicit double-click/native pairing path"
+            body.contains("refresh_windows_ble_cache_after_device_ble_name_change"),
+            "different BLE names must refresh Windows Bluetooth cache so the Windows display name matches Type"
+        );
+
+        let helper_start = source
+            .find("fn apply_device_ble_name_windows_refresh_blocking")
+            .expect("BLE name Windows refresh helper should exist");
+        let helper_end = source[helper_start..]
+            .find("fn device_ble_name_windows_refresh_detail")
+            .map(|offset| helper_start + offset)
+            .expect("BLE name Windows refresh helper boundary should exist");
+        let helper = &source[helper_start..helper_end];
+        assert!(helper.contains("send_recording_control_recovery"));
+        assert!(helper.contains("unpair_listener_devices_for_names"));
+        assert!(helper.contains("embedded_ble_windows_pairing_result"));
+        assert!(
+            helper.contains("DEVICE_SETTINGS_BLE_RECOVERY_PAIRING_SETTLE_DELAY"),
+            "rename recovery must wait for firmware pairing-window refresh before Windows pairing/cache cleanup"
         );
     }
 
     #[cfg(target_os = "windows")]
     #[test]
-    #[ignore = "renames Listener hardware and confirms Type does not invoke Windows pairing"]
-    fn device_ble_name_change_no_repair_hardware_smoke() {
+    #[ignore = "renames Listener hardware and refreshes Windows Bluetooth cache"]
+    fn device_ble_name_windows_refresh_hardware_smoke() {
         crate::init_file_logger();
         let old_name = std::env::var("LISTENER_BLE_NAME_RENAME_OLD")
             .expect("set LISTENER_BLE_NAME_RENAME_OLD to the currently advertised BLE name");
@@ -8101,6 +8394,21 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_secs(2));
 
         crate::embedded_ble::set_configured_bluetooth_target_name(&target_name);
+        let outcome = super::apply_device_ble_name_windows_refresh_blocking(
+            target_name.clone(),
+            vec![old_name, target_name.clone()],
+        );
+        assert_eq!(
+            outcome.pairing_prompt_result.failed_devices, 0,
+            "Windows pairing failed: {:?}",
+            outcome.pairing_prompt_result.details
+        );
+        assert!(
+            super::device_ble_name_windows_refresh_confirmed(&outcome),
+            "Windows cache refresh should complete pairing: {:?}",
+            outcome
+        );
+
         let settings =
             crate::embedded_ble::read_device_settings_status(std::time::Duration::from_secs(4))
                 .expect("renamed Listener device settings should be readable");
@@ -8127,6 +8435,17 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_secs(2));
 
         crate::embedded_ble::set_configured_bluetooth_target_name(target_name);
+        let outcome = super::apply_device_ble_name_windows_refresh_blocking(
+            target_name.to_string(),
+            vec![current_name.to_string(), target_name.to_string()],
+        );
+        if !super::device_ble_name_windows_refresh_confirmed(&outcome) {
+            return Err(format!(
+                "Windows cache refresh failed {current_name}->{target_name}: {:?}",
+                outcome
+            ));
+        }
+
         let settings =
             crate::embedded_ble::read_device_settings_status(std::time::Duration::from_secs(8))
                 .map_err(|err| {
@@ -8143,8 +8462,8 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    #[ignore = "round-trips Listener BLE name without Windows pairing prompts on hardware"]
-    fn device_ble_name_no_repair_roundtrip_hardware_smoke() {
+    #[ignore = "round-trips Listener BLE name and Windows Bluetooth cache on hardware"]
+    fn device_ble_name_windows_refresh_roundtrip_hardware_smoke() {
         crate::init_file_logger();
         let old_name = std::env::var("LISTENER_BLE_NAME_RENAME_OLD").unwrap_or_else(|_| {
             crate::embedded_ble::read_device_settings_status(std::time::Duration::from_secs(8))
@@ -8253,7 +8572,7 @@ mod tests {
     }
 
     #[test]
-    fn device_ble_name_change_writes_name_without_repair_command() {
+    fn device_ble_name_change_serial_batch_only_writes_name() {
         let request = DeviceSettingsUpdateRequest {
             status_led_brightness_percent: 70,
             key_led_brightness_percent: 65,
@@ -8497,7 +8816,7 @@ mod tests {
     }
 
     #[test]
-    fn ble_name_rename_never_uses_pairasync_and_one_click_hands_off_to_native_pairing() {
+    fn ble_name_refresh_uses_windows_cache_refresh_and_one_click_hands_off_to_native_pairing() {
         let source = include_str!("commands.rs");
         let helper_start = source
             .find("fn embedded_ble_windows_pairing_result")
@@ -8511,19 +8830,6 @@ mod tests {
         assert!(helper.contains("prompt_listener_pairing_for_recovery"));
         assert!(helper.contains("PairAsync"));
 
-        let deleted_ble_name_refresh_helper =
-            ["fn apply_device_ble_name_windows", "_refresh_blocking"].concat();
-        let deleted_ble_name_cache_refresh = [
-            "fn refresh_windows_ble_cache_after",
-            "_device_ble_name_change",
-        ]
-        .concat();
-        let deleted_ble_name_pairing_delay =
-            ["DEVICE_SETTINGS_BLE_RECOVERY", "_PAIRING_SETTLE_DELAY"].concat();
-        assert!(!source.contains(&deleted_ble_name_refresh_helper));
-        assert!(!source.contains(&deleted_ble_name_cache_refresh));
-        assert!(!source.contains(&deleted_ble_name_pairing_delay));
-
         let settings_start = source
             .find("pub async fn set_device_settings")
             .expect("device settings command should exist");
@@ -8533,33 +8839,27 @@ mod tests {
             .expect("device settings command boundary should exist");
         let settings_body = &source[settings_start..settings_end];
         assert!(
-            !settings_body.contains("embedded_ble_windows_pairing_result"),
-            "BLE rename must not trigger Type PairAsync or Windows pairing prompts"
-        );
-        assert!(
-            !settings_body.contains("VREC:RECOVERY:TYPE"),
-            "BLE rename must not reuse the explicit re-pair recovery command"
-        );
-        assert!(
-            settings_body.contains("refresh_embedded_ble_listener"),
-            "BLE rename should only retarget/reconnect Type's Listener BLE client"
-        );
-        assert!(
-            settings_body.contains("without automatic unpair or Windows pairing prompt"),
-            "BLE rename log/detail should preserve the no-repair product contract"
+            settings_body.contains("refresh_windows_ble_cache_after_device_ble_name_change"),
+            "BLE rename must refresh this PC's Windows Bluetooth cache so display name and Type target stay aligned"
         );
 
-        let rename_test_start = source
-            .find("fn device_ble_name_change_path_never_calls_pairing_recovery")
-            .expect("BLE name no-repair regression test should exist");
-        let rename_test_end = source[rename_test_start..]
-            .find("#[test]\n    #[ignore = \"renames Listener hardware")
-            .map(|offset| rename_test_start + offset)
-            .expect("BLE name no-repair regression test boundary should exist");
-        let rename_test = &source[rename_test_start..rename_test_end];
+        let rename_helper_start = source
+            .find("fn apply_device_ble_name_windows_refresh_blocking")
+            .expect("BLE name Windows refresh helper should exist");
+        let rename_helper_end = source[rename_helper_start..]
+            .find("fn device_ble_name_windows_refresh_detail")
+            .map(|offset| rename_helper_start + offset)
+            .expect("BLE name Windows refresh helper boundary should exist");
+        let rename_helper = &source[rename_helper_start..rename_helper_end];
+        assert!(rename_helper.contains("send_recording_control_recovery"));
+        assert!(rename_helper.contains("unpair_listener_devices_for_names"));
         assert!(
-            rename_test.contains("re-pair is only the explicit double-click/native pairing path"),
-            "BLE rename regression test must keep the no-repair product contract explicit"
+            rename_helper.contains("embedded_ble_windows_pairing_result"),
+            "BLE rename refresh must run the bounded Windows pairing/cache refresh path after firmware applies a different name"
+        );
+        assert!(
+            rename_helper.contains("DEVICE_SETTINGS_BLE_RECOVERY_PAIRING_SETTLE_DELAY"),
+            "BLE rename refresh must wait for firmware recovery advertising before touching Windows cache"
         );
 
         let one_click_start = source
