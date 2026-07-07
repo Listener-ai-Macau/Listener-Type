@@ -7,6 +7,7 @@ param(
   [switch]$IncludePortable,
   [switch]$CleanArtifacts,
   [switch]$ReuseExistingExe,
+  [switch]$SkipDesktopShortcut,
   [switch]$UseSccache,
   [switch]$IncrementalReleaseBuild
 )
@@ -519,6 +520,40 @@ function Copy-WindowsArtifacts {
   Get-FileHash -Algorithm SHA256 -LiteralPath $hashPaths | Select-Object Path,Hash | Format-List
 }
 
+function Update-DesktopShortcut {
+  if ($SkipDesktopShortcut.IsPresent) {
+    Write-Host "[info] Skipping desktop shortcut refresh"
+    return
+  }
+
+  $exePath = Join-Path $releaseRoot "listener-type.exe"
+  if (-not (Test-Path -LiteralPath $exePath)) {
+    throw "Cannot update desktop shortcut; release exe not found: $exePath"
+  }
+
+  $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+  if ([string]::IsNullOrWhiteSpace($desktop) -and -not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+    $desktop = Join-Path $env:USERPROFILE "Desktop"
+  }
+  if ([string]::IsNullOrWhiteSpace($desktop) -or -not (Test-Path -LiteralPath $desktop)) {
+    throw "Cannot update desktop shortcut; Desktop directory not found."
+  }
+
+  $resolvedExe = (Resolve-Path -LiteralPath $exePath).Path
+  $resolvedReleaseRoot = (Resolve-Path -LiteralPath $releaseRoot).Path
+  $shortcutPath = Join-Path $desktop "Listener Type.lnk"
+  $shell = New-Object -ComObject WScript.Shell
+  $shortcut = $shell.CreateShortcut($shortcutPath)
+  $shortcut.TargetPath = $resolvedExe
+  $shortcut.WorkingDirectory = $resolvedReleaseRoot
+  $shortcut.IconLocation = "$resolvedExe,0"
+  $shortcut.Description = "Listener Type latest local release build"
+  $shortcut.Save()
+
+  Write-Host "[ok] Desktop shortcut updated -> $shortcutPath"
+  Write-Host "     target: $resolvedExe"
+}
+
 Push-Location $appRoot
 try {
   Write-Host "[info] App root: $appRoot"
@@ -551,6 +586,7 @@ try {
   }
   Repair-TauriMsiBundle
   Copy-WindowsArtifacts
+  Update-DesktopShortcut
 } finally {
   Pop-Location
 }

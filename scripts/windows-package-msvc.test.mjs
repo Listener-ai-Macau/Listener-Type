@@ -86,12 +86,16 @@ assert.match(script, /\[switch\]\$IncludePortable/, "portable zip generation sho
 assert.match(script, /\[switch\]\$CleanArtifacts/, "script should support cleaning the output directory");
 assert.match(script, /\[int\]\$CargoBuildJobs = 0/, "script should leave Cargo parallelism at the default unless explicitly limited");
 assert.match(script, /\[switch\]\$ReuseExistingExe/, "script should support fast MSI relink for docs/scripts-only commits");
+assert.match(script, /\[switch\]\$SkipDesktopShortcut/, "script should support opting out of local desktop shortcut refresh");
 assert.match(script, /\[switch\]\$UseSccache/, "script should support opt-in sccache acceleration");
 assert.match(script, /\[switch\]\$IncrementalReleaseBuild/, "script should support opt-in local incremental release builds");
 assert.match(regressionGate, /-IncrementalReleaseBuild/, "v1.0.2 regression packaging should use incremental release builds to avoid repeated long relinks");
 assert.match(releaseCheck, /check:preproduction-operator-notes/, "release:check must reject untriaged operator notes before publishing");
 assert.match(releaseCheck, /check:preproduction-bench-contract/, "release:check must keep the preproduction bench/human workflow contract in the default release gate");
 assert.match(script, /Test-ReusableReleaseExe/, "script should guard the fast MSI relink path");
+assert.match(script, /function Update-DesktopShortcut/, "packaging should refresh the local desktop shortcut after each rebuild");
+assert.match(script, /WScript\.Shell/, "desktop shortcut refresh should use the Windows shortcut COM API");
+assert.match(script, /Listener Type\.lnk/, "desktop shortcut refresh should target the stable Listener Type shortcut name");
 assert.match(script, /Cargo build jobs left at Cargo default parallelism/, "script should advertise default Cargo parallelism");
 assert.doesNotMatch(script, /set `"CARGO_BUILD_JOBS=1`"/, "default packaging must not force serial Cargo builds");
 assert.doesNotMatch(script, /WixTools314/, "MSVC packaging must not hard-code a single Tauri WiX tools version");
@@ -115,7 +119,7 @@ assert.match(script, /Copy-Item -LiteralPath \$msiPath -Destination \(Join-Path 
 assert.match(script, /Remove-Item -LiteralPath \$portableRoot -Recurse -Force -ErrorAction SilentlyContinue/, "default packaging should remove stale portable folders");
 assert.match(script, /Remove-Item -LiteralPath \$zipPath -Force -ErrorAction SilentlyContinue/, "default packaging should remove stale portable zips");
 assert.match(script, /if \(\$IncludePortable\) \{[\s\S]*Compress-Archive/, "portable zip generation should stay behind IncludePortable");
-assert.match(script, /Invoke-MsvcBuild[\s\S]*Repair-TauriMsiBundle[\s\S]*Copy-WindowsArtifacts/, "packaging should relink the Tauri MSI after enabling same-version major upgrades");
+assert.match(script, /Invoke-MsvcBuild[\s\S]*Repair-TauriMsiBundle[\s\S]*Copy-WindowsArtifacts[\s\S]*Update-DesktopShortcut/, "packaging should relink the Tauri MSI, copy artifacts, and refresh the desktop shortcut");
 assert.match(script, /AllowSameVersionUpgrades="yes"/, "MSI packaging should allow same-version 1.0.0 replacement builds to major-upgrade installed copies");
 assert.match(script, /DowngradeErrorMessage=/, "MSI packaging should keep an explicit downgrade block after replacing AllowDowngrades");
 assert.doesNotMatch(ciWorkflow, /windows-ime-install-smoke\.ps1/, "release CI must not expect default installers to register a TSF IME");
