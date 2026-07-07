@@ -29,6 +29,7 @@ import { FirmwareOtaPanel } from './FirmwareOtaPanel';
 import { inputStyle, SettingRow } from './shared';
 import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusPanel';
 import {
+  DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
   DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
 } from '../../lib/deviceSettingsDefaults';
@@ -255,7 +256,7 @@ function DeviceFirmwareSettingsCard() {
   const [snapshot, setSnapshot] = useState<DeviceSettingsSnapshot | null>(null);
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
     statusLedBrightnessPercent: DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
-    keyLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+    keyLedBrightnessPercent: DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
     knobLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
     edgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
     pluggedLowPowerIdleMinutes: 1,

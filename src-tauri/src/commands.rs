@@ -2973,7 +2973,7 @@ fn device_settings_snapshot_from_device(
             "unavailable"
         },
         status_led_brightness_percent: crate::types::DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
-        key_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        key_led_brightness_percent: crate::types::DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
         knob_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         edge_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         led_zone_brightness_supported: false,
@@ -3006,7 +3006,7 @@ fn device_settings_snapshot_from_request(
         write_supported: true,
         source: "lastKnown",
         status_led_brightness_percent: crate::types::DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
-        key_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+        key_led_brightness_percent: crate::types::DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
         knob_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         edge_led_brightness_percent: crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
         led_zone_brightness_supported: false,

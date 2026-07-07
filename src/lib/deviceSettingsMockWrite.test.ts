@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
   DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
 } from './deviceSettingsDefaults.ts';
@@ -20,7 +21,7 @@ const initial: DeviceSettingsSnapshot = {
   writeSupported: true,
   source: 'mock',
   statusLedBrightnessPercent: DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
-  keyLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  keyLedBrightnessPercent: DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
   knobLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   edgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   ledZoneBrightnessSupported: true,
@@ -72,8 +73,8 @@ assert.equal(
 );
 assert.equal(
   initial.keyLedBrightnessPercent,
-  DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
-  'Type frontend mock/default non-status LED zones must start at 100 percent',
+  DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
+  'Type frontend mock/default key LED brightness must start at 80 percent',
 );
 const sameNameWrite = applyMockDeviceSettingsWrite(
   currentSettings,
@@ -118,4 +119,8 @@ assert.ok(
 assert.ok(
   deviceSectionSource.includes('DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT'),
   'device settings form must use the shared Type status LED default instead of a local literal',
+);
+assert.ok(
+  deviceSectionSource.includes('DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT'),
+  'device settings form must use the shared Type key LED default instead of a local literal',
 );

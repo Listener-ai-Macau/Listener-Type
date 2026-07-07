@@ -449,6 +449,8 @@ export interface UserPreferences {
   deviceEdgeLedBrightnessPercent: number;
   /** 状态灯旧默认迁移标记。false/缺失时旧的四区 100 默认会迁到状态灯 80。 */
   deviceStatusLedDefaultMigrated: boolean;
+  /** 按键灯旧默认迁移标记。false/缺失时旧的按键灯 100 默认会迁到按键灯 80。 */
+  deviceKeyLedDefaultMigrated: boolean;
   /** 进入低功耗 idle 的等待时间，单位分钟。 */
   deviceLowPowerIdleMinutes: number;
   /** 插电/外部供电时是否允许进入低功耗 idle。 */

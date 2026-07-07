@@ -374,9 +374,18 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
                 .and_then(|flag| flag.as_bool())
         })
         .unwrap_or(false);
+    let device_key_led_default_migrated = raw_prefs
+        .as_ref()
+        .and_then(|value| {
+            value
+                .get("deviceKeyLedDefaultMigrated")
+                .and_then(|flag| flag.as_bool())
+        })
+        .unwrap_or(false);
     if !streaming_default_migrated
         || !dictation_input_source_has_user_override_marker
         || !device_status_led_default_migrated
+        || !device_key_led_default_migrated
     {
         match serde_json::to_vec_pretty(&prefs)
             .context("encode prefs failed")
@@ -2534,10 +2543,11 @@ mod tests {
 
         let prefs = read_preferences(&path).expect("read prefs");
         assert_eq!(prefs.device_status_led_brightness_percent, 80);
-        assert_eq!(prefs.device_key_led_brightness_percent, 100);
+        assert_eq!(prefs.device_key_led_brightness_percent, 80);
         assert_eq!(prefs.device_knob_led_brightness_percent, 100);
         assert_eq!(prefs.device_edge_led_brightness_percent, 100);
         assert!(prefs.device_status_led_default_migrated);
+        assert!(prefs.device_key_led_default_migrated);
 
         let saved: serde_json::Value =
             serde_json::from_slice(&fs::read(&path).expect("read saved prefs"))
@@ -2550,7 +2560,19 @@ mod tests {
         );
         assert_eq!(
             saved
+                .get("deviceKeyLedBrightnessPercent")
+                .and_then(|value| value.as_u64()),
+            Some(80)
+        );
+        assert_eq!(
+            saved
                 .get("deviceStatusLedDefaultMigrated")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            saved
+                .get("deviceKeyLedDefaultMigrated")
                 .and_then(|value| value.as_bool()),
             Some(true)
         );

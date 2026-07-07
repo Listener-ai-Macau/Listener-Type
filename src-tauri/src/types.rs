@@ -486,6 +486,7 @@ fn default_true() -> bool {
 }
 
 pub const DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT: u8 = 80;
+pub const DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT: u8 = 80;
 pub const DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT: u8 = 100;
 pub const DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 1;
 pub const DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 10;
@@ -495,6 +496,10 @@ pub const MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 24 * 60;
 
 fn default_device_status_led_brightness_percent() -> u8 {
     DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT
+}
+
+fn default_device_key_led_brightness_percent() -> u8 {
+    DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT
 }
 
 fn default_device_led_zone_brightness_percent() -> u8 {
@@ -1173,7 +1178,7 @@ pub struct UserPreferences {
     #[serde(default = "default_device_status_led_brightness_percent")]
     pub device_status_led_brightness_percent: u8,
     /// Key LED zone brightness ceiling. Requires firmware led_key support.
-    #[serde(default = "default_device_led_zone_brightness_percent")]
+    #[serde(default = "default_device_key_led_brightness_percent")]
     pub device_key_led_brightness_percent: u8,
     /// EC11 knob LED zone brightness ceiling. Requires firmware led_ec11 support.
     #[serde(default = "default_device_led_zone_brightness_percent")]
@@ -1184,6 +1189,9 @@ pub struct UserPreferences {
     /// One-time migration marker for the old all-zones-100 default.
     #[serde(default = "default_true")]
     pub device_status_led_default_migrated: bool,
+    /// One-time migration marker for the old key-zone-100 default.
+    #[serde(default = "default_true")]
+    pub device_key_led_default_migrated: bool,
     /// Runtime low-power idle timeout in minutes. Applies before battery-only shutdown.
     #[serde(default = "default_device_low_power_idle_minutes")]
     pub device_low_power_idle_minutes: u32,
@@ -1389,7 +1397,7 @@ struct UserPreferencesWire {
     device_knob_rotation_action: DeviceKnobRotationAction,
     #[serde(default = "default_device_status_led_brightness_percent")]
     device_status_led_brightness_percent: u8,
-    #[serde(default = "default_device_led_zone_brightness_percent")]
+    #[serde(default = "default_device_key_led_brightness_percent")]
     device_key_led_brightness_percent: u8,
     #[serde(default = "default_device_led_zone_brightness_percent")]
     device_knob_led_brightness_percent: u8,
@@ -1397,6 +1405,8 @@ struct UserPreferencesWire {
     device_edge_led_brightness_percent: u8,
     #[serde(default)]
     device_status_led_default_migrated: bool,
+    #[serde(default)]
+    device_key_led_default_migrated: bool,
     #[serde(default = "default_device_low_power_idle_minutes")]
     device_low_power_idle_minutes: u32,
     #[serde(default = "default_true")]
@@ -1492,6 +1502,7 @@ impl Default for UserPreferencesWire {
             device_knob_led_brightness_percent: prefs.device_knob_led_brightness_percent,
             device_edge_led_brightness_percent: prefs.device_edge_led_brightness_percent,
             device_status_led_default_migrated: prefs.device_status_led_default_migrated,
+            device_key_led_default_migrated: prefs.device_key_led_default_migrated,
             device_low_power_idle_minutes: prefs.device_low_power_idle_minutes,
             device_plugged_low_power_enabled: prefs.device_plugged_low_power_enabled,
             device_battery_auto_shutdown_minutes: prefs.device_battery_auto_shutdown_minutes,
@@ -1571,6 +1582,13 @@ impl<'de> Deserialize<'de> for UserPreferences {
         {
             device_status_led_brightness_percent = DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT;
         }
+        let mut device_key_led_brightness_percent =
+            clamp_device_brightness_percent(wire.device_key_led_brightness_percent);
+        if !wire.device_key_led_default_migrated
+            && wire.device_key_led_brightness_percent == DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT
+        {
+            device_key_led_brightness_percent = DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT;
+        }
 
         Ok(Self {
             hotkey,
@@ -1617,9 +1635,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             device_custom_keys_default_migrated: true,
             device_knob_rotation_action: wire.device_knob_rotation_action,
             device_status_led_brightness_percent,
-            device_key_led_brightness_percent: clamp_device_brightness_percent(
-                wire.device_key_led_brightness_percent,
-            ),
+            device_key_led_brightness_percent,
             device_knob_led_brightness_percent: clamp_device_brightness_percent(
                 wire.device_knob_led_brightness_percent,
             ),
@@ -1627,6 +1643,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
                 wire.device_edge_led_brightness_percent,
             ),
             device_status_led_default_migrated: true,
+            device_key_led_default_migrated: true,
             device_low_power_idle_minutes: clamp_device_low_power_idle_minutes(
                 wire.device_low_power_idle_minutes,
             ),
@@ -2040,10 +2057,11 @@ impl Default for UserPreferences {
             device_custom_keys_default_migrated: true,
             device_knob_rotation_action: DeviceKnobRotationAction::default(),
             device_status_led_brightness_percent: default_device_status_led_brightness_percent(),
-            device_key_led_brightness_percent: default_device_led_zone_brightness_percent(),
+            device_key_led_brightness_percent: default_device_key_led_brightness_percent(),
             device_knob_led_brightness_percent: default_device_led_zone_brightness_percent(),
             device_edge_led_brightness_percent: default_device_led_zone_brightness_percent(),
             device_status_led_default_migrated: true,
+            device_key_led_default_migrated: true,
             device_low_power_idle_minutes: default_device_low_power_idle_minutes(),
             device_plugged_low_power_enabled: true,
             device_battery_auto_shutdown_minutes: default_device_battery_auto_shutdown_minutes(),
@@ -3054,20 +3072,22 @@ mod tests {
     }
 
     #[test]
-    fn device_led_zone_defaults_keep_status_at_eighty_and_other_zones_at_full() {
+    fn device_led_zone_defaults_keep_status_and_key_at_eighty() {
         let prefs = UserPreferences::default();
         assert_eq!(prefs.device_status_led_brightness_percent, 80);
-        assert_eq!(prefs.device_key_led_brightness_percent, 100);
+        assert_eq!(prefs.device_key_led_brightness_percent, 80);
         assert_eq!(prefs.device_knob_led_brightness_percent, 100);
         assert_eq!(prefs.device_edge_led_brightness_percent, 100);
         assert!(prefs.device_status_led_default_migrated);
+        assert!(prefs.device_key_led_default_migrated);
 
         let from_empty: UserPreferences = serde_json::from_str("{}").unwrap();
         assert_eq!(from_empty.device_status_led_brightness_percent, 80);
-        assert_eq!(from_empty.device_key_led_brightness_percent, 100);
+        assert_eq!(from_empty.device_key_led_brightness_percent, 80);
         assert_eq!(from_empty.device_knob_led_brightness_percent, 100);
         assert_eq!(from_empty.device_edge_led_brightness_percent, 100);
         assert!(from_empty.device_status_led_default_migrated);
+        assert!(from_empty.device_key_led_default_migrated);
 
         let old_all_full_default: UserPreferences = serde_json::from_str(
             r#"{
@@ -3082,7 +3102,9 @@ mod tests {
             old_all_full_default.device_status_led_brightness_percent,
             80
         );
+        assert_eq!(old_all_full_default.device_key_led_brightness_percent, 80);
         assert!(old_all_full_default.device_status_led_default_migrated);
+        assert!(old_all_full_default.device_key_led_default_migrated);
 
         let explicit_full: UserPreferences = serde_json::from_str(
             r#"{
@@ -3090,12 +3112,15 @@ mod tests {
                 "deviceKeyLedBrightnessPercent": 100,
                 "deviceKnobLedBrightnessPercent": 100,
                 "deviceEdgeLedBrightnessPercent": 100,
-                "deviceStatusLedDefaultMigrated": true
+                "deviceStatusLedDefaultMigrated": true,
+                "deviceKeyLedDefaultMigrated": true
             }"#,
         )
         .unwrap();
         assert_eq!(explicit_full.device_status_led_brightness_percent, 100);
+        assert_eq!(explicit_full.device_key_led_brightness_percent, 100);
         assert!(explicit_full.device_status_led_default_migrated);
+        assert!(explicit_full.device_key_led_default_migrated);
     }
 
     /// issue #440: 老版本会把默认 `streamingInsert:false` 写进 preferences.json。

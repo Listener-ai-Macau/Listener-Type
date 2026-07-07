@@ -5038,11 +5038,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             || fields.contains_key("led_ec11")
             || fields.contains_key("led_edge");
         let default_status_brightness = crate::types::DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT;
+        let default_key_brightness = crate::types::DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT;
         let default_zone_brightness = crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT;
         let status_led_brightness_percent =
             optional_u8_field(&fields, "led_status").unwrap_or(default_status_brightness);
         let key_led_brightness_percent =
-            optional_u8_field(&fields, "led_key").unwrap_or(default_zone_brightness);
+            optional_u8_field(&fields, "led_key").unwrap_or(default_key_brightness);
         let knob_led_brightness_percent =
             optional_u8_field(&fields, "led_ec11").unwrap_or(default_zone_brightness);
         let edge_led_brightness_percent =
@@ -16532,7 +16533,7 @@ mod tests {
         assert_eq!(status.plugged_brightness_percent, 100);
         assert_eq!(status.battery_brightness_percent, 100);
         assert_eq!(status.status_led_brightness_percent, 80);
-        assert_eq!(status.key_led_brightness_percent, 100);
+        assert_eq!(status.key_led_brightness_percent, 80);
         assert_eq!(status.knob_led_brightness_percent, 100);
         assert_eq!(status.edge_led_brightness_percent, 100);
         assert!(!status.led_zone_brightness_supported);
