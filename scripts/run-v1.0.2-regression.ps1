@@ -519,20 +519,21 @@ try {
       if ($releaseRecord.Count -ne 1) {
         throw "Bench collector review should include exactly one release-package-final-check record"
       }
-      if ($releaseRecord[0].status -ne "NO_GO") {
-        throw "Bench collector smoke should keep release-package-final-check NO_GO until Denzic root is staged from the latest source hashes, got $($releaseRecord[0].status)"
-      }
       $releaseArtifactsPath = Join-Path $collectDir "release-artifacts.json"
       if (-not (Test-Path -LiteralPath $releaseArtifactsPath)) {
         throw "Bench collector should write release-artifacts.json for the final root package hash gate"
       }
       $releaseArtifacts = Get-Content -LiteralPath $releaseArtifactsPath -Raw | ConvertFrom-Json
-      if ($releaseArtifacts.all_latest_sources_staged -ne $false) {
-        throw "Offline bench collector smoke must not mark latest root packages staged before final release copy."
-      }
       if ($releaseArtifacts.PSObject.Properties["type_source_hash_matches_root"] -eq $null -or
           $releaseArtifacts.PSObject.Properties["firmware_source_hash_matches_root"] -eq $null) {
         throw "release-artifacts.json must include source-to-root hash comparison fields"
+      }
+      if ($releaseArtifacts.all_latest_sources_staged) {
+        if ($releaseRecord[0].status -ne "PASS") {
+          throw "Bench collector should mark release-package-final-check PASS when root packages match latest source hashes, got $($releaseRecord[0].status)"
+        }
+      } elseif ($releaseRecord[0].status -ne "NO_GO") {
+        throw "Bench collector should keep release-package-final-check NO_GO until root packages match latest source hashes, got $($releaseRecord[0].status)"
       }
       $remainingNoGo = @($bench.records | Where-Object { $_.status -eq "NO_GO" })
       if ($remainingNoGo.Count -eq 0) {

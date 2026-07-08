@@ -393,15 +393,49 @@ function Invoke-ProcessCapture {
   }
 }
 
+function Get-LatestReleaseSourceFile {
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][string]$Filter,
+    [Parameter(Mandatory = $true)][string]$NamePattern
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root)) {
+    return $null
+  }
+
+  $files = @(
+    Get-ChildItem -LiteralPath $Root -Recurse -File -Filter $Filter -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.Name -match $NamePattern -and
+        $_.FullName -notmatch '\\(node_modules|target|\.git)\\'
+      }
+  )
+  if ($files.Count -eq 0) {
+    return $null
+  }
+
+  return @($files | Sort-Object LastWriteTime, Length -Descending | Select-Object -First 1)[0]
+}
+
 function Get-ReleaseArtifacts {
-  $typeMsi = Join-Path $repoRoot ".artifacts\windows-msvc\ListenerType_1.0.2_x64_en-US.msi"
   $rootMsi = Join-Path $RepoBaseRoot "ListenerType_1.0.2_x64_en-US.msi"
   $rootFirmwareZip = Join-Path $RepoBaseRoot "ListenerFirmware_1.0.2_ota.zip"
+  $typeMsiItem = Get-LatestReleaseSourceFile `
+    -Root $repoRoot `
+    -Filter "ListenerType_1.0.2_x64_en-US.msi" `
+    -NamePattern '^ListenerType_1\.0\.2_x64_en-US\.msi$'
+  $typeMsi = if ($null -ne $typeMsiItem) {
+    $typeMsiItem.FullName
+  } else {
+    Join-Path $repoRoot ".artifacts\windows-msvc\ListenerType_1.0.2_x64_en-US.msi"
+  }
   $firmwareZip = $null
   if (-not [string]::IsNullOrWhiteSpace($FirmwareRoot) -and (Test-Path -LiteralPath $FirmwareRoot)) {
-    $firmwareZip = @(Get-ChildItem -LiteralPath (Join-Path $FirmwareRoot ".cache\ota_firmware") -File -Filter "*.zip" -ErrorAction SilentlyContinue |
-      Sort-Object LastWriteTime -Descending |
-      Select-Object -First 1)
+    $firmwareZip = Get-LatestReleaseSourceFile `
+      -Root $FirmwareRoot `
+      -Filter "*.zip" `
+      -NamePattern '^listener-ota-1\.0\.2-\d{8}-\d{6}\.zip$'
   }
   $expectedRootNames = @(
     [System.IO.Path]::GetFileName($rootMsi),
