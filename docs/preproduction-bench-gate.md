@@ -13,6 +13,13 @@ pwsh -NoProfile -File .\scripts\windows-listener-preproduction-bench-review.ps1 
 pwsh -NoProfile -File .\scripts\windows-listener-preproduction-bench-review.ps1 -CapabilityManifest <bench-capabilities.json>
 ```
 
+Before a production-readiness bench run, build and install the latest MSI so the
+user-facing app at `C:\Program Files\Listener Type\listener-type.exe` is the
+payload under test. The collector and active BLE script default to this installed
+app path; do not rely on repo `target\...\listener-type.exe` outputs for
+preproduction acceptance unless `-TypeExe` is explicitly provided for a
+diagnostic-only run.
+
 The collector is read-only by default: it records Type runtime state, a desktop
 screenshot, Windows BLE PnP/event state, optional live BLE/GATT probes, Type log
 tail, and package hashes, then feeds the generated manifest into the bench

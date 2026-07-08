@@ -17,15 +17,10 @@ Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 if ([string]::IsNullOrWhiteSpace($TypeExe)) {
-  foreach ($candidate in @(
-      (Join-Path $repoRoot "src-tauri\target\x86_64-pc-windows-msvc\release\listener-type.exe"),
-      (Join-Path $repoRoot "src-tauri\target\release\listener-type.exe")
-    )) {
-    if (Test-Path -LiteralPath $candidate) {
-      $TypeExe = (Resolve-Path -LiteralPath $candidate).Path
-      break
-    }
-  }
+  $TypeExe = "C:\Program Files\Listener Type\listener-type.exe"
+}
+if (-not [string]::IsNullOrWhiteSpace($TypeExe) -and (Test-Path -LiteralPath $TypeExe)) {
+  $TypeExe = (Resolve-Path -LiteralPath $TypeExe).Path
 }
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
   $stamp = Get-Date -Format "yyyyMMdd-HHmmss"

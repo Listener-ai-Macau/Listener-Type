@@ -9,7 +9,11 @@ param(
   [switch]$ReuseExistingExe,
   [switch]$SkipDesktopShortcut,
   [switch]$UseSccache,
-  [switch]$IncrementalReleaseBuild
+  [switch]$IncrementalReleaseBuild,
+  [switch]$InstallMsi,
+  [switch]$LaunchInstalledApp,
+  [ValidateRange(60, 14400)]
+  [int]$CommandTimeoutSeconds = 3600
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +27,10 @@ $releaseRoot = Join-Path $appRoot "src-tauri\target\x86_64-pc-windows-msvc\relea
 if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
   $ArtifactsRoot = Join-Path $appRoot ".artifacts\windows-msvc"
 }
+if (-not [System.IO.Path]::IsPathRooted($ArtifactsRoot)) {
+  $ArtifactsRoot = Join-Path $appRoot $ArtifactsRoot
+}
+$ArtifactsRoot = [System.IO.Path]::GetFullPath($ArtifactsRoot)
 
 function Add-PathEntry($PathEntry) {
   if ([string]::IsNullOrWhiteSpace($PathEntry) -or -not (Test-Path $PathEntry)) {
@@ -144,6 +152,10 @@ function Get-TauriMsiPath {
   return Join-Path $releaseRoot "bundle\msi\$(Get-TauriMsiName)"
 }
 
+function Get-InstalledExePath {
+  return "C:\Program Files\Listener Type\listener-type.exe"
+}
+
 function Find-BuiltMsiPath {
   foreach ($candidate in @((Get-MsiPath), (Get-TauriMsiPath))) {
     if (Test-Path $candidate) {
@@ -248,7 +260,8 @@ function Invoke-CmdWithHeartbeat {
   param(
     [Parameter(Mandatory = $true)][string]$Command,
     [Parameter(Mandatory = $true)][string]$Label,
-    [int]$HeartbeatSeconds = 60
+    [int]$HeartbeatSeconds = 60,
+    [int]$TimeoutSeconds = 3600
   )
 
   New-Item -ItemType Directory -Force -Path $ArtifactsRoot | Out-Null
@@ -308,23 +321,34 @@ function Invoke-CmdWithHeartbeat {
 
   $started = Get-Date
   $lastHeartbeat = $started
+  $deadline = $started.AddSeconds([Math]::Max(60, $TimeoutSeconds))
   $logOffset = 0L
-  [void]$process.Start()
-  while (-not $process.WaitForExit(1000)) {
-    $logOffset = Write-LogDelta -Path $logPath -Offset $logOffset
-    $now = Get-Date
-    if (($now - $lastHeartbeat).TotalSeconds -ge $HeartbeatSeconds) {
-      $elapsed = [int]($now - $started).TotalSeconds
-      Write-Host "[info] $Label still running ($elapsed s elapsed); release builds can be quiet while rustc compiles a large crate."
-      $lastHeartbeat = $now
+  try {
+    [void]$process.Start()
+    while (-not $process.WaitForExit(1000)) {
+      $logOffset = Write-LogDelta -Path $logPath -Offset $logOffset
+      $now = Get-Date
+      if ($now -ge $deadline) {
+        $elapsed = [int]($now - $started).TotalSeconds
+        Write-Warning "$Label timed out after $elapsed seconds; terminating process tree. Log: $logPath"
+        & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+        $process.WaitForExit(5000) | Out-Null
+        $logOffset = Write-LogDelta -Path $logPath -Offset $logOffset
+        throw "$Label timed out after $elapsed seconds. See $logPath"
+      }
+      if (($now - $lastHeartbeat).TotalSeconds -ge $HeartbeatSeconds) {
+        $elapsed = [int]($now - $started).TotalSeconds
+        Write-Host "[info] $Label still running ($elapsed s elapsed); release builds can be quiet while rustc compiles a large crate."
+        $lastHeartbeat = $now
+      }
     }
-  }
-  $process.WaitForExit()
-  $logOffset = Write-LogDelta -Path $logPath -Offset $logOffset
+    $process.WaitForExit()
+    $logOffset = Write-LogDelta -Path $logPath -Offset $logOffset
 
-  $exitCode = $process.ExitCode
-  $process.Dispose()
-  return $exitCode
+    return $process.ExitCode
+  } finally {
+    $process.Dispose()
+  }
 }
 
 function Invoke-MsvcBuild {
@@ -366,7 +390,7 @@ function Invoke-MsvcBuild {
 
   $commandParts += "npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
   $buildCommand = $commandParts -join " && "
-  $exitCode = Invoke-CmdWithHeartbeat -Command $buildCommand -Label "Tauri Windows MSI build"
+  $exitCode = Invoke-CmdWithHeartbeat -Command $buildCommand -Label "Tauri Windows MSI build" -TimeoutSeconds $CommandTimeoutSeconds
   if ($exitCode -ne 0) {
     Write-Warning "Tauri Windows MSI build returned exit code $exitCode. Trying to finish MSI linking from generated WiX objects."
     Repair-TauriMsiBundle
@@ -520,15 +544,143 @@ function Copy-WindowsArtifacts {
   Get-FileHash -Algorithm SHA256 -LiteralPath $hashPaths | Select-Object Path,Hash | Format-List
 }
 
+function Stop-InstalledListenerType {
+  $installedExePath = Get-InstalledExePath
+  $resolvedInstalledExe = $null
+  if (Test-Path -LiteralPath $installedExePath) {
+    $resolvedInstalledExe = (Resolve-Path -LiteralPath $installedExePath).Path
+  }
+  if (-not $resolvedInstalledExe) {
+    return
+  }
+
+  $running = @(Get-CimInstance Win32_Process -Filter "Name = 'listener-type.exe'" -ErrorAction SilentlyContinue)
+  foreach ($process in $running) {
+    $commandLine = [string]$process.CommandLine
+    if ($commandLine.IndexOf($resolvedInstalledExe, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+      continue
+    }
+
+    Write-Host "[info] Stopping installed Listener Type before MSI update: pid=$($process.ProcessId)"
+    Stop-Process -Id $process.ProcessId -Force
+  }
+}
+
+function Assert-InstalledPayloadMatchesRelease {
+  param([int]$TimeoutSeconds = 15)
+
+  $releaseExePath = Join-Path $releaseRoot "listener-type.exe"
+  $installedExePath = Get-InstalledExePath
+
+  if (-not (Test-Path -LiteralPath $releaseExePath)) {
+    throw "Release exe not found: $releaseExePath"
+  }
+
+  $releaseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseExePath).Hash
+  $installedHash = ""
+  $lastHashError = ""
+  $deadline = (Get-Date).AddSeconds([Math]::Max(1, $TimeoutSeconds))
+  do {
+    if (Test-Path -LiteralPath $installedExePath) {
+      try {
+        $installedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedExePath).Hash
+        $lastHashError = ""
+        if ($releaseHash -eq $installedHash) {
+          Write-Host "[ok] Installed Listener Type exe matches MSI payload"
+          Write-Host "     exe: $installedExePath"
+          Write-Host "     sha256: $installedHash"
+          return
+        }
+      } catch {
+        $lastHashError = $_.Exception.Message
+      }
+    }
+    Start-Sleep -Milliseconds 250
+  } while ((Get-Date) -lt $deadline)
+
+  if (-not (Test-Path -LiteralPath $installedExePath)) {
+    throw "Installed Listener Type exe not found after MSI update: $installedExePath"
+  }
+
+  if ($releaseHash -ne $installedHash) {
+    $suffix = if ([string]::IsNullOrWhiteSpace($lastHashError)) { "" } else { " last_error=$lastHashError" }
+    throw "Installed Listener Type exe hash does not match the freshly built MSI payload. release=$releaseHash installed=$installedHash$suffix"
+  }
+}
+
+function Install-LatestMsi {
+  $msiPath = Join-Path $ArtifactsRoot (Get-MsiName)
+  if (-not (Test-Path -LiteralPath $msiPath)) {
+    throw "Cannot install latest MSI because the copied artifact is missing: $msiPath"
+  }
+
+  Stop-InstalledListenerType
+
+  $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  $logPath = Join-Path $ArtifactsRoot "msi-install-$stamp.log"
+  Write-Host "[info] Installing latest Listener Type MSI through msiexec"
+  Write-Host "       msi: $msiPath"
+  Write-Host "       log: $logPath"
+  $installCommand = "msiexec.exe /i `"$msiPath`" /qn /norestart /L*v `"$logPath`""
+  $exitCode = Invoke-CmdWithHeartbeat -Command $installCommand -Label "msiexec install" -HeartbeatSeconds 20 -TimeoutSeconds $CommandTimeoutSeconds
+  if ($exitCode -ne 0) {
+    throw "msiexec install failed with code $exitCode. See $logPath"
+  }
+
+  Assert-InstalledPayloadMatchesRelease
+}
+
+function Start-InstalledListenerType {
+  if (-not $LaunchInstalledApp.IsPresent) {
+    return
+  }
+
+  Assert-InstalledPayloadMatchesRelease
+
+  $installedExePath = (Resolve-Path -LiteralPath (Get-InstalledExePath)).Path
+  $installRoot = Split-Path -Parent $installedExePath
+  Write-Host "[info] Starting installed Listener Type app"
+  Write-Host "       exe: $installedExePath"
+  $process = Start-Process -FilePath $installedExePath -WorkingDirectory $installRoot -WindowStyle Hidden -PassThru
+  Start-Sleep -Milliseconds 800
+
+  $running = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)" -ErrorAction SilentlyContinue
+  if (-not $running) {
+    throw "Installed Listener Type process exited immediately after launch."
+  }
+  $commandLine = [string]$running.CommandLine
+  if ($commandLine.IndexOf($installedExePath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    throw "Started Listener Type process is not the installed Program Files exe: $commandLine"
+  }
+
+  Write-Host "[ok] Started installed Listener Type app pid=$($process.Id)"
+}
+
 function Update-DesktopShortcut {
   if ($SkipDesktopShortcut.IsPresent) {
     Write-Host "[info] Skipping desktop shortcut refresh"
     return
   }
 
-  $exePath = Join-Path $releaseRoot "listener-type.exe"
-  if (-not (Test-Path -LiteralPath $exePath)) {
-    throw "Cannot update desktop shortcut; release exe not found: $exePath"
+  $releaseExePath = Join-Path $releaseRoot "listener-type.exe"
+  if (-not (Test-Path -LiteralPath $releaseExePath)) {
+    throw "Cannot update desktop shortcut; release exe not found: $releaseExePath"
+  }
+
+  $installedExePath = Get-InstalledExePath
+  if (-not (Test-Path -LiteralPath $installedExePath)) {
+    Write-Host "[info] Desktop shortcut not updated: install the MSI first so the shortcut targets the user-facing app, not the repo build output."
+    return
+  }
+
+  $releaseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseExePath).Hash
+  $installedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedExePath).Hash
+  if ($releaseHash -ne $installedHash) {
+    Write-Host "[info] Desktop shortcut not updated: installed Listener Type exe does not match the freshly built MSI payload."
+    Write-Host "       release:   $releaseHash"
+    Write-Host "       installed: $installedHash"
+    Write-Host "       install the new MSI, then refresh the shortcut."
+    return
   }
 
   $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
@@ -539,15 +691,15 @@ function Update-DesktopShortcut {
     throw "Cannot update desktop shortcut; Desktop directory not found."
   }
 
-  $resolvedExe = (Resolve-Path -LiteralPath $exePath).Path
-  $resolvedReleaseRoot = (Resolve-Path -LiteralPath $releaseRoot).Path
+  $resolvedExe = (Resolve-Path -LiteralPath $installedExePath).Path
+  $resolvedInstallRoot = Split-Path -Parent $resolvedExe
   $shortcutPath = Join-Path $desktop "Listener Type.lnk"
   $shell = New-Object -ComObject WScript.Shell
   $shortcut = $shell.CreateShortcut($shortcutPath)
   $shortcut.TargetPath = $resolvedExe
-  $shortcut.WorkingDirectory = $resolvedReleaseRoot
+  $shortcut.WorkingDirectory = $resolvedInstallRoot
   $shortcut.IconLocation = "$resolvedExe,0"
-  $shortcut.Description = "Listener Type latest local release build"
+  $shortcut.Description = "Listener Type installed application"
   $shortcut.Save()
 
   Write-Host "[ok] Desktop shortcut updated -> $shortcutPath"
@@ -573,7 +725,10 @@ try {
     }
     Write-Host "[info] Skipping npm.cmd ci"
   } else {
-    npm.cmd ci
+    $exitCode = Invoke-CmdWithHeartbeat -Command "npm.cmd ci" -Label "npm ci" -HeartbeatSeconds 30 -TimeoutSeconds $CommandTimeoutSeconds
+    if ($exitCode -ne 0) {
+      throw "npm.cmd ci failed with exit code $exitCode."
+    }
   }
 
   $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
@@ -586,7 +741,13 @@ try {
   }
   Repair-TauriMsiBundle
   Copy-WindowsArtifacts
+  if ($InstallMsi.IsPresent) {
+    Install-LatestMsi
+  } elseif ($LaunchInstalledApp.IsPresent) {
+    throw "-LaunchInstalledApp requires -InstallMsi so validation uses a freshly updated user-facing installation."
+  }
   Update-DesktopShortcut
+  Start-InstalledListenerType
 } finally {
   Pop-Location
 }

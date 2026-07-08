@@ -20,6 +20,16 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
 $steps = @(
     [ordered]@{
+        id = "ble-low-double-flash"
+        title = "0. BLE 低亮双闪亮度"
+        prompt = "动作：保持 Listener 已刷入当前固件；先退出 Listener Type 或让 Type 暂时不接管，观察 LED2/BLE 的找 Type/connected 低亮蓝色双闪。`r`n期望：低亮双闪应明显低于 Type-ready 全亮蓝，不像满亮蓝灯；不能带着 PWR、EC11、key1-key4 乱闪。`r`n只验这条备注：如果看起来仍然太亮、不是低亮、或者其它灯被带闪，请写备注；通过可直接点通过。"
+    },
+    [ordered]@{
+        id = "ble-idle-only-dark"
+        title = "0b. BLE 只在 idle 灭"
+        prompt = "动作：只观察 LED2/BLE。1) Type 开着并已恢复时，LED2 应是 Type-ready 稳定蓝。2) 从托盘退出 Type 但不要删 Windows 配对，观察 HID-only/找 Type：应是低谷/低蓝双闪。3) 重连或配对过程中允许黑相位，不能伪装成已连接低谷。4) idle/sleep 完全无 BLE 灯效可让 Codex 用串口 ~POWER:IDLE + ~LED:STATUS 证明，不需要你干等。`r`n期望：低谷/低蓝只表示已经连上蓝牙但还没 Type-ready；Type-ready 是稳定蓝；未连接、重连、配对可以有黑相位；只有 idle/sleep/明确全灭时 BLE 才应完全没有灯效。`r`n只验这条：不要重验改名、双击、按键灯；看不懂或异常请写备注。"
+    },
+    [ordered]@{
         id = "manual-delete-no-autopair-led"
         title = "1. 手动删除不抢回"
         prompt = "动作：Type 保持开启，在 Windows 蓝牙里删除当前 Listener。`r`n期望：Type 不自动抢回配对；灯效不显示 Type-ready/已连接，不出现已连接未连接循环。`r`n只填写失败现象；通过可直接点通过。"
@@ -27,7 +37,7 @@ $steps = @(
     [ordered]@{
         id = "type-exit-led-clears"
         title = "2. 退出 Type 灯效"
-        prompt = "动作：退出 Listener Type，等待 12 秒。`r`n期望：固件不再显示 Type-ready/连接 Type 的灯效；功能层可以保持 HID 已连接，但灯不能骗用户 Type 还在。`r`n填写退出后蓝牙灯/EC11 灯现象。"
+        prompt = "动作：从托盘退出 Listener Type；2 秒内进程应退出，然后继续等待到 12 秒。`r`n期望：退出不应卡很久；固件不再显示 Type-ready/连接 Type 的灯效；功能层可以保持 HID 已连接，但灯不能骗用户 Type 还在。`r`n填写退出耗时、是否残留 listener-type.exe，以及退出后蓝牙灯/EC11 灯现象。"
     },
     [ordered]@{
         id = "no-type-clean-pair-led"
@@ -42,7 +52,7 @@ $steps = @(
     [ordered]@{
         id = "ec11-double-repair"
         title = "5. EC11 双击重配"
-        prompt = "动作：快速双击 EC11 旋钮。`r`n期望：不要进录音；出现已验收的蓝色重配三次双闪；Windows/Type 能完成重新连接，不长时间卡已连接/未连接。`r`n填写灯效、Windows 状态和 Type 胶囊。"
+        prompt = "动作：快速双击 EC11 旋钮。`r`n期望：不要进录音；出现已验收的蓝色重配三次双闪；Windows/Type 能完成重新连接，不长时间卡已连接/未连接；未连接、重连、等待 Type audio notify 时不能有已连接蓝底，恢复完成后才允许 Type-ready/蓝底。`r`n填写灯效、Windows 状态和 Type 胶囊。"
     },
     [ordered]@{
         id = "type-restart-recovers-led"

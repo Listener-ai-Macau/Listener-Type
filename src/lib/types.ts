@@ -451,8 +451,14 @@ export interface UserPreferences {
   deviceStatusLedDefaultMigrated: boolean;
   /** 按键灯旧默认迁移标记。false/缺失时旧的按键灯 100 默认会迁到按键灯 80。 */
   deviceKeyLedDefaultMigrated: boolean;
-  /** 进入低功耗 idle 的等待时间，单位分钟。 */
+  /** 1.0.2 状态灯/按键灯 50 旧默认是否已迁到 80。 */
+  deviceLedBrightness102DefaultMigrated: boolean;
+  /** 兼容旧配置的低功耗 idle 等待时间，单位分钟；新配置以 plugged/battery 字段为准。 */
   deviceLowPowerIdleMinutes: number;
+  /** 插电/外部供电进入低功耗 idle 的等待时间，单位分钟。 */
+  devicePluggedLowPowerIdleMinutes: number;
+  /** 电池供电进入低功耗 idle 的等待时间，单位分钟。 */
+  deviceBatteryLowPowerIdleMinutes: number;
   /** 插电/外部供电时是否允许进入低功耗 idle。 */
   devicePluggedLowPowerEnabled: boolean;
   /** 电池供电空闲自动关机时间，单位分钟。插电时不进入该策略。 */

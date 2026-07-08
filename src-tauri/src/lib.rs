@@ -2224,11 +2224,25 @@ mod tests {
             .map(|offset| start + offset)
             .expect("explicit quit helper boundary should exist");
         let body = &source[start..end];
+        let quit_flag_index = body
+            .find("APP_QUIT_REQUESTED.store(true")
+            .expect("explicit quit must mark the app as intentionally quitting");
+        let tray_watcher_index = body
+            .find("TRAY_MICROPHONE_WATCHER_STOPPING.store(true")
+            .expect("explicit quit must stop tray watcher work before exit");
         let shutdown_index = body
             .find("coordinator.request_shutdown();")
             .expect("explicit quit must ask the coordinator to shut down BLE first");
         let exit_index = body.find("app.exit(0);").expect("explicit quit must exit");
 
+        assert!(
+            quit_flag_index < shutdown_index,
+            "explicit quit must set the quit flag before shutdown so ExitRequested is not kept alive"
+        );
+        assert!(
+            tray_watcher_index < shutdown_index,
+            "explicit quit must stop tray watcher refreshes before shutdown"
+        );
         assert!(
             shutdown_index < exit_index,
             "Type must send its BLE shutdown signal before exiting the process"

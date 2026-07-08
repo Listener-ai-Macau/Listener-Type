@@ -754,6 +754,7 @@ mod windows_ble {
         windows::core::w!("Local\\Denzic.Listener.Type.PairingMaintenance");
     const BLE_RECENT_PAIRING_FAST_GATT_WINDOW: Duration = Duration::from_secs(45);
     const BLE_ADAPTER_RESTART_SETTLE: Duration = Duration::from_millis(2500);
+    const BLE_PAIRING_IN_PROGRESS_SETTLE: Duration = Duration::from_millis(2200);
     const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
@@ -1567,7 +1568,7 @@ mod windows_ble {
     pub fn prompt_listener_pairing(
         expected_name: Option<&str>,
     ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-        match prompt_listener_pairing_inner(expected_name, false, false) {
+        match prompt_listener_pairing_inner(expected_name, false, false, true) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -1588,7 +1589,7 @@ mod windows_ble {
     pub fn prompt_listener_pairing_for_recovery(
         expected_name: Option<&str>,
     ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-        match prompt_listener_pairing_inner(expected_name, true, false) {
+        match prompt_listener_pairing_inner(expected_name, true, false, true) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -1606,10 +1607,33 @@ mod windows_ble {
         }
     }
 
+    pub fn prompt_listener_pairing_for_recovery_without_user_prompt(
+        expected_name: Option<&str>,
+    ) -> crate::embedded_ble::BleDevicePairingPromptResult {
+        match prompt_listener_pairing_inner(expected_name, true, false, false) {
+            Ok(result) => result,
+            Err(err) => {
+                log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
+                crate::embedded_ble::BleDevicePairingPromptResult {
+                    status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+                    attempted: false,
+                    matched_devices: 0,
+                    prompted_devices: 0,
+                    already_paired_devices: 0,
+                    failed_devices: 0,
+                    open_bluetooth_settings: false,
+                    details: vec![format!(
+                        "{err}; user pairing prompt suppressed for BLE name recovery"
+                    )],
+                }
+            }
+        }
+    }
+
     pub fn prompt_listener_pairing_after_type_recovery(
         expected_name: Option<&str>,
     ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-        match prompt_listener_pairing_inner(expected_name, true, true) {
+        match prompt_listener_pairing_inner(expected_name, true, true, true) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -1622,6 +1646,29 @@ mod windows_ble {
                     failed_devices: 0,
                     open_bluetooth_settings: true,
                     details: vec![err],
+                }
+            }
+        }
+    }
+
+    pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt(
+        expected_name: Option<&str>,
+    ) -> crate::embedded_ble::BleDevicePairingPromptResult {
+        match prompt_listener_pairing_inner(expected_name, true, true, false) {
+            Ok(result) => result,
+            Err(err) => {
+                log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
+                crate::embedded_ble::BleDevicePairingPromptResult {
+                    status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+                    attempted: false,
+                    matched_devices: 0,
+                    prompted_devices: 0,
+                    already_paired_devices: 0,
+                    failed_devices: 0,
+                    open_bluetooth_settings: false,
+                    details: vec![format!(
+                        "{err}; user pairing prompt suppressed for BLE name recovery"
+                    )],
                 }
             }
         }
@@ -1730,6 +1777,7 @@ mod windows_ble {
         expected_name: Option<&str>,
         bypass_prompt_suppression: bool,
         type_recovery_command_confirmed: bool,
+        allow_user_pairing_prompt: bool,
     ) -> Result<crate::embedded_ble::BleDevicePairingPromptResult, String> {
         let target_name = effective_bluetooth_target_name(expected_name);
         set_configured_bluetooth_target_name(&target_name);
@@ -1801,16 +1849,18 @@ mod windows_ble {
             prompted_devices: 0,
             already_paired_devices: 0,
             failed_devices: 0,
-            open_bluetooth_settings: true,
+            open_bluetooth_settings: allow_user_pairing_prompt,
             details: Vec::new(),
         };
 
+        let allow_adapter_restart = allow_user_pairing_prompt && !type_recovery_command_confirmed;
         let fast_recovery_pairing_failure = pair_listener_candidates_into_prompt_result(
             &mut result,
             candidates,
             &target_name,
             bypass_prompt_suppression,
             bypass_prompt_suppression,
+            allow_adapter_restart,
         );
         if bypass_prompt_suppression
             && result.prompted_devices == 0
@@ -1835,6 +1885,7 @@ mod windows_ble {
                         &target_name,
                         false,
                         true,
+                        allow_adapter_restart,
                     );
                     if result.prompted_devices > prompted_before_fallback
                         || result.already_paired_devices > already_before_fallback
@@ -1861,10 +1912,18 @@ mod windows_ble {
 
         if result.matched_devices == 0 {
             result.status = crate::embedded_ble::BleDevicePairingPromptStatus::NotFound;
-            result.details.push(
-                "No pairable Listener device object was visible to Windows. Bluetooth settings will open for native pairing."
-                    .to_string(),
-            );
+            result.open_bluetooth_settings = allow_user_pairing_prompt;
+            if allow_user_pairing_prompt {
+                result.details.push(
+                    "No pairable Listener device object was visible to Windows. Bluetooth settings will open for native pairing."
+                        .to_string(),
+                );
+            } else {
+                result.details.push(
+                    "No pairable Listener device object was visible to Windows; user pairing prompt is suppressed for this Type-controlled recovery."
+                        .to_string(),
+                );
+            }
             return Ok(result);
         }
 
@@ -1877,10 +1936,16 @@ mod windows_ble {
             result.open_bluetooth_settings = false;
             crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
         } else {
-            result.open_bluetooth_settings = true;
+            result.open_bluetooth_settings = allow_user_pairing_prompt;
+            if !allow_user_pairing_prompt {
+                result.details.push(
+                    "Windows pairing did not complete automatically; user pairing prompt is suppressed for this Type-controlled recovery."
+                        .to_string(),
+                );
+            }
             crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction
         };
-        if result.prompted_devices > 0 || result.failed_devices > 0 {
+        if allow_user_pairing_prompt && (result.prompted_devices > 0 || result.failed_devices > 0) {
             remember_pairing_prompt_attempt(&target_name, now);
         }
         Ok(result)
@@ -1892,6 +1957,7 @@ mod windows_ble {
         target_name: &str,
         track_fast_failure_for_aep_fallback: bool,
         verify_already_paired_liveness: bool,
+        allow_adapter_restart: bool,
     ) -> bool {
         let mut fast_pairing_failure = false;
         for candidate in candidates {
@@ -1900,6 +1966,7 @@ mod windows_ble {
                 &candidate,
                 Some(target_name),
                 verify_already_paired_liveness,
+                allow_adapter_restart,
             ) {
                 Ok(DevicePairingOutcome::Paired) => {
                     remember_recent_pairing_fast_gatt(
@@ -2672,6 +2739,7 @@ mod windows_ble {
         candidate: &ListenerPairingCandidate,
         expected_name: Option<&str>,
         verify_already_paired_liveness: bool,
+        allow_adapter_restart: bool,
     ) -> Result<DevicePairingOutcome, String> {
         let mut candidate = candidate.clone();
         for stale_cleanup_attempt in 0..3 {
@@ -2754,7 +2822,12 @@ mod windows_ble {
                 }
             }
 
-            return pair_unpaired_listener_candidate(&candidate, &pairing, expected_name);
+            return pair_unpaired_listener_candidate(
+                &candidate,
+                &pairing,
+                expected_name,
+                allow_adapter_restart,
+            );
         }
 
         Err(
@@ -2799,12 +2872,13 @@ mod windows_ble {
         candidate: &ListenerPairingCandidate,
         pairing: &DeviceInformationPairing,
         expected_name: Option<&str>,
+        allow_adapter_restart: bool,
     ) -> Result<DevicePairingOutcome, String> {
         pair_unpaired_listener_candidate_with_adapter_recovery(
             candidate,
             pairing,
             expected_name,
-            true,
+            allow_adapter_restart,
         )
     }
 
@@ -2855,6 +2929,7 @@ mod windows_ble {
                 Err(_) => {}
             }
         }
+        let mut custom_pairing_already_in_progress = false;
         if pairing_status_should_try_custom_fallback(status) {
             log::warn!(
                 "[embedded-ble] Windows standard pairing returned status={status:?} for {}; trying custom PairAsync fallback",
@@ -2863,6 +2938,9 @@ mod windows_ble {
             match custom_pair_listener_candidate(pairing, &candidate.label, expected_name) {
                 Ok(outcome) => return Ok(outcome),
                 Err(err) => {
+                    if err.contains("already pairing") {
+                        custom_pairing_already_in_progress = true;
+                    }
                     log::warn!(
                         "[embedded-ble] Windows custom pairing fallback failed for {} after standard status={status:?}: {err}",
                         candidate.label
@@ -2879,6 +2957,42 @@ mod windows_ble {
             expected_name,
             &format!("Windows returned pairing status={status:?}"),
         );
+        if final_result.is_err()
+            && !allow_adapter_restart
+            && (custom_pairing_already_in_progress
+                || pairing_status_suggests_adapter_restart(status))
+        {
+            log::warn!(
+                "[embedded-ble] Windows PairAsync did not finish cleanly for {}, but Type automatic recovery will not restart the local Bluetooth adapter; waiting {} ms for in-progress Windows pairing to settle",
+                candidate.label,
+                BLE_PAIRING_IN_PROGRESS_SETTLE.as_millis()
+            );
+            std::thread::sleep(BLE_PAIRING_IN_PROGRESS_SETTLE);
+            match refresh_listener_pairing_candidate(candidate, expected_name)? {
+                Some(refreshed) => {
+                    let refreshed_pairing = refreshed
+                        .info
+                        .Pairing()
+                        .map_err(|err| format!("read refreshed pairing info failed: {err}"))?;
+                    if refreshed_pairing
+                        .IsPaired()
+                        .map_err(|err| format!("read refreshed pairing state failed: {err}"))?
+                    {
+                        log::info!(
+                            "[embedded-ble] Windows reports {} paired after passive in-progress PairAsync settle",
+                            refreshed.label
+                        );
+                        return Ok(DevicePairingOutcome::AlreadyPaired);
+                    }
+                }
+                None => {
+                    log::warn!(
+                        "[embedded-ble] Windows PairAsync settle finished for {}, but Listener pairing candidate was not visible yet",
+                        candidate.label
+                    );
+                }
+            }
+        }
         if final_result.is_err()
             && allow_adapter_restart
             && pairing_status_suggests_adapter_restart(status)
@@ -4366,6 +4480,28 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         )
     }
 
+    pub fn send_recording_control_silent_recovery(timeout: Duration) -> Result<(), String> {
+        let serial_result =
+            send_control_command_via_usb_serial("VREC:RECOVERY:TYPE:SILENT", timeout);
+        match &serial_result {
+            Ok(()) => {
+                log::info!("[embedded-ble] audio control silent recovery sent via USB serial");
+                return Ok(());
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] audio control silent recovery USB serial path unavailable; trying BLE control: {err}"
+                );
+            }
+        }
+        send_recording_control_command(
+            b"VREC:RECOVERY:TYPE:SILENT\n",
+            timeout,
+            "audio control silent recovery",
+            ActiveControlTransientFallback::TryFreshGatt,
+        )
+    }
+
     pub fn send_recording_control_type_bye(timeout: Duration) -> Result<(), String> {
         if let Some(result) =
             send_audio_control_via_active_capture(b"TYPE:BYE\n", timeout, "audio type bye")
@@ -4688,6 +4824,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Ok(())
     }
 
+    #[cfg(test)]
+    pub fn read_status_led_brightness_status(timeout: Duration) -> Result<String, String> {
+        exchange_status_led_via_usb_serial(
+            "LED:STATUS detail=brightness",
+            "~LED:STATUS detail=brightness",
+            timeout,
+        )
+        .map_err(|err| format!("USB serial status LED brightness refresh failed: {err}"))
+    }
+
     fn device_settings_command_allows_active_capture(command: &str) -> bool {
         !device_settings_command_updates_ble_name(command)
     }
@@ -4775,6 +4921,44 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         for port in candidates {
             match send_control_command_via_serial_port(&port.port_name, command, timeout) {
                 Ok(()) => return Ok(()),
+                Err(err) => errors.push(format!("{}: {err}", port.port_name)),
+            }
+        }
+
+        Err(DeviceSettingsSerialError::Transport(format!(
+            "all Listener USB serial candidates failed: {}",
+            errors.join("; ")
+        )))
+    }
+
+    #[cfg(test)]
+    fn exchange_status_led_via_usb_serial(
+        command: &str,
+        expected_fragment: &str,
+        timeout: Duration,
+    ) -> Result<String, DeviceSettingsSerialError> {
+        let ports = serialport::available_ports().map_err(|err| {
+            DeviceSettingsSerialError::Unavailable(format!(
+                "USB serial port enumeration failed: {err}"
+            ))
+        })?;
+        let candidates = listener_usb_serial_candidates(&ports);
+        if candidates.is_empty() {
+            return Err(DeviceSettingsSerialError::Unavailable(
+                "no Listener USB serial port found".to_string(),
+            ));
+        }
+
+        let mut errors = Vec::new();
+        for port in candidates {
+            match exchange_status_led_via_serial_port(
+                &port.port_name,
+                command,
+                expected_fragment,
+                timeout,
+            ) {
+                Ok(line) => return Ok(line),
+                Err(err) if err.is_firmware_rejection() => return Err(err),
                 Err(err) => errors.push(format!("{}: {err}", port.port_name)),
             }
         }
@@ -4962,6 +5146,65 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Ok(())
     }
 
+    #[cfg(test)]
+    fn exchange_status_led_via_serial_port(
+        port_name: &str,
+        command: &str,
+        expected_fragment: &str,
+        timeout: Duration,
+    ) -> Result<String, DeviceSettingsSerialError> {
+        let serial_timeout = Duration::from_millis(120);
+        let mut port = serialport::new(port_name, DEVICE_SETTINGS_SERIAL_BAUD_RATE)
+            .dtr_on_open(false)
+            .timeout(serial_timeout)
+            .open()
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("open failed: {err}")))?;
+        let _ = port.write_data_terminal_ready(false);
+        let _ = port.write_request_to_send(false);
+
+        drain_serial_input_until_quiet(
+            &mut *port,
+            DEVICE_SETTINGS_SERIAL_DRAIN_MAX_DURATION,
+            DEVICE_SETTINGS_SERIAL_DRAIN_QUIET_DURATION,
+        );
+        let payload = format!("~{command}\n");
+        port.write_all(payload.as_bytes())
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("write failed: {err}")))?;
+        port.flush()
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("flush failed: {err}")))?;
+
+        let deadline = Instant::now() + timeout.max(Duration::from_secs(2));
+        let mut response = String::new();
+        let mut read_buf = [0_u8; DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES];
+        while Instant::now() < deadline {
+            match port.read(&mut read_buf) {
+                Ok(count) if count > 0 => {
+                    response.push_str(&String::from_utf8_lossy(&read_buf[..count]));
+                    if let Some(line) = response.lines().find(|line| line.contains("~LED:ERROR")) {
+                        return Err(DeviceSettingsSerialError::FirmwareRejected(format!(
+                            "firmware rejected status LED command: {line}"
+                        )));
+                    }
+                    if let Some(line) = complete_status_led_line(&response, expected_fragment) {
+                        return Ok(line);
+                    }
+                }
+                Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(err) => {
+                    return Err(DeviceSettingsSerialError::Transport(format!(
+                        "read failed: {err}"
+                    )));
+                }
+            }
+        }
+
+        let tail = response_tail(&response, 320);
+        Err(DeviceSettingsSerialError::Transport(format!(
+            "timed out waiting for {expected_fragment}; received={tail:?}"
+        )))
+    }
+
     fn drain_serial_input_until_quiet(
         port: &mut dyn serialport::SerialPort,
         max_duration: Duration,
@@ -5008,6 +5251,19 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             .into_iter()
             .map(str::trim)
             .find(|line| line.contains("~DEVICE:SETTINGS") && line.contains(" result=OK"))
+            .map(ToString::to_string)
+    }
+
+    #[cfg(test)]
+    fn complete_status_led_line(response: &str, expected_fragment: &str) -> Option<String> {
+        let mut lines: Vec<&str> = response.split('\n').collect();
+        if !response.ends_with('\n') {
+            let _ = lines.pop();
+        }
+        lines
+            .into_iter()
+            .map(str::trim)
+            .find(|line| line.contains(expected_fragment))
             .map(ToString::to_string)
     }
 
@@ -5194,21 +5450,18 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     fn low_power_minutes_from_ms(ms: u32) -> u32 {
-        minutes_from_ms_nearest(ms, crate::types::MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
+        minutes_from_ms_floor(ms, crate::types::MAX_DEVICE_LOW_POWER_IDLE_MINUTES)
     }
 
     fn auto_shutdown_minutes_from_ms(ms: u32) -> u32 {
-        minutes_from_ms_nearest(ms, crate::types::MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES)
+        minutes_from_ms_floor(ms, crate::types::MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES)
     }
 
-    fn minutes_from_ms_nearest(ms: u32, max_minutes: u32) -> u32 {
+    fn minutes_from_ms_floor(ms: u32, max_minutes: u32) -> u32 {
         if ms == 0 {
             0
         } else {
-            ms.saturating_add(30_000)
-                .checked_div(60_000)
-                .unwrap_or(0)
-                .clamp(1, max_minutes)
+            ms.checked_div(60_000).unwrap_or(0).clamp(1, max_minutes)
         }
     }
 
@@ -14321,7 +14574,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        fn pairasync_failed_restarts_windows_bluetooth_adapter_once_before_retry() {
+        fn pairasync_failed_restarts_windows_bluetooth_adapter_only_when_allowed() {
             let source = include_str!("embedded_ble.rs");
             let start = source
                 .find("fn pair_unpaired_listener_candidate_with_adapter_recovery")
@@ -14333,10 +14586,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             let body = &source[start..end];
 
             assert!(body.contains("pairing_status_suggests_adapter_restart(status)"));
+            assert!(body.contains("&& allow_adapter_restart"));
             assert!(body.contains("restart_windows_bluetooth_adapter_after_pairing_failure"));
             assert!(
                 body.contains("refresh_listener_pairing_candidate(candidate, expected_name)"),
                 "after restarting the local adapter, Type must reopen the BLE DeviceInformation before retrying PairAsync"
+            );
+            assert!(
+                body.contains("!allow_adapter_restart")
+                    && body.contains("passive in-progress PairAsync settle"),
+                "Type automatic recovery should wait briefly for Windows in-progress pairing instead of bouncing the local Bluetooth adapter"
             );
             assert!(
                 body.contains("false,"),
@@ -14346,6 +14605,28 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 source.contains("fn pairing_status_suggests_adapter_restart")
                     && source.contains("DevicePairingResultStatus::Failed"),
                 "only the observed Windows Failed(19) pairing result should trigger adapter restart"
+            );
+        }
+
+        #[test]
+        fn type_recovery_pairasync_disables_adapter_restart() {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("fn prompt_listener_pairing_inner")
+                .expect("prompt helper should exist");
+            let end = source[start..]
+                .find("fn pairing_prompt_suppression_remaining")
+                .map(|offset| start + offset)
+                .expect("prompt helper boundary should exist");
+            let body = &source[start..end];
+
+            assert!(
+                body.contains("allow_user_pairing_prompt && !type_recovery_command_confirmed"),
+                "Type-owned or user-prompt-suppressed recovery must not restart the whole Windows Bluetooth adapter"
+            );
+            assert!(
+                body.contains("allow_adapter_restart,"),
+                "the Type recovery adapter-restart policy must flow into every pairing candidate attempt"
             );
         }
 
@@ -14433,7 +14714,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        fn type_controlled_recovery_uses_single_type_command() {
+        fn type_controlled_recovery_uses_explicit_type_commands() {
             let source = include_str!("embedded_ble.rs");
             let production = &source[..source
                 .find("    mod tests {")
@@ -14451,8 +14732,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             assert!(body.contains("b\"VREC:RECOVERY:TYPE\\n\""));
             assert!(
                 !body.contains("b\"VREC:RECOVERY\\n\""),
-                "Type-controlled recovery should use one explicit firmware command; firmware decides whether the bounded Windows Swift Pair prompt is advertised"
+                "normal Type-controlled recovery should use the explicit Swift-Pair-capable firmware command"
             );
+            assert!(source.contains("pub fn send_recording_control_silent_recovery"));
+            assert!(source.contains("\"VREC:RECOVERY:TYPE:SILENT\""));
+            assert!(source.contains("b\"VREC:RECOVERY:TYPE:SILENT\\n\""));
             assert!(!production.contains("send_recording_control_native_pairing_recovery"));
         }
 
@@ -15028,6 +15312,11 @@ pub fn send_recording_control_recovery(timeout: Duration) -> Result<(), String> 
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_silent_recovery(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_control_silent_recovery(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_control_type_bye(timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_control_type_bye(timeout)
 }
@@ -15074,6 +15363,11 @@ pub fn apply_pending_ble_name(timeout: Duration) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 pub fn send_status_led_command(command: &str, timeout: Duration) -> Result<(), String> {
     windows_ble::send_status_led_command(command, timeout)
+}
+
+#[cfg(all(target_os = "windows", test))]
+pub fn read_status_led_brightness_status(timeout: Duration) -> Result<String, String> {
+    windows_ble::read_status_led_brightness_status(timeout)
 }
 
 #[cfg(target_os = "windows")]
@@ -15417,10 +15711,24 @@ pub fn prompt_listener_pairing_for_recovery(
 }
 
 #[cfg(target_os = "windows")]
+pub fn prompt_listener_pairing_for_recovery_without_user_prompt(
+    expected_name: Option<&str>,
+) -> BleDevicePairingPromptResult {
+    windows_ble::prompt_listener_pairing_for_recovery_without_user_prompt(expected_name)
+}
+
+#[cfg(target_os = "windows")]
 pub fn prompt_listener_pairing_after_type_recovery(
     expected_name: Option<&str>,
 ) -> BleDevicePairingPromptResult {
     windows_ble::prompt_listener_pairing_after_type_recovery(expected_name)
+}
+
+#[cfg(target_os = "windows")]
+pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt(
+    expected_name: Option<&str>,
+) -> BleDevicePairingPromptResult {
+    windows_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt(expected_name)
 }
 
 #[cfg(target_os = "windows")]
@@ -15500,6 +15808,11 @@ pub fn send_recording_control_stop(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_recovery(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recovery is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_silent_recovery(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE silent recovery is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -15839,10 +16152,34 @@ pub fn prompt_listener_pairing_for_recovery(
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn prompt_listener_pairing_for_recovery_without_user_prompt(
+    _expected_name: Option<&str>,
+) -> BleDevicePairingPromptResult {
+    let mut result = prompt_listener_pairing(_expected_name);
+    result.open_bluetooth_settings = false;
+    result
+        .details
+        .push("User pairing prompt is suppressed for this Type-controlled recovery.".to_string());
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn prompt_listener_pairing_after_type_recovery(
     _expected_name: Option<&str>,
 ) -> BleDevicePairingPromptResult {
     prompt_listener_pairing(_expected_name)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt(
+    _expected_name: Option<&str>,
+) -> BleDevicePairingPromptResult {
+    let mut result = prompt_listener_pairing(_expected_name);
+    result.open_bluetooth_settings = false;
+    result
+        .details
+        .push("User pairing prompt is suppressed for this Type-controlled recovery.".to_string());
+    result
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -16480,16 +16817,26 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn parses_device_settings_ms_jitter_without_rounding_up_full_minute() {
-        let status = super::windows_ble::parse_device_settings_status_line(
-            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK active_power=battery low_power_idle_ms=600001 plugged_low_power_idle_ms=600001 battery_low_power_idle_ms=600001 plugged_low_power_enabled=1 auto_shutdown_ms=600001 plugged_auto_shutdown_ms=0 battery_auto_shutdown_ms=600001 knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=0 external_power_present=0 usb_power_present=0 charging=0 charge_full=0"
-        )
-        .expect("parse device settings with millisecond jitter");
+        for minutes in [0, 1, 2, 3, 5, 12, 47, 1439, 1440] {
+            let extra_ms_values: &[u32] = if minutes == 0 {
+                &[0]
+            } else {
+                &[0, 1, 17_321, 59_999]
+            };
+            for extra_ms in extra_ms_values {
+                let jittered_ms = minutes * 60_000 + extra_ms;
+                let status = super::windows_ble::parse_device_settings_status_line(&format!(
+                    "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK active_power=battery low_power_idle_ms={jittered_ms} plugged_low_power_idle_ms={jittered_ms} battery_low_power_idle_ms={jittered_ms} plugged_low_power_enabled=1 auto_shutdown_ms={jittered_ms} plugged_auto_shutdown_ms=0 battery_auto_shutdown_ms={jittered_ms} knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=0 external_power_present=0 usb_power_present=0 charging=0 charge_full=0"
+                ))
+                .expect("parse device settings with millisecond jitter");
 
-        assert_eq!(status.low_power_idle_minutes, 10);
-        assert_eq!(status.plugged_low_power_idle_minutes, 10);
-        assert_eq!(status.battery_low_power_idle_minutes, 10);
-        assert_eq!(status.plugged_auto_shutdown_minutes, 0);
-        assert_eq!(status.battery_auto_shutdown_minutes, 10);
+                assert_eq!(status.low_power_idle_minutes, minutes);
+                assert_eq!(status.plugged_low_power_idle_minutes, minutes);
+                assert_eq!(status.battery_low_power_idle_minutes, minutes);
+                assert_eq!(status.plugged_auto_shutdown_minutes, 0);
+                assert_eq!(status.battery_auto_shutdown_minutes, minutes);
+            }
+        }
     }
 
     #[cfg(target_os = "windows")]

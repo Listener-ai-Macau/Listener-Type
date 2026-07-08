@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
 import { detectOS } from '../../components/WindowChrome';
@@ -317,7 +317,7 @@ function DeviceFirmwareSettingsCard() {
         t('settings.device.writeTimeout', '写入超时，请确认设备仍连接后重试。'),
       );
       setSnapshot(value);
-      setForm(submittedForm);
+      setForm(snapshotToForm(value));
       setStatus('saved');
       setMessage(t('settings.device.configSaved', '已发送到设备'));
       window.setTimeout(() => setStatus(current => (current === 'saved' ? 'idle' : current)), 1800);
@@ -326,11 +326,26 @@ function DeviceFirmwareSettingsCard() {
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
+  const handleSettingsKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) {
+      return;
+    }
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    event.preventDefault();
+    target.blur();
+    window.setTimeout(() => {
+      void save();
+    }, 0);
+  };
   const detailText = formatDeviceSnapshotDetail(snapshot, t);
   const footerText = validationError || message || formatDeviceSnapshotFooter(snapshot, t);
 
   return (
     <Card className="ol-device-settings-card" style={{ padding: 20 }}>
+      <div onKeyDown={handleSettingsKeyDown}>
       <div className="ol-device-settings-header" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700 }}>
@@ -435,6 +450,7 @@ function DeviceFirmwareSettingsCard() {
           {footerText}
         </div>
       )}
+      </div>
     </Card>
   );
 }
@@ -742,15 +758,76 @@ function PercentNumber({
   onChange: (value: number) => void;
 }) {
   const safeValue = clampPercent(value);
+  const [draft, setDraft] = useState(() => String(safeValue));
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(String(safeValue));
+    }
+  }, [editing, safeValue]);
+
+  const commit = (raw: string, fallback: number) => {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) {
+      setDraft(String(fallback));
+      return;
+    }
+    const next = Number(trimmed);
+    if (!Number.isFinite(next)) {
+      setDraft(String(fallback));
+      return;
+    }
+    const clamped = clampPercent(next);
+    onChange(clamped);
+    setDraft(String(clamped));
+  };
+
+  const updateDraft = (raw: string) => {
+    setDraft(raw);
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) {
+      return;
+    }
+    const next = Number(trimmed);
+    if (!Number.isFinite(next)) {
+      return;
+    }
+    const clamped = clampPercent(next);
+    if (clamped !== value) {
+      onChange(clamped);
+    }
+  };
+
   return (
     <div className="ol-device-percent-number">
       <input
         type="number"
         min={0}
         max={100}
-        value={safeValue}
+        step={1}
+        value={draft}
         disabled={disabled}
-        onChange={event => onChange(clampPercent(Number(event.target.value)))}
+        onFocus={() => {
+          setEditing(true);
+          setDraft(String(safeValue));
+        }}
+        onChange={event => {
+          updateDraft(event.target.value);
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            event.currentTarget.blur();
+          } else if (event.key === 'Escape') {
+            setDraft(String(safeValue));
+            setEditing(false);
+            event.currentTarget.blur();
+          }
+        }}
+        onBlur={event => {
+          setEditing(false);
+          commit(event.target.value, safeValue);
+        }}
         style={{ ...inputStyle, width: 56, height: 26, flex: '0 0 56px', maxWidth: 56, padding: '0 6px', textAlign: 'right' }}
       />
       <span style={{ fontSize: 11.5, color: 'var(--ol-ink-4)' }}>%</span>
@@ -775,6 +852,7 @@ function PercentSlider({
         type="range"
         min={0}
         max={100}
+        step={1}
         value={safeValue}
         disabled={disabled}
         onChange={event => onChange(clampPercent(Number(event.target.value)))}
@@ -1206,12 +1284,12 @@ function isValidBleName(value: string): boolean {
 
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(100, Math.round(value)));
+  return Math.max(0, Math.min(100, Math.trunc(value)));
 }
 
 function clampMinuteValue(value: number, min: 0 | 1): number {
   if (!Number.isFinite(value)) return min;
-  return Math.max(min, Math.min(1440, Math.round(value)));
+  return Math.max(min, Math.min(1440, Math.trunc(value)));
 }
 
 function minutesFromMsForDeviceForm(value: number): number {

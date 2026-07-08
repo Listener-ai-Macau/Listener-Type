@@ -7,27 +7,43 @@
       "id": "baseline-type-tray-ui",
       "bench_title": "Type tray/UI baseline",
       "bench_capabilities": ["type_runtime", "desktop_visual_capture"],
-      "bench_evidence": ["type_process", "window_screenshot", "type_log"]
+      "bench_evidence": ["type_process", "window_screenshot", "type_log"],
+      "product_contract": "Preproduction must use the latest MSI-updated user installation: Program Files listener-type.exe, desktop Listener Type.lnk, and tray startup must all resolve to the installed MSI payload, not a repo build output. The Type process evidence must include ExecutablePath, FileVersion, ProductVersion, and Sha256."
+    },
+    {
+      "id": "pwr-boot-shutdown-led",
+      "bench_title": "PWR boot and shutdown-confirm LED",
+      "bench_capabilities": ["power_relay", "physical_input_fixture", "led_optical_capture"],
+      "bench_evidence": ["power_cycle_log", "physical_input_trace", "led_capture", "serial_led_status"],
+      "product_contract": "Cold boot PWR must show the same capped warm amber color and brightness as the shutdown-confirm PWR cue without an all-black first latch."
+    },
+    {
+      "id": "type-brightness-low-power-sync",
+      "bench_title": "Type LED brightness and low-power exact sync",
+      "bench_capabilities": ["type_runtime", "wired_flash_port"],
+      "bench_evidence": ["type_log", "device_settings_readback"],
+      "product_contract": "Type defaults status/key LED brightness to 80, writes each LED zone brightness as firmware caps, allows brightness number fields to be cleared and retyped without a leading-zero value such as 050, and preserves every low-power minute value exactly without hidden dimming or readback rounding."
     },
     {
       "id": "same-name-write-no-repair",
       "bench_title": "Same-name write does not repair",
       "bench_capabilities": ["type_runtime", "windows_ble_automation"],
-      "bench_evidence": ["before_ble_state", "after_ble_state", "type_log"]
+      "bench_evidence": ["before_ble_state", "after_ble_state", "type_log"],
+      "product_contract": "Writing the current BLE name again must be a normal settings write only: no DEVICE:SET ble_name, no BLE-name apply, no Windows cache refresh, no PairAsync, and no pairing prompt."
     },
     {
       "id": "random-name-exact-cache-refresh",
       "bench_title": "Random BLE name exact cache refresh",
       "bench_capabilities": ["type_runtime", "windows_ble_automation"],
       "bench_evidence": ["name_write_log", "windows_ble_state", "gatt_probe"],
-      "product_contract": "Writing a different valid BLE name must update firmware, refresh this PC's stale Windows Bluetooth cache, and leave Windows/Type displaying the exact new name. Same-name writes remain no-repair/no-prompt."
+      "product_contract": "Writing a different valid BLE name must update firmware, clear this PC's stale pairing/cache through the same Type-controlled recovery path, show the same BLE blue double-flash/reconnect recovery cue as Type-controlled double-click repair, reconnect without opening this PC's Windows Bluetooth Settings/user pairing prompt, leave Windows/Type displaying the exact new fully random ASCII name with no listener/LT/type family prefix, and use silent rename recovery so other computers do not receive a Swift Pair prompt during rename. Explicit cross-computer re-pair remains the double-click/native Windows pairing flow. Same-name writes remain no-repair/no-prompt."
     },
     {
       "id": "restore-default-listener",
       "bench_title": "Restore default listener name",
       "bench_capabilities": ["type_runtime", "windows_ble_automation"],
       "bench_evidence": ["name_write_log", "windows_ble_state", "gatt_probe"],
-      "product_contract": "Restoring the default BLE name listener is a different-name rename when the current name is not listener, so it must run the same Windows cache refresh and exact display-name confirmation path."
+      "product_contract": "Restoring the default BLE name listener is a different-name rename when the current name is not listener, so it must run the same Type-controlled cache refresh/reconnect path, show the same BLE blue double-flash/reconnect recovery cue, avoid opening this PC's Windows Bluetooth Settings/user pairing prompt, suppress Swift Pair prompts on other computers during rename, then prove exact display-name confirmation."
     },
     {
       "id": "manual-windows-delete-no-type-autopair",
@@ -61,23 +77,24 @@
     },
     {
       "id": "ec11-single-not-double",
-      "bench_title": "EC11 single is not double",
+      "bench_title": "EC11 single/double boundary",
       "bench_capabilities": ["physical_input_fixture", "windows_ble_automation", "led_optical_capture"],
-      "bench_evidence": ["physical_input_trace", "windows_ble_events", "led_capture"]
+      "bench_evidence": ["physical_input_trace", "windows_ble_events", "led_capture"],
+      "product_contract": "EC11 single click must remain a single-click action and must not open pairing recovery. A fast EC11 double click must cancel the first pending single click, avoid starting dictation, and enter the BLE recovery cue before the full Type automatic recovery scenario is judged."
     },
     {
       "id": "ec11-double-repair-with-type",
-      "bench_title": "EC11 double-click repair with Type cleanup and Windows native connect",
+      "bench_title": "EC11 double-click repair with Type automatic recovery",
       "bench_capabilities": ["physical_input_fixture", "type_runtime", "windows_ble_automation", "led_optical_capture"],
-      "bench_evidence": ["physical_input_trace", "type_unpair_log", "windows_native_pair_log", "led_capture", "gatt_probe"],
-      "product_contract": "With Type present, double-click repair lets Type clear this PC's stale Windows pairing cache, then the user must complete Windows native pairing via the system notification or Add device. Type must not call PairAsync for this handoff."
+      "bench_evidence": ["physical_input_trace", "type_pairasync_log", "windows_ble_state", "led_capture", "gatt_probe"],
+      "product_contract": "With Type present, double-click repair first clears this PC's stale Windows pairing cache, then waits for the fresh Listener recovery advertisement before running the bounded Type PairAsync recovery path automatically. If another computer completes Windows popup pairing first, this Type instance must stop waiting instead of looping or stealing the bond back."
     },
     {
       "id": "computer-switch-product-flow",
       "bench_title": "Computer switch flow with and without Type",
       "bench_capabilities": ["windows_ble_automation", "second_ble_host"],
       "bench_evidence": ["old_host_state", "no_type_manual_delete_log", "new_host_native_pair_log", "takeover_log"],
-      "product_contract": "Without Type, the user must manually remove stale Windows pairing before native pairing. With Type on the target PC, Type may clear local stale pairing but still waits for Windows native user-confirmed pairing."
+      "product_contract": "Without Type, the user must manually remove stale Windows pairing before native pairing. With Type on the target PC, Type may clear local stale pairing first, then wait for the fresh Listener recovery advertisement and run bounded automatic PairAsync recovery; if another host pairs first, the old Type instance must stop instead of looping or stealing the bond back."
     },
     {
       "id": "recording-response-and-led-priority",
@@ -113,7 +130,8 @@
       "id": "release-package-final-check",
       "bench_title": "Release package final check",
       "bench_capabilities": ["release_artifacts"],
-      "bench_evidence": ["msi_hash", "firmware_zip_hash", "root_package_listing"]
+      "bench_evidence": ["msi_hash", "firmware_zip_hash", "root_package_listing", "source_hash_comparison"],
+      "product_contract": "Denzic root may contain only ListenerType_1.0.2_x64_en-US.msi and ListenerFirmware_1.0.2_ota.zip. The root MSI hash must match the latest Type MSI source artifact, the root firmware OTA zip hash must match the latest stable firmware OTA source artifact, and no Type portable zip or older package may remain."
     }
   ]
 }

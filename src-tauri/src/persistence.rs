@@ -382,10 +382,19 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
                 .and_then(|flag| flag.as_bool())
         })
         .unwrap_or(false);
+    let device_led_brightness_102_default_migrated = raw_prefs
+        .as_ref()
+        .and_then(|value| {
+            value
+                .get("deviceLedBrightness102DefaultMigrated")
+                .and_then(|flag| flag.as_bool())
+        })
+        .unwrap_or(false);
     if !streaming_default_migrated
         || !dictation_input_source_has_user_override_marker
         || !device_status_led_default_migrated
         || !device_key_led_default_migrated
+        || !device_led_brightness_102_default_migrated
     {
         match serde_json::to_vec_pretty(&prefs)
             .context("encode prefs failed")
@@ -2548,6 +2557,7 @@ mod tests {
         assert_eq!(prefs.device_edge_led_brightness_percent, 100);
         assert!(prefs.device_status_led_default_migrated);
         assert!(prefs.device_key_led_default_migrated);
+        assert!(prefs.device_led_brightness_102_default_migrated);
 
         let saved: serde_json::Value =
             serde_json::from_slice(&fs::read(&path).expect("read saved prefs"))
@@ -2573,6 +2583,88 @@ mod tests {
         assert_eq!(
             saved
                 .get("deviceKeyLedDefaultMigrated")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            saved
+                .get("deviceLedBrightness102DefaultMigrated")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn legacy_status_key_led_fifty_default_is_migrated_and_marker_is_persisted() {
+        let tmp: PathBuf = std::env::temp_dir().join(format!(
+            "listener-type-status-key-led-50-prefs-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("preferences.json");
+        fs::write(
+            &path,
+            r#"{
+                "deviceStatusLedBrightnessPercent": 50,
+                "deviceKeyLedBrightnessPercent": 50,
+                "deviceKnobLedBrightnessPercent": 100,
+                "deviceEdgeLedBrightnessPercent": 100,
+                "deviceStatusLedDefaultMigrated": true,
+                "deviceKeyLedDefaultMigrated": true,
+                "deviceLowPowerIdleMinutes": 3,
+                "devicePluggedLowPowerEnabled": true
+            }"#,
+        )
+        .expect("write legacy prefs");
+
+        let prefs = read_preferences(&path).expect("read prefs");
+        assert_eq!(prefs.device_status_led_brightness_percent, 80);
+        assert_eq!(prefs.device_key_led_brightness_percent, 80);
+        assert_eq!(prefs.device_knob_led_brightness_percent, 100);
+        assert_eq!(prefs.device_edge_led_brightness_percent, 100);
+        assert_eq!(prefs.device_low_power_idle_minutes, 3);
+        assert_eq!(prefs.device_plugged_low_power_idle_minutes, 3);
+        assert_eq!(prefs.device_battery_low_power_idle_minutes, 3);
+        assert!(prefs.device_led_brightness_102_default_migrated);
+
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("read saved prefs"))
+                .expect("decode saved prefs");
+        assert_eq!(
+            saved
+                .get("deviceStatusLedBrightnessPercent")
+                .and_then(|value| value.as_u64()),
+            Some(80)
+        );
+        assert_eq!(
+            saved
+                .get("deviceKeyLedBrightnessPercent")
+                .and_then(|value| value.as_u64()),
+            Some(80)
+        );
+        assert_eq!(
+            saved
+                .get("deviceLowPowerIdleMinutes")
+                .and_then(|value| value.as_u64()),
+            Some(3)
+        );
+        assert_eq!(
+            saved
+                .get("devicePluggedLowPowerIdleMinutes")
+                .and_then(|value| value.as_u64()),
+            Some(3)
+        );
+        assert_eq!(
+            saved
+                .get("deviceBatteryLowPowerIdleMinutes")
+                .and_then(|value| value.as_u64()),
+            Some(3)
+        );
+        assert_eq!(
+            saved
+                .get("deviceLedBrightness102DefaultMigrated")
                 .and_then(|value| value.as_bool()),
             Some(true)
         );

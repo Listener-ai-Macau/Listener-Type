@@ -13,8 +13,9 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $tauriRoot = Join-Path $repoRoot "src-tauri"
+$installedTypeExePath = "C:\Program Files\Listener Type\listener-type.exe"
 if ([string]::IsNullOrWhiteSpace($ReleaseExePath)) {
-  $ReleaseExePath = Join-Path $tauriRoot "target\x86_64-pc-windows-msvc\release\listener-type.exe"
+  $ReleaseExePath = $installedTypeExePath
 }
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
   $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -241,7 +242,7 @@ function Restart-ListenerTypeForBleProbe {
 
 function Invoke-EmbeddedAudioBleLiveProbe {
   if (-not (Test-Path -LiteralPath $ReleaseExePath)) {
-    throw "Release exe not found: $ReleaseExePath"
+    throw "Installed Listener Type exe not found: $ReleaseExePath. Run the MSI package gate with -InstallMsi before hardware probes."
   }
   Restart-ListenerTypeForBleProbe `
     -File $ReleaseExePath `
@@ -518,8 +519,20 @@ try {
       if ($releaseRecord.Count -ne 1) {
         throw "Bench collector review should include exactly one release-package-final-check record"
       }
-      if ($releaseRecord[0].status -ne "PASS") {
-        throw "Bench collector should provide enough package evidence for release-package-final-check, got $($releaseRecord[0].status)"
+      if ($releaseRecord[0].status -ne "NO_GO") {
+        throw "Bench collector smoke should keep release-package-final-check NO_GO until Denzic root is staged from the latest source hashes, got $($releaseRecord[0].status)"
+      }
+      $releaseArtifactsPath = Join-Path $collectDir "release-artifacts.json"
+      if (-not (Test-Path -LiteralPath $releaseArtifactsPath)) {
+        throw "Bench collector should write release-artifacts.json for the final root package hash gate"
+      }
+      $releaseArtifacts = Get-Content -LiteralPath $releaseArtifactsPath -Raw | ConvertFrom-Json
+      if ($releaseArtifacts.all_latest_sources_staged -ne $false) {
+        throw "Offline bench collector smoke must not mark latest root packages staged before final release copy."
+      }
+      if ($releaseArtifacts.PSObject.Properties["type_source_hash_matches_root"] -eq $null -or
+          $releaseArtifacts.PSObject.Properties["firmware_source_hash_matches_root"] -eq $null) {
+        throw "release-artifacts.json must include source-to-root hash comparison fields"
       }
       $remainingNoGo = @($bench.records | Where-Object { $_.status -eq "NO_GO" })
       if ($remainingNoGo.Count -eq 0) {
@@ -535,7 +548,9 @@ try {
           "-SkipRustInstall",
           "-SkipNpmCi",
           "-IncrementalReleaseBuild",
-          "-CleanArtifacts"
+          "-CleanArtifacts",
+          "-InstallMsi",
+          "-LaunchInstalledApp"
         ) $repoRoot
       }
     } elseif (-not $SkipBuild.IsPresent) {

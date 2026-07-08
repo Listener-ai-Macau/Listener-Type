@@ -17,6 +17,8 @@ const imeSolutionPath = join(appRoot, "windows-ime", "ListenerTypeIme.sln");
 const imeProjectPath = join(appRoot, "windows-ime", "ListenerTypeIme.vcxproj");
 const imeEditSessionPath = join(appRoot, "windows-ime", "src", "edit_session.cpp");
 const imeTextServicePath = join(appRoot, "windows-ime", "src", "text_service.cpp");
+const packageJsonPath = join(appRoot, "package.json");
+const persistencePath = join(appRoot, "src-tauri", "src", "persistence.rs");
 const tauriConfigPath = join(appRoot, "src-tauri", "tauri.conf.json");
 const viteConfigPath = join(appRoot, "vite.config.ts");
 const distIndexPath = join(appRoot, "dist", "index.html");
@@ -24,6 +26,7 @@ const nsisHookPath = join(appRoot, "src-tauri", "nsis", "listener-type-ime-hooks
 const nsisCleanupHookPath = join(appRoot, "src-tauri", "nsis", "listener-type-ime-cleanup-hooks.nsh");
 const regressionGatePath = join(scriptsDir, "run-v1.0.2-regression.ps1");
 const releaseCheckPath = join(scriptsDir, "release-check.mjs");
+const releaseRootArtifactsPath = join(scriptsDir, "check-release-root-artifacts.mjs");
 const wixFragmentPath = join(appRoot, "src-tauri", "wix", "listener-type-ime.wxs");
 const wixCleanupFragmentPath = join(appRoot, "src-tauri", "wix", "listener-type-ime-cleanup.wxs");
 
@@ -38,6 +41,8 @@ const imeSolution = readFileSync(imeSolutionPath, "utf8");
 const imeProject = readFileSync(imeProjectPath, "utf8");
 const imeEditSession = readFileSync(imeEditSessionPath, "utf8");
 const imeTextService = readFileSync(imeTextServicePath, "utf8");
+const packageJsonText = readFileSync(packageJsonPath, "utf8");
+const persistence = readFileSync(persistencePath, "utf8");
 const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, "utf8"));
 const viteConfig = readFileSync(viteConfigPath, "utf8");
 const distIndex = readFileSync(distIndexPath, "utf8");
@@ -45,6 +50,7 @@ const nsisHook = readFileSync(nsisHookPath, "utf8");
 const nsisCleanupHook = readFileSync(nsisCleanupHookPath, "utf8");
 const regressionGate = readFileSync(regressionGatePath, "utf8");
 const releaseCheck = readFileSync(releaseCheckPath, "utf8");
+const releaseRootArtifacts = readFileSync(releaseRootArtifactsPath, "utf8");
 const wixFragment = readFileSync(wixFragmentPath, "utf8");
 const wixCleanupFragment = readFileSync(wixCleanupFragmentPath, "utf8");
 
@@ -59,6 +65,13 @@ const requiredFragments = [
   "Repair-TauriMsiBundle",
   "Enable-SameVersionMsiUpgrade",
   "Find-BuiltMsiPath",
+  "Install-LatestMsi",
+  "Start-InstalledListenerType",
+  "msiexec.exe",
+  "/qn",
+  "/norestart",
+  "/L*v",
+  "Installed Listener Type exe matches MSI payload",
   "candle.exe",
   "light.exe",
   "-sice:ICE03",
@@ -89,13 +102,39 @@ assert.match(script, /\[switch\]\$ReuseExistingExe/, "script should support fast
 assert.match(script, /\[switch\]\$SkipDesktopShortcut/, "script should support opting out of local desktop shortcut refresh");
 assert.match(script, /\[switch\]\$UseSccache/, "script should support opt-in sccache acceleration");
 assert.match(script, /\[switch\]\$IncrementalReleaseBuild/, "script should support opt-in local incremental release builds");
+assert.match(script, /\[switch\]\$InstallMsi/, "script should support installing the freshly built MSI");
+assert.match(script, /\[switch\]\$LaunchInstalledApp/, "script should support launching the installed Program Files app after MSI update");
+assert.match(script, /\[int\]\$CommandTimeoutSeconds = 3600/, "packaging should bound long child commands by default");
+assert.match(script, /\[System\.IO\.Path\]::IsPathRooted\(\$ArtifactsRoot\)/, "packaging should normalize relative ArtifactsRoot before passing MSI paths to msiexec");
+assert.match(script, /\$ArtifactsRoot = \[System\.IO\.Path\]::GetFullPath\(\$ArtifactsRoot\)/, "packaging should use absolute artifact paths for msiexec and shortcut validation");
+assert.match(script, /Invoke-CmdWithHeartbeat[\s\S]*TimeoutSeconds[\s\S]*taskkill\.exe \/PID \$process\.Id \/T \/F/, "heartbeat runner should terminate hung child process trees");
+assert.match(script, /Tauri Windows MSI build[\s\S]*-TimeoutSeconds \$CommandTimeoutSeconds/, "Tauri MSI build should use the bounded heartbeat runner");
+assert.match(script, /Invoke-CmdWithHeartbeat -Command "npm\.cmd ci"[\s\S]*-TimeoutSeconds \$CommandTimeoutSeconds/, "npm ci should use the bounded heartbeat runner");
+assert.match(script, /msiexec\.exe \/i[\s\S]*Invoke-CmdWithHeartbeat -Command \$installCommand[\s\S]*-TimeoutSeconds \$CommandTimeoutSeconds/, "MSI install should use the bounded heartbeat runner");
 assert.match(regressionGate, /-IncrementalReleaseBuild/, "v1.0.2 regression packaging should use incremental release builds to avoid repeated long relinks");
+assert.match(regressionGate, /C:\\Program Files\\Listener Type\\listener-type\.exe/, "v1.0.2 regression should default to the installed Program Files app");
+assert.match(regressionGate, /-InstallMsi/, "v1.0.2 regression package gate must install the freshly built MSI");
+assert.match(regressionGate, /-LaunchInstalledApp/, "v1.0.2 regression package gate must start the installed app after MSI update");
+assert.doesNotMatch(regressionGate, /\$ReleaseExePath = Join-Path \$tauriRoot "target\\x86_64-pc-windows-msvc\\release\\listener-type\.exe"/, "v1.0.2 regression must not default to launching the repo release exe");
 assert.match(releaseCheck, /check:preproduction-operator-notes/, "release:check must reject untriaged operator notes before publishing");
 assert.match(releaseCheck, /check:preproduction-bench-contract/, "release:check must keep the preproduction bench/human workflow contract in the default release gate");
+assert.match(packageJsonText, /"check:release-root-artifacts": "node scripts\/check-release-root-artifacts\.mjs"/, "package.json should expose the final Denzic-root package gate");
+assert.match(releaseRootArtifacts, /ListenerType_\$\{version\}_x64_en-US\.msi/, "release root artifact gate should require the current Type MSI");
+assert.match(releaseRootArtifacts, /ListenerFirmware_\$\{version\}_ota\.zip/, "release root artifact gate should require the current Firmware OTA zip");
+assert.match(releaseRootArtifacts, /portable.*\.zip/i, "release root artifact gate should reject Type portable zips");
+assert.match(releaseRootArtifacts, /--type-source[\s\S]*--firmware-source/, "release root artifact gate should support source-hash comparison during final staging");
 assert.match(script, /Test-ReusableReleaseExe/, "script should guard the fast MSI relink path");
-assert.match(script, /function Update-DesktopShortcut/, "packaging should refresh the local desktop shortcut after each rebuild");
+assert.match(script, /function Update-DesktopShortcut/, "packaging should protect the local desktop shortcut after each rebuild");
 assert.match(script, /WScript\.Shell/, "desktop shortcut refresh should use the Windows shortcut COM API");
 assert.match(script, /Listener Type\.lnk/, "desktop shortcut refresh should target the stable Listener Type shortcut name");
+assert.match(script, /C:\\Program Files\\Listener Type\\listener-type\.exe/, "desktop shortcut refresh must target the installed MSI application");
+assert.match(script, /installed Listener Type exe does not match the freshly built MSI payload/, "desktop shortcut refresh must refuse stale installed apps");
+assert.match(script, /-LaunchInstalledApp requires -InstallMsi/, "launching the app must require a freshly installed MSI in validation");
+assert.match(script, /Stop-InstalledListenerType[\s\S]*msiexec\.exe[\s\S]*Assert-InstalledPayloadMatchesRelease/, "MSI update must stop the installed app, install with msiexec, and verify the Program Files payload hash");
+assert.match(script, /Assert-InstalledPayloadMatchesRelease[\s\S]*TimeoutSeconds[\s\S]*Start-Sleep -Milliseconds 250/, "MSI validation must wait for the Program Files payload hash to settle after install");
+assert.match(script, /lastHashError[\s\S]*catch[\s\S]*Exception\.Message/, "MSI validation must retry through transient Program Files file locks");
+assert.match(script, /Start-Process -FilePath \$installedExePath[\s\S]*Started installed Listener Type app/, "installed-app validation must launch the Program Files exe");
+assert.doesNotMatch(script, /Description = "Listener Type latest local release build"/, "desktop shortcut must not advertise or target the repo build output");
 assert.match(script, /Cargo build jobs left at Cargo default parallelism/, "script should advertise default Cargo parallelism");
 assert.doesNotMatch(script, /set `"CARGO_BUILD_JOBS=1`"/, "default packaging must not force serial Cargo builds");
 assert.doesNotMatch(script, /WixTools314/, "MSVC packaging must not hard-code a single Tauri WiX tools version");
@@ -119,9 +158,13 @@ assert.match(script, /Copy-Item -LiteralPath \$msiPath -Destination \(Join-Path 
 assert.match(script, /Remove-Item -LiteralPath \$portableRoot -Recurse -Force -ErrorAction SilentlyContinue/, "default packaging should remove stale portable folders");
 assert.match(script, /Remove-Item -LiteralPath \$zipPath -Force -ErrorAction SilentlyContinue/, "default packaging should remove stale portable zips");
 assert.match(script, /if \(\$IncludePortable\) \{[\s\S]*Compress-Archive/, "portable zip generation should stay behind IncludePortable");
-assert.match(script, /Invoke-MsvcBuild[\s\S]*Repair-TauriMsiBundle[\s\S]*Copy-WindowsArtifacts[\s\S]*Update-DesktopShortcut/, "packaging should relink the Tauri MSI, copy artifacts, and refresh the desktop shortcut");
+assert.match(script, /Invoke-MsvcBuild[\s\S]*Repair-TauriMsiBundle[\s\S]*Copy-WindowsArtifacts[\s\S]*Install-LatestMsi[\s\S]*Update-DesktopShortcut[\s\S]*Start-InstalledListenerType/, "packaging should relink the Tauri MSI, install it when requested, refresh the desktop shortcut, and start the installed app");
 assert.match(script, /AllowSameVersionUpgrades="yes"/, "MSI packaging should allow same-version 1.0.0 replacement builds to major-upgrade installed copies");
 assert.match(script, /DowngradeErrorMessage=/, "MSI packaging should keep an explicit downgrade block after replacing AllowDowngrades");
+assert.match(persistence, /const PREFERENCES_FILE: &str = "preferences\.json"/, "user settings should live in a stable preferences.json file");
+assert.match(persistence, /target_os = "windows"[\s\S]*std::env::var\("APPDATA"\)[\s\S]*join\(app_profile_dir_name\(\)\)/, "Windows preferences must live under %APPDATA%\\Listener Type, independent of the installed exe");
+assert.doesNotMatch(script, /preferences\.json/i, "MSI packaging and install validation must not rewrite the user preferences file");
+assert.doesNotMatch(script, /APPDATA[\s\S]{0,240}Remove-Item|Remove-Item[\s\S]{0,240}APPDATA/i, "MSI packaging and install validation must not delete or clean the user AppData settings directory");
 assert.doesNotMatch(ciWorkflow, /windows-ime-install-smoke\.ps1/, "release CI must not expect default installers to register a TSF IME");
 assert.match(ciWorkflow, /node scripts\/windows-package-msvc\.test\.mjs/, "release CI should run the static packaging guard");
 

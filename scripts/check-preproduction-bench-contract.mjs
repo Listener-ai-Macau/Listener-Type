@@ -6,6 +6,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const benchScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-bench-review.ps1");
 const collectScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-bench-collect.ps1");
 const activeBleScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-ble-active-bench.ps1");
+const focusedBleHumanScript = path.join(repoRoot, "scripts", "windows-ble-focused-human-review.ps1");
 const humanScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-human-review.ps1");
 const operatorNoteTriageScript = path.join(repoRoot, "scripts", "check-preproduction-operator-note-triage.mjs");
 const scenarioManifestPath = path.join(repoRoot, "scripts", "listener-preproduction-scenarios.json");
@@ -17,6 +18,7 @@ const coordinatorPath = path.join(repoRoot, "src-tauri", "src", "coordinator.rs"
 const bench = fs.readFileSync(benchScript, "utf8");
 const collect = fs.readFileSync(collectScript, "utf8");
 const activeBle = fs.readFileSync(activeBleScript, "utf8");
+const focusedBleHuman = fs.readFileSync(focusedBleHumanScript, "utf8");
 const human = fs.readFileSync(humanScript, "utf8");
 const operatorNoteTriage = fs.readFileSync(operatorNoteTriageScript, "utf8");
 const scenarioManifest = JSON.parse(fs.readFileSync(scenarioManifestPath, "utf8"));
@@ -35,9 +37,89 @@ if (requiredStepIds.length < 18) {
   failures.push(`canonical scenario manifest must contain at least 18 release scenarios, got ${requiredStepIds.length}`);
 }
 
-for (const requiredId of ["ec11-long-press-shutdown-led", "ec11-rotate-ring-feedback"]) {
+for (const requiredId of ["pwr-boot-shutdown-led", "ec11-long-press-shutdown-led", "ec11-rotate-ring-feedback"]) {
   if (!requiredStepIds.includes(requiredId)) {
     failures.push(`canonical scenario manifest is missing ${requiredId}`);
+  }
+}
+
+const pwrScenario = scenarios.find((scenario) => scenario.id === "pwr-boot-shutdown-led");
+const pwrContract = pwrScenario?.product_contract ?? "";
+if (
+  pwrContract.includes("white full-brightness") ||
+  human.includes("white full-brightness cue") ||
+  human.includes("开机白灯")
+) {
+  failures.push("PWR boot human/manifest contract must not regress to the rejected white boot light");
+}
+for (const requiredToken of ["warm amber", "与关机确认同色同亮", "Type 状态灯四区亮度 cap"]) {
+  if (!pwrContract.includes(requiredToken) && !human.includes(requiredToken)) {
+    failures.push(`PWR boot acceptance must require shutdown-matching capped amber: ${requiredToken}`);
+  }
+}
+
+const scenarioById = new Map(scenarios.map((scenario) => [scenario.id, scenario]));
+const scenarioContract = (id) => scenarioById.get(id)?.product_contract ?? "";
+for (const [stepId, requiredTokens] of [
+  [
+    "same-name-write-no-repair",
+    ["current BLE name", "no DEVICE:SET ble_name", "no BLE-name apply", "no Windows cache refresh", "no PairAsync", "no pairing prompt"],
+  ],
+  [
+    "random-name-exact-cache-refresh",
+    ["different valid BLE name", "update firmware", "same Type-controlled recovery path", "same BLE blue double-flash/reconnect recovery cue", "without opening this PC's Windows Bluetooth Settings/user pairing prompt", "exact new fully random ASCII name", "no listener/LT/type family prefix", "silent rename recovery", "other computers do not receive a Swift Pair prompt during rename", "Explicit cross-computer re-pair remains the double-click/native Windows pairing flow", "Same-name writes remain no-repair/no-prompt"],
+  ],
+  [
+    "restore-default-listener",
+    ["default BLE name listener", "same Type-controlled cache refresh/reconnect path", "same BLE blue double-flash/reconnect recovery cue", "avoid opening this PC's Windows Bluetooth Settings/user pairing prompt", "suppress Swift Pair prompts on other computers during rename", "exact display-name confirmation"],
+  ],
+]) {
+  const contract = scenarioContract(stepId);
+  for (const token of requiredTokens) {
+    if (!contract.includes(token)) {
+      failures.push(`BLE rename scenario ${stepId} must encode product contract token: ${token}`);
+    }
+  }
+}
+
+for (const requiredToken of [
+  "这个步骤是同名写入，不是改名。",
+  "不能触发重新配对。",
+  "任意合法 1-29 个可见 ASCII 名字都能写入",
+  "本步骤生成的随机名必须是无产品前缀的 12 位随机 ASCII 串",
+  "不同名改名由 Type 自动清理本机旧配对并恢复",
+  "BLE 灯效和双击恢复一样",
+  "改名恢复走 silent Type 路径",
+  "其它电脑也不应因为改名收到 Swift Pair 弹窗",
+  "不能继续显示旧缓存名",
+  "默认名字 listener 能恢复。",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`BLE rename human acceptance must protect same-name/random/default behavior: ${requiredToken}`);
+  }
+}
+if (
+  !human.includes("function New-ReviewRandomBleName") ||
+  !human.includes("[System.Security.Cryptography.RandomNumberGenerator]::GetInt32") ||
+  !human.includes("$i -lt 12") ||
+  !human.includes("(?i:listener|listner|lt|type)") ||
+  human.includes("Get-Random -Count 8") ||
+  human.includes('$RandomName = "listener-$suffix"') ||
+  human.includes('$RandomName = "LT$suffix"')
+) {
+  failures.push("random BLE name human review must generate a fully random 12-character ASCII name without listener/listner/LT/type family prefixes by default");
+}
+
+for (const requiredToken of [
+  "device_settings_update_commands_skip_unchanged_ble_name",
+  "device_ble_name_change_path_refreshes_windows_cache_after_apply",
+  "device_ble_name_change_serial_batch_only_writes_name",
+  "ble_name_refresh_uses_silent_recovery_while_one_click_keeps_user_prompt",
+  "device_ble_name_same_name_no_repair_hardware_smoke",
+  "device_ble_name_windows_refresh_roundtrip_hardware_smoke",
+]) {
+  if (!commands.includes(requiredToken)) {
+    failures.push(`BLE rename Rust regression coverage is missing: ${requiredToken}`);
   }
 }
 
@@ -73,6 +155,17 @@ for (const requiredToken of ["[string[]]$StepIds", "FocusStepIds:", "$requestedS
 }
 
 for (const requiredToken of [
+  "focused_review_status",
+  "FOCUSED_HUMAN_REVIEW_PASS",
+  "focused_human_review_status=",
+  '$focusedReviewStatus -eq "FOCUSED_HUMAN_REVIEW_PASS"',
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`focused human review must let a selected PASS step complete without claiming full release acceptance: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
   "Find-CarryForwardHumanSummary",
   "Test-CarryForwardHumanSummaryCandidate",
   "Get-NormalizedExistingPath",
@@ -81,7 +174,82 @@ for (const requiredToken of [
   "carried forward from previous PASS summary",
 ]) {
   if (!human.includes(requiredToken)) {
-    failures.push(`focused human review must merge old PASS records instead of forcing all 18 steps to be repeated: ${requiredToken}`);
+    failures.push(`focused human review must merge old PASS records instead of forcing all canonical steps to be repeated: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of ["ExecutablePath", "FileVersion", "ProductVersion", "Sha256", "Get-FileHash"]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review process evidence must prove which Type exe was tested: ${requiredToken}`);
+  }
+  if (!collect.includes(requiredToken)) {
+    failures.push(`bench process evidence must prove which Type exe was tested: ${requiredToken}`);
+  }
+}
+
+const baselineTypeContract = scenarioContract("baseline-type-tray-ui");
+for (const requiredToken of [
+  "latest MSI-updated user installation",
+  "Program Files listener-type.exe",
+  "desktop Listener Type.lnk",
+  "not a repo build output",
+  "ExecutablePath, FileVersion, ProductVersion, and Sha256",
+]) {
+  if (!baselineTypeContract.includes(requiredToken)) {
+    failures.push(`baseline Type tray/UI scenario must require installed-MSI user path evidence: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  "先用最新 MSI 更新 Listener Type",
+  "C:\\Program Files\\Listener Type\\listener-type.exe",
+  "Listener Type.lnk",
+  "不要从 repo target 目录启动",
+  "桌面快捷方式和托盘启动都指向已安装的最新 MSI exe",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human baseline Type acceptance must force the installed-MSI user path: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of ["type-brightness-low-power-sync", "从 Windows 托盘图标打开最新 Type"]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`Type brightness/low-power acceptance must require testing the latest tray Type: ${requiredToken}`);
+  }
+}
+const typeBrightnessContract = scenarioContract("type-brightness-low-power-sync");
+for (const requiredToken of ["cleared and retyped", "leading-zero value such as 050"]) {
+  if (!typeBrightnessContract.includes(requiredToken)) {
+    failures.push(`Type brightness/low-power scenario must protect numeric input editing: ${requiredToken}`);
+  }
+}
+for (const requiredToken of ["清空任意一个亮度数字框后直接输入 50", "不能残留前导 0 变成 050"]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`Type brightness/low-power human acceptance must cover leading-zero numeric input regression: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  "C:\\Program Files\\Listener Type\\listener-type.exe",
+  "$TypeExe = \"C:\\Program Files\\Listener Type\\listener-type.exe\"",
+]) {
+  if (!collect.includes(requiredToken)) {
+    failures.push(`bench collection must default to the installed MSI Type: ${requiredToken}`);
+  }
+  if (!activeBle.includes(requiredToken)) {
+    failures.push(`active BLE bench must default to the installed MSI Type: ${requiredToken}`);
+  }
+}
+
+for (const forbiddenToken of [
+  "src-tauri\\target\\x86_64-pc-windows-msvc\\release\\listener-type.exe",
+  "src-tauri\\target\\release\\listener-type.exe",
+]) {
+  if (collect.includes(forbiddenToken)) {
+    failures.push(`bench collection must not silently fall back to repo build outputs: ${forbiddenToken}`);
+  }
+  if (activeBle.includes(forbiddenToken)) {
+    failures.push(`active BLE bench must not silently fall back to repo build outputs: ${forbiddenToken}`);
   }
 }
 
@@ -110,6 +278,18 @@ for (const requiredToken of [
 ]) {
   if (!human.includes(requiredToken)) {
     failures.push(`human review must treat every operator note as a prompt requiring triage: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  "operator_note_requires_triage=1",
+  "human_review_stopped_after_operator_note=1",
+  "stopped_after_operator_note",
+  "-or $stoppedAfterOperatorNote",
+  "Stopped after operator note",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review must stop the current review after any non-empty operator note: ${requiredToken}`);
   }
 }
 
@@ -200,7 +380,13 @@ if (!deviceSection.includes("onWheel={event => {\n          event.currentTarget.
 
 for (const requiredToken of [
   "const [selectedPackage, setSelectedPackage]",
+  "selectedPackageAriaLabel",
+  "firmwareOtaReselectPackage",
   "selectedPackage && (",
+  "className=\"ol-firmware-selected-package\"",
+  "onClick={firmwareActionBusy ? undefined : () => void choosePackage(selectedPackage.sourceKind === 'directory')}",
+  "title={selectedPackage.path}",
+  "firmwareSelectedPackage",
   "FirmwareOtaFact label={t('settings.recording.firmwareOtaPackageVersion'",
   "FirmwareWiredFlashPanel ref={wiredRef} packagePath={selectedPackage?.path ?? null}",
   "wiredFirmwareNeedsSharedPackage",
@@ -217,22 +403,22 @@ if (oneClickStart === -1 || oneClickEnd === -1) {
   failures.push("recover_embedded_ble_device boundary must stay discoverable for the stale-pairing regression gate");
 } else {
   const oneClickBody = commands.slice(oneClickStart, oneClickEnd);
-  if (oneClickBody.includes("embedded_ble_windows_pairing_result(")) {
-    failures.push("one-click/double-click stale cleanup must not call Type PairAsync; Windows native pairing must be user-confirmed after cleanup");
+  if (!oneClickBody.includes("embedded_ble_windows_pairing_result(")) {
+    failures.push("one-click/double-click stale cleanup must run the bounded Type PairAsync recovery path when Type is present");
   }
   for (const requiredToken of [
     "hold_embedded_ble_listener_for_native_pairing_handoff",
-    "skipped Type PairAsync after stale cleanup",
+    "will stop if another host completes pairing before this Type instance",
   ]) {
     if (!oneClickBody.includes(requiredToken)) {
-      failures.push(`one-click recovery must hand off to Windows native pairing after Type cleanup: ${requiredToken}`);
+      failures.push(`one-click recovery must hold Type BLE and stop if another host wins pairing: ${requiredToken}`);
     }
   }
 }
 
 for (const requiredToken of [
-  "Type 只负责清理旧配对和等待确认，不能自己 PairAsync 抢配。",
-  "如果未清旧配对就直接点连接，出现连接失败不能算通过。",
+  "Type 会先清理本机旧配对，再寻找恢复广播并走本机自动 PairAsync/GATT 恢复。",
+  "如果另一台电脑先用 Windows 弹窗连上，本机 Type 不能循环清理或抢回。",
   "没有 Type 的电脑也能作为普通蓝牙键盘配对，但旧缓存必须由用户自己删除。",
 ]) {
   if (!human.includes(requiredToken)) {
@@ -246,16 +432,40 @@ for (const requiredToken of [
   "pairing.failed_devices > 0",
 ]) {
   if (!coordinator.includes(requiredToken)) {
-    failures.push(`Type-present repair must clean local stale Windows cache evidence before native pairing: ${requiredToken}`);
+    failures.push(`Type-present repair must clean local stale Windows cache evidence before automatic PairAsync recovery: ${requiredToken}`);
   }
 }
 
 for (const requiredContract of [
-  "Type must not call PairAsync",
+  "first clears this PC's stale Windows pairing cache",
+  "fresh Listener recovery advertisement",
+  "bounded Type PairAsync recovery path automatically",
+  "another host pairs first",
   "Without Type, the user must manually remove stale Windows pairing",
 ]) {
   if (!JSON.stringify(scenarioManifest).includes(requiredContract)) {
     failures.push(`canonical scenario manifest must encode the Bluetooth repair product contract: ${requiredContract}`);
+  }
+}
+
+const releaseScenario = scenarioById.get("release-package-final-check");
+for (const requiredToken of [
+  "source_hash_comparison",
+  "root MSI hash must match the latest Type MSI source artifact",
+  "root firmware OTA zip hash must match the latest stable firmware OTA source artifact",
+  "no Type portable zip or older package",
+]) {
+  if (!JSON.stringify(releaseScenario ?? {}).includes(requiredToken)) {
+    failures.push(`release package final scenario must encode source-hash root staging contract: ${requiredToken}`);
+  }
+}
+for (const requiredToken of [
+  "SHA256 必须分别等于本次最终打包源产物",
+  "type_source_hash_matches_root",
+  "firmware_source_hash_matches_root",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`release package human review must require source-to-root hash match: ${requiredToken}`);
   }
 }
 
@@ -311,6 +521,10 @@ for (const requiredToken of [
   "preproduction-bench-review-summary.json",
   "windows-ble-state.json",
   "release-artifacts.json",
+  "all_latest_sources_staged",
+  "forbidden_root_packages",
+  "type_source_hash_matches_root",
+  "firmware_source_hash_matches_root",
 ]) {
   if (!collect.includes(requiredToken)) {
     failures.push(`bench evidence collector is missing ${requiredToken}`);
@@ -341,6 +555,18 @@ if (!activeBle.includes("PairAsync") && !activeBle.includes("--prompt-embedded-b
 
 if (activeBle.includes("System.Windows.Forms") || activeBle.includes("MessageBox") || activeBle.includes("ShowDialog")) {
   failures.push("active Windows BLE bench script must not use custom blocking dialog UI");
+}
+
+for (const requiredToken of [
+  "type-exit-led-clears",
+  "从托盘退出 Listener Type",
+  "2 秒内进程应退出",
+  "等待到 12 秒",
+  "是否残留 listener-type.exe",
+]) {
+  if (!focusedBleHuman.includes(requiredToken)) {
+    failures.push(`focused BLE human review must capture tray-exit speed and Type-ready clear evidence: ${requiredToken}`);
+  }
 }
 
 if (failures.length > 0) {

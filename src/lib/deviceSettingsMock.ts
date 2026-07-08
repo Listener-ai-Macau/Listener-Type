@@ -19,6 +19,8 @@ export function applyMockDeviceSettingsWrite(
     deviceKnobLedBrightnessPercent: request.knobLedBrightnessPercent,
     deviceEdgeLedBrightnessPercent: request.edgeLedBrightnessPercent,
     deviceLowPowerIdleMinutes: request.batteryLowPowerIdleMinutes,
+    devicePluggedLowPowerIdleMinutes: request.pluggedLowPowerIdleMinutes,
+    deviceBatteryLowPowerIdleMinutes: request.batteryLowPowerIdleMinutes,
     devicePluggedLowPowerEnabled: request.pluggedLowPowerEnabled,
     deviceBatteryAutoShutdownMinutes: request.batteryAutoShutdownMinutes,
     deviceBleName: request.bleName,

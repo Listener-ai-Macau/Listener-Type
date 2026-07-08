@@ -32,16 +32,10 @@ if ([string]::IsNullOrWhiteSpace($FirmwareRoot)) {
   }
 }
 if ([string]::IsNullOrWhiteSpace($TypeExe)) {
-  $candidates = @(
-    (Join-Path $repoRoot "src-tauri\target\x86_64-pc-windows-msvc\release\listener-type.exe"),
-    (Join-Path $repoRoot "src-tauri\target\release\listener-type.exe")
-  )
-  foreach ($candidate in $candidates) {
-    if (Test-Path -LiteralPath $candidate) {
-      $TypeExe = (Resolve-Path -LiteralPath $candidate).Path
-      break
-    }
-  }
+  $TypeExe = "C:\Program Files\Listener Type\listener-type.exe"
+}
+if (-not [string]::IsNullOrWhiteSpace($TypeExe) -and (Test-Path -LiteralPath $TypeExe)) {
+  $TypeExe = (Resolve-Path -LiteralPath $TypeExe).Path
 }
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
   $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -157,8 +151,37 @@ function Get-TypeProcesses {
       $_.Name -eq "listener-type.exe" -or
       $_.Name -eq $exeFilter -or
       ([string]$_.CommandLine) -match "listener-type"
-    } | Select-Object ProcessId, Name, ExecutablePath, CommandLine, CreationDate)
-  return $rows
+    })
+  return @(
+    foreach ($row in $rows) {
+      $fileVersion = ""
+      $productVersion = ""
+      $lastWriteTime = ""
+      $sha256 = ""
+      $exePath = [string]$row.ExecutablePath
+      if (-not [string]::IsNullOrWhiteSpace($exePath) -and (Test-Path -LiteralPath $exePath)) {
+        try {
+          $item = Get-Item -LiteralPath $exePath -ErrorAction Stop
+          $fileVersion = [string]$item.VersionInfo.FileVersion
+          $productVersion = [string]$item.VersionInfo.ProductVersion
+          $lastWriteTime = $item.LastWriteTime.ToString("o")
+          $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash
+        } catch {
+        }
+      }
+      [pscustomobject][ordered]@{
+        ProcessId = $row.ProcessId
+        Name = $row.Name
+        ExecutablePath = $exePath
+        FileVersion = $fileVersion
+        ProductVersion = $productVersion
+        LastWriteTime = $lastWriteTime
+        Sha256 = $sha256
+        CommandLine = $row.CommandLine
+        CreationDate = $row.CreationDate
+      }
+    }
+  )
 }
 
 function Get-TypeLogTail {
@@ -220,6 +243,30 @@ function Invoke-SerialLedStatusSnapshot {
     -OutputPath $Path | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "serial LED status helper exited with code $LASTEXITCODE"
+  }
+}
+
+function Invoke-SerialDeviceSettingsSnapshot {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$PortName
+  )
+  if ([string]::IsNullOrWhiteSpace($FirmwareRoot)) {
+    throw "FirmwareRoot is not set."
+  }
+  $sendSerial = Join-Path $FirmwareRoot "tools\send_serial_and_capture.ps1"
+  if (-not (Test-Path -LiteralPath $sendSerial)) {
+    throw "Missing firmware serial helper: $sendSerial"
+  }
+  & pwsh -NoProfile -File $sendSerial `
+    -Port $PortName `
+    -Command "~DEVICE:SETTINGS" `
+    -InitialReadMs 200 `
+    -CommandReadMs 1200 `
+    -CommandDelayMs 0 `
+    -OutputPath $Path | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "serial device settings helper exited with code $LASTEXITCODE"
   }
 }
 
@@ -356,6 +403,35 @@ function Get-ReleaseArtifacts {
       Sort-Object LastWriteTime -Descending |
       Select-Object -First 1)
   }
+  $expectedRootNames = @(
+    [System.IO.Path]::GetFileName($rootMsi),
+    [System.IO.Path]::GetFileName($rootFirmwareZip)
+  )
+  $rootPackageFiles = @(
+    Get-ChildItem -LiteralPath $RepoBaseRoot -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -match '^(ListenerType_|ListenerFirmware_).*\.(msi|zip)$' }
+  )
+  $forbiddenRootPackages = @(
+    $rootPackageFiles |
+      Where-Object {
+        $_.Name -notin $expectedRootNames -or
+        $_.Name -match '(?i)portable'
+      } |
+      Select-Object -ExpandProperty FullName
+  )
+  function Get-FileSha256OrEmpty {
+    param([AllowNull()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+      return ""
+    }
+    return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
+  }
+  $typeSourceHash = Get-FileSha256OrEmpty $typeMsi
+  $rootMsiHash = Get-FileSha256OrEmpty $rootMsi
+  $firmwareSourceHash = if ($firmwareZip) { Get-FileSha256OrEmpty $firmwareZip.FullName } else { "" }
+  $rootFirmwareHash = Get-FileSha256OrEmpty $rootFirmwareZip
+  $typeSourceHashMatches = -not [string]::IsNullOrWhiteSpace($typeSourceHash) -and $typeSourceHash -eq $rootMsiHash
+  $firmwareSourceHashMatches = -not [string]::IsNullOrWhiteSpace($firmwareSourceHash) -and $firmwareSourceHash -eq $rootFirmwareHash
   $files = @($typeMsi, $rootMsi, $rootFirmwareZip)
   if ($firmwareZip) {
     $files += $firmwareZip.FullName
@@ -387,6 +463,20 @@ function Get-ReleaseArtifacts {
         $property = $_.PSObject.Properties["missing"]
         $null -ne $property -and [bool]$property.Value
       }).Count -eq 0
+    all_latest_sources_staged = @($entries | Where-Object {
+        $property = $_.PSObject.Properties["missing"]
+        $null -ne $property -and [bool]$property.Value
+      }).Count -eq 0 -and
+      $forbiddenRootPackages.Count -eq 0 -and
+      $typeSourceHashMatches -and
+      $firmwareSourceHashMatches
+    forbidden_root_packages = @($forbiddenRootPackages)
+    type_source_hash_matches_root = $typeSourceHashMatches
+    firmware_source_hash_matches_root = $firmwareSourceHashMatches
+    type_source_hash = $typeSourceHash
+    root_msi_hash = $rootMsiHash
+    firmware_source_hash = $firmwareSourceHash
+    root_firmware_hash = $rootFirmwareHash
     type_msi = $typeMsi
     firmware_zip = if ($firmwareZip) { $firmwareZip.FullName } else { "" }
     root_msi = $rootMsi
@@ -471,22 +561,25 @@ if (-not $SkipNotificationScan.IsPresent) {
 }
 
 $serialLedStatusPath = ""
+$serialDeviceSettingsPath = ""
 $resolvedSerialPort = Resolve-SerialPortName
 if (-not $SkipSerialSnapshot.IsPresent -and -not [string]::IsNullOrWhiteSpace($resolvedSerialPort)) {
   $serialLedStatusPath = Join-Path $OutputDir "serial-led-status.txt"
+  $serialDeviceSettingsPath = Join-Path $OutputDir "serial-device-settings.txt"
   try {
     Invoke-SerialLedStatusSnapshot -Path $serialLedStatusPath -PortName $resolvedSerialPort
+    Invoke-SerialDeviceSettingsSnapshot -Path $serialDeviceSettingsPath -PortName $resolvedSerialPort
     $manifest.capabilities.wired_flash_port = $true
-    $notes.Add("serial LED status captured from $resolvedSerialPort; wired_flash_port capability records serial port availability only, not a wired flash smoke PASS.") | Out-Null
+    $notes.Add("serial LED status and device settings captured from $resolvedSerialPort; wired_flash_port capability records serial port availability only, not a wired flash smoke PASS.") | Out-Null
   } catch {
     $serialErrorPath = Join-Path $OutputDir "serial-led-status-error.txt"
     Write-TextFile -Path $serialErrorPath -Text $_.Exception.ToString()
-    $notes.Add("serial LED status snapshot failed on $resolvedSerialPort`: $($_.Exception.Message)") | Out-Null
+    $notes.Add("serial LED/device settings snapshot failed on $resolvedSerialPort`: $($_.Exception.Message)") | Out-Null
   }
 } elseif ($SkipSerialSnapshot.IsPresent) {
-  $notes.Add("serial LED status snapshot skipped by -SkipSerialSnapshot.") | Out-Null
+  $notes.Add("serial LED/device settings snapshot skipped by -SkipSerialSnapshot.") | Out-Null
 } else {
-  $notes.Add("serial LED status snapshot skipped because no unique serial port was resolved.") | Out-Null
+  $notes.Add("serial LED/device settings snapshot skipped because no unique serial port was resolved.") | Out-Null
 }
 
 $audioStatus = $null
@@ -501,7 +594,7 @@ if (-not $SkipLiveBle.IsPresent -and -not [string]::IsNullOrWhiteSpace($TypeExe)
 $releaseArtifactsPath = Join-Path $OutputDir "release-artifacts.json"
 $releaseArtifacts = Get-ReleaseArtifacts
 Write-JsonFile -Path $releaseArtifactsPath -Value $releaseArtifacts -Depth 8
-$manifest.capabilities.release_artifacts = [bool]$releaseArtifacts.all_expected_present
+$manifest.capabilities.release_artifacts = [bool]$releaseArtifacts.all_latest_sources_staged
 $manifest.capabilities.ota_package = -not [string]::IsNullOrWhiteSpace([string]$releaseArtifacts.firmware_zip)
 
 $activeBle = $null
@@ -546,11 +639,14 @@ Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "ble_audio_p
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "type_log" -Path $typeLogPath
 Add-Evidence -Manifest $manifest -StepId "ble-audio-type-link" -Key "windows_ble_state" -Path $bleStatePath
 Add-Evidence -Manifest $manifest -StepId "led-independent-contract" -Key "serial_led_status" -Path $serialLedStatusPath
+Add-Evidence -Manifest $manifest -StepId "type-brightness-low-power-sync" -Key "type_log" -Path $typeLogPath
+Add-Evidence -Manifest $manifest -StepId "type-brightness-low-power-sync" -Key "device_settings_readback" -Path $serialDeviceSettingsPath
 Add-Evidence -Manifest $manifest -StepId "ota-wireless-smoke" -Key "ota_probe" -Path $(if ($otaProbe) { $otaProbe.path } else { "" })
 Add-Evidence -Manifest $manifest -StepId "ota-wireless-smoke" -Key "ota_log" -Path $(if ($otaProbe) { $otaProbe.path } else { "" })
 Add-Evidence -Manifest $manifest -StepId "release-package-final-check" -Key "msi_hash" -Path $releaseArtifactsPath
 Add-Evidence -Manifest $manifest -StepId "release-package-final-check" -Key "firmware_zip_hash" -Path $releaseArtifactsPath
 Add-Evidence -Manifest $manifest -StepId "release-package-final-check" -Key "root_package_listing" -Path $releaseArtifactsPath
+Add-Evidence -Manifest $manifest -StepId "release-package-final-check" -Key "source_hash_comparison" -Path $releaseArtifactsPath
 
 Write-JsonFile -Path $manifestPath -Value $manifest -Depth 12
 

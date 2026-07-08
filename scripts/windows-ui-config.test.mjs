@@ -18,6 +18,8 @@ const capsuleWindow = config.app.windows.find((window) => window.label === 'caps
 const mainWindow = config.app.windows.find((window) => window.label === 'main');
 const libRs = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf-8');
 const coordinatorRs = await readFile(new URL('../src-tauri/src/coordinator.rs', import.meta.url), 'utf-8');
+const mainTsx = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf-8');
+const errorBoundaryTsx = await readFile(new URL('../src/components/ErrorBoundary.tsx', import.meta.url), 'utf-8');
 const capsuleTsx = await readFile(new URL('../src/components/Capsule.tsx', import.meta.url), 'utf-8');
 const capsuleLayoutTs = await readFile(new URL('../src/lib/capsuleLayout.ts', import.meta.url), 'utf-8');
 const windowChromeTsx = await readFile(new URL('../src/components/WindowChrome.tsx', import.meta.url), 'utf-8');
@@ -37,6 +39,47 @@ assertEqual(capsuleWindow.alwaysOnTop, true, 'capsule window should stay above t
 assertEqual(mainWindow.url, 'index.html', 'main window should explicitly load the frontend entry instead of relying on platform defaults');
 assertEqual(mainWindow.decorations, true, 'shared main window config should keep the native OS window chrome');
 assertEqual(mainWindow.visible, false, 'windows main window should stay hidden until the intended first show point');
+
+assertMatch(
+  mainTsx,
+  /import \{ ErrorBoundary \} from "\.\/components\/ErrorBoundary";/,
+  'frontend entry should import the WebView blank-screen error boundary',
+);
+assertMatch(
+  mainTsx,
+  /<ErrorBoundary>[\s\S]*<App isCapsule=\{isCapsule\} isQa=\{isQa\} \/>[\s\S]*<\/ErrorBoundary>/,
+  'frontend entry should render the app inside ErrorBoundary so React failures do not leave a blank WebView',
+);
+assertMatch(
+  mainTsx,
+  /record_ui_timeline_event[\s\S]*source:\s*"frontend\.startup"[\s\S]*event/,
+  'frontend startup should keep writing render telemetry for blank-window triage',
+);
+assertMatch(
+  mainTsx,
+  /reportStartup\("waiting-for-i18n"[\s\S]*i18n\.on\("initialized", \(\) => renderApp\("i18n-initialized-event"\)\);[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*renderApp\("i18n-timeout-fallback"\);[\s\S]*\}, 1500\);/,
+  'frontend startup should keep a bounded i18n fallback instead of waiting forever before first render',
+);
+assertMatch(
+  errorBoundaryTsx,
+  /static getDerivedStateFromError\(error: unknown\)/,
+  'ErrorBoundary should catch React render failures',
+);
+assertMatch(
+  errorBoundaryTsx,
+  /listen<\{ message: string \}>\('panic:error'/,
+  'ErrorBoundary should listen for Rust panic events',
+);
+assertMatch(
+  errorBoundaryTsx,
+  /内部错误[\s\S]*页面出错[\s\S]*重试/,
+  'ErrorBoundary should show a visible recoverable error surface instead of an empty page',
+);
+assertMatch(
+  libRs,
+  /std::panic::set_hook[\s\S]*handle\.emit\("panic:error", payload\)/,
+  'Rust panic hook should emit panic:error so the frontend can replace a blank WebView with an error surface',
+);
 
 assertMatch(
   libRs,

@@ -48,6 +48,7 @@ import {
   DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
   DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
+  LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT,
 } from './deviceSettingsDefaults';
 import { OL_DATA } from './mockData';
 import { defaultAppShortcutModifiers, defaultQaShortcut, formatComboLabel } from './hotkey';
@@ -149,7 +150,10 @@ let mockSettings: UserPreferences = {
   deviceEdgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   deviceStatusLedDefaultMigrated: true,
   deviceKeyLedDefaultMigrated: true,
+  deviceLedBrightness102DefaultMigrated: true,
   deviceLowPowerIdleMinutes: 1,
+  devicePluggedLowPowerIdleMinutes: 1,
+  deviceBatteryLowPowerIdleMinutes: 1,
   devicePluggedLowPowerEnabled: true,
   deviceBatteryAutoShutdownMinutes: 10,
   deviceBleName: 'listener',
@@ -227,6 +231,11 @@ const clampNumber = (value: unknown, fallback: number, min: number, max: number)
   return Math.min(max, Math.max(min, Math.round(num)));
 };
 
+const clampMinutePreference = (value: unknown, fallback: number, min: number, max: number) => {
+  const num = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return Math.min(max, Math.max(min, Math.trunc(num)));
+};
+
 const normalizeDeviceBleName = (value: unknown) => {
   const name = typeof value === 'string' ? value.trim() : '';
   if (
@@ -245,6 +254,8 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
   const fallbackDisabledDeviceKeys = mockSettings.deviceCustomKeyDoubleClicks;
   const deviceStatusLedDefaultMigrated = prefs.deviceStatusLedDefaultMigrated ?? false;
   const deviceKeyLedDefaultMigrated = prefs.deviceKeyLedDefaultMigrated ?? false;
+  const deviceLedBrightness102DefaultMigrated =
+    prefs.deviceLedBrightness102DefaultMigrated ?? false;
   let deviceKeyLedBrightnessPercent = clampNumber(
     prefs.deviceKeyLedBrightnessPercent,
     DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
@@ -284,6 +295,36 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
   ) {
     deviceKeyLedBrightnessPercent = DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT;
   }
+  if (
+    !deviceLedBrightness102DefaultMigrated &&
+    deviceStatusLedDefaultMigrated &&
+    deviceKeyLedDefaultMigrated &&
+    prefs.deviceStatusLedBrightnessPercent === LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT &&
+    prefs.deviceKeyLedBrightnessPercent === LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT &&
+    deviceKnobLedBrightnessPercent === DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT &&
+    deviceEdgeLedBrightnessPercent === DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT
+  ) {
+    deviceStatusLedBrightnessPercent = DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT;
+    deviceKeyLedBrightnessPercent = DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT;
+  }
+  const legacyDeviceLowPowerIdleMinutes = clampMinutePreference(
+    prefs.deviceLowPowerIdleMinutes,
+    1,
+    0,
+    1440,
+  );
+  const devicePluggedLowPowerIdleMinutes = clampMinutePreference(
+    prefs.devicePluggedLowPowerIdleMinutes,
+    legacyDeviceLowPowerIdleMinutes,
+    0,
+    1440,
+  );
+  const deviceBatteryLowPowerIdleMinutes = clampMinutePreference(
+    prefs.deviceBatteryLowPowerIdleMinutes,
+    legacyDeviceLowPowerIdleMinutes,
+    0,
+    1440,
+  );
   return {
     ...prefs,
     hotkey: {
@@ -321,7 +362,10 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     deviceEdgeLedBrightnessPercent,
     deviceStatusLedDefaultMigrated: true,
     deviceKeyLedDefaultMigrated: true,
-    deviceLowPowerIdleMinutes: clampNumber(prefs.deviceLowPowerIdleMinutes, 1, 1, 1440),
+    deviceLedBrightness102DefaultMigrated: true,
+    deviceLowPowerIdleMinutes: deviceBatteryLowPowerIdleMinutes,
+    devicePluggedLowPowerIdleMinutes,
+    deviceBatteryLowPowerIdleMinutes,
     devicePluggedLowPowerEnabled: prefs.devicePluggedLowPowerEnabled ?? true,
     deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 10, 0, 1440),
     deviceBleName: normalizeDeviceBleName(prefs.deviceBleName),
@@ -694,9 +738,11 @@ export function setSettings(prefs: UserPreferences): Promise<void> {
       keyLedBrightnessPercent: nextPrefs.deviceKeyLedBrightnessPercent,
       knobLedBrightnessPercent: nextPrefs.deviceKnobLedBrightnessPercent,
       edgeLedBrightnessPercent: nextPrefs.deviceEdgeLedBrightnessPercent,
-      lowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
-      pluggedLowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
-      batteryLowPowerIdleMinutes: nextPrefs.deviceLowPowerIdleMinutes,
+      lowPowerIdleMinutes: mockDeviceSettings.activePowerSource === 'plugged'
+        ? nextPrefs.devicePluggedLowPowerIdleMinutes
+        : nextPrefs.deviceBatteryLowPowerIdleMinutes,
+      pluggedLowPowerIdleMinutes: nextPrefs.devicePluggedLowPowerIdleMinutes,
+      batteryLowPowerIdleMinutes: nextPrefs.deviceBatteryLowPowerIdleMinutes,
       pluggedLowPowerEnabled: nextPrefs.devicePluggedLowPowerEnabled,
       pluggedAutoShutdownMs: 0,
       batteryAutoShutdownMs: nextPrefs.deviceBatteryAutoShutdownMinutes * 60 * 1000,
@@ -727,9 +773,11 @@ export function refreshDeviceSettingsStatus(): Promise<DeviceFirmwareSettingsSta
     knobLedBrightnessPercent: mockSettings.deviceKnobLedBrightnessPercent,
     edgeLedBrightnessPercent: mockSettings.deviceEdgeLedBrightnessPercent,
     ledZoneBrightnessSupported: true,
-    lowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
-    pluggedLowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
-    batteryLowPowerIdleMinutes: mockSettings.deviceLowPowerIdleMinutes,
+    lowPowerIdleMinutes: mockDeviceSettings.activePowerSource === 'plugged'
+      ? mockSettings.devicePluggedLowPowerIdleMinutes
+      : mockSettings.deviceBatteryLowPowerIdleMinutes,
+    pluggedLowPowerIdleMinutes: mockSettings.devicePluggedLowPowerIdleMinutes,
+    batteryLowPowerIdleMinutes: mockSettings.deviceBatteryLowPowerIdleMinutes,
     pluggedLowPowerEnabled: mockSettings.devicePluggedLowPowerEnabled,
     pluggedAutoShutdownMinutes: 0,
     batteryAutoShutdownMinutes: mockSettings.deviceBatteryAutoShutdownMinutes,

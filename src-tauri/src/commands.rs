@@ -414,8 +414,16 @@ fn persist_settings<T: SettingsWriter>(
 }
 
 fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPreferences) -> bool {
-    previous.device_knob_rotation_action != next.device_knob_rotation_action
+    previous.device_status_led_brightness_percent != next.device_status_led_brightness_percent
+        || previous.device_key_led_brightness_percent != next.device_key_led_brightness_percent
+        || previous.device_knob_led_brightness_percent != next.device_knob_led_brightness_percent
+        || previous.device_edge_led_brightness_percent != next.device_edge_led_brightness_percent
+        || previous.device_knob_rotation_action != next.device_knob_rotation_action
         || previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes
+        || previous.device_plugged_low_power_idle_minutes
+            != next.device_plugged_low_power_idle_minutes
+        || previous.device_battery_low_power_idle_minutes
+            != next.device_battery_low_power_idle_minutes
         || previous.device_plugged_low_power_enabled != next.device_plugged_low_power_enabled
         || previous.device_battery_auto_shutdown_minutes
             != next.device_battery_auto_shutdown_minutes
@@ -430,7 +438,10 @@ fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(), S
     {
         return Err("设备灯光亮度必须在 0-100 之间。".to_string());
     }
-    if prefs.device_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES {
+    if prefs.device_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
+        || prefs.device_plugged_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
+        || prefs.device_battery_low_power_idle_minutes > MAX_DEVICE_LOW_POWER_IDLE_MINUTES
+    {
         return Err(format!(
             "低功耗等待时间必须在 0-{} 分钟之间。",
             MAX_DEVICE_LOW_POWER_IDLE_MINUTES
@@ -479,6 +490,28 @@ fn device_setting_packets_for_changes(
     next: &UserPreferences,
 ) -> Vec<DeviceSettingPacket> {
     let mut packets = Vec::new();
+    if previous.device_status_led_brightness_percent != next.device_status_led_brightness_percent
+        || previous.device_key_led_brightness_percent != next.device_key_led_brightness_percent
+    {
+        packets.push(DeviceSettingPacket {
+            id: "status_key_led_brightness",
+            command: format!(
+                "DEVICE:SET led_status={} led_key={}",
+                next.device_status_led_brightness_percent, next.device_key_led_brightness_percent
+            ),
+        });
+    }
+    if previous.device_knob_led_brightness_percent != next.device_knob_led_brightness_percent
+        || previous.device_edge_led_brightness_percent != next.device_edge_led_brightness_percent
+    {
+        packets.push(DeviceSettingPacket {
+            id: "knob_edge_led_brightness",
+            command: format!(
+                "DEVICE:SET led_ec11={} led_edge={}",
+                next.device_knob_led_brightness_percent, next.device_edge_led_brightness_percent
+            ),
+        });
+    }
     if previous.device_knob_rotation_action != next.device_knob_rotation_action {
         let mode = firmware_mode_for_device_knob_rotation_action(next.device_knob_rotation_action);
         packets.push(DeviceSettingPacket {
@@ -486,12 +519,24 @@ fn device_setting_packets_for_changes(
             command: format!("DEVICE:SET knob_rotation={mode}"),
         });
     }
-    if previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes {
+    if previous.device_plugged_low_power_idle_minutes != next.device_plugged_low_power_idle_minutes
+    {
         packets.push(DeviceSettingPacket {
-            id: "low_power_idle_minutes",
+            id: "plugged_low_power_idle_minutes",
             command: format!(
-                "DEVICE:SET low_power_idle_minutes={}",
-                next.device_low_power_idle_minutes
+                "DEVICE:SET plugged_low_power_idle_minutes={}",
+                next.device_plugged_low_power_idle_minutes
+            ),
+        });
+    }
+    if previous.device_battery_low_power_idle_minutes != next.device_battery_low_power_idle_minutes
+        || previous.device_low_power_idle_minutes != next.device_low_power_idle_minutes
+    {
+        packets.push(DeviceSettingPacket {
+            id: "battery_low_power_idle_minutes",
+            command: format!(
+                "DEVICE:SET battery_low_power_idle_minutes={}",
+                next.device_battery_low_power_idle_minutes
             ),
         });
     }
@@ -1930,21 +1975,21 @@ fn embedded_ble_recovery_message(
                 return "Listener 在 Windows 里已经是已配对状态。Type 正在重新连接；如果仍失败，请重新打开蓝牙设置检查连接。".to_string();
             }
             crate::embedded_ble::BleDevicePairingPromptStatus::NotFound => {
-                return "旧配对已清理，但 Windows 当前没有看到可配对的 Listener。请保持设备唤醒，在打开的蓝牙设置里添加设备。".to_string();
+                return "Type 没有看到可自动配对的 Listener。如果另一台电脑已经用 Windows 弹窗连上，这是预期；否则请保持设备可配对后重试。".to_string();
             }
             crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction => {
-                return "旧配对已清理。请在打开的 Windows 蓝牙设置里重新连接 Listener；Type 检测到配对后会自动恢复。".to_string();
+                return "Type 已尝试本机自动恢复但 Windows 未完成配对。如果另一台电脑已经连上，本机会停止抢回；否则请保持设备可配对后重试。".to_string();
             }
         }
     }
     if let Some(unpair) = unpair_result {
         return match unpair.status {
             crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
-                "Type 已清理这台电脑上的旧 Listener 配对。请点击 Windows 连接通知重新配对，或在 Windows 蓝牙里手动添加 Listener；Type 检测到新配对后会恢复。".to_string()
+                "Type 已清理这台电脑上的旧 Listener 配对，接下来会尝试本机自动恢复；如果另一台电脑已经连上，本机会停止抢回。".to_string()
             }
             crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
             | crate::embedded_ble::BleDeviceUnpairStatus::NotFound => {
-                "这台电脑没有可自动清理的旧 Listener 配对。请点击 Windows 连接通知，或在 Windows 蓝牙里手动添加 Listener；如果连接失败，请先删除旧设备再连接。".to_string()
+                "这台电脑没有可自动清理的旧 Listener 配对。如果要换电脑，请在另一台电脑用 Windows 弹窗连接；如果要恢复本机，请保持设备可配对后重试。".to_string()
             }
             crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction => {
                 "Windows 没有允许 Type 自动清理旧 Listener 配对。请先在 Windows 蓝牙里删除旧设备，再点击连接通知或手动添加 Listener。".to_string()
@@ -1971,24 +2016,50 @@ fn embedded_ble_recovery_message(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbeddedBleWindowsPairingPromptPolicy {
+    AllowUserPrompt,
+    SuppressUserPrompt,
+}
+
+impl EmbeddedBleWindowsPairingPromptPolicy {
+    fn allows_user_prompt(self) -> bool {
+        matches!(self, Self::AllowUserPrompt)
+    }
+}
+
 fn embedded_ble_windows_pairing_result(
     context: &str,
     expected_ble_name: &str,
     type_recovery_command_confirmed: bool,
+    prompt_policy: EmbeddedBleWindowsPairingPromptPolicy,
 ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-    let pairing = if type_recovery_command_confirmed {
-        crate::embedded_ble::prompt_listener_pairing_after_type_recovery(Some(expected_ble_name))
+    let pairing = if prompt_policy.allows_user_prompt() {
+        if type_recovery_command_confirmed {
+            crate::embedded_ble::prompt_listener_pairing_after_type_recovery(Some(
+                expected_ble_name,
+            ))
+        } else {
+            crate::embedded_ble::prompt_listener_pairing_for_recovery(Some(expected_ble_name))
+        }
+    } else if type_recovery_command_confirmed {
+        crate::embedded_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt(Some(
+            expected_ble_name,
+        ))
     } else {
-        crate::embedded_ble::prompt_listener_pairing_for_recovery(Some(expected_ble_name))
+        crate::embedded_ble::prompt_listener_pairing_for_recovery_without_user_prompt(Some(
+            expected_ble_name,
+        ))
     };
     log::info!(
-        "[embedded-ble] {context} Windows PairAsync status={:?} matched={} prompted={} already_paired={} failed={} open_settings={} recovery_command_confirmed={type_recovery_command_confirmed}",
+        "[embedded-ble] {context} Windows PairAsync status={:?} matched={} prompted={} already_paired={} failed={} open_settings={} recovery_command_confirmed={type_recovery_command_confirmed} allow_user_prompt={}",
         pairing.status,
         pairing.matched_devices,
         pairing.prompted_devices,
         pairing.already_paired_devices,
         pairing.failed_devices,
         pairing.open_bluetooth_settings,
+        prompt_policy.allows_user_prompt(),
     );
     pairing
 }
@@ -2090,8 +2161,8 @@ pub async fn recover_embedded_ble_device(
             let (mut user_action_required, mut open_bluetooth_settings) =
                 embedded_ble_repair_failure_action(&failure);
             let mut recovery_action = embedded_ble_recovery_action_for_failure(&failure);
-            let mut unpair_result = None;
-            let pairing_prompt_result = None;
+            let unpair_result = None;
+            let mut pairing_prompt_result = None;
             let listener_last_error = coord.embedded_ble_listener_last_error();
             let wake_recovery = coord.embedded_ble_wake_recovery_snapshot();
             let runtime_requests_auto_unpair = runtime_suggests_embedded_ble_auto_unpair(
@@ -2117,31 +2188,43 @@ pub async fn recover_embedded_ble_device(
                     expected_ble_name.clone(),
                 );
                 log::info!(
-                    "[embedded-ble] one-click recovery attempting automatic Listener unpair failure_kind={:?} runtime_escalated={runtime_requests_auto_unpair} reconnect_attempts={} notify_state={:?}",
+                    "[embedded-ble] one-click recovery attempting Type automatic PairAsync recovery failure_kind={:?} runtime_escalated={runtime_requests_auto_unpair} reconnect_attempts={} notify_state={:?}",
                     failure.kind,
                     wake_recovery.reconnect_attempts,
                     wake_recovery.notify_subscription_state,
                 );
-                let unpair = tauri::async_runtime::spawn_blocking(
-                    crate::embedded_ble::unpair_listener_devices,
-                )
+                let pairing_expected_name = expected_ble_name.clone();
+                let pairing = tauri::async_runtime::spawn_blocking(move || {
+                    embedded_ble_windows_pairing_result(
+                        "one-click recovery",
+                        pairing_expected_name.as_str(),
+                        true,
+                        EmbeddedBleWindowsPairingPromptPolicy::AllowUserPrompt,
+                    )
+                })
                 .await
-                .map_err(|err| format!("Listener BLE automatic unpair task failed: {err}"))?;
+                .map_err(|err| {
+                    format!("Listener BLE Type automatic PairAsync task failed: {err}")
+                })?;
+                let pairing_ready = matches!(
+                    pairing.status,
+                    crate::embedded_ble::BleDevicePairingPromptStatus::Paired
+                        | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
+                ) && !pairing.open_bluetooth_settings
+                    && pairing.failed_devices == 0;
                 log::info!(
-                    "[embedded-ble] one-click recovery automatic Listener unpair result status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
-                    unpair.status,
-                    unpair.matched_devices,
-                    unpair.unpaired_devices,
-                    unpair.already_unpaired_devices,
-                    unpair.failed_devices,
-                    unpair.needs_user_action,
+                    "[embedded-ble] one-click recovery Type PairAsync requested pairing_ready={pairing_ready} target={expected_ble_name:?}"
                 );
-                user_action_required = true;
-                recovery_action = EmbeddedBleRecoveryAction::RePairRequired;
-                unpair_result = Some(unpair.clone());
-                open_bluetooth_settings = true;
+                user_action_required = false;
+                recovery_action = if pairing_ready {
+                    EmbeddedBleRecoveryAction::WaitForAutomaticRecovery
+                } else {
+                    EmbeddedBleRecoveryAction::RePairRequired
+                };
+                open_bluetooth_settings = false;
+                pairing_prompt_result = Some(pairing.clone());
                 log::info!(
-                    "[embedded-ble] one-click recovery skipped Type PairAsync after stale cleanup target={expected_ble_name:?}; waiting for Windows native pairing notification or manual add-device flow"
+                    "[embedded-ble] one-click recovery will stop if another host completes pairing before this Type instance target={expected_ble_name:?}"
                 );
             }
 
@@ -2251,6 +2334,8 @@ const DEVICE_SETTINGS_BLE_RECOVERY_PAIRING_SETTLE_DELAY: Duration = Duration::fr
 const DEVICE_SETTINGS_BLE_NAME_PAIRING_SETTLE_DELAY: Duration = Duration::from_millis(1200);
 const DEVICE_SETTINGS_BLE_NAME_PAIRING_RETRY_DELAY: Duration = Duration::from_millis(2200);
 const DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES: usize = 63;
+const DEVICE_SETTINGS_READBACK_VERIFY_ATTEMPTS: u8 = 5;
+const DEVICE_SETTINGS_READBACK_VERIFY_RETRY_DELAY: Duration = Duration::from_millis(220);
 
 async fn read_device_settings_snapshot_from_firmware() -> Result<DeviceSettingsSnapshot, String> {
     let status = run_device_settings_blocking("readback", || {
@@ -2398,6 +2483,13 @@ fn device_settings_sent_but_readback_unavailable_detail(error: &str) -> String {
     )
 }
 
+fn device_settings_readback_unavailable_allowed_after_write(
+    ble_name_changed: bool,
+    ble_name_apply_needed: bool,
+) -> bool {
+    ble_name_changed || ble_name_apply_needed
+}
+
 #[derive(Debug, Clone)]
 struct DeviceBleNameWindowsRefreshOutcome {
     recovery_error: Option<String>,
@@ -2439,7 +2531,7 @@ fn apply_device_ble_name_windows_refresh_blocking(
     expected_ble_name: String,
     cleanup_target_names: Vec<String>,
 ) -> DeviceBleNameWindowsRefreshOutcome {
-    let recovery_error = match crate::embedded_ble::send_recording_control_recovery(
+    let recovery_error = match crate::embedded_ble::send_recording_control_silent_recovery(
         DEVICE_SETTINGS_BLE_WRITE_TIMEOUT,
     ) {
         Ok(()) => None,
@@ -2474,6 +2566,7 @@ fn apply_device_ble_name_windows_refresh_blocking(
         "device BLE name change",
         expected_ble_name.as_str(),
         recovery_error.is_none(),
+        EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt,
     );
     if recovery_error.is_none()
         && device_ble_name_windows_refresh_pairing_retry_needed(&pairing_prompt_result)
@@ -2487,6 +2580,7 @@ fn apply_device_ble_name_windows_refresh_blocking(
             "device BLE name change retry",
             expected_ble_name.as_str(),
             true,
+            EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt,
         );
         if device_ble_name_pairing_retry_result_is_better(
             &retry_pairing_prompt_result,
@@ -2754,6 +2848,8 @@ pub async fn set_device_settings(
             prefs.device_edge_led_brightness_percent = request.edge_led_brightness_percent;
         }
         prefs.device_low_power_idle_minutes = request.battery_low_power_idle_minutes;
+        prefs.device_plugged_low_power_idle_minutes = request.plugged_low_power_idle_minutes;
+        prefs.device_battery_low_power_idle_minutes = request.battery_low_power_idle_minutes;
         prefs.device_plugged_low_power_enabled = plugged_low_power_enabled;
         prefs.device_battery_auto_shutdown_minutes = request.battery_auto_shutdown_minutes;
         prefs.device_ble_name = request.ble_name.clone();
@@ -2871,18 +2967,30 @@ pub async fn set_device_settings(
     } else {
         None
     };
-    let final_snapshot = match post_apply_snapshot {
-        Some(snapshot) => Ok(snapshot),
-        None => read_device_settings_snapshot_from_firmware().await,
-    };
-    match final_snapshot {
+    match read_device_settings_snapshot_after_write(
+        &request,
+        post_apply_snapshot,
+        led_zone_brightness_supported,
+        plugged_low_power_enabled,
+    )
+    .await
+    {
         Ok(mut snapshot) => {
             if let Some(detail) = ble_name_detail {
                 snapshot.detail = Some(detail);
             }
             Ok(snapshot)
         }
-        Err(readback_error) => {
+        Err(DeviceSettingsReadbackAfterWriteError::Mismatch(mismatch_error)) => Err(mismatch_error),
+        Err(DeviceSettingsReadbackAfterWriteError::Unavailable(readback_error)) => {
+            if !device_settings_readback_unavailable_allowed_after_write(
+                ble_name_changed,
+                ble_name_apply_needed,
+            ) {
+                return Err(format!(
+                    "设备设置已发送，但固件读回不可用，无法确认写入是否生效：{readback_error}"
+                ));
+            }
             let mut snapshot = device_settings_snapshot_from_request(
                 &request,
                 previous_snapshot,
@@ -2897,6 +3005,73 @@ pub async fn set_device_settings(
             Ok(snapshot)
         }
     }
+}
+
+enum DeviceSettingsReadbackAfterWriteError {
+    Unavailable(String),
+    Mismatch(String),
+}
+
+async fn read_device_settings_snapshot_after_write(
+    request: &DeviceSettingsUpdateRequest,
+    first_snapshot: Option<DeviceSettingsSnapshot>,
+    led_zone_brightness_supported: bool,
+    plugged_low_power_enabled: bool,
+) -> Result<DeviceSettingsSnapshot, DeviceSettingsReadbackAfterWriteError> {
+    let mut first_snapshot = first_snapshot;
+    let mut last_error = DeviceSettingsReadbackAfterWriteError::Unavailable(
+        "device settings readback was not attempted".to_string(),
+    );
+    for attempt in 1..=DEVICE_SETTINGS_READBACK_VERIFY_ATTEMPTS {
+        let snapshot_result = if attempt == 1 {
+            match first_snapshot.take() {
+                Some(snapshot) => Ok(snapshot),
+                None => read_device_settings_snapshot_from_firmware().await,
+            }
+        } else {
+            read_device_settings_snapshot_from_firmware().await
+        };
+
+        match snapshot_result {
+            Ok(snapshot) => {
+                let mismatches = device_settings_readback_mismatches(
+                    &snapshot,
+                    request,
+                    led_zone_brightness_supported,
+                    plugged_low_power_enabled,
+                );
+                if mismatches.is_empty() {
+                    if attempt > 1 {
+                        log::info!(
+                            "[device-settings] write readback matched after retry attempt={attempt}/{}",
+                            DEVICE_SETTINGS_READBACK_VERIFY_ATTEMPTS
+                        );
+                    }
+                    return Ok(snapshot);
+                }
+                let mismatch_text = mismatches.join("; ");
+                log::warn!(
+                    "[device-settings] write readback mismatch attempt={attempt}/{}: {mismatch_text}",
+                    DEVICE_SETTINGS_READBACK_VERIFY_ATTEMPTS
+                );
+                last_error = DeviceSettingsReadbackAfterWriteError::Mismatch(format!(
+                    "设备设置写入后读回不一致：{mismatch_text}"
+                ));
+            }
+            Err(readback_error) => {
+                log::warn!(
+                    "[device-settings] write readback unavailable attempt={attempt}/{}: {readback_error}",
+                    DEVICE_SETTINGS_READBACK_VERIFY_ATTEMPTS
+                );
+                last_error = DeviceSettingsReadbackAfterWriteError::Unavailable(readback_error);
+            }
+        }
+
+        if attempt < DEVICE_SETTINGS_READBACK_VERIFY_ATTEMPTS {
+            tokio::time::sleep(DEVICE_SETTINGS_READBACK_VERIFY_RETRY_DELAY).await;
+        }
+    }
+    Err(last_error)
 }
 
 fn device_settings_snapshot_from_status(
@@ -3053,6 +3228,109 @@ fn device_settings_snapshot_from_request(
         "Device settings were sent; displayed values are last-known until firmware DEVICE readback succeeds.".to_string(),
     );
     snapshot
+}
+
+fn device_settings_readback_mismatches(
+    snapshot: &DeviceSettingsSnapshot,
+    request: &DeviceSettingsUpdateRequest,
+    led_zone_brightness_supported: bool,
+    plugged_low_power_enabled: bool,
+) -> Vec<String> {
+    let mut mismatches = Vec::new();
+    if led_zone_brightness_supported {
+        if !snapshot.led_zone_brightness_supported {
+            mismatches.push("led_zone_brightness_supported=false".to_string());
+        } else {
+            if snapshot.status_led_brightness_percent != request.status_led_brightness_percent {
+                mismatches.push(format!(
+                    "led_status expected={} actual={}",
+                    request.status_led_brightness_percent, snapshot.status_led_brightness_percent
+                ));
+            }
+            if snapshot.key_led_brightness_percent != request.key_led_brightness_percent {
+                mismatches.push(format!(
+                    "led_key expected={} actual={}",
+                    request.key_led_brightness_percent, snapshot.key_led_brightness_percent
+                ));
+            }
+            if snapshot.knob_led_brightness_percent != request.knob_led_brightness_percent {
+                mismatches.push(format!(
+                    "led_ec11 expected={} actual={}",
+                    request.knob_led_brightness_percent, snapshot.knob_led_brightness_percent
+                ));
+            }
+            if snapshot.edge_led_brightness_percent != request.edge_led_brightness_percent {
+                mismatches.push(format!(
+                    "led_edge expected={} actual={}",
+                    request.edge_led_brightness_percent, snapshot.edge_led_brightness_percent
+                ));
+            }
+        }
+    }
+    if snapshot.plugged_low_power_idle_minutes != request.plugged_low_power_idle_minutes {
+        mismatches.push(format!(
+            "plugged_low_power_idle_minutes expected={} actual={}",
+            request.plugged_low_power_idle_minutes, snapshot.plugged_low_power_idle_minutes
+        ));
+    }
+    if snapshot.battery_low_power_idle_minutes != request.battery_low_power_idle_minutes {
+        mismatches.push(format!(
+            "battery_low_power_idle_minutes expected={} actual={}",
+            request.battery_low_power_idle_minutes, snapshot.battery_low_power_idle_minutes
+        ));
+    }
+    if snapshot.plugged_low_power_enabled != plugged_low_power_enabled {
+        mismatches.push(format!(
+            "plugged_low_power_enabled expected={} actual={}",
+            plugged_low_power_enabled, snapshot.plugged_low_power_enabled
+        ));
+    }
+    let expected_battery_auto_shutdown_ms =
+        request.battery_auto_shutdown_minutes.saturating_mul(60_000);
+    if snapshot.battery_auto_shutdown_ms != expected_battery_auto_shutdown_ms {
+        mismatches.push(format!(
+            "battery_auto_shutdown_ms expected={} actual={}",
+            expected_battery_auto_shutdown_ms, snapshot.battery_auto_shutdown_ms
+        ));
+    }
+    if snapshot.plugged_auto_shutdown_ms != DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS {
+        mismatches.push(format!(
+            "plugged_auto_shutdown_ms expected={} actual={}",
+            DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS, snapshot.plugged_auto_shutdown_ms
+        ));
+    }
+    if snapshot.ble_name != request.ble_name {
+        mismatches.push(format!(
+            "ble_name expected={:?} actual={:?}",
+            request.ble_name, snapshot.ble_name
+        ));
+    }
+    if snapshot.ble_name_pending_restart {
+        mismatches.push("ble_name_pending_restart=true".to_string());
+    }
+    mismatches
+}
+
+fn ensure_device_settings_readback_matches_request(
+    snapshot: &DeviceSettingsSnapshot,
+    request: &DeviceSettingsUpdateRequest,
+    led_zone_brightness_supported: bool,
+    plugged_low_power_enabled: bool,
+) -> Result<(), String> {
+    let mismatches = device_settings_readback_mismatches(
+        snapshot,
+        request,
+        led_zone_brightness_supported,
+        plugged_low_power_enabled,
+    );
+    if mismatches.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "设备设置写入后读回不一致：{}",
+            mismatches.join("; ")
+        ))
+    }
 }
 
 fn device_settings_update_commands(
@@ -8364,9 +8642,11 @@ mod tests {
             .map(|offset| helper_start + offset)
             .expect("BLE name Windows refresh helper boundary should exist");
         let helper = &source[helper_start..helper_end];
-        assert!(helper.contains("send_recording_control_recovery"));
+        assert!(helper.contains("send_recording_control_silent_recovery"));
+        assert!(!helper.contains("send_recording_control_recovery("));
         assert!(helper.contains("unpair_listener_devices_for_names"));
         assert!(helper.contains("embedded_ble_windows_pairing_result"));
+        assert!(helper.contains("EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt"));
         assert!(
             helper.contains("DEVICE_SETTINGS_BLE_RECOVERY_PAIRING_SETTLE_DELAY"),
             "rename recovery must wait for firmware pairing-window refresh before Windows pairing/cache cleanup"
@@ -8660,6 +8940,274 @@ mod tests {
     }
 
     #[test]
+    fn settings_save_packets_led_zone_brightness_and_low_power_changes() {
+        let previous = UserPreferences::default();
+        let mut next = previous.clone();
+        next.device_status_led_brightness_percent = 73;
+        next.device_key_led_brightness_percent = 74;
+        next.device_knob_led_brightness_percent = 75;
+        next.device_edge_led_brightness_percent = 76;
+        next.device_plugged_low_power_idle_minutes = 12;
+        next.device_battery_low_power_idle_minutes = 7;
+        next.device_low_power_idle_minutes = next.device_battery_low_power_idle_minutes;
+
+        assert!(
+            super::device_firmware_settings_changed(&previous, &next),
+            "Type settings save must treat four-zone LED brightness as firmware settings"
+        );
+
+        let commands = super::device_setting_packets_for_changes(&previous, &next)
+            .into_iter()
+            .map(|packet| packet.command)
+            .collect::<Vec<_>>();
+        assert!(
+            commands
+                .iter()
+                .any(|command| command == "DEVICE:SET led_status=73 led_key=74"),
+            "Type settings save must sync status/key brightness through DEVICE:SET"
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|command| command == "DEVICE:SET led_ec11=75 led_edge=76"),
+            "Type settings save must sync EC11/edge brightness through DEVICE:SET"
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|command| command == "DEVICE:SET plugged_low_power_idle_minutes=12"),
+            "Type settings save must sync plugged low-power minutes exactly"
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|command| command == "DEVICE:SET battery_low_power_idle_minutes=7"),
+            "Type settings save must sync battery low-power minutes exactly"
+        );
+        assert!(
+            commands.iter().all(|command| {
+                !command.contains("plugged_brightness")
+                    && !command.contains("battery_brightness")
+                    && command != "DEVICE:SET low_power_idle_minutes=7"
+            }),
+            "Type settings save must not reintroduce global brightness or merged low-power writes"
+        );
+    }
+
+    #[test]
+    fn device_settings_readback_mismatch_fails_after_write() {
+        let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 73,
+            key_led_brightness_percent: 74,
+            knob_led_brightness_percent: 75,
+            edge_led_brightness_percent: 76,
+            plugged_low_power_idle_minutes: 12,
+            battery_low_power_idle_minutes: 12,
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_minutes: 0,
+            battery_auto_shutdown_minutes: 30,
+            ble_name: "listener-dev".to_string(),
+        };
+        let snapshot = super::DeviceSettingsSnapshot {
+            schema: super::DEVICE_SETTINGS_SCHEMA,
+            connected: true,
+            write_supported: true,
+            source: "firmware",
+            status_led_brightness_percent: 72,
+            key_led_brightness_percent: 74,
+            knob_led_brightness_percent: 75,
+            edge_led_brightness_percent: 76,
+            led_zone_brightness_supported: true,
+            low_power_idle_minutes: 13,
+            plugged_low_power_idle_minutes: 13,
+            battery_low_power_idle_minutes: 12,
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_ms: 0,
+            battery_auto_shutdown_ms: 30 * 60_000,
+            knob_rotation_action: "systemVolume".to_string(),
+            ble_name: "listener-dev".to_string(),
+            ble_name_pending_restart: false,
+            active_power_source: "plugged",
+            battery_percent: None,
+            detail: None,
+            last_updated_at: None,
+        };
+
+        let err =
+            super::ensure_device_settings_readback_matches_request(&snapshot, &request, true, true)
+                .expect_err("mismatched firmware readback must fail the Type settings write");
+        assert!(err.contains("led_status expected=73 actual=72"));
+        assert!(err.contains("plugged_low_power_idle_minutes expected=12 actual=13"));
+    }
+
+    #[test]
+    fn device_settings_readback_mismatch_fails_for_each_written_field() {
+        let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: 41,
+            key_led_brightness_percent: 57,
+            knob_led_brightness_percent: 63,
+            edge_led_brightness_percent: 79,
+            plugged_low_power_idle_minutes: 23,
+            battery_low_power_idle_minutes: 37,
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_minutes: 0,
+            battery_auto_shutdown_minutes: 45,
+            ble_name: "listener-dev".to_string(),
+        };
+        let matching = super::DeviceSettingsSnapshot {
+            schema: super::DEVICE_SETTINGS_SCHEMA,
+            connected: true,
+            write_supported: true,
+            source: "firmware",
+            status_led_brightness_percent: request.status_led_brightness_percent,
+            key_led_brightness_percent: request.key_led_brightness_percent,
+            knob_led_brightness_percent: request.knob_led_brightness_percent,
+            edge_led_brightness_percent: request.edge_led_brightness_percent,
+            led_zone_brightness_supported: true,
+            low_power_idle_minutes: request.plugged_low_power_idle_minutes,
+            plugged_low_power_idle_minutes: request.plugged_low_power_idle_minutes,
+            battery_low_power_idle_minutes: request.battery_low_power_idle_minutes,
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_ms: 0,
+            battery_auto_shutdown_ms: request.battery_auto_shutdown_minutes * 60_000,
+            knob_rotation_action: "systemVolume".to_string(),
+            ble_name: request.ble_name.clone(),
+            ble_name_pending_restart: false,
+            active_power_source: "plugged",
+            battery_percent: None,
+            detail: None,
+            last_updated_at: None,
+        };
+
+        let assert_mismatch = |snapshot: super::DeviceSettingsSnapshot, fragment: &str| {
+            let err = super::ensure_device_settings_readback_matches_request(
+                &snapshot, &request, true, true,
+            )
+            .expect_err("any written field readback mismatch must fail the Type settings write");
+            assert!(
+                err.contains(fragment),
+                "expected mismatch fragment {fragment:?} in {err:?}"
+            );
+        };
+
+        let mut snapshot = matching.clone();
+        snapshot.status_led_brightness_percent = 40;
+        assert_mismatch(snapshot, "led_status expected=41 actual=40");
+
+        let mut snapshot = matching.clone();
+        snapshot.key_led_brightness_percent = 56;
+        assert_mismatch(snapshot, "led_key expected=57 actual=56");
+
+        let mut snapshot = matching.clone();
+        snapshot.knob_led_brightness_percent = 62;
+        assert_mismatch(snapshot, "led_ec11 expected=63 actual=62");
+
+        let mut snapshot = matching.clone();
+        snapshot.edge_led_brightness_percent = 78;
+        assert_mismatch(snapshot, "led_edge expected=79 actual=78");
+
+        for actual in [0, 1, 12, 24, 1440] {
+            if actual == request.plugged_low_power_idle_minutes {
+                continue;
+            }
+            let mut snapshot = matching.clone();
+            snapshot.plugged_low_power_idle_minutes = actual;
+            assert_mismatch(
+                snapshot,
+                &format!(
+                    "plugged_low_power_idle_minutes expected={} actual={actual}",
+                    request.plugged_low_power_idle_minutes
+                ),
+            );
+        }
+
+        for actual in [0, 1, 12, 38, 1440] {
+            if actual == request.battery_low_power_idle_minutes {
+                continue;
+            }
+            let mut snapshot = matching.clone();
+            snapshot.battery_low_power_idle_minutes = actual;
+            assert_mismatch(
+                snapshot,
+                &format!(
+                    "battery_low_power_idle_minutes expected={} actual={actual}",
+                    request.battery_low_power_idle_minutes
+                ),
+            );
+        }
+
+        let mut snapshot = matching.clone();
+        snapshot.plugged_low_power_enabled = false;
+        assert_mismatch(
+            snapshot,
+            "plugged_low_power_enabled expected=true actual=false",
+        );
+
+        let mut snapshot = matching.clone();
+        snapshot.battery_auto_shutdown_ms = 46 * 60_000;
+        assert_mismatch(
+            snapshot,
+            "battery_auto_shutdown_ms expected=2700000 actual=2760000",
+        );
+
+        let mut snapshot = matching.clone();
+        snapshot.ble_name = "listener-alt".to_string();
+        assert_mismatch(
+            snapshot,
+            "ble_name expected=\"listener-dev\" actual=\"listener-alt\"",
+        );
+    }
+
+    #[test]
+    fn device_settings_plain_writes_require_confirmed_readback() {
+        assert!(
+            !super::device_settings_readback_unavailable_allowed_after_write(false, false),
+            "brightness and low-power writes must not be reported as saved without firmware readback"
+        );
+        assert!(
+            super::device_settings_readback_unavailable_allowed_after_write(true, false),
+            "BLE rename can temporarily lose readback while Windows cache refresh follows the new name"
+        );
+        assert!(
+            super::device_settings_readback_unavailable_allowed_after_write(false, true),
+            "pending BLE-name apply can use the existing deferred confirmation path"
+        );
+        let source = include_str!("commands.rs");
+        assert!(
+            source.contains("无法确认写入是否生效"),
+            "plain settings write failures must tell the UI that firmware readback did not confirm persistence"
+        );
+    }
+
+    #[test]
+    fn device_settings_write_retries_stale_readback_before_failing() {
+        let source = include_str!("commands.rs");
+        let settings_start = source
+            .find("pub async fn set_device_settings")
+            .expect("set_device_settings should exist");
+        let settings_end = source[settings_start..]
+            .find("fn device_settings_snapshot_from_status")
+            .map(|offset| settings_start + offset)
+            .expect("set_device_settings boundary should exist");
+        let settings_body = &source[settings_start..settings_end];
+
+        assert!(
+            settings_body.contains("read_device_settings_snapshot_after_write"),
+            "Type settings writes must verify readback through the retry helper, not a single immediate USB read"
+        );
+        assert!(
+            source.contains("DEVICE_SETTINGS_READBACK_VERIFY_ATTEMPTS")
+                && source.contains("DEVICE_SETTINGS_READBACK_VERIFY_RETRY_DELAY"),
+            "Type settings readback verification must keep bounded retry constants"
+        );
+        assert!(
+            source.contains("[device-settings] write readback mismatch attempt=")
+                && source.contains("[device-settings] write readback unavailable attempt="),
+            "Type settings readback retries must log expected/actual mismatch or unavailable evidence"
+        );
+    }
+
+    #[test]
     fn device_settings_update_commands_skip_unchanged_ble_name() {
         let request = DeviceSettingsUpdateRequest {
             status_led_brightness_percent: 70,
@@ -8728,6 +9276,200 @@ mod tests {
         assert!(commands
             .iter()
             .any(|command| { command == "DEVICE:SET plugged_low_power_enabled=0" }));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "writes random Listener LED brightness and low-power settings through Type"]
+    fn device_settings_random_led_and_low_power_write_hardware_smoke() {
+        crate::init_file_logger();
+        let before =
+            crate::embedded_ble::read_device_settings_status(std::time::Duration::from_secs(8))
+                .expect("device settings should be readable before Type settings smoke");
+        assert!(
+            before.led_zone_brightness_supported,
+            "firmware must report led_status/led_key support before Type writes LED brightness"
+        );
+        assert!(
+            !before.ble_name_pending_restart,
+            "hardware smoke expects no pending BLE-name apply before the settings write"
+        );
+
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be after Unix epoch")
+            .as_nanos();
+        let pick_brightness = |salt: u128, avoid: u8| -> u8 {
+            let mut value = 33 + (((seed / salt) % 53) as u8);
+            if value == avoid {
+                value = if value < 80 { value + 5 } else { value - 5 };
+            }
+            value
+        };
+        let pick_minutes = |salt: u128, avoid: u32| -> u32 {
+            let mut value = 5 + (((seed / salt) % 19) as u32);
+            if value == avoid {
+                value = if value < 20 { value + 1 } else { value - 1 };
+            }
+            value
+        };
+        let request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent: pick_brightness(3, before.status_led_brightness_percent),
+            key_led_brightness_percent: pick_brightness(7, before.key_led_brightness_percent),
+            knob_led_brightness_percent: before.knob_led_brightness_percent,
+            edge_led_brightness_percent: before.edge_led_brightness_percent,
+            plugged_low_power_idle_minutes: pick_minutes(11, before.plugged_low_power_idle_minutes),
+            battery_low_power_idle_minutes: pick_minutes(17, before.battery_low_power_idle_minutes),
+            plugged_low_power_enabled: true,
+            plugged_auto_shutdown_minutes: 0,
+            battery_auto_shutdown_minutes: before.battery_auto_shutdown_minutes,
+            ble_name: before.ble_name.clone(),
+        };
+        let plugged_low_power_enabled =
+            request.plugged_low_power_enabled && request.plugged_low_power_idle_minutes > 0;
+        let commands = device_settings_update_commands(
+            &request,
+            before.led_zone_brightness_supported,
+            plugged_low_power_enabled,
+            false,
+        )
+        .expect("Type device-settings commands should fit BLE audio control");
+        println!(
+            "type_simulated_device_settings_write led_status={} led_key={} plugged_low_power={} battery_low_power={} commands={:?}",
+            request.status_led_brightness_percent,
+            request.key_led_brightness_percent,
+            request.plugged_low_power_idle_minutes,
+            request.battery_low_power_idle_minutes,
+            commands
+        );
+
+        let smoke_result = std::panic::catch_unwind(|| {
+            for command in &commands {
+                crate::embedded_ble::send_device_settings_command(
+                    command,
+                    std::time::Duration::from_secs(4),
+                )
+                .unwrap_or_else(|err| {
+                    panic!("Type device-settings command failed command={command}: {err}")
+                });
+            }
+
+            let after =
+                crate::embedded_ble::read_device_settings_status(std::time::Duration::from_secs(8))
+                    .expect("device settings should be readable after Type settings smoke");
+            println!(
+                "type_device_settings_readback led_status={} led_key={} led_ec11={} led_edge={} plugged_low_power={} battery_low_power={} raw={}",
+                after.status_led_brightness_percent,
+                after.key_led_brightness_percent,
+                after.knob_led_brightness_percent,
+                after.edge_led_brightness_percent,
+                after.plugged_low_power_idle_minutes,
+                after.battery_low_power_idle_minutes,
+                after.raw_line
+            );
+            let snapshot = super::device_settings_snapshot_from_status(after);
+            super::ensure_device_settings_readback_matches_request(
+                &snapshot,
+                &request,
+                before.led_zone_brightness_supported,
+                plugged_low_power_enabled,
+            )
+            .expect("firmware readback must match the Type random write exactly");
+            assert_eq!(
+                snapshot.plugged_low_power_idle_minutes, request.plugged_low_power_idle_minutes,
+                "Type must show exactly the plugged low-power minutes that it wrote"
+            );
+            assert_eq!(
+                snapshot.battery_low_power_idle_minutes, request.battery_low_power_idle_minutes,
+                "Type must show exactly the battery low-power minutes that it wrote"
+            );
+            let brightness_log = crate::embedded_ble::read_status_led_brightness_status(
+                std::time::Duration::from_secs(8),
+            )
+            .expect("status LED brightness detail should be readable after Type random write");
+            println!(
+                "type_device_settings_led_brightness_log led_status={} led_key={} raw={}",
+                request.status_led_brightness_percent,
+                request.key_led_brightness_percent,
+                brightness_log
+            );
+            assert!(
+                brightness_log.contains(&format!(
+                    "status_zone_brightness_percent={}",
+                    request.status_led_brightness_percent
+                )),
+                "firmware LED status brightness log must reflect Type's random status cap: {brightness_log}"
+            );
+            assert!(
+                brightness_log.contains(&format!(
+                    "key_zone_brightness_percent={}",
+                    request.key_led_brightness_percent
+                )),
+                "firmware LED status brightness log must reflect Type's random key cap: {brightness_log}"
+            );
+        });
+
+        let restore_request = DeviceSettingsUpdateRequest {
+            status_led_brightness_percent:
+                crate::types::DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
+            key_led_brightness_percent: crate::types::DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
+            knob_led_brightness_percent: before.knob_led_brightness_percent,
+            edge_led_brightness_percent: before.edge_led_brightness_percent,
+            plugged_low_power_idle_minutes: before.plugged_low_power_idle_minutes,
+            battery_low_power_idle_minutes: before.battery_low_power_idle_minutes,
+            plugged_low_power_enabled: before.plugged_low_power_enabled,
+            plugged_auto_shutdown_minutes: 0,
+            battery_auto_shutdown_minutes: before.battery_auto_shutdown_minutes,
+            ble_name: before.ble_name.clone(),
+        };
+        let restore_plugged_low_power_enabled = restore_request.plugged_low_power_enabled
+            && restore_request.plugged_low_power_idle_minutes > 0;
+        let restore_commands = device_settings_update_commands(
+            &restore_request,
+            before.led_zone_brightness_supported,
+            restore_plugged_low_power_enabled,
+            false,
+        )
+        .expect("restore commands should fit BLE audio control");
+        for command in &restore_commands {
+            crate::embedded_ble::send_device_settings_command(
+                command,
+                std::time::Duration::from_secs(4),
+            )
+            .unwrap_or_else(|err| {
+                panic!("failed to restore Type device settings command={command}: {err}")
+            });
+        }
+        let restored =
+            crate::embedded_ble::read_device_settings_status(std::time::Duration::from_secs(8))
+                .expect("device settings should be readable after restore");
+        println!(
+            "type_device_settings_restored led_status={} led_key={} plugged_low_power={} battery_low_power={} raw={}",
+            restored.status_led_brightness_percent,
+            restored.key_led_brightness_percent,
+            restored.plugged_low_power_idle_minutes,
+            restored.battery_low_power_idle_minutes,
+            restored.raw_line
+        );
+        assert_eq!(
+            restored.status_led_brightness_percent,
+            crate::types::DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT
+        );
+        assert_eq!(
+            restored.key_led_brightness_percent,
+            crate::types::DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT
+        );
+        assert_eq!(
+            restored.plugged_low_power_idle_minutes,
+            before.plugged_low_power_idle_minutes
+        );
+        assert_eq!(
+            restored.battery_low_power_idle_minutes,
+            before.battery_low_power_idle_minutes
+        );
+        if let Err(err) = smoke_result {
+            std::panic::resume_unwind(err);
+        }
     }
 
     #[test]
@@ -8816,7 +9558,7 @@ mod tests {
     }
 
     #[test]
-    fn ble_name_refresh_uses_windows_cache_refresh_and_one_click_hands_off_to_native_pairing() {
+    fn ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery() {
         let source = include_str!("commands.rs");
         let helper_start = source
             .find("fn embedded_ble_windows_pairing_result")
@@ -8826,6 +9568,8 @@ mod tests {
             .map(|offset| helper_start + offset)
             .expect("Windows pairing helper boundary should exist");
         let helper = &source[helper_start..helper_end];
+        assert!(helper.contains("EmbeddedBleWindowsPairingPromptPolicy"));
+        assert!(helper.contains("prompt_listener_pairing_after_type_recovery_without_user_prompt"));
         assert!(helper.contains("prompt_listener_pairing_after_type_recovery"));
         assert!(helper.contains("prompt_listener_pairing_for_recovery"));
         assert!(helper.contains("PairAsync"));
@@ -8851,8 +9595,9 @@ mod tests {
             .map(|offset| rename_helper_start + offset)
             .expect("BLE name Windows refresh helper boundary should exist");
         let rename_helper = &source[rename_helper_start..rename_helper_end];
-        assert!(rename_helper.contains("send_recording_control_recovery"));
+        assert!(rename_helper.contains("send_recording_control_silent_recovery"));
         assert!(rename_helper.contains("unpair_listener_devices_for_names"));
+        assert!(rename_helper.contains("EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt"));
         assert!(
             rename_helper.contains("embedded_ble_windows_pairing_result"),
             "BLE rename refresh must run the bounded Windows pairing/cache refresh path after firmware applies a different name"
@@ -8871,16 +9616,65 @@ mod tests {
             .expect("one-click recovery command boundary should exist");
         let one_click = &source[one_click_start..one_click_end];
         assert!(
-            !one_click.contains("embedded_ble_windows_pairing_result"),
-            "one-click recovery must not start Type PairAsync after cleanup; users finish with the Windows native pairing notification"
+            one_click.contains("embedded_ble_windows_pairing_result"),
+            "one-click recovery should use the same bounded Type PairAsync recovery path as BLE rename"
+        );
+        assert!(
+            one_click.contains("EmbeddedBleWindowsPairingPromptPolicy::AllowUserPrompt"),
+            "one-click recovery keeps the user-prompt-capable path for computer switching"
         );
         assert!(
             one_click.contains("hold_embedded_ble_listener_for_native_pairing_handoff"),
-            "one-click recovery should hold Type BLE and watch for the user's Windows native pairing"
+            "one-click recovery should hold Type BLE while PairAsync/GATT recovery is in progress"
         );
         assert!(
-            one_click.contains("skipped Type PairAsync after stale cleanup"),
-            "one-click recovery logs must prove it handed pairing to Windows instead of auto-pairing"
+            one_click.contains("will stop if another host completes pairing before this Type instance"),
+            "one-click recovery logs must prove a different computer can win the pairing race without old Type looping"
+        );
+    }
+
+    #[test]
+    fn ble_name_refresh_uses_silent_recovery_while_one_click_keeps_user_prompt() {
+        let source = include_str!("commands.rs");
+        let rename_helper_start = source
+            .find("fn apply_device_ble_name_windows_refresh_blocking")
+            .expect("BLE name Windows refresh helper should exist");
+        let rename_helper_end = source[rename_helper_start..]
+            .find("fn device_ble_name_windows_refresh_detail")
+            .map(|offset| rename_helper_start + offset)
+            .expect("BLE name Windows refresh helper boundary should exist");
+        let rename_helper = &source[rename_helper_start..rename_helper_end];
+        assert!(
+            rename_helper.contains("send_recording_control_silent_recovery")
+                && rename_helper.contains("EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt"),
+            "BLE rename must use the silent firmware recovery command and suppress local user pairing prompts"
+        );
+        assert!(
+            !rename_helper.contains("send_recording_control_recovery("),
+            "BLE rename must not use the Swift-Pair-capable Type recovery command"
+        );
+
+        let one_click_start = source
+            .find("pub async fn recover_embedded_ble_device")
+            .expect("one-click recovery command should exist");
+        let one_click_end = source[one_click_start..]
+            .find("#[tauri::command]\npub async fn get_device_settings")
+            .map(|offset| one_click_start + offset)
+            .expect("one-click recovery command boundary should exist");
+        let one_click = &source[one_click_start..one_click_end];
+        assert!(
+            one_click.contains("EmbeddedBleWindowsPairingPromptPolicy::AllowUserPrompt"),
+            "one-click recovery keeps the user-prompt-capable PairAsync path for computer switching"
+        );
+
+        let coordinator = include_str!("coordinator.rs");
+        let lib = include_str!("lib.rs");
+        assert!(
+            coordinator.contains("send_recording_control_recovery")
+                && !coordinator.contains("send_recording_control_silent_recovery")
+                && lib.contains("send_recording_control_recovery")
+                && !lib.contains("send_recording_control_silent_recovery"),
+            "explicit/double-click Type recovery must keep the Swift-Pair-capable firmware recovery command"
         );
     }
 

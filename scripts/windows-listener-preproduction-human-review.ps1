@@ -64,9 +64,19 @@ if (-not $resumeExistingFullReview) {
     }
 }
 
+function New-ReviewRandomBleName {
+    $alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+    do {
+        $chars = for ($i = 0; $i -lt 12; $i++) {
+            $alphabet[[System.Security.Cryptography.RandomNumberGenerator]::GetInt32($alphabet.Length)]
+        }
+        $candidate = -join $chars
+    } while ($candidate -match '^(?i:listener|listner|lt|type)')
+    return $candidate
+}
+
 if ([string]::IsNullOrWhiteSpace($RandomName)) {
-    $suffix = -join ((48..57 + 65..90) | Get-Random -Count 4 | ForEach-Object { [char]$_ })
-    $RandomName = "listener-$suffix"
+    $RandomName = New-ReviewRandomBleName
 }
 
 function Get-GitHeadInfo {
@@ -183,9 +193,53 @@ function Assert-StepsMatchCanonicalScenarios {
 
 function Get-TypeProcessSnapshot {
     try {
-        @(Get-Process | Where-Object {
-            $_.ProcessName -match "listener|type" -or $_.MainWindowTitle -match "Listener Type|com.listener.type"
-        } | Select-Object Id, ProcessName, MainWindowTitle, Responding, StartTime)
+        $processes = @(Get-Process | Where-Object {
+                $_.ProcessName -match "listener|type" -or $_.MainWindowTitle -match "Listener Type|com.listener.type"
+            })
+        @(
+            foreach ($process in $processes) {
+                $cim = $null
+                try {
+                    $cim = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $process.Id) -ErrorAction Stop
+                } catch {
+                }
+                $exePath = ""
+                try {
+                    $exePath = [string]$process.Path
+                } catch {
+                }
+                if ([string]::IsNullOrWhiteSpace($exePath) -and $null -ne $cim) {
+                    $exePath = [string]$cim.ExecutablePath
+                }
+                $fileVersion = ""
+                $productVersion = ""
+                $lastWriteTime = ""
+                $sha256 = ""
+                if (-not [string]::IsNullOrWhiteSpace($exePath) -and (Test-Path -LiteralPath $exePath)) {
+                    try {
+                        $item = Get-Item -LiteralPath $exePath -ErrorAction Stop
+                        $fileVersion = [string]$item.VersionInfo.FileVersion
+                        $productVersion = [string]$item.VersionInfo.ProductVersion
+                        $lastWriteTime = $item.LastWriteTime.ToString("o")
+                        $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash
+                    } catch {
+                    }
+                }
+                [pscustomobject][ordered]@{
+                    Id = $process.Id
+                    ProcessName = $process.ProcessName
+                    MainWindowTitle = $process.MainWindowTitle
+                    Responding = $process.Responding
+                    StartTime = $process.StartTime
+                    ExecutablePath = $exePath
+                    FileVersion = $fileVersion
+                    ProductVersion = $productVersion
+                    LastWriteTime = $lastWriteTime
+                    Sha256 = $sha256
+                    CommandLine = $(if ($null -ne $cim) { [string]$cim.CommandLine } else { "" })
+                }
+            }
+        )
     } catch {
         @([PSCustomObject]@{ error = $_.Exception.Message })
     }
@@ -554,11 +608,40 @@ $steps = @(
         -Id "baseline-type-tray-ui" `
         -Title "Type 托盘和窗口基线" `
         -Action (Join-Text @(
-            "打开最新 Listener Type，确认托盘里是最新版本。"
-            "从托盘打开主窗口。不要继续下一步，直到窗口不是空白 WebView。")) `
+            "先用最新 MSI 更新 Listener Type；像普通用户一样从 C:\Program Files\Listener Type\listener-type.exe、桌面 Listener Type.lnk 或托盘启动，不要从 repo target 目录启动。"
+            "确认托盘里是最新版本；从托盘打开主窗口。不要继续下一步，直到窗口不是空白 WebView。"
+            "本步骤的进程证据必须显示 ExecutablePath 是 Program Files 安装路径，并带 FileVersion/ProductVersion/Sha256。")) `
         -Expected (Join-Text @(
-            "主窗口能打开，界面不空白。"
+            "主窗口能打开，界面不空白；桌面快捷方式和托盘启动都指向已安装的最新 MSI exe，而不是 repo build output。"
             "Windows 蓝牙和 Type 状态稳定，不在已连接/未连接之间循环。"))
+    New-ReviewStep `
+        -Id "pwr-boot-shutdown-led" `
+        -Title "PWR 开机/关机确认灯" `
+        -Action (Join-Text @(
+            "让 Listener 断电或重启到刚刷入的固件；开机时只观察 PWR/LED1 第一帧，不要按 EC11 或 key1-key4。"
+            "开机稳定后，长按 EC11 约 1.2 到 1.5 秒；只观察关机确认 PWR 是否仍是已验收 warm amber，看到后松开，不要按到硬件关机边界。"
+            "本项只验 PWR 开机第一帧和关机确认 PWR 是否各自符合合同；EC11 旋钮环松开后取消是已验收行为，如果看到 key/EC11 异常只写备注，不在本项调整。")) `
+        -Expected (Join-Text @(
+            "开机 PWR 第一帧应直接显示与关机确认同色同亮的 warm amber；不能先黑一下再亮，并且仍受 Type 状态灯四区亮度 cap 约束。"
+            "关机确认 PWR 保持已验收 warm amber；开机琥珀灯不能影响后续 PWR/BLE/EC11/key 灯效。"
+            "松开 EC11 后退出 pending 关机确认是受保护行为；不应触发单击、双击重配或 Windows 连接通知。"))
+    New-ReviewStep `
+        -Id "type-brightness-low-power-sync" `
+        -Title "Type 亮度和低功耗精确同步" `
+        -Action (Join-Text @(
+            "从 Windows 托盘图标打开最新 Type 的设备设置页；不要从旧窗口、旧桌面快捷方式或旧 exe 猜测。"
+            "本项只验 Type 亮度/低功耗设置，不验其它灯效样式。"
+            "确认状态灯亮度和按键灯亮度默认/迁移后是 80；如果要临时改随机值，请记下输入的数字。"
+            "清空任意一个亮度数字框后直接输入 50，输入框应显示 50，不能残留前导 0 变成 050。"
+            "在 Type 里写入任意状态灯/按键灯亮度，以及任意外接/电池低功耗分钟值；不要只测 12 分钟。"
+            "保存后刷新或重新打开设备设置页，观察 Type 显示值和设备读回值是否仍等于刚输入的值。")) `
+        -Expected (Join-Text @(
+            "Type 默认状态灯/按键灯亮度是 80；EC11/边框仍按各自设置，不被状态灯或按键灯拖动。"
+            "亮度数字框删除时允许临时为空，重新输入后不能把旧的 0 拼进新值。"
+            "Type 写入多少亮度，固件最大亮度 cap 就是多少；不能绕过 Type 设置，也不能偷偷变回 100。"
+            "Type 写入多少低功耗分钟，读回就必须是多少；不能 12 变 13，也不能任何其它数字被四舍五入或夹带改写。"
+            "低功耗开关只能决定是否进入低功耗语义状态，不能另加隐藏亮度层。"
+            "如果有任何异常、疑问或观感备注，请写在备注里；脚本会停在本项等待 triage。"))
     New-ReviewStep `
         -Id "same-name-write-no-repair" `
         -Title "同名写入不重配" `
@@ -575,20 +658,26 @@ $steps = @(
         -Action (Join-Text @(
             "在 Type 蓝牙名称里填这个随机名字并写入：$RandomName"
             "名字已复制到剪贴板。"
-            "如果 Windows 需要原生连接，只处理一次，然后等它稳定。")) `
+            "不要手动打开 Windows 添加设备；等待 Type 自动清理本机旧配对并恢复。")) `
         -Expected (Join-Text @(
-            "任意 1-29 个可见 ASCII 名字都能写入。"
+            "任意合法 1-29 个可见 ASCII 名字都能写入；不能包含空格、引号、分号、等号或反斜杠。"
+            "本步骤生成的随机名必须是无产品前缀的 12 位随机 ASCII 串，用来证明任意随机名都可写。"
+            "不同名改名由 Type 自动清理本机旧配对并恢复。"
+            "BLE 灯效和双击恢复一样：蓝色双闪/重连恢复，完成前不能显示已连接蓝底。"
             "Windows 最终显示精确新名字：$RandomName。"
-            "不能继续显示旧缓存名，不能无限弹添加设备，Type 最终能恢复。")) `
+            "改名恢复走 silent Type 路径：本机 Type 不能打开 Windows 添加设备/蓝牙设置或本机用户配对提示，其它电脑也不应因为改名收到 Swift Pair 弹窗。"
+            "不能继续显示旧缓存名，Type 最终能恢复。")) `
         -ClipboardText $RandomName
     New-ReviewStep `
         -Id "restore-default-listener" `
         -Title "恢复默认名字 listener" `
         -Action (Join-Text @(
             "在 Type 蓝牙名称里填 listener 并写入。"
-            "如果 Windows 要求连接，只处理一次，然后等它稳定。")) `
+            "不要手动打开 Windows 添加设备；等待 Type 自动清理本机旧配对并恢复。")) `
         -Expected (Join-Text @(
             "默认名字 listener 能恢复。"
+            "BLE 灯效和双击恢复一样：蓝色双闪/重连恢复，完成前不能显示已连接蓝底。"
+            "改名恢复走 silent Type 路径：本机 Type 不能打开 Windows 添加设备/蓝牙设置或本机用户配对提示，其它电脑也不应因为改名收到 Swift Pair 弹窗。"
             "Windows 最终显示 listener，Type 恢复连接。"
             "不能截断名字，不能缓存成旧名。")) `
         -ClipboardText "listener"
@@ -651,26 +740,29 @@ $steps = @(
             "PWR/BLE/REC/AI/key1-key4 不应该被带着乱闪；录音态下录音灯优先覆盖旋钮白色反馈是允许的。"))
     New-ReviewStep `
         -Id "ec11-single-not-double" `
-        -Title "EC11 单击不误判双击" `
+        -Title "EC11 单击/双击边界" `
         -Action (Join-Text @(
-            "单击一次 EC11 旋钮。"
-            "不要快速双击。观察 Windows、Type 和蓝牙灯。")) `
+            "保持 Type 打开且当前不要录音。"
+            "先单击一次 EC11 旋钮，等待约 1 秒。确认这是单击行为。"
+            "如果录音被单击启动，请用 EC11 单击或 Type 取消让它回到空闲后再继续。"
+            "然后快速双击一次 EC11 旋钮，只看它是否被识别成双击；本步骤不要求完整自动重连通过。")) `
         -Expected (Join-Text @(
-            "只触发单击/本地反馈。"
-            "不能打开重配流程，不能弹 Windows 连接通知。"
+            "单击必须只触发单击/本地反馈或单击录音动作，不能打开重配流程，不能弹 Windows 连接通知。"
+            "快速双击必须取消第一下单击，不应该先进入录音或显示单击录音胶囊。"
+            "快速双击应进入双击重配提示/蓝色重配灯效；如果后续自动重连失败，只在备注里写自动重连现象，边界本身按是否误判来判定。"
             "EC11 的按键行为要和 key1-key4 的单/双击窗口一致。"))
     New-ReviewStep `
         -Id "ec11-double-repair-with-type" `
         -Title "有 Type 的双击重配" `
         -Action (Join-Text @(
             "保持 Type 打开。快速双击 EC11 旋钮。"
-            "等 Type 先清理这台电脑上的旧 Listener 配对。"
-            "看到 Windows 右下角连接通知后，只点一次连接；如果没有通知，就打开 Windows 蓝牙页手动添加当前 Listener 名字。"
-            "不要在 Type 里点别的恢复按钮，不要重复双击。")) `
+            "等 Type 先清理这台电脑上的旧 Listener 配对，再寻找 Listener 恢复广播并自动恢复本机连接。"
+            "不要点击 Windows 蓝牙弹窗，不要在 Type 里点别的恢复按钮，不要重复双击。"
+            "如果另一台电脑已经通过 Windows 弹窗连上，本机 Type 应该停止等待，不要再抢回。")) `
         -Expected (Join-Text @(
-            "Type 只负责清理旧配对和等待确认，不能自己 PairAsync 抢配。"
-            "Windows 连接通知最多出现一次；点连接或手动添加后应成功。"
-            "如果未清旧配对就直接点连接，出现连接失败不能算通过。"
+            "Type 会先清理本机旧配对，再寻找恢复广播并走本机自动 PairAsync/GATT 恢复。"
+            "同一台电脑恢复时不需要用户点击 Windows 连接通知。"
+            "如果另一台电脑先用 Windows 弹窗连上，本机 Type 不能循环清理或抢回。"
             "不能长时间卡在已连接/未连接循环。"
             "灯效时机正确：重配提示和找 Type 提示不能互相错用。"
             "Type 必须在真实 BLE GATT 恢复后再显示已恢复。"))
@@ -684,8 +776,8 @@ $steps = @(
             "再模拟有 Type 的电脑：打开 Type，确认它只接管已配对设备，不抢回旧电脑。")) `
         -Expected (Join-Text @(
             "没有 Type 的电脑也能作为普通蓝牙键盘配对，但旧缓存必须由用户自己删除。"
-            "有 Type 的电脑可以帮本机清旧配对，但仍需要用户点 Windows 原生连接。"
-            "旧电脑缓存不会被旧 Type 自动抢回。"
+            "有 Type 的电脑可以帮本机清旧配对并自动恢复。"
+            "如果另一台电脑先通过 Windows 弹窗连上，旧电脑 Type 不能循环清理或抢回。"
             "有 Type 场景能恢复 BLE 控制和录音。"))
     New-ReviewStep `
         -Id "recording-response-and-led-priority" `
@@ -745,11 +837,13 @@ $steps = @(
         -Action (Join-Text @(
             "只在前面全部通过后做。"
             "确认 Denzic 根目录只保留最新 Type MSI 和 Firmware OTA zip。"
-            "不要保留 Type portable zip。")) `
+            "不要保留 Type portable zip。"
+            "核对根目录 Type MSI/Firmware OTA zip 的 SHA256 必须分别等于本次最终打包源产物。")) `
         -Expected (Join-Text @(
             "Type MSI 是最新 v1.0.2。"
             "Firmware OTA zip 是最新 v1.0.2。"
-            "根目录没有旧包或 portable 包。"))
+            "根目录没有旧包或 portable 包。"
+            "root package hash listing 里 type_source_hash_matches_root 和 firmware_source_hash_matches_root 都必须为 true。"))
 )
 Assert-StepsMatchCanonicalScenarios -ReviewSteps $steps
 $allSteps = @($steps)
@@ -1092,6 +1186,7 @@ if ($resumeExistingFullReview) {
 }
 
 $records = [System.Collections.Generic.List[object]]::new()
+$stoppedAfterOperatorNote = $false
 try {
     foreach ($existingRecord in $existingRecords) {
         $records.Add($existingRecord) | Out-Null
@@ -1101,6 +1196,13 @@ try {
         $record = Show-ReviewStep -Index ($i + 1) -Total $steps.Count -Step $steps[$i]
         $records.Add($record) | Out-Null
         ($record | ConvertTo-Json -Depth 10 -Compress) | Add-Content -LiteralPath $sessionPath -Encoding UTF8
+        $operatorNote = Get-OperatorNoteText -Record $record
+        if (-not [string]::IsNullOrWhiteSpace($operatorNote)) {
+            $stoppedAfterOperatorNote = $true
+            Write-Host "operator_note_requires_triage=1 step=$($record.id)"
+            Write-Host "human_review_stopped_after_operator_note=1"
+            break
+        }
         if ($record.result -eq "ABORT") {
             break
         }
@@ -1160,10 +1262,25 @@ $failCount = @($recordsWithResult | Where-Object { $_.result -eq "FAIL" }).Count
 $incompleteCount = @($recordsWithResult | Where-Object { $_.result -in @("SKIP", "ABORT") }).Count + $missingResultCount
 $status = if ($failCount -gt 0) {
     "HUMAN_REVIEW_FAIL"
-} elseif ($incompleteCount -gt 0 -or $summaryRecordArray.Count -ne $expectedRecordCount) {
+} elseif ($incompleteCount -gt 0 -or $summaryRecordArray.Count -ne $expectedRecordCount -or $stoppedAfterOperatorNote) {
     "HUMAN_REVIEW_INCOMPLETE"
 } else {
     "HUMAN_REVIEW_PASS"
+}
+
+$focusedReviewStatus = ""
+if ($requestedStepIds.Count -gt 0) {
+    $focusedRecordsWithResult = @($records | Where-Object { $null -ne $_.PSObject.Properties["result"] })
+    $focusedMissingResultCount = $records.Count - $focusedRecordsWithResult.Count
+    $focusedFailCount = @($focusedRecordsWithResult | Where-Object { $_.result -eq "FAIL" }).Count
+    $focusedIncompleteCount = @($focusedRecordsWithResult | Where-Object { $_.result -in @("SKIP", "ABORT") }).Count + $focusedMissingResultCount
+    $focusedReviewStatus = if ($focusedFailCount -gt 0) {
+        "FOCUSED_HUMAN_REVIEW_FAIL"
+    } elseif ($focusedIncompleteCount -gt 0 -or $records.Count -ne $steps.Count -or $stoppedAfterOperatorNote) {
+        "FOCUSED_HUMAN_REVIEW_INCOMPLETE"
+    } else {
+        "FOCUSED_HUMAN_REVIEW_PASS"
+    }
 }
 
 $operatorNotes = [System.Collections.Generic.List[object]]::new()
@@ -1216,6 +1333,7 @@ $triageTemplate | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $triageTem
 [ordered]@{
     schema_version = 1
     status = $status
+    focused_review_status = $focusedReviewStatus
     generated_at = (Get-Date).ToString("o")
     repo_root = $repoRoot
     output_dir = $OutputDir
@@ -1225,6 +1343,7 @@ $triageTemplate | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $triageTem
     focus_step_ids = @($requestedStepIds)
     carried_forward_summary = $(if ($carryForwardSummary) { $carryForwardSummary.path } else { "" })
     carried_forward_count = $carriedForwardCount
+    stopped_after_operator_note = $stoppedAfterOperatorNote
     operator_note_review_status = $(if ($operatorNoteArray.Count -gt 0) { "PENDING" } else { "PASS" })
     operator_note_review_required_count = $operatorNoteArray.Count
     operator_note_recorded_count = $operatorNoteArray.Count
@@ -1239,11 +1358,15 @@ $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("# Listener 1.0.2 Preproduction Human Review") | Out-Null
 $lines.Add("") | Out-Null
 $lines.Add("- Status: $status") | Out-Null
+if (-not [string]::IsNullOrWhiteSpace($focusedReviewStatus)) {
+    $lines.Add("- Focused review status: $focusedReviewStatus") | Out-Null
+}
 $lines.Add("- Output: $OutputDir") | Out-Null
 $lines.Add("- Session: $sessionPath") | Out-Null
 $lines.Add("- Random BLE name: $RandomName") | Out-Null
 $lines.Add("- Focus steps: $(if ($requestedStepIds.Count -gt 0) { $requestedStepIds -join ', ' } else { 'FULL' })") | Out-Null
 $lines.Add("- Carried forward: $carriedForwardCount") | Out-Null
+$lines.Add("- Stopped after operator note: $stoppedAfterOperatorNote") | Out-Null
 $lines.Add("- Operator notes requiring triage: $($operatorNoteArray.Count)") | Out-Null
 $lines.Add("- Blank operator notes mean normal pass with no extra remarks.") | Out-Null
 $lines.Add("- Operator note triage template: $triageTemplatePath") | Out-Null
@@ -1270,9 +1393,12 @@ $lines.Add("Release rule: HUMAN_REVIEW_PASS alone is not publishable when any no
 $lines | Set-Content -LiteralPath $summaryPath -Encoding UTF8
 
 Write-Host "preproduction_human_review_status=$status"
+if (-not [string]::IsNullOrWhiteSpace($focusedReviewStatus)) {
+    Write-Host "focused_human_review_status=$focusedReviewStatus"
+}
 Write-Host "summary=$summaryPath"
 Write-Host "session=$sessionPath"
-if ($status -eq "HUMAN_REVIEW_PASS") {
+if ($status -eq "HUMAN_REVIEW_PASS" -or $focusedReviewStatus -eq "FOCUSED_HUMAN_REVIEW_PASS") {
     exit 0
 }
 exit 2
