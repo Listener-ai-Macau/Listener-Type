@@ -9743,9 +9743,11 @@ mod tests {
         };
 
         let message = super::embedded_ble_recovery_message(&failure, Some(&unpair), None);
-        assert!(message.contains("重新配对"));
+        assert!(message.contains("旧 Listener 配对"));
+        assert!(message.contains("自动恢复"));
         assert!(!message.to_ascii_lowercase().contains("cccd"));
         assert!(!message.to_ascii_lowercase().contains("gatt"));
+        assert!(!message.to_ascii_lowercase().contains("pairasync"));
     }
 
     #[test]
