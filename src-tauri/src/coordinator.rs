@@ -9292,7 +9292,7 @@ mod tests {
             "Windows BLE service rebuild after UnpairAsync/PairAsync can exceed a short 5s probe; recovery resume must keep a 20s GATT budget"
         );
         assert!(
-            !source.contains("EMBEDDED_BLE_PRE_PAIR_LINK_CHECK_TIMEOUT"),
+            !body.contains("EMBEDDED_BLE_PRE_PAIR_LINK_CHECK_TIMEOUT"),
             "EC11 Type double-click recovery must clear the local stale pair first instead of using a pre-pair GATT shortcut"
         );
     }
