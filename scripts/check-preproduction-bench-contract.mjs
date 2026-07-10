@@ -232,6 +232,34 @@ for (const requiredToken of [
   }
 }
 
+if (!baselineTypeContract.includes("ExecutablePath, FileVersion, ProductVersion, and Sha256")) {
+  failures.push("baseline Type scenario must keep installed exe identity evidence in the product contract");
+}
+
+for (const requiredToken of [
+  "Set-TypeWindowForeground",
+  "Select-TypeCaptureWindow",
+  "no_visible_type_window",
+  "Start-TypeWindowForBench",
+  "type-window-capture.json",
+  "desktop screenshot captured, but Type window focus failed",
+  "desktop_visual_capture = (",
+]) {
+  if (!collect.includes(requiredToken)) {
+    failures.push(`bench collector must bind baseline screenshot evidence to the foreground Type window: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  "type_window_capture",
+  "type_window_not_focused",
+  "missing_type_process_id",
+]) {
+  if (!bench.includes(requiredToken)) {
+    failures.push(`bench review must validate Type window focus metadata: ${requiredToken}`);
+  }
+}
+
 for (const requiredToken of [
   "先用最新 MSI 更新 Listener Type",
   "C:\\Program Files\\Listener Type\\listener-type.exe",

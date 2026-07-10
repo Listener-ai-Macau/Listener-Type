@@ -7,7 +7,7 @@
       "id": "baseline-type-tray-ui",
       "bench_title": "Type tray/UI baseline",
       "bench_capabilities": ["type_runtime", "desktop_visual_capture"],
-      "bench_evidence": ["type_process", "window_screenshot", "type_log"],
+      "bench_evidence": ["type_process", "window_screenshot", "type_window_capture", "type_log"],
       "product_contract": "Preproduction must use the latest MSI-updated user installation: Program Files listener-type.exe, desktop Listener Type.lnk, and tray startup must all resolve to the installed MSI payload, not a repo build output. The Type process evidence must include ExecutablePath, FileVersion, ProductVersion, and Sha256."
     },
     {

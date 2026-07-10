@@ -136,6 +136,21 @@ function Test-EvidenceHealthy {
     return [pscustomobject]@{ ok = $false; reason = "missing" }
   }
 
+  if ($Key -eq "type_window_capture") {
+    try {
+      $capture = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    } catch {
+      return [pscustomobject]@{ ok = $false; reason = "window_capture_json_parse_failed" }
+    }
+    if ($null -eq $capture.PSObject.Properties["focused"] -or -not [bool]$capture.focused) {
+      $reason = if ($null -ne $capture.PSObject.Properties["reason"]) { [string]$capture.reason } else { "not_focused" }
+      return [pscustomobject]@{ ok = $false; reason = "type_window_not_focused:$reason" }
+    }
+    if ($null -eq $capture.PSObject.Properties["process_id"] -or [int]$capture.process_id -le 0) {
+      return [pscustomobject]@{ ok = $false; reason = "missing_type_process_id" }
+    }
+  }
+
   $fileName = [System.IO.Path]::GetFileName($Path)
   if ($fileName -notlike "*.summary.json") {
     return [pscustomobject]@{ ok = $true; reason = "" }

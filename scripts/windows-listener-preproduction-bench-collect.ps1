@@ -184,6 +184,238 @@ function Get-TypeProcesses {
   )
 }
 
+function Ensure-WindowCaptureApi {
+  if (([System.Management.Automation.PSTypeName]"ListenerBenchWindowCapture").Type) {
+    return
+  }
+
+  Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+
+public static class ListenerBenchWindowCapture {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+
+  [DllImport("user32.dll")]
+  public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+  [DllImport("user32.dll")]
+  public static extern bool IsWindowVisible(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
+  public static extern bool IsIconic(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
+  public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+
+  [DllImport("user32.dll")]
+  public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+  [DllImport("user32.dll")]
+  public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
+  public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+"@
+}
+
+function Get-ForegroundProcessId {
+  Ensure-WindowCaptureApi
+  $foregroundWindow = [ListenerBenchWindowCapture]::GetForegroundWindow()
+  if ($foregroundWindow -eq [IntPtr]::Zero) {
+    return 0
+  }
+  [uint32]$foregroundProcessId = 0
+  [void][ListenerBenchWindowCapture]::GetWindowThreadProcessId($foregroundWindow, [ref]$foregroundProcessId)
+  return [int]$foregroundProcessId
+}
+
+function Get-TypeWindowCandidates {
+  param([Parameter(Mandatory = $true)][object[]]$TypeProcesses)
+
+  Ensure-WindowCaptureApi
+  $targetProcessIds = @($TypeProcesses | ForEach-Object { [int]$_.ProcessId })
+  $rows = [System.Collections.Generic.List[object]]::new()
+  $callback = [ListenerBenchWindowCapture+EnumWindowsProc]{
+    param([IntPtr]$hWnd, [IntPtr]$lParam)
+
+    [uint32]$windowProcessId = 0
+    [void][ListenerBenchWindowCapture]::GetWindowThreadProcessId($hWnd, [ref]$windowProcessId)
+    if ($targetProcessIds -contains [int]$windowProcessId) {
+      $text = [System.Text.StringBuilder]::new(512)
+      [void][ListenerBenchWindowCapture]::GetWindowText($hWnd, $text, $text.Capacity)
+      $rect = [ListenerBenchWindowCapture+RECT]::new()
+      [void][ListenerBenchWindowCapture]::GetWindowRect($hWnd, [ref]$rect)
+      $rows.Add([pscustomobject][ordered]@{
+          handle_int64 = $hWnd.ToInt64()
+          handle = ("0x{0:x}" -f $hWnd.ToInt64())
+          process_id = [int]$windowProcessId
+          visible = [ListenerBenchWindowCapture]::IsWindowVisible($hWnd)
+          iconic = [ListenerBenchWindowCapture]::IsIconic($hWnd)
+          title = $text.ToString()
+          left = $rect.Left
+          top = $rect.Top
+          right = $rect.Right
+          bottom = $rect.Bottom
+          width = $rect.Right - $rect.Left
+          height = $rect.Bottom - $rect.Top
+        }) | Out-Null
+    }
+    return $true
+  }
+  [void][ListenerBenchWindowCapture]::EnumWindows($callback, [IntPtr]::Zero)
+  return @($rows)
+}
+
+function Select-TypeCaptureWindow {
+  param([Parameter(Mandatory = $true)][object[]]$TypeProcesses)
+
+  $candidates = @(Get-TypeWindowCandidates -TypeProcesses $TypeProcesses)
+  $eligible = @(
+    $candidates | Where-Object {
+      [bool]$_.visible -and
+      -not [bool]$_.iconic -and
+      [int]$_.width -ge 300 -and
+      [int]$_.height -ge 300 -and
+      [string]$_.title -notin @("Default IME", "MSCTFIME UI", "com.listener.type-siw")
+    } | Sort-Object `
+      @{ Expression = { if ([string]$_.title -eq "Listener Type") { 0 } else { 1 } } }, `
+      @{ Expression = "width"; Descending = $true }, `
+      @{ Expression = "height"; Descending = $true }
+  )
+
+  if ($eligible.Count -eq 0) {
+    return [pscustomobject][ordered]@{
+      process = $null
+      window = $null
+      candidates = @($candidates)
+    }
+  }
+
+  $window = $eligible[0]
+  $process = $null
+  try {
+    $process = Get-Process -Id ([int]$window.process_id) -ErrorAction Stop
+  } catch {
+  }
+
+  return [pscustomobject][ordered]@{
+    process = $process
+    window = $window
+    candidates = @($candidates)
+  }
+}
+
+function Write-TypeProcessEvidence {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][object[]]$TypeProcesses
+  )
+
+  Write-JsonFile -Path $Path -Value ([ordered]@{
+      generated_at = (Get-Date).ToString("o")
+      type_exe = $TypeExe
+      process_count = $TypeProcesses.Count
+      processes = @($TypeProcesses)
+    }) -Depth 8
+}
+
+function Start-TypeWindowForBench {
+  if ([string]::IsNullOrWhiteSpace($TypeExe) -or -not (Test-Path -LiteralPath $TypeExe)) {
+    return $false
+  }
+  try {
+    Start-Process -FilePath $TypeExe | Out-Null
+    Start-Sleep -Seconds 3
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Set-TypeWindowForeground {
+  param([Parameter(Mandatory = $true)][object[]]$TypeProcesses)
+
+  Ensure-WindowCaptureApi
+  $selection = Select-TypeCaptureWindow -TypeProcesses $TypeProcesses
+  if ($null -eq $selection.process -or $null -eq $selection.window) {
+    return [ordered]@{
+      focused = $false
+      reason = "no_visible_type_window"
+      process_id = 0
+      process_name = ""
+      main_window_title = ""
+      main_window_handle = ""
+      selected_window = $null
+      candidate_windows = @($selection.candidates)
+      foreground_process_id = Get-ForegroundProcessId
+      attempts = 0
+    }
+  }
+
+  $process = $selection.process
+  $window = $selection.window
+  $windowHandle = [IntPtr]::new([int64]$window.handle_int64)
+  $attempts = 0
+  for ($attempt = 1; $attempt -le 10; $attempt++) {
+    $attempts = $attempt
+    try {
+      $shell = New-Object -ComObject WScript.Shell
+      [void]$shell.AppActivate($process.Id)
+    } catch {
+    }
+    [void][ListenerBenchWindowCapture]::ShowWindowAsync($windowHandle, 9)
+    [void][ListenerBenchWindowCapture]::SetForegroundWindow($windowHandle)
+    Start-Sleep -Milliseconds 150
+    $foregroundProcessId = Get-ForegroundProcessId
+    if ($foregroundProcessId -eq $process.Id) {
+      $process.Refresh()
+      return [ordered]@{
+        focused = $true
+        reason = ""
+        process_id = $process.Id
+        process_name = $process.ProcessName
+        main_window_title = $process.MainWindowTitle
+        main_window_handle = $window.handle
+        selected_window = $window
+        candidate_windows = @($selection.candidates)
+        foreground_process_id = $foregroundProcessId
+        attempts = $attempts
+      }
+    }
+  }
+
+  $process.Refresh()
+  return [ordered]@{
+    focused = $false
+    reason = "foreground_window_mismatch"
+    process_id = $process.Id
+    process_name = $process.ProcessName
+    main_window_title = $process.MainWindowTitle
+    main_window_handle = $window.handle
+    selected_window = $window
+    candidate_windows = @($selection.candidates)
+    foreground_process_id = Get-ForegroundProcessId
+    attempts = $attempts
+  }
+}
+
 function Get-TypeLogTail {
   param([int]$MaxBytes = 131072)
   $appLog = Join-Path $env:LOCALAPPDATA "Listener Type\Logs\listener-type.log"
@@ -543,12 +775,7 @@ $notes = [System.Collections.Generic.List[string]]::new()
 
 $typeProcessPath = Join-Path $OutputDir "type-process.json"
 $typeProcesses = @(Get-TypeProcesses)
-Write-JsonFile -Path $typeProcessPath -Value ([ordered]@{
-    generated_at = (Get-Date).ToString("o")
-    type_exe = $TypeExe
-    process_count = $typeProcesses.Count
-    processes = @($typeProcesses)
-  }) -Depth 8
+Write-TypeProcessEvidence -Path $typeProcessPath -TypeProcesses $typeProcesses
 $manifest.capabilities.type_runtime = $typeProcesses.Count -gt 0
 if (-not $manifest.capabilities.type_runtime) {
   $notes.Add("type_runtime capability is false because no running listener-type process was found.") | Out-Null
@@ -562,10 +789,26 @@ if (-not $typeLog.exists) {
 }
 
 $screenshotPath = Join-Path $OutputDir "desktop-screenshot.png"
+$typeWindowCapturePath = Join-Path $OutputDir "type-window-capture.json"
 if (-not $SkipScreenshot.IsPresent) {
   try {
+    $typeWindowCapture = Set-TypeWindowForeground -TypeProcesses $typeProcesses
+    if (-not [bool]$typeWindowCapture.focused -and [string]$typeWindowCapture.reason -eq "no_visible_type_window") {
+      if (Start-TypeWindowForBench) {
+        $notes.Add("Type main window was hidden; launched installed Type exe once to show the window before screenshot.") | Out-Null
+        $typeProcesses = @(Get-TypeProcesses)
+        Write-TypeProcessEvidence -Path $typeProcessPath -TypeProcesses $typeProcesses
+        $manifest.capabilities.type_runtime = $typeProcesses.Count -gt 0
+        $typeWindowCapture = Set-TypeWindowForeground -TypeProcesses $typeProcesses
+        $typeWindowCapture["launched_type_exe_to_show_window"] = $true
+      }
+    }
+    Write-JsonFile -Path $typeWindowCapturePath -Value $typeWindowCapture -Depth 6
     Save-DesktopScreenshot -Path $screenshotPath
-    $manifest.capabilities.desktop_visual_capture = Test-Path -LiteralPath $screenshotPath
+    $manifest.capabilities.desktop_visual_capture = ((Test-Path -LiteralPath $screenshotPath) -and [bool]$typeWindowCapture.focused)
+    if (-not [bool]$typeWindowCapture.focused) {
+      $notes.Add("desktop screenshot captured, but Type window focus failed: $($typeWindowCapture.reason)") | Out-Null
+    }
   } catch {
     $errorPath = Join-Path $OutputDir "desktop-screenshot-error.txt"
     Write-TextFile -Path $errorPath -Text $_.Exception.ToString()
@@ -650,6 +893,7 @@ if (-not [string]::IsNullOrWhiteSpace($ActiveBleSummaryPath)) {
 
 Add-Evidence -Manifest $manifest -StepId "baseline-type-tray-ui" -Key "type_process" -Path $typeProcessPath
 Add-Evidence -Manifest $manifest -StepId "baseline-type-tray-ui" -Key "window_screenshot" -Path $screenshotPath
+Add-Evidence -Manifest $manifest -StepId "baseline-type-tray-ui" -Key "type_window_capture" -Path $typeWindowCapturePath
 Add-Evidence -Manifest $manifest -StepId "baseline-type-tray-ui" -Key "type_log" -Path $typeLogPath
 Add-Evidence -Manifest $manifest -StepId "same-name-write-no-repair" -Key "before_ble_state" -Path $bleStatePath
 Add-Evidence -Manifest $manifest -StepId "same-name-write-no-repair" -Key "after_ble_state" -Path (Get-ActiveBleEvidencePath -Summary $activeBle -Key "after_ble_state")
