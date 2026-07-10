@@ -24,6 +24,7 @@ for (const key of [
   "recording_low_latency",
   "ble_rename_recovery",
   "type_takeover_no_forced_repair",
+  "ec11_type_repair_recovery",
   "ota_transfer_speed",
 ]) {
   if (!contracts[key]) fail(`missing performance baseline contract: ${key}`);
@@ -174,6 +175,91 @@ for (const token of [
   }
 }
 
+const ec11Recovery = contracts.ec11_type_repair_recovery;
+if (ec11Recovery.accepted !== true) {
+  fail("EC11 Type recovery speed baseline must stay accepted after human acceptance");
+}
+for (const key of [
+  "measured_recovery_trigger_to_notify_ready_ms",
+  "measured_recovery_trigger_to_type_heartbeat_ready_ms",
+  "measured_human_disconnect_to_type_heartbeat_ready_ms",
+  "measured_human_recovery_adv_to_notify_ready_ms",
+  "max_recovery_trigger_to_notify_ready_ms",
+]) {
+  requireNumber(ec11Recovery[key], `EC11 Type recovery ${key}`);
+}
+if (ec11Recovery.max_recovery_trigger_to_notify_ready_ms > 20000) {
+  fail("EC11 Type recovery notify-ready latency ceiling must not drift above 20000 ms");
+}
+if (ec11Recovery.shared_type_recovery_path_required !== true) {
+  fail("EC11 Type recovery must stay on the shared Type PairAsync/GATT/notify path");
+}
+if (ec11Recovery.type_observed_direct_pairasync_required !== true) {
+  fail("EC11 Type recovery must use the Type-observed recovery address before slow scans");
+}
+if (ec11Recovery.no_slow_recovery_paths_after_observed_address !== true) {
+  fail("EC11 Type recovery must keep slow recovery paths disabled after observed-address evidence");
+}
+if (ec11Recovery.no_duplicate_advertisement_scan_after_notify_evidence !== true) {
+  fail("EC11 Type recovery must not repeat an advertisement scan after notify-open evidence");
+}
+if (ec11Recovery.single_click_no_double !== true) {
+  fail("EC11 single-click boundary must stay protected against double-click recovery regression");
+}
+if (ec11Recovery.human_acceptance_step_id !== "ec11-double-repair-with-type") {
+  fail("EC11 Type recovery baseline must retain the focused human acceptance step id");
+}
+if (
+  !ec11Recovery.human_acceptance_evidence?.includes("ec11-boundary-20260710-20s") ||
+  !ec11Recovery.human_acceptance_evidence?.endsWith("human-ec11-boundary-type-recovery-rootfix.txt")
+) {
+  fail("EC11 Type recovery baseline must cite the focused root-fix human acceptance note");
+}
+if (
+  !ec11Recovery.evidence?.includes("ec11-boundary-20260710-20s") ||
+  !ec11Recovery.evidence?.endsWith("firmware-ec11-double-observed-address.log")
+) {
+  fail("EC11 Type recovery baseline must cite the observed-address firmware double-click artifact");
+}
+if (
+  !ec11Recovery.type_log_evidence?.includes("ec11-boundary-20260710-20s") ||
+  !ec11Recovery.type_log_evidence?.endsWith("type-log-after-human-rootfix-recovery-slice.txt")
+) {
+  fail("EC11 Type recovery baseline must cite the human-run Type recovery log slice");
+}
+if (
+  !ec11Recovery.single_click_boundary_evidence?.includes("ec11-boundary-20260710-20s") ||
+  !ec11Recovery.single_click_boundary_evidence?.endsWith("firmware-ec11-single-start-stop-observed-address.log")
+) {
+  fail("EC11 Type recovery baseline must cite the single-click start/stop boundary artifact");
+}
+if (ec11Recovery.measured_recovery_trigger_to_type_heartbeat_ready_ms > 20000) {
+  fail("EC11 Type recovery Type heartbeat latency must not drift above 20000 ms");
+}
+if (ec11Recovery.measured_human_disconnect_to_type_heartbeat_ready_ms > 20000) {
+  fail("EC11 human-run disconnect-to-heartbeat latency must not drift above 20000 ms");
+}
+if (ec11Recovery.measured_human_recovery_adv_to_notify_ready_ms > 20000) {
+  fail("EC11 human-run recovery advertisement to notify-ready latency must not drift above 20000 ms");
+}
+for (const token of [
+  "type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan",
+  "embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path",
+  "type_recovery_promotes_only_trusted_cached_addresses",
+  "embedded_ble_notify_advertisement_evidence_skips_only_the_duplicate_scan",
+  "ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery",
+  "Program Files\\Listener Type\\listener-type.exe",
+  "<=20000 ms",
+  "Type-observed direct PairAsync",
+  "no duplicate advertisement scan",
+  "no paired link check",
+  "single-click start/stop without double-click",
+]) {
+  if (!ec11Recovery.validation_command?.includes(token)) {
+    fail(`EC11 Type recovery validation command must preserve token: ${token}`);
+  }
+}
+
 const startupReconnectGate = readFileSync(
   join(repoRoot, "scripts", "check-type-startup-reconnect-speed.ps1"),
   "utf8",
@@ -223,5 +309,5 @@ if (ota.accepted !== false || ota.status !== "pending_baseline_after_ota_accepta
 }
 
 console.log(
-  "PASS: performance baselines protect accepted settings-write, BLE rename, recording latency, and Type takeover targets; OTA speed baseline remains explicit pending work.",
+  "PASS: performance baselines protect accepted settings-write, BLE rename, EC11 Type recovery, recording latency, and Type takeover targets; OTA speed baseline remains explicit pending work.",
 );

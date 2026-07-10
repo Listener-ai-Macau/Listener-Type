@@ -47,6 +47,25 @@
       "no_pair_async": true,
       "validation_command": "pwsh -NoProfile -File C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\scripts\\aiw.ps1 with-lock -Resource listener-ble -Wait -WaitTimeoutSeconds 60 -Purpose \"Type restart reconnect speed validation\" -Run pwsh -NoProfile -File .\\scripts\\check-type-startup-reconnect-speed.ps1 -RequirePersistedPath -MaxNotifyReadyMs 3000 -OutputJson <artifact>.json; artifact must prove no PairAsync, persisted_path_used=true, and background listener notify ready <=3000 ms from === Listener Type 启动 ===."
     },
+    "ec11_type_repair_recovery": {
+      "accepted": true,
+      "human_acceptance_evidence": ".cache/validation/ec11-boundary-20260710-20s/human-ec11-boundary-type-recovery-rootfix.txt",
+      "human_acceptance_step_id": "ec11-double-repair-with-type",
+      "evidence": ".cache/validation/ec11-boundary-20260710-20s/firmware-ec11-double-observed-address.log",
+      "type_log_evidence": ".cache/validation/ec11-boundary-20260710-20s/type-log-after-human-rootfix-recovery-slice.txt",
+      "single_click_boundary_evidence": ".cache/validation/ec11-boundary-20260710-20s/firmware-ec11-single-start-stop-observed-address.log",
+      "measured_recovery_trigger_to_notify_ready_ms": 17420,
+      "measured_recovery_trigger_to_type_heartbeat_ready_ms": 17530,
+      "measured_human_disconnect_to_type_heartbeat_ready_ms": 10664,
+      "measured_human_recovery_adv_to_notify_ready_ms": 8984,
+      "max_recovery_trigger_to_notify_ready_ms": 20000,
+      "shared_type_recovery_path_required": true,
+      "type_observed_direct_pairasync_required": true,
+      "no_slow_recovery_paths_after_observed_address": true,
+      "no_duplicate_advertisement_scan_after_notify_evidence": true,
+      "single_click_no_double": true,
+      "validation_command": "cargo test --manifest-path .\\src-tauri\\Cargo.toml type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml type_recovery_promotes_only_trusted_cached_addresses --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_notify_advertisement_evidence_skips_only_the_duplicate_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery --lib; use C:\\Program Files\\Listener Type\\listener-type.exe with EC11 double-click and require recovery trigger to notify ready <=20000 ms, Type-observed direct PairAsync, no duplicate advertisement scan, no paired link check, GATT reachability, notify enable, Type heartbeat ready, and single-click start/stop without double-click."
+    },
     "ota_transfer_speed": {
       "accepted": false,
       "status": "pending_baseline_after_ota_acceptance",

@@ -1328,7 +1328,7 @@ impl Coordinator {
                 CapsuleState::Recording,
                 0.0,
                 0,
-                Some("正在重连 Listener BLE；若设备离线，请按 KEY4/唤醒键。".to_string()),
+                Some("正在恢复 Listener BLE".to_string()),
                 None,
             );
             match wait_for_embedded_ble_listener_ready(
@@ -1354,7 +1354,7 @@ impl Coordinator {
                         CapsuleState::Error,
                         0.0,
                         0,
-                        Some(message.clone()),
+                        Some("Listener 音频通道未恢复".to_string()),
                         None,
                     );
                     schedule_capsule_idle(&self.inner, 5000, None);
@@ -2348,7 +2348,7 @@ fn handle_device_custom_key_pressed(
                     CapsuleState::Error,
                     0.0,
                     0,
-                    Some(format!("打开应用失败：{error}")),
+                    Some("打开应用失败".to_string()),
                     None,
                 );
                 schedule_capsule_idle(inner, 3000, None);
@@ -2533,7 +2533,7 @@ fn send_builtin_shortcut(
                 CapsuleState::Error,
                 0.0,
                 0,
-                Some(format!("{label} 快捷键发送失败：{error}")),
+                Some(format!("{label} 发送失败")),
                 None,
             );
             schedule_capsule_idle(inner, 2200, None);
@@ -2689,7 +2689,7 @@ async fn handle_device_dictation_action(
                 CapsuleState::Reconnecting,
                 0.0,
                 0,
-                Some("设备键已触发，正在恢复 Listener BLE 音频通道...".to_string()),
+                Some("正在恢复 Listener 音频".to_string()),
                 None,
             );
         }
@@ -2718,7 +2718,7 @@ async fn handle_device_dictation_action(
                     CapsuleState::Reconnecting,
                     0.0,
                     0,
-                    Some("设备键已触发，Listener 恢复后会自动开始录音。".to_string()),
+                    Some("Listener 恢复后自动录音".to_string()),
                     None,
                 );
                 return;
@@ -2728,10 +2728,7 @@ async fn handle_device_dictation_action(
                 CapsuleState::Error,
                 0.0,
                 0,
-                Some(format!(
-                    "设备键已触发，但 Listener BLE 音频通道未恢复：{}",
-                    embedded_ble_wake_guidance_for_error(&error)
-                )),
+                Some("Listener 音频通道未恢复".to_string()),
                 None,
             );
             schedule_capsule_idle(&inner, 6000, None);
@@ -2873,10 +2870,7 @@ async fn handle_device_dictation_action(
                                 CapsuleState::Reconnecting,
                                 0.0,
                                 0,
-                                Some(
-                                    "设备键已触发，Listener BLE 控制通道恢复后会自动开始录音。"
-                                        .to_string(),
-                                ),
+                                Some("Listener 恢复后自动录音".to_string()),
                                 None,
                             );
                         }
@@ -2892,8 +2886,7 @@ async fn handle_device_dictation_action(
                                 control_session,
                                 DictationUiState::Transcribing,
                                 CapsuleState::Reconnecting,
-                                "设备停止控制会在 Listener BLE 控制通道恢复后自动补发。"
-                                    .to_string(),
+                                "Listener 恢复后自动停止录音".to_string(),
                             );
                         }
                     }
@@ -2904,7 +2897,7 @@ async fn handle_device_dictation_action(
                     control_session,
                     DictationUiState::Error,
                     CapsuleState::Error,
-                    embedded_ble_recording_control_guidance(&error),
+                    "Listener 录音控制失败".to_string(),
                 );
                 schedule_capsule_idle(&inner, 6000, idle_session);
             }
@@ -3325,7 +3318,7 @@ async fn send_pending_device_key_ble_stop(
                     control_session,
                     DictationUiState::Transcribing,
                     CapsuleState::Reconnecting,
-                    "设备停止控制会在 Listener BLE 控制通道恢复后自动补发。".to_string(),
+                    "Listener 恢复后自动停止录音".to_string(),
                 );
                 return;
             }
@@ -3334,7 +3327,7 @@ async fn send_pending_device_key_ble_stop(
                 control_session,
                 DictationUiState::Error,
                 CapsuleState::Error,
-                embedded_ble_recording_control_guidance(&error),
+                "Listener 录音控制失败".to_string(),
             );
             schedule_capsule_idle(&inner, 6000, idle_session);
         }
@@ -3462,10 +3455,7 @@ async fn request_embedded_ble_recording_start_from_host(
                     CapsuleState::Error,
                     0.0,
                     0,
-                    Some(format!(
-                        "Listener 录音启动控制发送失败: {}",
-                        embedded_ble_recording_control_guidance(&err)
-                    )),
+                    Some("Listener 录音启动失败".to_string()),
                     None,
                 );
                 schedule_capsule_idle(inner, 6000, Some(session_id));
@@ -3915,6 +3905,7 @@ fn try_begin_embedded_ble_pairing_recovery(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EmbeddedBleStalePairingCleanupOutcome {
     Skipped,
+    RetryImmediate,
     RetrySoon,
     HoldForConfirmation,
 }
@@ -4031,7 +4022,7 @@ fn mark_embedded_ble_pairing_link_reachable(inner: &Arc<Inner>, reason: &'static
 fn resume_embedded_ble_listener_after_pairing_recovery(
     inner: &Arc<Inner>,
     reason: &'static str,
-    message: &'static str,
+    message: EmbeddedBleRecoveryCapsuleMessage,
 ) {
     mark_embedded_ble_pairing_link_reachable(inner, reason);
     emit_embedded_ble_recovery_capsule(inner, "reconnecting", message, Some(1800));
@@ -4198,9 +4189,9 @@ fn start_embedded_ble_pairing_confirmation_watch(
                                 "Windows pairing confirmation watch link reachable"
                             },
                             if pairing_ready {
-                                "Listener 已重新配对，正在恢复连接..."
+                                EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio
                             } else {
-                                "Listener 已连接，正在恢复音频通道..."
+                                EmbeddedBleRecoveryCapsuleMessage::RestoringAudio
                             },
                         );
                         break;
@@ -4628,10 +4619,37 @@ fn record_embedded_ble_recovery_failure(inner: &Arc<Inner>, err: &str) {
     );
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbeddedBleRecoveryCapsuleMessage {
+    RestoringAudio,
+    WaitingWindowsPairing,
+    WaitingManualPairing,
+    RebuildingPairing,
+    CleaningPairing,
+    LocalPairingRestoringAudio,
+    WaitingTypePairing,
+    AudioRecovered,
+}
+
+impl EmbeddedBleRecoveryCapsuleMessage {
+    fn text(self) -> &'static str {
+        match self {
+            Self::RestoringAudio => "正在恢复 Listener 音频",
+            Self::WaitingWindowsPairing => "等待 Windows 配对",
+            Self::WaitingManualPairing => "等待手动配对",
+            Self::RebuildingPairing => "正在重建 Listener 配对",
+            Self::CleaningPairing => "正在清理旧配对",
+            Self::LocalPairingRestoringAudio => "本机配对完成，恢复音频",
+            Self::WaitingTypePairing => "等待本机配对",
+            Self::AudioRecovered => "Listener 音频已恢复",
+        }
+    }
+}
+
 fn emit_embedded_ble_recovery_capsule(
     inner: &Arc<Inner>,
     state_label: &str,
-    message: impl Into<String>,
+    message: EmbeddedBleRecoveryCapsuleMessage,
     idle_after_ms: Option<u64>,
 ) {
     let state = if state_label == "reconnected" {
@@ -4639,7 +4657,7 @@ fn emit_embedded_ble_recovery_capsule(
     } else {
         CapsuleState::Reconnecting
     };
-    emit_capsule(inner, state, 0.0, 0, Some(message.into()), None);
+    emit_capsule(inner, state, 0.0, 0, Some(message.text().to_string()), None);
     log::info!("[embedded-ble] recovery capsule state={state_label} emitted=true");
     if let Some(delay_ms) = idle_after_ms {
         schedule_capsule_idle(inner, delay_ms, None);
@@ -4823,7 +4841,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                         emit_embedded_ble_recovery_capsule(
                             &inner,
                             "reconnecting",
-                            "Listener BLE 正在自动重连音频通道...",
+                            EmbeddedBleRecoveryCapsuleMessage::RestoringAudio,
                             Some(1800),
                         );
                     } else if is_embedded_ble_automatic_recovery_error(&err) {
@@ -4834,6 +4852,8 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     }
                     let stale_cleanup_retry_soon =
                         stale_cleanup_outcome == EmbeddedBleStalePairingCleanupOutcome::RetrySoon;
+                    let stale_cleanup_retry_immediate = stale_cleanup_outcome
+                        == EmbeddedBleStalePairingCleanupOutcome::RetryImmediate;
                     let stale_cleanup_holding = stale_cleanup_outcome
                         == EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation;
                     let stale_cleanup_skipped =
@@ -4852,7 +4872,9 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                             embedded_ble_log_preview(&err),
                         );
                     }
-                    retry_delay = if stale_cleanup_retry_soon {
+                    retry_delay = if stale_cleanup_retry_immediate {
+                        Duration::ZERO
+                    } else if stale_cleanup_retry_soon {
                         EMBEDDED_BLE_RETRY_LONG_DELAY
                     } else if stale_cleanup_backoff {
                         EMBEDDED_BLE_RETRY_OFFLINE_DELAY
@@ -4893,6 +4915,12 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         return EmbeddedBleStalePairingCleanupOutcome::Skipped;
     }
     let recovery_pairing_window_visible = recovery_pairing_probe.visible;
+    let pairing_confirmation_hold_active =
+        embedded_ble_pairing_confirmation_hold_remaining(inner, now).is_some();
+    let active_capture_type_recovery =
+        recovery_pairing_advertisement_already_observed_during_active_capture(err);
+    let type_observed_recovery_advertisement = !pairing_confirmation_hold_active
+        && recovery_pairing_advertisement_already_observed_during_notify_open(err);
     let stale_cleanup_candidate = should_attempt_embedded_ble_background_stale_pairing_cleanup(
         err,
         &snapshot,
@@ -4913,10 +4941,11 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     );
     let recovery_advertisement_allows_cleanup =
         recovery_pairing_advertisement_allows_immediate_stale_cleanup(err);
-    let should_query_pairing_preflight = recovery_pairing_window_visible
-        || stale_cleanup_candidate
-        || visible_recovery_allows_cleanup
-        || recovery_advertisement_allows_cleanup;
+    let should_query_pairing_preflight = !type_observed_recovery_advertisement
+        && (recovery_pairing_window_visible
+            || stale_cleanup_candidate
+            || visible_recovery_allows_cleanup
+            || recovery_advertisement_allows_cleanup);
     let usb_ble_name_synced = should_query_pairing_preflight
         && sync_device_ble_name_from_firmware_settings(
             inner,
@@ -4954,11 +4983,24 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     if !embedded_ble_recovery_error_still_current(inner, err, "after_pairing_preflight") {
         return EmbeddedBleStalePairingCleanupOutcome::Skipped;
     }
+    let recovery_advertisement_type_owned_cleanup = type_observed_recovery_advertisement
+        || (recovery_pairing_window_visible && recovery_advertisement_allows_cleanup);
+    let noisy_cccd_stale_cache_type_owned_cleanup =
+        pairing_before_cleanup.as_ref().is_some_and(|pairing| {
+            noisy_cccd_stale_windows_cache_evidence_allows_type_recovery(
+                err,
+                stale_cleanup_candidate,
+                pairing,
+            )
+        });
+    let type_owned_stale_cache_cleanup =
+        recovery_advertisement_type_owned_cleanup || noisy_cccd_stale_cache_type_owned_cleanup;
     let manual_unpair_hold = !usb_ble_name_synced
         && pairing_before_cleanup.as_ref().is_some_and(|pairing| {
             should_hold_embedded_ble_background_recovery_after_manual_unpair(
                 pairing,
                 direct_gatt_instability_recovery,
+                type_owned_stale_cache_cleanup,
             )
         });
     let local_stale_cache_recovery_allows_cleanup = recovery_pairing_window_visible
@@ -4968,11 +5010,19 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                     || pairing.matched_devices > 0
                     || pairing.failed_devices > 0)
         });
-    let automatic_cleanup_allowed = visible_recovery_allows_cleanup
+    let automatic_cleanup_allowed = type_observed_recovery_advertisement
+        || visible_recovery_allows_cleanup
         || stale_cleanup_candidate
         || recovery_advertisement_allows_cleanup
+        || noisy_cccd_stale_cache_type_owned_cleanup
         || local_stale_cache_recovery_allows_cleanup
         || usb_ble_name_synced;
+    if noisy_cccd_stale_cache_type_owned_cleanup {
+        log::warn!(
+            "[embedded-ble] noisy CCCD stale Windows cache evidence allows Type automatic PairAsync recovery even though recovery advertisement scan may have missed err={}",
+            embedded_ble_log_preview(err),
+        );
+    }
     if recovery_pairing_probe.has_random_identity {
         if recovery_advertisement_allows_cleanup || local_stale_cache_recovery_allows_cleanup {
             log::warn!(
@@ -5019,9 +5069,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         emit_embedded_ble_recovery_capsule(
             inner,
             "reconnecting",
-            format!(
-                "Listener 已可重新配对；Type 等待你在 Windows 蓝牙里添加 {expected_ble_name}。"
-            ),
+            EmbeddedBleRecoveryCapsuleMessage::WaitingWindowsPairing,
             Some(4200),
         );
         return EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation;
@@ -5090,9 +5138,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         emit_embedded_ble_recovery_capsule(
             inner,
             "reconnecting",
-            format!(
-                "Windows 已删除 {expected_ble_name} 配对；Listener 已可重新配对，Type 等待你手动添加。"
-            ),
+            EmbeddedBleRecoveryCapsuleMessage::WaitingManualPairing,
             Some(4200),
         );
         return EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation;
@@ -5124,9 +5170,9 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         inner,
         "reconnecting",
         if direct_gatt_instability_recovery {
-            "Listener BLE 临时链路不稳定，正在重建配对..."
+            EmbeddedBleRecoveryCapsuleMessage::RebuildingPairing
         } else {
-            "Listener BLE 配对缓存异常，正在清理旧连接..."
+            EmbeddedBleRecoveryCapsuleMessage::CleaningPairing
         },
         Some(2600),
     );
@@ -5156,10 +5202,36 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         hold_embedded_ble_listener_for_pairing_confirmation(inner, recovery_reason);
 
     let pairing_expected_name = expected_ble_name.clone();
+    let observed_recovery_addresses = if type_observed_recovery_advertisement {
+        listener_recovery_addresses_from_error(err)
+    } else {
+        Vec::new()
+    };
     let pairing = async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::prompt_listener_pairing_after_type_recovery(Some(
-            pairing_expected_name.as_str(),
-        ))
+        if type_observed_recovery_advertisement {
+            let cleanup_names = vec![pairing_expected_name.clone()];
+            let unpair = crate::embedded_ble::unpair_listener_devices_for_known_addresses(
+                &cleanup_names,
+                &observed_recovery_addresses,
+            );
+            log::warn!(
+                "[embedded-ble] background Type observed-recovery known-address cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={} active_capture={active_capture_type_recovery} addresses={observed_recovery_addresses:?}",
+                unpair.status,
+                unpair.matched_devices,
+                unpair.unpaired_devices,
+                unpair.already_unpaired_devices,
+                unpair.failed_devices,
+                unpair.needs_user_action,
+            );
+            crate::embedded_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses(
+                Some(pairing_expected_name.as_str()),
+                &observed_recovery_addresses,
+            )
+        } else {
+            crate::embedded_ble::prompt_listener_pairing_after_type_recovery(Some(
+                pairing_expected_name.as_str(),
+            ))
+        }
     })
     .await;
     match pairing {
@@ -5175,6 +5247,18 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             );
 
             if embedded_ble_pairing_prompt_ready(&pairing) {
+                if type_observed_recovery_advertisement {
+                    log::info!(
+                        "[embedded-ble] background Type observed-recovery PairAsync paired; reopening notify immediately for GATT/notify validation active_capture={active_capture_type_recovery}"
+                    );
+                    resume_embedded_ble_listener_after_pairing_recovery(
+                        inner,
+                        "background Type recovery PairAsync paired; reopening notify for GATT validation",
+                        EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
+                    );
+                    return EmbeddedBleStalePairingCleanupOutcome::RetryImmediate;
+                }
+
                 if embedded_ble_pairing_recovery_link_reachable(
                     inner,
                     "background Type recovery PairAsync paired link check",
@@ -5184,9 +5268,9 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                     resume_embedded_ble_listener_after_pairing_recovery(
                         inner,
                         "background Type recovery PairAsync paired and link reachable",
-                        "Type 已完成本机自动配对，正在恢复音频通道...",
+                        EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
                     );
-                    return EmbeddedBleStalePairingCleanupOutcome::RetrySoon;
+                    return EmbeddedBleStalePairingCleanupOutcome::RetryImmediate;
                 }
 
                 start_embedded_ble_pairing_confirmation_watch(
@@ -5210,7 +5294,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                 emit_embedded_ble_recovery_capsule(
                     inner,
                     "reconnecting",
-                    "Type 已完成本机自动配对，正在恢复连接...",
+                    EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
                     Some(2600),
                 );
                 return EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation;
@@ -5239,7 +5323,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             emit_embedded_ble_recovery_capsule(
                 inner,
                 "reconnecting",
-                "Type 正在等待本机自动配对确认；如果另一台电脑已连上，本机会停止抢回。",
+                EmbeddedBleRecoveryCapsuleMessage::WaitingTypePairing,
                 Some(4200),
             );
             EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation
@@ -5262,13 +5346,26 @@ async fn maybe_probe_embedded_ble_recovery_pairing_advertisement(
     last_cleanup_at: Option<Instant>,
     now: Instant,
 ) -> crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
-    if !should_probe_embedded_ble_recovery_pairing_advertisement(
+    let should_probe = should_probe_embedded_ble_recovery_pairing_advertisement(
         err,
         snapshot,
         last_cleanup_at,
         now,
-    ) {
+    );
+    if !should_probe {
         return crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe::default();
+    }
+    if recovery_pairing_advertisement_already_observed_during_notify_open(err) {
+        log::info!(
+            "[embedded-ble] notify open already observed Listener recovery advertising; skipping duplicate recovery advertisement scan"
+        );
+        return crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
+            visible: true,
+            // The notify-open path proves that matching recovery advertising is present but does
+            // not carry the address type. Treat it as random to retain the conservative
+            // multi-host failure behavior; pairing preflight still decides ownership.
+            has_random_identity: true,
+        };
     }
 
     let expected_ble_name = inner.prefs.get().device_ble_name;
@@ -5345,6 +5442,31 @@ fn recovery_pairing_advertisement_allows_immediate_stale_cleanup(err: &str) -> b
     ) && is_embedded_ble_noisy_cccd_failure(err))
 }
 
+fn recovery_pairing_advertisement_already_observed_during_notify_open(err: &str) -> bool {
+    err.contains("Listener recovery Swift Pair advertisement visible for notify CCCD address")
+        || err.contains("Listener recovery Swift Pair advertisement visible for persisted address")
+        || recovery_pairing_advertisement_already_observed_during_active_capture(err)
+}
+
+fn recovery_pairing_advertisement_already_observed_during_active_capture(err: &str) -> bool {
+    err.contains("Listener recovery Swift Pair advertisement visible for active capture address")
+}
+
+fn listener_recovery_addresses_from_error(err: &str) -> Vec<u64> {
+    let mut addresses = Vec::new();
+    for token in err.split(|ch: char| !ch.is_ascii_hexdigit()) {
+        if token.len() != 12 {
+            continue;
+        }
+        if let Ok(address) = u64::from_str_radix(token, 16) {
+            if address != 0 && !addresses.contains(&address) {
+                addresses.push(address);
+            }
+        }
+    }
+    addresses
+}
+
 fn recovery_pairing_probe_allows_immediate_stale_cleanup(
     err: &str,
     probe: crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe,
@@ -5356,11 +5478,28 @@ fn recovery_pairing_probe_allows_immediate_stale_cleanup(
             || recovery_pairing_advertisement_allows_immediate_stale_cleanup(err))
 }
 
+fn noisy_cccd_stale_windows_cache_evidence_allows_type_recovery(
+    err: &str,
+    stale_cleanup_candidate: bool,
+    pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
+) -> bool {
+    stale_cleanup_candidate
+        && is_embedded_ble_noisy_cccd_failure(err)
+        && matches!(
+            pairing.status,
+            crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction
+        )
+        && pairing.open_bluetooth_settings
+        && pairing.matched_devices > 0
+        && pairing.failed_devices > 0
+}
+
 fn should_hold_embedded_ble_background_recovery_after_manual_unpair(
     pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
     direct_gatt_instability_recovery: bool,
+    recovery_advertisement_type_owned_cleanup: bool,
 ) -> bool {
-    if direct_gatt_instability_recovery {
+    if direct_gatt_instability_recovery || recovery_advertisement_type_owned_cleanup {
         return false;
     }
     if pairing.already_paired_devices > 0 {
@@ -5753,7 +5892,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             emit_embedded_ble_recovery_capsule(
                 inner,
                 "reconnected",
-                "Listener BLE 已重连，音频通道已恢复。",
+                EmbeddedBleRecoveryCapsuleMessage::AudioRecovered,
                 Some(1400),
             );
         }
@@ -8739,7 +8878,7 @@ mod tests {
             .find("maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
             .expect("background loop must evaluate pairing/recovery state");
         let generic_capsule = body
-            .find("Listener BLE 正在自动重连音频通道")
+            .find("EmbeddedBleRecoveryCapsuleMessage::RestoringAudio")
             .expect("background loop should still have a generic reconnect capsule");
 
         assert!(
@@ -8752,6 +8891,33 @@ mod tests {
             ),
             "generic reconnect capsule should only appear when pairing/recovery handling did not take over"
         );
+    }
+
+    #[test]
+    fn embedded_ble_recovery_capsule_messages_fit_without_ellipsis() {
+        let messages = [
+            EmbeddedBleRecoveryCapsuleMessage::RestoringAudio,
+            EmbeddedBleRecoveryCapsuleMessage::WaitingWindowsPairing,
+            EmbeddedBleRecoveryCapsuleMessage::WaitingManualPairing,
+            EmbeddedBleRecoveryCapsuleMessage::RebuildingPairing,
+            EmbeddedBleRecoveryCapsuleMessage::CleaningPairing,
+            EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
+            EmbeddedBleRecoveryCapsuleMessage::WaitingTypePairing,
+            EmbeddedBleRecoveryCapsuleMessage::AudioRecovered,
+        ];
+
+        for message in messages {
+            let display_units: usize = message
+                .text()
+                .chars()
+                .map(|ch| if ch.is_ascii() { 1 } else { 2 })
+                .sum();
+            assert!(
+                display_units <= 26,
+                "{} is too wide for the recovery capsule ({display_units} > 26)",
+                message.text()
+            );
+        }
     }
 
     #[test]
@@ -8978,8 +9144,9 @@ mod tests {
             "Type-owned stale-cache cleanup must explicitly run the bounded Type PairAsync recovery path"
         );
         assert!(
-            body.contains("如果另一台电脑已连上，本机会停止抢回"),
-            "runtime guidance should make computer switching safe when another host wins the Windows pairing race"
+            body.contains("如果你已在另一台电脑用 Windows 弹窗连上，这是预期")
+                && body.contains("EmbeddedBleRecoveryCapsuleMessage::WaitingTypePairing"),
+            "runtime guidance should keep computer switching safe while the visible capsule stays short"
         );
         let active_gate_index = body
             .find("listener_pairing_maintenance_active")
@@ -9013,6 +9180,49 @@ mod tests {
             active_gate_body.contains("EmbeddedBleStalePairingCleanupOutcome::RetrySoon"),
             "cross-process pairing maintenance should make the tray retry soon after CLI pairing completes, not sleep for the offline confirmation window"
         );
+        let paired_reachable_index = body
+            .find("background Type recovery PairAsync paired and link reachable")
+            .expect("successful Type PairAsync recovery should prove GATT reachability");
+        let immediate_retry_index = body[paired_reachable_index..]
+            .find("EmbeddedBleStalePairingCleanupOutcome::RetryImmediate")
+            .map(|offset| paired_reachable_index + offset)
+            .expect("successful Type PairAsync recovery should reopen notify immediately");
+        let confirmation_hold_index = body[paired_reachable_index..]
+            .find("EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation")
+            .map(|offset| paired_reachable_index + offset)
+            .expect("unconfirmed Type PairAsync recovery should still hold for confirmation");
+        assert!(
+            immediate_retry_index < confirmation_hold_index,
+            "once PairAsync and GATT reachability are confirmed, Type should reopen notify immediately instead of sleeping through the old retry delay"
+        );
+    }
+
+    #[test]
+    fn embedded_ble_successful_pairasync_retry_reopens_notify_without_sleep() {
+        let source = include_str!("coordinator.rs");
+        let loop_start = source
+            .find("submit_embedded_audio_ble_stream_background")
+            .expect("background listener loop should exist");
+        let loop_end = source[loop_start..]
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .map(|offset| loop_start + offset)
+            .expect("background listener loop boundary should exist");
+        let body = &source[loop_start..loop_end];
+        let immediate_branch = body
+            .find("stale_cleanup_retry_immediate")
+            .expect("background listener should recognize immediate recovery outcome");
+        let zero_delay = body[immediate_branch..]
+            .find("Duration::ZERO")
+            .map(|offset| immediate_branch + offset)
+            .expect("immediate recovery outcome should not sleep before reopening notify");
+        let long_retry = body[immediate_branch..]
+            .find("EMBEDDED_BLE_RETRY_LONG_DELAY")
+            .map(|offset| immediate_branch + offset)
+            .expect("non-immediate retry outcomes should still use the bounded long delay");
+        assert!(
+            zero_delay < long_retry,
+            "successful PairAsync+GATT recovery must reopen notify before the ordinary retry delay path"
+        );
     }
 
     #[test]
@@ -9027,9 +9237,15 @@ mod tests {
             open_bluetooth_settings: false,
             details: vec![],
         };
-        assert!(should_hold_embedded_ble_background_recovery_after_manual_unpair(&removed, false,));
         assert!(
-            !should_hold_embedded_ble_background_recovery_after_manual_unpair(&removed, true),
+            should_hold_embedded_ble_background_recovery_after_manual_unpair(
+                &removed, false, false,
+            )
+        );
+        assert!(
+            !should_hold_embedded_ble_background_recovery_after_manual_unpair(
+                &removed, true, false,
+            ),
             "Type-confirmed direct GATT instability recovery may still rebuild pairing"
         );
 
@@ -9043,7 +9259,11 @@ mod tests {
             open_bluetooth_settings: false,
             details: vec![],
         };
-        assert!(!should_hold_embedded_ble_background_recovery_after_manual_unpair(&paired, false));
+        assert!(
+            !should_hold_embedded_ble_background_recovery_after_manual_unpair(
+                &paired, false, false,
+            )
+        );
 
         let manual_delete_failed_node = crate::embedded_ble::BleDevicePairingPromptResult {
             status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
@@ -9058,9 +9278,80 @@ mod tests {
         assert!(
             should_hold_embedded_ble_background_recovery_after_manual_unpair(
                 &manual_delete_failed_node,
-                false
+                false,
+                false,
             ),
             "manual Windows delete leaves a matched but unpaired Listener devnode; Type must not background PairAsync it back"
+        );
+        assert!(
+            !should_hold_embedded_ble_background_recovery_after_manual_unpair(
+                &manual_delete_failed_node,
+                false,
+                true,
+            ),
+            "EC11/Type-owned recovery advertisement must not be swallowed by the manual-delete no-steal branch"
+        );
+    }
+
+    #[test]
+    fn embedded_ble_noisy_cccd_stale_cache_evidence_does_not_hit_manual_delete_hold() {
+        let stale_failed_node = crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+            attempted: true,
+            matched_devices: 2,
+            prompted_devices: 0,
+            already_paired_devices: 0,
+            failed_devices: 2,
+            open_bluetooth_settings: true,
+            details: vec![],
+        };
+        let noisy_cccd_error = "BLE CCCD write async error: Some(HRESULT(0x800704C7))";
+        assert!(
+            noisy_cccd_stale_windows_cache_evidence_allows_type_recovery(
+                noisy_cccd_error,
+                true,
+                &stale_failed_node,
+            ),
+            "a repeated Type-owned CCCD/cache failure must not be swallowed by the manual-delete hold when the advertisement scan misses"
+        );
+        assert!(
+            !should_hold_embedded_ble_background_recovery_after_manual_unpair(
+                &stale_failed_node,
+                false,
+                noisy_cccd_stale_windows_cache_evidence_allows_type_recovery(
+                    noisy_cccd_error,
+                    true,
+                    &stale_failed_node,
+                ),
+            ),
+            "EC11/Type recovery should still enter bounded PairAsync when CCCD stale-cache evidence is present"
+        );
+        assert!(
+            !noisy_cccd_stale_windows_cache_evidence_allows_type_recovery(
+                noisy_cccd_error,
+                false,
+                &stale_failed_node,
+            ),
+            "the noisy CCCD fallback remains threshold-gated"
+        );
+
+        let missing_pairing_error =
+            "No paired BLE device found in Windows Bluetooth pairing store for advertised Listener address(es)";
+        assert!(
+            !noisy_cccd_stale_windows_cache_evidence_allows_type_recovery(
+                missing_pairing_error,
+                true,
+                &stale_failed_node,
+            ),
+            "the accepted manual Windows delete path remains user-controlled"
+        );
+        assert!(
+            should_hold_embedded_ble_background_recovery_after_manual_unpair(
+                &stale_failed_node,
+                false,
+                false,
+            ),
+            "manual Windows delete still suppresses automatic PairAsync/no-steal recovery"
         );
     }
 
@@ -9192,7 +9483,7 @@ mod tests {
             .find("background stale pairing cleanup preflight Windows pairing")
             .expect("Windows pairing preflight should exist before cleanup");
         let automatic_allowed = body
-            .find("let automatic_cleanup_allowed = visible_recovery_allows_cleanup")
+            .find("let automatic_cleanup_allowed = type_observed_recovery_advertisement")
             .expect("automatic cleanup decision should exist after Windows pairing preflight");
         let visible_hold = body
             .find("recovery pairing advertisement visible from hardware/user action")
@@ -9205,6 +9496,64 @@ mod tests {
             body.contains("recovery_advertisement_allows_cleanup")
                 && body.contains("local_stale_cache_recovery_allows_cleanup"),
             "MissingPairing/StaleGatt recovery advertisements and stale Windows cache evidence must still reach Type-controlled cleanup"
+        );
+    }
+
+    #[test]
+    fn embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .expect("background stale cleanup helper should exist");
+        let end = source[start..]
+            .find("async fn maybe_probe_embedded_ble_recovery_pairing_advertisement")
+            .map(|offset| start + offset)
+            .expect("background stale cleanup helper boundary should exist");
+        let body = &source[start..end];
+
+        assert!(
+            body.contains("recovery_pairing_advertisement_already_observed_during_notify_open")
+                && body.contains("let should_query_pairing_preflight = !type_observed_recovery_advertisement"),
+            "Type-observed recovery advertising already proves Type owns the current recovery, so it should not repeat the slow manual-pairing preflight"
+        );
+        assert!(
+            body.contains("!pairing_confirmation_hold_active"),
+            "Type-observed fast recovery must not steal back connections while a manual/hardware pairing hold is active"
+        );
+        assert!(
+            body.contains("background Type observed-recovery known-address cleanup")
+                && body.contains("unpair_listener_devices_for_known_addresses")
+                && body.contains("prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses")
+                && body.contains("&observed_recovery_addresses"),
+            "Type-observed recovery should share the rename-style path: clear stale local cache once, then PairAsync through the after-cache no-popup API using the same observed address evidence"
+        );
+        assert!(
+            body.contains("background Type observed-recovery PairAsync paired; reopening notify immediately for GATT/notify validation"),
+            "after PairAsync succeeds, Type-observed recovery should let the real notify-open path provide GATT evidence instead of doing a duplicate status probe"
+        );
+    }
+
+    #[test]
+    fn embedded_ble_observed_recovery_extracts_known_address_for_fast_cleanup() {
+        let addresses = listener_recovery_addresses_from_error(
+            "Listener recovery Swift Pair advertisement visible for notify CCCD address F1CFEC3F0E5E after BLE CCCD write async error: Some(HRESULT(0x800704C7))",
+        );
+        assert_eq!(addresses, vec![0xF1CF_EC3F_0E5E]);
+
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .expect("background stale cleanup helper should exist");
+        let end = source[start..]
+            .find("async fn maybe_probe_embedded_ble_recovery_pairing_advertisement")
+            .map(|offset| start + offset)
+            .expect("background stale cleanup helper boundary should exist");
+        let body = &source[start..end];
+        assert!(
+            body.contains("listener_recovery_addresses_from_error")
+                && body.contains("unpair_listener_devices_for_known_addresses")
+                && !body.contains("unpair_listener_devices_for_names(&cleanup_names)"),
+            "Type-observed recovery must clear the known recovery address directly instead of doing the slow full-name cleanup"
         );
     }
 
@@ -9275,6 +9624,52 @@ mod tests {
                 cccd_error, &snapshot, None, now,
             ),
             "the early path is still gated by actually seeing recovery advertising"
+        );
+    }
+
+    #[test]
+    fn embedded_ble_notify_advertisement_evidence_skips_only_the_duplicate_scan() {
+        let known_recovery_error = "Listener recovery Swift Pair advertisement visible for notify CCCD address F1CFEC3F0E5E after BLE CCCD write async error: Some(HRESULT(0x800704C7)); missing pairing must use Type automatic PairAsync recovery before declaring notify ready";
+        let active_capture_recovery_error = "Listener recovery Swift Pair advertisement visible for active capture address F1CFEC3F0E5E after BLE device connection status changed to Disconnected; transport_not_ready; missing pairing must use Type automatic PairAsync recovery before declaring notify ready";
+        let manual_windows_unpair_error = "No paired BLE device found in Windows Bluetooth pairing store for advertised Listener address(es) F1CFEC3F0E5E";
+
+        assert!(
+            recovery_pairing_advertisement_already_observed_during_notify_open(
+                known_recovery_error
+            ),
+            "a notify-open recovery-advertisement observation should not be scanned again"
+        );
+        assert!(
+            recovery_pairing_advertisement_already_observed_during_notify_open(
+                active_capture_recovery_error
+            ),
+            "active-capture recovery advertising should not repeat the coordinator scan"
+        );
+        assert!(
+            !recovery_pairing_advertisement_already_observed_during_notify_open(
+                manual_windows_unpair_error
+            ),
+            "manual Windows unpair must keep its separate no-auto-pair decision path"
+        );
+
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn maybe_probe_embedded_ble_recovery_pairing_advertisement")
+            .expect("recovery advertisement probe helper should exist");
+        let end = source[start..]
+            .find("fn should_probe_embedded_ble_recovery_pairing_advertisement")
+            .map(|offset| start + offset)
+            .expect("recovery advertisement probe helper should end before its predicate");
+        let body = &source[start..end];
+        let known_evidence = body
+            .find("recovery_pairing_advertisement_already_observed_during_notify_open")
+            .expect("known notify evidence should be handled before scanning");
+        let duplicate_scan = body
+            .find("listener_recovery_pairing_advertisement_probe")
+            .expect("unknown recovery state should retain the bounded advertisement scan");
+        assert!(
+            known_evidence < duplicate_scan,
+            "known notify evidence may remove only the redundant scan; unknown recovery state must still scan"
         );
     }
 
