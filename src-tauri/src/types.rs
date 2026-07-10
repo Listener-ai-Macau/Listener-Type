@@ -754,6 +754,52 @@ fn legacy_device_custom_keys_default() -> DeviceCustomKeys {
 }
 
 fn current_device_custom_keys_default_with_external_app_path(
+    _external_app_path: String,
+) -> DeviceCustomKeys {
+    DeviceCustomKeys {
+        key1: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SendShortcut,
+            shortcut: Some(device_keyboard_shortcut("RightControl", &[])),
+            ..DeviceCustomKeyMapping::default()
+        },
+        key2: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SendShortcut,
+            shortcut: Some(device_keyboard_shortcut("C", &["ctrl"])),
+            ..DeviceCustomKeyMapping::default()
+        },
+        key3: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SendShortcut,
+            shortcut: Some(device_keyboard_shortcut("V", &["ctrl"])),
+            ..DeviceCustomKeyMapping::default()
+        },
+        key4: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::SendShortcut,
+            shortcut: Some(device_keyboard_shortcut("Z", &["ctrl"])),
+            ..DeviceCustomKeyMapping::default()
+        },
+        knob: DeviceCustomKeyMapping::default(),
+    }
+}
+
+fn device_keyboard_shortcut(primary: &str, modifiers: &[&str]) -> ShortcutBinding {
+    ShortcutBinding {
+        primary: primary.into(),
+        modifiers: modifiers
+            .iter()
+            .map(|modifier| (*modifier).into())
+            .collect(),
+    }
+}
+
+fn current_device_custom_keys_default_with_legacy_knob_switch_style(
+    external_app_path: String,
+) -> DeviceCustomKeys {
+    let mut keys = current_device_custom_keys_default_with_external_app_path(external_app_path);
+    keys.knob.action = DeviceCustomKeyAction::SwitchStyle;
+    keys
+}
+
+fn previous_action_device_custom_keys_default_with_external_app_path(
     external_app_path: String,
 ) -> DeviceCustomKeys {
     DeviceCustomKeys {
@@ -779,10 +825,11 @@ fn current_device_custom_keys_default_with_external_app_path(
     }
 }
 
-fn current_device_custom_keys_default_with_legacy_knob_switch_style(
+fn previous_action_device_custom_keys_default_with_legacy_knob_switch_style(
     external_app_path: String,
 ) -> DeviceCustomKeys {
-    let mut keys = current_device_custom_keys_default_with_external_app_path(external_app_path);
+    let mut keys =
+        previous_action_device_custom_keys_default_with_external_app_path(external_app_path);
     keys.knob.action = DeviceCustomKeyAction::SwitchStyle;
     keys
 }
@@ -875,6 +922,13 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
         previous_current_device_custom_keys_default_with_external_app_path(
             default_device_external_app_path(),
         );
+    let previous_action_default = previous_action_device_custom_keys_default_with_external_app_path(
+        default_device_external_app_path(),
+    );
+    let previous_action_default_with_legacy_knob =
+        previous_action_device_custom_keys_default_with_legacy_knob_switch_style(
+            default_device_external_app_path(),
+        );
     let current_default_with_legacy_knob =
         current_device_custom_keys_default_with_legacy_knob_switch_style(
             default_device_external_app_path(),
@@ -883,6 +937,10 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
         || device_custom_key_defaults_match(keys, &legacy_device_custom_keys_default(), true)
         || keys == &current_default_with_legacy_knob
         || device_custom_key_defaults_match(keys, &current_default_with_legacy_knob, false)
+        || keys == &previous_action_default
+        || device_custom_key_defaults_match(keys, &previous_action_default, true)
+        || keys == &previous_action_default_with_legacy_knob
+        || device_custom_key_defaults_match(keys, &previous_action_default_with_legacy_knob, false)
         || keys == &previous_current_default
         || device_custom_key_defaults_match(keys, &previous_current_default, false)
         || keys == &legacy_device_custom_keys_default_with_external_app_path("code".into())
@@ -900,6 +958,12 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
                     previous_current_device_custom_keys_default_with_external_app_path(
                         path.clone(),
                     );
+                let previous_action_default =
+                    previous_action_device_custom_keys_default_with_external_app_path(path.clone());
+                let previous_action_default_with_legacy_knob =
+                    previous_action_device_custom_keys_default_with_legacy_knob_switch_style(
+                        path.clone(),
+                    );
                 let current_default_with_legacy_knob =
                     current_device_custom_keys_default_with_legacy_knob_switch_style(path.clone());
                 let previous_shortcuts_default =
@@ -910,6 +974,14 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
                     || device_custom_key_defaults_match(
                         keys,
                         &current_default_with_legacy_knob,
+                        false,
+                    )
+                    || keys == &previous_action_default
+                    || device_custom_key_defaults_match(keys, &previous_action_default, true)
+                    || keys == &previous_action_default_with_legacy_knob
+                    || device_custom_key_defaults_match(
+                        keys,
+                        &previous_action_default_with_legacy_knob,
                         false,
                     )
                     || keys == &previous_current_default
@@ -1104,6 +1176,9 @@ pub struct UserPreferences {
     #[serde(default)]
     pub dictation_input_source_user_overridden: bool,
     pub active_asr_provider: String, // "volcengine" | "apple-speech" | ...
+    /// One-time migration marker for the incorrect Windows Foundry default.
+    #[serde(default = "default_true")]
+    pub active_asr_provider_default_migrated: bool,
     pub active_llm_provider: String, // "ark" | "openai" | ...
     /// LLM 思考模式开关。默认 false 以保持既有「尽量关闭思考」行为；
     /// Gemini 走原生 thinkingConfig，OpenAI-compatible 路径仅按 provider/channel
@@ -1345,14 +1420,7 @@ fn default_foundry_local_runtime_source() -> String {
 }
 
 fn default_active_asr_provider() -> String {
-    #[cfg(target_os = "windows")]
-    {
-        return crate::asr::local::foundry::PROVIDER_ID.into();
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        "volcengine".into()
-    }
+    "volcengine".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1379,6 +1447,8 @@ struct UserPreferencesWire {
     #[serde(default)]
     dictation_input_source_user_overridden: bool,
     active_asr_provider: String,
+    #[serde(default)]
+    active_asr_provider_default_migrated: bool,
     active_llm_provider: String,
     #[serde(default)]
     llm_thinking_enabled: bool,
@@ -1495,6 +1565,7 @@ impl Default for UserPreferencesWire {
             dictation_input_source: prefs.dictation_input_source,
             dictation_input_source_user_overridden: prefs.dictation_input_source_user_overridden,
             active_asr_provider: prefs.active_asr_provider,
+            active_asr_provider_default_migrated: prefs.active_asr_provider_default_migrated,
             active_llm_provider: prefs.active_llm_provider,
             llm_thinking_enabled: prefs.llm_thinking_enabled,
             restore_clipboard_after_paste: prefs.restore_clipboard_after_paste,
@@ -1659,6 +1730,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             dictation_input_source,
             dictation_input_source_user_overridden: wire.dictation_input_source_user_overridden,
             active_asr_provider: wire.active_asr_provider,
+            active_asr_provider_default_migrated: wire.active_asr_provider_default_migrated,
             active_llm_provider: wire.active_llm_provider,
             llm_thinking_enabled: wire.llm_thinking_enabled,
             restore_clipboard_after_paste: wire.restore_clipboard_after_paste,
@@ -2086,6 +2158,7 @@ impl Default for UserPreferences {
             dictation_input_source: DictationInputSource::EmbeddedBle,
             dictation_input_source_user_overridden: false,
             active_asr_provider: default_active_asr_provider(),
+            active_asr_provider_default_migrated: true,
             active_llm_provider: "ark".into(),
             llm_thinking_enabled: false,
             restore_clipboard_after_paste: true,
@@ -2731,6 +2804,21 @@ pub struct QaChatMessage {
 mod tests {
     use super::*;
 
+    fn assert_device_keyboard_shortcut(
+        mapping: &DeviceCustomKeyMapping,
+        primary: &str,
+        modifiers: &[&str],
+    ) {
+        assert_eq!(mapping.action, DeviceCustomKeyAction::SendShortcut);
+        let shortcut = mapping.shortcut.as_ref().expect("device shortcut");
+        assert_eq!(shortcut.primary, primary);
+        let expected_modifiers: Vec<String> = modifiers
+            .iter()
+            .map(|modifier| (*modifier).into())
+            .collect();
+        assert_eq!(shortcut.modifiers, expected_modifiers);
+    }
+
     #[test]
     fn capsule_payload_serializes_session_ordering_contract() {
         let payload = CapsulePayload {
@@ -2906,29 +2994,13 @@ mod tests {
     }
 
     #[test]
-    fn device_custom_keys_default_to_dictation_device_page_paste_and_external_app() {
+    fn device_custom_keys_default_to_keyboard_key_output() {
         let prefs = UserPreferences::default();
 
-        assert_eq!(
-            prefs.device_custom_keys.key1.action,
-            DeviceCustomKeyAction::Dictation
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key2.action,
-            DeviceCustomKeyAction::OpenApp
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key2.app_page,
-            DeviceCustomKeyAppPage::SettingsDevice
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key3.action,
-            DeviceCustomKeyAction::PasteShortcut
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key4.action,
-            DeviceCustomKeyAction::OpenExternalApp
-        );
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key2, "C", &["ctrl"]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key3, "V", &["ctrl"]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Z", &["ctrl"]);
         assert_eq!(
             prefs.device_custom_keys.knob.action,
             DeviceCustomKeyAction::Disabled
@@ -2969,6 +3041,7 @@ mod tests {
             prefs.device_custom_keys.knob.action,
             DeviceCustomKeyAction::Disabled
         );
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
     }
 
     #[test]
@@ -2984,26 +3057,10 @@ mod tests {
         });
         let prefs: UserPreferences = serde_json::from_value(raw).unwrap();
 
-        assert_eq!(
-            prefs.device_custom_keys.key1.action,
-            DeviceCustomKeyAction::Dictation
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key2.action,
-            DeviceCustomKeyAction::OpenApp
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key2.app_page,
-            DeviceCustomKeyAppPage::SettingsDevice
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key3.action,
-            DeviceCustomKeyAction::PasteShortcut
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key4.action,
-            DeviceCustomKeyAction::OpenExternalApp
-        );
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key2, "C", &["ctrl"]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key3, "V", &["ctrl"]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Z", &["ctrl"]);
         assert_eq!(
             prefs.device_custom_keys.knob.action,
             DeviceCustomKeyAction::Disabled
@@ -3026,26 +3083,10 @@ mod tests {
         });
         let prefs: UserPreferences = serde_json::from_value(raw).unwrap();
 
-        assert_eq!(
-            prefs.device_custom_keys.key1.action,
-            DeviceCustomKeyAction::Dictation
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key2.action,
-            DeviceCustomKeyAction::OpenApp
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key2.app_page,
-            DeviceCustomKeyAppPage::SettingsDevice
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key3.action,
-            DeviceCustomKeyAction::PasteShortcut
-        );
-        assert_eq!(
-            prefs.device_custom_keys.key4.action,
-            DeviceCustomKeyAction::OpenExternalApp
-        );
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key2, "C", &["ctrl"]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key3, "V", &["ctrl"]);
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Z", &["ctrl"]);
         assert_ne!(
             prefs.device_custom_keys.key4.external_app_path,
             old_code_path

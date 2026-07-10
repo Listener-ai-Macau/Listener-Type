@@ -83,8 +83,34 @@ mod windows_shortcut {
     const VK_UP: VIRTUAL_KEY = VIRTUAL_KEY(0x26);
     const VK_RIGHT: VIRTUAL_KEY = VIRTUAL_KEY(0x27);
     const VK_DOWN: VIRTUAL_KEY = VIRTUAL_KEY(0x28);
+    const VK_SNAPSHOT: VIRTUAL_KEY = VIRTUAL_KEY(0x2C);
+    const VK_INSERT: VIRTUAL_KEY = VIRTUAL_KEY(0x2D);
     const VK_DELETE: VIRTUAL_KEY = VIRTUAL_KEY(0x2E);
     const VK_LEFT_WIN: VIRTUAL_KEY = VIRTUAL_KEY(0x5B);
+    const VK_RIGHT_WIN: VIRTUAL_KEY = VIRTUAL_KEY(0x5C);
+    const VK_NUMPAD0: VIRTUAL_KEY = VIRTUAL_KEY(0x60);
+    const VK_NUMPAD1: VIRTUAL_KEY = VIRTUAL_KEY(0x61);
+    const VK_NUMPAD2: VIRTUAL_KEY = VIRTUAL_KEY(0x62);
+    const VK_NUMPAD3: VIRTUAL_KEY = VIRTUAL_KEY(0x63);
+    const VK_NUMPAD4: VIRTUAL_KEY = VIRTUAL_KEY(0x64);
+    const VK_NUMPAD5: VIRTUAL_KEY = VIRTUAL_KEY(0x65);
+    const VK_NUMPAD6: VIRTUAL_KEY = VIRTUAL_KEY(0x66);
+    const VK_NUMPAD7: VIRTUAL_KEY = VIRTUAL_KEY(0x67);
+    const VK_NUMPAD8: VIRTUAL_KEY = VIRTUAL_KEY(0x68);
+    const VK_NUMPAD9: VIRTUAL_KEY = VIRTUAL_KEY(0x69);
+    const VK_MULTIPLY: VIRTUAL_KEY = VIRTUAL_KEY(0x6A);
+    const VK_ADD: VIRTUAL_KEY = VIRTUAL_KEY(0x6B);
+    const VK_SUBTRACT: VIRTUAL_KEY = VIRTUAL_KEY(0x6D);
+    const VK_DECIMAL: VIRTUAL_KEY = VIRTUAL_KEY(0x6E);
+    const VK_DIVIDE: VIRTUAL_KEY = VIRTUAL_KEY(0x6F);
+    const VK_NUMLOCK: VIRTUAL_KEY = VIRTUAL_KEY(0x90);
+    const VK_SCROLL: VIRTUAL_KEY = VIRTUAL_KEY(0x91);
+    const VK_LSHIFT: VIRTUAL_KEY = VIRTUAL_KEY(0xA0);
+    const VK_RSHIFT: VIRTUAL_KEY = VIRTUAL_KEY(0xA1);
+    const VK_LCONTROL: VIRTUAL_KEY = VIRTUAL_KEY(0xA2);
+    const VK_RCONTROL: VIRTUAL_KEY = VIRTUAL_KEY(0xA3);
+    const VK_LALT: VIRTUAL_KEY = VIRTUAL_KEY(0xA4);
+    const VK_RALT: VIRTUAL_KEY = VIRTUAL_KEY(0xA5);
 
     pub fn send(binding: &ShortcutBinding) -> Result<(), String> {
         let modifiers = modifier_vks(binding)?;
@@ -135,11 +161,13 @@ mod windows_shortcut {
         let upper = trimmed.to_ascii_uppercase();
         let key = match upper.as_str() {
             "ENTER" | "RETURN" => VK_RETURN,
+            "NUMPADENTER" => VK_RETURN,
             "TAB" => VK_TAB,
             "ESC" | "ESCAPE" => VK_ESCAPE,
             "SPACE" => VK_SPACE,
             "BACKSPACE" => VK_BACKSPACE,
             "DELETE" | "DEL" => VK_DELETE,
+            "INSERT" | "INS" => VK_INSERT,
             "HOME" => VK_HOME,
             "END" => VK_END,
             "PAGEUP" => VK_PAGE_UP,
@@ -148,6 +176,38 @@ mod windows_shortcut {
             "ARROWDOWN" | "DOWN" => VK_DOWN,
             "ARROWLEFT" | "LEFT" => VK_LEFT,
             "ARROWRIGHT" | "RIGHT" => VK_RIGHT,
+            "CONTROL" | "CTRL" => VK_CONTROL,
+            "LEFTCONTROL" | "LEFTCTRL" => VK_LCONTROL,
+            "RIGHTCONTROL" | "RIGHTCTRL" => VK_RCONTROL,
+            "SHIFT" => VK_SHIFT,
+            "LEFTSHIFT" => VK_LSHIFT,
+            "RIGHTSHIFT" => VK_RSHIFT,
+            "ALT" | "OPTION" | "OPT" => VK_ALT,
+            "LEFTALT" | "LEFTOPTION" | "LEFTOPT" => VK_LALT,
+            "RIGHTALT" | "RIGHTOPTION" | "RIGHTOPT" => VK_RALT,
+            "META" | "WIN" | "SUPER" | "COMMAND" | "CMD" => VK_LEFT_WIN,
+            "LEFTMETA" | "LEFTWIN" | "LEFTSUPER" | "LEFTCOMMAND" | "LEFTCMD" => VK_LEFT_WIN,
+            "RIGHTMETA" | "RIGHTWIN" | "RIGHTSUPER" | "RIGHTCOMMAND" | "RIGHTCMD" => VK_RIGHT_WIN,
+            "CAPSLOCK" => VIRTUAL_KEY(0x14),
+            "NUMLOCK" => VK_NUMLOCK,
+            "SCROLLLOCK" => VK_SCROLL,
+            "PRINTSCREEN" | "PRTSC" => VK_SNAPSHOT,
+            "PAUSE" => VIRTUAL_KEY(0x13),
+            "NUMPAD0" => VK_NUMPAD0,
+            "NUMPAD1" => VK_NUMPAD1,
+            "NUMPAD2" => VK_NUMPAD2,
+            "NUMPAD3" => VK_NUMPAD3,
+            "NUMPAD4" => VK_NUMPAD4,
+            "NUMPAD5" => VK_NUMPAD5,
+            "NUMPAD6" => VK_NUMPAD6,
+            "NUMPAD7" => VK_NUMPAD7,
+            "NUMPAD8" => VK_NUMPAD8,
+            "NUMPAD9" => VK_NUMPAD9,
+            "NUMPADADD" => VK_ADD,
+            "NUMPADSUBTRACT" => VK_SUBTRACT,
+            "NUMPADMULTIPLY" => VK_MULTIPLY,
+            "NUMPADDIVIDE" => VK_DIVIDE,
+            "NUMPADDECIMAL" => VK_DECIMAL,
             value if function_key_vk(value).is_some() => function_key_vk(value).unwrap(),
             _ => return Err(format!("unsupported shortcut primary: {trimmed}")),
         };
@@ -212,6 +272,8 @@ mod windows_shortcut {
             assert_eq!(char_vk('Z').expect("Z").0, 0x5A);
             assert_eq!(function_key_vk("F13").expect("F13").0, 0x7C);
             assert_eq!(function_key_vk("F24").expect("F24").0, 0x87);
+            assert_eq!(primary_vk("RightControl").expect("right ctrl").0, 0xA3);
+            assert_eq!(primary_vk("NumpadAdd").expect("numpad add").0, 0x6B);
         }
     }
 }
@@ -244,11 +306,13 @@ fn shortcut_primary(raw: &str) -> Result<enigo::Key, String> {
     let upper = trimmed.to_ascii_uppercase();
     let key = match upper.as_str() {
         "ENTER" | "RETURN" => enigo::Key::Return,
+        "NUMPADENTER" => enigo::Key::Return,
         "TAB" => enigo::Key::Tab,
         "ESC" | "ESCAPE" => enigo::Key::Escape,
         "SPACE" => enigo::Key::Space,
         "BACKSPACE" => enigo::Key::Backspace,
         "DELETE" | "DEL" => enigo::Key::Delete,
+        "INSERT" | "INS" => enigo::Key::Insert,
         "HOME" => enigo::Key::Home,
         "END" => enigo::Key::End,
         "PAGEUP" => enigo::Key::PageUp,
@@ -257,6 +321,38 @@ fn shortcut_primary(raw: &str) -> Result<enigo::Key, String> {
         "ARROWDOWN" | "DOWN" => enigo::Key::DownArrow,
         "ARROWLEFT" | "LEFT" => enigo::Key::LeftArrow,
         "ARROWRIGHT" | "RIGHT" => enigo::Key::RightArrow,
+        "CONTROL" | "CTRL" | "LEFTCONTROL" | "LEFTCTRL" | "RIGHTCONTROL" | "RIGHTCTRL" => {
+            enigo::Key::Control
+        }
+        "SHIFT" | "LEFTSHIFT" | "RIGHTSHIFT" => enigo::Key::Shift,
+        "ALT" | "OPTION" | "OPT" | "LEFTALT" | "LEFTOPTION" | "LEFTOPT" | "RIGHTALT"
+        | "RIGHTOPTION" | "RIGHTOPT" => enigo::Key::Alt,
+        "META" | "WIN" | "SUPER" | "COMMAND" | "CMD" | "LEFTMETA" | "LEFTWIN" | "LEFTSUPER"
+        | "LEFTCOMMAND" | "LEFTCMD" | "RIGHTMETA" | "RIGHTWIN" | "RIGHTSUPER" | "RIGHTCOMMAND"
+        | "RIGHTCMD" => enigo::Key::Meta,
+        "CAPSLOCK" => enigo::Key::CapsLock,
+        "NUMLOCK" => enigo::Key::Numlock,
+        #[cfg(target_os = "windows")]
+        "SCROLLLOCK" => enigo::Key::Scroll,
+        #[cfg(all(unix, not(target_os = "macos")))]
+        "SCROLLLOCK" => enigo::Key::ScrollLock,
+        "PRINTSCREEN" | "PRTSC" => enigo::Key::Print,
+        "PAUSE" => enigo::Key::Pause,
+        "NUMPAD0" => enigo::Key::Numpad0,
+        "NUMPAD1" => enigo::Key::Numpad1,
+        "NUMPAD2" => enigo::Key::Numpad2,
+        "NUMPAD3" => enigo::Key::Numpad3,
+        "NUMPAD4" => enigo::Key::Numpad4,
+        "NUMPAD5" => enigo::Key::Numpad5,
+        "NUMPAD6" => enigo::Key::Numpad6,
+        "NUMPAD7" => enigo::Key::Numpad7,
+        "NUMPAD8" => enigo::Key::Numpad8,
+        "NUMPAD9" => enigo::Key::Numpad9,
+        "NUMPADADD" => enigo::Key::Add,
+        "NUMPADSUBTRACT" => enigo::Key::Subtract,
+        "NUMPADMULTIPLY" => enigo::Key::Multiply,
+        "NUMPADDIVIDE" => enigo::Key::Divide,
+        "NUMPADDECIMAL" => enigo::Key::Decimal,
         "F1" => enigo::Key::F1,
         "F2" => enigo::Key::F2,
         "F3" => enigo::Key::F3,
@@ -313,6 +409,18 @@ mod tests {
         assert_eq!(
             shortcut_primary(&binding.primary).expect("primary parses"),
             enigo::Key::Unicode('K')
+        );
+    }
+
+    #[test]
+    fn parses_modifier_primary_for_device_single_key_output() {
+        assert_eq!(
+            shortcut_primary("RightControl").expect("right control parses"),
+            enigo::Key::Control
+        );
+        assert_eq!(
+            shortcut_primary("Shift").expect("shift parses"),
+            enigo::Key::Shift
         );
     }
 }

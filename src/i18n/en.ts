@@ -843,9 +843,12 @@ export const en: typeof zhCN = {
     },
       deviceKeys: {
         title: 'Device custom keys',
-        desc: 'Default: KEY1 records, KEY2 opens Device settings, KEY3 pastes, KEY4 opens WeChat; all are customizable.',
-        keyLabel: '{{key}}',
+        desc: 'Default: KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z; all are customizable.',
+      restoreKeyboardDefaults: 'Restore default key output',
+      actualOutput: 'Sends: {{shortcut}}',
+      keyLabel: '{{key}}',
         actionSelectAria: 'Select device key action',
+        keyboardKeySelectAria: 'Choose output key',
         templatePlaceholder: 'Text to paste',
         externalAppPlaceholder: 'App or shortcut path',
         installedAppSelectAria: 'Choose installed application',
@@ -905,7 +908,7 @@ export const en: typeof zhCN = {
           translation: 'Translation dictation',
           selectionAsk: 'Selection Ask',
         pasteTemplate: 'Paste template',
-        sendShortcut: 'Send shortcut',
+        sendShortcut: 'Send key / shortcut',
       },
     },
     permissions: {

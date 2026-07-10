@@ -241,6 +241,28 @@ function formatPrimary(primary: string): string {
     case 'rightcommand': return isMac ? 'Right ⌘' : (currentPlatform().isWindows ? 'Right Win' : 'Right Super');
     case 'fn': return 'Fn';
     case 'shift': return isMac ? '⇧' : 'Shift';
+    case 'insert': return 'Insert';
+    case 'capslock': return 'CapsLock';
+    case 'numlock': return 'NumLock';
+    case 'scrolllock': return 'ScrollLock';
+    case 'printscreen': return 'PrintScreen';
+    case 'pause': return 'Pause';
+    case 'numpad0': return 'Num 0';
+    case 'numpad1': return 'Num 1';
+    case 'numpad2': return 'Num 2';
+    case 'numpad3': return 'Num 3';
+    case 'numpad4': return 'Num 4';
+    case 'numpad5': return 'Num 5';
+    case 'numpad6': return 'Num 6';
+    case 'numpad7': return 'Num 7';
+    case 'numpad8': return 'Num 8';
+    case 'numpad9': return 'Num 9';
+    case 'numpadenter': return 'Num Enter';
+    case 'numpadadd': return 'Num +';
+    case 'numpadsubtract': return 'Num -';
+    case 'numpadmultiply': return 'Num *';
+    case 'numpaddivide': return 'Num /';
+    case 'numpaddecimal': return 'Num .';
   }
   return trimmed;
 }

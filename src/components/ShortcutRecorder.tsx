@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { currentPlatform, formatComboLabel } from '../lib/hotkey';
 import { setShortcutRecordingActive, validateShortcutBinding } from '../lib/ipc';
@@ -59,10 +59,17 @@ export function ShortcutRecorder({
     }
   };
 
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!recording || disabled) return;
+  const stopRecordingEvent = (e: KeyboardEvent | ReactKeyboardEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    if ('stopImmediatePropagation' in e) {
+      e.stopImmediatePropagation();
+    }
+  };
+
+  const handleKeyDown = (e: KeyboardEvent | ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!recording || disabled) return;
+    stopRecordingEvent(e);
     if (e.key === 'Escape') {
       setRecording(false);
       setError(null);
@@ -87,10 +94,9 @@ export function ShortcutRecorder({
     if (primary) void finish({ primary, modifiers: modifiersFromKeyboardEvent(e) });
   };
 
-  const onKeyUp = (e: KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyUp = (e: KeyboardEvent | ReactKeyboardEvent<HTMLDivElement>) => {
     if (!recording || disabled || !isModifierKey(e.key)) return;
-    e.preventDefault();
-    e.stopPropagation();
+    stopRecordingEvent(e);
     const primary = modifierPrimaryFromCode(e.code, e.key);
     if (primary && pendingModifier.current?.primary === primary) {
       const binding = pendingModifier.current;
@@ -98,6 +104,18 @@ export function ShortcutRecorder({
       void finish(binding);
     }
   };
+
+  useEffect(() => {
+    if (!recording || disabled) return;
+    const onWindowKeyDown = (event: KeyboardEvent) => handleKeyDown(event);
+    const onWindowKeyUp = (event: KeyboardEvent) => handleKeyUp(event);
+    window.addEventListener('keydown', onWindowKeyDown, true);
+    window.addEventListener('keyup', onWindowKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onWindowKeyDown, true);
+      window.removeEventListener('keyup', onWindowKeyUp, true);
+    };
+  }, [recording, disabled]);
 
   const rootStyle: CSSProperties = {
     display: 'flex',
@@ -148,8 +166,8 @@ export function ShortcutRecorder({
       {recording && (
         <div
           tabIndex={-1}
-          onKeyDown={onKeyDown}
-          onKeyUp={onKeyUp}
+          onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
           style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(101,123,112,0.06)', border: '1px solid rgba(101,123,112,0.2)', fontSize: 12, color: 'var(--ol-blue)', outline: 'none' }}
           ref={el => el?.focus()}
         >
@@ -162,7 +180,7 @@ export function ShortcutRecorder({
   );
 }
 
-function modifiersFromKeyboardEvent(e: KeyboardEvent): string[] {
+function modifiersFromKeyboardEvent(e: KeyboardEvent | ReactKeyboardEvent): string[] {
   const modifiers: string[] = [];
   if (e.metaKey && e.key !== 'Meta') modifiers.push(currentPlatform().isMac ? 'cmd' : 'super');
   if (e.ctrlKey && e.key !== 'Control') modifiers.push('ctrl');
@@ -185,16 +203,15 @@ function modifierPrimaryFromCode(code: string, key: string): string {
   return '';
 }
 
-function primaryFromKeyboardEvent(e: KeyboardEvent): string {
-  const printable = primaryFromPrintableCode(e.code);
-  if (printable) return printable;
-  if (e.key.length === 1) return e.key;
+function primaryFromKeyboardEvent(e: KeyboardEvent | ReactKeyboardEvent): string {
   const codeToName: Record<string, string> = {
     Space: 'Space',
     Enter: 'Enter',
     Tab: 'Tab',
+    Escape: 'Escape',
     Backspace: 'Backspace',
     Delete: 'Delete',
+    Insert: 'Insert',
     ArrowUp: 'ArrowUp',
     ArrowDown: 'ArrowDown',
     ArrowLeft: 'ArrowLeft',
@@ -203,7 +220,32 @@ function primaryFromKeyboardEvent(e: KeyboardEvent): string {
     End: 'End',
     PageUp: 'PageUp',
     PageDown: 'PageDown',
+    CapsLock: 'CapsLock',
+    NumLock: 'NumLock',
+    ScrollLock: 'ScrollLock',
+    PrintScreen: 'PrintScreen',
+    Pause: 'Pause',
+    Numpad0: 'Numpad0',
+    Numpad1: 'Numpad1',
+    Numpad2: 'Numpad2',
+    Numpad3: 'Numpad3',
+    Numpad4: 'Numpad4',
+    Numpad5: 'Numpad5',
+    Numpad6: 'Numpad6',
+    Numpad7: 'Numpad7',
+    Numpad8: 'Numpad8',
+    Numpad9: 'Numpad9',
+    NumpadEnter: 'NumpadEnter',
+    NumpadAdd: 'NumpadAdd',
+    NumpadSubtract: 'NumpadSubtract',
+    NumpadMultiply: 'NumpadMultiply',
+    NumpadDivide: 'NumpadDivide',
+    NumpadDecimal: 'NumpadDecimal',
   };
+  if (codeToName[e.code]) return codeToName[e.code];
+  const printable = primaryFromPrintableCode(e.code);
+  if (printable) return printable;
+  if (e.key.length === 1) return e.key;
   if (/^F\d{1,2}$/.test(e.key)) return e.key;
   return codeToName[e.code] || e.key;
 }

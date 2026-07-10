@@ -226,13 +226,23 @@ assert.match(
 );
 assert.match(
   commandsSource,
-  /"DEVICE:SET plugged_low_power_idle_minutes=\{\}"[\s\S]{0,120}request\.plugged_low_power_idle_minutes/,
+  /device_setting_assignment\(\s*"plugged_low_power_idle_minutes",\s*request\.plugged_low_power_idle_minutes,/,
   'Type backend must send plugged low-power minutes to firmware without rounding or second conversion',
 );
 assert.match(
   commandsSource,
-  /"DEVICE:SET battery_low_power_idle_minutes=\{\}"[\s\S]{0,120}request\.battery_low_power_idle_minutes/,
+  /device_setting_assignment\(\s*"battery_low_power_idle_minutes",\s*request\.battery_low_power_idle_minutes,/,
   'Type backend must send battery low-power minutes to firmware without rounding or second conversion',
+);
+assert.match(
+  commandsSource,
+  /"plugged_low_power_idle_minutes"\s*=>\s*"plm"/,
+  'Type backend compact settings writes must keep plugged low-power minutes as an exact minute token',
+);
+assert.match(
+  commandsSource,
+  /"battery_low_power_idle_minutes"\s*=>\s*"blm"/,
+  'Type backend compact settings writes must keep battery low-power minutes as an exact minute token',
 );
 assert.match(
   commandsSource,

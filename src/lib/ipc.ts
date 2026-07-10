@@ -85,6 +85,17 @@ async function invokeMarketplace<T>(
   return invoke<T>(cmd, args);
 }
 
+const defaultDeviceKeyboardKey = (
+  primary: string,
+  modifiers: string[] = [],
+): UserPreferences['deviceCustomKeys']['key1'] => ({
+  action: 'sendShortcut',
+  appPage: 'settingsDevice',
+  externalAppPath: '',
+  pasteTemplate: '',
+  shortcut: { primary, modifiers },
+});
+
 // ── Mock fixtures ──────────────────────────────────────────────────────
 let mockSettings: UserPreferences = {
   hotkey: { trigger: 'rightControl', mode: 'toggle', keys: [{ code: 'ControlRight' }] },
@@ -105,7 +116,8 @@ let mockSettings: UserPreferences = {
   microphoneDeviceName: '',
   dictationInputSource: 'embeddedBle',
   dictationInputSourceUserOverridden: false,
-  activeAsrProvider: 'foundry-local-whisper',
+  activeAsrProvider: 'volcengine',
+  activeAsrProviderDefaultMigrated: true,
   activeLlmProvider: 'ark',
   llmThinkingEnabled: false,
   restoreClipboardAfterPaste: true,
@@ -122,10 +134,10 @@ let mockSettings: UserPreferences = {
   switchStyleHotkey: { primary: 'S', modifiers: defaultAppShortcutModifiers() },
   openAppHotkey: { primary: 'O', modifiers: defaultAppShortcutModifiers() },
   deviceCustomKeys: {
-    key1: { action: 'dictation', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key2: { action: 'openApp', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key3: { action: 'pasteShortcut', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
-    key4: { action: 'openExternalApp', appPage: 'settingsDevice', externalAppPath: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\微信\\微信.lnk', pasteTemplate: '', shortcut: null },
+    key1: defaultDeviceKeyboardKey('RightControl'),
+    key2: defaultDeviceKeyboardKey('C', ['ctrl']),
+    key3: defaultDeviceKeyboardKey('V', ['ctrl']),
+    key4: defaultDeviceKeyboardKey('Z', ['ctrl']),
     knob: { action: 'disabled', appPage: 'settingsDevice', externalAppPath: '', pasteTemplate: '', shortcut: null },
   },
   deviceCustomKeyDoubleClicks: {
@@ -630,7 +642,7 @@ const mockHotkeyCapability: HotkeyCapability = {
 };
 
 const mockCredentialsStatus: CredentialsStatus = {
-  activeAsrProvider: 'foundry-local-whisper',
+  activeAsrProvider: 'volcengine',
   activeLlmProvider: 'ark',
   asrConfigured: true,
   llmConfigured: true,

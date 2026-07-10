@@ -107,11 +107,13 @@ fn parse_primary(raw: &str) -> Result<Code, ShortcutBindingError> {
     let upper = trimmed.to_ascii_uppercase();
     let named = match upper.as_str() {
         "ENTER" | "RETURN" => Code::Enter,
+        "NUMPADENTER" => Code::NumpadEnter,
         "TAB" => Code::Tab,
         "ESC" | "ESCAPE" => Code::Escape,
         "SPACE" => Code::Space,
         "BACKSPACE" => Code::Backspace,
         "DELETE" | "DEL" => Code::Delete,
+        "INSERT" | "INS" => Code::Insert,
         "HOME" => Code::Home,
         "END" => Code::End,
         "PAGEUP" => Code::PageUp,
@@ -120,6 +122,26 @@ fn parse_primary(raw: &str) -> Result<Code, ShortcutBindingError> {
         "ARROWDOWN" | "DOWN" => Code::ArrowDown,
         "ARROWLEFT" | "LEFT" => Code::ArrowLeft,
         "ARROWRIGHT" | "RIGHT" => Code::ArrowRight,
+        "CAPSLOCK" => Code::CapsLock,
+        "NUMLOCK" => Code::NumLock,
+        "SCROLLLOCK" => Code::ScrollLock,
+        "PRINTSCREEN" | "PRTSC" => Code::PrintScreen,
+        "PAUSE" => Code::Pause,
+        "NUMPAD0" => Code::Numpad0,
+        "NUMPAD1" => Code::Numpad1,
+        "NUMPAD2" => Code::Numpad2,
+        "NUMPAD3" => Code::Numpad3,
+        "NUMPAD4" => Code::Numpad4,
+        "NUMPAD5" => Code::Numpad5,
+        "NUMPAD6" => Code::Numpad6,
+        "NUMPAD7" => Code::Numpad7,
+        "NUMPAD8" => Code::Numpad8,
+        "NUMPAD9" => Code::Numpad9,
+        "NUMPADADD" => Code::NumpadAdd,
+        "NUMPADSUBTRACT" => Code::NumpadSubtract,
+        "NUMPADMULTIPLY" => Code::NumpadMultiply,
+        "NUMPADDIVIDE" => Code::NumpadDivide,
+        "NUMPADDECIMAL" => Code::NumpadDecimal,
         "F1" => Code::F1,
         "F2" => Code::F2,
         "F3" => Code::F3,
@@ -242,6 +264,25 @@ mod tests {
             legacy_modifier_trigger(&binding),
             Some(HotkeyTrigger::RightControl)
         );
+    }
+
+    #[test]
+    fn parses_keyboard_library_keys_for_device_mapping() {
+        let cases = [
+            ("Insert", Code::Insert),
+            ("CapsLock", Code::CapsLock),
+            ("NumpadEnter", Code::NumpadEnter),
+            ("NumpadAdd", Code::NumpadAdd),
+            ("PrintScreen", Code::PrintScreen),
+        ];
+        for (primary, expected) in cases {
+            let binding = ShortcutBinding {
+                primary: primary.into(),
+                modifiers: vec![],
+            };
+            let parsed = parse_global_hotkey(&binding).expect("keyboard key parses");
+            assert_eq!(parsed.key, expected);
+        }
     }
 
     #[test]

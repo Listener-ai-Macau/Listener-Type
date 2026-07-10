@@ -843,9 +843,12 @@ export const zhTW: typeof zhCN = {
     },
     deviceKeys: {
       title: '設備自定義鍵',
-      desc: '預設：KEY1 錄音，KEY2 開啟裝置設定，KEY3 貼上，KEY4 開啟微信；都可自訂。',
+      desc: '預設：KEY1 Ctrl，KEY2 Ctrl+C，KEY3 Ctrl+V，KEY4 Ctrl+Z；都可自訂。',
+      restoreKeyboardDefaults: '恢復預設按鍵輸出',
+      actualOutput: '實際送出：{{shortcut}}',
       keyLabel: '{{key}}',
       actionSelectAria: '選擇設備鍵動作',
+      keyboardKeySelectAria: '選擇實際發送按鍵',
       templatePlaceholder: '要貼上的文字',
       externalAppPlaceholder: '應用或快捷方式路徑',
       installedAppSelectAria: '選擇已安裝應用',
@@ -905,7 +908,7 @@ export const zhTW: typeof zhCN = {
         translation: '翻譯聽寫',
         selectionAsk: '劃詞問答',
         pasteTemplate: '貼上模板',
-        sendShortcut: '發送快捷鍵',
+        sendShortcut: '發送按鍵 / 快捷鍵',
       },
     },
     permissions: {

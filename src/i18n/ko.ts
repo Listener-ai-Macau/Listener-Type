@@ -801,9 +801,12 @@ export const ko: typeof zhCN = {
     },
     deviceKeys: {
       title: '장치 사용자 지정 키',
-      desc: '기본값: KEY1 녹음, KEY2 장치 설정 열기, KEY3 붙여넣기, KEY4 WeChat 열기. 모두 사용자 지정할 수 있습니다.',
+      desc: '기본값: KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z. 모두 사용자 지정할 수 있습니다.',
+      restoreKeyboardDefaults: '기본 키 출력 복원',
+      actualOutput: '전송: {{shortcut}}',
       keyLabel: '{{key}}',
       actionSelectAria: '장치 키 동작 선택',
+      keyboardKeySelectAria: '실제로 보낼 키 선택',
       templatePlaceholder: '붙여넣을 텍스트',
       externalAppPlaceholder: '앱 또는 바로가기 경로',
       installedAppSelectAria: '설치된 앱 선택',
@@ -863,7 +866,7 @@ export const ko: typeof zhCN = {
         translation: '번역 받아쓰기',
         selectionAsk: '선택 질문',
         pasteTemplate: '템플릿 붙여넣기',
-        sendShortcut: '단축키 보내기',
+        sendShortcut: '키 / 단축키 보내기',
       },
     },
     permissions: {

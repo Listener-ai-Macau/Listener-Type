@@ -841,9 +841,12 @@ export const zhCN = {
     },
       deviceKeys: {
         title: '设备自定义键',
-        desc: '默认：KEY1 录音，KEY2 打开设备设置，KEY3 粘贴，KEY4 打开微信；都可自定义。',
+        desc: '默认：KEY1 Ctrl，KEY2 Ctrl+C，KEY3 Ctrl+V，KEY4 Ctrl+Z；都可自定义。',
+        restoreKeyboardDefaults: '恢复默认按键输出',
+        actualOutput: '实际发送：{{shortcut}}',
         keyLabel: '{{key}}',
         actionSelectAria: '选择设备键动作',
+        keyboardKeySelectAria: '选择实际发送按键',
         templatePlaceholder: '要粘贴的文本',
         externalAppPlaceholder: '应用或快捷方式路径',
         installedAppSelectAria: '选择已安装应用',
@@ -903,7 +906,7 @@ export const zhCN = {
           translation: '翻译听写',
           selectionAsk: '划词问答',
         pasteTemplate: '粘贴模板',
-        sendShortcut: '发送快捷键',
+        sendShortcut: '发送按键 / 快捷键',
       },
     },
     permissions: {

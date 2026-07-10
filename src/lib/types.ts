@@ -399,6 +399,8 @@ export interface UserPreferences {
   /** 输入源是否已经由用户显式改过。false 表示沿用产品默认 embeddedBle。 */
   dictationInputSourceUserOverridden: boolean;
   activeAsrProvider: string;
+  /** 1.0.2 Windows 错误 Foundry 默认是否已完成一次性迁移。 */
+  activeAsrProviderDefaultMigrated: boolean;
   activeLlmProvider: string;
   /** LLM 思考模式开关。默认关闭，保持既有尽量关闭思考的行为。详见 issue #402。 */
   llmThinkingEnabled: boolean;

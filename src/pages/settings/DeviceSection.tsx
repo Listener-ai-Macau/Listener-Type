@@ -3,13 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { ShortcutRecorder } from '../../components/ShortcutRecorder';
 import { detectOS } from '../../components/WindowChrome';
 import { SelectLite } from '../../components/ui/SelectLite';
-import { defaultAppShortcutModifiers } from '../../lib/hotkey';
 import {
   getDeviceSettings,
   getEmbeddedBleRuntimeStatus,
   listInstalledApplications,
   setDeviceSettings,
 } from '../../lib/ipc';
+import { formatComboLabel } from '../../lib/hotkey';
 import type {
   DeviceCustomKeyAction,
   DeviceCustomKeyAppPage,
@@ -65,13 +65,13 @@ const DEVICE_GESTURES: Array<{
 ];
 
 const DEVICE_KEY_ACTIONS: DeviceCustomKeyAction[] = [
+  'sendShortcut',
   'dictation',
   'openApp',
   'pasteShortcut',
   'openExternalApp',
   'copyShortcut',
   'undoShortcut',
-  'sendShortcut',
   'pasteTemplate',
   'switchStyle',
   'translation',
@@ -117,9 +117,24 @@ const DEVICE_SETTINGS_WRITE_TIMEOUT_MS = 45_000;
 const DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES = 10;
 
 const fallbackShortcut = (): ShortcutBinding => ({
-  primary: 'K',
-  modifiers: defaultAppShortcutModifiers(),
+  primary: 'F1',
+  modifiers: [],
 });
+
+const defaultDeviceKeyboardKey = (primary: string, modifiers: string[] = []): DeviceCustomKeyMapping => ({
+  action: 'sendShortcut',
+  appPage: 'settingsDevice',
+  externalAppPath: '',
+  pasteTemplate: '',
+  shortcut: { primary, modifiers },
+});
+
+function isDeviceFallbackReservedPrimary(primary: string): boolean {
+  const match = /^F(\d{1,2})$/i.exec(primary.trim());
+  if (!match) return false;
+  const keyNumber = Number(match[1]);
+  return keyNumber >= 13 && keyNumber <= 24;
+}
 
 export function DeviceSection() {
   const { t } = useTranslation();
@@ -192,17 +207,42 @@ export function DeviceSection() {
       deviceKnobRotationAction: value as DeviceKnobRotationAction,
     }));
   };
+  const restoreDefaultDeviceKeyboardOutput = async () => {
+    await savePrefs(current => ({
+      ...current,
+      deviceCustomKeys: {
+        ...current.deviceCustomKeys,
+        key1: defaultDeviceKeyboardKey('RightControl'),
+        key2: defaultDeviceKeyboardKey('C', ['ctrl']),
+        key3: defaultDeviceKeyboardKey('V', ['ctrl']),
+        key4: defaultDeviceKeyboardKey('Z', ['ctrl']),
+      },
+    }));
+  };
 
   return (
     <>
       <DeviceFirmwareSettingsCard />
 
       <Card>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-          {t('settings.deviceKeys.title')}
-        </div>
-        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 2 }}>
-          {t('settings.deviceKeys.desc')}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'start', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+              {t('settings.deviceKeys.title')}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 2 }}>
+              {t('settings.deviceKeys.desc')}
+            </div>
+          </div>
+          <Btn
+            variant="ghost"
+            size="sm"
+            icon="refresh"
+            onClick={() => void restoreDefaultDeviceKeyboardOutput()}
+            style={{ height: 32, whiteSpace: 'nowrap', justifyContent: 'center' }}
+          >
+            {t('settings.deviceKeys.restoreKeyboardDefaults')}
+          </Btn>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
           {DEVICE_GESTURES.map(gesture => (
@@ -1082,6 +1122,7 @@ function DeviceKeyMappingControl({
   ], [installedApps, installedAppsLoading, t]);
   const externalAppPickerValue = matchingInstalledApp?.path ?? EXTERNAL_APP_MANUAL_VALUE;
   const mainActionWidth = actionWidthOverride ?? DEVICE_KEY_MAIN_CONTROL_WIDTH;
+  const shortcut = mapping.shortcut ?? fallbackShortcut();
   const controlBaseStyle = {
     ...inputStyle,
     height: 32,
@@ -1201,12 +1242,18 @@ function DeviceKeyMappingControl({
       {mapping.action === 'sendShortcut' && (
         <div style={{ width: 240, maxWidth: '100%', minWidth: 0 }}>
           <ShortcutRecorder
-            value={mapping.shortcut ?? fallbackShortcut()}
+            value={shortcut}
             alignRecordButton
             onSave={async shortcut => {
+              if (isDeviceFallbackReservedPrimary(shortcut.primary)) {
+                throw new Error('reserved device fallback hotkey');
+              }
               await onChange({ ...mapping, shortcut });
             }}
           />
+          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--ol-ink-4)' }}>
+            {t('settings.deviceKeys.actualOutput', { shortcut: formatComboLabel(shortcut) })}
+          </div>
         </div>
       )}
     </div>

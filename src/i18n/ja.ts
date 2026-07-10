@@ -801,9 +801,12 @@ export const ja: typeof zhCN = {
     },
     deviceKeys: {
       title: 'デバイスカスタムキー',
-      desc: '既定: KEY1 は録音、KEY2 はデバイス設定を開く、KEY3 は貼り付け、KEY4 は WeChat を開く。すべてカスタマイズできます。',
+      desc: '既定: KEY1 Ctrl、KEY2 Ctrl+C、KEY3 Ctrl+V、KEY4 Ctrl+Z。すべてカスタマイズできます。',
+      restoreKeyboardDefaults: '既定のキー出力に戻す',
+      actualOutput: '送信: {{shortcut}}',
       keyLabel: '{{key}}',
       actionSelectAria: 'デバイスキー動作を選択',
+      keyboardKeySelectAria: '送信するキーを選択',
       templatePlaceholder: '貼り付けるテキスト',
       externalAppPlaceholder: 'アプリまたはショートカットのパス',
       installedAppSelectAria: 'インストール済みアプリを選択',
@@ -863,7 +866,7 @@ export const ja: typeof zhCN = {
         translation: '翻訳ディクテーション',
         selectionAsk: '選択質問',
         pasteTemplate: 'テンプレート貼付',
-        sendShortcut: 'ショートカット送信',
+        sendShortcut: 'キー / ショートカット送信',
       },
     },
     permissions: {
