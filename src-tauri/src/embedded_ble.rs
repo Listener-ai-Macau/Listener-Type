@@ -7969,6 +7969,38 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
+    pub fn listener_ota_v2_gatt_probe_snapshot(
+        timeout: Duration,
+    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        let _fresh_guard = match BleFreshGattGuard::enter("Listener OTA v2 GATT probe") {
+            Ok(guard) => guard,
+            Err(err) => {
+                return crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+                    connected: false,
+                    hardware_revision: None,
+                    firmware_version: None,
+                    capabilities: Vec::new(),
+                    battery_percent: None,
+                    usb_powered: None,
+                    detail: Some(err),
+                };
+            }
+        };
+        let deadline = Instant::now() + timeout.max(Duration::from_millis(1));
+        match open_listener_ota_v2_target_with_deadline(deadline) {
+            Ok(target) => listener_ota_v2_gatt_probe_snapshot_from_target(&target),
+            Err(err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+                connected: false,
+                hardware_revision: None,
+                firmware_version: None,
+                capabilities: Vec::new(),
+                battery_percent: None,
+                usb_powered: None,
+                detail: Some(err),
+            },
+        }
+    }
+
     #[cfg(any())]
     fn stm32wb_st_ota_device_snapshot_from_target(
         target: &OpenStm32wbStOtaTarget,
@@ -8087,6 +8119,36 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             snapshot.firmware_version,
             snapshot.battery_percent,
             snapshot.usb_powered,
+            snapshot.detail
+        );
+        snapshot
+    }
+
+    fn listener_ota_v2_gatt_probe_snapshot_from_target(
+        target: &OpenListenerOtaV2Target,
+    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        let address = target.bluetooth_address.map(|value| {
+            format!(
+                " at {}",
+                crate::embedded_ble::format_bluetooth_address(value)
+            )
+        });
+        let snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+            connected: true,
+            hardware_revision: None,
+            firmware_version: None,
+            capabilities: vec!["firmware_ota_v2".to_string()],
+            battery_percent: None,
+            usb_powered: None,
+            detail: Some(format!(
+                "Listener OTA v2 service is reachable{}; bounded GATT probe skipped optional DIS metadata.",
+                address.as_deref().unwrap_or("")
+            )),
+        };
+        log::info!(
+            "[embedded-ble] Listener OTA v2 GATT probe connected={} capabilities={:?} detail={:?}",
+            snapshot.connected,
+            snapshot.capabilities,
             snapshot.detail
         );
         snapshot
@@ -10162,6 +10224,96 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
+    fn open_listener_ota_v2_target_with_deadline(
+        deadline: Instant,
+    ) -> Result<OpenListenerOtaV2Target, String> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V2_SERVICE_UUID)
+            .map_err(|err| format!("Listener OTA v2 service selector failed: {err}"))?;
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .map_err(|err| format!("Listener OTA v2 service discovery failed: {err}"))
+            .and_then(|op| {
+                wait_async_operation(
+                    op,
+                    remaining_ble_timeout(
+                        deadline,
+                        BLE_DISCOVERY_TIMEOUT,
+                        "Listener OTA v2 service discovery",
+                    )?,
+                    "Listener OTA v2 service discovery",
+                )
+            })?;
+        let count = devices
+            .Size()
+            .map_err(|err| format!("Listener OTA v2 service collection size failed: {err}"))?;
+        if count == 0 {
+            return Err(format!(
+                "Listener OTA v2 service {LISTENER_OTA_V2_SERVICE_UUID:?} not found in Windows service index"
+            ));
+        }
+
+        let mut last_error = None;
+        for index in 0..count {
+            let info = match devices.GetAt(index) {
+                Ok(info) => info,
+                Err(err) => {
+                    last_error = Some(format!("read Listener OTA v2 service info failed: {err}"));
+                    continue;
+                }
+            };
+            let name = info
+                .Name()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let id = match info.Id() {
+                Ok(id) => id,
+                Err(err) => {
+                    last_error = Some(format!("read Listener OTA v2 service id failed: {err}"));
+                    continue;
+                }
+            };
+            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+            if !ble_candidate_allowed("Listener OTA v2", index, &name, address) {
+                continue;
+            }
+
+            let mut candidate_error = None;
+            if let Some(address) = address {
+                match open_listener_ota_v2_target_for_device_with_deadline(address, deadline) {
+                    Ok(target) => {
+                        log::info!(
+                            "[embedded-ble] selected Listener OTA v2 device index={index} name={name} address={address:012X}"
+                        );
+                        return Ok(target);
+                    }
+                    Err(err) => {
+                        candidate_error = Some(format!(
+                            "{name}: Listener OTA v2 device path {address:012X} failed: {err}"
+                        ));
+                    }
+                }
+            }
+
+            match open_listener_ota_v2_target_for_service_with_deadline(&id, deadline) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] selected Listener OTA v2 service-id fallback index={index} name={name}"
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    last_error = Some(match candidate_error {
+                        Some(previous) => {
+                            format!("{previous}; Listener OTA v2 service-id fallback failed: {err}")
+                        }
+                        None => format!("{name}: {err}"),
+                    });
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| "No writable Listener OTA v2 service found".to_string()))
+    }
+
     fn open_listener_ota_v2_target_from_stable_ota(
         previous_error: String,
     ) -> Result<OpenListenerOtaV2Target, String> {
@@ -11200,6 +11352,129 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }))
     }
 
+    fn open_listener_ota_v2_target_for_device_with_deadline(
+        address: u64,
+        deadline: Instant,
+    ) -> Result<OpenListenerOtaV2Target, String> {
+        let device = open_ble_device_with_timeout(
+            address,
+            remaining_ble_timeout(
+                deadline,
+                BLE_DISCOVERY_TIMEOUT,
+                "Listener OTA v2 device open",
+            )?,
+        )?;
+        if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
+            wait_async_operation(
+                op,
+                remaining_ble_timeout(
+                    deadline,
+                    BLE_DISCOVERY_TIMEOUT,
+                    "Listener OTA v2 device access",
+                )
+                .ok()?,
+                "Listener OTA v2 device access",
+            )
+            .ok()
+        }) {
+            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
+                return Err(format!(
+                    "Listener OTA v2 device access denied status={access:?}"
+                ));
+            }
+        }
+
+        let mut last_error = None;
+        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+            let services_result = match device
+                .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V2_SERVICE_UUID, cache_mode)
+                .map_err(|err| {
+                    format!("Listener OTA v2 {cache_mode:?} service discovery failed: {err}")
+                })
+                .and_then(|op| {
+                    wait_async_operation(
+                        op,
+                        remaining_ble_timeout(
+                            deadline,
+                            BLE_DISCOVERY_TIMEOUT,
+                            "Listener OTA v2 service",
+                        )?,
+                        &format!("Listener OTA v2 {cache_mode:?} service"),
+                    )
+                    .map_err(|err| {
+                        format!(
+                            "Listener OTA v2 {cache_mode:?} service discovery wait failed: {err}"
+                        )
+                    })
+                }) {
+                Ok(result) => result,
+                Err(err) => {
+                    last_error = Some(err);
+                    continue;
+                }
+            };
+            let status = services_result.Status().map_err(|err| {
+                format!("Listener OTA v2 {cache_mode:?} service status read failed: {err}")
+            })?;
+            if status != GattCommunicationStatus::Success {
+                last_error = Some(format!(
+                    "Listener OTA v2 {cache_mode:?} service discovery returned status={status:?}"
+                ));
+                continue;
+            }
+
+            let services = services_result.Services().map_err(|err| {
+                format!("Listener OTA v2 {cache_mode:?} service list read failed: {err}")
+            })?;
+            let count = services.Size().map_err(|err| {
+                format!("Listener OTA v2 {cache_mode:?} service list size failed: {err}")
+            })?;
+            if count == 0 {
+                last_error = Some(format!(
+                    "Listener OTA v2 service {LISTENER_OTA_V2_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
+                ));
+                continue;
+            }
+
+            for index in 0..count {
+                let service = match services.GetAt(index) {
+                    Ok(service) => service,
+                    Err(err) => {
+                        last_error = Some(format!(
+                            "read Listener OTA v2 {cache_mode:?} service failed: {err}"
+                        ));
+                        continue;
+                    }
+                };
+                match open_listener_ota_v2_characteristics_from_service_with_retry_deadline(
+                    &service, cache_mode, deadline,
+                ) {
+                    Ok(prepared) => {
+                        return Ok(OpenListenerOtaV2Target {
+                            control: prepared.control,
+                            data: prepared.data,
+                            status: prepared.status,
+                            data_write_option: prepared.data_write_option,
+                            data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
+                            service: Some(service),
+                            session: prepared.session,
+                            device: Some(device),
+                            bluetooth_address: Some(address),
+                        });
+                    }
+                    Err(err) => {
+                        last_error = Some(format!("{cache_mode:?}: {err}"));
+                        let _ = service.Close();
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "No writable Listener OTA v2 characteristics found on device".to_string()
+        }))
+    }
+
     fn open_diagnostic_target_for_device(address: u64) -> Result<OpenDiagnosticTarget, String> {
         let device = open_ble_device(address)?;
         if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
@@ -11771,6 +12046,71 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }))
     }
 
+    fn open_listener_ota_v2_target_for_service_with_deadline(
+        service_id: &HSTRING,
+        deadline: Instant,
+    ) -> Result<OpenListenerOtaV2Target, String> {
+        let service = GattDeviceService::FromIdAsync(service_id)
+            .map_err(|err| format!("Listener OTA v2 service open failed: {err}"))
+            .and_then(|op| {
+                wait_async_operation(
+                    op,
+                    remaining_ble_timeout(
+                        deadline,
+                        BLE_DISCOVERY_TIMEOUT,
+                        "Listener OTA v2 service open",
+                    )?,
+                    "Listener OTA v2 service open",
+                )
+            })?;
+        let device = service.DeviceId().ok().and_then(|device_id| {
+            BluetoothLEDevice::FromIdAsync(&device_id)
+                .ok()
+                .and_then(|op| {
+                    wait_async_operation(
+                        op,
+                        remaining_ble_timeout(
+                            deadline,
+                            BLE_DISCOVERY_TIMEOUT,
+                            "Listener OTA v2 service device",
+                        )
+                        .ok()?,
+                        "Listener OTA v2 service device",
+                    )
+                    .ok()
+                })
+        });
+
+        let mut last_error = None;
+        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+            match open_listener_ota_v2_characteristics_from_service_with_retry_deadline(
+                &service, cache_mode, deadline,
+            ) {
+                Ok(prepared) => {
+                    return Ok(OpenListenerOtaV2Target {
+                        control: prepared.control,
+                        data: prepared.data,
+                        status: prepared.status,
+                        data_write_option: prepared.data_write_option,
+                        data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
+                        service: Some(service),
+                        session: prepared.session,
+                        device,
+                        bluetooth_address: parse_bluetooth_address_from_device_id(
+                            &service_id.to_string_lossy(),
+                        ),
+                    });
+                }
+                Err(err) => {
+                    last_error = Some(format!("{cache_mode:?}: {err}"));
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            "No writable Listener OTA v2 characteristics found from service id".to_string()
+        }))
+    }
+
     fn open_diagnostic_target_for_service(
         service_id: &HSTRING,
     ) -> Result<OpenDiagnosticTarget, String> {
@@ -12067,6 +12407,90 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         })
     }
 
+    fn open_listener_ota_v2_characteristics_from_service_with_deadline(
+        service: &GattDeviceService,
+        cache_mode: BluetoothCacheMode,
+        deadline: Instant,
+    ) -> Result<PreparedListenerOtaV2Characteristics, String> {
+        if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
+            wait_async_operation(
+                op,
+                remaining_ble_timeout(
+                    deadline,
+                    BLE_DISCOVERY_TIMEOUT,
+                    "Listener OTA v2 service access",
+                )
+                .ok()?,
+                "Listener OTA v2 service access",
+            )
+            .ok()
+        }) {
+            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
+                return Err(format!(
+                    "Listener OTA v2 service access denied status={access:?}"
+                ));
+            }
+        }
+        let session = prepare_gatt_session(
+            service,
+            remaining_ble_timeout(deadline, GATT_READY_TIMEOUT, "Listener OTA v2 GATT session")?,
+        )?;
+        let control = open_write_characteristic_from_service_with_timeout(
+            service,
+            LISTENER_OTA_V2_CONTROL_UUID,
+            "Listener OTA v2 control",
+            cache_mode,
+            remaining_ble_timeout(
+                deadline,
+                BLE_DISCOVERY_TIMEOUT,
+                "Listener OTA v2 control characteristic",
+            )?,
+        )?;
+        let data = open_write_characteristic_from_service_with_timeout(
+            service,
+            LISTENER_OTA_V2_DATA_UUID,
+            "Listener OTA v2 data",
+            cache_mode,
+            remaining_ble_timeout(
+                deadline,
+                BLE_DISCOVERY_TIMEOUT,
+                "Listener OTA v2 data characteristic",
+            )?,
+        )?;
+        let status = if LISTENER_OTA_V2_STATUS_UUID == LISTENER_OTA_V2_CONTROL_UUID {
+            control.clone()
+        } else {
+            open_read_characteristic_from_service_with_timeout(
+                service,
+                LISTENER_OTA_V2_STATUS_UUID,
+                "Listener OTA v2 status",
+                cache_mode,
+                remaining_ble_timeout(
+                    deadline,
+                    BLE_DISCOVERY_TIMEOUT,
+                    "Listener OTA v2 status characteristic",
+                )?,
+            )?
+        };
+        let data_properties = data.CharacteristicProperties().map_err(|err| {
+            format!("Listener OTA v2 data characteristic properties read failed: {err}")
+        })?;
+        let data_write_option = listener_ota_v2_data_write_option(data_properties)?;
+        let payload_bytes =
+            listener_ota_v2_data_chunk_payload_bytes(session.as_ref(), data_write_option);
+        log::info!(
+            "[embedded-ble] Listener OTA v2 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes}"
+        );
+        Ok(PreparedListenerOtaV2Characteristics {
+            control,
+            data,
+            status,
+            data_write_option,
+            data_chunk_payload_bytes: payload_bytes,
+            session,
+        })
+    }
+
     fn open_listener_ota_v2_characteristics_from_service_with_retry(
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
@@ -12094,6 +12518,52 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     );
                     last_error = Some(err);
                     std::thread::sleep(delay);
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            "Listener OTA v2 characteristic discovery did not complete".to_string()
+        }))
+    }
+
+    fn open_listener_ota_v2_characteristics_from_service_with_retry_deadline(
+        service: &GattDeviceService,
+        cache_mode: BluetoothCacheMode,
+        deadline: Instant,
+    ) -> Result<PreparedListenerOtaV2Characteristics, String> {
+        let mut last_error = None;
+        for attempt in 1..=AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() + 1 {
+            match open_listener_ota_v2_characteristics_from_service_with_deadline(
+                service, cache_mode, deadline,
+            ) {
+                Ok(prepared) => {
+                    if attempt > 1 {
+                        log::info!(
+                            "[embedded-ble] Listener OTA v2 characteristics recovered via {cache_mode:?} on attempt {attempt}"
+                        );
+                    }
+                    return Ok(prepared);
+                }
+                Err(err) => {
+                    let transient = is_transient_listener_ota_v2_discovery_error(&err);
+                    if attempt > AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() || !transient {
+                        return Err(err);
+                    }
+                    let delay = AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS[attempt - 1];
+                    let sleep_for = match remaining_ble_timeout(
+                        deadline,
+                        delay,
+                        "Listener OTA v2 characteristic retry delay",
+                    ) {
+                        Ok(value) => value,
+                        Err(_) => return Err(err),
+                    };
+                    log::warn!(
+                        "[embedded-ble] Listener OTA v2 characteristic discovery attempt {attempt} via {cache_mode:?} returned transient error: {err}; retrying in {} ms",
+                        sleep_for.as_millis()
+                    );
+                    last_error = Some(err);
+                    std::thread::sleep(sleep_for);
                 }
             }
         }
@@ -12618,10 +13088,26 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         label: &str,
         cache_mode: BluetoothCacheMode,
     ) -> Result<GattCharacteristic, String> {
+        open_read_characteristic_from_service_with_timeout(
+            service,
+            uuid,
+            label,
+            cache_mode,
+            BLE_DISCOVERY_TIMEOUT,
+        )
+    }
+
+    fn open_read_characteristic_from_service_with_timeout(
+        service: &GattDeviceService,
+        uuid: GUID,
+        label: &str,
+        cache_mode: BluetoothCacheMode,
+        timeout: Duration,
+    ) -> Result<GattCharacteristic, String> {
         let result = service
             .GetCharacteristicsForUuidWithCacheModeAsync(uuid, cache_mode)
             .map_err(|err| format!("BLE {label} characteristic discovery failed: {err}"))?
-            .wait_ble_result(BLE_DISCOVERY_TIMEOUT, &format!("{label} characteristic"))?;
+            .wait_ble_result(timeout, &format!("{label} characteristic"))?;
         let status = result
             .Status()
             .map_err(|err| format!("BLE {label} characteristic status read failed: {err}"))?;
@@ -17025,6 +17511,11 @@ pub fn listener_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
 }
 
 #[cfg(target_os = "windows")]
+pub fn listener_ota_v2_gatt_probe_snapshot(timeout: Duration) -> FirmwareOtaDeviceSnapshot {
+    windows_ble::listener_ota_v2_gatt_probe_snapshot(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn pull_firmware_diagnostic_log(timeout: Duration) -> FirmwareDiagnosticLogPull {
     windows_ble::pull_firmware_diagnostic_log(timeout)
 }
@@ -17456,6 +17947,19 @@ pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
 
 #[cfg(not(target_os = "windows"))]
 pub fn listener_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+    FirmwareOtaDeviceSnapshot {
+        connected: false,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: Vec::new(),
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some("Listener OTA v2 over BLE is only supported on Windows".to_string()),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn listener_ota_v2_gatt_probe_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
         hardware_revision: None,
