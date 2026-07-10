@@ -91,6 +91,22 @@
       ]
     },
     {
+      "id": "type_recording_preview_text_stability",
+      "repo": "type",
+      "commit": "b77bfd8dc0d28d0f74ed10d04ddf6369e8591ce5",
+      "subject": "Stabilize recording preview text",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "Recording capsule partial text grows without rewriting the visible prefix when final and preview ASR disagree on punctuation.",
+        "Punctuation-only ASR revisions do not cause the capsule text to jump.",
+        "Shorter ASR partial revisions do not shrink already visible recording preview text."
+      ],
+      "guards": [
+        "npm run check:recording-latency",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml coordinator::dictation::tests::embedded_audio_partial_preview --lib"
+      ]
+    },
+    {
       "id": "type_device_settings_and_custom_keys",
       "repo": "type",
       "commit": "ac43b90e0a592065a8f74d80cadc67d99c1f113d",
