@@ -4,6 +4,8 @@ import { join } from "node:path";
 const repoRoot = process.cwd();
 const embeddedBlePath = join(repoRoot, "src-tauri", "src", "embedded_ble.rs");
 const source = readFileSync(embeddedBlePath, "utf8");
+const dictationPath = join(repoRoot, "src-tauri", "src", "coordinator", "dictation.rs");
+const dictationSource = readFileSync(dictationPath, "utf8");
 
 const processingStart = source.indexOf("pub fn send_recording_processing_state");
 const processingEnd = source.indexOf("pub fn send_ec11_rotation_mode", processingStart);
@@ -22,18 +24,116 @@ if (foundForbidden.length > 0) {
   );
 }
 
+const processingHelperStart = source.indexOf("fn send_processing_hint_control_command");
+const processingHelperEnd = source.indexOf(
+  "pub fn send_recording_control_toggle",
+  processingHelperStart,
+);
+if (processingHelperStart < 0 || processingHelperEnd < 0) {
+  throw new Error("Could not locate processing LED hint helper");
+}
+const processingHelperSection = source.slice(processingHelperStart, processingHelperEnd);
 for (const token of [
-  "send_type_ready_keepalive_before_processing",
-  "audio type ready before processing done",
-  "audio type ready before processing warning",
+  "send_audio_control_via_active_capture",
+  "send_control_command_via_usb_serial",
+]) {
+  if (!processingHelperSection.includes(token)) {
+    throw new Error(`Processing LED hints must keep lightweight active/USB path: ${token}`);
+  }
+}
+for (const token of ["BleFreshGattGuard::enter", "open_audio_control_target_with_retry"]) {
+  if (processingHelperSection.includes(token)) {
+    throw new Error(
+      `Processing LED hints must not open late fresh GATT retry path; found ${token}`,
+    );
+  }
+}
+for (const token of [
+  "VREC:PROCESSING:START",
+  "VREC:PROCESSING:STOP",
+  "VREC:PROCESSING:DONE",
+  "VREC:PROCESSING:WARN",
 ]) {
   if (!processingSection.includes(token)) {
-    throw new Error(`Processing LED sync lost Type-ready keepalive token: ${token}`);
+    throw new Error(`Processing LED sync lost processing hint command: ${token}`);
   }
+}
+
+const stopHelperStart = source.indexOf("fn send_recording_stop_control_command");
+const stopHelperEnd = source.indexOf("pub fn send_recording_control_toggle", stopHelperStart);
+if (stopHelperStart < 0 || stopHelperEnd < 0) {
+  throw new Error("Could not locate embedded BLE recording stop helper");
+}
+const stopHelperSection = source.slice(stopHelperStart, stopHelperEnd);
+for (const token of [
+  "bounded_recording_stop_active_timeout",
+  "send_audio_control_via_active_capture",
+  'send_control_command_via_usb_serial("VREC:STOP"',
+  "USB serial stop fallback",
+]) {
+  if (!stopHelperSection.includes(token)) {
+    throw new Error(`Recording stop must keep bounded active/USB fallback path: ${token}`);
+  }
+}
+for (const token of ["BleFreshGattGuard::enter", "open_audio_control_target_with_retry"]) {
+  if (stopHelperSection.includes(token)) {
+    throw new Error(
+      `Recording stop must not open late fresh GATT retry path while audio is streaming; found ${token}`,
+    );
+  }
+}
+
+const stopPolicyStart = source.indexOf("fn audio_control_write_policy");
+const stopPolicyEnd = source.indexOf("fn audio_control_write_options_from_properties", stopPolicyStart);
+if (stopPolicyStart < 0 || stopPolicyEnd < 0) {
+  throw new Error("Could not locate audio control write policy");
+}
+const stopPolicySection = source.slice(stopPolicyStart, stopPolicyEnd);
+if (!stopPolicySection.includes('bytes == b"VREC:STOP\\n"')) {
+  throw new Error("Recording stop must prefer low-latency no-response writes when available");
+}
+
+const captureSignalStart = source.indexOf("enum BleCaptureSignal");
+const captureSignalEnd = source.indexOf("struct AudioControlRequest", captureSignalStart);
+if (captureSignalStart < 0 || captureSignalEnd < 0) {
+  throw new Error("Could not locate active capture signal/control definitions");
+}
+const captureSignalSection = source.slice(captureSignalStart, captureSignalEnd);
+if (captureSignalSection.includes("AudioControl")) {
+  throw new Error(
+    "Active audio control must not share the high-volume BLE notification FIFO; keep it on the separate control channel.",
+  );
+}
+for (const token of [
+  "mpsc::channel::<AudioControlRequest>()",
+  "ActiveAudioControlRegistration::install(",
+  "control_tx",
+  "cleanup.drain_audio_control_requests(&control_rx)",
+  "active audio control dispatch label={}",
+]) {
+  if (!source.includes(token)) {
+    throw new Error(`Active capture control lost its low-latency side channel token: ${token}`);
+  }
+}
+if (source.includes("BleCaptureSignal::AudioControl")) {
+  throw new Error("Active audio control regressed back into the BLE notification FIFO");
 }
 
 if (!source.includes('write_type_heartbeat(b"TYPE:BYE\\n", "Type heartbeat bye")')) {
   throw new Error("Real notify teardown must still send Type BYE");
+}
+
+for (const token of [
+  "const DEVICE_AI_PROCESSING_MAX_VISIBLE_MS: u64 = 5_000;",
+  "fn schedule_device_ai_processing_max_visible_timeout",
+  "dictation_processing_max_visible_timeout",
+  "send_recording_processing_done(Duration::from_secs(2))",
+  "device AI processing LED max-visible timeout completed",
+  "cancel_max_visible_timeout",
+]) {
+  if (!dictationSource.includes(token)) {
+    throw new Error(`Processing LED sync lost max-visible watchdog token: ${token}`);
+  }
 }
 
 const recoveryStart = source.indexOf("fn listener_recovery_pairing_candidates");
@@ -119,5 +219,5 @@ if (!candidateAllowedSection.includes("listener_recovery_target_addresses()")) {
 }
 
 console.log(
-  "PASS: embedded BLE processing LED sync keeps Type-ready across normal completion, recovery pairing appends direct address fallback, stale BTHPORT cache does not bypass pairing, and runtime BLE address cache cannot outrank current Windows evidence.",
+  "PASS: embedded BLE recording stop uses low-latency active/USB paths with a separate control side channel, processing LED sync avoids late fresh GATT, recovery pairing appends direct address fallback, stale BTHPORT cache does not bypass pairing, and runtime BLE address cache cannot outrank current Windows evidence.",
 );

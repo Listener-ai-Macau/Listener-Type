@@ -23,7 +23,8 @@ use uuid::Uuid;
 use super::frame::{self, Flags, MessageType, Serialization};
 use super::{AudioConsumer, DictionaryHotword, RawTranscript};
 
-const ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
+const FINAL_TRANSCRIPT_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
+const LOW_LATENCY_PREVIEW_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
 /// 100 ms of 16 kHz / 16-bit / mono PCM.
 const TARGET_AUDIO_CHUNK_BYTES: usize = 3_200;
 const TARGET_AUDIO_CHUNK_MS: usize = 100;
@@ -79,6 +80,32 @@ type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
 type SharedWriter = Arc<AsyncMutex<Option<WsSink>>>;
 type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VolcengineStreamingRole {
+    FinalTranscript,
+    LowLatencyPreview,
+}
+
+impl VolcengineStreamingRole {
+    fn endpoint(self) -> &'static str {
+        match self {
+            Self::FinalTranscript => FINAL_TRANSCRIPT_ENDPOINT,
+            Self::LowLatencyPreview => LOW_LATENCY_PREVIEW_ENDPOINT,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::FinalTranscript => "final",
+            Self::LowLatencyPreview => "preview",
+        }
+    }
+
+    fn finish_on_final_frame(self) -> bool {
+        matches!(self, Self::FinalTranscript)
+    }
+}
+
 use super::volcengine_transcript::{
     is_unstable_initial_partial, merge_streaming_candidate, normalize_cjk_final_spacing_and_echoes,
     normalized_result, transcript_candidate_from_result, trim_repeated_short_final_tail,
@@ -93,6 +120,8 @@ struct SyncState {
     next_sequence: i32,
     bytes_sent: usize,
     frames_sent: usize,
+    response_frames_seen: usize,
+    partial_updates_seen: usize,
     is_connected: bool,
     final_tx: Option<oneshot::Sender<Result<RawTranscript, VolcengineASRError>>>,
     runtime: Option<Handle>,
@@ -114,6 +143,7 @@ struct SyncState {
 pub struct VolcengineStreamingASR {
     credentials: VolcengineCredentials,
     hotwords: Vec<DictionaryHotword>,
+    role: VolcengineStreamingRole,
     state: ParkingMutex<SyncState>,
     partial_callback: ParkingMutex<Option<PartialTranscriptCallback>>,
     /// Guards the WebSocket write half so concurrent `send` calls serialize.
@@ -135,9 +165,33 @@ pub struct VolcengineStreamingASR {
 
 impl VolcengineStreamingASR {
     pub fn new(credentials: VolcengineCredentials, hotwords: Vec<DictionaryHotword>) -> Self {
+        Self::new_with_role(
+            credentials,
+            hotwords,
+            VolcengineStreamingRole::FinalTranscript,
+        )
+    }
+
+    pub fn new_low_latency_preview(
+        credentials: VolcengineCredentials,
+        hotwords: Vec<DictionaryHotword>,
+    ) -> Self {
+        Self::new_with_role(
+            credentials,
+            hotwords,
+            VolcengineStreamingRole::LowLatencyPreview,
+        )
+    }
+
+    fn new_with_role(
+        credentials: VolcengineCredentials,
+        hotwords: Vec<DictionaryHotword>,
+        role: VolcengineStreamingRole,
+    ) -> Self {
         Self {
             credentials,
             hotwords,
+            role,
             state: ParkingMutex::new(SyncState::default()),
             partial_callback: ParkingMutex::new(None),
             writer: Arc::new(AsyncMutex::new(None)),
@@ -175,7 +229,14 @@ impl VolcengineStreamingASR {
         }
 
         let connect_id = Uuid::new_v4().to_string();
-        let mut request = ENDPOINT
+        log::info!(
+            "[asr] opening Volcengine {} session endpoint={}",
+            self.role.label(),
+            self.role.endpoint()
+        );
+        let mut request = self
+            .role
+            .endpoint()
             .into_client_request()
             .map_err(|e| VolcengineASRError::ConnectionFailed(e.to_string()))?;
         let headers = request.headers_mut();
@@ -214,6 +275,8 @@ impl VolcengineStreamingASR {
             st.next_sequence = 1;
             st.bytes_sent = 0;
             st.frames_sent = 0;
+            st.response_frames_seen = 0;
+            st.partial_updates_seen = 0;
             st.is_connected = true;
             st.final_tx = Some(tx);
             st.runtime = Some(Handle::current());
@@ -237,6 +300,7 @@ impl VolcengineStreamingASR {
         let writer_for_worker = Arc::clone(&self.writer);
         let pending_for_worker = Arc::clone(&self.pending_sends);
         let notify_for_worker = Arc::clone(&self.send_done);
+        let role_label = self.role.label();
         tokio::spawn(async move {
             while let Some((seq, chunk)) = audio_rx.recv().await {
                 let frame = frame::build(
@@ -247,7 +311,12 @@ impl VolcengineStreamingASR {
                     Some(seq),
                 );
                 if let Err(e) = send_binary(&writer_for_worker, frame).await {
-                    log::error!("[asr] audio frame seq={} send 失败: {}", seq, e);
+                    log::error!(
+                        "[asr] {} audio frame seq={} send 失败: {}",
+                        role_label,
+                        seq,
+                        e
+                    );
                 }
                 if pending_for_worker.fetch_sub(1, Ordering::SeqCst) == 1 {
                     notify_for_worker.notify_waiters();
@@ -514,19 +583,43 @@ impl VolcengineStreamingASR {
         self.signal_error(VolcengineASRError::NoFinalResult);
     }
 
+    pub fn low_latency_preview_silent_stalled(
+        &self,
+        min_elapsed: Duration,
+        min_audio_frames: usize,
+    ) -> bool {
+        if self.role != VolcengineStreamingRole::LowLatencyPreview {
+            return false;
+        }
+        let st = self.state.lock();
+        st.is_connected
+            && st.partial_updates_seen == 0
+            && st.frames_sent >= min_audio_frames
+            && st.start.is_some_and(|start| start.elapsed() >= min_elapsed)
+    }
+
     // ---- internals ----
 
     fn build_first_frame_payload(&self, connect_id: &str) -> Value {
-        let mut request = json!({
-            "model_name": "bigmodel",
-            "enable_nonstream": true,
-            "enable_itn": true,
-            "enable_punc": true,
-            "show_utterances": true,
-            "result_type": "full",
-            "end_window_size": SECOND_PASS_END_WINDOW_MS,
-            "force_to_speech_time": SECOND_PASS_FORCE_TO_SPEECH_MS,
-        });
+        let mut request = match self.role {
+            VolcengineStreamingRole::FinalTranscript => json!({
+                "model_name": "bigmodel",
+                "enable_nonstream": true,
+                "enable_itn": true,
+                "enable_punc": true,
+                "show_utterances": true,
+                "result_type": "full",
+                "end_window_size": SECOND_PASS_END_WINDOW_MS,
+                "force_to_speech_time": SECOND_PASS_FORCE_TO_SPEECH_MS,
+            }),
+            VolcengineStreamingRole::LowLatencyPreview => json!({
+                "model_name": "bigmodel",
+                "enable_itn": true,
+                "enable_punc": true,
+                "show_utterances": true,
+                "result_type": "full",
+            }),
+        };
         if let Some(context) = hotword_context(&self.hotwords) {
             request["context"] = Value::String(context);
             let enabled_count = self.hotwords.iter().filter(|h| h.enabled).count();
@@ -579,13 +672,14 @@ impl VolcengineStreamingASR {
         if parsed.message_type != Some(MessageType::FullServerResponse) {
             return true;
         }
-
-        if let Ok(payload_str) = std::str::from_utf8(&parsed.payload) {
-            log::info!(
-                "[asr] server JSON: {}",
-                payload_str.chars().take(400).collect::<String>()
-            );
+        {
+            let mut st = self.state.lock();
+            st.response_frames_seen += 1;
         }
+
+        let payload_for_log = std::str::from_utf8(&parsed.payload)
+            .ok()
+            .map(|payload| payload.chars().take(400).collect::<String>());
 
         let json: Value = match serde_json::from_slice(&parsed.payload) {
             Ok(v) => v,
@@ -601,6 +695,21 @@ impl VolcengineStreamingASR {
         // 后面用户讲的内容全部丢失（实测丢了 9 秒）。
         let has_final = parsed.is_final();
         let candidate = transcript_candidate_from_result(result);
+        if let Some(payload) = payload_for_log {
+            let text_is_empty = candidate.text.trim().is_empty();
+            if self.role == VolcengineStreamingRole::LowLatencyPreview
+                && text_is_empty
+                && !has_final
+            {
+                log::debug!(
+                    "[asr] {} server JSON(empty): {}",
+                    self.role.label(),
+                    payload
+                );
+            } else {
+                log::info!("[asr] {} server JSON: {}", self.role.label(), payload);
+            }
+        }
         if !has_final {
             let should_ignore = {
                 let state = self.state.lock();
@@ -663,10 +772,27 @@ impl VolcengineStreamingASR {
         // 同时把稳定预览推给胶囊。final 也要推一次，因为火山 two-pass
         // 经常在 final 才补齐长句前半段；这能让胶囊消失前先显示完整预览。
         if (partial_changed || has_final) && !full_text.is_empty() {
+            let elapsed_ms = self
+                .state
+                .lock()
+                .start
+                .map(|s| s.elapsed().as_millis() as u64)
+                .unwrap_or(0);
+            {
+                let mut st = self.state.lock();
+                st.partial_updates_seen += 1;
+            }
+            log::info!(
+                "[asr] {} partial update chars={} final={} elapsed_ms={}",
+                self.role.label(),
+                full_text.chars().count(),
+                has_final,
+                elapsed_ms
+            );
             self.emit_partial_transcript(&full_text);
         }
 
-        if has_final {
+        if has_final && self.role.finish_on_final_frame() {
             let duration_ms = self
                 .state
                 .lock()
@@ -681,6 +807,8 @@ impl VolcengineStreamingASR {
             self.state.lock().is_connected = false;
             *self.audio_tx.lock() = None;
             return false;
+        } else if has_final {
+            log::debug!("[asr] preview final frame kept alive for continued low-latency preview");
         }
         true
     }
@@ -951,6 +1079,29 @@ mod tests {
         assert_eq!(FINAL_SILENCE_PADDING_MS, 800);
         assert!(FINAL_SILENCE_PADDING_MS as u32 >= SECOND_PASS_END_WINDOW_MS);
         assert!(FINAL_SILENCE_PADDING_MS as u32 <= SECOND_PASS_FORCE_TO_SPEECH_MS);
+    }
+
+    #[test]
+    fn low_latency_preview_uses_realtime_endpoint_without_owning_final_result() {
+        let asr = VolcengineStreamingASR::new_low_latency_preview(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+
+        assert_eq!(asr.role.endpoint(), LOW_LATENCY_PREVIEW_ENDPOINT);
+        assert!(!asr.role.finish_on_final_frame());
+        let payload = asr.build_first_frame_payload("test-connect-id");
+        let request = &payload["request"];
+        assert_eq!(request["enable_punc"], true);
+        assert_eq!(request["result_type"], "full");
+        assert_eq!(request["show_utterances"], true);
+        assert!(request.get("enable_nonstream").is_none());
+        assert!(request.get("end_window_size").is_none());
+        assert!(request.get("force_to_speech_time").is_none());
     }
 
     #[test]

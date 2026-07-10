@@ -236,6 +236,15 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
     None
 }
 
+pub fn suppress_capsule_window_requested<S: AsRef<str>>(args: &[S]) -> bool {
+    args.iter()
+        .any(|arg| arg.as_ref() == "--suppress-capsule-window")
+}
+
+pub fn force_raw_output_requested<S: AsRef<str>>(args: &[S]) -> bool {
+    args.iter().any(|arg| arg.as_ref() == "--force-raw-output")
+}
+
 fn next_path_arg<'a, S, I>(args: &mut std::iter::Peekable<I>) -> Option<PathBuf>
 where
     S: AsRef<str> + 'a,
@@ -393,6 +402,26 @@ mod tests {
             Some(CliIntent::SubmitEmbeddedAudioStreamingFile {
                 path: PathBuf::from("input.wav"),
                 format: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_ignores_capsule_suppression_flag_while_reporting_it_separately() {
+        let args = vec![
+            "listener-type",
+            "--suppress-capsule-window",
+            "--force-raw-output",
+            "--submit-embedded-audio-wav-stream",
+            "input.wav",
+        ];
+        assert!(suppress_capsule_window_requested(&args));
+        assert!(force_raw_output_requested(&args));
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::SubmitEmbeddedAudioStreamingFile {
+                path: PathBuf::from("input.wav"),
+                format: Some(crate::embedded_audio::EmbeddedAudioInputFormat::Wav),
             })
         );
     }

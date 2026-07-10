@@ -86,6 +86,7 @@ pub struct DeviceSettingsStatus {
     pub knob_led_brightness_percent: u8,
     pub edge_led_brightness_percent: u8,
     pub led_zone_brightness_supported: bool,
+    pub compact_set_supported: bool,
     pub low_power_idle_minutes: u32,
     pub plugged_low_power_idle_minutes: u32,
     pub battery_low_power_idle_minutes: u32,
@@ -564,15 +565,17 @@ fn stop_drain_timeout_reason(stats: &crate::embedded_audio::SessionStats) -> Str
 #[cfg(target_os = "windows")]
 mod windows_ble {
     use std::fmt;
+    use std::fs;
     use std::io::{Read, Write};
     use std::os::windows::process::CommandExt;
+    use std::path::PathBuf;
     use std::process::{Command, Output};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
     use std::time::{Duration, Instant};
 
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
     use serialport::{SerialPortInfo, SerialPortType};
     use windows::core::{IInspectable, Interface, GUID, HSTRING, PCWSTR};
     use windows::Devices::Bluetooth::Advertisement::{
@@ -746,6 +749,7 @@ mod windows_ble {
     const AUDIO_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const BLE_PAIRING_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(45);
+    const BLE_PAIRING_FAST_AEP_FALLBACK_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(6);
     const BLE_PAIRING_PROMPT_TIMEOUT: Duration = Duration::from_secs(45);
     const BLE_PAIRING_FAST_FAILURE_AEP_FALLBACK_THRESHOLD: Duration = Duration::from_secs(5);
     const BLE_PAIRING_PROMPT_SUPPRESS_WINDOW: Duration = Duration::from_secs(60 * 60);
@@ -819,12 +823,17 @@ mod windows_ble {
     const OTA_V2_STATE_ERROR: u8 = 4;
     const OTA_V2_ERROR_NONE: u8 = 0;
     const OTA_V2_ERROR_OFFSET_MISMATCH: u8 = 4;
+    const RECORDING_STOP_ACTIVE_CONTROL_TIMEOUT: Duration = Duration::from_millis(700);
     #[cfg(any())]
     const COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH: u8 = OTA_V2_ERROR_OFFSET_MISMATCH;
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
     const OTA_REQUIRED_DATA_CHUNK_BYTES: usize = 500;
     const BLE_TARGET_ADDRESS_CACHE_WINDOW: Duration = Duration::from_secs(60 * 60);
     const BLE_RENAME_ADDRESS_GRACE_WINDOW: Duration = Duration::from_secs(10 * 60);
+    const BLE_DEVICE_STATE_FILE: &str = "ble_device_state.json";
+    const STARTUP_NOTIFY_FAST_PATH_TIMEOUT: Duration = Duration::from_millis(2500);
+    const STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT: Duration = Duration::from_millis(1200);
+    const STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT: Duration = Duration::from_millis(1800);
     static RUNTIME_BLUETOOTH_TARGET_NAME: OnceLock<Mutex<Option<String>>> = OnceLock::new();
     static RUNTIME_BLUETOOTH_TARGET_ADDRESS: OnceLock<
         Mutex<Option<RuntimeBluetoothTargetAddress>>,
@@ -836,20 +845,20 @@ mod windows_ble {
     enum BleCaptureSignal {
         Notification(Vec<u8>),
         Disconnected(String),
-        AudioControl(AudioControlRequest),
     }
 
     struct AudioControlRequest {
         bytes: Vec<u8>,
         label: String,
         timeout: Duration,
+        queued_at: Instant,
         result_tx: mpsc::Sender<Result<(), String>>,
     }
 
     #[derive(Clone)]
     struct ActiveAudioControlSender {
         capture_id: u64,
-        tx: mpsc::Sender<BleCaptureSignal>,
+        tx: mpsc::Sender<AudioControlRequest>,
     }
 
     #[derive(Clone)]
@@ -858,6 +867,16 @@ mod windows_ble {
         target_name: String,
         learned_at: Instant,
         valid_for: Duration,
+    }
+
+    #[derive(Debug, Default, Deserialize, Serialize)]
+    struct PersistedBleDeviceState {
+        #[serde(default)]
+        last_successful_address: Option<String>,
+        #[serde(default)]
+        target_name: Option<String>,
+        #[serde(default)]
+        updated_at: Option<String>,
     }
 
     fn active_audio_control_slot() -> &'static Mutex<Option<ActiveAudioControlSender>> {
@@ -887,7 +906,7 @@ mod windows_ble {
     }
 
     impl ActiveAudioControlRegistration {
-        fn install(capture_id: u64, tx: mpsc::Sender<BleCaptureSignal>) -> Self {
+        fn install(capture_id: u64, tx: mpsc::Sender<AudioControlRequest>) -> Self {
             if let Ok(mut slot) = active_audio_control_slot().lock() {
                 *slot = Some(ActiveAudioControlSender { capture_id, tx });
                 log::info!("[embedded-ble] capture #{capture_id}: audio control sender registered");
@@ -1568,7 +1587,7 @@ mod windows_ble {
     pub fn prompt_listener_pairing(
         expected_name: Option<&str>,
     ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-        match prompt_listener_pairing_inner(expected_name, false, false, true) {
+        match prompt_listener_pairing_inner(expected_name, false, false, true, false) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -1589,7 +1608,7 @@ mod windows_ble {
     pub fn prompt_listener_pairing_for_recovery(
         expected_name: Option<&str>,
     ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-        match prompt_listener_pairing_inner(expected_name, true, false, true) {
+        match prompt_listener_pairing_inner(expected_name, true, false, true, false) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -1610,7 +1629,7 @@ mod windows_ble {
     pub fn prompt_listener_pairing_for_recovery_without_user_prompt(
         expected_name: Option<&str>,
     ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-        match prompt_listener_pairing_inner(expected_name, true, false, false) {
+        match prompt_listener_pairing_inner(expected_name, true, false, false, false) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -1633,7 +1652,7 @@ mod windows_ble {
     pub fn prompt_listener_pairing_after_type_recovery(
         expected_name: Option<&str>,
     ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-        match prompt_listener_pairing_inner(expected_name, true, true, true) {
+        match prompt_listener_pairing_inner(expected_name, true, true, true, true) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -1654,7 +1673,30 @@ mod windows_ble {
     pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt(
         expected_name: Option<&str>,
     ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-        match prompt_listener_pairing_inner(expected_name, true, true, false) {
+        match prompt_listener_pairing_inner(expected_name, true, true, false, true) {
+            Ok(result) => result,
+            Err(err) => {
+                log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
+                crate::embedded_ble::BleDevicePairingPromptResult {
+                    status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+                    attempted: false,
+                    matched_devices: 0,
+                    prompted_devices: 0,
+                    already_paired_devices: 0,
+                    failed_devices: 0,
+                    open_bluetooth_settings: false,
+                    details: vec![format!(
+                        "{err}; user pairing prompt suppressed for BLE name recovery"
+                    )],
+                }
+            }
+        }
+    }
+
+    pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup(
+        expected_name: Option<&str>,
+    ) -> crate::embedded_ble::BleDevicePairingPromptResult {
+        match prompt_listener_pairing_inner(expected_name, true, true, false, false) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -1778,6 +1820,7 @@ mod windows_ble {
         bypass_prompt_suppression: bool,
         type_recovery_command_confirmed: bool,
         allow_user_pairing_prompt: bool,
+        pre_pair_stale_cleanup: bool,
     ) -> Result<crate::embedded_ble::BleDevicePairingPromptResult, String> {
         let target_name = effective_bluetooth_target_name(expected_name);
         set_configured_bluetooth_target_name(&target_name);
@@ -1796,7 +1839,7 @@ mod windows_ble {
             return Ok(pairing_maintenance_busy_prompt_result(&target_name));
         };
 
-        if type_recovery_command_confirmed {
+        if type_recovery_command_confirmed && pre_pair_stale_cleanup {
             match unpair_listener_devices_inner(std::slice::from_ref(&target_name)) {
                 Ok(unpair) => {
                     log::warn!(
@@ -2116,11 +2159,27 @@ mod windows_ble {
         expected_name: Option<&str>,
         extra_target_addresses: &[u64],
     ) -> Result<Vec<ListenerPairingCandidate>, String> {
+        listener_pairing_candidates_from_unpaired_selector_with_timeout(
+            expected_name,
+            extra_target_addresses,
+            BLE_PAIRING_DISCOVERY_TIMEOUT,
+        )
+    }
+
+    fn listener_pairing_candidates_from_unpaired_selector_with_timeout(
+        expected_name: Option<&str>,
+        extra_target_addresses: &[u64],
+        discovery_timeout: Duration,
+    ) -> Result<Vec<ListenerPairingCandidate>, String> {
         let mut target_addresses = listener_recovery_target_addresses();
         for address in extra_target_addresses.iter().copied() {
             push_unique_address(&mut target_addresses, address);
         }
-        match listener_pairing_candidates_from_windows_ble_aep(expected_name, &target_addresses) {
+        match listener_pairing_candidates_from_windows_ble_aep(
+            expected_name,
+            &target_addresses,
+            discovery_timeout,
+        ) {
             Ok(candidates) if !candidates.is_empty() => {
                 log::info!(
                     "[embedded-ble] Windows BLE AEP pairing query found {} candidate(s)",
@@ -2147,11 +2206,7 @@ mod windows_ble {
         let query_result = DeviceInformation::FindAllAsyncAqsFilter(&selector)
             .map_err(|err| format!("unpaired BLE device query failed: {err}"))
             .and_then(|op| {
-                wait_async_operation(
-                    op,
-                    BLE_PAIRING_DISCOVERY_TIMEOUT,
-                    "unpaired BLE device query",
-                )
+                wait_async_operation(op, discovery_timeout, "unpaired BLE device query")
             });
         match query_result {
             Ok(devices) => {
@@ -2185,6 +2240,7 @@ mod windows_ble {
     fn listener_pairing_candidates_from_windows_ble_aep(
         expected_name: Option<&str>,
         target_addresses: &[u64],
+        discovery_timeout: Duration,
     ) -> Result<Vec<ListenerPairingCandidate>, String> {
         match listener_pairing_candidates_from_windows_ble_aep_selector(
             expected_name,
@@ -2192,6 +2248,7 @@ mod windows_ble {
             WINDOWS_BLE_AEP_CONNECTABLE_SELECTOR,
             "connectable BLE AEP device query",
             true,
+            discovery_timeout,
         ) {
             Ok(candidates) if !candidates.is_empty() => {
                 log::info!(
@@ -2218,6 +2275,7 @@ mod windows_ble {
             WINDOWS_BLE_AEP_SELECTOR,
             "BLE AEP device query",
             false,
+            discovery_timeout,
         )
     }
 
@@ -2227,6 +2285,7 @@ mod windows_ble {
         selector_text: &str,
         query_label: &str,
         connectable_selector: bool,
+        discovery_timeout: Duration,
     ) -> Result<Vec<ListenerPairingCandidate>, String> {
         let selector = HSTRING::from(selector_text);
         let query_result = DeviceInformation::FindAllAsyncWithKindAqsFilterAndAdditionalProperties(
@@ -2235,7 +2294,7 @@ mod windows_ble {
             DeviceInformationKind::AssociationEndpoint,
         )
         .map_err(|err| format!("{query_label} failed: {err}"))
-        .and_then(|op| wait_async_operation(op, BLE_PAIRING_DISCOVERY_TIMEOUT, query_label));
+        .and_then(|op| wait_async_operation(op, discovery_timeout, query_label));
 
         let mut candidates = Vec::new();
         let mut seen_ids = Vec::new();
@@ -2375,8 +2434,11 @@ mod windows_ble {
         } else {
             fresh_advertised_addresses.as_slice()
         };
-        match listener_pairing_candidates_from_unpaired_selector(expected_name, selector_addresses)
-        {
+        match listener_pairing_candidates_from_unpaired_selector_with_timeout(
+            expected_name,
+            selector_addresses,
+            BLE_PAIRING_FAST_AEP_FALLBACK_DISCOVERY_TIMEOUT,
+        ) {
             Ok(candidates) if !candidates.is_empty() => Ok(candidates),
             Ok(_) => {
                 if !fresh_advertised_addresses.is_empty() {
@@ -4372,18 +4434,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         ReturnError,
     }
 
-    fn recording_stop_active_transient_fallback() -> ActiveControlTransientFallback {
-        ActiveControlTransientFallback::TryFreshGatt
+    fn processing_state_active_transient_fallback(active: bool) -> ActiveControlTransientFallback {
+        let _ = active;
+        ActiveControlTransientFallback::ReturnError
     }
 
-    fn processing_state_active_transient_fallback(active: bool) -> ActiveControlTransientFallback {
-        if active {
-            // PROCESSING:START is an LED hint. If the active capture is already
-            // closing, a late fresh-GATT START can race after DONE and leave the
-            // device in thinking state.
-            ActiveControlTransientFallback::ReturnError
+    fn bounded_recording_stop_active_timeout(timeout: Duration) -> Duration {
+        if timeout > RECORDING_STOP_ACTIVE_CONTROL_TIMEOUT {
+            RECORDING_STOP_ACTIVE_CONTROL_TIMEOUT
         } else {
-            ActiveControlTransientFallback::TryFreshGatt
+            timeout
         }
     }
 
@@ -4420,15 +4480,77 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Ok(())
     }
 
-    fn send_type_ready_keepalive_before_processing(timeout: Duration, label: &'static str) {
-        let command = type_ready_command_bytes();
-        if let Err(err) = send_recording_control_command(
-            command.as_slice(),
-            timeout,
-            label,
-            ActiveControlTransientFallback::TryFreshGatt,
-        ) {
-            log::warn!("[embedded-ble] {label} failed before processing LED sync: {err}");
+    fn send_processing_hint_control_command(
+        command: &[u8],
+        serial_command: &'static str,
+        timeout: Duration,
+        label: &'static str,
+    ) -> Result<(), String> {
+        let mut active_error = None;
+        if let Some(result) = send_audio_control_via_active_capture(command, timeout, label) {
+            match result {
+                Ok(()) => {
+                    log::info!("[embedded-ble] {label} sent via active capture");
+                    return Ok(());
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] active {label} write failed; trying USB serial processing hint fallback: {err}"
+                    );
+                    active_error = Some(err);
+                }
+            }
+        }
+
+        match send_control_command_via_usb_serial(serial_command, timeout) {
+            Ok(()) => {
+                log::info!("[embedded-ble] {label} sent via USB serial fallback");
+                Ok(())
+            }
+            Err(err) => {
+                let active_part = active_error
+                    .map(|err| format!("active BLE failed: {err}; "))
+                    .unwrap_or_default();
+                Err(format!("{active_part}USB serial fallback failed: {err}"))
+            }
+        }
+    }
+
+    fn send_recording_stop_control_command(timeout: Duration) -> Result<(), String> {
+        let command = b"VREC:STOP\n";
+        let label = "audio control stop";
+        let active_timeout = bounded_recording_stop_active_timeout(timeout);
+        let mut active_error = None;
+        if let Some(result) = send_audio_control_via_active_capture(command, active_timeout, label)
+        {
+            match result {
+                Ok(()) => {
+                    log::info!(
+                        "[embedded-ble] {label} sent via active capture active_timeout_ms={}",
+                        active_timeout.as_millis()
+                    );
+                    return Ok(());
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] active {label} write failed; trying USB serial stop fallback: {err}"
+                    );
+                    active_error = Some(err);
+                }
+            }
+        }
+
+        match send_control_command_via_usb_serial("VREC:STOP", timeout) {
+            Ok(()) => {
+                log::info!("[embedded-ble] {label} sent via USB serial fallback");
+                Ok(())
+            }
+            Err(err) => {
+                let active_part = active_error
+                    .map(|err| format!("active BLE failed: {err}; "))
+                    .unwrap_or_default();
+                Err(format!("{active_part}USB serial fallback failed: {err}"))
+            }
         }
     }
 
@@ -4451,12 +4573,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     pub fn send_recording_control_stop(timeout: Duration) -> Result<(), String> {
-        send_recording_control_command(
-            b"VREC:STOP\n",
-            timeout,
-            "audio control stop",
-            recording_stop_active_transient_fallback(),
-        )
+        send_recording_stop_control_command(timeout)
     }
 
     pub fn send_recording_control_recovery(timeout: Duration) -> Result<(), String> {
@@ -4512,48 +4629,39 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     pub fn send_recording_processing_state(active: bool, timeout: Duration) -> Result<(), String> {
-        send_type_ready_keepalive_before_processing(timeout, "audio type ready before processing");
         let command = if active {
             b"VREC:PROCESSING:START\n".as_slice()
         } else {
             b"VREC:PROCESSING:STOP\n".as_slice()
+        };
+        let serial_command = if active {
+            "VREC:PROCESSING:START"
+        } else {
+            "VREC:PROCESSING:STOP"
         };
         let label = if active {
             "audio processing start"
         } else {
             "audio processing stop"
         };
-        send_recording_control_command(
-            command,
-            timeout,
-            label,
-            processing_state_active_transient_fallback(active),
-        )
+        send_processing_hint_control_command(command, serial_command, timeout, label)
     }
 
     pub fn send_recording_processing_done(timeout: Duration) -> Result<(), String> {
-        send_type_ready_keepalive_before_processing(
-            timeout,
-            "audio type ready before processing done",
-        );
-        send_recording_control_command(
+        send_processing_hint_control_command(
             b"VREC:PROCESSING:DONE\n",
+            "VREC:PROCESSING:DONE",
             timeout,
             "audio processing done",
-            ActiveControlTransientFallback::TryFreshGatt,
         )
     }
 
     pub fn send_recording_processing_warning(timeout: Duration) -> Result<(), String> {
-        send_type_ready_keepalive_before_processing(
-            timeout,
-            "audio type ready before processing warning",
-        );
-        send_recording_control_command(
+        send_processing_hint_control_command(
             b"VREC:PROCESSING:WARN\n",
+            "VREC:PROCESSING:WARN",
             timeout,
             "audio processing warning",
-            ActiveControlTransientFallback::TryFreshGatt,
         )
     }
 
@@ -5293,6 +5401,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             || fields.contains_key("led_key")
             || fields.contains_key("led_ec11")
             || fields.contains_key("led_edge");
+        let compact_set_supported = optional_bool_field(&fields, "compact_set").unwrap_or(false);
         let default_status_brightness = crate::types::DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT;
         let default_key_brightness = crate::types::DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT;
         let default_zone_brightness = crate::types::DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT;
@@ -5345,6 +5454,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             knob_led_brightness_percent,
             edge_led_brightness_percent,
             led_zone_brightness_supported,
+            compact_set_supported,
             low_power_idle_minutes,
             plugged_low_power_idle_minutes,
             battery_low_power_idle_minutes,
@@ -5498,13 +5608,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             bytes: bytes.to_vec(),
             label: label.to_string(),
             timeout,
+            queued_at: Instant::now(),
             result_tx,
         };
-        if active
-            .tx
-            .send(BleCaptureSignal::AudioControl(request))
-            .is_err()
-        {
+        if active.tx.send(request).is_err() {
             clear_active_audio_control_sender(active.capture_id);
             return None;
         }
@@ -5579,6 +5686,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let target = open_notify_target_with_retry(capture_id)?;
         let characteristic = target.characteristic.clone();
         let (tx, rx) = mpsc::channel::<BleCaptureSignal>();
+        let (control_tx, control_rx) = mpsc::channel::<AudioControlRequest>();
         let notification_tx = tx.clone();
         let notification_log_count = Arc::new(AtomicUsize::new(0));
         let notification_log_count_for_handler = Arc::clone(&notification_log_count);
@@ -5609,8 +5717,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let mut cleanup = NotifyCleanup::new(capture_id, target);
         if cleanup.target.control.is_some() {
             cleanup.set_audio_control_registration(ActiveAudioControlRegistration::install(
-                capture_id,
-                tx.clone(),
+                capture_id, control_tx,
             ));
         } else {
             log::warn!(
@@ -5676,6 +5783,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         match cleanup.write_type_heartbeat(&type_ready_command, "Type heartbeat ready") {
             Ok(()) => {
                 cleanup.mark_type_heartbeat_open();
+                if let Some(address) = cleanup.target.bluetooth_address {
+                    persist_successful_notify_target_address(address, "Type heartbeat ready");
+                }
                 if type_heartbeat_enabled {
                     next_type_heartbeat = Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL);
                 }
@@ -5701,6 +5811,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let mut link_recovery_reason: Option<String> = None;
         let mut consecutive_type_heartbeat_failures = 0u32;
         loop {
+            cleanup.drain_audio_control_requests(&control_rx);
             let now = Instant::now();
             if let Some(due) = next_type_heartbeat {
                 if now >= due {
@@ -5874,10 +5985,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     log::warn!("[embedded-ble] capture #{capture_id}: {reason}");
                     cleanup.disable_notify();
                     return Err(reason);
-                }
-                BleCaptureSignal::AudioControl(request) => {
-                    cleanup.handle_audio_control_request(request);
-                    continue;
                 }
             };
             let terminal = super::is_terminal_notification(&notification);
@@ -7867,6 +7974,112 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Ok(remaining.min(cap).max(Duration::from_millis(1)))
     }
 
+    fn open_notify_target_for_startup_cached_address(
+        address: u64,
+    ) -> Result<OpenNotifyTarget, String> {
+        let deadline = Instant::now() + STARTUP_NOTIFY_FAST_PATH_TIMEOUT;
+        let device = open_ble_device_with_timeout(
+            address,
+            remaining_ble_timeout(
+                deadline,
+                STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT,
+                "persisted startup device open",
+            )?,
+        )?;
+        if let Ok(operation) = device.RequestAccessAsync() {
+            if let Some(access) = wait_async_operation(
+                operation,
+                remaining_ble_timeout(
+                    deadline,
+                    STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT,
+                    "persisted startup device access",
+                )?,
+                "persisted startup device access",
+            )
+            .ok()
+            {
+                if access != DeviceAccessStatus::Allowed
+                    && access != DeviceAccessStatus::Unspecified
+                {
+                    return Err(format!("BLE device access denied status={access:?}"));
+                }
+            }
+        }
+
+        let services_result = device
+            .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, BluetoothCacheMode::Cached)
+            .map_err(|err| format!("BLE persisted startup Cached service discovery failed: {err}"))
+            .and_then(|op| {
+                wait_async_operation(
+                    op,
+                    remaining_ble_timeout(
+                        deadline,
+                        STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT,
+                        "persisted startup Cached service",
+                    )?,
+                    "persisted startup Cached service",
+                )
+                .map_err(|err| {
+                    format!("BLE persisted startup Cached service discovery wait failed: {err}")
+                })
+            })?;
+        let status = services_result.Status().map_err(|err| {
+            format!("BLE persisted startup Cached service status read failed: {err}")
+        })?;
+        if status != GattCommunicationStatus::Success {
+            return Err(format!(
+                "BLE persisted startup Cached service discovery returned status={status:?}"
+            ));
+        }
+
+        let services = services_result.Services().map_err(|err| {
+            format!("BLE persisted startup Cached service list read failed: {err}")
+        })?;
+        let count = services.Size().map_err(|err| {
+            format!("BLE persisted startup Cached service list size failed: {err}")
+        })?;
+        if count == 0 {
+            return Err(format!(
+                "service {SERVICE_UUID:?} not found from persisted startup Cached device"
+            ));
+        }
+
+        let mut last_error = None;
+        for index in 0..count {
+            let service = match services.GetAt(index) {
+                Ok(service) => service,
+                Err(err) => {
+                    last_error = Some(format!(
+                        "read persisted startup Cached service failed: {err}"
+                    ));
+                    continue;
+                }
+            };
+            match open_notify_characteristic_from_service_for_startup_fast_path(&service, deadline)
+            {
+                Ok(prepared) => {
+                    return Ok(OpenNotifyTarget {
+                        characteristic: prepared.characteristic,
+                        control: prepared.control,
+                        service: Some(service),
+                        session: prepared.session,
+                        device: Some(device),
+                        bluetooth_address: Some(address),
+                    });
+                }
+                Err(err) => {
+                    last_error = Some(format!("persisted startup Cached index={index}: {err}"));
+                    let _ = service.Close();
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "No subscribable embedded audio BLE notify characteristic found on persisted startup device"
+                .to_string()
+        }))
+    }
+
     fn open_notify_target() -> Result<OpenNotifyTarget, String> {
         let recent_pairing = recent_pairing_fast_gatt_active(Instant::now());
         if let Some(state) = recent_pairing.as_ref() {
@@ -7885,6 +8098,29 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         state.target_name,
                         err.chars().take(240).collect::<String>()
                     );
+                }
+            }
+        }
+
+        if recent_pairing.is_none() {
+            if let Some(address) = persisted_successful_notify_target_address_for_current() {
+                match open_notify_target_for_startup_cached_address(address) {
+                    Ok(target) => {
+                        remember_runtime_bluetooth_target_address_for_current(
+                            address,
+                            "persisted startup audio notify",
+                        );
+                        log::info!(
+                            "[embedded-ble] selected persisted startup audio notify address={address:012X}"
+                        );
+                        return Ok(target);
+                    }
+                    Err(err) => {
+                        log::info!(
+                            "[embedded-ble] persisted startup audio notify address={address:012X} not ready: {}",
+                            err.chars().take(240).collect::<String>()
+                        );
+                    }
                 }
             }
         }
@@ -8860,6 +9096,36 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             );
         }
         address
+    }
+
+    pub(super) fn wait_for_bluetooth_target_advertisement_by_name(
+        target_name: &str,
+        timeout: Duration,
+        context: &str,
+    ) -> Result<u64, String> {
+        let target_name = normalize_bluetooth_target_name(target_name)
+            .ok_or_else(|| format!("{context}: empty BLE target name"))?;
+        if let Some(address) = configured_bluetooth_address_from_env() {
+            remember_runtime_bluetooth_target_address_for_name(
+                address,
+                &target_name,
+                BLE_RENAME_ADDRESS_GRACE_WINDOW,
+                context,
+            );
+            return Ok(address);
+        }
+        let addresses = scan_ble_advertisements_by_name(context, &target_name, timeout)?;
+        let address = addresses
+            .into_iter()
+            .next()
+            .ok_or_else(|| format!("{context}: advertisement scan returned no address"))?;
+        remember_runtime_bluetooth_target_address_for_name(
+            address,
+            &target_name,
+            BLE_RENAME_ADDRESS_GRACE_WINDOW,
+            context,
+        );
+        Ok(address)
     }
 
     fn find_bluetooth_target_service_address(
@@ -10738,6 +11004,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                             service: Some(service),
                             session: prepared.session,
                             device: Some(device),
+                            bluetooth_address: Some(address),
                         });
                     }
                     Err(err) => {
@@ -11100,6 +11367,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             service: Some(service),
             session: prepared.session,
             device: None,
+            bluetooth_address: parse_bluetooth_address_from_device_id(
+                &service_id.to_string_lossy(),
+            ),
         })
     }
 
@@ -11800,10 +12070,26 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         label: &str,
         cache_mode: BluetoothCacheMode,
     ) -> Result<GattCharacteristic, String> {
+        open_write_characteristic_from_service_with_timeout(
+            service,
+            uuid,
+            label,
+            cache_mode,
+            BLE_DISCOVERY_TIMEOUT,
+        )
+    }
+
+    fn open_write_characteristic_from_service_with_timeout(
+        service: &GattDeviceService,
+        uuid: GUID,
+        label: &str,
+        cache_mode: BluetoothCacheMode,
+        timeout: Duration,
+    ) -> Result<GattCharacteristic, String> {
         let result = service
             .GetCharacteristicsForUuidWithCacheModeAsync(uuid, cache_mode)
             .map_err(|err| format!("BLE {label} characteristic discovery failed: {err}"))?
-            .wait_ble_result(BLE_DISCOVERY_TIMEOUT, &format!("{label} characteristic"))?;
+            .wait_ble_result(timeout, &format!("{label} characteristic"))?;
         let status = result
             .Status()
             .map_err(|err| format!("BLE {label} characteristic status read failed: {err}"))?;
@@ -11927,10 +12213,26 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         label: &str,
         cache_mode: BluetoothCacheMode,
     ) -> Result<GattCharacteristic, String> {
+        open_notify_characteristic_by_uuid_from_service_with_timeout(
+            service,
+            uuid,
+            label,
+            cache_mode,
+            BLE_DISCOVERY_TIMEOUT,
+        )
+    }
+
+    fn open_notify_characteristic_by_uuid_from_service_with_timeout(
+        service: &GattDeviceService,
+        uuid: GUID,
+        label: &str,
+        cache_mode: BluetoothCacheMode,
+        timeout: Duration,
+    ) -> Result<GattCharacteristic, String> {
         let result = service
             .GetCharacteristicsForUuidWithCacheModeAsync(uuid, cache_mode)
             .map_err(|err| format!("BLE {label} characteristic discovery failed: {err}"))?
-            .wait_ble_result(BLE_DISCOVERY_TIMEOUT, &format!("{label} characteristic"))?;
+            .wait_ble_result(timeout, &format!("{label} characteristic"))?;
         let status = result
             .Status()
             .map_err(|err| format!("BLE {label} characteristic status read failed: {err}"))?;
@@ -12013,6 +12315,66 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Ok(PreparedNotifyCharacteristic {
             characteristic,
             control,
+            session,
+        })
+    }
+
+    fn open_notify_characteristic_from_service_for_startup_fast_path(
+        service: &GattDeviceService,
+        deadline: Instant,
+    ) -> Result<PreparedNotifyCharacteristic, String> {
+        if let Ok(operation) = service.RequestAccessAsync() {
+            if let Some(access) = wait_async_operation(
+                operation,
+                remaining_ble_timeout(
+                    deadline,
+                    STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT,
+                    "persisted startup service access",
+                )?,
+                "persisted startup service access",
+            )
+            .ok()
+            {
+                if access != DeviceAccessStatus::Allowed
+                    && access != DeviceAccessStatus::Unspecified
+                {
+                    return Err(format!("BLE service access denied status={access:?}"));
+                }
+            }
+        }
+        let session = prepare_gatt_session(
+            service,
+            remaining_ble_timeout(
+                deadline,
+                STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT,
+                "persisted startup GATT ready",
+            )?,
+        )?;
+        let control = open_write_characteristic_from_service_with_timeout(
+            service,
+            AUDIO_CONTROL_UUID,
+            "persisted startup audio control",
+            BluetoothCacheMode::Cached,
+            remaining_ble_timeout(
+                deadline,
+                STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT,
+                "persisted startup audio control characteristic",
+            )?,
+        )?;
+        let characteristic = open_notify_characteristic_by_uuid_from_service_with_timeout(
+            service,
+            NOTIFY_UUID,
+            "persisted startup notify",
+            BluetoothCacheMode::Cached,
+            remaining_ble_timeout(
+                deadline,
+                STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT,
+                "persisted startup notify characteristic",
+            )?,
+        )?;
+        Ok(PreparedNotifyCharacteristic {
+            characteristic,
+            control: Some(control),
             session,
         })
     }
@@ -12182,6 +12544,88 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             return None;
         }
         Some(state.address)
+    }
+
+    fn ble_device_state_path() -> Option<PathBuf> {
+        let appdata = std::env::var_os("APPDATA")?;
+        Some(
+            PathBuf::from(appdata)
+                .join("Listener Type")
+                .join(BLE_DEVICE_STATE_FILE),
+        )
+    }
+
+    fn persisted_ble_device_state_address_for_target(
+        state: &PersistedBleDeviceState,
+        expected_target_name: &str,
+    ) -> Option<u64> {
+        let stored_target = state
+            .target_name
+            .as_deref()
+            .and_then(normalize_bluetooth_target_name)?;
+        if !bluetooth_name_matches_expected(&stored_target, expected_target_name) {
+            return None;
+        }
+        state
+            .last_successful_address
+            .as_deref()
+            .and_then(parse_bluetooth_address_hex)
+    }
+
+    fn persisted_successful_notify_target_address_for_current() -> Option<u64> {
+        if configured_bluetooth_address_from_env().is_some() {
+            return None;
+        }
+        let path = ble_device_state_path()?;
+        let text = fs::read_to_string(&path).ok()?;
+        let state: PersistedBleDeviceState = serde_json::from_str(&text).ok()?;
+        let target_name = effective_bluetooth_target_name(None);
+        let address = persisted_ble_device_state_address_for_target(&state, &target_name)?;
+        log::info!(
+            "[embedded-ble] persisted Listener BLE notify target candidate address={} target={target_name:?}",
+            crate::embedded_ble::format_bluetooth_address(address)
+        );
+        Some(address)
+    }
+
+    fn persist_successful_notify_target_address(address: u64, context: &str) {
+        let target_name = effective_bluetooth_target_name(None);
+        let Some(path) = ble_device_state_path() else {
+            return;
+        };
+        let state = PersistedBleDeviceState {
+            last_successful_address: Some(crate::embedded_ble::format_bluetooth_address(address)),
+            target_name: Some(target_name.clone()),
+            updated_at: Some(super::utc_now_rfc3339()),
+        };
+        let Some(parent) = path.parent() else {
+            return;
+        };
+        if let Err(err) = fs::create_dir_all(parent) {
+            log::warn!(
+                "[embedded-ble] failed to create BLE device state dir {}: {err}",
+                parent.display()
+            );
+            return;
+        }
+        let bytes = match serde_json::to_vec_pretty(&state) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                log::warn!("[embedded-ble] failed to encode BLE device state: {err}");
+                return;
+            }
+        };
+        if let Err(err) = fs::write(&path, bytes) {
+            log::warn!(
+                "[embedded-ble] failed to persist BLE notify target address to {}: {err}",
+                path.display()
+            );
+            return;
+        }
+        log::info!(
+            "[embedded-ble] persisted Listener BLE notify target address={} target={target_name:?} context={context}",
+            crate::embedded_ble::format_bluetooth_address(address)
+        );
     }
 
     fn has_active_runtime_bluetooth_target_address(now: Instant) -> bool {
@@ -13056,6 +13500,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         service: Option<GattDeviceService>,
         session: Option<GattSession>,
         device: Option<BluetoothLEDevice>,
+        bluetooth_address: Option<u64>,
     }
 
     struct OpenAudioControlTarget {
@@ -13626,6 +14071,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         fn handle_audio_control_request(&self, request: AudioControlRequest) {
+            let queued_ms = request.queued_at.elapsed().as_millis();
+            if request.label == "audio control stop" || queued_ms >= 50 {
+                log::info!(
+                    "[embedded-ble] active audio control dispatch label={} queued_ms={}",
+                    request.label,
+                    queued_ms
+                );
+            }
             let result = match self.target.control.as_ref() {
                 Some(control) => write_audio_control_value_with_timeout(
                     control,
@@ -13638,6 +14091,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 ),
             };
             let _ = request.result_tx.send(result);
+        }
+
+        fn drain_audio_control_requests(&self, rx: &mpsc::Receiver<AudioControlRequest>) {
+            while let Ok(request) = rx.try_recv() {
+                self.handle_audio_control_request(request);
+            }
         }
 
         fn log_embedded_audio_status_snapshot(&self, label: &str) {
@@ -13727,7 +14186,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         timeout: Duration,
         label: &str,
     ) -> Result<(), String> {
-        let (primary, fallback) = audio_control_write_options(control, label)?;
+        let (primary, fallback) = audio_control_write_options(control, bytes, label)?;
         match write_gatt_value_with_timeout(control, bytes, primary, timeout, label) {
             Ok(_) => Ok(()),
             Err(primary_err) => {
@@ -13750,24 +14209,41 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
     fn audio_control_write_options(
         control: &GattCharacteristic,
+        bytes: &[u8],
         label: &str,
     ) -> Result<(GattWriteOption, Option<GattWriteOption>), String> {
         let properties = control
             .CharacteristicProperties()
             .map_err(|err| format!("BLE {label} characteristic properties read failed: {err}"))?;
-        audio_control_write_options_from_properties(properties).ok_or_else(|| {
-            "BLE audio control characteristic must support Write or WriteWithoutResponse."
-                .to_string()
-        })
+        audio_control_write_options_from_properties(properties, audio_control_write_policy(bytes))
+            .ok_or_else(|| {
+                "BLE audio control characteristic must support Write or WriteWithoutResponse."
+                    .to_string()
+            })
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum AudioControlWritePolicy {
+        LowLatency,
+        Reliable,
+    }
+
+    fn audio_control_write_policy(bytes: &[u8]) -> AudioControlWritePolicy {
+        if bytes == b"VREC:TOGGLE\n" || bytes == b"VREC:STOP\n" {
+            AudioControlWritePolicy::LowLatency
+        } else {
+            AudioControlWritePolicy::Reliable
+        }
     }
 
     fn audio_control_write_options_from_properties(
         properties: GattCharacteristicProperties,
+        policy: AudioControlWritePolicy,
     ) -> Option<(GattWriteOption, Option<GattWriteOption>)> {
         let supports_write = properties.contains(GattCharacteristicProperties::Write);
         let supports_without_response =
             properties.contains(GattCharacteristicProperties::WriteWithoutResponse);
-        if supports_without_response {
+        if policy == AudioControlWritePolicy::LowLatency && supports_without_response {
             return Some((
                 GattWriteOption::WriteWithoutResponse,
                 supports_write.then_some(GattWriteOption::WriteWithResponse),
@@ -13775,9 +14251,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
         if supports_write {
             return Some((
-                GattWriteOption::WriteWithoutResponse,
-                Some(GattWriteOption::WriteWithResponse),
+                GattWriteOption::WriteWithResponse,
+                supports_without_response.then_some(GattWriteOption::WriteWithoutResponse),
             ));
+        }
+        if supports_without_response {
+            return Some((GattWriteOption::WriteWithoutResponse, None));
         }
         None
     }
@@ -13890,18 +14369,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        fn audio_control_prefers_no_response_when_available() {
+        fn audio_control_toggle_prefers_no_response_when_available() {
             let both = GattCharacteristicProperties::Write
                 | GattCharacteristicProperties::WriteWithoutResponse;
             assert_eq!(
-                audio_control_write_options_from_properties(both),
-                Some((
-                    GattWriteOption::WriteWithoutResponse,
-                    Some(GattWriteOption::WriteWithResponse)
-                ))
-            );
-            assert_eq!(
-                audio_control_write_options_from_properties(GattCharacteristicProperties::Write),
+                audio_control_write_options_from_properties(
+                    both,
+                    AudioControlWritePolicy::LowLatency
+                ),
                 Some((
                     GattWriteOption::WriteWithoutResponse,
                     Some(GattWriteOption::WriteWithResponse)
@@ -13909,7 +14384,53 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             );
             assert_eq!(
                 audio_control_write_options_from_properties(
-                    GattCharacteristicProperties::WriteWithoutResponse
+                    GattCharacteristicProperties::Write,
+                    AudioControlWritePolicy::LowLatency
+                ),
+                Some((GattWriteOption::WriteWithResponse, None))
+            );
+            assert_eq!(
+                audio_control_write_options_from_properties(
+                    GattCharacteristicProperties::WriteWithoutResponse,
+                    AudioControlWritePolicy::LowLatency
+                ),
+                Some((GattWriteOption::WriteWithoutResponse, None))
+            );
+        }
+
+        #[test]
+        fn recording_stop_prefers_no_response_when_available() {
+            assert_eq!(
+                audio_control_write_policy(b"VREC:STOP\n"),
+                AudioControlWritePolicy::LowLatency
+            );
+        }
+
+        #[test]
+        fn reliable_audio_control_prefers_with_response_when_available() {
+            let both = GattCharacteristicProperties::Write
+                | GattCharacteristicProperties::WriteWithoutResponse;
+            assert_eq!(
+                audio_control_write_options_from_properties(
+                    both,
+                    AudioControlWritePolicy::Reliable
+                ),
+                Some((
+                    GattWriteOption::WriteWithResponse,
+                    Some(GattWriteOption::WriteWithoutResponse)
+                ))
+            );
+            assert_eq!(
+                audio_control_write_options_from_properties(
+                    GattCharacteristicProperties::Write,
+                    AudioControlWritePolicy::Reliable
+                ),
+                Some((GattWriteOption::WriteWithResponse, None))
+            );
+            assert_eq!(
+                audio_control_write_options_from_properties(
+                    GattCharacteristicProperties::WriteWithoutResponse,
+                    AudioControlWritePolicy::Reliable
                 ),
                 Some((GattWriteOption::WriteWithoutResponse, None))
             );
@@ -14077,6 +14598,30 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             assert!(
                 body.contains("saturating_sub(failed_before_fallback)"),
                 "if slow AEP fallback succeeds after an immediate direct PairAsync failure, the direct failure must not keep the final prompt result failed"
+            );
+        }
+
+        #[test]
+        fn recovery_pairing_fast_aep_fallback_is_bounded() {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("fn listener_recovery_pairing_selector_fallback_candidates")
+                .expect("recovery pairing selector fallback should exist");
+            let end = source[start..]
+                .find("fn listener_recovery_direct_pairing_candidates")
+                .map(|offset| start + offset)
+                .expect("recovery direct pairing boundary should exist");
+            let body = &source[start..end];
+
+            assert!(source.contains("BLE_PAIRING_FAST_AEP_FALLBACK_DISCOVERY_TIMEOUT"));
+            assert!(
+                body.contains("listener_pairing_candidates_from_unpaired_selector_with_timeout")
+                    && body.contains("BLE_PAIRING_FAST_AEP_FALLBACK_DISCOVERY_TIMEOUT"),
+                "rename/Type automatic recovery must not wait the full Windows pairing discovery timeout after direct PairAsync fails"
+            );
+            assert!(
+                source.contains("const BLE_PAIRING_FAST_AEP_FALLBACK_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(6)"),
+                "keep the no-user-prompt recovery fallback bounded so full BLE rename recovery does not regress toward 45s"
             );
         }
 
@@ -14631,6 +15176,40 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
+        fn rename_recovery_can_skip_duplicate_pre_pair_cleanup_after_cache_refresh() {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt")
+                .expect("Type recovery prompt helper should exist");
+            let end = source[start..]
+                .find("pub fn query_listener_pairing")
+                .map(|offset| start + offset)
+                .expect("Type recovery prompt helper boundary should exist");
+            let helpers = &source[start..end];
+            let prompt_start = source
+                .find("fn prompt_listener_pairing_inner")
+                .expect("prompt helper should exist");
+            let prompt_end = source[prompt_start..]
+                .find("let mut candidates = if bypass_prompt_suppression")
+                .map(|offset| prompt_start + offset)
+                .expect("prompt helper cleanup boundary should exist");
+            let prompt_setup = &source[prompt_start..prompt_end];
+
+            assert!(helpers.contains(
+                "prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup"
+            ));
+            assert!(helpers
+                .contains("prompt_listener_pairing_inner(expected_name, true, true, false, true)"));
+            assert!(helpers.contains(
+                "prompt_listener_pairing_inner(expected_name, true, true, false, false)"
+            ));
+            assert!(
+                prompt_setup.contains("type_recovery_command_confirmed && pre_pair_stale_cleanup"),
+                "double-click/one-click Type recovery must keep pre-pair stale cleanup, while BLE rename may skip it only after its explicit Windows cache cleanup already ran"
+            );
+        }
+
+        #[test]
         fn windows_pairing_recovery_uses_hidden_pwsh_not_windows_powershell() {
             let source = include_str!("embedded_ble.rs");
             let production = &source[..source
@@ -14843,6 +15422,88 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             assert!(
                 !helper_body.contains("audio_target_advertisement_addresses"),
                 "recent pairing fallback must not reuse stale configured Bluetooth addresses"
+            );
+        }
+
+        #[test]
+        fn persisted_startup_notify_address_is_named_bounded_and_after_recent_pairing() {
+            let source = include_str!("embedded_ble.rs");
+            let notify_start = source
+                .find("fn open_notify_target()")
+                .expect("notify target helper should exist");
+            let notify_end = source[notify_start..]
+                .find("fn open_notify_target_with_retry")
+                .map(|offset| notify_start + offset)
+                .expect("notify retry helper boundary should exist");
+            let notify_body = &source[notify_start..notify_end];
+            let recent_index = notify_body
+                .find("recent_pairing_fast_gatt_active")
+                .expect("recent pairing path must remain first");
+            let persisted_index = notify_body
+                .find("persisted_successful_notify_target_address_for_current")
+                .expect("startup persisted address fast path should exist");
+            let service_selector_index = notify_body
+                .find("GetDeviceSelectorFromUuid(SERVICE_UUID)")
+                .expect("service selector fallback should remain");
+
+            assert!(
+                recent_index < persisted_index && persisted_index < service_selector_index,
+                "persisted startup fast path must not steal recent-pairing recovery and must fall back before service selector"
+            );
+            assert!(notify_body.contains("if recent_pairing.is_none()"));
+            assert!(source.contains(
+                "const STARTUP_NOTIFY_FAST_PATH_TIMEOUT: Duration = Duration::from_millis(2500)"
+            ));
+            assert!(source.contains("open_notify_target_for_startup_cached_address"));
+            assert!(source.contains("BluetoothCacheMode::Cached"));
+            assert!(source.contains("open_write_characteristic_from_service_with_timeout"));
+            assert!(
+                source.contains("AUDIO_CONTROL_UUID")
+                    && source.contains("persist_successful_notify_target_address(address, \"Type heartbeat ready\")"),
+                "startup fast path must keep audio control and persist only after Type heartbeat ready"
+            );
+        }
+
+        #[test]
+        fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
+            let legacy = PersistedBleDeviceState {
+                last_successful_address: Some("FB8FBDD8C90F".to_string()),
+                target_name: None,
+                updated_at: None,
+            };
+            assert_eq!(
+                persisted_ble_device_state_address_for_target(
+                    &legacy,
+                    DEFAULT_BLUETOOTH_TARGET_NAME
+                ),
+                None,
+                "legacy address-only state must not be trusted after hardware swaps"
+            );
+
+            let wrong_target = PersistedBleDeviceState {
+                last_successful_address: Some("FB8FBDD8C90F".to_string()),
+                target_name: Some("OldType".to_string()),
+                updated_at: None,
+            };
+            assert_eq!(
+                persisted_ble_device_state_address_for_target(
+                    &wrong_target,
+                    DEFAULT_BLUETOOTH_TARGET_NAME
+                ),
+                None
+            );
+
+            let matching = PersistedBleDeviceState {
+                last_successful_address: Some("E5:C3:D5:B8:D2:FC".to_string()),
+                target_name: Some("listener".to_string()),
+                updated_at: None,
+            };
+            assert_eq!(
+                persisted_ble_device_state_address_for_target(
+                    &matching,
+                    DEFAULT_BLUETOOTH_TARGET_NAME
+                ),
+                Some(0xE5C3_D5B8_D2FC)
             );
         }
 
@@ -15070,22 +15731,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             let (tx, rx) = mpsc::channel();
             let registration = ActiveAudioControlRegistration::install(42, tx);
             let receiver = std::thread::spawn(move || {
-                let signal = rx
+                let request = rx
                     .recv_timeout(Duration::from_secs(1))
                     .expect("active control request");
-                match signal {
-                    BleCaptureSignal::AudioControl(request) => {
-                        assert_eq!(request.bytes, b"DEVICE:SET knob_rotation=system_volume\n");
-                        assert_eq!(request.label, "device settings");
-                        request.result_tx.send(Ok(())).expect("send result");
-                    }
-                    BleCaptureSignal::Notification(_) => {
-                        panic!("unexpected notification signal")
-                    }
-                    BleCaptureSignal::Disconnected(reason) => {
-                        panic!("unexpected disconnect signal: {reason}")
-                    }
-                }
+                assert_eq!(request.bytes, b"DEVICE:SET knob_rotation=system_volume\n");
+                assert_eq!(request.label, "device settings");
+                request.result_tx.send(Ok(())).expect("send result");
             });
 
             send_device_settings_command(
@@ -15247,22 +15898,42 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        fn recording_stop_retries_with_fresh_gatt_after_active_transient_error() {
+        fn recording_stop_uses_bounded_active_then_usb_serial_without_fresh_gatt() {
             assert_eq!(
-                recording_stop_active_transient_fallback(),
-                ActiveControlTransientFallback::TryFreshGatt
+                bounded_recording_stop_active_timeout(Duration::from_secs(5)),
+                RECORDING_STOP_ACTIVE_CONTROL_TIMEOUT
+            );
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("fn send_recording_stop_control_command")
+                .expect("recording stop helper should exist");
+            let end = source[start..]
+                .find("pub fn send_recording_control_toggle")
+                .map(|offset| start + offset)
+                .expect("recording stop helper boundary should exist");
+            let body = &source[start..end];
+
+            assert!(body.contains("send_audio_control_via_active_capture"));
+            assert!(body.contains("send_control_command_via_usb_serial(\"VREC:STOP\""));
+            assert!(
+                !body.contains("BleFreshGattGuard::enter"),
+                "recording stop must not open a late fresh GATT path while active audio is streaming"
+            );
+            assert!(
+                !body.contains("open_audio_control_target_with_retry"),
+                "recording stop must not run the long audio-control rediscovery path"
             );
         }
 
         #[test]
-        fn processing_start_does_not_retry_with_late_fresh_gatt() {
+        fn processing_hints_do_not_retry_with_late_fresh_gatt() {
             assert_eq!(
                 processing_state_active_transient_fallback(true),
                 ActiveControlTransientFallback::ReturnError
             );
             assert_eq!(
                 processing_state_active_transient_fallback(false),
-                ActiveControlTransientFallback::TryFreshGatt
+                ActiveControlTransientFallback::ReturnError
             );
         }
 
@@ -15732,6 +16403,15 @@ pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt(
 }
 
 #[cfg(target_os = "windows")]
+pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup(
+    expected_name: Option<&str>,
+) -> BleDevicePairingPromptResult {
+    windows_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup(
+        expected_name,
+    )
+}
+
+#[cfg(target_os = "windows")]
 pub fn query_listener_pairing(expected_name: Option<&str>) -> BleDevicePairingPromptResult {
     windows_ble::query_listener_pairing(expected_name)
 }
@@ -15773,6 +16453,15 @@ pub fn listener_ble_name_cache_needs_cleanup_for_names(
 #[cfg(target_os = "windows")]
 pub fn set_configured_bluetooth_target_name(name: &str) {
     windows_ble::set_configured_bluetooth_target_name(name)
+}
+
+#[cfg(target_os = "windows")]
+pub fn wait_for_bluetooth_target_advertisement_by_name(
+    target_name: &str,
+    timeout: Duration,
+    context: &str,
+) -> Result<u64, String> {
+    windows_ble::wait_for_bluetooth_target_advertisement_by_name(target_name, timeout, context)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -16183,6 +16872,13 @@ pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt(
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup(
+    _expected_name: Option<&str>,
+) -> BleDevicePairingPromptResult {
+    prompt_listener_pairing_after_type_recovery_without_user_prompt(_expected_name)
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn query_listener_pairing(_expected_name: Option<&str>) -> BleDevicePairingPromptResult {
     BleDevicePairingPromptResult {
         status: BleDevicePairingPromptStatus::NeedsUserAction,
@@ -16232,6 +16928,15 @@ pub fn listener_ble_name_cache_needs_cleanup_for_names(
 
 #[cfg(not(target_os = "windows"))]
 pub fn set_configured_bluetooth_target_name(_name: &str) {}
+
+#[cfg(not(target_os = "windows"))]
+pub fn wait_for_bluetooth_target_advertisement_by_name(
+    _target_name: &str,
+    _timeout: Duration,
+    _context: &str,
+) -> Result<u64, String> {
+    Err("Embedded BLE advertisement scan is only supported on Windows".to_string())
+}
 
 #[cfg(test)]
 mod tests {
@@ -16843,7 +17548,7 @@ mod tests {
     #[test]
     fn parses_device_settings_status_line() {
         let status = super::windows_ble::parse_device_settings_status_line(
-            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 led_status=70 led_key=65 led_ec11=60 led_edge=55 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,led_zone_brightness_0_100,low_power_idle_ms_0_86400000"
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 led_status=70 led_key=65 led_ec11=60 led_edge=55 compact_set=1 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,led_zone_brightness_0_100,low_power_idle_ms_0_86400000"
         )
         .expect("parse device settings");
         assert_eq!(status.brightness_percent, 80);
@@ -16854,6 +17559,7 @@ mod tests {
         assert_eq!(status.knob_led_brightness_percent, 60);
         assert_eq!(status.edge_led_brightness_percent, 55);
         assert!(status.led_zone_brightness_supported);
+        assert!(status.compact_set_supported);
         assert_eq!(status.low_power_idle_minutes, 2);
         assert_eq!(status.plugged_low_power_idle_minutes, 2);
         assert_eq!(status.battery_low_power_idle_minutes, 3);

@@ -1217,11 +1217,9 @@ $timer.Start()
 '@
     Set-Content -Path $targetScript -Value $targetScriptBody -Encoding UTF8
     for ($attempt = 1; $attempt -le 3; $attempt++) {
-        $process = Start-Process -FilePath "powershell.exe" `
+        $process = Start-Process -FilePath "pwsh" `
             -ArgumentList @(
                 "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
                 "-STA",
                 "-File",
                 (Quote-ProcessArgument $targetScript),
@@ -2540,7 +2538,7 @@ if (-not $SkipEnsureBle) {
     if (-not (Test-Path $ensureScript)) {
         throw "BLE ensure script not found: $ensureScript"
     }
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ensureScript `
+    & pwsh -NoProfile -File $ensureScript `
         -DeviceName $DeviceName `
         -BluetoothAddress $BluetoothAddress `
         -DurationSeconds 8 `

@@ -347,7 +347,7 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
     if bytes.is_empty() {
         return Ok(UserPreferences::default());
     }
-    let prefs = serde_json::from_slice::<UserPreferences>(&bytes)
+    let mut prefs = serde_json::from_slice::<UserPreferences>(&bytes)
         .with_context(|| format!("decode failed: {}", path.display()))?;
 
     // issue #440：老版本可能已把旧默认 `streamingInsert:false` 写进 preferences.json。
@@ -390,11 +390,23 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
                 .and_then(|flag| flag.as_bool())
         })
         .unwrap_or(false);
+    let active_asr_provider_default_migrated = raw_prefs
+        .as_ref()
+        .and_then(|value| {
+            value
+                .get("activeAsrProviderDefaultMigrated")
+                .and_then(|flag| flag.as_bool())
+        })
+        .unwrap_or(false);
+    if !active_asr_provider_default_migrated {
+        prefs.active_asr_provider_default_migrated = true;
+    }
     if !streaming_default_migrated
         || !dictation_input_source_has_user_override_marker
         || !device_status_led_default_migrated
         || !device_key_led_default_migrated
         || !device_led_brightness_102_default_migrated
+        || !active_asr_provider_default_migrated
     {
         match serde_json::to_vec_pretty(&prefs)
             .context("encode prefs failed")
@@ -467,14 +479,7 @@ impl Default for CredsActive {
 }
 
 fn creds_default_asr() -> String {
-    #[cfg(target_os = "windows")]
-    {
-        return crate::asr::local::foundry::PROVIDER_ID.into();
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        "volcengine".into()
-    }
+    "volcengine".into()
 }
 fn creds_default_llm() -> String {
     "ark".into()
@@ -2524,6 +2529,49 @@ mod tests {
         assert_eq!(
             saved
                 .get("streamingInsertDefaultMigrated")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn legacy_asr_provider_marker_migration_preserves_existing_provider() {
+        let tmp: PathBuf = std::env::temp_dir().join(format!(
+            "listener-type-asr-provider-prefs-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("preferences.json");
+        fs::write(
+            &path,
+            r#"{
+                "activeAsrProvider": "foundry-local-whisper",
+                "activeLlmProvider": "ark"
+            }"#,
+        )
+        .expect("write legacy prefs");
+
+        let prefs = read_preferences(&path).expect("read prefs");
+        assert_eq!(
+            prefs.active_asr_provider,
+            crate::asr::local::foundry::PROVIDER_ID
+        );
+        assert!(prefs.active_asr_provider_default_migrated);
+
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("read saved prefs"))
+                .expect("decode saved prefs");
+        assert_eq!(
+            saved
+                .get("activeAsrProvider")
+                .and_then(|value| value.as_str()),
+            Some(crate::asr::local::foundry::PROVIDER_ID)
+        );
+        assert_eq!(
+            saved
+                .get("activeAsrProviderDefaultMigrated")
                 .and_then(|value| value.as_bool()),
             Some(true)
         );

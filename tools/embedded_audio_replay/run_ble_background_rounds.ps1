@@ -15,7 +15,11 @@ param(
     [int]$PreRecordDelayMs = 300,
     [int]$PostPlaybackRecordMs = 500,
     [double]$MaxHiddenToVisibleSeconds = 1.0,
+    [int]$MaxTypeKeyToVisibleMs = 250,
+    [int]$MaxPlaybackStartToFirstTextMs = 1800,
+    [int]$MaxPlaybackDoneToDoneMs = 4000,
     [switch]$SkipAccuracyGate,
+    [switch]$RequireTranscriptMatch,
     [switch]$SkipEnsureBle
 )
 
@@ -40,6 +44,46 @@ function Write-Utf8NoBomText {
     )
     $encoding = [System.Text.UTF8Encoding]::new($false)
     [System.IO.File]::WriteAllText($Path, $Text, $encoding)
+}
+
+function Normalize-TranscriptForGate {
+    param([AllowNull()][string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+    $normalized = $Text.Trim().ToLowerInvariant()
+    try {
+        $normalized = $normalized.Normalize([System.Text.NormalizationForm]::FormKC)
+    } catch {
+    }
+    return [regex]::Replace($normalized, "[\p{P}\p{S}\s]+", "")
+}
+
+function ConvertTo-UnixMilliseconds {
+    param([Parameter(Mandatory = $true)][datetime]$Value)
+    return [DateTimeOffset]::new($Value.ToUniversalTime()).ToUnixTimeMilliseconds()
+}
+
+function Get-TimelineUnixMs {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$Pattern,
+        [switch]$Last
+    )
+    $values = @(
+        $Text -split "`r?`n" | Where-Object { $_ -match $Pattern } | ForEach-Object {
+            if ($_ -match "unix_ms=(\d+)") {
+                [int64]$Matches[1]
+            }
+        }
+    )
+    if ($values.Count -eq 0) {
+        return $null
+    }
+    if ($Last) {
+        return $values[-1]
+    }
+    return $values[0]
 }
 
 function Read-NewLogText {
@@ -630,7 +674,7 @@ if (-not $SkipEnsureBle) {
     if (-not (Test-Path $ensureScript)) {
         throw "BLE ensure script not found: $ensureScript"
     }
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ensureScript `
+    & pwsh -NoProfile -File $ensureScript `
         -DeviceName $DeviceName `
         -BluetoothAddress $BluetoothAddress `
         -DurationSeconds 8 `
@@ -815,6 +859,33 @@ try {
         }
         $visibleLatencySeconds = if ($startFallbackUsed) { $startToVisibleSeconds } else { $hiddenToVisibleSeconds }
         $visibleLatencyBasis = if ($startFallbackUsed) { "fallback_start" } else { "previous_hidden" }
+        $typeKeyPressedUnixMs = Get-TimelineUnixMs `
+            -Text $roundLogText `
+            -Pattern "source=backend\.device_key event=pressed key=KEY3"
+        $capsuleFrontendVisibleUnixMs = Get-TimelineUnixMs `
+            -Text $roundLogText `
+            -Pattern "source=frontend\.capsule event=visible state=recording"
+        $firstTextUnixMs = Get-TimelineUnixMs `
+            -Text $roundLogText `
+            -Pattern "source=backend\.capsule event=emit_request.*session_id=[0-9a-fA-F-]{36}.*state=Recording.*message=.+"
+        $doneUnixMs = Get-TimelineUnixMs `
+            -Text $roundLogText `
+            -Pattern "source=backend\.capsule event=emit_request.*session_id=[0-9a-fA-F-]{36}.*state=Done" `
+            -Last
+        $playbackStartedUnixMs = ConvertTo-UnixMilliseconds -Value $playbackStartedAt
+        $playbackDoneUnixMs = ConvertTo-UnixMilliseconds -Value $playbackDoneAt
+        $typeKeyToVisibleMs = if ($null -ne $typeKeyPressedUnixMs -and $null -ne $capsuleFrontendVisibleUnixMs) {
+            [int]($capsuleFrontendVisibleUnixMs - $typeKeyPressedUnixMs)
+        } else { $null }
+        $typeKeyToFirstTextMs = if ($null -ne $typeKeyPressedUnixMs -and $null -ne $firstTextUnixMs) {
+            [int]($firstTextUnixMs - $typeKeyPressedUnixMs)
+        } else { $null }
+        $playbackStartToFirstTextMs = if ($null -ne $firstTextUnixMs) {
+            [int]($firstTextUnixMs - $playbackStartedUnixMs)
+        } else { $null }
+        $playbackDoneToDoneMs = if ($null -ne $doneUnixMs) {
+            [int]($doneUnixMs - $playbackDoneUnixMs)
+        } else { $null }
 
         $roundFailures = @()
         $roundWarnings = @()
@@ -830,9 +901,36 @@ try {
                 $roundFailures += "transcript_missing"
             }
         }
+        $normalizedExpectedText = Normalize-TranscriptForGate -Text $expectedText
+        $normalizedTranscript = Normalize-TranscriptForGate -Text $transcript
+        if (-not [string]::IsNullOrWhiteSpace($normalizedExpectedText) -and
+            -not [string]::IsNullOrWhiteSpace($normalizedTranscript) -and
+            $normalizedExpectedText -ne $normalizedTranscript) {
+            $mismatch = "transcript_mismatch expected=$normalizedExpectedText actual=$normalizedTranscript"
+            if ($RequireTranscriptMatch -and -not $SkipAccuracyGate) {
+                $roundFailures += $mismatch
+            } else {
+                $roundWarnings += $mismatch
+            }
+        }
         if ($null -ne $missingPackets -and [int]$missingPackets -ne 0) { $roundFailures += "missing_packets=$missingPackets" }
         if ($visibleLatencySeconds -ne $null -and $visibleLatencySeconds -gt $MaxHiddenToVisibleSeconds) {
             $roundFailures += "capsule_visible_latency_seconds=$visibleLatencySeconds basis=$visibleLatencyBasis"
+        }
+        if ($null -eq $typeKeyToVisibleMs) {
+            $roundWarnings += "type_key_to_visible_ms_unavailable"
+        } elseif ($typeKeyToVisibleMs -gt $MaxTypeKeyToVisibleMs) {
+            $roundFailures += "type_key_to_visible_ms=$typeKeyToVisibleMs"
+        }
+        if ($null -eq $playbackStartToFirstTextMs) {
+            $roundWarnings += "playback_start_to_first_text_ms_unavailable"
+        } elseif ($playbackStartToFirstTextMs -gt $MaxPlaybackStartToFirstTextMs) {
+            $roundFailures += "playback_start_to_first_text_ms=$playbackStartToFirstTextMs"
+        }
+        if ($null -eq $playbackDoneToDoneMs) {
+            $roundWarnings += "playback_done_to_done_ms_unavailable"
+        } elseif ($playbackDoneToDoneMs -gt $MaxPlaybackDoneToDoneMs) {
+            $roundFailures += "playback_done_to_done_ms=$playbackDoneToDoneMs"
         }
         $roundSerialEvidenceLines = @($roundSerialLines + $stopLines)
         $serialText = ($roundSerialEvidenceLines -join "`n")
@@ -864,8 +962,25 @@ try {
             warnings = @($roundWarnings)
             expected_text = $expectedText
             transcript = $transcript
+            normalized_expected_text = $normalizedExpectedText
+            normalized_transcript = $normalizedTranscript
             accuracy_gate_skipped = [bool]$SkipAccuracyGate
             transcript_gate_skipped = [bool]$SkipAccuracyGate
+            latency_thresholds_ms = [ordered]@{
+                max_type_key_to_visible_ms = $MaxTypeKeyToVisibleMs
+                max_playback_start_to_first_text_ms = $MaxPlaybackStartToFirstTextMs
+                max_playback_done_to_done_ms = $MaxPlaybackDoneToDoneMs
+            }
+            latency = [ordered]@{
+                type_key_to_visible_ms = $typeKeyToVisibleMs
+                type_key_to_first_text_ms = $typeKeyToFirstTextMs
+                playback_start_to_first_text_ms = $playbackStartToFirstTextMs
+                playback_done_to_done_ms = $playbackDoneToDoneMs
+                type_key_pressed_unix_ms = $typeKeyPressedUnixMs
+                capsule_frontend_visible_unix_ms = $capsuleFrontendVisibleUnixMs
+                first_text_unix_ms = $firstTextUnixMs
+                done_unix_ms = $doneUnixMs
+            }
             started_at_utc = $roundStartedAt.ToUniversalTime().ToString("o")
             effective_started_at_utc = $effectiveRoundStartedAt.ToUniversalTime().ToString("o")
             fallback_triggered_at_utc = if ($fallbackTriggeredAt) { $fallbackTriggeredAt.ToUniversalTime().ToString("o") } else { $null }

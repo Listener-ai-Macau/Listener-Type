@@ -221,6 +221,9 @@ struct Inner {
     /// 嵌入式 BLE 流式 ASR 的最近一次 partial preview。只用于胶囊视觉反馈；
     /// 光标仍只在 final text 完成后写入。
     embedded_audio_partial_preview: Mutex<Option<String>>,
+    /// 最近一次用于录音胶囊的嵌入式 BLE PCM 电平。ASR partial preview 到达时沿用它，
+    /// 避免文字刷新把音量动画刷成 0。
+    embedded_audio_last_capsule_level: Mutex<f32>,
     /// 嵌入式 BLE 收到停止包后锁存胶囊的停止反馈。SessionPhase 仍保持 Listening，
     /// 让 end_session 接管最终处理，同时避免尾包 / partial preview 把 UI 刷回 Recording。
     embedded_audio_stop_feedback_latched: AtomicBool,
@@ -363,6 +366,7 @@ enum EmbeddedBleSessionActorCommand {
     BlePacket,
     AsrPartial,
     AsrFinal,
+    StartCommand,
     StopCommand,
     CancelCommand,
     Timeout,
@@ -377,6 +381,7 @@ impl EmbeddedBleSessionActorCommand {
             Self::BlePacket => "ble_packet",
             Self::AsrPartial => "asr_partial",
             Self::AsrFinal => "asr_final",
+            Self::StartCommand => "start_command",
             Self::StopCommand => "stop_command",
             Self::CancelCommand => "cancel_command",
             Self::Timeout => "timeout",
@@ -438,7 +443,7 @@ impl EmbeddedBlePcmCapsuleTraceState {
             .map(|last| now.duration_since(last) >= EMBEDDED_BLE_PCM_CAPSULE_TRACE_INTERVAL)
             .unwrap_or(true);
 
-        let should_trace = after_stop || session_changed || boundary_changed || due;
+        let should_trace = session_changed || boundary_changed || due;
         if should_trace {
             self.session_id = Some(session_id);
             self.last_after_stop = Some(after_stop);
@@ -543,6 +548,7 @@ impl Coordinator {
                     embedded_audio_stats: Mutex::new(None),
                     embedded_audio_final_result: Mutex::new(None),
                     embedded_audio_partial_preview: Mutex::new(None),
+                    embedded_audio_last_capsule_level: Mutex::new(0.0),
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     embedded_ble_ota_active: AtomicBool::new(false),
@@ -617,6 +623,7 @@ impl Coordinator {
                 embedded_audio_stats: Mutex::new(None),
                 embedded_audio_final_result: Mutex::new(None),
                 embedded_audio_partial_preview: Mutex::new(None),
+                embedded_audio_last_capsule_level: Mutex::new(0.0),
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 embedded_ble_ota_active: AtomicBool::new(false),
@@ -697,6 +704,41 @@ impl Coordinator {
         #[cfg(not(target_os = "macos"))]
         {
             // no-op
+        }
+    }
+
+    pub fn preload_foundry_local_asr_in_background(self: &Arc<Self>, reason: &'static str) {
+        #[cfg(target_os = "windows")]
+        {
+            let inner = Arc::clone(&self.inner);
+            tauri::async_runtime::spawn(async move {
+                let prefs = inner.prefs.get();
+                if !foundry::is_foundry_local_whisper(&prefs.active_asr_provider) {
+                    return;
+                }
+                let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
+                    prefs.foundry_local_asr_model.clone()
+                } else {
+                    foundry::DEFAULT_MODEL_ALIAS.to_string()
+                };
+                let runtime_source = prefs.foundry_local_runtime_source.clone();
+                let runtime = Arc::clone(&inner.foundry_local_runtime);
+                log::info!(
+                    "[foundry-asr] background preload started reason={reason} model={model_alias} source={runtime_source}"
+                );
+                match runtime.ensure_loaded(&model_alias, &runtime_source).await {
+                    Ok(model_id) => log::info!(
+                        "[foundry-asr] background preload ready reason={reason} model={model_alias} model_id={model_id}"
+                    ),
+                    Err(error) => log::warn!(
+                        "[foundry-asr] background preload failed reason={reason} model={model_alias}: {error:#}"
+                    ),
+                }
+            });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = reason;
         }
     }
 
@@ -1271,16 +1313,12 @@ impl Coordinator {
         if self.inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle {
             if embedded_ble_listener_capture_ready(&self.inner) {
                 record_embedded_ble_notify_ready(&self.inner);
-                emit_capsule(
+                request_embedded_ble_recording_start_from_host(
                     &self.inner,
-                    CapsuleState::Recording,
-                    0.0,
-                    0,
-                    Some("Listener BLE 已连接，按设备语音键开始录音。".to_string()),
-                    None,
-                );
-                schedule_capsule_idle(&self.inner, 1400, None);
-                log::info!("[coord] start_dictation reused ready Listener BLE background listener");
+                    "host_start_ready_listener",
+                )
+                .await?;
+                log::info!("[coord] start_dictation started Listener BLE recording via ready background listener");
                 return Ok(());
             }
             self.refresh_embedded_ble_listener();
@@ -1301,15 +1339,11 @@ impl Coordinator {
             {
                 Ok(()) => {
                     record_embedded_ble_notify_ready(&self.inner);
-                    emit_capsule(
+                    request_embedded_ble_recording_start_from_host(
                         &self.inner,
-                        CapsuleState::Recording,
-                        0.0,
-                        0,
-                        Some("Listener BLE 已连接，按设备语音键开始录音。".to_string()),
-                        None,
-                    );
-                    schedule_capsule_idle(&self.inner, 1400, None);
+                        "host_start_after_recovery",
+                    )
+                    .await?;
                 }
                 Err(err) => {
                     record_embedded_ble_listener_last_error(&self.inner, &err);
@@ -3347,6 +3381,100 @@ fn emit_device_key_recording_control_capsule(
     None
 }
 
+async fn request_embedded_ble_recording_start_from_host(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+) -> Result<SessionId, String> {
+    if !embedded_ble_listener_capture_ready(inner) {
+        return Err("Listener BLE audio channel is not ready".to_string());
+    }
+
+    let session_id = {
+        let mut state = inner.state.lock();
+        match state.phase {
+            SessionPhase::Idle => begin_session_state(&mut state, None, capture_frontmost_app())
+                .ok_or_else(|| "Listener BLE recording start ignored while idle".to_string())?,
+            SessionPhase::Starting | SessionPhase::Listening => state.session_id,
+            phase => {
+                return Err(format!(
+                    "Listener BLE recording start ignored while dictation phase is {phase:?}"
+                ));
+            }
+        }
+    };
+
+    record_embedded_ble_session_actor_command(
+        inner,
+        EmbeddedBleSessionActorCommand::StartCommand,
+        Some(session_id),
+        format!("host start requested reason={reason}"),
+    );
+    emit_capsule_for_session(
+        inner,
+        session_id,
+        CapsuleState::Recording,
+        0.0,
+        0,
+        Some("Listener 录音已启动，正在接收音频...".to_string()),
+        None,
+    );
+
+    #[cfg(test)]
+    {
+        crate::timeline::mark(
+            "backend.embedded_ble_session_actor",
+            "firmware_start_skipped_test",
+            format!("session_id={session_id} reason={reason}"),
+        );
+        return Ok(session_id);
+    }
+
+    #[cfg(not(test))]
+    {
+        let result = async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::send_recording_control_toggle(
+                EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+            )
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|value| value);
+
+        match result {
+            Ok(()) => {
+                crate::timeline::mark(
+                    "backend.embedded_ble_session_actor",
+                    "firmware_start_sent",
+                    format!("session_id={session_id} reason={reason}"),
+                );
+                log::info!(
+                    "[coord] embedded BLE firmware start sent session_id={session_id} reason={reason}"
+                );
+                Ok(session_id)
+            }
+            Err(err) => {
+                set_phase_idle_if_session_matches(inner, session_id);
+                record_embedded_ble_listener_last_error(inner, &err);
+                record_embedded_ble_recovery_failure(inner, &err);
+                refresh_embedded_ble_listener(inner);
+                emit_capsule(
+                    inner,
+                    CapsuleState::Error,
+                    0.0,
+                    0,
+                    Some(format!(
+                        "Listener 录音启动控制发送失败: {}",
+                        embedded_ble_recording_control_guidance(&err)
+                    )),
+                    None,
+                );
+                schedule_capsule_idle(inner, 6000, Some(session_id));
+                Err(err)
+            }
+        }
+    }
+}
+
 async fn handle_device_translation_action(inner: Arc<Inner>) {
     let phase = inner.state.lock().phase;
     if matches!(phase, SessionPhase::Idle) {
@@ -4785,11 +4913,16 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     );
     let recovery_advertisement_allows_cleanup =
         recovery_pairing_advertisement_allows_immediate_stale_cleanup(err);
-    let expected_ble_name = inner.prefs.get().device_ble_name;
     let should_query_pairing_preflight = recovery_pairing_window_visible
         || stale_cleanup_candidate
         || visible_recovery_allows_cleanup
         || recovery_advertisement_allows_cleanup;
+    let usb_ble_name_synced = should_query_pairing_preflight
+        && sync_device_ble_name_from_firmware_settings(
+            inner,
+            "background_stale_pairing_usb_name_probe",
+        );
+    let expected_ble_name = inner.prefs.get().device_ble_name;
     let pairing_before_cleanup = if should_query_pairing_preflight {
         let expected_ble_name = expected_ble_name.clone();
         let pairing = async_runtime::spawn_blocking(move || {
@@ -4821,12 +4954,13 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     if !embedded_ble_recovery_error_still_current(inner, err, "after_pairing_preflight") {
         return EmbeddedBleStalePairingCleanupOutcome::Skipped;
     }
-    let manual_unpair_hold = pairing_before_cleanup.as_ref().is_some_and(|pairing| {
-        should_hold_embedded_ble_background_recovery_after_manual_unpair(
-            pairing,
-            direct_gatt_instability_recovery,
-        )
-    });
+    let manual_unpair_hold = !usb_ble_name_synced
+        && pairing_before_cleanup.as_ref().is_some_and(|pairing| {
+            should_hold_embedded_ble_background_recovery_after_manual_unpair(
+                pairing,
+                direct_gatt_instability_recovery,
+            )
+        });
     let local_stale_cache_recovery_allows_cleanup = recovery_pairing_window_visible
         && pairing_before_cleanup.as_ref().is_some_and(|pairing| {
             !manual_unpair_hold
@@ -4837,7 +4971,8 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     let automatic_cleanup_allowed = visible_recovery_allows_cleanup
         || stale_cleanup_candidate
         || recovery_advertisement_allows_cleanup
-        || local_stale_cache_recovery_allows_cleanup;
+        || local_stale_cache_recovery_allows_cleanup
+        || usb_ble_name_synced;
     if recovery_pairing_probe.has_random_identity {
         if recovery_advertisement_allows_cleanup || local_stale_cache_recovery_allows_cleanup {
             log::warn!(
@@ -5177,15 +5312,24 @@ fn should_probe_embedded_ble_recovery_pairing_advertisement(
         return false;
     }
     let failure = crate::embedded_ble::classify_ble_failure(err);
-    matches!(
+    if matches!(
         failure.kind,
-        crate::embedded_ble::BleFailureKind::PairedButDisconnected
-            | crate::embedded_ble::BleFailureKind::MissingPairing
+        crate::embedded_ble::BleFailureKind::MissingPairing
             | crate::embedded_ble::BleFailureKind::DeviceMissing
     ) || (matches!(
         failure.kind,
         crate::embedded_ble::BleFailureKind::CccdProtocolError
     ) && is_embedded_ble_noisy_cccd_failure(err))
+    {
+        return true;
+    }
+
+    should_attempt_embedded_ble_background_direct_gatt_pairing_recovery(
+        err,
+        snapshot,
+        last_cleanup_at,
+        now,
+    )
 }
 
 fn recovery_pairing_advertisement_allows_immediate_stale_cleanup(err: &str) -> bool {
@@ -5221,6 +5365,14 @@ fn should_hold_embedded_ble_background_recovery_after_manual_unpair(
     }
     if pairing.already_paired_devices > 0 {
         return false;
+    }
+    if matches!(
+        pairing.status,
+        crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction
+    ) && pairing.open_bluetooth_settings
+        && pairing.failed_devices > 0
+    {
+        return true;
     }
     if pairing.matched_devices > 0 || pairing.failed_devices > 0 {
         return false;
@@ -6074,11 +6226,33 @@ fn ensure_microphone_permission(_inner: &Arc<Inner>) -> Result<(), String> {
     }
 }
 
-fn ensure_asr_credentials() -> Result<(), String> {
-    let active_asr = CredentialsVault::get_active_asr();
+fn active_asr_provider_from_preferences(inner: &Arc<Inner>) -> String {
+    let prefs_provider = inner.prefs.get().active_asr_provider;
+    let prefs_provider = prefs_provider.trim();
+    if prefs_provider.is_empty() {
+        return CredentialsVault::get_active_asr();
+    }
+    prefs_provider.to_string()
+}
 
+fn sync_active_asr_provider_to_credentials_for_runtime(active_asr: &str) {
+    let vault_active_asr = CredentialsVault::get_active_asr();
+    if vault_active_asr == active_asr {
+        return;
+    }
+    match CredentialsVault::set_active_asr_provider(active_asr) {
+        Ok(()) => log::warn!(
+            "[coord] active ASR provider drift corrected for runtime prefs={active_asr} vault={vault_active_asr}"
+        ),
+        Err(err) => log::warn!(
+            "[coord] active ASR provider drift detected but credential sync failed prefs={active_asr} vault={vault_active_asr}: {err}"
+        ),
+    }
+}
+
+fn ensure_asr_credentials(active_asr: &str) -> Result<(), String> {
     // 本地 Qwen3-ASR 没有"凭据"概念，但需要：(a) macOS 平台 (b) 模型已下载。
-    if crate::asr::local::is_local_qwen3(&active_asr) {
+    if crate::asr::local::is_local_qwen3(active_asr) {
         #[cfg(not(target_os = "macos"))]
         {
             return Err("本地 ASR 当前仅支持 macOS（Windows 见 issue #256）".to_string());
@@ -6089,7 +6263,7 @@ fn ensure_asr_credentials() -> Result<(), String> {
         }
     }
 
-    if crate::asr::local::foundry::is_foundry_local_whisper(&active_asr) {
+    if crate::asr::local::foundry::is_foundry_local_whisper(active_asr) {
         #[cfg(not(target_os = "windows"))]
         {
             return Err("Foundry Local Whisper 当前仅支持 Windows".to_string());
@@ -6100,7 +6274,7 @@ fn ensure_asr_credentials() -> Result<(), String> {
         }
     }
 
-    if is_whisper_compatible_provider(&active_asr) || is_bailian_provider(&active_asr) {
+    if is_whisper_compatible_provider(active_asr) || is_bailian_provider(active_asr) {
         let api_key = CredentialsVault::get(CredentialAccount::AsrApiKey)
             .ok()
             .flatten()
@@ -6540,8 +6714,9 @@ async fn translate_text(
         .await?)
 }
 
-fn read_whisper_credentials() -> anyhow::Result<(String, String, String, ProviderProxyConfig)> {
-    let active_asr = CredentialsVault::get_active_asr();
+fn read_whisper_credentials(
+    active_asr: &str,
+) -> anyhow::Result<(String, String, String, ProviderProxyConfig)> {
     let api_key = CredentialsVault::get(CredentialAccount::AsrApiKey)
         .ok()
         .flatten()
@@ -8057,6 +8232,16 @@ mod tests {
             .lock()
             .as_ref()
             .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
+        {
+            let state = coordinator.inner.state.lock();
+            assert_eq!(state.phase, SessionPhase::Starting);
+        }
+        assert!(embedded_ble_session_actor_history(&coordinator.inner)
+            .iter()
+            .any(
+                |record| record.command == EmbeddedBleSessionActorCommand::StartCommand
+                    && record.detail.contains("host_start_ready_listener")
+            ));
     }
 
     #[test]
@@ -8860,7 +9045,7 @@ mod tests {
         };
         assert!(!should_hold_embedded_ble_background_recovery_after_manual_unpair(&paired, false));
 
-        let stale_failed_node = crate::embedded_ble::BleDevicePairingPromptResult {
+        let manual_delete_failed_node = crate::embedded_ble::BleDevicePairingPromptResult {
             status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
             attempted: true,
             matched_devices: 1,
@@ -8871,11 +9056,11 @@ mod tests {
             details: vec![],
         };
         assert!(
-            !should_hold_embedded_ble_background_recovery_after_manual_unpair(
-                &stale_failed_node,
+            should_hold_embedded_ble_background_recovery_after_manual_unpair(
+                &manual_delete_failed_node,
                 false
             ),
-            "a visible but unpaired stale Windows Listener node is local cleanup evidence; user-controlled means Type skips PairAsync, not that Type leaves stale cache untouched"
+            "manual Windows delete leaves a matched but unpaired Listener devnode; Type must not background PairAsync it back"
         );
     }
 
@@ -9097,7 +9282,9 @@ mod tests {
     fn embedded_ble_recovery_pairing_probe_ignores_stale_usb_power_snapshot() {
         let now = Instant::now();
         let snapshot = EmbeddedBleWakeRecoverySnapshot {
-            reconnect_attempts: 2,
+            reconnect_attempts: EMBEDDED_BLE_BACKGROUND_DIRECT_GATT_PAIRING_ATTEMPT_THRESHOLD,
+            consecutive_reconnect_failures:
+                EMBEDDED_BLE_BACKGROUND_DIRECT_GATT_PAIRING_ATTEMPT_THRESHOLD,
             notify_subscription_state: EmbeddedBleNotifySubscriptionState::Failed,
             usb_powered: Some(false),
             ..Default::default()
@@ -9132,11 +9319,47 @@ mod tests {
         assert!(
             !should_attempt_embedded_ble_background_direct_gatt_pairing_recovery(
                 reconnect_error,
-                &snapshot,
+                &EmbeddedBleWakeRecoverySnapshot {
+                    reconnect_attempts:
+                        EMBEDDED_BLE_BACKGROUND_DIRECT_GATT_PAIRING_ATTEMPT_THRESHOLD - 1,
+                    consecutive_reconnect_failures:
+                        EMBEDDED_BLE_BACKGROUND_DIRECT_GATT_PAIRING_ATTEMPT_THRESHOLD - 1,
+                    ..snapshot.clone()
+                },
                 None,
                 now,
             ),
             "direct GATT pairing recovery waits for repeated lease churn, not the first transient recovery scan"
+        );
+    }
+
+    #[test]
+    fn embedded_ble_transient_link_loss_skips_recovery_pairing_scan_before_direct_gatt_threshold() {
+        let now = Instant::now();
+        let reconnect_error =
+            "BLE device connection status changed to Disconnected; transport_not_ready";
+        let transient_snapshot = EmbeddedBleWakeRecoverySnapshot {
+            reconnect_attempts: EMBEDDED_BLE_BACKGROUND_DIRECT_GATT_PAIRING_ATTEMPT_THRESHOLD - 1,
+            consecutive_reconnect_failures:
+                EMBEDDED_BLE_BACKGROUND_DIRECT_GATT_PAIRING_ATTEMPT_THRESHOLD - 1,
+            notify_subscription_state: EmbeddedBleNotifySubscriptionState::Lost,
+            usb_powered: Some(true),
+            ..Default::default()
+        };
+
+        assert!(
+            !should_probe_embedded_ble_recovery_pairing_advertisement(
+                reconnect_error,
+                &transient_snapshot,
+                None,
+                now,
+            ),
+            "ordinary reboot/link-loss reconnect must not spend the fast path on a recovery-advertisement scan"
+        );
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(reconnect_error, Duration::from_secs(4)),
+            EMBEDDED_BLE_RETRY_FAST_DELAY,
+            "the next background retry after ordinary link loss stays on the fast reconnect cadence"
         );
     }
 
@@ -10821,7 +11044,11 @@ fn emit_capsule_with_session(
     let session_id = event_session_id.map(|id| id.to_string());
     let translation = inner.translation_modifier_seen.load(Ordering::SeqCst);
     let visible = !matches!(state, CapsuleState::Idle);
-    let show_capsule = inner.prefs.get().show_capsule;
+    let show_capsule = inner.prefs.get().show_capsule
+        && std::env::var("LISTENER_TYPE_SUPPRESS_CAPSULE_WINDOW")
+            .ok()
+            .as_deref()
+            != Some("1");
     let now = Instant::now();
     let should_emit_frontend = {
         let mut throttle = inner.capsule_ui_throttle.lock();

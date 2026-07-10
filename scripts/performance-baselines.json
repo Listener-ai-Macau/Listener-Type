@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-10",
+  "contracts": {
+    "device_settings_compact_write": {
+      "accepted": true,
+      "evidence": ".cache/validation/installed-device-settings-compact-write-latest-warm-20260709-2253.json",
+      "measured_write_elapsed_ms": 1167,
+      "measured_restore_elapsed_ms": 1568,
+      "max_write_elapsed_ms": 2500,
+      "max_restore_elapsed_ms": 3000,
+      "validation_command": "python scripts/windows-installed-device-settings-write-e2e.py --remote-debugging-port <port> --max-write-ms 2500 --max-restore-ms 3000 --output-json <artifact>.json"
+    },
+    "recording_low_latency": {
+      "accepted": true,
+      "evidence": ".cache/validation/asr-latency-20260710-0915/run-summary.json",
+      "measured_max_start_to_preview_ms": 1231,
+      "measured_max_submit_to_preview_ms": 1528,
+      "measured_max_submitted_to_done_ms": 623,
+      "max_start_to_preview_ms": 1800,
+      "max_submit_to_preview_ms": 2000,
+      "max_submitted_to_done_ms": 1200,
+      "all_force_raw": true,
+      "no_streaming_polish_or_401": true,
+      "no_transport_errors": true,
+      "validation_command": "npm run check:recording-latency; pwsh -NoProfile -File .\\tools\\embedded_audio_replay\\run_embedded_audio_file_smoke.ps1 -ListenerExe \"C:\\Program Files\\Listener Type\\listener-type.exe\" -UseExistingInstance -AccuracyWarningOnly <short/fast/long wavs>; parse listener-type.log to enforce force raw, no streaming polish/401, no transport timeout, preview <=2000 ms, Done <=1200 ms"
+    },
+    "ble_rename_recovery": {
+      "accepted": true,
+      "evidence": ".cache/validation/rename-speed-optimized-msi-20260709/installed-random-rename-speed-optimized.json",
+      "measured_random_rename_elapsed_ms": 15336,
+      "measured_restore_elapsed_ms": 18942,
+      "max_random_rename_elapsed_ms": 25000,
+      "max_restore_elapsed_ms": 25000,
+      "validation_command": "python scripts/windows-installed-device-settings-write-e2e.py --remote-debugging-port <port> --rename-random-name --max-write-ms 25000 --max-restore-ms 25000 --output-json <artifact>.json"
+    },
+    "type_takeover_no_forced_repair": {
+      "accepted": true,
+      "human_acceptance_evidence": ".cache/validation/preproduction-human-review-type-takeover-no-forced-repair-20260710-0831/preproduction-human-review-summary.json",
+      "evidence": ".cache/validation/type-startup-reconnect-20260710-0940/summary.json",
+      "measured_start_to_gatt_ready_ms": 777,
+      "measured_start_to_selected_device_ms": 796,
+      "measured_start_to_notify_ready_ms": 1228,
+      "measured_start_to_type_heartbeat_ready_ms": 1254,
+      "max_start_to_notify_ready_ms": 3000,
+      "persisted_path_required": true,
+      "no_pair_async": true,
+      "validation_command": "pwsh -NoProfile -File C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\scripts\\aiw.ps1 with-lock -Resource listener-ble -Wait -WaitTimeoutSeconds 60 -Purpose \"Type restart reconnect speed validation\" -Run pwsh -NoProfile -File .\\scripts\\check-type-startup-reconnect-speed.ps1 -RequirePersistedPath -MaxNotifyReadyMs 3000 -OutputJson <artifact>.json; artifact must prove no PairAsync, persisted_path_used=true, and background listener notify ready <=3000 ms from === Listener Type 启动 ===."
+    },
+    "ota_transfer_speed": {
+      "accepted": false,
+      "status": "pending_baseline_after_ota_acceptance",
+      "validation_command": "TBD after OTA/wired flashing item is machine-validated and human-accepted"
+    }
+  }
+}

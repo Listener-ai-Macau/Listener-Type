@@ -17,5 +17,8 @@ pub struct DictionaryHotword {
     pub enabled: bool,
 }
 
+#[path = "../../../../src-tauri/src/asr/volcengine_transcript.rs"]
+pub mod volcengine_transcript;
+
 #[path = "../../../../src-tauri/src/asr/volcengine.rs"]
 pub mod volcengine;

@@ -53,6 +53,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const LOG_ROTATE_LIMIT_BYTES: u64 = 10 * 1024 * 1024;
+const SUPPRESS_CAPSULE_WINDOW_ENV: &str = "LISTENER_TYPE_SUPPRESS_CAPSULE_WINDOW";
+const FORCE_RAW_OUTPUT_ENV: &str = "LISTENER_TYPE_FORCE_RAW_OUTPUT";
+#[cfg(target_os = "windows")]
+const LISTENER_TYPE_WEBVIEW2_ADDITIONAL_BROWSER_ARGS_ENV: &str =
+    "LISTENER_TYPE_WEBVIEW2_ADDITIONAL_BROWSER_ARGS";
+#[cfg(target_os = "windows")]
+const WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES: &str = "msWebOOUI,msPdfOOUI,msSmartScreenProtection";
 
 /// 第一次 show 时把 QA 浮窗摆到屏幕底部居中；之后的 show 不再 reposition，
 /// 让用户拖动后的位置在 hide → show 之间得以保持。详见 issue #118 v2。
@@ -68,6 +75,48 @@ use tauri::{
 };
 
 use crate::types::{DictationInputSource, PolishMode};
+
+#[cfg(target_os = "windows")]
+fn merge_webview2_test_browser_args(existing: Option<&str>, requested: &str) -> Option<String> {
+    let requested = requested.trim();
+    if requested.is_empty() {
+        return existing
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+    }
+
+    let mut merged = match existing.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(existing) => format!("{existing} {requested}"),
+        None => requested.to_string(),
+    };
+    if !merged.contains("--disable-features=") {
+        merged = format!(
+            "--disable-features={} {}",
+            WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES, merged
+        );
+    }
+    Some(merged)
+}
+
+#[cfg(target_os = "windows")]
+fn apply_webview2_test_browser_args_from_env<R: Runtime>(context: &mut tauri::Context<R>) {
+    let Some(requested) = std::env::var(LISTENER_TYPE_WEBVIEW2_ADDITIONAL_BROWSER_ARGS_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+
+    for window in &mut context.config_mut().app.windows {
+        window.additional_browser_args =
+            merge_webview2_test_browser_args(window.additional_browser_args.as_deref(), &requested);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_webview2_test_browser_args_from_env<R: Runtime>(_context: &mut tauri::Context<R>) {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -107,6 +156,8 @@ pub fn run() {
     #[cfg(not(target_os = "windows"))]
     let coordinator = Arc::new(coordinator::Coordinator::new());
     let local_asr_download_manager = Arc::new(asr::local::DownloadManager::new());
+    let mut tauri_context = tauri::generate_context!();
+    apply_webview2_test_browser_args_from_env(&mut tauri_context);
 
     tauri::Builder::default()
         // 单实例锁：第二个进程启动时立即退出，激活信号转给已运行实例的主窗口。
@@ -124,10 +175,16 @@ pub fn run() {
             forwarded_argv.push("listener-type".to_string());
             forwarded_argv.extend(argv);
             if let Some(intent) = cli::parse_cli_intent(&forwarded_argv) {
+                let dispatch_options = CliDispatchOptions {
+                    suppress_capsule_window: cli::suppress_capsule_window_requested(
+                        &forwarded_argv,
+                    ),
+                    force_raw_output: cli::force_raw_output_requested(&forwarded_argv),
+                };
                 log::info!(
                     "[single-instance] another instance launched with intent={intent:?}, dispatching"
                 );
-                dispatch_cli_intent(app, intent);
+                dispatch_cli_intent(app, intent, dispatch_options);
                 return;
             }
             log::info!(
@@ -153,6 +210,13 @@ pub fn run() {
         .setup(move |app| {
             init_file_logger();
             log::info!("=== Listener Type 启动 ===");
+            #[cfg(target_os = "windows")]
+            if std::env::var_os(LISTENER_TYPE_WEBVIEW2_ADDITIONAL_BROWSER_ARGS_ENV).is_some() {
+                log::info!(
+                    "[automation] WebView2 additional browser args applied from {}",
+                    LISTENER_TYPE_WEBVIEW2_ADDITIONAL_BROWSER_ARGS_ENV
+                );
+            }
 
             // Panic hook: catch Rust panics and emit to frontend so the user sees
             // an error card instead of a silent white-screen crash.
@@ -310,9 +374,11 @@ pub fn run() {
             // Spin up hotkey listener; coordinator owns the lifecycle.
             coordinator.start_hotkey_listener();
             coordinator.auto_select_embedded_ble_input_source_in_background();
+            coordinator.preload_foundry_local_asr_in_background("startup");
             // QA / custom combo hotkeys use `global-hotkey` (Carbon on macOS).
             // Start those after RunEvent::Ready, when the AppKit event loop is live.
             if should_force_show_main_on_start() {
+                log::info!("[main] force show requested during setup");
                 show_main_window(app.handle());
             }
 
@@ -327,8 +393,17 @@ pub fn run() {
             // 首次启动也可能带 CLI flag（用户双击 .desktop 之前先用 CLI 起一遍）。
             // 等 coordinator 准备好后再 dispatch；GUI 仍然照常起来。
             if let Some(intent) = cli::parse_cli_intent(&first_run_args) {
+                let dispatch_options = CliDispatchOptions {
+                    suppress_capsule_window: cli::suppress_capsule_window_requested(
+                        &first_run_args,
+                    ),
+                    force_raw_output: cli::force_raw_output_requested(&first_run_args)
+                        || std::env::var(FORCE_RAW_OUTPUT_ENV)
+                            .map(|value| value == "1")
+                            .unwrap_or(false),
+                };
                 log::info!("[startup] first-run CLI intent={intent:?}, dispatching");
-                dispatch_cli_intent(app.handle(), intent);
+                dispatch_cli_intent(app.handle(), intent, dispatch_options);
             }
 
             Ok(())
@@ -460,11 +535,15 @@ pub fn run() {
             commands::export_diagnostic_package,
             restart_app,
         ])
-        .build(tauri::generate_context!())
+        .build(tauri_context)
         .expect("error while building tauri application")
         .run(|app, event| match event {
             RunEvent::Ready => {
                 let coordinator = app.state::<Arc<coordinator::Coordinator>>();
+                if should_force_show_main_on_start() {
+                    log::info!("[main] force show requested after RunEvent::Ready");
+                    show_main_window(app);
+                }
                 // 同步启动 QA hotkey listener。和 dictation hotkey 平行，互不抢状态。
                 coordinator.start_qa_hotkey_listener();
                 // 启动自定义组合键监听器。当 trigger == Custom 时替代 modifier-only 监听器。
@@ -1037,15 +1116,33 @@ pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         let _ = w.show();
         restore_main_window_native(&w);
         let _ = w.unminimize();
+        restore_main_window_layout_if_needed(&w);
         if main_window_needs_recenter(&w) {
             let _ = w.center();
             restore_main_window_native(&w);
         }
         let _ = w.show();
         let _ = w.unminimize();
+        restore_main_window_native(&w);
         let _ = w.set_focus();
     }
     activate_app(app);
+}
+
+fn restore_main_window_layout_if_needed<R: Runtime>(window: &WebviewWindow<R>) {
+    if let Ok(size) = window.outer_size() {
+        if size.width < 400 || size.height < 300 {
+            log::warn!(
+                "[main] restoring tiny main window size {}x{} to default",
+                size.width,
+                size.height
+            );
+            let _ = window.set_size(LogicalSize::new(1240.0, 800.0));
+        }
+    }
+    if main_window_needs_recenter(window) {
+        let _ = window.center();
+    }
 }
 
 fn main_window_needs_recenter<R: Runtime>(window: &WebviewWindow<R>) -> bool {
@@ -1065,11 +1162,66 @@ fn main_window_needs_recenter<R: Runtime>(window: &WebviewWindow<R>) -> bool {
 #[cfg(target_os = "windows")]
 fn restore_main_window_native<R: Runtime>(window: &WebviewWindow<R>) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
     use windows::Win32::UI::WindowsAndMessaging::{
-        BringWindowToTop, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST,
-        HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
+        BringWindowToTop, EnumWindows, GetWindowRect, GetWindowTextLengthW,
+        GetWindowThreadProcessId, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST,
+        HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW,
     };
+
+    struct RestoreWindowState {
+        process_id: u32,
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+    }
+
+    unsafe extern "system" fn show_same_process_host_windows(
+        candidate: HWND,
+        lparam: LPARAM,
+    ) -> BOOL {
+        let state = &*(lparam.0 as *const RestoreWindowState);
+        let mut candidate_process_id = 0;
+        GetWindowThreadProcessId(candidate, Some(&mut candidate_process_id));
+        if candidate_process_id != state.process_id {
+            return BOOL(1);
+        }
+        if GetWindowTextLengthW(candidate) > 0 {
+            return BOOL(1);
+        }
+
+        let mut rect = RECT::default();
+        if GetWindowRect(candidate, &mut rect).is_err() {
+            return BOOL(1);
+        }
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width < 400 || height < 300 {
+            return BOOL(1);
+        }
+
+        let _ = ShowWindow(candidate, SW_SHOW);
+        let _ = SetWindowPos(
+            candidate,
+            HWND_TOPMOST,
+            state.left,
+            state.top,
+            state.width,
+            state.height,
+            SWP_SHOWWINDOW,
+        );
+        let _ = SetWindowPos(
+            candidate,
+            HWND_NOTOPMOST,
+            state.left,
+            state.top,
+            state.width,
+            state.height,
+            SWP_SHOWWINDOW,
+        );
+        BOOL(1)
+    }
 
     let Ok(handle) = window.window_handle() else {
         return;
@@ -1080,11 +1232,29 @@ fn restore_main_window_native<R: Runtime>(window: &WebviewWindow<R>) {
     let hwnd = HWND(raw.hwnd.get() as *mut _);
     unsafe {
         let _ = ShowWindow(hwnd, SW_RESTORE);
+        let _ = ShowWindow(hwnd, SW_SHOW);
         let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
         let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
         let _ = SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
         let _ = BringWindowToTop(hwnd);
         let _ = SetForegroundWindow(hwnd);
+
+        let mut process_id = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+        let mut rect = RECT::default();
+        if process_id != 0 && GetWindowRect(hwnd, &mut rect).is_ok() {
+            let state = RestoreWindowState {
+                process_id,
+                left: rect.left,
+                top: rect.top,
+                width: rect.right - rect.left,
+                height: rect.bottom - rect.top,
+            };
+            let _ = EnumWindows(
+                Some(show_same_process_host_windows),
+                LPARAM(&state as *const RestoreWindowState as isize),
+            );
+        }
     }
 }
 
@@ -1100,7 +1270,92 @@ fn restore_main_window_native<R: Runtime>(_window: &WebviewWindow<R>) {}
 /// - ToggleDictation 在 Idle → start，在 Listening → stop，Starting/Processing/Inserting 忽略并记日志
 /// - ToggleQa 直接转发到 handle_qa_hotkey_pressed（语义等同于按一次 QA 热键）
 /// - CancelDictation 直接调 cancel（cancel 本身在非 Listening 时也安全）
-fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
+#[derive(Clone, Copy, Debug, Default)]
+struct CliDispatchOptions {
+    suppress_capsule_window: bool,
+    force_raw_output: bool,
+}
+
+struct ScopedCapsuleSuppression {
+    previous: Option<String>,
+    active: bool,
+}
+
+impl ScopedCapsuleSuppression {
+    fn apply(active: bool) -> Self {
+        if active {
+            let previous = std::env::var(SUPPRESS_CAPSULE_WINDOW_ENV).ok();
+            std::env::set_var(SUPPRESS_CAPSULE_WINDOW_ENV, "1");
+            log::info!("[cli] capsule window suppressed for automation intent");
+            Self {
+                previous,
+                active: true,
+            }
+        } else {
+            Self {
+                previous: None,
+                active: false,
+            }
+        }
+    }
+}
+
+impl Drop for ScopedCapsuleSuppression {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        if let Some(previous) = self.previous.as_ref() {
+            std::env::set_var(SUPPRESS_CAPSULE_WINDOW_ENV, previous);
+        } else {
+            std::env::remove_var(SUPPRESS_CAPSULE_WINDOW_ENV);
+        }
+        log::info!("[cli] capsule window suppression restored after automation intent");
+    }
+}
+
+struct ScopedForceRawOutput {
+    previous: Option<String>,
+    active: bool,
+}
+
+impl ScopedForceRawOutput {
+    fn apply(active: bool) -> Self {
+        if active {
+            let previous = std::env::var(FORCE_RAW_OUTPUT_ENV).ok();
+            std::env::set_var(FORCE_RAW_OUTPUT_ENV, "1");
+            log::info!("[cli] force raw output scoped for automation intent");
+            Self {
+                previous,
+                active: true,
+            }
+        } else {
+            Self {
+                previous: None,
+                active: false,
+            }
+        }
+    }
+}
+
+impl Drop for ScopedForceRawOutput {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        if let Some(previous) = self.previous.take() {
+            std::env::set_var(FORCE_RAW_OUTPUT_ENV, previous);
+        } else {
+            std::env::remove_var(FORCE_RAW_OUTPUT_ENV);
+        }
+    }
+}
+
+fn dispatch_cli_intent<R: Runtime>(
+    app: &AppHandle<R>,
+    intent: cli::CliIntent,
+    options: CliDispatchOptions,
+) {
     let coordinator = app
         .try_state::<Arc<coordinator::Coordinator>>()
         .map(|s| Arc::clone(&*s));
@@ -1154,7 +1409,11 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
         }
         cli::CliIntent::SubmitEmbeddedAudioFile { path, format } => {
             let coord = Arc::clone(&coordinator);
+            let suppress_capsule_window = options.suppress_capsule_window;
+            let force_raw_output = options.force_raw_output;
             tauri::async_runtime::spawn(async move {
+                let _suppression = ScopedCapsuleSuppression::apply(suppress_capsule_window);
+                let _force_raw = ScopedForceRawOutput::apply(force_raw_output);
                 log::info!(
                     "[cli] submit-embedded-audio-file: path={} format={format:?}",
                     path.display()
@@ -1171,7 +1430,11 @@ fn dispatch_cli_intent<R: Runtime>(app: &AppHandle<R>, intent: cli::CliIntent) {
         }
         cli::CliIntent::SubmitEmbeddedAudioStreamingFile { path, format } => {
             let coord = Arc::clone(&coordinator);
+            let suppress_capsule_window = options.suppress_capsule_window;
+            let force_raw_output = options.force_raw_output;
             tauri::async_runtime::spawn(async move {
+                let _suppression = ScopedCapsuleSuppression::apply(suppress_capsule_window);
+                let _force_raw = ScopedForceRawOutput::apply(force_raw_output);
                 log::info!(
                     "[cli] submit-embedded-audio-streaming-file: path={} format={format:?}",
                     path.display()
@@ -2150,8 +2413,33 @@ mod tests {
         should_keep_alive_on_exit_request, tray_polish_mode_menu_entries, tray_style_menu_enabled,
         LOG_ROTATE_LIMIT_BYTES,
     };
+    #[cfg(target_os = "windows")]
+    use super::{merge_webview2_test_browser_args, WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES};
     use crate::types::PolishMode;
     use std::io::Write;
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn webview2_test_browser_args_keep_wry_defaults() {
+        let merged = merge_webview2_test_browser_args(
+            None,
+            "--remote-debugging-port=9224 --remote-allow-origins=*",
+        )
+        .expect("test browser args should be produced");
+
+        assert!(merged.contains(WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES));
+        assert!(merged.contains("--remote-debugging-port=9224"));
+        assert!(merged.contains("--remote-allow-origins=*"));
+
+        let existing = merge_webview2_test_browser_args(
+            Some("--disable-features=AlreadyDisabled"),
+            "--remote-debugging-port=9333",
+        )
+        .expect("existing browser args should be preserved");
+        assert!(existing.contains("--disable-features=AlreadyDisabled"));
+        assert!(!existing.contains(WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES));
+        assert!(existing.contains("--remote-debugging-port=9333"));
+    }
 
     #[test]
     fn headless_recovery_command_uses_confirmed_type_recovery_pairing_path() {

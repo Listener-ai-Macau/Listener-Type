@@ -11,7 +11,8 @@ param(
     [switch]$AccuracyWarningOnly,
     [switch]$FailOnMissingPackets,
     [switch]$VerifyInsertion,
-    [switch]$VerifyHistory
+    [switch]$VerifyHistory,
+    [switch]$UseExistingInstance
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,7 +50,8 @@ function Read-NewLogText {
 
 function Get-LatestAsrTranscriptFromLog {
     param([string]$Text)
-    $latest = ""
+    $latestAsr = ""
+    $latestCapsule = ""
     foreach ($line in ($Text -split "(`r`n|`n)")) {
         $marker = "server JSON:"
         $index = $line.IndexOf($marker)
@@ -58,12 +60,28 @@ function Get-LatestAsrTranscriptFromLog {
         try {
             $payload = $jsonText | ConvertFrom-Json
             if ($payload.result -and -not [string]::IsNullOrWhiteSpace([string]$payload.result.text)) {
-                $latest = [string]$payload.result.text
+                $latestAsr = [string]$payload.result.text
             }
         } catch {
+            $textMatch = [regex]::Match($jsonText, '"text"\s*:\s*"(?<text>(?:\\.|[^"\\])*)"')
+            if ($textMatch.Success) {
+                $fallbackText = [regex]::Unescape([string]$textMatch.Groups["text"].Value)
+                if (-not [string]::IsNullOrWhiteSpace($fallbackText)) {
+                    $latestAsr = $fallbackText
+                }
+            }
         }
     }
-    return $latest
+    foreach ($match in [regex]::Matches($Text, "source=backend\.capsule event=emit_request .*? message=(?<message>.+)(?:`r?`n|$)")) {
+        $message = [string]$match.Groups["message"].Value
+        if (-not [string]::IsNullOrWhiteSpace($message) -and $message -ne "-") {
+            $latestCapsule = $message.Trim()
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($latestAsr)) {
+        return $latestAsr
+    }
+    return $latestCapsule
 }
 
 function Normalize-AccuracyText {
@@ -335,7 +353,17 @@ $insertedText = $null
 $historySession = $null
 $smokeStartedAt = Get-Date
 
-Get-Process listener-type -ErrorAction SilentlyContinue | Stop-Process -Force
+$resolvedListenerExe = (Resolve-Path $ListenerExe).Path
+if ($UseExistingInstance) {
+    $existingInstance = Get-Process listener-type -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $resolvedListenerExe } |
+        Select-Object -First 1
+    if (-not $existingInstance) {
+        throw "UseExistingInstance requested, but no running Listener Type process matches $resolvedListenerExe"
+    }
+} else {
+    Get-Process listener-type -ErrorAction SilentlyContinue | Stop-Process -Force
+}
 
 try {
     if ($VerifyInsertion) {
@@ -344,12 +372,13 @@ try {
     }
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = (Resolve-Path $ListenerExe).Path
-    $psi.Arguments = "--submit-embedded-audio-wav-stream " + (Quote-ProcessArgument $WavPath)
+    $psi.FileName = $resolvedListenerExe
+    $psi.Arguments = "--suppress-capsule-window --force-raw-output --submit-embedded-audio-wav-stream " + (Quote-ProcessArgument $WavPath)
     $psi.WorkingDirectory = $RepoRoot
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.EnvironmentVariables["LISTENER_TYPE_HIDE_MAIN_ON_START"] = "1"
+    $psi.EnvironmentVariables["LISTENER_TYPE_SUPPRESS_CAPSULE_WINDOW"] = "1"
     $psi.EnvironmentVariables["LISTENER_TYPE_DISABLE_BACKGROUND_BLE"] = "1"
     $psi.EnvironmentVariables["LISTENER_TYPE_FORCE_RAW_OUTPUT"] = "1"
     $process = [System.Diagnostics.Process]::Start($psi)
@@ -373,7 +402,7 @@ try {
         if ($capturedLog -match "submit-embedded-audio-streaming-file failed") {
             throw "Listener-Type embedded audio file stream failed"
         }
-        if ($process.HasExited -and -not $doneMatch.Success) {
+        if (-not $UseExistingInstance -and $process.HasExited -and -not $doneMatch.Success) {
             throw "Listener-Type exited before embedded audio file stream completed"
         }
     }
@@ -453,6 +482,7 @@ try {
         max_missing_packets = $MaxMissingPackets
         verify_insertion = [bool]$VerifyInsertion
         verify_history = [bool]$VerifyHistory
+        use_existing_instance = [bool]$UseExistingInstance
         insertion_target_path = if ($insertionTarget) { $insertionTarget.Path } else { $null }
         inserted_text = $insertedText
         history_path = Get-HistoryPath
@@ -480,6 +510,7 @@ try {
         wav_path = $WavPath
         verify_insertion = [bool]$VerifyInsertion
         verify_history = [bool]$VerifyHistory
+        use_existing_instance = [bool]$UseExistingInstance
         insertion_target_path = if ($insertionTarget) { $insertionTarget.Path } else { $null }
         inserted_text = $insertedText
         history_path = Get-HistoryPath
@@ -496,7 +527,7 @@ try {
     exit 1
 } finally {
     Stop-InsertionTarget -Target $insertionTarget
-    if ($process -and -not $process.HasExited) {
+    if (-not $UseExistingInstance -and $process -and -not $process.HasExited) {
         try {
             $process.Kill()
             [void]$process.WaitForExit(2000)

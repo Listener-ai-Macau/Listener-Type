@@ -359,26 +359,48 @@ fn has_duplicate_tail_after_full_revision(candidate: &str, stable_full: &str) ->
 pub(super) fn trim_repeated_short_final_tail(text: &str) -> String {
     const MIN_SHORT_TAIL_CHARS: usize = 2;
     const MAX_SHORT_TAIL_CHARS: usize = 6;
+    const MIN_PREFIX_ECHO_TAIL_CHARS: usize = 4;
+    const MAX_PREFIX_ECHO_TAIL_CHARS: usize = 12;
 
     let trimmed = text.trim();
-    let Some((space_start, space_end)) = last_whitespace_run(trimmed) else {
-        return trimmed.to_string();
-    };
-    let prefix = trimmed[..space_start].trim_end();
-    let suffix = trimmed[space_end..].trim_start();
-    if prefix.is_empty()
-        || suffix.is_empty()
-        || !prefix
+    let spaced_tail = last_whitespace_run(trimmed).and_then(|(space_start, space_end)| {
+        let prefix = trimmed[..space_start].trim_end();
+        let suffix = trimmed[space_end..].trim_start();
+        prefix
             .chars()
             .next_back()
             .is_some_and(is_sentence_terminal_punctuation)
-    {
+            .then_some((
+                prefix,
+                suffix,
+                MIN_SHORT_TAIL_CHARS,
+                MAX_SHORT_TAIL_CHARS,
+                false,
+            ))
+    });
+    let prefix_echo_tail = spaced_tail.or_else(|| {
+        last_sentence_terminal_boundary(trimmed).map(|boundary| {
+            (
+                trimmed[..boundary].trim_end(),
+                trimmed[boundary..].trim_start(),
+                MIN_PREFIX_ECHO_TAIL_CHARS,
+                MAX_PREFIX_ECHO_TAIL_CHARS,
+                true,
+            )
+        })
+    });
+    let Some((prefix, suffix, min_tail_chars, max_tail_chars, require_prefix_start)) =
+        prefix_echo_tail
+    else {
+        return trimmed.to_string();
+    };
+    if prefix.is_empty() || suffix.is_empty() {
         return trimmed.to_string();
     }
 
     let suffix_compact = compact_transcript_for_duplicate_check(suffix);
     let suffix_len = suffix_compact.chars().count();
-    if !(MIN_SHORT_TAIL_CHARS..=MAX_SHORT_TAIL_CHARS).contains(&suffix_len) {
+    if !(min_tail_chars..=max_tail_chars).contains(&suffix_len) {
         return trimmed.to_string();
     }
     if suffix
@@ -389,7 +411,11 @@ pub(super) fn trim_repeated_short_final_tail(text: &str) -> String {
     }
 
     let prefix_compact = compact_transcript_for_duplicate_check(prefix);
-    if prefix_compact.contains(&suffix_compact) {
+    if if require_prefix_start {
+        prefix_compact.starts_with(&suffix_compact)
+    } else {
+        prefix_compact.contains(&suffix_compact)
+    } {
         return prefix.to_string();
     }
     trimmed.to_string()
@@ -448,6 +474,19 @@ fn last_whitespace_run(text: &str) -> Option<(usize, usize)> {
         last_run = Some((start, text.len()));
     }
     last_run
+}
+
+fn last_sentence_terminal_boundary(text: &str) -> Option<usize> {
+    let mut boundary = None;
+    for (index, ch) in text.char_indices() {
+        if is_sentence_terminal_punctuation(ch) {
+            let end = index + ch.len_utf8();
+            if end < text.len() {
+                boundary = Some(end);
+            }
+        }
+    }
+    boundary
 }
 
 fn is_sentence_terminal_punctuation(ch: char) -> bool {
@@ -552,7 +591,28 @@ pub(super) fn is_unstable_initial_partial(previous: &str, current: &str) -> bool
     if char_count == 0 {
         return true;
     }
-    char_count <= 3
+    is_initial_hesitation_partial(&compact)
+}
+
+fn is_initial_hesitation_partial(compact: &str) -> bool {
+    matches!(
+        compact,
+        "嗯" | "嗯嗯"
+            | "嗯嗯嗯"
+            | "呃"
+            | "呃呃"
+            | "呃呃呃"
+            | "额"
+            | "额额"
+            | "额额额"
+            | "啊"
+            | "啊啊"
+            | "啊啊啊"
+            | "哎"
+            | "哎呀"
+            | "唉"
+            | "诶"
+    )
 }
 
 fn is_same_prefix_streaming_revision(previous: &str, current: &str) -> bool {
@@ -1010,6 +1070,10 @@ mod tests {
     fn unstable_initial_partial_filters_short_interference_only_before_context() {
         assert!(is_unstable_initial_partial("", "哎呀"));
         assert!(is_unstable_initial_partial("", "嗯"));
+        assert!(is_unstable_initial_partial("", "呃呃"));
+        assert!(!is_unstable_initial_partial("", "短"));
+        assert!(!is_unstable_initial_partial("", "短句"));
+        assert!(!is_unstable_initial_partial("", "测试"));
         assert!(!is_unstable_initial_partial("", "蓝牙听写测试现在开始"));
         assert!(!is_unstable_initial_partial("已经有正文", "哎呀"));
     }
@@ -1056,6 +1120,16 @@ mod tests {
         assert_eq!(
             trim_repeated_short_final_tail(text),
             "测试报告里要记录蓝牙包数和识别准确率。再观察识别完成后文字是否立即进入当前光标。最后确认这段文字没有明显缺句，再结束测试。"
+        );
+    }
+
+    #[test]
+    fn trim_repeated_short_final_tail_removes_prefix_echo_after_sentence() {
+        let text = "长时间录音测试开始。今天我们验证中文预览速度、最终出字速度、连续短句稳定性和准确度。这个句子会稍微长一点，用来观察文字是不是持续更新，停止以后是不是很快完成，并且不会再次卡在录音状态。长时间录音测试结束。长时间录音测试";
+
+        assert_eq!(
+            trim_repeated_short_final_tail(text),
+            "长时间录音测试开始。今天我们验证中文预览速度、最终出字速度、连续短句稳定性和准确度。这个句子会稍微长一点，用来观察文字是不是持续更新，停止以后是不是很快完成，并且不会再次卡在录音状态。长时间录音测试结束。"
         );
     }
 

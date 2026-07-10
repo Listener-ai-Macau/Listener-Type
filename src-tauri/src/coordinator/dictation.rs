@@ -1,14 +1,18 @@
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use parking_lot::Mutex as ParkingMutex;
 
 use crate::coordinator_state::{
     apply_dictation_event, request_stop_during_starting_state, DictationEvent, DictationTransition,
     DictationUiState,
 };
 use crate::correction::apply_correction_rules;
-use crate::types::HotkeyMode;
+use crate::types::{
+    ChineseScriptPreference, HotkeyMode, OutputLanguagePreference, UserPreferences,
+};
 
 use super::qa::handle_qa_option_edge;
 use super::resources::*;
@@ -20,6 +24,11 @@ pub(super) const HOTKEY_DEBOUNCE: Duration = Duration::from_millis(250);
 const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
 const EMBEDDED_AUDIO_ASR_PREROLL_MS: usize = 800;
 const EMBEDDED_AUDIO_ASR_PREROLL_BYTES: usize = 16_000 * 2 * EMBEDDED_AUDIO_ASR_PREROLL_MS / 1_000;
+const VOLCENGINE_PREVIEW_STALL_RESTART_MS: u64 = 2_500;
+const VOLCENGINE_PREVIEW_STALL_MIN_FRAMES: usize = 20;
+const VOLCENGINE_PREVIEW_REPLAY_MS: usize = 1_500;
+const VOLCENGINE_PREVIEW_REPLAY_BYTES: usize = 16_000 * 2 * VOLCENGINE_PREVIEW_REPLAY_MS / 1_000;
+const VOLCENGINE_PREVIEW_MAX_RESTARTS: usize = 1;
 const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
@@ -34,12 +43,359 @@ const EMBEDDED_AUDIO_TRIM_PEAK_RATIO: f64 = 0.12;
 const EMBEDDED_BLE_PCM_EVENT_TRACE_PACKET_INTERVAL: u16 = 50;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
 const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 750;
+const DEVICE_AI_PROCESSING_MAX_VISIBLE_MS: u64 = 5_000;
 const EMBEDDED_BLE_STATS_ONLY_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_STATS_ONLY";
 const EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV: &str =
     "LISTENER_TYPE_DISABLE_EMBEDDED_BLE_PROCESSING_SYNC";
 const EMBEDDED_BLE_CONTROL_START_SIGNAL_ENV: &str =
     "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_START_SIGNAL";
 const EMBEDDED_BLE_CONTROL_STOP_SIGNAL_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_STOP_SIGNAL";
+
+struct FoundryLanguageHintSelection {
+    hint: Option<String>,
+    source: &'static str,
+}
+
+fn foundry_language_hint_from_preferences(prefs: &UserPreferences) -> FoundryLanguageHintSelection {
+    let explicit = prefs.foundry_local_asr_language_hint.trim();
+    if !explicit.is_empty() {
+        return FoundryLanguageHintSelection {
+            hint: Some(explicit.to_string()),
+            source: "explicit",
+        };
+    }
+
+    if let Some(hint) = foundry_language_hint_for_output_language(prefs.output_language_preference)
+    {
+        return FoundryLanguageHintSelection {
+            hint: Some(hint.to_string()),
+            source: "output_language_preference",
+        };
+    }
+
+    if matches!(
+        prefs.chinese_script_preference,
+        ChineseScriptPreference::Simplified | ChineseScriptPreference::Traditional
+    ) {
+        return FoundryLanguageHintSelection {
+            hint: Some("zh".to_string()),
+            source: "chinese_script_preference",
+        };
+    }
+
+    for language in &prefs.working_languages {
+        if let Some(hint) = foundry_language_hint_for_working_language(language) {
+            return FoundryLanguageHintSelection {
+                hint: Some(hint.to_string()),
+                source: "working_languages",
+            };
+        }
+    }
+
+    FoundryLanguageHintSelection {
+        hint: None,
+        source: "auto",
+    }
+}
+
+fn foundry_language_hint_for_output_language(
+    preference: OutputLanguagePreference,
+) -> Option<&'static str> {
+    match preference {
+        OutputLanguagePreference::ZhCn | OutputLanguagePreference::ZhTw => Some("zh"),
+        OutputLanguagePreference::En => Some("en"),
+        OutputLanguagePreference::Ja => Some("ja"),
+        OutputLanguagePreference::Ko => Some("ko"),
+        OutputLanguagePreference::Auto => None,
+    }
+}
+
+fn foundry_language_hint_for_working_language(language: &str) -> Option<&'static str> {
+    let normalized = language.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    if language.contains("中文")
+        || language.contains("汉语")
+        || language.contains("漢語")
+        || language.contains("简体")
+        || language.contains("簡體")
+        || language.contains("繁体")
+        || language.contains("繁體")
+        || normalized == "zh"
+        || normalized.starts_with("zh-")
+        || normalized.contains("chinese")
+    {
+        return Some("zh");
+    }
+
+    if normalized == "en" || normalized.starts_with("en-") || normalized.contains("english") {
+        return Some("en");
+    }
+
+    if language.contains("日本")
+        || language.contains("日语")
+        || language.contains("日語")
+        || normalized == "ja"
+        || normalized.starts_with("ja-")
+        || normalized.contains("japanese")
+    {
+        return Some("ja");
+    }
+
+    if language.contains("한국")
+        || language.contains("韩语")
+        || language.contains("韓語")
+        || normalized == "ko"
+        || normalized.starts_with("ko-")
+        || normalized.contains("korean")
+    {
+        return Some("ko");
+    }
+
+    None
+}
+
+struct VolcengineAsrPair {
+    final_asr: Arc<VolcengineStreamingASR>,
+    preview_sidecar: Arc<VolcenginePreviewSidecar>,
+    target: Arc<dyn crate::asr::AudioConsumer>,
+}
+
+struct VolcenginePreviewTeeConsumer {
+    final_asr: Arc<VolcengineStreamingASR>,
+    preview_sidecar: Arc<VolcenginePreviewSidecar>,
+}
+
+impl crate::asr::AudioConsumer for VolcenginePreviewTeeConsumer {
+    fn consume_pcm_chunk(&self, pcm: &[u8]) {
+        self.preview_sidecar.consume_pcm_chunk(pcm);
+        crate::asr::AudioConsumer::consume_pcm_chunk(&*self.final_asr, pcm);
+    }
+}
+
+impl Drop for VolcenginePreviewTeeConsumer {
+    fn drop(&mut self) {
+        self.preview_sidecar.cancel();
+        log::info!("[asr] low-latency preview sidecar cancelled");
+    }
+}
+
+struct VolcenginePreviewSidecar {
+    credentials: VolcengineCredentials,
+    hotwords: Vec<DictionaryHotword>,
+    inner: Arc<Inner>,
+    session_id: SessionId,
+    current: ParkingMutex<Arc<VolcengineStreamingASR>>,
+    recent_pcm: ParkingMutex<Vec<u8>>,
+    restarting: AtomicBool,
+    restart_count: AtomicUsize,
+}
+
+impl VolcenginePreviewSidecar {
+    fn new(
+        credentials: VolcengineCredentials,
+        hotwords: Vec<DictionaryHotword>,
+        inner: &Arc<Inner>,
+        session_id: SessionId,
+        initial: Arc<VolcengineStreamingASR>,
+    ) -> Self {
+        Self {
+            credentials,
+            hotwords,
+            inner: Arc::clone(inner),
+            session_id,
+            current: ParkingMutex::new(initial),
+            recent_pcm: ParkingMutex::new(Vec::new()),
+            restarting: AtomicBool::new(false),
+            restart_count: AtomicUsize::new(0),
+        }
+    }
+
+    fn current_asr(&self) -> Arc<VolcengineStreamingASR> {
+        Arc::clone(&self.current.lock())
+    }
+
+    fn consume_pcm_chunk(self: &Arc<Self>, pcm: &[u8]) {
+        self.remember_recent_pcm(pcm);
+        let preview = self.current_asr();
+        crate::asr::AudioConsumer::consume_pcm_chunk(&*preview, pcm);
+        self.restart_silent_preview_if_needed(preview);
+    }
+
+    fn cancel(&self) {
+        self.current_asr().cancel();
+    }
+
+    fn open_initial_preview_in_background(self: &Arc<Self>) {
+        if self.restarting.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        let sidecar = Arc::clone(self);
+        let preview = self.current_asr();
+        tauri::async_runtime::spawn(async move {
+            let started = Instant::now();
+            match preview.open_session().await {
+                Ok(()) => {
+                    let replay = sidecar.recent_pcm.lock().clone();
+                    if !replay.is_empty() {
+                        crate::asr::AudioConsumer::consume_pcm_chunk(&*preview, &replay);
+                    }
+                    log::info!(
+                        "[asr] low-latency preview sidecar opened asynchronously elapsed_ms={} replay_bytes={} replay_ms={}",
+                        started.elapsed().as_millis(),
+                        replay.len(),
+                        replay.len() / 32
+                    );
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[asr] low-latency preview sidecar unavailable; continuing with final ASR only: {err}"
+                    );
+                }
+            }
+            sidecar.restarting.store(false, Ordering::SeqCst);
+        });
+    }
+
+    fn remember_recent_pcm(&self, pcm: &[u8]) {
+        let mut recent = self.recent_pcm.lock();
+        recent.extend_from_slice(pcm);
+        if recent.len() > VOLCENGINE_PREVIEW_REPLAY_BYTES {
+            let drop_bytes = recent.len() - VOLCENGINE_PREVIEW_REPLAY_BYTES;
+            recent.drain(..drop_bytes);
+        }
+    }
+
+    fn restart_silent_preview_if_needed(self: &Arc<Self>, preview: Arc<VolcengineStreamingASR>) {
+        if !preview.low_latency_preview_silent_stalled(
+            Duration::from_millis(VOLCENGINE_PREVIEW_STALL_RESTART_MS),
+            VOLCENGINE_PREVIEW_STALL_MIN_FRAMES,
+        ) {
+            return;
+        }
+        if self.restarting.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        let attempt = self.restart_count.fetch_add(1, Ordering::SeqCst) + 1;
+        if attempt > VOLCENGINE_PREVIEW_MAX_RESTARTS {
+            if attempt == VOLCENGINE_PREVIEW_MAX_RESTARTS + 1 {
+                log::warn!(
+                    "[asr] low-latency preview silent watchdog reached restart limit; keeping final ASR path only"
+                );
+            }
+            self.restarting.store(false, Ordering::SeqCst);
+            return;
+        }
+
+        let sidecar = Arc::clone(self);
+        tauri::async_runtime::spawn(async move {
+            sidecar.restart_preview(preview, attempt).await;
+        });
+    }
+
+    async fn restart_preview(
+        self: Arc<Self>,
+        old_preview: Arc<VolcengineStreamingASR>,
+        attempt: usize,
+    ) {
+        log::warn!(
+            "[asr] low-latency preview silent for {} ms after {} audio frames; restarting sidecar attempt={}",
+            VOLCENGINE_PREVIEW_STALL_RESTART_MS,
+            VOLCENGINE_PREVIEW_STALL_MIN_FRAMES,
+            attempt
+        );
+        let replacement = Arc::new(VolcengineStreamingASR::new_low_latency_preview(
+            self.credentials.clone(),
+            self.hotwords.clone(),
+        ));
+        set_volcengine_partial_preview_callback(&replacement, &self.inner, self.session_id);
+        match replacement.open_session().await {
+            Ok(()) => {
+                old_preview.cancel();
+                {
+                    *self.current.lock() = Arc::clone(&replacement);
+                }
+                let replay = self.recent_pcm.lock().clone();
+                if !replay.is_empty() {
+                    crate::asr::AudioConsumer::consume_pcm_chunk(&*replacement, &replay);
+                }
+                log::info!(
+                    "[asr] low-latency preview sidecar restarted attempt={} replay_bytes={} replay_ms={}",
+                    attempt,
+                    replay.len(),
+                    replay.len() / 32
+                );
+            }
+            Err(err) => {
+                log::warn!(
+                    "[asr] low-latency preview sidecar restart attempt={} failed; keeping existing preview/final ASR: {err}",
+                    attempt
+                );
+            }
+        }
+        self.restarting.store(false, Ordering::SeqCst);
+    }
+}
+
+fn set_volcengine_partial_preview_callback(
+    asr: &Arc<VolcengineStreamingASR>,
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) {
+    let inner_for_partial = Arc::clone(inner);
+    asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
+        update_embedded_audio_partial_preview(&inner_for_partial, session_id, text);
+    })));
+}
+
+fn build_volcengine_asr_pair(inner: &Arc<Inner>, session_id: SessionId) -> VolcengineAsrPair {
+    let credentials = read_volc_credentials();
+    let hotwords = enabled_hotwords(inner);
+    let final_asr = Arc::new(VolcengineStreamingASR::new(
+        credentials.clone(),
+        hotwords.clone(),
+    ));
+    let preview_asr = Arc::new(VolcengineStreamingASR::new_low_latency_preview(
+        credentials.clone(),
+        hotwords.clone(),
+    ));
+    set_volcengine_partial_preview_callback(&final_asr, inner, session_id);
+    set_volcengine_partial_preview_callback(&preview_asr, inner, session_id);
+    let preview_sidecar = Arc::new(VolcenginePreviewSidecar::new(
+        credentials,
+        hotwords,
+        inner,
+        session_id,
+        Arc::clone(&preview_asr),
+    ));
+    let target: Arc<dyn crate::asr::AudioConsumer> = Arc::new(VolcenginePreviewTeeConsumer {
+        final_asr: Arc::clone(&final_asr),
+        preview_sidecar: Arc::clone(&preview_sidecar),
+    });
+    VolcengineAsrPair {
+        final_asr,
+        preview_sidecar,
+        target,
+    }
+}
+
+async fn open_volcengine_asr_pair(
+    pair: &VolcengineAsrPair,
+) -> Result<(), crate::asr::volcengine::VolcengineASRError> {
+    let final_asr = Arc::clone(&pair.final_asr);
+    let started = Instant::now();
+    final_asr.open_session().await?;
+    log::info!(
+        "[asr] final ASR ready; preview sidecar will open asynchronously elapsed_ms={}",
+        started.elapsed().as_millis()
+    );
+    pair.preview_sidecar.open_initial_preview_in_background();
+    Ok(())
+}
 
 fn apply_and_publish_dictation_event(
     inner: &Arc<Inner>,
@@ -270,6 +626,17 @@ fn clear_embedded_audio_stats(inner: &Arc<Inner>) {
 
 fn clear_embedded_audio_partial_preview(inner: &Arc<Inner>) {
     *inner.embedded_audio_partial_preview.lock() = None;
+    *inner.embedded_audio_last_capsule_level.lock() = 0.0;
+}
+
+fn current_embedded_audio_capsule_level(inner: &Arc<Inner>) -> f32 {
+    *inner.embedded_audio_last_capsule_level.lock()
+}
+
+fn remember_embedded_audio_capsule_level(inner: &Arc<Inner>, level: f32) -> f32 {
+    let clamped = level.clamp(0.0, 1.0);
+    *inner.embedded_audio_last_capsule_level.lock() = clamped;
+    clamped
 }
 
 fn clear_embedded_audio_stop_feedback(inner: &Arc<Inner>) {
@@ -329,6 +696,45 @@ fn device_ai_processing_completion_delay(started_at: Option<Instant>, now: Insta
     };
     let min_visible = Duration::from_millis(DEVICE_AI_PROCESSING_MIN_VISIBLE_MS);
     min_visible.saturating_sub(now.saturating_duration_since(started_at))
+}
+
+fn schedule_device_ai_processing_max_visible_timeout(
+    inner: &Arc<Inner>,
+    cancel: Arc<AtomicBool>,
+    reason: &'static str,
+) {
+    if !should_sync_device_ai_processing(inner) {
+        return;
+    }
+    let expected_session_id = inner.state.lock().session_id;
+    let inner = Arc::clone(inner);
+    async_runtime::spawn_blocking(move || {
+        std::thread::sleep(Duration::from_millis(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS));
+        if cancel.load(Ordering::SeqCst) {
+            return;
+        }
+        let session_id = inner.state.lock().session_id;
+        if session_id != expected_session_id {
+            log::info!(
+                "[embedded-ble] skipped stale device AI processing LED max-visible timeout reason={reason} expected_session_id={expected_session_id} current_session_id={session_id}"
+            );
+            return;
+        }
+        if !should_sync_device_ai_processing(&inner) {
+            log::info!(
+                "[embedded-ble] skipped device AI processing LED max-visible timeout reason={reason} session_id={session_id}; processing sync no longer active"
+            );
+            return;
+        }
+        match crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2)) {
+            Ok(()) => log::warn!(
+                "[embedded-ble] device AI processing LED max-visible timeout completed reason={reason} session_id={session_id} max_visible_ms={DEVICE_AI_PROCESSING_MAX_VISIBLE_MS}"
+            ),
+            Err(err) => log::warn!(
+                "[embedded-ble] device AI processing LED max-visible timeout completion failed reason={reason} session_id={session_id}: {err}"
+            ),
+        }
+    });
 }
 
 fn set_device_ai_processing_done_async(inner: &Arc<Inner>, reason: &'static str, delay: Duration) {
@@ -472,6 +878,7 @@ struct DeviceAiProcessingGuard {
     active: bool,
     completed: bool,
     started_at: Option<Instant>,
+    max_visible_cancel: Option<Arc<AtomicBool>>,
 }
 
 impl DeviceAiProcessingGuard {
@@ -481,6 +888,7 @@ impl DeviceAiProcessingGuard {
             active: false,
             completed: false,
             started_at: None,
+            max_visible_cancel: None,
         }
     }
 
@@ -489,12 +897,26 @@ impl DeviceAiProcessingGuard {
             return;
         }
         set_device_ai_processing_async(&self.inner, true, reason);
+        let cancel = Arc::new(AtomicBool::new(false));
+        schedule_device_ai_processing_max_visible_timeout(
+            &self.inner,
+            Arc::clone(&cancel),
+            "dictation_processing_max_visible_timeout",
+        );
+        self.max_visible_cancel = Some(cancel);
         self.active = true;
         self.started_at = Some(Instant::now());
     }
 
+    fn cancel_max_visible_timeout(&mut self) {
+        if let Some(cancel) = self.max_visible_cancel.take() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+    }
+
     async fn complete_success(&mut self, reason: &'static str) {
         if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
+            self.cancel_max_visible_timeout();
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
             set_device_ai_processing_done_wait(&self.inner, reason, delay).await;
             self.completed = true;
@@ -505,6 +927,7 @@ impl DeviceAiProcessingGuard {
 
     fn complete_success_async(&mut self, reason: &'static str) {
         if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
+            self.cancel_max_visible_timeout();
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
             set_device_ai_processing_done_async(&self.inner, reason, delay);
             self.completed = true;
@@ -515,6 +938,7 @@ impl DeviceAiProcessingGuard {
 
     async fn complete_warning(&mut self, reason: &'static str) {
         if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
+            self.cancel_max_visible_timeout();
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
             set_device_ai_processing_warning_wait(&self.inner, reason, delay).await;
             self.completed = true;
@@ -525,6 +949,7 @@ impl DeviceAiProcessingGuard {
 
     fn complete_warning_async(&mut self, reason: &'static str) {
         if !self.completed && (self.active || should_sync_device_ai_processing(&self.inner)) {
+            self.cancel_max_visible_timeout();
             let delay = device_ai_processing_completion_delay(self.started_at, Instant::now());
             set_device_ai_processing_warning_async(&self.inner, reason, delay);
             self.completed = true;
@@ -537,6 +962,7 @@ impl DeviceAiProcessingGuard {
 impl Drop for DeviceAiProcessingGuard {
     fn drop(&mut self) {
         if self.active && !self.completed {
+            self.cancel_max_visible_timeout();
             set_device_ai_processing_async(&self.inner, false, "dictation_processing_end");
         }
     }
@@ -618,7 +1044,7 @@ fn emit_embedded_audio_partial_preview_if_active(
             session_id,
             after_stop: embedded_audio_stop_feedback_latched(inner),
         },
-        0.0,
+        current_embedded_audio_capsule_level(inner),
         Some(preview),
         None,
     )
@@ -636,6 +1062,7 @@ fn emit_embedded_audio_pcm_capsule_if_active(
         CapsuleState::Transcribing => true,
         _ => return false,
     };
+    let level = remember_embedded_audio_capsule_level(inner, level);
     if embedded_ble_actor_context_active(inner) {
         let trace_timeline = should_trace_embedded_ble_pcm_capsule(inner, session_id, after_stop);
         apply_embedded_ble_session_actor_dictation_event_with_trace(
@@ -691,6 +1118,11 @@ fn emit_embedded_audio_transcribing_if_active(
             None,
         )
     }
+}
+
+fn embedded_audio_streaming_session_accepts_pcm(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let state = inner.state.lock();
+    state.session_id == session_id && !state.cancelled && state.phase == SessionPhase::Listening
 }
 
 pub(super) fn request_embedded_audio_stop_feedback(
@@ -863,23 +1295,28 @@ impl EmbeddedAudioDictationSession {
         }
 
         let (asr_pcm, gain_stats) = prepare_embedded_streaming_pcm_for_asr(&self.active_asr, pcm);
-        let capsule_state = if embedded_audio_stop_feedback_latched(inner) {
-            CapsuleState::Transcribing
+        if embedded_audio_stop_feedback_latched(inner) {
+            if !embedded_audio_streaming_session_accepts_pcm(inner, self.session_id) {
+                log::debug!(
+                    "[coord] embedded audio streaming PCM ignored for inactive dictation session ({})",
+                    self.session_id
+                );
+                return Ok(());
+            }
         } else {
-            CapsuleState::Recording
-        };
-        if !emit_embedded_audio_pcm_capsule_if_active(
-            inner,
-            self.session_id,
-            capsule_state,
-            embedded_pcm_peak_level(&asr_pcm),
-            current_embedded_audio_partial_preview(inner),
-        ) {
-            log::debug!(
-                "[coord] embedded audio streaming PCM ignored for inactive dictation session ({})",
-                self.session_id
-            );
-            return Ok(());
+            if !emit_embedded_audio_pcm_capsule_if_active(
+                inner,
+                self.session_id,
+                CapsuleState::Recording,
+                embedded_pcm_peak_level(&asr_pcm),
+                current_embedded_audio_partial_preview(inner),
+            ) {
+                log::debug!(
+                    "[coord] embedded audio streaming PCM ignored for inactive dictation session ({})",
+                    self.session_id
+                );
+                return Ok(());
+            }
         }
 
         if let Some(archive_pcm) = self.archive_pcm.as_mut() {
@@ -1458,14 +1895,15 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         return Ok(());
     }
 
-    if let Err(message) = ensure_asr_credentials() {
+    let active_asr = active_asr_provider_from_preferences(inner);
+    sync_active_asr_provider_to_credentials_for_runtime(&active_asr);
+
+    if let Err(message) = ensure_asr_credentials(&active_asr) {
         log::warn!("[coord] ASR credential gate failed: {message}");
         publish_dictation_pipeline_error(inner, current_session_id, message.clone());
         restore_prepared_windows_ime_session(inner, current_session_id);
         return Err(message);
     }
-
-    let active_asr = CredentialsVault::get_active_asr();
 
     if let Err(message) = ensure_microphone_permission(inner) {
         log::warn!("[coord] microphone permission gate failed: {message}");
@@ -1487,17 +1925,17 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         } else {
             foundry::DEFAULT_MODEL_ALIAS.to_string()
         };
-        let language_hint = prefs.foundry_local_asr_language_hint.trim().to_string();
-        let language_hint = if language_hint.is_empty() {
-            None
-        } else {
-            Some(language_hint)
-        };
+        let language_hint = foundry_language_hint_from_preferences(&prefs);
+        log::info!(
+            "[foundry-asr] language hint selected source={} hint={}",
+            language_hint.source,
+            language_hint.hint.as_deref().unwrap_or("auto")
+        );
         let local = Arc::new(FoundryLocalWhisperAsr::new(
             Arc::clone(&inner.foundry_local_runtime),
             model_alias,
             prefs.foundry_local_runtime_source.clone(),
-            language_hint,
+            language_hint.hint,
         ));
         store_asr_for_session(
             inner,
@@ -1607,7 +2045,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         finish_starting_session(inner, current_session_id).await;
     } else if is_whisper_compatible_provider(&active_asr) {
         let (api_key, base_url, model, proxy_config) =
-            read_whisper_credentials().map_err(|e| e.to_string())?;
+            read_whisper_credentials(&active_asr).map_err(|e| e.to_string())?;
         // 用户辞書の有効フレーズを Whisper の `prompt` に流し込む。固有名詞や
         // 専門用語の同音・近形誤認識を ASR 段階で抑える。Polish LLM 側には
         // 既に system prompt として注入済みだが、Whisper 出力が大きく崩れる
@@ -1636,9 +2074,8 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         start_recorder_and_enter_listening(inner, current_session_id, &active_asr, consumer)
             .await?;
     } else {
-        let hotwords = enabled_hotwords(inner);
-        let creds = read_volc_credentials();
-        let asr = Arc::new(VolcengineStreamingASR::new(creds, hotwords));
+        let volcengine = build_volcengine_asr_pair(inner, current_session_id);
+        let asr = Arc::clone(&volcengine.final_asr);
         let bridge = Arc::new(DeferredAsrBridge::new());
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
         store_asr_for_session(
@@ -1648,7 +2085,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         );
         start_recorder_for_starting(inner, current_session_id, &active_asr, consumer).await?;
 
-        if let Err(e) = asr.open_session().await {
+        if let Err(e) = open_volcengine_asr_pair(&volcengine).await {
             log::error!("[coord] open ASR session failed: {e}");
             match startup_race_status_for_starting(inner, current_session_id) {
                 StartupRaceStatus::StaleContinuation => {
@@ -1702,7 +2139,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                 return Ok(());
             }
         }
-        let target: Arc<dyn crate::asr::AudioConsumer> = asr;
+        let target = Arc::clone(&volcengine.target);
         let flushed_bytes = bridge.attach(target);
         log::info!("[coord] ASR connected; flushed {flushed_bytes} deferred audio bytes");
         finish_starting_session(inner, current_session_id).await;
@@ -2726,12 +3163,15 @@ impl EmbeddedStreamingDictation {
 
     fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
         if let Some(session) = self.session.as_ref() {
+            let already_latched = embedded_audio_stop_feedback_latched(inner);
             latch_embedded_audio_stop_feedback(inner);
-            let _ = emit_embedded_audio_transcribing_if_active(
-                inner,
-                session.session_id,
-                current_embedded_audio_partial_preview(inner),
-            );
+            if !already_latched {
+                let _ = emit_embedded_audio_transcribing_if_active(
+                    inner,
+                    session.session_id,
+                    current_embedded_audio_partial_preview(inner),
+                );
+            }
         }
     }
 
@@ -2802,11 +3242,7 @@ fn submission_result_from_stats(
 async fn begin_embedded_audio_dictation_session(
     inner: &Arc<Inner>,
 ) -> Result<EmbeddedAudioDictationSession, String> {
-    let current_session_id = {
-        let mut state = inner.state.lock();
-        begin_session_state(&mut state, capture_focus_target(), capture_frontmost_app())
-            .ok_or_else(|| "当前已有听写会话在运行，暂不能提交嵌入式音频".to_string())?
-    };
+    let current_session_id = begin_embedded_audio_dictation_session_id(inner)?;
     clear_embedded_audio_stats(inner);
     clear_embedded_audio_partial_preview(inner);
     clear_embedded_audio_stop_feedback(inner);
@@ -2831,15 +3267,16 @@ async fn begin_embedded_audio_dictation_session(
         None,
     );
 
-    if let Err(message) = ensure_asr_credentials() {
+    let active_asr = active_asr_provider_from_preferences(inner);
+    sync_active_asr_provider_to_credentials_for_runtime(&active_asr);
+
+    if let Err(message) = ensure_asr_credentials(&active_asr) {
         log::warn!("[coord] embedded audio ASR credential gate failed: {message}");
         publish_dictation_pipeline_error(inner, current_session_id, message.clone());
         restore_prepared_windows_ime_session(inner, current_session_id);
         schedule_actionable_error_capsule_idle(inner, current_session_id);
         return Err(message);
     }
-
-    let active_asr = CredentialsVault::get_active_asr();
     let consumer =
         match build_embedded_audio_asr_consumer(inner, current_session_id, &active_asr).await {
             Ok(consumer) => consumer,
@@ -2867,6 +3304,18 @@ async fn begin_embedded_audio_dictation_session(
         asr_preroll_sent: false,
         device_ai_processing_started: false,
     })
+}
+
+fn begin_embedded_audio_dictation_session_id(inner: &Arc<Inner>) -> Result<SessionId, String> {
+    let attach_host_start = inner.prefs.get().dictation_input_source
+        == DictationInputSource::EmbeddedBle
+        && embedded_ble_actor_context_active(inner);
+    let mut state = inner.state.lock();
+    if attach_host_start && state.phase == SessionPhase::Starting {
+        return Ok(state.session_id);
+    }
+    begin_session_state(&mut state, capture_focus_target(), capture_frontmost_app())
+        .ok_or_else(|| "当前已有听写会话在运行，暂不能提交嵌入式音频".to_string())
 }
 
 fn activate_embedded_audio_dictation_session(
@@ -3039,17 +3488,17 @@ async fn build_embedded_audio_asr_consumer(
         } else {
             foundry::DEFAULT_MODEL_ALIAS.to_string()
         };
-        let language_hint = prefs.foundry_local_asr_language_hint.trim().to_string();
-        let language_hint = if language_hint.is_empty() {
-            None
-        } else {
-            Some(language_hint)
-        };
+        let language_hint = foundry_language_hint_from_preferences(&prefs);
+        log::info!(
+            "[foundry-asr] language hint selected source={} hint={}",
+            language_hint.source,
+            language_hint.hint.as_deref().unwrap_or("auto")
+        );
         let local = Arc::new(FoundryLocalWhisperAsr::new(
             Arc::clone(&inner.foundry_local_runtime),
             model_alias,
             prefs.foundry_local_runtime_source.clone(),
-            language_hint,
+            language_hint.hint,
         ));
         store_asr_for_session(
             inner,
@@ -3062,7 +3511,7 @@ async fn build_embedded_audio_asr_consumer(
 
     if is_whisper_compatible_provider(active_asr) {
         let (api_key, base_url, model, proxy_config) =
-            read_whisper_credentials().map_err(|err| err.to_string())?;
+            read_whisper_credentials(active_asr).map_err(|err| err.to_string())?;
         let whisper_prompt =
             crate::asr::whisper::build_prompt_from_phrases(&enabled_phrases(inner));
         let client = http_client_builder_with_proxy(&base_url, 30, &proxy_config)
@@ -3093,21 +3542,17 @@ async fn build_embedded_audio_asr_consumer(
         return Ok(consumer);
     }
 
-    let asr = Arc::new(VolcengineStreamingASR::new(
-        read_volc_credentials(),
-        enabled_hotwords(inner),
-    ));
-    let inner_for_partial = Arc::clone(inner);
-    asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
-        update_embedded_audio_partial_preview(&inner_for_partial, session_id, text);
-    })));
-    asr.open_session()
+    let volcengine = build_volcengine_asr_pair(inner, session_id);
+    open_volcengine_asr_pair(&volcengine)
         .await
         .map_err(|err| format!("打开火山 ASR 连接失败: {err}"))?;
-    store_asr_for_session(inner, session_id, ActiveAsr::Volcengine(Arc::clone(&asr)));
+    store_asr_for_session(
+        inner,
+        session_id,
+        ActiveAsr::Volcengine(Arc::clone(&volcengine.final_asr)),
+    );
     let bridge = Arc::new(DeferredAsrBridge::new());
-    let target: Arc<dyn crate::asr::AudioConsumer> = asr;
-    bridge.attach(target);
+    bridge.attach(Arc::clone(&volcengine.target));
     let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge;
     Ok(consumer)
 }
@@ -3684,7 +4129,8 @@ async fn finish_end_session_after_stop_transition(
     let output_language_preference = prefs.output_language_preference;
     let llm_thinking_enabled = prefs.llm_thinking_enabled;
     let style_system_prompt = pack.prompt.clone();
-    let raw_uses_llm = mode == PolishMode::Raw && super::raw_style_pack_uses_llm(&pack);
+    let raw_uses_llm =
+        !force_raw_output && mode == PolishMode::Raw && super::raw_style_pack_uses_llm(&pack);
     let translation_target = prefs.translation_target_language.trim().to_string();
     let translation_active =
         inner.translation_modifier_seen.load(Ordering::SeqCst) && !translation_target.is_empty();
@@ -4223,27 +4669,28 @@ fn append_typed_prefix(target: &mut String, delta: &str, typed_chars: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        append_typed_prefix, cancel_embedded_ble_listener_capture, cancel_session,
-        clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview,
-        default_done_message, device_ai_processing_completion_delay,
-        device_processing_final_succeeded, dictation_error_code,
-        embedded_audio_stop_feedback_latched, embedded_ble_listener_capture_ready,
-        embedded_ble_processing_sync_disabled, embedded_ble_session_actor_history,
-        embedded_ble_session_event_should_trace, embedded_ble_stream_idle_timeout,
-        embedded_pcm_rms_and_peak, embedded_streaming_chunk_is_asr_input,
-        emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
-        finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
-        install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
-        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
-        publish_embedded_ble_asr_final, record_embedded_ble_session_actor_command,
-        register_embedded_ble_cancel_flag, request_embedded_audio_stop_feedback,
-        request_embedded_ble_recording_stop_from_host, store_embedded_audio_stats,
-        streaming_insert_eligible, trim_embedded_pcm_for_asr,
+        append_typed_prefix, begin_embedded_audio_dictation_session_id,
+        cancel_embedded_ble_listener_capture, cancel_session, clear_embedded_ble_cancel_flag,
+        current_embedded_audio_partial_preview, default_done_message,
+        device_ai_processing_completion_delay, device_processing_final_succeeded,
+        dictation_error_code, embedded_audio_stop_feedback_latched,
+        embedded_ble_listener_capture_ready, embedded_ble_processing_sync_disabled,
+        embedded_ble_session_actor_history, embedded_ble_session_event_should_trace,
+        embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak,
+        embedded_streaming_chunk_is_asr_input, emit_embedded_audio_transcribing_if_active,
+        end_embedded_ble_session, finalize_polished_text, finish_dictation_pipeline_error,
+        finish_dictation_timeout, install_embedded_ble_listener_cancel,
+        mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
+        prepare_embedded_streaming_pcm_for_asr, publish_embedded_ble_asr_final,
+        record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
+        request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
+        store_embedded_audio_stats, streaming_insert_eligible, trim_embedded_pcm_for_asr,
         update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
         EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
-        DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_ASR_PREROLL_BYTES,
-        EMBEDDED_AUDIO_ASR_PREROLL_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
-        EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS, EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV,
+        DEVICE_AI_PROCESSING_MAX_VISIBLE_MS, DEVICE_AI_PROCESSING_MIN_VISIBLE_MS,
+        EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
+        EMBEDDED_AUDIO_FEED_CHUNK_BYTES, EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS,
+        EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV,
     };
     use crate::coordinator::Coordinator;
     use crate::coordinator_state::{new_session_id, SessionPhase};
@@ -4681,6 +5128,31 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn embedded_audio_session_attaches_to_host_starting_session() {
+        let coordinator = Coordinator::new();
+        let mut prefs = coordinator.inner.prefs.get();
+        prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
+        coordinator.inner.prefs.replace_for_tests(prefs);
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        register_embedded_ble_cancel_flag(&coordinator.inner, &cancel_flag);
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Starting;
+            state.cancelled = false;
+        }
+
+        let attached = begin_embedded_audio_dictation_session_id(&coordinator.inner)
+            .expect("BLE start packet should attach to the host-started session");
+
+        assert_eq!(attached, session_id);
+        let state = coordinator.inner.state.lock();
+        assert_eq!(state.session_id, session_id);
+        assert_eq!(state.phase, SessionPhase::Starting);
+    }
+
     #[tokio::test]
     async fn host_stop_request_routes_by_embedded_ble_preference_without_capture_flag() {
         let coordinator = Coordinator::new();
@@ -5087,6 +5559,24 @@ mod tests {
     }
 
     #[test]
+    fn raw_mode_without_llm_uses_passthrough_instead_of_streaming_polish() {
+        assert!(!streaming_insert_eligible(
+            true,
+            false,
+            PolishMode::Raw,
+            false,
+            false
+        ));
+        assert!(streaming_insert_eligible(
+            true,
+            false,
+            PolishMode::Raw,
+            true,
+            false
+        ));
+    }
+
+    #[test]
     fn wayland_done_message_tells_user_manual_paste_is_required() {
         assert_eq!(
             wayland_done_message(InsertStatus::CopiedFallback, false),
@@ -5163,6 +5653,15 @@ mod tests {
         assert_eq!(
             device_ai_processing_completion_delay(None, started_at),
             Duration::from_millis(0)
+        );
+    }
+
+    #[test]
+    fn device_processing_max_visible_timeout_is_bounded() {
+        assert_eq!(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS, 5_000);
+        assert!(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS > DEVICE_AI_PROCESSING_MIN_VISIBLE_MS);
+        assert!(
+            Duration::from_millis(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS) <= Duration::from_secs(5)
         );
     }
 
