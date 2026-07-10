@@ -226,7 +226,7 @@ assert.match(imeInstallSmoke, /ListenerTypeImeSubmit/, "manual IME install smoke
 assert.match(imeInstallSmoke, /Software\\Classes\\CLSID\\\{E6D16C6C-2975-4A5C-BBBB-67A3C9966767\}\\InprocServer32/, "manual IME install smoke should check x64 COM registration");
 assert.match(imeInstallSmoke, /LanguageProfile\\0x00000804\\\{19F96D43-A5EB-46C9-8A73-9FCA5A0630C8\}/, "manual IME install smoke should check the TSF language profile");
 
-assert.match(launcher, /powershell\.exe/, "launcher should call powershell.exe");
-assert.match(launcher, /-ExecutionPolicy Bypass/, "launcher should bypass execution policy for this process");
+assert.match(launcher, /pwsh\.exe/, "launcher should call pwsh.exe");
+assert.doesNotMatch(launcher, /-ExecutionPolicy Bypass/, "launcher should not carry Windows PowerShell execution-policy shims");
 assert.match(launcher, /windows-package-msvc\.ps1/, "launcher should invoke the packaging script");
 assert.match(launcher, /%SUPPLIED_ARGS%/, "launcher should forward user arguments");

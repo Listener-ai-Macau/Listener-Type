@@ -65,7 +65,7 @@ listener-type --submit-embedded-audio-ble-stream 120000
 真实设备 smoke 默认不要人工按物理键。优先使用串口控制命令模拟默认 KEY3 录音键，并把录音窗口对齐到第二遍 TTS 播放：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\embedded_audio_replay\run_ble_stream_smoke.ps1 `
+pwsh -NoProfile -File tools\embedded_audio_replay\run_ble_stream_smoke.ps1 `
   -Port COM3 `
   -BluetoothAddress DCB4D91112CE `
   -VerifyHistory
@@ -135,7 +135,7 @@ pwsh -NoProfile -File tools\embedded_audio_replay\generate_tts_fixtures.ps1 `
 ## 识别准确度报告
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\embedded_audio_replay\measure_asr_accuracy.ps1 `
+pwsh -NoProfile -File tools\embedded_audio_replay\measure_asr_accuracy.ps1 `
   -Seed 20260518 `
   -Count 6 `
   -OutDir artifacts\embedded_audio_accuracy

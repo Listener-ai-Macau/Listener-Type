@@ -25,7 +25,7 @@ jobs:
         run: |
           npm ci
           node scripts/windows-package-msvc.test.mjs
-          powershell -ExecutionPolicy Bypass -File scripts/windows-package-msvc.ps1
+          pwsh -NoProfile -File scripts/windows-package-msvc.ps1
       - name: Discover WiX tools
         shell: pwsh
         run: |

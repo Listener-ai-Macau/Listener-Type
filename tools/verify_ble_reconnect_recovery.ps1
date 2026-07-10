@@ -581,9 +581,9 @@ try {
 
     $initialEnsure = Invoke-External `
         -Label "initial-ensure-ble" `
-        -FilePath "powershell.exe" `
+        -FilePath "pwsh" `
         -Arguments @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ensureScript,
+            "-NoProfile", "-File", $ensureScript,
             "-DeviceName", $DeviceName,
             "-BluetoothAddress", $BluetoothAddress,
             "-DurationSeconds", ([string]$InitialReadyTimeoutSeconds),
@@ -595,9 +595,9 @@ try {
 
     $otaBefore = Invoke-External `
         -Label "ota-identity-before" `
-        -FilePath "powershell.exe" `
+        -FilePath "pwsh" `
         -Arguments @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $otaScript,
+            "-NoProfile", "-File", $otaScript,
             "-DeviceName", $DeviceName,
             "-BluetoothAddress", $BluetoothAddress,
             "-TimeoutSeconds", "20"
@@ -689,8 +689,8 @@ try {
             } else {
                 $restartResult = Invoke-External `
                     -Label "restart-windows-bluetooth" `
-                    -FilePath "powershell.exe" `
-                    -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $restartScript, "-RestartPanAdapter")
+                    -FilePath "pwsh" `
+                    -Arguments @("-NoProfile", "-File", $restartScript, "-RestartPanAdapter")
                 $commands.Add($restartResult)
                 Require-Success $restartResult
             }
@@ -754,9 +754,9 @@ try {
 
     $otaAfter = Invoke-External `
         -Label "ota-identity-after" `
-        -FilePath "powershell.exe" `
+        -FilePath "pwsh" `
         -Arguments @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $otaScript,
+            "-NoProfile", "-File", $otaScript,
             "-DeviceName", $DeviceName,
             "-BluetoothAddress", $BluetoothAddress,
             "-TimeoutSeconds", "20"
@@ -786,9 +786,9 @@ try {
             $attemptOut = Join-Path $streamOut "attempt-$attempt"
             $streamResult = Invoke-External `
                 -Label "post-reconnect-stream-smoke-attempt-$attempt" `
-                -FilePath "powershell.exe" `
+                -FilePath "pwsh" `
                 -Arguments @(
-                    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $RepoRoot "tools\run_ble_stream_smoke.ps1"),
+                    "-NoProfile", "-File", (Join-Path $RepoRoot "tools\run_ble_stream_smoke.ps1"),
                     "-Port", $Port,
                     "-DeviceName", $DeviceName,
                     "-BluetoothAddress", $BluetoothAddress,

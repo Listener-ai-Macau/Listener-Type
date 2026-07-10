@@ -99,8 +99,6 @@ function Invoke-TtsFixtureGeneration {
     $scriptPath = Join-Path $RepoRoot "tools\embedded_audio_replay\generate_tts_fixtures.ps1"
     $args = @(
         "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
         "-File",
         $scriptPath,
         "-Seed",
@@ -119,7 +117,7 @@ function Invoke-TtsFixtureGeneration {
         $args += "-SkipReplay"
     }
 
-    $output = & powershell.exe @args 2>&1
+    $output = & pwsh @args 2>&1
     if ($LASTEXITCODE -ne 0) {
         $output | Write-Output
         throw "TTS fixture generation failed"

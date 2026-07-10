@@ -16,6 +16,7 @@
     "check:tauri-info": "node scripts/check-tauri-info.mjs",
     "check:version": "node scripts/check-release-version.mjs",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
+    "check:pwsh-entrypoints": "node scripts/check-pwsh-entrypoints.mjs",
     "check:dirty-inventory": "node scripts/check-dirty-change-inventory.mjs",
     "check:guard-commits": "node scripts/check-regression-guard-commits.mjs",
     "check:embedded-ble-processing-led": "node scripts/check-embedded-ble-processing-led.mjs",

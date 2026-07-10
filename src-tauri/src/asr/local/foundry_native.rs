@@ -429,16 +429,10 @@ if ($readyForFoundryX64) { exit 0 } else { exit 1 }
 
     async fn run_powershell_script(script: &'static str) -> Result<CommandCapture> {
         task::spawn_blocking(move || {
-            let mut command = Command::new("powershell.exe");
-            command.args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                script,
-            ]);
+            let mut command = Command::new("pwsh");
+            command.args(["-NoProfile", "-Command", script]);
             command.creation_flags(CREATE_NO_WINDOW);
-            let output = command.output().context("run powershell.exe")?;
+            let output = command.output().context("run pwsh")?;
             Ok(CommandCapture {
                 status_code: output.status.code(),
                 stdout: decode_command_output(&output.stdout),

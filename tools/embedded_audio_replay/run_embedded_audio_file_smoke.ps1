@@ -221,8 +221,8 @@ $timer.Start()
 [System.Windows.Forms.Application]::Run($form)
 '@
     Set-Content -Path $targetScript -Value $targetScriptBody -Encoding UTF8
-    $process = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-STA", "-File", (Quote-ProcessArgument $targetScript), "-Path", (Quote-ProcessArgument $Path)) `
+    $process = Start-Process -FilePath "pwsh.exe" `
+        -ArgumentList @("-NoProfile", "-STA", "-File", (Quote-ProcessArgument $targetScript), "-Path", (Quote-ProcessArgument $Path)) `
         -PassThru
     [void](Focus-ProcessWindow -Process $process)
     return [pscustomobject]@{ Process = $process; Path = $Path; ScriptPath = $targetScript }

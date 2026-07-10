@@ -256,7 +256,7 @@ try {
     } else {
         $restartScript = Join-Path $firmwareRoot "tools\restart_windows_bluetooth.ps1"
         Invoke-Step -Name "restart_windows_bluetooth" -Body {
-            $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $restartScript 2>&1 | Out-String
+            $output = & pwsh -NoProfile -File $restartScript 2>&1 | Out-String
             if ($LASTEXITCODE -ne 0) {
                 throw "restart_windows_bluetooth failed exit_code=$LASTEXITCODE`n$output"
             }
@@ -269,7 +269,7 @@ try {
     } else {
         $ensureScript = Join-Path $firmwareRoot "tools\ensure_ble_hid_connection.ps1"
         Invoke-Step -Name "ble_gatt_maintain_connection_probe" -Body {
-            $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ensureScript `
+            $output = & pwsh -NoProfile -File $ensureScript `
                 -DeviceName $DeviceName `
                 -BluetoothAddress $address `
                 -DurationSeconds $GattProbeSeconds `

@@ -58,7 +58,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run
 cargo test --manifest-path tools/embedded_audio_replay/Cargo.toml
 npm run build
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/embedded_audio_replay/run_ble_stream_smoke.ps1 -Port COM3 -VerifyHistory
+pwsh -NoProfile -File tools/embedded_audio_replay/run_ble_stream_smoke.ps1 -Port COM3 -VerifyHistory
 ```
 
 Platform smoke:

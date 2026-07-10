@@ -615,9 +615,9 @@ def detect_firmware_tool(firmware_repo: Path) -> Path | None:
 
 
 def invoke_firmware_tool(tool_path: Path, output_dir: Path, firmware_repo: Path) -> dict[str, Any]:
-    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    pwsh = shutil.which("pwsh")
     if not pwsh:
-        return {"status": "not_invoked", "reason": "powershell_not_found", "tool_path": str(tool_path)}
+        return {"status": "not_invoked", "reason": "pwsh_not_found", "tool_path": str(tool_path)}
     tool_output = output_dir / "firmware_tool"
     tool_output.mkdir(parents=True, exist_ok=True)
     result = run_command(

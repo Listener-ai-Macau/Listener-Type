@@ -97,7 +97,7 @@ function New-FeatureSnapshot {
             "cargo test --manifest-path tools\firmware_ota_headless\Cargo.toml",
             "node scripts\write-updater-manifest.test.mjs",
             "node scripts\windows-package-msvc.test.mjs",
-            "powershell -ExecutionPolicy Bypass -File scripts\windows-ime-build.ps1",
+            "pwsh -NoProfile -File scripts\windows-ime-build.ps1",
             "git diff --check"
         )
         update_policy = "Record accepted changes only when they alter important desktop responsibilities, user-visible workflows, provider/device support, or validation entry points."

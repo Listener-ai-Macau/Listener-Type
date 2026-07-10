@@ -26,10 +26,10 @@
 
 ```powershell
 cargo test --manifest-path src-tauri\Cargo.toml --lib windows_ime_profile
-powershell -ExecutionPolicy Bypass -File scripts\windows-ime-build.ps1
-powershell -ExecutionPolicy Bypass -File scripts\windows-ime-register.ps1
-powershell -ExecutionPolicy Bypass -File scripts\windows-ime-install-smoke.ps1
-powershell -ExecutionPolicy Bypass -File scripts\windows-ime-unregister.ps1
+pwsh -NoProfile -File scripts\windows-ime-build.ps1
+pwsh -NoProfile -File scripts\windows-ime-register.ps1
+pwsh -NoProfile -File scripts\windows-ime-install-smoke.ps1
+pwsh -NoProfile -File scripts\windows-ime-unregister.ps1
 ```
 
 ## Known Limits

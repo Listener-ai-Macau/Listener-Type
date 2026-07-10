@@ -6,6 +6,7 @@ const checks = [
   ['dirty change inventory', 'npm run check:dirty-inventory'],
   ['regression guard commit index', 'npm run check:guard-commits'],
   ['repo hygiene', 'npm run check:repo-hygiene'],
+  ['pwsh entrypoint hygiene', 'npm run check:pwsh-entrypoints'],
   ['version consistency', 'npm run check:version'],
   ['operator note triage gate', 'npm run check:preproduction-operator-notes'],
   ['preproduction bench contract', 'npm run check:preproduction-bench-contract'],
