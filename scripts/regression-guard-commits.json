@@ -20,6 +20,10 @@
       "guard": "npm run check:performance-baselines"
     },
     {
+      "repo": "type",
+      "guard": "npm run check:pwsh-entrypoints"
+    },
+    {
       "repo": "firmware",
       "guard": "python tools/verify_status_led_static.py"
     },
@@ -120,6 +124,25 @@
         "node scripts/windows-startup-lifecycle-contract.test.mjs",
         "node scripts/windows-ui-config.test.mjs",
         "python -m py_compile scripts/windows-listener-type-lifecycle-e2e.py"
+      ]
+    },
+    {
+      "id": "type_pwsh_public_and_tool_entrypoints",
+      "repo": "type",
+      "commit": "b2bf3bdaabae43e736109a2aaf6cbb1fd47b10fd",
+      "subject": "Clean Type pwsh entrypoints",
+      "state": "repo_cleanup_validated",
+      "protects": [
+        "Public Type docs and release commands use pwsh -NoProfile entrypoints.",
+        "Packaging, BLE recovery, OTA recovery, embedded audio replay, and diagnostics helpers do not invoke Windows PowerShell 5.1 or carry execution-policy shims.",
+        "Type runtime Windows App Runtime detection uses pwsh instead of powershell.exe.",
+        "Missing pwsh is reported as environment failure instead of silently falling back to Windows PowerShell."
+      ],
+      "guards": [
+        "npm run check:pwsh-entrypoints",
+        "node scripts/windows-package-msvc.test.mjs",
+        "python -m py_compile tools/ai_diagnostics/collector.py",
+        "cargo test --manifest-path src-tauri/Cargo.toml --lib asr::local::foundry_native"
       ]
     },
     {
