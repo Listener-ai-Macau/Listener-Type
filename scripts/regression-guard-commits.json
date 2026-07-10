@@ -30,6 +30,14 @@
     {
       "repo": "firmware",
       "guard": "pwsh -NoProfile -File ./tools/build.ps1"
+    },
+    {
+      "repo": "firmware",
+      "guard": "python tools/verify_ble_audio_transport_model.py"
+    },
+    {
+      "repo": "firmware",
+      "guard": "pwsh -NoProfile -File ./tools/verify_ble_audio_backpressure_static.ps1"
     }
   ],
   "entries": [
@@ -161,6 +169,24 @@
         "pwsh -NoProfile -File ./tools/verify_ble_hid.ps1",
         "pwsh -NoProfile -File ./tools/verify_diagnostic_log_coverage.ps1",
         "python tools/verify_validation_tooling_hygiene.py",
+        "pwsh -NoProfile -File ./tools/build.ps1"
+      ]
+    },
+    {
+      "id": "firmware_ble_audio_transport",
+      "repo": "firmware",
+      "commit": "244aba944306882ce935de6ab55df989e4376c28",
+      "subject": "Stabilize firmware BLE audio transport",
+      "state": "machine_validated_pending_release_review",
+      "protects": [
+        "BLE audio backpressure uses low-latency queue/pool thresholds before emergency pressure fallback.",
+        "Type-ready BLE audio events refresh power activity and can participate in truthful startup readiness.",
+        "BLE audio product matrix and host recovery helpers stay on pwsh and keep their product-chain case catalog valid."
+      ],
+      "guards": [
+        "python tools/verify_ble_audio_transport_model.py",
+        "pwsh -NoProfile -File ./tools/verify_ble_audio_backpressure_static.ps1",
+        "python tools/verify_audio_ble_product_matrix.py --list-cases",
         "pwsh -NoProfile -File ./tools/build.ps1"
       ]
     }
