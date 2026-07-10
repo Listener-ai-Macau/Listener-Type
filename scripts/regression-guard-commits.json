@@ -189,6 +189,22 @@
         "python tools/verify_audio_ble_product_matrix.py --list-cases",
         "pwsh -NoProfile -File ./tools/build.ps1"
       ]
+    },
+    {
+      "id": "firmware_led_history_doc_cleanup",
+      "repo": "firmware",
+      "commit": "eb3150943bfad948e0a07e80e4b5695bb27cbee9",
+      "subject": "Remove bulky LED history doc",
+      "state": "repo_cleanup_validated",
+      "protects": [
+        "Old LED DMA/flicker history prose is not a required maintenance input.",
+        "Status LED transport constraints live in code contracts, static verifiers, and this JSON index instead of a bulky MD history file."
+      ],
+      "guards": [
+        "python tools/verify_status_led_static.py",
+        "pwsh -NoProfile -File ./tools/build.ps1",
+        "git grep -n status_led_dma_history.md"
+      ]
     }
   ]
 }
