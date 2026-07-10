@@ -107,6 +107,25 @@
       ]
     },
     {
+      "id": "type_ec11_observed_address_recovery",
+      "repo": "type",
+      "commit": "e5a02a97d7713158cbea0f303245f8109944de41",
+      "subject": "Use observed address for Type recovery",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "EC11 double-click with Type clears stale pairing and re-pairs through the Type-observed recovery address instead of repeating slow advertisement scans.",
+        "Type recovery reaches notify ready and Type heartbeat within the 20s acceptance ceiling.",
+        "EC11 single-click recording start/stop stays separate from double-click recovery.",
+        "Recovery capsule messages stay short while the shared PairAsync/GATT/notify path remains visible in logs."
+      ],
+      "guards": [
+        "npm run check:performance-baselines",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml type_recovery_promotes_only_trusted_cached_addresses --lib"
+      ]
+    },
+    {
       "id": "type_device_settings_and_custom_keys",
       "repo": "type",
       "commit": "ac43b90e0a592065a8f74d80cadc67d99c1f113d",
