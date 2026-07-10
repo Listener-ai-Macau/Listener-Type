@@ -11,6 +11,7 @@ const checks = [
   ['operator note triage gate', 'npm run check:preproduction-operator-notes'],
   ['preproduction bench contract', 'npm run check:preproduction-bench-contract'],
   ['recording low-latency regression contract', 'npm run check:recording-latency'],
+  ['OTA speed log parser contract', 'npm run check:ota-speed-log-contract'],
   ['performance baseline contract', 'npm run check:performance-baselines'],
   ['frontend verification', 'npm run verify'],
   ['updater manifest generation', 'node scripts/write-updater-manifest.test.mjs'],

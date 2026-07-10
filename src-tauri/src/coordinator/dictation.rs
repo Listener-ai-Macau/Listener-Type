@@ -2901,6 +2901,13 @@ async fn submit_embedded_audio_ble_stream_impl(
         .map_err(|err| format!("嵌入式 BLE 流式抓音任务失败: {err}"))
         .and_then(|result| result);
     clear_embedded_ble_cancel_flag(inner, &cancel_capture);
+    if let Err(err) = &capture_result {
+        if !emit_idle_capture_errors
+            && crate::embedded_ble::is_background_listener_deferred_for_ota_error(err)
+        {
+            return Err(err.clone());
+        }
+    }
     let cancelled_by_caller = !streaming.terminal_received
         && (streaming.session.is_some() || streaming.embedded_session_id.is_some())
         && inner.state.lock().cancelled;

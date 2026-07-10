@@ -71,6 +71,7 @@ const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(3);
 const EMBEDDED_BLE_RETRY_OFFLINE_DELAY: Duration = Duration::from_secs(180);
 const EMBEDDED_BLE_RETRY_NOISY_CCCD_DELAY: Duration = Duration::from_secs(3);
+const EMBEDDED_BLE_RETRY_OTA_DEFER_DELAY: Duration = Duration::from_secs(10);
 const EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD: u32 = 6;
 const EMBEDDED_BLE_BACKGROUND_DIRECT_GATT_PAIRING_ATTEMPT_THRESHOLD: u32 = 3;
 const EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_COOLDOWN: Duration = Duration::from_secs(600);
@@ -4821,6 +4822,16 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
                 {
                     break;
+                }
+                if crate::embedded_ble::is_background_listener_deferred_for_ota_error(&err) {
+                    clear_embedded_ble_listener_last_error(&inner);
+                    retry_delay = EMBEDDED_BLE_RETRY_OTA_DEFER_DELAY;
+                    log::info!(
+                        "[embedded-ble] background listener deferred while firmware OTA is active; retrying in {} ms",
+                        retry_delay.as_millis()
+                    );
+                    tokio::time::sleep(retry_delay).await;
+                    continue;
                 }
                 if is_embedded_ble_idle_timeout_error(&err) {
                     clear_embedded_ble_listener_last_error(&inner);

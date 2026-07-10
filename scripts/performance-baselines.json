@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-10",
+  "updated_at": "2026-07-11",
   "contracts": {
     "device_settings_compact_write": {
       "accepted": true,
@@ -67,9 +67,24 @@
       "validation_command": "cargo test --manifest-path .\\src-tauri\\Cargo.toml type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml type_recovery_promotes_only_trusted_cached_addresses --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_notify_advertisement_evidence_skips_only_the_duplicate_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery --lib; use C:\\Program Files\\Listener Type\\listener-type.exe with EC11 double-click and require recovery trigger to notify ready <=20000 ms, Type-observed direct PairAsync, no duplicate advertisement scan, no paired link check, GATT reachability, notify enable, Type heartbeat ready, and single-click start/stop without double-click."
     },
     "ota_transfer_speed": {
-      "accepted": false,
-      "status": "pending_baseline_after_ota_acceptance",
-      "validation_command": "TBD after OTA/wired flashing item is machine-validated and human-accepted"
+      "accepted": true,
+      "status": "accepted_machine_ota_speed_after_type_ota_active_hint",
+      "target_max_transfer_ms": 60000,
+      "target_max_total_ms": 90000,
+      "min_transfer_bytes": 900000,
+      "evidence": ".cache/validation/ota-speed-regression-20260710/low-power-type-ota-active-hint-speed-check.json",
+      "type_log_evidence": ".cache/validation/ota-speed-regression-20260710/type-log-after-low-power-ota-type-ota-active-hint.txt",
+      "firmware_post_status_evidence": "../Listener-Firmware/.cache/validation/ota-speed-regression-20260710/post-low-power-type-ota-active-hint-serial-status.txt",
+      "measured_transfer_ms": 57672,
+      "measured_total_ms": 75326,
+      "measured_bytes": 960656,
+      "historical_machine_pass_evidence": ".cache/validation/ota-speed-regression-20260710/active-link-speed-check.json",
+      "low_power_failed_evidence": ".cache/validation/ota-speed-regression-20260710/low-power-ota-fail-speed-check.json",
+      "pre_type_ota_hint_failed_evidence": ".cache/validation/ota-speed-regression-20260710/low-power-deferred-fix-speed-check.json",
+      "root_cause": "low-power OTA was slow because OTA begin active-link recovery happened after the measured transfer path and installed Type background heartbeat could contend for BLE; Type now holds a Windows named OTA mutex, sends TYPE:OTA before the transfer timer, and firmware requests active BLE connection parameters from that command.",
+      "failed_regression_evidence": ".cache/validation/preproduction-human-review-ota-wireless-20260710-2208/preproduction-human-review-summary.json",
+      "historical_pass_evidence": ".cache/validation/preproduction-human-review-visible-20260707-143954/preproduction-human-review-summary.json",
+      "validation_command": "node scripts/check-ota-transfer-speed-log.mjs --log .cache/validation/ota-speed-regression-20260710/type-log-after-low-power-ota-type-ota-active-hint.txt --output-json .cache/validation/ota-speed-regression-20260710/low-power-type-ota-active-hint-speed-check.json --max-transfer-ms 60000 --max-total-ms 90000 --min-bytes 900000; node scripts/check-ota-transfer-speed-log.test.mjs; npm run check:performance-baselines"
     }
   }
 }

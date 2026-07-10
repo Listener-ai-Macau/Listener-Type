@@ -757,6 +757,10 @@ mod windows_ble {
     const BLE_PAIRING_MAINTENANCE_MAX_WINDOW: Duration = Duration::from_secs(3 * 60);
     const BLE_PAIRING_MAINTENANCE_MUTEX_NAME: PCWSTR =
         windows::core::w!("Local\\Denzic.Listener.Type.PairingMaintenance");
+    const BLE_OTA_OPERATION_MUTEX_NAME: PCWSTR =
+        windows::core::w!("Local\\Denzic.Listener.Type.BleOtaOperation");
+    const BACKGROUND_LISTENER_DEFERRED_FOR_OTA: &str =
+        "embedded_ble_background_listener_deferred_for_ota";
     const BLE_RECENT_PAIRING_FAST_GATT_WINDOW: Duration = Duration::from_secs(45);
     const BLE_ADAPTER_RESTART_SETTLE: Duration = Duration::from_millis(2500);
     const BLE_PAIRING_IN_PROGRESS_SETTLE: Duration = Duration::from_millis(2200);
@@ -813,8 +817,10 @@ mod windows_ble {
     #[cfg(any())]
     const OTA_V2_WINDOW_ENV: &str = COMPANION_OTA_V2_WINDOW_ENV;
     const LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES: usize = 500;
-    const LISTENER_OTA_V2_DEFAULT_WINDOW_CHUNKS: usize = 14;
+    const LISTENER_OTA_V2_DEFAULT_WINDOW_CHUNKS: usize = 20;
     const LISTENER_OTA_V2_WINDOW_ENV: &str = "LISTENER_OTA_V2_WINDOW_CHUNKS";
+    const LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS: u64 = 1000;
+    const LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS_ENV: &str = "LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS";
     const OTA_V2_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(15);
     const OTA_V2_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(150);
     const OTA_V2_STATE_IDLE: u8 = 0;
@@ -1504,6 +1510,28 @@ mod windows_ble {
         }
     }
 
+    struct BleOtaProcessGuard {
+        handle: HANDLE,
+        owner: &'static str,
+    }
+
+    impl Drop for BleOtaProcessGuard {
+        fn drop(&mut self) {
+            if let Err(err) = unsafe { ReleaseMutex(self.handle) } {
+                log::warn!(
+                    "[embedded-ble] release BLE OTA operation mutex failed owner={}: {err}",
+                    self.owner
+                );
+            }
+            if let Err(err) = unsafe { CloseHandle(self.handle) } {
+                log::warn!(
+                    "[embedded-ble] close BLE OTA operation mutex failed owner={}: {err}",
+                    self.owner
+                );
+            }
+        }
+    }
+
     struct PairingMaintenanceGuard {
         owner: &'static str,
         target_name: String,
@@ -1631,6 +1659,53 @@ mod windows_ble {
             );
         }
         None
+    }
+
+    fn try_acquire_ble_ota_process_mutex(owner: &'static str) -> Option<BleOtaProcessGuard> {
+        let handle = unsafe { CreateMutexW(None, false, BLE_OTA_OPERATION_MUTEX_NAME) }
+            .map_err(|err| {
+                log::warn!(
+                    "[embedded-ble] create BLE OTA operation mutex failed owner={owner}: {err}"
+                );
+                err
+            })
+            .ok()?;
+        let wait = unsafe { WaitForSingleObject(handle, 0) };
+        if wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED {
+            return Some(BleOtaProcessGuard { handle, owner });
+        }
+        if wait != WAIT_TIMEOUT {
+            log::warn!(
+                "[embedded-ble] BLE OTA operation mutex wait returned {wait:?} owner={owner}"
+            );
+        }
+        if let Err(err) = unsafe { CloseHandle(handle) } {
+            log::warn!(
+                "[embedded-ble] close deferred BLE OTA operation mutex failed owner={owner}: {err}"
+            );
+        }
+        None
+    }
+
+    fn acquire_ble_ota_process_mutex(owner: &'static str) -> Result<BleOtaProcessGuard, String> {
+        try_acquire_ble_ota_process_mutex(owner).ok_or_else(|| {
+            format!("BLE OTA is already active in another Listener Type process ({owner}).")
+        })
+    }
+
+    fn ble_ota_process_mutex_busy() -> bool {
+        match try_acquire_ble_ota_process_mutex("probe") {
+            Some(_guard) => false,
+            None => true,
+        }
+    }
+
+    pub(super) fn is_background_listener_deferred_for_ota_error(err: &str) -> bool {
+        err.contains(BACKGROUND_LISTENER_DEFERRED_FOR_OTA)
+    }
+
+    fn background_listener_deferred_for_ota_error() -> String {
+        BACKGROUND_LISTENER_DEFERRED_FOR_OTA.to_string()
     }
 
     fn listener_pairing_process_mutex_busy() -> bool {
@@ -5975,6 +6050,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     ) -> Result<(), String> {
         let capture_guard = BleCaptureGuard::enter(idle_timeout)?;
         let capture_id = capture_guard.session_id();
+        if terminal_behavior == CaptureTerminalBehavior::ContinueListening
+            && ble_ota_process_mutex_busy()
+        {
+            log::info!(
+                "[embedded-ble] capture #{capture_id}: BLE OTA operation active in another process; deferring background listener before notify open"
+            );
+            return Err(background_listener_deferred_for_ota_error());
+        }
         let target = open_notify_target_with_retry(capture_id)?;
         let characteristic = target.characteristic.clone();
         let (tx, rx) = mpsc::channel::<BleCaptureSignal>();
@@ -6081,6 +6164,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             type_heartbeat_enabled_for_terminal_behavior(terminal_behavior);
         let mut next_type_heartbeat = None;
         let type_ready_command = type_ready_command_bytes();
+        if type_heartbeat_enabled && ble_ota_process_mutex_busy() {
+            log::info!(
+                "[embedded-ble] capture #{capture_id}: BLE OTA operation active in another process; closing background listener before Type heartbeat ready"
+            );
+            cleanup.disable_notify();
+            return Err(background_listener_deferred_for_ota_error());
+        }
         match cleanup.write_type_heartbeat(&type_ready_command, "Type heartbeat ready") {
             Ok(()) => {
                 cleanup.mark_type_heartbeat_open();
@@ -6114,6 +6204,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         loop {
             cleanup.drain_audio_control_requests(&control_rx);
             let now = Instant::now();
+            if type_heartbeat_enabled
+                && !collector_has_active_recoverable_session(&collector)
+                && ble_ota_process_mutex_busy()
+            {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: BLE OTA operation active in another process; closing idle background listener"
+                );
+                cleanup.disable_notify();
+                return Err(background_listener_deferred_for_ota_error());
+            }
             if let Some(due) = next_type_heartbeat {
                 if now >= due {
                     if let Err(err) = cleanup.write_type_heartbeat(b"TYPE:HB\n", "Type heartbeat") {
@@ -6564,6 +6664,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         target: OpenListenerOtaV2Target,
         snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
         transfer_guard: BleCaptureGuard,
+        _ota_process_guard: BleOtaProcessGuard,
     }
 
     impl PreparedFirmwareOtaTransfer {
@@ -6714,6 +6815,18 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
     pub(super) fn prepare_listener_ota_v2_transfer() -> Result<PreparedListenerOtaV2Transfer, String>
     {
+        let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v2")?;
+        match send_recording_control_command(
+            b"TYPE:OTA\n",
+            Duration::from_secs(3),
+            "Listener OTA v2 active-link hint",
+            ActiveControlTransientFallback::TryFreshGatt,
+        ) {
+            Ok(()) => log::info!("[embedded-ble] Listener OTA v2 active-link hint sent"),
+            Err(err) => log::warn!(
+                "[embedded-ble] Listener OTA v2 active-link hint failed; continuing with OTA begin fallback: {err}"
+            ),
+        }
         log::info!("[embedded-ble] Listener OTA v2 prepare: acquiring BLE capture guard");
         let transfer_guard = BleCaptureGuard::enter(None)?;
         let _fresh_guard = BleFreshGattGuard::enter("Listener OTA v2 prepare")?;
@@ -6728,6 +6841,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             target,
             snapshot,
             transfer_guard,
+            _ota_process_guard: ota_process_guard,
         })
     }
 
@@ -7164,6 +7278,24 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             },
             "begin",
         )?;
+        let active_link_settle_delay = listener_ota_v2_active_link_settle_delay()?;
+        if !active_link_settle_delay.is_zero() {
+            log::info!(
+                "[embedded-ble] Listener OTA v2 #{transfer_id}: waiting {} ms for active BLE connection parameters after begin",
+                active_link_settle_delay.as_millis()
+            );
+            std::thread::sleep(active_link_settle_delay);
+            status = read_listener_ota_v2_status(target)?;
+            ota_v2_status_result(&status)?;
+            if status.state != OTA_V2_STATE_RECEIVING
+                || status.expected_size != firmware_bytes.len()
+            {
+                return Err(format!(
+                    "Listener OTA v2 status changed during active-link settle: state={} expected_size={} bytes_written={}.",
+                    status.state, status.expected_size, status.bytes_written
+                ));
+            }
+        }
         let mut window_chunks = status.window_chunks.max(1).min(configured_window.max(1));
         let chunk_payload_bytes = status
             .chunk_payload_bytes
@@ -7356,6 +7488,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .ok_or_else(|| {
                     format!(
                         "Unsupported {LISTENER_OTA_V2_WINDOW_ENV}={value}; use a window from 1 to 64 chunks."
+                    )
+                }),
+        }
+    }
+
+    fn listener_ota_v2_active_link_settle_delay() -> Result<Duration, String> {
+        let value = std::env::var(LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS_ENV)
+            .ok()
+            .and_then(ota_env_value);
+        listener_ota_v2_active_link_settle_delay_from(value.as_deref())
+    }
+
+    fn listener_ota_v2_active_link_settle_delay_from(
+        value: Option<&str>,
+    ) -> Result<Duration, String> {
+        match value.map(str::trim).filter(|value| !value.is_empty()) {
+            None => Ok(Duration::from_millis(LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS)),
+            Some(value) => value
+                .parse::<u64>()
+                .ok()
+                .filter(|ms| *ms <= 30_000)
+                .map(Duration::from_millis)
+                .ok_or_else(|| {
+                    format!(
+                        "Unsupported {LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS_ENV}={value}; use a non-negative millisecond count up to 30000."
                     )
                 }),
         }
@@ -16862,6 +17019,15 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 ota_data_inter_chunk_delay_from(Some("25")),
                 Ok(Duration::from_millis(25))
             );
+            assert_eq!(
+                listener_ota_v2_active_link_settle_delay_from(None),
+                Ok(Duration::from_millis(1000))
+            );
+            assert_eq!(
+                listener_ota_v2_active_link_settle_delay_from(Some("0")),
+                Ok(Duration::ZERO)
+            );
+            assert!(listener_ota_v2_active_link_settle_delay_from(Some("30001")).is_err());
         }
 
         #[test]
@@ -17243,6 +17409,11 @@ pub fn capture_notification_events_continuous_until_cancelled(
         on_ready,
         on_event,
     )
+}
+
+#[cfg(target_os = "windows")]
+pub fn is_background_listener_deferred_for_ota_error(err: &str) -> bool {
+    windows_ble::is_background_listener_deferred_for_ota_error(err)
 }
 
 #[cfg(target_os = "windows")]
@@ -17769,6 +17940,11 @@ pub fn capture_notification_events_continuous_until_cancelled(
     _on_event: &mut BleNotificationHandler<'_>,
 ) -> Result<(), String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn is_background_listener_deferred_for_ota_error(_err: &str) -> bool {
+    false
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -18328,6 +18504,42 @@ mod tests {
             windows_ble::type_heartbeat_terminal_behavior_matrix_for_test();
         assert!(!one_shot);
         assert!(background);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn listener_ota_v2_blocks_cross_process_background_heartbeat() {
+        let source = include_str!("embedded_ble.rs");
+        assert!(
+            source.contains("BLE_OTA_OPERATION_MUTEX_NAME")
+                && source.contains("Local\\\\Denzic.Listener.Type.BleOtaOperation")
+                && source.contains("acquire_ble_ota_process_mutex(\"listener_ota_v2\")"),
+            "Listener OTA v2 must hold a Windows named mutex shared by headless CLI and the installed tray process"
+        );
+        assert!(
+            source.contains("BLE OTA operation active in another process; deferring background listener before notify open")
+                && source.contains("BLE OTA operation active in another process; closing idle background listener")
+                && source.contains("BACKGROUND_LISTENER_DEFERRED_FOR_OTA"),
+            "background capture must not keep sending Type heartbeat or report recovery failures while another process owns Listener OTA"
+        );
+        let prepare_start = source
+            .find("pub(super) fn prepare_listener_ota_v2_transfer")
+            .expect("Listener OTA v2 prepare helper should exist");
+        let prepare_end = source[prepare_start..]
+            .find("pub fn transfer_firmware_ota")
+            .map(|offset| prepare_start + offset)
+            .expect("Listener OTA v2 prepare helper boundary should exist");
+        let prepare = &source[prepare_start..prepare_end];
+        assert!(
+            prepare.contains("_ota_process_guard: ota_process_guard")
+                && prepare.contains("TYPE:OTA")
+                && prepare.contains("Listener OTA v2 active-link hint")
+                && prepare.find("acquire_ble_ota_process_mutex").unwrap()
+                    < prepare.find("TYPE:OTA").unwrap()
+                && prepare.find("TYPE:OTA").unwrap()
+                    < prepare.find("BleCaptureGuard::enter").unwrap(),
+            "Listener OTA v2 must acquire the cross-process OTA lock, send TYPE:OTA, then open BLE GATT"
+        );
     }
 
     #[cfg(target_os = "windows")]

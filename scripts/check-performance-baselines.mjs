@@ -5,6 +5,7 @@ import { join } from "node:path";
 const repoRoot = process.cwd();
 const baselinePath = join(repoRoot, "scripts", "performance-baselines.json");
 const baselines = JSON.parse(readFileSync(baselinePath, "utf8"));
+const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
 
 function fail(message) {
   throw new Error(message);
@@ -303,11 +304,97 @@ for (const token of [
   }
 }
 
+const embeddedBle = readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble.rs"), "utf8");
+const listenerOtaWindow = embeddedBle.match(
+  /const\s+LISTENER_OTA_V2_DEFAULT_WINDOW_CHUNKS:\s*usize\s*=\s*(\d+);/,
+);
+if (!listenerOtaWindow) {
+  fail("Listener OTA v2 default window constant is missing");
+}
+if (Number(listenerOtaWindow[1]) < 20) {
+  fail("Listener OTA v2 default window must stay at least 20 chunks for the <=60000 ms OTA target");
+}
+if (!embeddedBle.includes("LISTENER_OTA_V2_WINDOW_ENV")) {
+  fail("Listener OTA v2 must keep the window override env for controlled bench experiments");
+}
+if (!embeddedBle.includes("LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS")) {
+  fail("Listener OTA v2 must keep the post-begin active-link settle guard for low-power OTA speed");
+}
+if (!embeddedBle.includes("waiting {} ms for active BLE connection parameters after begin")) {
+  fail("Listener OTA v2 must log the active-link settle wait before streaming OTA data");
+}
+for (const token of [
+  "BLE_OTA_OPERATION_MUTEX_NAME",
+  "acquire_ble_ota_process_mutex(\"listener_ota_v2\")",
+  "BLE OTA operation active in another process; deferring background listener before notify open",
+  "BLE OTA operation active in another process; closing idle background listener",
+  "BACKGROUND_LISTENER_DEFERRED_FOR_OTA",
+  "EMBEDDED_BLE_RETRY_OTA_DEFER_DELAY",
+  "TYPE:OTA",
+  "Listener OTA v2 active-link hint",
+  "background listener deferred while firmware OTA is active",
+]) {
+  if (!embeddedBle.includes(token)) {
+    const coordinatorSource = readFileSync(join(repoRoot, "src-tauri", "src", "coordinator.rs"), "utf8");
+    const haystack = `${embeddedBle}\n${coordinatorSource}`;
+    if (!haystack.includes(token)) {
+      fail(`Listener OTA v2 speed guard must keep cross-process BLE exclusivity token: ${token}`);
+    }
+  }
+}
+
 const ota = contracts.ota_transfer_speed;
-if (ota.accepted !== false || ota.status !== "pending_baseline_after_ota_acceptance") {
-  fail("OTA speed baseline must remain explicit pending work until OTA is accepted");
+if (![true, false].includes(ota.accepted)) {
+  fail("OTA speed baseline must keep an explicit accepted boolean");
+}
+for (const key of ["target_max_transfer_ms", "target_max_total_ms", "min_transfer_bytes"]) {
+  requireNumber(ota[key], `OTA speed ${key}`);
+}
+if (ota.target_max_transfer_ms !== 60000) {
+  fail("OTA speed contract must enforce transfer_ms <=60000");
+}
+if (ota.target_max_total_ms > 90000) {
+  fail("OTA speed total ceiling must not drift above 90000 ms");
+}
+if (ota.min_transfer_bytes < 900000) {
+  fail("OTA speed contract must validate a real firmware-sized transfer");
+}
+for (const token of [
+  "check-ota-transfer-speed-log.mjs",
+  "check-ota-transfer-speed-log.test.mjs",
+  "--max-transfer-ms 60000",
+  "--max-total-ms 90000",
+  "--min-bytes 900000",
+]) {
+  const haystack = `${ota.validation_command ?? ""}\n${packageJson.scripts?.["check:ota-speed-log-contract"] ?? ""}`;
+  if (!haystack.includes(token)) {
+    fail(`OTA speed validation contract must preserve token: ${token}`);
+  }
+}
+if (
+  ota.accepted === false &&
+  ![
+    "pending_human_acceptance_after_fix",
+    "pending_low_power_revalidation_after_cross_process_ota_lock",
+  ].includes(ota.status)
+) {
+  fail("OTA speed baseline may stay unaccepted only while the focused OTA speed fix or its low-power revalidation is pending");
+}
+if (ota.accepted === true) {
+  for (const key of ["measured_transfer_ms", "measured_total_ms", "measured_bytes"]) {
+    requireNumber(ota[key], `OTA speed ${key}`);
+  }
+  if (ota.measured_transfer_ms > ota.target_max_transfer_ms) {
+    fail("accepted OTA speed evidence exceeds transfer_ms ceiling");
+  }
+  if (ota.measured_total_ms > ota.target_max_total_ms) {
+    fail("accepted OTA speed evidence exceeds total_ms ceiling");
+  }
+  if (!ota.evidence?.includes("ota") || !ota.evidence?.endsWith(".json")) {
+    fail("accepted OTA speed baseline must cite a machine-readable OTA speed artifact");
+  }
 }
 
 console.log(
-  "PASS: performance baselines protect accepted settings-write, BLE rename, EC11 Type recovery, recording latency, and Type takeover targets; OTA speed baseline remains explicit pending work.",
+  "PASS: performance baselines protect accepted settings-write, BLE rename, EC11 Type recovery, recording latency, Type takeover, and the OTA <=60000 ms speed target.",
 );
