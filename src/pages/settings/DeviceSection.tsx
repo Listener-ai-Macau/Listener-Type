@@ -129,6 +129,14 @@ const defaultDeviceKeyboardKey = (primary: string, modifiers: string[] = []): De
   shortcut: { primary, modifiers },
 });
 
+const defaultDeviceDictationKey = (): DeviceCustomKeyMapping => ({
+  action: 'dictation',
+  appPage: 'settingsDevice',
+  externalAppPath: '',
+  pasteTemplate: '',
+  shortcut: null,
+});
+
 function isDeviceFallbackReservedPrimary(primary: string): boolean {
   const match = /^F(\d{1,2})$/i.exec(primary.trim());
   if (!match) return false;
@@ -216,6 +224,7 @@ export function DeviceSection() {
         key2: defaultDeviceKeyboardKey('C', ['ctrl']),
         key3: defaultDeviceKeyboardKey('V', ['ctrl']),
         key4: defaultDeviceKeyboardKey('Z', ['ctrl']),
+        knob: defaultDeviceDictationKey(),
       },
     }));
   };

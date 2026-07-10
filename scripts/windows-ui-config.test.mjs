@@ -25,6 +25,7 @@ const capsuleLayoutTs = await readFile(new URL('../src/lib/capsuleLayout.ts', im
 const windowChromeTsx = await readFile(new URL('../src/components/WindowChrome.tsx', import.meta.url), 'utf-8');
 const floatingShellTsx = await readFile(new URL('../src/components/FloatingShell.tsx', import.meta.url), 'utf-8');
 const deviceSectionTsx = await readFile(new URL('../src/pages/settings/DeviceSection.tsx', import.meta.url), 'utf-8');
+const ipcTs = await readFile(new URL('../src/lib/ipc.ts', import.meta.url), 'utf-8');
 const tokensCss = await readFile(new URL('../src/styles/tokens.css', import.meta.url), 'utf-8');
 
 if (!capsuleWindow) {
@@ -138,8 +139,13 @@ if (!/borderRadius:\s*'var\(--ol-window-console-radius\)'/.test(floatingShellTsx
 
 assertMatch(
   deviceSectionTsx,
-  /restoreDefaultDeviceKeyboardOutput[\s\S]*key1:\s*defaultDeviceKeyboardKey\('RightControl'\)[\s\S]*key2:\s*defaultDeviceKeyboardKey\('C',\s*\['ctrl'\]\)[\s\S]*key3:\s*defaultDeviceKeyboardKey\('V',\s*\['ctrl'\]\)[\s\S]*key4:\s*defaultDeviceKeyboardKey\('Z',\s*\['ctrl'\]\)/,
-  'device custom key defaults should remain KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z',
+  /restoreDefaultDeviceKeyboardOutput[\s\S]*key1:\s*defaultDeviceKeyboardKey\('RightControl'\)[\s\S]*key2:\s*defaultDeviceKeyboardKey\('C',\s*\['ctrl'\]\)[\s\S]*key3:\s*defaultDeviceKeyboardKey\('V',\s*\['ctrl'\]\)[\s\S]*key4:\s*defaultDeviceKeyboardKey\('Z',\s*\['ctrl'\]\)[\s\S]*knob:\s*defaultDeviceDictationKey\(\)/,
+  'device custom key defaults should remain KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z, EC11 click dictation',
+);
+assertMatch(
+  ipcTs,
+  /deviceCustomKeys:[\s\S]*key1:\s*defaultDeviceKeyboardKey\('RightControl'\)[\s\S]*key2:\s*defaultDeviceKeyboardKey\('C',\s*\['ctrl'\]\)[\s\S]*key3:\s*defaultDeviceKeyboardKey\('V',\s*\['ctrl'\]\)[\s\S]*key4:\s*defaultDeviceKeyboardKey\('Z',\s*\['ctrl'\]\)[\s\S]*knob:\s*\{\s*action:\s*'dictation'/,
+  'mock device custom key defaults should keep EC11 click as recording',
 );
 assertMatch(
   deviceSectionTsx,

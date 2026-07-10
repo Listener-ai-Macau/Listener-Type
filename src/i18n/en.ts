@@ -843,7 +843,7 @@ export const en: typeof zhCN = {
     },
       deviceKeys: {
         title: 'Device custom keys',
-        desc: 'Default: KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z; all are customizable.',
+        desc: 'Default: KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z, EC11 click starts / stops recording; all are customizable.',
       restoreKeyboardDefaults: 'Restore default key output',
       actualOutput: 'Sends: {{shortcut}}',
       keyLabel: '{{key}}',

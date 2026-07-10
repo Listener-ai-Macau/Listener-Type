@@ -777,7 +777,10 @@ fn current_device_custom_keys_default_with_external_app_path(
             shortcut: Some(device_keyboard_shortcut("Z", &["ctrl"])),
             ..DeviceCustomKeyMapping::default()
         },
-        knob: DeviceCustomKeyMapping::default(),
+        knob: DeviceCustomKeyMapping {
+            action: DeviceCustomKeyAction::Dictation,
+            ..DeviceCustomKeyMapping::default()
+        },
     }
 }
 
@@ -796,6 +799,14 @@ fn current_device_custom_keys_default_with_legacy_knob_switch_style(
 ) -> DeviceCustomKeys {
     let mut keys = current_device_custom_keys_default_with_external_app_path(external_app_path);
     keys.knob.action = DeviceCustomKeyAction::SwitchStyle;
+    keys
+}
+
+fn current_device_custom_keys_default_with_legacy_knob_disabled(
+    external_app_path: String,
+) -> DeviceCustomKeys {
+    let mut keys = current_device_custom_keys_default_with_external_app_path(external_app_path);
+    keys.knob = DeviceCustomKeyMapping::default();
     keys
 }
 
@@ -933,8 +944,18 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
         current_device_custom_keys_default_with_legacy_knob_switch_style(
             default_device_external_app_path(),
         );
+    let current_default_with_legacy_knob_disabled =
+        current_device_custom_keys_default_with_legacy_knob_disabled(
+            default_device_external_app_path(),
+        );
     keys == &legacy_device_custom_keys_default()
         || device_custom_key_defaults_match(keys, &legacy_device_custom_keys_default(), true)
+        || keys == &current_default_with_legacy_knob_disabled
+        || device_custom_key_defaults_match(
+            keys,
+            &current_default_with_legacy_knob_disabled,
+            false,
+        )
         || keys == &current_default_with_legacy_knob
         || device_custom_key_defaults_match(keys, &current_default_with_legacy_knob, false)
         || keys == &previous_action_default
@@ -966,10 +987,18 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
                     );
                 let current_default_with_legacy_knob =
                     current_device_custom_keys_default_with_legacy_knob_switch_style(path.clone());
+                let current_default_with_legacy_knob_disabled =
+                    current_device_custom_keys_default_with_legacy_knob_disabled(path.clone());
                 let previous_shortcuts_default =
                     previous_shortcuts_device_custom_keys_default_with_external_app_path(path);
                 keys == &legacy_default
                     || device_custom_key_defaults_match(keys, &legacy_default, true)
+                    || keys == &current_default_with_legacy_knob_disabled
+                    || device_custom_key_defaults_match(
+                        keys,
+                        &current_default_with_legacy_knob_disabled,
+                        false,
+                    )
                     || keys == &current_default_with_legacy_knob
                     || device_custom_key_defaults_match(
                         keys,
@@ -2994,7 +3023,7 @@ mod tests {
     }
 
     #[test]
-    fn device_custom_keys_default_to_keyboard_key_output() {
+    fn device_custom_keys_default_to_keyboard_key_output_and_knob_dictation() {
         let prefs = UserPreferences::default();
 
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
@@ -3003,14 +3032,14 @@ mod tests {
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Z", &["ctrl"]);
         assert_eq!(
             prefs.device_custom_keys.knob.action,
-            DeviceCustomKeyAction::Disabled
+            DeviceCustomKeyAction::Dictation
         );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
     }
 
     #[test]
-    fn current_default_with_legacy_knob_switch_style_migrates_knob_to_disabled() {
+    fn current_default_with_legacy_knob_switch_style_migrates_knob_to_dictation() {
         let raw = serde_json::json!({
             "deviceCustomKeysDefaultMigrated": true,
             "deviceCustomKeys": {
@@ -3039,7 +3068,42 @@ mod tests {
 
         assert_eq!(
             prefs.device_custom_keys.knob.action,
-            DeviceCustomKeyAction::Disabled
+            DeviceCustomKeyAction::Dictation
+        );
+        assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
+    }
+
+    #[test]
+    fn current_default_with_legacy_knob_disabled_migrates_knob_to_dictation() {
+        let raw = serde_json::json!({
+            "deviceCustomKeysDefaultMigrated": true,
+            "deviceCustomKeys": {
+                "key1": { "action": "sendShortcut", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": { "primary": "RightControl", "modifiers": [] } },
+                "key2": { "action": "sendShortcut", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": { "primary": "C", "modifiers": ["ctrl"] } },
+                "key3": { "action": "sendShortcut", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": { "primary": "V", "modifiers": ["ctrl"] } },
+                "key4": { "action": "sendShortcut", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": { "primary": "Z", "modifiers": ["ctrl"] } },
+                "knob": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            },
+            "deviceCustomKeyDoubleClicks": {
+                "key1": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            },
+            "deviceCustomKeyLongPresses": {
+                "key1": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key2": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key3": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "key4": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null },
+                "knob": { "action": "disabled", "appPage": "settingsDevice", "externalAppPath": "", "pasteTemplate": "", "shortcut": null }
+            }
+        });
+        let prefs: UserPreferences = serde_json::from_value(raw).unwrap();
+
+        assert_eq!(
+            prefs.device_custom_keys.knob.action,
+            DeviceCustomKeyAction::Dictation
         );
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key1, "RightControl", &[]);
     }
@@ -3063,7 +3127,7 @@ mod tests {
         assert_device_keyboard_shortcut(&prefs.device_custom_keys.key4, "Z", &["ctrl"]);
         assert_eq!(
             prefs.device_custom_keys.knob.action,
-            DeviceCustomKeyAction::Disabled
+            DeviceCustomKeyAction::Dictation
         );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
@@ -3093,7 +3157,7 @@ mod tests {
         );
         assert_eq!(
             prefs.device_custom_keys.knob.action,
-            DeviceCustomKeyAction::Disabled
+            DeviceCustomKeyAction::Dictation
         );
         assert!(prefs.device_custom_key_double_clicks.is_all_disabled());
         assert!(prefs.device_custom_key_long_presses.is_all_disabled());
