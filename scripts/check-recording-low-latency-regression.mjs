@@ -176,6 +176,20 @@ requireIncludes(
   "current_embedded_audio_capsule_level(inner)",
   "Recording capsule partial preview must reuse the latest audio level",
 );
+for (const token of [
+  "fn stabilize_embedded_audio_partial_preview",
+  "candidate_key.starts_with(&current_key)",
+  "current_key.starts_with(&candidate_key)",
+  "embedded_audio_partial_preview_ignores_punctuation_only_revision",
+  "embedded_audio_partial_preview_extends_without_rewriting_visible_prefix",
+  "embedded_audio_partial_preview_does_not_shrink_visible_text",
+]) {
+  requireIncludes(
+    dictation,
+    token,
+    "Recording capsule partial preview must grow without rewriting visible text",
+  );
+}
 const partialPreviewEmit = section(
   dictation,
   "fn emit_embedded_audio_partial_preview_if_active",

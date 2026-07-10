@@ -1021,16 +1021,136 @@ fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: Session
         Some(session_id),
         format!("chars={}", preview.chars().count()),
         |_| {
-            {
-                let mut slot = inner.embedded_audio_partial_preview.lock();
-                if slot.as_deref() == Some(preview.as_str()) {
-                    return false;
-                }
-                *slot = Some(preview.clone());
-            }
-            emit_embedded_audio_partial_preview_if_active(inner, session_id, preview)
+            let mut slot = inner.embedded_audio_partial_preview.lock();
+            let Some(stabilized_preview) =
+                stabilize_embedded_audio_partial_preview(slot.as_deref(), &preview)
+            else {
+                return false;
+            };
+            *slot = Some(stabilized_preview.clone());
+            emit_embedded_audio_partial_preview_if_active(inner, session_id, stabilized_preview)
         },
     );
+}
+
+fn stabilize_embedded_audio_partial_preview(
+    current: Option<&str>,
+    candidate: &str,
+) -> Option<String> {
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return None;
+    }
+    let Some(current) = current.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Some(candidate.to_string());
+    };
+    let current_key = embedded_audio_partial_preview_stability_key(current);
+    let candidate_key = embedded_audio_partial_preview_stability_key(candidate);
+    if current_key == candidate_key || candidate_key.is_empty() {
+        return None;
+    }
+    if current_key.is_empty() {
+        return Some(candidate.to_string());
+    }
+    if candidate_key.starts_with(&current_key) {
+        return stitch_embedded_audio_partial_preview(
+            current,
+            candidate,
+            current_key.chars().count(),
+        );
+    }
+    if current_key.starts_with(&candidate_key) {
+        return None;
+    }
+
+    let current_chars = current_key.chars().count();
+    let candidate_chars = candidate_key.chars().count();
+    if current_chars <= 4 && candidate_chars >= current_chars.saturating_add(3) {
+        return Some(candidate.to_string());
+    }
+
+    None
+}
+
+fn embedded_audio_partial_preview_stability_key(text: &str) -> String {
+    let mut key = String::new();
+    for ch in text.chars() {
+        if is_embedded_audio_partial_preview_decorative(ch) {
+            continue;
+        }
+        for lower in ch.to_lowercase() {
+            key.push(lower);
+        }
+    }
+    key
+}
+
+fn is_embedded_audio_partial_preview_decorative(ch: char) -> bool {
+    ch.is_whitespace()
+        || ch.is_ascii_punctuation()
+        || matches!(
+            ch,
+            '，' | '。'
+                | '、'
+                | '；'
+                | '：'
+                | '？'
+                | '！'
+                | '“'
+                | '”'
+                | '‘'
+                | '’'
+                | '（'
+                | '）'
+                | '【'
+                | '】'
+                | '《'
+                | '》'
+                | '…'
+                | '—'
+        )
+}
+
+fn stitch_embedded_audio_partial_preview(
+    current: &str,
+    candidate: &str,
+    current_key_chars: usize,
+) -> Option<String> {
+    let suffix_start = byte_index_after_stability_chars(candidate, current_key_chars);
+    let mut suffix = &candidate[suffix_start..];
+    if suffix.is_empty() {
+        return None;
+    }
+    if current
+        .chars()
+        .last()
+        .is_some_and(is_embedded_audio_partial_preview_decorative)
+    {
+        suffix = suffix.trim_start_matches(is_embedded_audio_partial_preview_decorative);
+    }
+    if suffix.is_empty() {
+        return None;
+    }
+    let mut stitched = current.to_string();
+    stitched.push_str(suffix);
+    Some(stitched)
+}
+
+fn byte_index_after_stability_chars(text: &str, count: usize) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    let mut seen = 0usize;
+    for (idx, ch) in text.char_indices() {
+        if is_embedded_audio_partial_preview_decorative(ch) {
+            continue;
+        }
+        seen = seen.saturating_add(1);
+        if seen == count {
+            return idx + ch.len_utf8();
+        }
+    }
+    text.len()
 }
 
 fn emit_embedded_audio_partial_preview_if_active(
@@ -4684,7 +4804,8 @@ mod tests {
         prepare_embedded_streaming_pcm_for_asr, publish_embedded_ble_asr_final,
         record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
         request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
-        store_embedded_audio_stats, streaming_insert_eligible, trim_embedded_pcm_for_asr,
+        stabilize_embedded_audio_partial_preview, store_embedded_audio_stats,
+        streaming_insert_eligible, trim_embedded_pcm_for_asr,
         update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
         EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
         DEVICE_AI_PROCESSING_MAX_VISIBLE_MS, DEVICE_AI_PROCESSING_MIN_VISIBLE_MS,
@@ -4714,6 +4835,40 @@ mod tests {
         fn consume_pcm_chunk(&self, pcm: &[u8]) {
             self.bytes.fetch_add(pcm.len(), Ordering::SeqCst);
         }
+    }
+
+    #[test]
+    fn embedded_audio_partial_preview_ignores_punctuation_only_revision() {
+        assert_eq!(
+            stabilize_embedded_audio_partial_preview(
+                Some("这个预览波动太大了。然后呢？对于用户"),
+                "这个预览波动太大了，然后呢？对于用户"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn embedded_audio_partial_preview_extends_without_rewriting_visible_prefix() {
+        assert_eq!(
+            stabilize_embedded_audio_partial_preview(
+                Some("这个预览波动太大了。然后呢？对于用户"),
+                "这个预览波动太大了，然后呢？对于用户的观感"
+            )
+            .as_deref(),
+            Some("这个预览波动太大了。然后呢？对于用户的观感")
+        );
+    }
+
+    #[test]
+    fn embedded_audio_partial_preview_does_not_shrink_visible_text() {
+        assert_eq!(
+            stabilize_embedded_audio_partial_preview(
+                Some("这个预览波动太大了。然后呢？对于用户的观感"),
+                "这个预览波动太大了。然后呢？对于用户"
+            ),
+            None
+        );
     }
 
     fn embedded_audio_test_session(
