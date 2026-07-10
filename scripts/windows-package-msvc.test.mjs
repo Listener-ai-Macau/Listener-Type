@@ -137,6 +137,7 @@ assert.match(script, /Assert-InstalledPayloadMatchesRelease[\s\S]*TimeoutSeconds
 assert.match(script, /lastHashError[\s\S]*catch[\s\S]*Exception\.Message/, "MSI validation must retry through transient Program Files file locks");
 assert.match(script, /Start-Process -FilePath \$installedExePath[\s\S]*Started installed Listener Type app/, "installed-app validation must launch the Program Files exe");
 assert.match(releaseCheck, /check:dirty-inventory/, "release:check must classify dirty work before the clean-worktree gate reports release blockage");
+assert.match(releaseCheck, /check:guard-commits/, "release:check must keep regression guards linked to recoverable repository commits");
 assert.match(releaseCheck, /check:repo-hygiene/, "release:check must require a clean worktree before publishing or final review");
 assert.doesNotMatch(script, /Description = "Listener Type latest local release build"/, "desktop shortcut must not advertise or target the repo build output");
 assert.match(script, /Cargo build jobs left at Cargo default parallelism/, "script should advertise default Cargo parallelism");

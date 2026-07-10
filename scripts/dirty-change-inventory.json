@@ -18,7 +18,9 @@
         "scripts/release-check.mjs",
         "scripts/check-repo-hygiene.mjs",
         "scripts/check-dirty-change-inventory.mjs",
+        "scripts/check-regression-guard-commits.mjs",
         "scripts/dirty-change-inventory.json",
+        "scripts/regression-guard-commits.json",
         "scripts/windows-listener-preproduction-human-review.ps1"
       ]
     },

@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-10",
+  "purpose": "Machine-readable index from critical Listener regression guards to the exact repository commit that introduced or hardened the guard. Use this first when a protected behavior regresses: git show the linked commit, inspect the guard, then rerun the listed validation commands.",
+  "repositories": {
+    "type": {
+      "path": "Listener-Type"
+    },
+    "firmware": {
+      "path": "Listener-Firmware"
+    }
+  },
+  "required_guards": [
+    {
+      "repo": "type",
+      "guard": "npm run check:recording-latency"
+    },
+    {
+      "repo": "type",
+      "guard": "npm run check:performance-baselines"
+    },
+    {
+      "repo": "firmware",
+      "guard": "python tools/verify_status_led_static.py"
+    },
+    {
+      "repo": "firmware",
+      "guard": "python tools/verify_power_manager_static.py"
+    },
+    {
+      "repo": "firmware",
+      "guard": "pwsh -NoProfile -File ./tools/build.ps1"
+    }
+  ],
+  "entries": [
+    {
+      "id": "type_repo_hygiene_and_review_progress",
+      "repo": "type",
+      "commit": "27f8b8d03230097ddb30c3f841210ec649cb174c",
+      "subject": "Add preproduction repo hygiene gates",
+      "state": "tooling_guard_validated",
+      "protects": [
+        "Dirty work must be classified before final review or release.",
+        "Final Type review/release must fail on a dirty worktree.",
+        "Human review shows overall progress and stops when an operator note needs triage.",
+        "MSI validation launches the installed Program Files app instead of a repo exe."
+      ],
+      "guards": [
+        "npm run check:dirty-inventory",
+        "npm run check:repo-hygiene",
+        "npm run check:preproduction-bench-contract",
+        "node scripts/windows-package-msvc.test.mjs"
+      ]
+    },
+    {
+      "id": "type_recording_latency_and_ble_audio_control",
+      "repo": "type",
+      "commit": "a0ec14e118347e2e84bbbdc057c5da75d50c6852",
+      "subject": "Restore Type recording latency guards",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "Recording preview and final text stay near-zero-latency after Type restart or MSI install.",
+        "Volcengine preview stays a low-latency sidecar while final ASR remains accurate.",
+        "Recording stop/control commands do not re-enter the high-volume BLE notification FIFO.",
+        "Recording capsule partial preview preserves the latest audio level instead of forcing zero."
+      ],
+      "guards": [
+        "npm run check:recording-latency",
+        "npm run check:performance-baselines",
+        "npm run build",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml coordinator::dictation::tests::raw_mode_without_llm_uses_passthrough_instead_of_streaming_polish --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml coordinator::dictation::tests::embedded_streaming_pcm_for_active_session_feeds_asr_without_early_ai_led --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml coordinator::tests::capsule_frontend_text_change_bypasses_level_throttle --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml coordinator::tests::capsule_recording_frontend_events_are_throttled --lib"
+      ]
+    },
+    {
+      "id": "type_device_settings_and_custom_keys",
+      "repo": "type",
+      "commit": "ac43b90e0a592065a8f74d80cadc67d99c1f113d",
+      "subject": "Stabilize Type device settings keys",
+      "state": "partially_human_accepted_with_machine_guard",
+      "protects": [
+        "Type writes exact low-power minutes instead of turning values such as 12 into 13.",
+        "Type syncs firmware readback values into local preferences exactly.",
+        "Default device key output stays KEY1 RightCtrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z.",
+        "Device custom-key UI keeps a single recorder control while preserving dictation/custom function choices."
+      ],
+      "guards": [
+        "npm run test:device-settings-mock",
+        "npm run build",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml device_settings_firmware_readback_syncs_local_preferences_exactly --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml device_settings_update_commands --lib"
+      ]
+    },
+    {
+      "id": "type_lifecycle_validation_scripts",
+      "repo": "type",
+      "commit": "ed00146d983c7b18a4c9f50cdd91b262bb8049d8",
+      "subject": "Harden Type lifecycle validation scripts",
+      "state": "tooling_guard_validated",
+      "protects": [
+        "Lifecycle validation uses pwsh instead of Windows PowerShell.",
+        "Startup/window lifecycle tests protect reopening hidden or tiny main windows.",
+        "UI config tests protect the device-key recorder-only control and default key output."
+      ],
+      "guards": [
+        "node scripts/windows-startup-lifecycle-contract.test.mjs",
+        "node scripts/windows-ui-config.test.mjs",
+        "python -m py_compile scripts/windows-listener-type-lifecycle-e2e.py"
+      ]
+    },
+    {
+      "id": "firmware_validation_tooling_hygiene",
+      "repo": "firmware",
+      "commit": "1278e612381a124a004ce80367e9c4d9aba71c89",
+      "subject": "Harden firmware validation tooling",
+      "state": "tooling_guard_validated",
+      "protects": [
+        "Firmware release_check fails early on a dirty worktree.",
+        "Firmware validation tooling stays on pwsh and avoids recurring PowerShell 5.1 fallbacks.",
+        "send_serial_and_capture.ps1 accepts -CaptureSeconds as a safe shorthand."
+      ],
+      "guards": [
+        "python tools/verify_validation_tooling_hygiene.py",
+        "pwsh -NoProfile -File ./tools/release_check.ps1"
+      ]
+    },
+    {
+      "id": "firmware_pwr_boot_shutdown_key_led",
+      "repo": "firmware",
+      "commit": "61d7a79f85d7bc76d740f4c794c930c8d7d63640",
+      "subject": "Stabilize firmware LED power cues",
+      "state": "machine_validated_pending_human_review",
+      "protects": [
+        "PWR boot starts warm amber and only hands off after BLE-visible readiness.",
+        "Shutdown confirmation preserves visible PWR/status frames instead of intermittently blacking out.",
+        "EC11 push suppresses rotation so straight presses do not produce rotation side effects.",
+        "Processing/AI LED has a stale timeout and idle-wake recording key evidence stays checkable."
+      ],
+      "guards": [
+        "python tools/verify_status_led_static.py",
+        "python tools/verify_power_manager_static.py",
+        "pwsh -NoProfile -File ./tools/build.ps1",
+        "python tools/verify_idle_wake_recording_key_log.py <serial-log>"
+      ]
+    },
+    {
+      "id": "firmware_ble_settings_recovery",
+      "repo": "firmware",
+      "commit": "66ebaf868bf999d4470598b526c850664a4ae59a",
+      "subject": "Stabilize firmware BLE settings recovery",
+      "state": "machine_validated_pending_human_review",
+      "protects": [
+        "Compact device settings keys preserve exact low-power and brightness values.",
+        "BLE advertising/secure connection can release the truthful PWR boot handoff.",
+        "pwsh BLE/HID validation loads the WinRT BLE projection before checking HID recovery.",
+        "BLE diagnostic coverage remains visible for rename/recovery regressions."
+      ],
+      "guards": [
+        "pwsh -NoProfile -File ./tools/verify_ble_hid.ps1",
+        "pwsh -NoProfile -File ./tools/verify_diagnostic_log_coverage.ps1",
+        "python tools/verify_validation_tooling_hygiene.py",
+        "pwsh -NoProfile -File ./tools/build.ps1"
+      ]
+    }
+  ]
+}
