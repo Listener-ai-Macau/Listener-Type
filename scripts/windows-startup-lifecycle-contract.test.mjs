@@ -16,6 +16,7 @@ const raw = await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.u
 const config = JSON.parse(raw);
 const mainWindow = config.app.windows.find(window => window.label === 'main');
 const appTsx = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf-8');
+const libRs = await readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf-8');
 
 if (!mainWindow) {
   throw new Error('main window config missing');
@@ -36,4 +37,14 @@ assertMatch(
   appTsx,
   /const pollHotkeyStatus = async \(\) => \{[\s\S]*?if \(status\.state !== 'starting'\) \{[\s\S]*?setGate\('ready'\);/m,
   'windows startup should wait for hotkey status to leave the starting phase before entering ready',
+);
+assertMatch(
+  libRs,
+  /fn restore_main_window_layout_if_needed[\s\S]*set_size\(LogicalSize::new\(1240\.0,\s*800\.0\)\)/,
+  'windows desktop-shortcut reopen should restore tiny/offscreen main windows to normal size',
+);
+assertMatch(
+  libRs,
+  /fn restore_main_window_native[\s\S]*EnumWindows[\s\S]*GetWindowTextLengthW\(candidate\) > 0[\s\S]*ShowWindow\(candidate,\s*SW_SHOW\)/,
+  'windows desktop-shortcut reopen should reveal hidden WebView host windows without expanding titled QA/capsule windows',
 );

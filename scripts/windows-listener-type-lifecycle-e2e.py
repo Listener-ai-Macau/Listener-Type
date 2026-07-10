@@ -92,7 +92,7 @@ def cdp_page_ws(port: int) -> str:
         try:
             response = subprocess.run(
                 [
-                    "powershell",
+                    "pwsh",
                     "-NoProfile",
                     "-Command",
                     f"(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:{port}/json/list).Content",
@@ -123,7 +123,7 @@ $speaker.Speak(@'
 {phrase}
 '@)
 """
-    subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True)
+    subprocess.run(["pwsh", "-NoProfile", "-Command", ps], check=True)
 
 
 def wait_for_history_growth(client: CdpClient, baseline: int, timeout_seconds: int):
@@ -187,7 +187,7 @@ def start_target(target: str):
         time.sleep(2.5)
         return focus_terminal_window(target)
     if target == "wt-powershell":
-        subprocess.run(["wt.exe", "new-tab", "powershell.exe"], check=True)
+        subprocess.run(["wt.exe", "new-tab", "pwsh.exe"], check=True)
         time.sleep(2.5)
         return focus_terminal_window(target)
     if target == "notepad":
@@ -233,13 +233,13 @@ def main():
 
     launch_ps = f"""
 $env:LISTENER_TYPE_SHOW_MAIN_ON_START='1'
-$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port={args.remote_debugging_port}'
+$env:LISTENER_TYPE_WEBVIEW2_ADDITIONAL_BROWSER_ARGS='--remote-debugging-port={args.remote_debugging_port} --remote-allow-origins=*'
 $env:LISTENER_TYPE_DEBUG_TRANSCRIPT_FILE='{debug_transcript_path}'
 $proc = Start-Process -FilePath '{args.exe_path}' -PassThru
 $proc.Id
 """
     app_process = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", launch_ps],
+        ["pwsh", "-NoProfile", "-Command", launch_ps],
         check=True,
         capture_output=True,
         text=True,
@@ -295,7 +295,7 @@ $proc.Id
         cleanup_target(target_info) if target_info else None
         set_clipboard_text(previous_clipboard)
         subprocess.run(
-            ["powershell", "-NoProfile", "-Command", f"Stop-Process -Id {app_pid} -Force -ErrorAction SilentlyContinue"],
+            ["pwsh", "-NoProfile", "-Command", f"Stop-Process -Id {app_pid} -Force -ErrorAction SilentlyContinue"],
             check=False,
         )
         if debug_transcript_path:

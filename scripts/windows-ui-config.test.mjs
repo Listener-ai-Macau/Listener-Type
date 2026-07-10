@@ -24,6 +24,7 @@ const capsuleTsx = await readFile(new URL('../src/components/Capsule.tsx', impor
 const capsuleLayoutTs = await readFile(new URL('../src/lib/capsuleLayout.ts', import.meta.url), 'utf-8');
 const windowChromeTsx = await readFile(new URL('../src/components/WindowChrome.tsx', import.meta.url), 'utf-8');
 const floatingShellTsx = await readFile(new URL('../src/components/FloatingShell.tsx', import.meta.url), 'utf-8');
+const deviceSectionTsx = await readFile(new URL('../src/pages/settings/DeviceSection.tsx', import.meta.url), 'utf-8');
 const tokensCss = await readFile(new URL('../src/styles/tokens.css', import.meta.url), 'utf-8');
 
 if (!capsuleWindow) {
@@ -133,6 +134,22 @@ if (/#\[cfg\(target_os = "windows"\)\][\s\S]*?main\.set_decorations\(false\)/.te
 
 if (!/borderRadius:\s*'var\(--ol-window-console-radius\)'/.test(floatingShellTsx)) {
   throw new Error('floating shell should consume the shared window-console radius');
+}
+
+assertMatch(
+  deviceSectionTsx,
+  /restoreDefaultDeviceKeyboardOutput[\s\S]*key1:\s*defaultDeviceKeyboardKey\('RightControl'\)[\s\S]*key2:\s*defaultDeviceKeyboardKey\('C',\s*\['ctrl'\]\)[\s\S]*key3:\s*defaultDeviceKeyboardKey\('V',\s*\['ctrl'\]\)[\s\S]*key4:\s*defaultDeviceKeyboardKey\('Z',\s*\['ctrl'\]\)/,
+  'device custom key defaults should remain KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z',
+);
+assertMatch(
+  deviceSectionTsx,
+  /mapping\.action === 'sendShortcut'[\s\S]*<ShortcutRecorder[\s\S]*value=\{shortcut\}/,
+  'device send-key UI should use the recorder as its single key-entry control',
+);
+for (const forbidden of ['DEVICE_KEYBOARD_PRIMARY_OPTIONS', 'DEVICE_SHORTCUT_MODIFIERS', 'deviceShortcutWithPrimary', 'deviceShortcutWithModifier']) {
+  if (deviceSectionTsx.includes(forbidden)) {
+    throw new Error(`device send-key UI should not bring back the extra selector control: ${forbidden}`);
+  }
 }
 
 assertMatch(
