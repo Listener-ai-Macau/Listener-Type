@@ -5,6 +5,7 @@ import {
   getCapsuleHostMetrics,
   getCapsuleMessageLayout,
   getCapsulePillMetrics,
+  getCapsuleProcessingTextMaxWidth,
 } from '../lib/capsuleLayout';
 import { invokeOrMock, isTauri } from '../lib/ipc';
 import { capsuleCancelEnabled, capsuleConfirmEnabled } from '../lib/capsuleActionRules';
@@ -74,14 +75,19 @@ interface CenterTextProps {
   color?: string;
 }
 
-function compactCapsuleText(text: string, os: OS, kind: CenterTextProps['kind']): string {
-  return truncatePreview(text, os, kind);
+function compactCapsuleText(
+  text: string,
+  os: OS,
+  kind: CenterTextProps['kind'],
+  truncate: boolean,
+): string {
+  return truncate ? truncatePreview(text, os, kind) : text.replace(/\s+/g, ' ').trim();
 }
 
 function CenterText({ os, kind, text, color = 'var(--ol-ink-3)' }: CenterTextProps) {
   const metrics = getCapsulePillMetrics(os);
   const layout = getCapsuleMessageLayout(os, kind);
-  const compactText = compactCapsuleText(text, os, kind);
+  const compactText = compactCapsuleText(text, os, kind, false);
   const lineHeight = layout.allowWrap ? 1.2 : 1;
   const fontSize = 11;
   return (
@@ -260,6 +266,7 @@ function Pill({
   const { t } = useTranslation();
   const metrics = getCapsulePillMetrics(os);
   const processingLayout = getCapsuleMessageLayout(os, 'processing');
+  const processingTextMaxWidth = getCapsuleProcessingTextMaxWidth(os);
   const stopPending = state === 'recording' && stopRequested;
   const showStopAck = shouldShowStopAcknowledgement(state, stopPending || stopAcknowledged);
   const errorActive = state === 'error';
@@ -272,8 +279,8 @@ function Pill({
   // visible with a subtle pulse, plus a small spinner on the right — no overlay.
 
   let center: JSX.Element;
-  const renderProcessingCenter = (displayText: string): JSX.Element => {
-    const compactText = compactCapsuleText(displayText, os, 'processing');
+  const renderProcessingCenter = (displayText: string, truncate: boolean): JSX.Element => {
+    const compactText = compactCapsuleText(displayText, os, 'processing', truncate);
     return (
       <div
         style={{
@@ -284,6 +291,7 @@ function Pill({
           maxWidth: metrics.textWidth,
           minWidth: 0,
           justifyContent: 'center',
+          overflow: 'hidden',
           animation: showStopAck
             ? 'cap-stop-ack-center 420ms var(--ol-motion-soft) both'
             : 'cap-state-enter 220ms var(--ol-motion-soft) both',
@@ -294,12 +302,16 @@ function Pill({
             fontSize: 11,
             fontWeight: 500,
             color: '#171714',
+            flex: '1 1 auto',
             minWidth: 0,
+            maxWidth: processingTextMaxWidth,
             textAlign: 'center',
             lineHeight: processingLayout.allowWrap ? 1.2 : 1,
             whiteSpace: processingLayout.allowWrap ? 'normal' : 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
+            overflowWrap: 'anywhere',
+            wordBreak: 'break-word',
             display: '-webkit-box',
             WebkitBoxOrient: 'vertical',
             WebkitLineClamp: processingLayout.lineClamp,
@@ -327,7 +339,7 @@ function Pill({
     );
   };
   const renderRecordingPreview = (displayText: string): JSX.Element => {
-    const compactText = compactCapsuleText(displayText, os, 'processing');
+    const compactText = compactCapsuleText(displayText, os, 'processing', true);
     return (
       <div
         style={{
@@ -337,6 +349,7 @@ function Pill({
           maxWidth: metrics.textWidth,
           minWidth: 0,
           justifyContent: 'center',
+          overflow: 'hidden',
         }}
       >
         <span
@@ -344,12 +357,16 @@ function Pill({
             fontSize: 11,
             fontWeight: 500,
             color: '#171714',
+            flex: '1 1 auto',
             minWidth: 0,
+            maxWidth: metrics.textWidth,
             textAlign: 'center',
             lineHeight: processingLayout.allowWrap ? 1.2 : 1,
             whiteSpace: processingLayout.allowWrap ? 'normal' : 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
+            overflowWrap: 'anywhere',
+            wordBreak: 'break-word',
             display: '-webkit-box',
             WebkitBoxOrient: 'vertical',
             WebkitLineClamp: processingLayout.lineClamp,
@@ -362,11 +379,11 @@ function Pill({
   };
   switch (state) {
     case 'reconnecting':
-      center = renderProcessingCenter(message || t('capsule.thinking'));
+      center = renderProcessingCenter(message || t('capsule.thinking'), false);
       break;
     case 'recording':
       center = stopPending
-        ? renderProcessingCenter(message || t('capsule.thinking'))
+        ? renderProcessingCenter(message || t('capsule.thinking'), Boolean(message))
         : message
           ? renderRecordingPreview(message)
           : <AudioBars level={level} />;
@@ -374,7 +391,7 @@ function Pill({
     case 'transcribing':
     case 'polishing': {
       const displayText = message || t('capsule.thinking');
-      center = renderProcessingCenter(displayText);
+      center = renderProcessingCenter(displayText, Boolean(message));
       break;
     }
     case 'done':

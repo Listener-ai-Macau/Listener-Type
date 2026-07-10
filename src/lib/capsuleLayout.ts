@@ -23,6 +23,8 @@ export interface CapsuleMessageLayout {
   lineClamp: number;
 }
 
+const PROCESSING_ICON_WIDTH = 17;
+
 export function getCapsulePillMetrics(os: OS): CapsulePillMetrics {
   if (os === 'win') {
     // Windows metrics describe the visible outer footprint of the pill.
@@ -32,6 +34,11 @@ export function getCapsulePillMetrics(os: OS): CapsulePillMetrics {
   }
 
   return { width: 176, height: 42, textWidth: 84, boxSizing: 'border-box' };
+}
+
+export function getCapsuleProcessingTextMaxWidth(os: OS): number {
+  const metrics = getCapsulePillMetrics(os);
+  return Math.max(0, metrics.textWidth - PROCESSING_ICON_WIDTH);
 }
 
 // macOS 走 1.2.11 calc 布局，不依赖 host metrics；Windows 端要更大的 host

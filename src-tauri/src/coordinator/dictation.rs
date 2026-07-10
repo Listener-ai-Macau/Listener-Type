@@ -1341,7 +1341,7 @@ pub(super) async fn request_embedded_ble_recording_stop_from_host(
                     CapsuleState::Error,
                     0.0,
                     0,
-                    Some(format!("Listener 录音停止控制发送失败: {err}")),
+                    Some("Listener 录音停止失败".to_string()),
                     None,
                 );
                 schedule_capsule_idle(inner, 6000, Some(session_id));
