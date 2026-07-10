@@ -221,12 +221,24 @@
       "repo": "firmware",
       "commit": "61d7a79f85d7bc76d740f4c794c930c8d7d63640",
       "subject": "Stabilize firmware LED power cues",
-      "state": "machine_validated_pending_human_review",
+      "state": "partially_human_accepted_with_machine_guard",
       "protects": [
         "PWR boot starts warm amber and only hands off after BLE-visible readiness.",
         "Shutdown confirmation preserves visible PWR/status frames instead of intermittently blacking out.",
         "EC11 push suppresses rotation so straight presses do not produce rotation side effects.",
         "Processing/AI LED has a stale timeout and idle-wake recording key evidence stays checkable."
+      ],
+      "accepted_scope": [
+        "Human review accepted PWR boot warm amber first frame, truthful BLE-ready handoff to normal PWR state, EC11 straight press not decoding as rotation, and shutdown confirmation/EC11 long-press continuity."
+      ],
+      "pending_human_scope": [
+        "AI/processing LED stale-timeout behavior and idle-wake recording key remain machine-validated pending focused human acceptance."
+      ],
+      "human_acceptance_evidence": [
+        ".cache/validation/preproduction-human-review-pwr-boot-shutdown-20260710-2149/preproduction-human-review-summary.json"
+      ],
+      "machine_evidence": [
+        "../Listener-Firmware/.cache/validation/pwr-ai-machine-refresh-20260710/pwr-ai-machine-summary.json"
       ],
       "guards": [
         "python tools/verify_status_led_static.py",
