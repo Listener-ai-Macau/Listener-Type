@@ -33,6 +33,10 @@
     },
     {
       "repo": "firmware",
+      "guard": "python tools/verify_validation_tooling_hygiene.py"
+    },
+    {
+      "repo": "firmware",
       "guard": "python tools/verify_ble_audio_transport_model.py"
     },
     {
@@ -131,6 +135,26 @@
       ],
       "guards": [
         "python tools/verify_validation_tooling_hygiene.py",
+        "pwsh -NoProfile -File ./tools/release_check.ps1"
+      ]
+    },
+    {
+      "id": "firmware_public_docs_and_tool_entrypoints",
+      "repo": "firmware",
+      "commit": "a0738c1e4cfa13028bcbd3a724b3c3819e573b46",
+      "subject": "Clean firmware public docs and tool entrypoints",
+      "state": "repo_cleanup_validated",
+      "protects": [
+        "Open-source firmware tree does not track bulky legacy !docs prose archives.",
+        "Schematics live under normal docs/schematics instead of !docs.",
+        "Public docs and helper scripts use pwsh -NoProfile entrypoints instead of Windows PowerShell execution-policy shims.",
+        "IDF access stays behind tools/idf.ps1 except for that wrapper and idf_env diagnostics.",
+        "Generated hardware and human validation evidence defaults to .cache/validation instead of tracked docs."
+      ],
+      "guards": [
+        "python tools/verify_validation_tooling_hygiene.py",
+        "pwsh -NoProfile -File ./tools/verify_idf_env_static.ps1",
+        "pwsh -NoProfile -File ./tools/build.ps1",
         "pwsh -NoProfile -File ./tools/release_check.ps1"
       ]
     },
