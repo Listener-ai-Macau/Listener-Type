@@ -482,6 +482,7 @@ function Show-ReviewStep {
     param(
         [Parameter(Mandatory = $true)][int]$Index,
         [Parameter(Mandatory = $true)][int]$Total,
+        [Parameter(Mandatory = $true)][int]$OverallIndex,
         [Parameter(Mandatory = $true)][int]$OverallTotal,
         [Parameter(Mandatory = $true)][string]$ReviewScope,
         [Parameter(Mandatory = $true)][pscustomobject]$Step
@@ -520,8 +521,15 @@ function Show-ReviewStep {
     Ensure-FormsLoaded
     Invoke-NoticeSound
 
+    $overallIndexSafe = if ($OverallIndex -gt 0) { $OverallIndex } else { $Index }
+    $progressText = if ($OverallTotal -gt $Total) {
+        "$overallIndexSafe/$OverallTotal（本次 $Index/$Total）"
+    } else {
+        "$Index/$Total"
+    }
+
     $form = [System.Windows.Forms.Form]::new()
-    $form.Text = "Listener 1.0.2 总验收 $Index/$Total"
+    $form.Text = "Listener 1.0.2 总验收 $progressText"
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
     $form.ClientSize = [System.Drawing.Size]::new(680, 360)
     $form.MinimumSize = [System.Drawing.Size]::new(640, 340)
@@ -537,13 +545,13 @@ function Show-ReviewStep {
     )
 
     $scopeText = if ($OverallTotal -gt $Total) {
-        "总体验收范围 $OverallTotal 项；本次$($ReviewScope)第 $Index/$Total 项；有备注会停下修备注"
+        "总体验收范围 $OverallTotal 项；当前总进度 $overallIndexSafe/$OverallTotal；本次$($ReviewScope)第 $Index/$Total 项；有备注会停下修备注"
     } else {
         "总体验收范围 $OverallTotal 项；第 $Index/$Total 项；有备注会停下修备注"
     }
 
     $title = [System.Windows.Forms.Label]::new()
-    $title.Text = "总验收 $Index/$Total  $($Step.title)"
+    $title.Text = "总验收 $progressText  $($Step.title)"
     $title.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 12, [System.Drawing.FontStyle]::Bold)
     $title.AutoSize = $false
     $title.Location = [System.Drawing.Point]::new(16, 10)
@@ -1244,13 +1252,18 @@ if ($resumeExistingFullReview) {
 $records = [System.Collections.Generic.List[object]]::new()
 $stoppedAfterOperatorNote = $false
 $reviewScopeLabel = if ($requestedStepIds.Count -gt 0) { "聚焦验收 " } else { "" }
+$overallIndexById = @{}
+for ($overallStepIndex = 0; $overallStepIndex -lt $allSteps.Count; $overallStepIndex++) {
+    $overallIndexById[[string]$allSteps[$overallStepIndex].id] = $overallStepIndex + 1
+}
 try {
     foreach ($existingRecord in $existingRecords) {
         $records.Add($existingRecord) | Out-Null
     }
 
     for ($i = $existingRecords.Count; $i -lt $steps.Count; $i++) {
-        $record = Show-ReviewStep -Index ($i + 1) -Total $steps.Count -OverallTotal $allSteps.Count -ReviewScope $reviewScopeLabel -Step $steps[$i]
+        $overallIndex = if ($overallIndexById.ContainsKey([string]$steps[$i].id)) { [int]$overallIndexById[[string]$steps[$i].id] } else { $i + 1 }
+        $record = Show-ReviewStep -Index ($i + 1) -Total $steps.Count -OverallIndex $overallIndex -OverallTotal $allSteps.Count -ReviewScope $reviewScopeLabel -Step $steps[$i]
         $records.Add($record) | Out-Null
         ($record | ConvertTo-Json -Depth 10 -Compress) | Add-Content -LiteralPath $sessionPath -Encoding UTF8
         $operatorNote = Get-OperatorNoteText -Record $record

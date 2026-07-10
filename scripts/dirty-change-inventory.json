@@ -18,6 +18,7 @@
         "scripts/release-check.mjs",
         "scripts/check-repo-hygiene.mjs",
         "scripts/check-dirty-change-inventory.mjs",
+        "scripts/check-preproduction-operator-note-triage.mjs",
         "scripts/check-regression-guard-commits.mjs",
         "scripts/dirty-change-inventory.json",
         "scripts/regression-guard-commits.json",
@@ -94,6 +95,8 @@
       "evidence": [
         "scripts/performance-baselines.json device_settings_compact_write",
         ".cache validation artifacts referenced by performance baseline",
+        ".cache/validation/preproduction-human-review-type-settings-write-speed-20260709-2255/preproduction-human-review-summary.json",
+        ".cache/validation/preproduction-human-review-type-settings-write-speed-20260709-2255/preproduction-operator-note-triage.json",
         "Custom key UI/use still pending focused human review"
       ],
       "patterns": [
@@ -134,6 +137,8 @@
       "evidence": [
         "python tools/verify_status_led_static.py PASS from prior repair loop",
         "pwsh -NoProfile -File tools/build.ps1 PASS from prior repair loop",
+        ".cache/validation/preproduction-human-review-ec11-long-press-shutdown-led-20260710-0834/preproduction-human-review-summary.json",
+        ".cache/validation/preproduction-human-review-ec11-long-press-shutdown-led-20260710-0834/preproduction-operator-note-triage.json",
         "PWR/key LED focused human review still has remaining items"
       ],
       "patterns": [

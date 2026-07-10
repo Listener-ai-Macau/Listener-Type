@@ -170,6 +170,9 @@ for (const requiredToken of ["[string[]]$StepIds", "FocusStepIds:", "$requestedS
 for (const requiredToken of [
   "Listener 1.0.2 总验收",
   "总体验收范围",
+  "当前总进度",
+  "$overallIndexById",
+  "$progressText",
   "$($ReviewScope)第",
   "有备注会停下修备注",
   "progress = [ordered]@",
