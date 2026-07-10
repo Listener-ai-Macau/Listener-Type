@@ -1562,7 +1562,7 @@ fn dispatch_cli_intent<R: Runtime>(
                 let report = firmware_ota::run_headless(options).await;
                 match serde_json::to_string(&report) {
                     Ok(json) => {
-                        println!("firmware_ota_result_json={json}");
+                        log::info!("firmware_ota_result_json={json}");
                         if report.status == "PASS" {
                             log::info!("[cli] firmware OTA {} PASS", report.mode);
                         } else {
@@ -1924,7 +1924,11 @@ fn run_firmware_ota_headless_cli(intent: cli::CliIntent) -> i32 {
         },
     ));
     match serde_json::to_string(&report) {
-        Ok(json) => println!("firmware_ota_result_json={json}"),
+        Ok(json) => {
+            let line = format!("firmware_ota_result_json={json}");
+            headless_print_line(&line);
+            log::info!("{line}");
+        }
         Err(err) => {
             eprintln!("firmware_ota_error=report serialization failed: {err}");
             return 2;
