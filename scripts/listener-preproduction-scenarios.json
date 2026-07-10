@@ -15,7 +15,7 @@
       "bench_title": "PWR boot and shutdown-confirm LED",
       "bench_capabilities": ["power_relay", "physical_input_fixture", "led_optical_capture"],
       "bench_evidence": ["power_cycle_log", "physical_input_trace", "led_capture", "serial_led_status"],
-      "product_contract": "Cold boot PWR must show the same capped warm amber color and brightness as the shutdown-confirm PWR cue without an all-black first latch."
+      "product_contract": "Cold boot PWR must show the same capped warm amber color and brightness as the shutdown-confirm PWR cue without an all-black first latch; startup time is measured from boot PWR lighting to stable BLE-visible readiness, so boot amber must remain until BLE is truly visibly ready and no startup-complete/PWR-normal cue may be shown early to fake a faster boot. During this focused PWR/EC11 confirmation, a straight EC11 push must not be decoded as a rotation, and the existing EC11 pending-shutdown fill effect must not intermittently black out and then restore during the long press."
     },
     {
       "id": "type-brightness-low-power-sync",
@@ -55,13 +55,15 @@
       "id": "no-type-native-pairing",
       "bench_title": "No-Type native Windows pairing",
       "bench_capabilities": ["windows_ble_automation"],
-      "bench_evidence": ["native_pair_log", "windows_ble_state", "hid_presence"]
+      "bench_evidence": ["native_pair_log", "windows_ble_state", "hid_presence"],
+      "product_contract": "With Listener Type fully exited and no listener-type.exe process, Windows native Add device > Bluetooth must pair listener without Type PairAsync, leave BTHLE listener OK, configure/start HID service 00001812, and expose a keyboard.inf/kbdhid Col01 keyboard path instead of looping between connected and disconnected."
     },
     {
       "id": "type-takeover-no-forced-repair",
       "bench_title": "Type takeover without forced repair",
       "bench_capabilities": ["type_runtime", "windows_ble_automation"],
-      "bench_evidence": ["takeover_log", "gatt_probe", "notification_count"]
+      "bench_evidence": ["takeover_log", "gatt_probe", "notification_count"],
+      "product_contract": "After no-Type native pairing, reopening the latest installed MSI Listener Type must take over the existing paired listener without PairAsync, Windows pairing prompt, forced repair, or device deletion. The process must be C:\\Program Files\\Listener Type\\listener-type.exe, Windows Bluetooth must keep BTHLE listener OK, Type must start background BLE capture and reach background listener notify ready within 3 seconds on the persisted startup path, then device-key recording/control events must be delivered without requiring re-pair."
     },
     {
       "id": "ec11-long-press-shutdown-led",
@@ -100,7 +102,8 @@
       "id": "recording-response-and-led-priority",
       "bench_title": "Recording response and LED priority",
       "bench_capabilities": ["physical_input_fixture", "audio_fixture", "type_runtime", "led_optical_capture"],
-      "bench_evidence": ["input_trace", "capsule_timeline", "audio_wav", "led_capture"]
+      "bench_evidence": ["input_trace", "capsule_timeline", "audio_wav", "led_capture"],
+      "product_contract": "When any device custom key is configured as Dictation, the first valid press after connected/disconnected low-power idle wake must not be swallowed: firmware records wake activity, continues the ordinary debounce path instead of synthesizing a false click, sends the F13-F24 fallback HID event for the configured key/gesture, Type maps that device key action to Dictation, and the capsule/audio/LED recording path begins normally."
     },
     {
       "id": "ble-audio-type-link",

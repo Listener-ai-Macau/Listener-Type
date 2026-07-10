@@ -57,6 +57,11 @@ for (const requiredToken of ["warm amber", "与关机确认同色同亮", "Type 
     failures.push(`PWR boot acceptance must require shutdown-matching capped amber: ${requiredToken}`);
   }
 }
+for (const requiredToken of ["startup time is measured", "stable BLE-visible readiness", "no startup-complete/PWR-normal cue may be shown early", "不能为了显得启动更快而提前显示"]) {
+  if (!pwrContract.includes(requiredToken) && !human.includes(requiredToken)) {
+    failures.push(`PWR boot acceptance must forbid fake startup-time optimization: ${requiredToken}`);
+  }
+}
 
 const scenarioById = new Map(scenarios.map((scenario) => [scenario.id, scenario]));
 const scenarioContract = (id) => scenarioById.get(id)?.product_contract ?? "";
@@ -73,11 +78,19 @@ for (const [stepId, requiredTokens] of [
     "restore-default-listener",
     ["default BLE name listener", "same Type-controlled cache refresh/reconnect path", "same BLE blue double-flash/reconnect recovery cue", "avoid opening this PC's Windows Bluetooth Settings/user pairing prompt", "suppress Swift Pair prompts on other computers during rename", "exact display-name confirmation"],
   ],
+  [
+    "no-type-native-pairing",
+    ["Listener Type fully exited", "no listener-type.exe process", "Windows native Add device > Bluetooth", "without Type PairAsync", "BTHLE listener OK", "HID service 00001812", "keyboard.inf/kbdhid Col01", "looping between connected and disconnected"],
+  ],
+  [
+    "type-takeover-no-forced-repair",
+    ["latest installed MSI Listener Type", "existing paired listener", "without PairAsync", "Windows pairing prompt", "forced repair", "device deletion", "C:\\Program Files\\Listener Type\\listener-type.exe", "BTHLE listener OK", "background BLE capture", "background listener notify ready within 3 seconds", "persisted startup path", "device-key recording/control events"],
+  ],
 ]) {
   const contract = scenarioContract(stepId);
   for (const token of requiredTokens) {
     if (!contract.includes(token)) {
-      failures.push(`BLE rename scenario ${stepId} must encode product contract token: ${token}`);
+      failures.push(`scenario ${stepId} must encode product contract token: ${token}`);
     }
   }
 }
@@ -152,6 +165,22 @@ for (const requiredToken of ["[string[]]$StepIds", "FocusStepIds:", "$requestedS
   if (!human.includes(requiredToken)) {
     failures.push(`human review must support focused re-review without repeating already-passed steps: ${requiredToken}`);
   }
+}
+
+for (const requiredToken of [
+  "Listener 1.0.2 总验收",
+  "总体验收范围",
+  "$($ReviewScope)第",
+  "有备注会停下修备注",
+  "progress = [ordered]@",
+  "One overall acceptance session shows total scope and progress",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review must show overall acceptance progress while advancing one focused item at a time: ${requiredToken}`);
+  }
+}
+if (human.includes("$ReviewScope第")) {
+  failures.push("human review overall progress label must use $($ReviewScope) before Chinese suffixes to avoid PowerShell variable-name expansion");
 }
 
 for (const requiredToken of [

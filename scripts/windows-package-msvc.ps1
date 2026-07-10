@@ -694,15 +694,34 @@ function Update-DesktopShortcut {
   $resolvedExe = (Resolve-Path -LiteralPath $installedExePath).Path
   $resolvedInstallRoot = Split-Path -Parent $resolvedExe
   $shortcutPath = Join-Path $desktop "Listener Type.lnk"
+  $desiredIconLocation = "$resolvedExe,0"
+  $desiredDescription = "Listener Type installed application"
   $shell = New-Object -ComObject WScript.Shell
+  $shortcutExists = Test-Path -LiteralPath $shortcutPath
   $shortcut = $shell.CreateShortcut($shortcutPath)
+
+  $shortcutAlreadyCurrent = $shortcutExists -and
+    [System.String]::Equals([string]$shortcut.TargetPath, $resolvedExe, [System.StringComparison]::OrdinalIgnoreCase) -and
+    [System.String]::Equals([string]$shortcut.WorkingDirectory, $resolvedInstallRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+    [System.String]::Equals([string]$shortcut.IconLocation, $desiredIconLocation, [System.StringComparison]::OrdinalIgnoreCase) -and
+    [System.String]::Equals([string]$shortcut.Description, $desiredDescription, [System.StringComparison]::Ordinal)
+  if ($shortcutAlreadyCurrent) {
+    Write-Host "[ok] Desktop shortcut already current -> $shortcutPath"
+    Write-Host "     target: $resolvedExe"
+    return
+  }
+
   $shortcut.TargetPath = $resolvedExe
   $shortcut.WorkingDirectory = $resolvedInstallRoot
-  $shortcut.IconLocation = "$resolvedExe,0"
-  $shortcut.Description = "Listener Type installed application"
+  $shortcut.IconLocation = $desiredIconLocation
+  $shortcut.Description = $desiredDescription
   $shortcut.Save()
 
-  Write-Host "[ok] Desktop shortcut updated -> $shortcutPath"
+  if ($shortcutExists) {
+    Write-Host "[ok] Desktop shortcut repaired -> $shortcutPath"
+  } else {
+    Write-Host "[ok] Desktop shortcut created -> $shortcutPath"
+  }
   Write-Host "     target: $resolvedExe"
 }
 
@@ -733,6 +752,10 @@ try {
 
   $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
   Write-Host "[info] Default Windows package does not bundle or register the optional TSF IME."
+  if ($InstallMsi.IsPresent -or $LaunchInstalledApp.IsPresent) {
+    Write-Host "[info] Install validation requested; stopping installed Listener Type before the long MSI build"
+    Stop-InstalledListenerType
+  }
   Stop-RunningReleaseApp
   if ($ReuseExistingExe.IsPresent) {
     Test-ReusableReleaseExe

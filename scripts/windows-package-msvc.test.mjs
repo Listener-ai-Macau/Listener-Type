@@ -129,11 +129,15 @@ assert.match(script, /WScript\.Shell/, "desktop shortcut refresh should use the 
 assert.match(script, /Listener Type\.lnk/, "desktop shortcut refresh should target the stable Listener Type shortcut name");
 assert.match(script, /C:\\Program Files\\Listener Type\\listener-type\.exe/, "desktop shortcut refresh must target the installed MSI application");
 assert.match(script, /installed Listener Type exe does not match the freshly built MSI payload/, "desktop shortcut refresh must refuse stale installed apps");
+assert.match(script, /Desktop shortcut already current/, "desktop shortcut refresh must be idempotent when the installed shortcut already targets Program Files");
 assert.match(script, /-LaunchInstalledApp requires -InstallMsi/, "launching the app must require a freshly installed MSI in validation");
+assert.match(script, /Install validation requested; stopping installed Listener Type before the long MSI build[\s\S]*Stop-InstalledListenerType[\s\S]*Stop-RunningReleaseApp[\s\S]*Invoke-MsvcBuild/, "install validation must stop the Program Files app before the long MSI build so users do not keep interacting with a stale or stuck exe");
 assert.match(script, /Stop-InstalledListenerType[\s\S]*msiexec\.exe[\s\S]*Assert-InstalledPayloadMatchesRelease/, "MSI update must stop the installed app, install with msiexec, and verify the Program Files payload hash");
 assert.match(script, /Assert-InstalledPayloadMatchesRelease[\s\S]*TimeoutSeconds[\s\S]*Start-Sleep -Milliseconds 250/, "MSI validation must wait for the Program Files payload hash to settle after install");
 assert.match(script, /lastHashError[\s\S]*catch[\s\S]*Exception\.Message/, "MSI validation must retry through transient Program Files file locks");
 assert.match(script, /Start-Process -FilePath \$installedExePath[\s\S]*Started installed Listener Type app/, "installed-app validation must launch the Program Files exe");
+assert.match(releaseCheck, /check:dirty-inventory/, "release:check must classify dirty work before the clean-worktree gate reports release blockage");
+assert.match(releaseCheck, /check:repo-hygiene/, "release:check must require a clean worktree before publishing or final review");
 assert.doesNotMatch(script, /Description = "Listener Type latest local release build"/, "desktop shortcut must not advertise or target the repo build output");
 assert.match(script, /Cargo build jobs left at Cargo default parallelism/, "script should advertise default Cargo parallelism");
 assert.doesNotMatch(script, /set `"CARGO_BUILD_JOBS=1`"/, "default packaging must not force serial Cargo builds");

@@ -117,10 +117,52 @@ function Get-GitHeadInfo {
     }
 }
 
+function Get-GitWorktreeInfo {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [PSCustomObject]@{
+            path = $Path
+            exists = $false
+            dirty = $false
+            dirty_count = 0
+            status_porcelain = @()
+            diff_stat = @()
+            error = "path not found"
+        }
+    }
+
+    try {
+        $status = @(& git -C $Path status --porcelain=v1 --untracked-files=all 2>$null)
+        $diffStat = @(& git -C $Path diff --stat 2>$null)
+        return [PSCustomObject]@{
+            path = $Path
+            exists = $true
+            dirty = $status.Count -gt 0
+            dirty_count = $status.Count
+            status_porcelain = @($status)
+            diff_stat = @($diffStat)
+            error = ""
+        }
+    } catch {
+        return [PSCustomObject]@{
+            path = $Path
+            exists = $true
+            dirty = $false
+            dirty_count = 0
+            status_porcelain = @()
+            diff_stat = @()
+            error = $_.Exception.Message
+        }
+    }
+}
+
 $listenerRoot = (Split-Path -Parent $repoRoot)
 $firmwareRoot = Join-Path $listenerRoot "Listener-Firmware"
 $typeHeadInfo = Get-GitHeadInfo -Path $repoRoot
 $firmwareHeadInfo = Get-GitHeadInfo -Path $firmwareRoot
+$typeWorktreeInfo = Get-GitWorktreeInfo -Path $repoRoot
+$firmwareWorktreeInfo = Get-GitWorktreeInfo -Path $firmwareRoot
 
 function Join-Text {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Lines)
@@ -440,6 +482,8 @@ function Show-ReviewStep {
     param(
         [Parameter(Mandatory = $true)][int]$Index,
         [Parameter(Mandatory = $true)][int]$Total,
+        [Parameter(Mandatory = $true)][int]$OverallTotal,
+        [Parameter(Mandatory = $true)][string]$ReviewScope,
         [Parameter(Mandatory = $true)][pscustomobject]$Step
     )
 
@@ -477,7 +521,7 @@ function Show-ReviewStep {
     Invoke-NoticeSound
 
     $form = [System.Windows.Forms.Form]::new()
-    $form.Text = "Listener 1.0.2 准量产验收"
+    $form.Text = "Listener 1.0.2 总验收 $Index/$Total"
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
     $form.ClientSize = [System.Drawing.Size]::new(680, 360)
     $form.MinimumSize = [System.Drawing.Size]::new(640, 340)
@@ -492,8 +536,14 @@ function Show-ReviewStep {
         $workingArea.Top + 72
     )
 
+    $scopeText = if ($OverallTotal -gt $Total) {
+        "总体验收范围 $OverallTotal 项；本次$($ReviewScope)第 $Index/$Total 项；有备注会停下修备注"
+    } else {
+        "总体验收范围 $OverallTotal 项；第 $Index/$Total 项；有备注会停下修备注"
+    }
+
     $title = [System.Windows.Forms.Label]::new()
-    $title.Text = "$Index/$Total  $($Step.title)"
+    $title.Text = "总验收 $Index/$Total  $($Step.title)"
     $title.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 12, [System.Drawing.FontStyle]::Bold)
     $title.AutoSize = $false
     $title.Location = [System.Drawing.Point]::new(16, 10)
@@ -501,7 +551,7 @@ function Show-ReviewStep {
     $form.Controls.Add($title)
 
     $actionLabel = [System.Windows.Forms.Label]::new()
-    $actionLabel.Text = "你现在做"
+    $actionLabel.Text = "你现在做 - $scopeText"
     $actionLabel.AutoSize = $false
     $actionLabel.Location = [System.Drawing.Point]::new(16, 42)
     $actionLabel.Size = [System.Drawing.Size]::new(648, 20)
@@ -619,11 +669,15 @@ $steps = @(
         -Title "PWR 开机/关机确认灯" `
         -Action (Join-Text @(
             "让 Listener 断电或重启到刚刷入的固件；开机时只观察 PWR/LED1 第一帧，不要按 EC11 或 key1-key4。"
-            "开机稳定后，长按 EC11 约 1.2 到 1.5 秒；只观察关机确认 PWR 是否仍是已验收 warm amber，看到后松开，不要按到硬件关机边界。"
-            "本项只验 PWR 开机第一帧和关机确认 PWR 是否各自符合合同；EC11 旋钮环松开后取消是已验收行为，如果看到 key/EC11 异常只写备注，不在本项调整。")) `
+            "继续观察到 BLE/LED2 稳定可见；把 PWR 亮起到 BLE 稳定可见这段当作真实启动时间，确认 PWR 从 warm amber 启动态切回正常电源状态的时机是在 BLE 启动可见之后。"
+            "开机稳定后，垂直按下 EC11 旋钮几次但不要旋转；确认按下不会被识别成旋转、不会改音量/亮度，也不会触发 EC11 环形旋转追光。"
+            "开机稳定后，长按 EC11 约 1.2 到 1.5 秒；观察关机确认 PWR 是否仍是已验收 warm amber，同时看 EC11 环形待关机灯效是否保持连续、不要黑一下再恢复；看到后松开，不要按到硬件关机边界。"
+            "本项只验 PWR 开机第一帧、BLE ready 后 PWR 启动完成切换、EC11 直按不误触发旋转、以及关机确认 PWR/EC11 是否各自符合合同；如果看到 key/其它灯异常只写备注，不在本项调整。")) `
         -Expected (Join-Text @(
             "开机 PWR 第一帧应直接显示与关机确认同色同亮的 warm amber；不能先黑一下再亮，并且仍受 Type 状态灯四区亮度 cap 约束。"
-            "关机确认 PWR 保持已验收 warm amber；开机琥珀灯不能影响后续 PWR/BLE/EC11/key 灯效。"
+            "BLE/LED2 稳定可见后，PWR 才从启动 warm amber 交给正常电源状态；这个正常色表示启动完成，不是首帧白，也不能为了显得启动更快而提前显示。"
+            "EC11 直按只应进入按键单击/双击/长按判定，不应产生旋转、音量/亮度变化或 EC11 环形旋转灯效。"
+            "关机确认 PWR 保持已验收 warm amber；EC11 环形待关机灯效保持原有连续填充效果，不应间歇性全黑再恢复；开机琥珀灯不能影响后续 PWR/BLE/EC11/key 灯效。"
             "松开 EC11 后退出 pending 关机确认是受保护行为；不应触发单击、双击重配或 Windows 连接通知。"))
     New-ReviewStep `
         -Id "type-brightness-low-power-sync" `
@@ -708,7 +762,7 @@ $steps = @(
         -Title "Type 接管已配对设备" `
         -Action (Join-Text @(
             "在上一项原生配对成功后，重新打开最新 Type。"
-            "不要改名，不要重新配对，等待 15 秒。")) `
+            "不要改名，不要重新配对，等待 3 秒；超过 3 秒才恢复就按速度回退记录备注。")) `
         -Expected (Join-Text @(
             "Type 应该接管已配对设备并恢复 BLE 控制/录音通道。"
             "不应该强制重新配对。"
@@ -1176,7 +1230,9 @@ $startLines = @(
     "FocusStepIds: $(if ($requestedStepIds.Count -gt 0) { ($requestedStepIds -join ',') } else { 'FULL' })"
     "CarryForwardSummary: $(if ($carryForwardSummary) { $carryForwardSummary.path } else { 'NONE' })"
     "TypeHead: $($typeHeadInfo.head) $($typeHeadInfo.commit_time) $($typeHeadInfo.subject)"
+    "TypeDirty: $($typeWorktreeInfo.dirty) dirty_count=$($typeWorktreeInfo.dirty_count)"
     "FirmwareHead: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time) $($firmwareHeadInfo.subject)"
+    "FirmwareDirty: $($firmwareWorktreeInfo.dirty) dirty_count=$($firmwareWorktreeInfo.dirty_count)"
 )
 if ($resumeExistingFullReview) {
     $startLines += "ResumedExistingRecords: $($existingRecords.Count)"
@@ -1187,13 +1243,14 @@ if ($resumeExistingFullReview) {
 
 $records = [System.Collections.Generic.List[object]]::new()
 $stoppedAfterOperatorNote = $false
+$reviewScopeLabel = if ($requestedStepIds.Count -gt 0) { "聚焦验收 " } else { "" }
 try {
     foreach ($existingRecord in $existingRecords) {
         $records.Add($existingRecord) | Out-Null
     }
 
     for ($i = $existingRecords.Count; $i -lt $steps.Count; $i++) {
-        $record = Show-ReviewStep -Index ($i + 1) -Total $steps.Count -Step $steps[$i]
+        $record = Show-ReviewStep -Index ($i + 1) -Total $steps.Count -OverallTotal $allSteps.Count -ReviewScope $reviewScopeLabel -Step $steps[$i]
         $records.Add($record) | Out-Null
         ($record | ConvertTo-Json -Depth 10 -Compress) | Add-Content -LiteralPath $sessionPath -Encoding UTF8
         $operatorNote = Get-OperatorNoteText -Record $record
@@ -1283,6 +1340,25 @@ if ($requestedStepIds.Count -gt 0) {
     }
 }
 
+$passCount = @($recordsWithResult | Where-Object { $_.result -eq "PASS" }).Count
+$skipCount = @($recordsWithResult | Where-Object { $_.result -eq "SKIP" }).Count
+$abortCount = @($recordsWithResult | Where-Object { $_.result -eq "ABORT" }).Count
+$progress = [ordered]@{
+    rule = "One overall acceptance session shows total scope and progress, then advances one focused item at a time; any operator note stops progress for triage."
+    total_items = $expectedRecordCount
+    current_session_items = $steps.Count
+    completed_items = $recordsWithResult.Count
+    passed_items = $passCount
+    failed_items = $failCount
+    skipped_items = $skipCount
+    aborted_items = $abortCount
+    missing_result_items = $missingResultCount
+    incomplete_items = $incompleteCount
+    carried_forward_items = $carriedForwardCount
+    stopped_after_operator_note = $stoppedAfterOperatorNote
+    focus_mode = $requestedStepIds.Count -gt 0
+}
+
 $operatorNotes = [System.Collections.Generic.List[object]]::new()
 foreach ($record in $summaryRecordArray) {
     $noteText = (Get-OperatorNoteText -Record $record).Trim()
@@ -1341,6 +1417,7 @@ $triageTemplate | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $triageTem
     device_name = $DeviceName
     random_name = $RandomName
     focus_step_ids = @($requestedStepIds)
+    progress = $progress
     carried_forward_summary = $(if ($carryForwardSummary) { $carryForwardSummary.path } else { "" })
     carried_forward_count = $carriedForwardCount
     stopped_after_operator_note = $stoppedAfterOperatorNote
@@ -1350,7 +1427,9 @@ $triageTemplate | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $triageTem
     operator_note_triage_template = $triageTemplatePath
     operator_notes = @($operatorNoteArray)
     type_git_head = $typeHeadInfo
+    type_git_worktree = $typeWorktreeInfo
     firmware_git_head = $firmwareHeadInfo
+    firmware_git_worktree = $firmwareWorktreeInfo
     records = @($summaryRecordArray)
 } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $summaryJsonPath -Encoding UTF8
 
@@ -1365,13 +1444,17 @@ $lines.Add("- Output: $OutputDir") | Out-Null
 $lines.Add("- Session: $sessionPath") | Out-Null
 $lines.Add("- Random BLE name: $RandomName") | Out-Null
 $lines.Add("- Focus steps: $(if ($requestedStepIds.Count -gt 0) { $requestedStepIds -join ', ' } else { 'FULL' })") | Out-Null
+$lines.Add("- Progress: passed $passCount/$expectedRecordCount, failed $failCount, incomplete $incompleteCount, carried forward $carriedForwardCount, current session $($steps.Count) item(s).") | Out-Null
+$lines.Add("- Review rule: one overall acceptance session shows total scope and progress, then advances one focused item at a time; any operator note stops progress for triage.") | Out-Null
 $lines.Add("- Carried forward: $carriedForwardCount") | Out-Null
 $lines.Add("- Stopped after operator note: $stoppedAfterOperatorNote") | Out-Null
 $lines.Add("- Operator notes requiring triage: $($operatorNoteArray.Count)") | Out-Null
 $lines.Add("- Blank operator notes mean normal pass with no extra remarks.") | Out-Null
 $lines.Add("- Operator note triage template: $triageTemplatePath") | Out-Null
 $lines.Add("- Type HEAD: $($typeHeadInfo.head) $($typeHeadInfo.commit_time)") | Out-Null
+$lines.Add("- Type worktree dirty: $($typeWorktreeInfo.dirty) ($($typeWorktreeInfo.dirty_count) paths)") | Out-Null
 $lines.Add("- Firmware HEAD: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time)") | Out-Null
+$lines.Add("- Firmware worktree dirty: $($firmwareWorktreeInfo.dirty) ($($firmwareWorktreeInfo.dirty_count) paths)") | Out-Null
 $lines.Add("") | Out-Null
 $lines.Add("| # | StepId | Step | Result | Operator note | Evidence |") | Out-Null
 $lines.Add("|---:|---|---|---|---|---|") | Out-Null

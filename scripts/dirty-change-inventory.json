@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-10",
+  "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.2 preproduction burn-down is still in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
+  "entries": [
+    {
+      "id": "repo_hygiene_and_review_traceability",
+      "repo": "type",
+      "item": "Repository hygiene, release gate, and human-review dirty-state evidence",
+      "state": "tooling_guard_validated",
+      "evidence": [
+        "npm run check:preproduction-bench-contract PASS",
+        "npm run check:repo-hygiene fails on current dirty tree as intended",
+        "Firmware tools/release_check.ps1 fails on current dirty tree as intended"
+      ],
+      "patterns": [
+        "package.json",
+        "scripts/release-check.mjs",
+        "scripts/check-repo-hygiene.mjs",
+        "scripts/check-dirty-change-inventory.mjs",
+        "scripts/dirty-change-inventory.json",
+        "scripts/windows-listener-preproduction-human-review.ps1"
+      ]
+    },
+    {
+      "id": "type_preproduction_flow_and_installer_contracts",
+      "repo": "type",
+      "item": "Preproduction scenario manifest, installed-MSI flow, lifecycle, tray/shortcut, and packaging contracts",
+      "state": "machine_validated_pending_final_human_review",
+      "evidence": [
+        "npm run check:preproduction-bench-contract PASS",
+        "Current final release package and full human acceptance still pending"
+      ],
+      "patterns": [
+        "scripts/check-preproduction-bench-contract.mjs",
+        "scripts/listener-preproduction-scenarios.json",
+        "scripts/windows-listener-type-lifecycle-e2e.py",
+        "scripts/windows-package-msvc.ps1",
+        "scripts/windows-package-msvc.test.mjs",
+        "scripts/windows-startup-lifecycle-contract.test.mjs",
+        "scripts/windows-ui-config.test.mjs"
+      ]
+    },
+    {
+      "id": "type_performance_baselines_and_startup_takeover",
+      "repo": "type",
+      "item": "Type takeover without forced repair plus accepted speed baselines",
+      "state": "human_accepted_with_machine_gate",
+      "evidence": [
+        ".cache/validation/preproduction-human-review-type-takeover-no-forced-repair-20260710-0831/preproduction-human-review-summary.json",
+        ".cache/validation/type-startup-reconnect-20260710-0940/summary.json",
+        "npm run check:performance-baselines PASS"
+      ],
+      "patterns": [
+        "scripts/check-performance-baselines.mjs",
+        "scripts/performance-baselines.json",
+        "scripts/check-type-startup-reconnect-speed.ps1"
+      ]
+    },
+    {
+      "id": "type_recording_latency_and_ble_audio_path",
+      "repo": "type",
+      "item": "Recording response speed, low-latency preview, force-raw smoke, and BLE audio stop/control side channel",
+      "state": "human_pass_operator_note_triaged_machine_validated",
+      "evidence": [
+        ".cache/validation/preproduction-human-review-20260710-094721/preproduction-human-review-summary.json",
+        ".cache/validation/preproduction-human-review-20260710-094721/preproduction-operator-note-triage.json",
+        "npm run check:recording-latency PASS",
+        "npm run check:performance-baselines PASS"
+      ],
+      "patterns": [
+        "scripts/check-embedded-ble-processing-led.mjs",
+        "scripts/check-recording-low-latency-regression.mjs",
+        "scripts/check-volcengine-low-latency-preview.mjs",
+        "src-tauri/src/asr/*.rs",
+        "src-tauri/src/cli.rs",
+        "src-tauri/src/coordinator.rs",
+        "src-tauri/src/coordinator/dictation.rs",
+        "src-tauri/src/embedded_ble.rs",
+        "src-tauri/src/lib.rs",
+        "src-tauri/src/persistence.rs",
+        "tools/embedded_audio_replay/*.ps1",
+        "tools/volcengine_asr_probe/src/asr/mod.rs",
+        "tools/volcengine_asr_probe/src/main.rs"
+      ]
+    },
+    {
+      "id": "type_settings_custom_keys_and_device_write",
+      "repo": "type",
+      "item": "Device settings write speed, exact low-power values, brightness defaults, and custom key UI/HID mapping",
+      "state": "partially_human_accepted_pending_full_item_review",
+      "evidence": [
+        "scripts/performance-baselines.json device_settings_compact_write",
+        ".cache validation artifacts referenced by performance baseline",
+        "Custom key UI/use still pending focused human review"
+      ],
+      "patterns": [
+        "scripts/windows-installed-device-settings-write-e2e.py",
+        "src-tauri/src/commands.rs",
+        "src-tauri/src/shortcut_binding.rs",
+        "src-tauri/src/shortcut_dispatch.rs",
+        "src-tauri/src/types.rs",
+        "src/components/ShortcutRecorder.tsx",
+        "src/i18n/*.ts",
+        "src/lib/deviceSettingsMockWrite.test.ts",
+        "src/lib/hotkey.ts",
+        "src/lib/ipc.ts",
+        "src/lib/types.ts",
+        "src/pages/settings/DeviceSection.tsx"
+      ]
+    },
+    {
+      "id": "firmware_repo_hygiene_and_validation_tooling",
+      "repo": "firmware",
+      "item": "Firmware release hygiene and validation-tooling shell reliability",
+      "state": "tooling_guard_validated",
+      "evidence": [
+        "tools/release_check.ps1 now fails early on dirty worktree",
+        "tools/verify_validation_tooling_hygiene.py pending inclusion in release_check"
+      ],
+      "patterns": [
+        "tools/release_check.ps1",
+        "tools/send_serial_and_capture.ps1",
+        "tools/verify_validation_tooling_hygiene.py"
+      ]
+    },
+    {
+      "id": "firmware_led_key_pwr_boot_and_dma_rmt",
+      "repo": "firmware",
+      "item": "PWR boot/BLE truthful handoff, status/key/EC11 LED timing, DMA+RMT transport, debounce, and fade regressions",
+      "state": "machine_validated_pending_remaining_human_review",
+      "evidence": [
+        "python tools/verify_status_led_static.py PASS from prior repair loop",
+        "pwsh -NoProfile -File tools/build.ps1 PASS from prior repair loop",
+        "PWR/key LED focused human review still has remaining items"
+      ],
+      "patterns": [
+        "components/keyboard/keyboard.c",
+        "components/power_manager/power_manager.c",
+        "components/status_led/include/status_led.h",
+        "components/status_led/status_led.c",
+        "docs/features/status_led.md",
+        "main/main.c",
+        "ports/esp32/voice_key_input/**/*.c",
+        "ports/esp32/voice_key_input/**/*.h",
+        "tools/verify_idle_wake_recording_key_log.py",
+        "tools/verify_power_manager_static.py",
+        "tools/verify_status_led_static.py"
+      ]
+    },
+    {
+      "id": "firmware_ble_pairing_settings_and_recovery",
+      "repo": "firmware",
+      "item": "BLE rename/recovery/common path, settings persistence defaults, HID connection recovery, and diagnostic coverage",
+      "state": "machine_validated_pending_remaining_human_review",
+      "evidence": [
+        "BLE rename/recovery was repaired in previous loop but final combined review still pending",
+        "Firmware static gates include BLE/HID recovery coverage"
+      ],
+      "patterns": [
+        "components/device_settings/device_settings.c",
+        "ports/esp32/ble_hid/*.c",
+        "ports/esp32/ble_hid_gap/*.c",
+        "tools/ensure_ble_hid_connection.ps1",
+        "tools/recover_ble_hid_host.ps1",
+        "tools/reset_listener_ble_host.ps1",
+        "tools/verify_ble_hid.ps1",
+        "tools/verify_diagnostic_log_coverage.ps1"
+      ]
+    },
+    {
+      "id": "firmware_ble_audio_transport_and_product_matrix",
+      "repo": "firmware",
+      "item": "BLE audio transport stability, product-chain recording validation, and diagnostics",
+      "state": "machine_validated_pending_release_review",
+      "evidence": [
+        "Recording latency Type gate PASS",
+        "Firmware audio/product matrix validation still pending final release run"
+      ],
+      "patterns": [
+        "ports/esp32/ble_audio_stream/ble_audio_stream_esp32.c",
+        "ports/esp32/diag_log_platform/diag_log_flash.c",
+        "tools/ble_audio_regression_common.py",
+        "tools/capture_audio_ble_wav.py",
+        "tools/verify_audio_ble_product_matrix.py",
+        "tools/verify_ble_audio_backpressure_static.ps1",
+        "tools/verify_ble_audio_transport_model.py"
+      ]
+    }
+  ]
+}

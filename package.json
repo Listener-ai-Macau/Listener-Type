@@ -15,6 +15,8 @@
     "check:traceability": "node scripts/check-traceability.mjs",
     "check:tauri-info": "node scripts/check-tauri-info.mjs",
     "check:version": "node scripts/check-release-version.mjs",
+    "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
+    "check:dirty-inventory": "node scripts/check-dirty-change-inventory.mjs",
     "check:embedded-ble-processing-led": "node scripts/check-embedded-ble-processing-led.mjs",
     "check:preproduction-bench-contract": "node scripts/check-preproduction-bench-contract.mjs",
     "check:release-root-artifacts": "node scripts/check-release-root-artifacts.mjs",

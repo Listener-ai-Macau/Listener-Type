@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 
 const checks = [
+  ['dirty change inventory', 'npm run check:dirty-inventory'],
+  ['repo hygiene', 'npm run check:repo-hygiene'],
   ['version consistency', 'npm run check:version'],
   ['operator note triage gate', 'npm run check:preproduction-operator-notes'],
   ['preproduction bench contract', 'npm run check:preproduction-bench-contract'],
