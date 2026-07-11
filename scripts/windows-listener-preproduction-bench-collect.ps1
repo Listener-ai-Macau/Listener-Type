@@ -863,7 +863,7 @@ $audioStatus = $null
 $otaProbe = $null
 if (-not $SkipLiveBle.IsPresent -and -not [string]::IsNullOrWhiteSpace($TypeExe) -and (Test-Path -LiteralPath $TypeExe)) {
   $audioStatus = Invoke-ProcessCapture -File $TypeExe -Arguments @("--read-embedded-audio-ble-status", [string]$LiveBleTimeoutMs) -Name "ble-audio-status" -TimeoutMs ([Math]::Max(4000, $LiveBleTimeoutMs + 4000))
-  $otaProbe = Invoke-ProcessCapture -File $TypeExe -Arguments @("--probe-listener-ota-v2-gatt", [string]$LiveBleTimeoutMs) -Name "ota-v2-gatt-probe" -TimeoutMs ([Math]::Max(4000, $LiveBleTimeoutMs + 4000))
+  $otaProbe = Invoke-ProcessCapture -File $TypeExe -Arguments @("--probe-listener-ota-v1-gatt", [string]$LiveBleTimeoutMs) -Name "ota-v1-gatt-probe" -TimeoutMs ([Math]::Max(4000, $LiveBleTimeoutMs + 4000))
 } else {
   $notes.Add("live BLE CLI probes skipped or release exe missing.") | Out-Null
 }

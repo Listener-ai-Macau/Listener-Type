@@ -878,9 +878,9 @@ $steps = @(
         -Title "无线 OTA smoke" `
         -Action (Join-Text @(
             "在 Type 里选择最新 v1.0.2 OTA 包做一次 OTA preflight/探测，必要时做一次实际 OTA。"
-            "如果不做完整传输，至少确认 OTA v2 GATT 可发现。")) `
+            "如果不做完整传输，至少确认 OTA v1 GATT 可发现。")) `
         -Expected (Join-Text @(
-            "OTA v2 服务和控制特征可发现。"
+            "OTA v1 服务和控制特征可发现。"
             "OTA 过程中设备有 OTA 灯效。"
             "界面状态、设备灯效和日志一致；不能报旧版本/低版本误判。"))
     New-ReviewStep `

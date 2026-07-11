@@ -6642,16 +6642,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             data_write_option: target.data_write_option,
         };
 
-        log::info!(
-            "[embedded-ble] Denzic OTA v1 #{transfer_id}: clearing interrupted transfer before begin"
-        );
-        let abort = denzic_ota_core::control_packet(denzic_ota_core::Operation::Abort, 0, 0, 0);
-        if let Err(error) = denzic_ota_core::OtaV1Transport::write_control(&mut transport, &abort) {
-            log::warn!(
-                "[embedded-ble] Denzic OTA v1 #{transfer_id}: pre-begin abort unavailable; begin will reset the session: {error}"
-            );
-        }
-
         let started_at = Instant::now();
         let report = denzic_ota_core::transfer(
             &mut transport,
@@ -6878,7 +6868,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             usb_powered: None,
             detail: None,
         };
-        // The OTA v2 service itself is the capability proof. DIS metadata is best-effort:
+        // The OTA v1 service itself is the capability proof. DIS metadata is best-effort:
         // read it once when Windows exposes it, but do not make it a hard preflight blocker.
         if !snapshot
             .capabilities

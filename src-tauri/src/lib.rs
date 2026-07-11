@@ -1611,7 +1611,7 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
 
     match intent {
         cli::CliIntent::ProbeListenerOtaV1Gatt { timeout_ms } => {
-            log::info!("[cli] headless probe-listener-ota-v2-gatt: timeout_ms={timeout_ms:?}");
+            log::info!("[cli] headless probe-listener-ota-v1-gatt: timeout_ms={timeout_ms:?}");
             let timeout_ms = timeout_ms.unwrap_or(20_000).clamp(1_000, 30_000);
             let snapshot = crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(
                 Duration::from_millis(timeout_ms),

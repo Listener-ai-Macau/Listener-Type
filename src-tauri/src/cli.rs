@@ -163,7 +163,7 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
                     timeout_ms: next_u64_arg(&mut args),
                 });
             }
-            "--probe-listener-ota-v2-gatt" => {
+            "--probe-listener-ota-v1-gatt" => {
                 return Some(CliIntent::ProbeListenerOtaV1Gatt {
                     timeout_ms: next_u64_arg(&mut args),
                 });
@@ -519,7 +519,7 @@ mod tests {
 
     #[test]
     fn parse_recognizes_listener_ota_v1_gatt_probe_with_timeout() {
-        let args = vec!["listener-type", "--probe-listener-ota-v2-gatt", "20000"];
+        let args = vec!["listener-type", "--probe-listener-ota-v1-gatt", "20000"];
         assert_eq!(
             parse_cli_intent(&args),
             Some(CliIntent::ProbeListenerOtaV1Gatt {
