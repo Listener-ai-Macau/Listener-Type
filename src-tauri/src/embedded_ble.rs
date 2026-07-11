@@ -600,8 +600,7 @@ mod windows_ble {
     const LISTENER_OTA_V1_SERVICE_UUID: GUID = OTA_SERVICE_UUID;
     const LISTENER_OTA_V1_CONTROL_UUID: GUID =
         GUID::from_u128(denzic_ota_core::GATT_CONTROL_UUID_U128);
-    const LISTENER_OTA_V1_DATA_UUID: GUID =
-        GUID::from_u128(denzic_ota_core::GATT_DATA_UUID_U128);
+    const LISTENER_OTA_V1_DATA_UUID: GUID = GUID::from_u128(denzic_ota_core::GATT_DATA_UUID_U128);
     const LISTENER_OTA_V1_STATUS_UUID: GUID =
         GUID::from_u128(denzic_ota_core::GATT_STATUS_UUID_U128);
     const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
@@ -700,10 +699,11 @@ mod windows_ble {
     ];
     const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(150);
     const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 500;
-    const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 48;
+    const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 100;
     const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 4;
     const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
     const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
+    const LISTENER_OTA_V1_RECONNECT_SETTLE: Duration = Duration::from_millis(500);
     const RECORDING_STOP_ACTIVE_CONTROL_TIMEOUT: Duration = Duration::from_millis(700);
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
     const BLE_TARGET_ADDRESS_CACHE_WINDOW: Duration = Duration::from_secs(60 * 60);
@@ -6135,7 +6135,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 log::info!(
                     "[embedded-ble] capture #{capture_id}: cancelled by caller; closing notify"
                 );
-                cleanup.disable_notify();
+                cleanup.finish_after_caller_cancel(terminal_behavior);
                 return Ok(());
             }
             if deadline.is_some_and(|deadline| now >= deadline) {
@@ -6186,7 +6186,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         log::info!(
                             "[embedded-ble] capture #{capture_id}: cancelled by caller; closing notify"
                         );
-                        cleanup.disable_notify();
+                        cleanup.finish_after_caller_cancel(terminal_behavior);
                         return Ok(());
                     }
                     if stop_drain_deadline.is_some_and(|drain_deadline| now >= drain_deadline) {
@@ -6682,22 +6682,40 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         send_recording_control_command(
             b"TYPE:OTA\n",
             Duration::from_secs(3),
-            "Listener OTA v1 active-link hint",
-            ActiveControlTransientFallback::TryFreshGatt,
+            "Listener OTA v1 reconnect handoff",
+            ActiveControlTransientFallback::ReturnError,
         )
     }
 
     pub(super) fn prepare_listener_ota_v1_transfer() -> Result<PreparedListenerOtaV1Transfer, String>
     {
+        prepare_listener_ota_v1_transfer_impl(true)
+    }
+
+    fn prepare_listener_ota_v1_transfer_after_active_link_hint(
+    ) -> Result<PreparedListenerOtaV1Transfer, String> {
+        prepare_listener_ota_v1_transfer_impl(false)
+    }
+
+    fn prepare_listener_ota_v1_transfer_impl(
+        send_active_link_hint: bool,
+    ) -> Result<PreparedListenerOtaV1Transfer, String> {
         let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v1")?;
-        match request_listener_ota_v1_active_link() {
-            Ok(()) => log::info!("[embedded-ble] Listener OTA v1 active-link hint sent"),
-            Err(err) => log::warn!(
-                "[embedded-ble] Listener OTA v1 active-link hint failed; continuing with OTA begin fallback: {err}"
-            ),
+        if send_active_link_hint {
+            request_listener_ota_v1_active_link()?;
+            log::info!("[embedded-ble] Listener OTA v1 reconnect handoff accepted");
+        } else {
+            log::info!(
+                "[embedded-ble] Listener OTA v1 prepare: reusing reconnect handoff sent before background pause"
+            );
         }
         log::info!("[embedded-ble] Listener OTA v1 prepare: acquiring BLE capture guard");
         let transfer_guard = BleCaptureGuard::enter(None)?;
+        log::info!(
+            "[embedded-ble] Listener OTA v1 prepare: waiting {} ms for reconnect handoff",
+            LISTENER_OTA_V1_RECONNECT_SETTLE.as_millis()
+        );
+        std::thread::sleep(LISTENER_OTA_V1_RECONNECT_SETTLE);
         let _fresh_guard = BleFreshGattGuard::enter("Listener OTA v1 prepare")?;
         log::info!("[embedded-ble] Listener OTA v1 prepare: discovering Listener OTA v1 service");
         let target = open_listener_ota_v1_target()?;
@@ -6744,6 +6762,25 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         )
     }
 
+    pub fn transfer_listener_ota_v1_after_active_link_hint(
+        firmware_sha256: &str,
+        firmware_bytes: &[u8],
+        manifest_chunk_bytes: usize,
+        on_progress: Option<&dyn Fn(usize, usize)>,
+    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
+        if firmware_bytes.is_empty() {
+            return Err("firmware_ota.bin is empty.".to_string());
+        }
+
+        let prepared = prepare_listener_ota_v1_transfer_after_active_link_hint()?;
+        prepared.transfer(
+            firmware_sha256,
+            firmware_bytes,
+            manifest_chunk_bytes,
+            on_progress,
+        )
+    }
+
     fn listener_ota_v1_window_chunks() -> Result<usize, String> {
         let configured = std::env::var(LISTENER_OTA_V1_WINDOW_ENV)
             .ok()
@@ -6753,10 +6790,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             Some(value) => value
                 .parse::<usize>()
                 .ok()
-                .filter(|window| (1..=64).contains(window))
+                .filter(|window| (1..=100).contains(window))
                 .ok_or_else(|| {
                     format!(
-                        "Unsupported {LISTENER_OTA_V1_WINDOW_ENV}={value}; use a window from 1 to 64 chunks."
+                        "Unsupported {LISTENER_OTA_V1_WINDOW_ENV}={value}; use a window from 1 to 100 chunks."
                     )
                 }),
         }
@@ -12166,6 +12203,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             self.finish(NotifyCccdTeardown::Disable);
         }
 
+        fn finish_after_caller_cancel(&mut self, terminal_behavior: CaptureTerminalBehavior) {
+            let teardown = NotifyCccdTeardown::for_capture_cancel(
+                terminal_behavior,
+                ble_ota_process_mutex_busy(),
+            );
+            self.finish(teardown);
+        }
+
         fn finish(&mut self, teardown: NotifyCccdTeardown) {
             if self.notify_disabled {
                 return;
@@ -12211,7 +12256,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 }
                 NotifyCccdTeardown::LeaveEnabled => {
                     log::info!(
-                        "[embedded-ble] capture #{}: leaving notify CCCD enabled after readiness probe",
+                        "[embedded-ble] capture #{}: leaving notify CCCD enabled for controlled connection handoff",
                         self.capture_id
                     );
                 }
@@ -12420,6 +12465,17 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     impl NotifyCccdTeardown {
         fn for_probe_success() -> Self {
             Self::Disable
+        }
+
+        fn for_capture_cancel(
+            terminal_behavior: CaptureTerminalBehavior,
+            ota_process_busy: bool,
+        ) -> Self {
+            if terminal_behavior == CaptureTerminalBehavior::ContinueListening && ota_process_busy {
+                Self::LeaveEnabled
+            } else {
+                Self::Disable
+            }
         }
     }
 
@@ -14161,6 +14217,28 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 NotifyCccdTeardown::Disable
             );
         }
+
+        #[test]
+        fn ota_background_capture_cancel_leaves_old_cccd_for_connection_handoff() {
+            assert_eq!(
+                NotifyCccdTeardown::for_capture_cancel(
+                    CaptureTerminalBehavior::ContinueListening,
+                    true,
+                ),
+                NotifyCccdTeardown::LeaveEnabled
+            );
+            assert_eq!(
+                NotifyCccdTeardown::for_capture_cancel(
+                    CaptureTerminalBehavior::ContinueListening,
+                    false,
+                ),
+                NotifyCccdTeardown::Disable
+            );
+            assert_eq!(
+                NotifyCccdTeardown::for_capture_cancel(CaptureTerminalBehavior::StopCapture, true),
+                NotifyCccdTeardown::Disable
+            );
+        }
     }
 }
 
@@ -14333,6 +14411,21 @@ pub fn transfer_listener_ota_v1(
     on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<FirmwareOtaTransferStats, String> {
     windows_ble::transfer_listener_ota_v1(
+        firmware_sha256,
+        firmware_bytes,
+        manifest_chunk_bytes,
+        on_progress,
+    )
+}
+
+#[cfg(target_os = "windows")]
+pub fn transfer_listener_ota_v1_after_active_link_hint(
+    firmware_sha256: &str,
+    firmware_bytes: &[u8],
+    manifest_chunk_bytes: usize,
+    on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Result<FirmwareOtaTransferStats, String> {
+    windows_ble::transfer_listener_ota_v1_after_active_link_hint(
         firmware_sha256,
         firmware_bytes,
         manifest_chunk_bytes,
@@ -14687,6 +14780,16 @@ pub fn is_background_listener_deferred_for_ota_error(_err: &str) -> bool {
 
 #[cfg(not(target_os = "windows"))]
 pub fn transfer_listener_ota_v1(
+    _firmware_sha256: &str,
+    _firmware_bytes: &[u8],
+    _manifest_chunk_bytes: usize,
+    _on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Result<FirmwareOtaTransferStats, String> {
+    Err("Listener OTA v1 over BLE is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn transfer_listener_ota_v1_after_active_link_hint(
     _firmware_sha256: &str,
     _firmware_bytes: &[u8],
     _manifest_chunk_bytes: usize,
@@ -15145,8 +15248,11 @@ mod tests {
         assert!(
             prepare.contains("_ota_process_guard: ota_process_guard")
                 && source.contains("b\"TYPE:OTA\\n\"")
+                && source.contains("Listener OTA v1 reconnect handoff")
                 && prepare.contains("request_listener_ota_v1_active_link()")
-                && prepare.contains("Listener OTA v1 active-link hint")
+                && source.contains("LISTENER_OTA_V1_RECONNECT_SETTLE")
+                && source.contains("reconnect handoff accepted")
+                && prepare.contains("waiting {} ms for reconnect handoff")
                 && prepare.find("acquire_ble_ota_process_mutex").unwrap()
                     < prepare
                         .find("request_listener_ota_v1_active_link")
@@ -15156,6 +15262,20 @@ mod tests {
                     .unwrap()
                     < prepare.find("BleCaptureGuard::enter").unwrap(),
             "Listener OTA v1 must acquire the cross-process OTA lock, send TYPE:OTA, then open BLE GATT"
+        );
+
+        let handoff_start = source
+            .find("pub(super) fn request_listener_ota_v1_active_link")
+            .expect("Listener OTA v1 reconnect handoff helper should exist");
+        let handoff_end = source[handoff_start..]
+            .find("pub(super) fn prepare_listener_ota_v1_transfer")
+            .map(|offset| handoff_start + offset)
+            .expect("Listener OTA v1 reconnect handoff helper boundary should exist");
+        let handoff = &source[handoff_start..handoff_end];
+        assert!(
+            handoff.contains("send_recording_control_command(")
+                && handoff.contains("ActiveControlTransientFallback::ReturnError"),
+            "headless OTA must use fresh GATT only when no active capture exists and must never race a failing active capture"
         );
     }
 

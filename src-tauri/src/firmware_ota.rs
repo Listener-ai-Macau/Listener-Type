@@ -1268,11 +1268,7 @@ mod tests {
     #[test]
     fn rejects_gatt_chunk_above_safe_limit() {
         let manifest = manifest_v2("").replace("\"chunk_bytes\": 500", "\"chunk_bytes\": 499");
-        let result = validate_package(
-            &manifest,
-            FIRMWARE_BYTES,
-            &context(),
-        );
+        let result = validate_package(&manifest, FIRMWARE_BYTES, &context());
 
         assert!(!result.ok);
         assert!(result.errors.iter().any(|item| item.contains("chunk size")));

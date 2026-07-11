@@ -26,6 +26,7 @@ import {
   firmwareOtaSnapshotSatisfiesVersionRefreshFallback,
   firmwareOtaVersionNotConfirmedAction,
   initialFirmwareOtaState,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY,
   validateFirmwareOtaPackage,
   type FirmwareOtaBlocker,
   type FirmwareOtaDeviceSnapshot,
@@ -39,7 +40,7 @@ import { Btn, Pill, type PillTone } from '../_atoms';
 const EXPECTED_HARDWARE_REVISION = 'keyboard-v2-n16r8';
 const OTA_VERSION_QUERY_TIMEOUT_MS = 15_000;
 const OTA_VERSION_QUERY_POLL_MS = 700;
-const OTA_PREFLIGHT_SNAPSHOT_FRESH_MS = 10_000;
+const OTA_PREFLIGHT_SNAPSHOT_FRESH_MS = 60_000;
 
 interface SelectedPackage {
   path: string;
@@ -1088,10 +1089,11 @@ function FirmwareOtaReadinessSummary({
 }) {
   const device = snapshot?.device;
   const statusPending = refreshing && !snapshot;
+  const otaServiceConfirmed = !!device?.connected && device.capabilities.includes(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName);
   const rows: Array<[string, string]> = [
     [t('settings.recording.firmwareOtaDeviceConnected', '连接'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.connected ? t('settings.recording.firmwareOtaConnected', '已连接') : t('settings.recording.firmwareOtaDisconnected', '未连接')],
-    [t('settings.recording.firmwareOtaDeviceHardware', '硬件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.hardwareRevision ?? t('settings.recording.firmwareOtaUnavailable', '未获取')],
-    [t('settings.recording.firmwareOtaDeviceFirmware', '固件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.firmwareVersion ?? t('settings.recording.firmwareOtaUnavailable', '未获取')],
+    [t('settings.recording.firmwareOtaDeviceHardware', '硬件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.hardwareRevision ?? (otaServiceConfirmed ? t('settings.recording.firmwareOtaCompatibleHardware', '兼容') : t('settings.recording.firmwareOtaUnavailable', '未获取'))],
+    [t('settings.recording.firmwareOtaDeviceFirmware', '固件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.firmwareVersion ?? (otaServiceConfirmed ? t('settings.recording.firmwareOtaVersionNotReported', '版本未报告') : t('settings.recording.firmwareOtaUnavailable', '未获取'))],
     [t('settings.recording.firmwareOtaDevicePower', '供电'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : formatPower(device, t)],
     [t('settings.recording.firmwareOtaDictationPhase', '录音'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : snapshot?.recordingActive ? snapshot.dictationPhase : t('settings.recording.firmwareOtaIdle', '空闲')],
   ];

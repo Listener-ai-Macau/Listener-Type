@@ -305,20 +305,28 @@ for (const token of [
 }
 
 const embeddedBle = readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble.rs"), "utf8");
+const commandsRs = readFileSync(join(repoRoot, "src-tauri", "src", "commands.rs"), "utf8");
 const listenerOtaWindow = embeddedBle.match(
   /const\s+LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS:\s*usize\s*=\s*(\d+);/,
 );
 if (!listenerOtaWindow) {
   fail("Listener OTA v1 default window constant is missing");
 }
-if (Number(listenerOtaWindow[1]) < 20) {
-  fail("Listener OTA v1 default window must stay at least 20 chunks for the <=60000 ms OTA target");
+if (Number(listenerOtaWindow[1]) < 100) {
+  fail("Listener OTA v1 default window must stay at 100 chunks for the measured <=60000 ms OTA UI target");
+}
+if (!commandsRs.includes("listener_ota_v1_gatt_probe_snapshot(")) {
+  fail("Listener OTA v1 completion must use the fast service-only probe instead of optional DIS metadata");
 }
 if (!embeddedBle.includes("LISTENER_OTA_V1_WINDOW_ENV")) {
   fail("Listener OTA v1 must keep the window override env for controlled bench experiments");
 }
-if (!embeddedBle.includes("continuing with OTA begin fallback")) {
-  fail("Listener OTA v1 must not block begin on an active-link hint that can collide with a central BLE procedure");
+if (
+  !embeddedBle.includes("LISTENER_OTA_V1_RECONNECT_SETTLE")
+  || !embeddedBle.includes("reconnect handoff accepted")
+  || embeddedBle.includes("continuing with OTA begin fallback")
+) {
+  fail("Listener OTA v1 must complete the low-power reconnect handoff before opening the OTA GATT data path");
 }
 for (const token of [
   "BLE_OTA_OPERATION_MUTEX_NAME",
@@ -328,7 +336,7 @@ for (const token of [
   "BACKGROUND_LISTENER_DEFERRED_FOR_OTA",
   "EMBEDDED_BLE_RETRY_OTA_DEFER_DELAY",
   "TYPE:OTA",
-  "Listener OTA v1 active-link hint",
+  "Listener OTA v1 reconnect handoff accepted",
   "background listener deferred while firmware OTA is active",
 ]) {
   if (!embeddedBle.includes(token)) {

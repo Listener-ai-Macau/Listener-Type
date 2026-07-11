@@ -589,8 +589,8 @@ assert.ok(
   'selecting a firmware package should refresh the OTA snapshot once with the package protocol',
 );
 assert.ok(
-  firmwareOtaPanelSource.includes('const OTA_PREFLIGHT_SNAPSHOT_FRESH_MS = 10_000;'),
-  'OTA start should reuse a very recent package-selection preflight instead of immediately querying GATT again',
+  firmwareOtaPanelSource.includes('const OTA_PREFLIGHT_SNAPSHOT_FRESH_MS = 60_000;'),
+  'OTA start should reuse the package-selection preflight long enough for a normal user to review it before starting',
 );
 assert.ok(
   firmwareOtaPanelSource.includes('const [otaSnapshotFetchedAtMs, setOtaSnapshotFetchedAtMs] = useState<number | null>(null);'),
@@ -678,12 +678,19 @@ assert.ok(
 assert.ok(
   commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT')
     && commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT')
-    && commandsSource.includes('crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot('),
-  'Denzic OTA v1 preflight must use the bounded GATT probe instead of optional DIS metadata reads',
+    && commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT: Duration = Duration::from_secs(8)')
+    && commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(10)')
+    && commandsSource.includes('crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(')
+    && commandsSource.includes('coord.embedded_ble_wake_recovery_snapshot()'),
+  'Denzic OTA v1 preflight must keep enough bounded time for a post-reconnect Windows GATT service query and merge the cached power state',
 );
 assert.ok(
   commandsSource.includes('confirm_listener_ota_v1_reachable(&version).await'),
   'Listener OTA v1 UI transfer confirmation must use the fast reachable-service confirmation path',
+);
+assert.ok(
+  commandsSource.includes('tauri::async_runtime::spawn_blocking(|| {\n            crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot('),
+  'Listener OTA v1 confirmation must probe only the OTA service instead of waiting for optional DIS metadata',
 );
 assert.ok(
   commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT'),
@@ -729,6 +736,10 @@ assert.ok(
 );
 
 const embeddedBleSource = readFileSync('src-tauri/src/embedded_ble.rs', 'utf8');
+assert.ok(
+  embeddedBleSource.includes('LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 100'),
+  'Listener OTA v1 must keep the measured 100-chunk default needed for the under-60-second UI transfer target',
+);
 for (const expected of [
   'denzic_ota_core::GATT_SERVICE_UUID_U128',
   'denzic_ota_core::GATT_CONTROL_UUID_U128',

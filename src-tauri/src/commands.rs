@@ -3806,8 +3806,8 @@ pub struct FirmwareOtaPreflightSnapshot {
     device: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
 }
 
-const FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
-const FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(4);
+const FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+const FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tauri::command]
 pub async fn get_firmware_ota_preflight_snapshot(
@@ -3822,12 +3822,13 @@ pub async fn get_firmware_ota_preflight_snapshot(
             device: firmware_ota_active_preflight_snapshot(),
         });
     }
+    let cached_power = coord.embedded_ble_wake_recovery_snapshot();
     let snapshot_task = tauri::async_runtime::spawn_blocking(move || {
         crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(
             FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT,
         )
     });
-    let device = match tokio::time::timeout(
+    let mut device = match tokio::time::timeout(
         FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,
         snapshot_task,
     )
@@ -3847,6 +3848,12 @@ pub async fn get_firmware_ota_preflight_snapshot(
             )),
         },
     };
+    if device.usb_powered.is_none() {
+        device.usb_powered = cached_power.usb_powered;
+    }
+    if device.battery_percent.is_none() {
+        device.battery_percent = cached_power.battery_percent;
+    }
     Ok(FirmwareOtaPreflightSnapshot {
         recording_active: phase != SessionPhase::Idle,
         dictation_phase: format!("{phase:?}"),
@@ -3946,9 +3953,11 @@ async fn confirm_listener_ota_v1_reachable(expected_version: &str) -> FirmwareOt
 
     loop {
         attempts += 1;
-        let snapshot = tauri::async_runtime::spawn_blocking(
-            crate::embedded_ble::listener_ota_v1_device_snapshot,
-        )
+        let snapshot = tauri::async_runtime::spawn_blocking(|| {
+            crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(
+                FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT,
+            )
+        })
         .await
         .ok();
         if let Some(snapshot) = snapshot {
@@ -5804,14 +5813,10 @@ pub async fn transfer_firmware_ota_ble(
         return Err("firmware_ota.bin SHA256 does not match ota_manifest.json.".to_string());
     }
 
-    match crate::embedded_ble::request_listener_ota_v1_active_link() {
-        Ok(()) => log::info!(
-            "[firmware-ota] Listener OTA v1 active-link hint sent before pausing the background listener"
-        ),
-        Err(err) => log::warn!(
-            "[firmware-ota] Listener OTA v1 active-link hint failed before pausing the background listener; continuing with OTA begin fallback: {err}"
-        ),
-    }
+    crate::embedded_ble::request_listener_ota_v1_active_link()?;
+    log::info!(
+        "[firmware-ota] Listener OTA v1 reconnect handoff accepted before pausing the background listener"
+    );
     if !coord.try_begin_firmware_ota_transfer() {
         return Err("Firmware OTA is already in progress.".to_string());
     }
@@ -5830,7 +5835,7 @@ pub async fn transfer_firmware_ota_ble(
                 }),
             );
         };
-        crate::embedded_ble::transfer_listener_ota_v1(
+        crate::embedded_ble::transfer_listener_ota_v1_after_active_link_hint(
             &transfer_sha256,
             &firmware_bytes,
             manifest_chunk_bytes,
