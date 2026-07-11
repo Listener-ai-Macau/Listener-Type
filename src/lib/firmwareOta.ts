@@ -1,4 +1,8 @@
 import {
+  DENZIC_OTA_V1_GATT_CONTROL_UUID,
+  DENZIC_OTA_V1_GATT_DATA_UUID,
+  DENZIC_OTA_V1_GATT_SERVICE_UUID,
+  DENZIC_OTA_V1_GATT_STATUS_UUID,
   DENZIC_OTA_V1_PROTOCOL_NAME,
   DENZIC_OTA_V1_PROTOCOL_VERSION,
 } from '@denzic/ota-core';
@@ -146,10 +150,10 @@ export const LISTENER_OTA_V1_TRANSPORT_BOUNDARY = {
   protocolVersion: DENZIC_OTA_V1_PROTOCOL_VERSION,
   firmwareCapability: DENZIC_OTA_V1_PROTOCOL_NAME,
   gatt: {
-    serviceUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
-    controlUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3094b',
-    dataUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3094c',
-    statusUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3094d',
+    serviceUuid: DENZIC_OTA_V1_GATT_SERVICE_UUID,
+    controlUuid: DENZIC_OTA_V1_GATT_CONTROL_UUID,
+    dataUuid: DENZIC_OTA_V1_GATT_DATA_UUID,
+    statusUuid: DENZIC_OTA_V1_GATT_STATUS_UUID,
     defaultChunkBytes: 500,
     maxChunkBytes: 500,
   },

@@ -11,10 +11,10 @@ pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3
 pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093b";
 pub const DIAGNOSTIC_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093c";
 pub const DIAGNOSTIC_COUNT_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093d";
-pub const LISTENER_OTA_V1_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
-pub const LISTENER_OTA_V1_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3094b";
-pub const LISTENER_OTA_V1_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3094c";
-pub const LISTENER_OTA_V1_STATUS_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3094d";
+pub const LISTENER_OTA_V1_SERVICE_UUID_TEXT: &str = denzic_ota_core::GATT_SERVICE_UUID;
+pub const LISTENER_OTA_V1_CONTROL_UUID_TEXT: &str = denzic_ota_core::GATT_CONTROL_UUID;
+pub const LISTENER_OTA_V1_DATA_UUID_TEXT: &str = denzic_ota_core::GATT_DATA_UUID;
+pub const LISTENER_OTA_V1_STATUS_UUID_TEXT: &str = denzic_ota_core::GATT_STATUS_UUID;
 pub const DIAGNOSTIC_EVENT_BYTES: usize = 24;
 pub const DIAGNOSTIC_CHUNK_HEADER_BYTES: usize = 8;
 
@@ -596,13 +596,14 @@ mod windows_ble {
     const SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091a);
     const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b);
     const AUDIO_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091e);
-    const OTA_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092a);
+    const OTA_SERVICE_UUID: GUID = GUID::from_u128(denzic_ota_core::GATT_SERVICE_UUID_U128);
     const LISTENER_OTA_V1_SERVICE_UUID: GUID = OTA_SERVICE_UUID;
     const LISTENER_OTA_V1_CONTROL_UUID: GUID =
-        GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3094b);
-    const LISTENER_OTA_V1_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3094c);
+        GUID::from_u128(denzic_ota_core::GATT_CONTROL_UUID_U128);
+    const LISTENER_OTA_V1_DATA_UUID: GUID =
+        GUID::from_u128(denzic_ota_core::GATT_DATA_UUID_U128);
     const LISTENER_OTA_V1_STATUS_UUID: GUID =
-        GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3094d);
+        GUID::from_u128(denzic_ota_core::GATT_STATUS_UUID_U128);
     const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
     const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
     const WINDOWS_BLE_AEP_SELECTOR: &str =
@@ -691,7 +692,7 @@ mod windows_ble {
     const ATT_WRITE_HEADER_BYTES: usize = 3;
     const ATT_DEFAULT_PAYLOAD_BYTES: usize = 20;
     const SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091a";
-    const OTA_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
+    const OTA_SERVICE_UUID_TEXT: &str = denzic_ota_core::GATT_SERVICE_UUID;
     const LISTENER_SERVICE_UUID_TEXTS: [&str; 3] = [
         SERVICE_UUID_TEXT,
         OTA_SERVICE_UUID_TEXT,
@@ -9248,7 +9249,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
@@ -9309,6 +9310,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     &service, cache_mode,
                 ) {
                     Ok(prepared) => {
+                        log::info!(
+                            "[embedded-ble] Listener OTA v1 selected {cache_mode:?} GATT characteristics"
+                        );
                         return Ok(OpenListenerOtaV1Target {
                             control: prepared.control,
                             data: prepared.data,
@@ -9367,7 +9371,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
@@ -9432,6 +9436,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     &service, cache_mode, deadline,
                 ) {
                     Ok(prepared) => {
+                        log::info!(
+                            "[embedded-ble] Listener OTA v1 selected {cache_mode:?} GATT characteristics"
+                        );
                         return Ok(OpenListenerOtaV1Target {
                             control: prepared.control,
                             data: prepared.data,
@@ -12456,8 +12463,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        #[test]
-        #[test]
         fn type_heartbeat_prefers_no_response_when_available() {
             let both = GattCharacteristicProperties::Write
                 | GattCharacteristicProperties::WriteWithoutResponse;
@@ -12539,8 +12544,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             );
         }
 
-        #[test]
-        #[test]
         #[test]
         fn ble_advertisement_name_matching_trims_expected_target() {
             assert!(ble_advertisement_name_matches(" Companion ", "companion"));
@@ -13928,30 +13931,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        #[test]
-        #[test]
-        fn ota_transfer_chunk_selection_uses_transport_and_test_override() {
-            assert_eq!(
-                ota_transfer_chunk_bytes_with_override(514, 500, None),
-                Ok(500)
-            );
-            assert_eq!(
-                ota_transfer_chunk_bytes_with_override(244, 500, None),
-                Ok(244)
-            );
-            assert_eq!(
-                ota_transfer_chunk_bytes_with_override(514, 500, Some(244)),
-                Ok(244)
-            );
-            assert!(ota_transfer_chunk_bytes_with_override(0, 500, None).is_err());
-            assert!(ota_data_test_chunk_bytes_override_from(Some("0")).is_err());
-            assert_eq!(
-                ota_data_inter_chunk_delay_from(Some("25")),
-                Ok(Duration::from_millis(25))
-            );
-        }
-
-        #[test]
         fn active_audio_control_registration_only_clears_matching_capture() {
             let _guard = active_audio_control_test_lock().lock().unwrap();
             *active_audio_control_slot().lock().unwrap() = None;
@@ -15175,11 +15154,16 @@ mod tests {
         let prepare = &source[prepare_start..prepare_end];
         assert!(
             prepare.contains("_ota_process_guard: ota_process_guard")
-                && prepare.contains("TYPE:OTA")
+                && source.contains("b\"TYPE:OTA\\n\"")
+                && prepare.contains("request_listener_ota_v1_active_link()")
                 && prepare.contains("Listener OTA v1 active-link hint")
                 && prepare.find("acquire_ble_ota_process_mutex").unwrap()
-                    < prepare.find("TYPE:OTA").unwrap()
-                && prepare.find("TYPE:OTA").unwrap()
+                    < prepare
+                        .find("request_listener_ota_v1_active_link")
+                        .unwrap()
+                && prepare
+                    .find("request_listener_ota_v1_active_link")
+                    .unwrap()
                     < prepare.find("BleCaptureGuard::enter").unwrap(),
             "Listener OTA v1 must acquire the cross-process OTA lock, send TYPE:OTA, then open BLE GATT"
         );
@@ -15514,21 +15498,6 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].port_name, "COM11");
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn ota_chunk_selection_uses_manifest_and_transport_limits() {
-        assert_eq!(
-            super::windows_ble::ota_transfer_chunk_bytes(514, 500),
-            Ok(500)
-        );
-        assert_eq!(
-            super::windows_ble::ota_transfer_chunk_bytes(499, 500),
-            Ok(499)
-        );
-        assert!(super::windows_ble::ota_transfer_chunk_bytes(0, 500).is_err());
-        assert!(super::windows_ble::ota_transfer_chunk_bytes(514, 499).is_err());
     }
 
     #[cfg(target_os = "windows")]

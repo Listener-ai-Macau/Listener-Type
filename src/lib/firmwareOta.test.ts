@@ -514,10 +514,10 @@ assert.deepEqual(
   ['checking', 'ready', 'transferring', 'rebooting', 'verifying', 'success', 'failed', 'rolledBack'],
 );
 assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName, 'denzic_ota_v1');
-assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3092a');
-assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3094b');
-assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3094c');
-assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3094d');
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid, '1b55f597-f09c-4c7f-9529-adfa64983b06');
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid, '206c5e29-c64d-4392-8180-66463788533c');
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid, 'fbc4b0fb-6102-4bd1-abe4-e5e90a9a7e12');
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid, 'e571544a-7c41-4650-b0d6-ccebfe1db489');
 assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 500);
 assert.ok(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.notDataPlane.every(item => item.includes('BLE')));
 assert.equal(
@@ -557,14 +557,25 @@ assert.equal(
 
 const rustFirmwareOtaSource = readFileSync('src-tauri/src/firmware_ota.rs', 'utf8');
 for (const expected of [
+  'denzic_ota_core::GATT_SERVICE_UUID',
+  'denzic_ota_core::GATT_CONTROL_UUID',
+  'denzic_ota_core::GATT_DATA_UUID',
+  'denzic_ota_core::GATT_STATUS_UUID',
+]) {
+  assert.ok(
+    rustFirmwareOtaSource.includes(expected),
+    `Listener OTA Rust manifest validation must use shared ${expected}`,
+  );
+}
+for (const uuid of [
   LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid,
   LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid,
   LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid,
   LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid,
 ]) {
   assert.ok(
-    rustFirmwareOtaSource.includes(expected),
-    `Listener OTA UUID ${expected} must match src-tauri/src/firmware_ota.rs`,
+    !rustFirmwareOtaSource.includes(uuid),
+    `Listener OTA UUID ${uuid} must not be duplicated in src-tauri/src/firmware_ota.rs`,
   );
 }
 
@@ -719,14 +730,14 @@ assert.ok(
 
 const embeddedBleSource = readFileSync('src-tauri/src/embedded_ble.rs', 'utf8');
 for (const expected of [
-  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid,
-  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid,
-  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid,
+  'denzic_ota_core::GATT_SERVICE_UUID_U128',
+  'denzic_ota_core::GATT_CONTROL_UUID_U128',
+  'denzic_ota_core::GATT_DATA_UUID_U128',
+  'denzic_ota_core::GATT_STATUS_UUID_U128',
 ]) {
   assert.ok(
     embeddedBleSource.includes(expected),
-    `Listener OTA UUID ${expected} must match src-tauri/src/embedded_ble.rs`,
+    `Listener OTA WinRT adapter must use shared ${expected}`,
   );
 }
 const listenerOtaV1SnapshotStart = embeddedBleSource.indexOf('fn listener_ota_v1_device_snapshot_from_target');
@@ -738,8 +749,8 @@ assert.ok(
   'Listener OTA v1 snapshot must document that DIS metadata is best-effort and not a hard blocker',
 );
 assert.ok(
-  embeddedBleSource.includes('for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]'),
-  'Listener OTA v1 discovery must try the Windows GATT cache before falling back to uncached discovery',
+  embeddedBleSource.includes('for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]'),
+  'Listener OTA v1 discovery must prefer uncached characteristics so a firmware GATT schema update cannot reuse stale handles',
 );
 assert.ok(
   !listenerOtaV1SnapshotBody.includes('read_optional_string_characteristic_from_service'),
