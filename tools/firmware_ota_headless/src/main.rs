@@ -240,10 +240,10 @@ mod tests {
     "version": 1,
     "firmware_capability": "denzic_ota_v1",
     "gatt": {{
-      "service_uuid": "710af845-6d9f-6583-0c4d-9e5b3bc3092a",
-      "control_uuid": "710af845-6d9f-6583-0c4d-9e5b3bc3094b",
-      "data_uuid": "710af845-6d9f-6583-0c4d-9e5b3bc3094c",
-      "status_uuid": "710af845-6d9f-6583-0c4d-9e5b3bc3094d",
+      "service_uuid": "{service_uuid}",
+      "control_uuid": "{control_uuid}",
+      "data_uuid": "{data_uuid}",
+      "status_uuid": "{status_uuid}",
       "chunk_bytes": 500
     }}
   }},
@@ -266,7 +266,11 @@ mod tests {
     "serial_commands": "~OTA:STATUS"
   }}
 }}"#,
-            git_commit = "a".repeat(40)
+            git_commit = "a".repeat(40),
+            service_uuid = firmware_ota::LISTENER_OTA_V1_SERVICE_UUID,
+            control_uuid = firmware_ota::LISTENER_OTA_V1_CONTROL_UUID,
+            data_uuid = firmware_ota::LISTENER_OTA_V1_DATA_UUID,
+            status_uuid = firmware_ota::LISTENER_OTA_V1_STATUS_UUID,
         )
     }
 
