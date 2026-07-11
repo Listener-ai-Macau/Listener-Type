@@ -5878,11 +5878,21 @@ pub async fn transfer_firmware_ota_ble(
         return Err("firmware_ota.bin SHA256 does not match ota_manifest.json.".to_string());
     }
 
+    let is_listener_ota_v2 = manifest.is_listener_ble_ota_v2();
+    if is_listener_ota_v2 {
+        match crate::embedded_ble::request_listener_ota_v2_active_link() {
+            Ok(()) => log::info!(
+                "[firmware-ota] Listener OTA v2 active-link hint sent before pausing the background listener"
+            ),
+            Err(err) => log::warn!(
+                "[firmware-ota] Listener OTA v2 active-link hint failed before pausing the background listener; continuing with OTA begin fallback: {err}"
+            ),
+        }
+    }
     if !coord.try_begin_firmware_ota_transfer() {
         return Err("Firmware OTA is already in progress.".to_string());
     }
     sync_firmware_ota_led_preview("LED:PREVIEW ota_led_only", "transfer_start");
-    let is_listener_ota_v2 = manifest.is_listener_ble_ota_v2();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_version = version.clone();

@@ -6813,15 +6813,19 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         })
     }
 
-    pub(super) fn prepare_listener_ota_v2_transfer() -> Result<PreparedListenerOtaV2Transfer, String>
-    {
-        let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v2")?;
-        match send_recording_control_command(
+    pub(super) fn request_listener_ota_v2_active_link() -> Result<(), String> {
+        send_recording_control_command(
             b"TYPE:OTA\n",
             Duration::from_secs(3),
             "Listener OTA v2 active-link hint",
             ActiveControlTransientFallback::TryFreshGatt,
-        ) {
+        )
+    }
+
+    pub(super) fn prepare_listener_ota_v2_transfer() -> Result<PreparedListenerOtaV2Transfer, String>
+    {
+        let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v2")?;
+        match request_listener_ota_v2_active_link() {
             Ok(()) => log::info!("[embedded-ble] Listener OTA v2 active-link hint sent"),
             Err(err) => log::warn!(
                 "[embedded-ble] Listener OTA v2 active-link hint failed; continuing with OTA begin fallback: {err}"
@@ -17467,6 +17471,16 @@ pub fn transfer_companion_ota_v2(
     _on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<FirmwareOtaTransferStats, String> {
     Err("Companion OTA v2 is handled by the separate Companion-Type app.".to_string())
+}
+
+#[cfg(target_os = "windows")]
+pub fn request_listener_ota_v2_active_link() -> Result<(), String> {
+    windows_ble::request_listener_ota_v2_active_link()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn request_listener_ota_v2_active_link() -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
