@@ -3806,12 +3806,13 @@ pub struct FirmwareOtaPreflightSnapshot {
     device: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
 }
 
-const FIRMWARE_OTA_PREFLIGHT_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(18);
+const FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(4);
 
 #[tauri::command]
 pub async fn get_firmware_ota_preflight_snapshot(
     coord: CoordinatorState<'_>,
-    protocol_name: Option<String>,
+    _protocol_name: Option<String>,
 ) -> Result<FirmwareOtaPreflightSnapshot, String> {
     let phase = coord.dictation_phase_for_cli();
     if coord.firmware_ota_transfer_active() {
@@ -3821,18 +3822,16 @@ pub async fn get_firmware_ota_preflight_snapshot(
             device: firmware_ota_active_preflight_snapshot(),
         });
     }
-    let use_listener_ota_v2 = protocol_name
-        .as_deref()
-        .is_some_and(|value| value == crate::firmware_ota::LISTENER_OTA_V2_PROTOCOL_NAME);
     let snapshot_task = tauri::async_runtime::spawn_blocking(move || {
-        if use_listener_ota_v2 {
-            crate::embedded_ble::listener_ota_v2_device_snapshot()
-        } else {
-            crate::embedded_ble::firmware_ota_device_snapshot()
-        }
+        crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(
+            FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT,
+        )
     });
-    let device = match tokio::time::timeout(FIRMWARE_OTA_PREFLIGHT_SNAPSHOT_TIMEOUT, snapshot_task)
-        .await
+    let device = match tokio::time::timeout(
+        FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,
+        snapshot_task,
+    )
+    .await
     {
         Ok(joined) => joined.map_err(|err| format!("Listener BLE OTA preflight task failed: {err}"))?,
         Err(_) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
@@ -3844,7 +3843,7 @@ pub async fn get_firmware_ota_preflight_snapshot(
             usb_powered: None,
             detail: Some(format!(
                 "Listener BLE OTA preflight timed out after {} ms; retry after reconnecting Listener or resetting Windows Bluetooth.",
-                FIRMWARE_OTA_PREFLIGHT_SNAPSHOT_TIMEOUT.as_millis()
+                FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT.as_millis()
             )),
         },
     };
@@ -3875,11 +3874,9 @@ pub struct FirmwareOtaPackagePayload {
     source_label: String,
 }
 
-const FIRMWARE_OTA_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 const FIRMWARE_OTA_CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 const FIRMWARE_OTA_CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(1800);
-const FIRMWARE_OTA_LISTENER_V2_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
-const FIRMWARE_OTA_LED_SYNC_TIMEOUT: Duration = Duration::from_millis(900);
+const FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
 const FIRMWARE_OTA_PACKAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 fn elapsed_ms_u64(started: Instant) -> u64 {
@@ -3922,14 +3919,6 @@ fn firmware_ota_active_preflight_snapshot() -> crate::embedded_ble::FirmwareOtaD
     }
 }
 
-fn sync_firmware_ota_led_preview(command: &'static str, reason: &'static str) {
-    if let Err(err) =
-        crate::embedded_ble::send_status_led_command(command, FIRMWARE_OTA_LED_SYNC_TIMEOUT)
-    {
-        log::warn!("[firmware-ota] status LED sync skipped reason={reason}: {err}");
-    }
-}
-
 #[derive(Debug, Clone)]
 struct FirmwareOtaConfirmOutcome {
     confirmed_version: Option<String>,
@@ -3938,7 +3927,7 @@ struct FirmwareOtaConfirmOutcome {
     matched: bool,
 }
 
-async fn confirm_firmware_ota_version(expected_version: &str) -> FirmwareOtaConfirmOutcome {
+async fn confirm_listener_ota_v1_reachable(expected_version: &str) -> FirmwareOtaConfirmOutcome {
     let started = Instant::now();
     if normalize_firmware_ota_version(expected_version).is_empty() || expected_version == "unknown"
     {
@@ -3952,76 +3941,13 @@ async fn confirm_firmware_ota_version(expected_version: &str) -> FirmwareOtaConf
 
     tokio::time::sleep(FIRMWARE_OTA_CONFIRM_REBOOT_GRACE).await;
 
-    let deadline = Instant::now() + FIRMWARE_OTA_CONFIRM_TIMEOUT;
-    let mut last_seen_version = None;
-    let mut attempts = 0usize;
-
-    loop {
-        attempts += 1;
-        let snapshot =
-            tauri::async_runtime::spawn_blocking(crate::embedded_ble::firmware_ota_device_snapshot)
-                .await
-                .ok();
-        if let Some(snapshot) = snapshot {
-            if let Some(version) = firmware_ota_snapshot_version(&snapshot) {
-                if firmware_ota_versions_match(&version, expected_version) {
-                    let outcome = FirmwareOtaConfirmOutcome {
-                        confirmed_version: Some(version),
-                        elapsed_ms: elapsed_ms_u64(started),
-                        attempts,
-                        matched: true,
-                    };
-                    log::info!(
-                        "[firmware-ota] version confirmation matched expected={expected_version} attempts={} elapsed_ms={}",
-                        outcome.attempts,
-                        outcome.elapsed_ms
-                    );
-                    return outcome;
-                }
-                last_seen_version = Some(version);
-            }
-        }
-
-        if Instant::now() >= deadline {
-            let outcome = FirmwareOtaConfirmOutcome {
-                confirmed_version: last_seen_version,
-                elapsed_ms: elapsed_ms_u64(started),
-                attempts,
-                matched: false,
-            };
-            log::warn!(
-                "[firmware-ota] version confirmation timed out expected={expected_version} last_seen={:?} attempts={} elapsed_ms={}",
-                outcome.confirmed_version,
-                outcome.attempts,
-                outcome.elapsed_ms
-            );
-            return outcome;
-        }
-        tokio::time::sleep(FIRMWARE_OTA_CONFIRM_INTERVAL).await;
-    }
-}
-
-async fn confirm_listener_ota_v2_reachable(expected_version: &str) -> FirmwareOtaConfirmOutcome {
-    let started = Instant::now();
-    if normalize_firmware_ota_version(expected_version).is_empty() || expected_version == "unknown"
-    {
-        return FirmwareOtaConfirmOutcome {
-            confirmed_version: None,
-            elapsed_ms: elapsed_ms_u64(started),
-            attempts: 0,
-            matched: false,
-        };
-    }
-
-    tokio::time::sleep(FIRMWARE_OTA_CONFIRM_REBOOT_GRACE).await;
-
-    let deadline = Instant::now() + FIRMWARE_OTA_LISTENER_V2_REACHABLE_CONFIRM_TIMEOUT;
+    let deadline = Instant::now() + FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT;
     let mut attempts = 0usize;
 
     loop {
         attempts += 1;
         let snapshot = tauri::async_runtime::spawn_blocking(
-            crate::embedded_ble::listener_ota_v2_device_snapshot,
+            crate::embedded_ble::listener_ota_v1_device_snapshot,
         )
         .await
         .ok();
@@ -4030,7 +3956,7 @@ async fn confirm_listener_ota_v2_reachable(expected_version: &str) -> FirmwareOt
                 && snapshot
                     .capabilities
                     .iter()
-                    .any(|item| item == crate::firmware_ota::LISTENER_OTA_V2_FIRMWARE_CAPABILITY);
+                    .any(|item| item == crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY);
             if reachable {
                 let outcome = FirmwareOtaConfirmOutcome {
                     confirmed_version: Some(expected_version.to_string()),
@@ -4039,7 +3965,7 @@ async fn confirm_listener_ota_v2_reachable(expected_version: &str) -> FirmwareOt
                     matched: true,
                 };
                 log::info!(
-                    "[firmware-ota] Listener OTA v2 service reachable after transfer expected={expected_version} attempts={} elapsed_ms={}",
+                    "[firmware-ota] Listener OTA v1 service reachable after transfer expected={expected_version} attempts={} elapsed_ms={}",
                     outcome.attempts,
                     outcome.elapsed_ms
                 );
@@ -4055,7 +3981,7 @@ async fn confirm_listener_ota_v2_reachable(expected_version: &str) -> FirmwareOt
                 matched: false,
             };
             log::warn!(
-                "[firmware-ota] Listener OTA v2 reachable confirmation timed out expected={expected_version} attempts={} elapsed_ms={}",
+                "[firmware-ota] Listener OTA v1 reachable confirmation timed out expected={expected_version} attempts={} elapsed_ms={}",
                 outcome.attempts,
                 outcome.elapsed_ms
             );
@@ -5878,24 +5804,19 @@ pub async fn transfer_firmware_ota_ble(
         return Err("firmware_ota.bin SHA256 does not match ota_manifest.json.".to_string());
     }
 
-    let is_listener_ota_v2 = manifest.is_listener_ble_ota_v2();
-    if is_listener_ota_v2 {
-        match crate::embedded_ble::request_listener_ota_v2_active_link() {
-            Ok(()) => log::info!(
-                "[firmware-ota] Listener OTA v2 active-link hint sent before pausing the background listener"
-            ),
-            Err(err) => log::warn!(
-                "[firmware-ota] Listener OTA v2 active-link hint failed before pausing the background listener; continuing with OTA begin fallback: {err}"
-            ),
-        }
+    match crate::embedded_ble::request_listener_ota_v1_active_link() {
+        Ok(()) => log::info!(
+            "[firmware-ota] Listener OTA v1 active-link hint sent before pausing the background listener"
+        ),
+        Err(err) => log::warn!(
+            "[firmware-ota] Listener OTA v1 active-link hint failed before pausing the background listener; continuing with OTA begin fallback: {err}"
+        ),
     }
     if !coord.try_begin_firmware_ota_transfer() {
         return Err("Firmware OTA is already in progress.".to_string());
     }
-    sync_firmware_ota_led_preview("LED:PREVIEW ota_led_only", "transfer_start");
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
-    let transfer_version = version.clone();
     let transfer_sha256 = expected_sha256.clone();
     let app_for_progress = app;
     let transfer_started = Instant::now();
@@ -5909,31 +5830,19 @@ pub async fn transfer_firmware_ota_ble(
                 }),
             );
         };
-        if is_listener_ota_v2 {
-            crate::embedded_ble::transfer_listener_ota_v2(
-                &transfer_sha256,
-                &firmware_bytes,
-                manifest_chunk_bytes,
-                Some(&progress),
-            )
-        } else {
-            crate::embedded_ble::transfer_firmware_ota(
-                &transfer_version,
-                &transfer_sha256,
-                &firmware_bytes,
-                manifest_chunk_bytes,
-                Some(&progress),
-            )
-        }
+        crate::embedded_ble::transfer_listener_ota_v1(
+            &transfer_sha256,
+            &firmware_bytes,
+            manifest_chunk_bytes,
+            Some(&progress),
+        )
     })
     .await
     .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
     .and_then(|result| result);
     let transfer_elapsed_ms = elapsed_ms_u64(transfer_started);
-    let confirm = if transfer.is_ok() && is_listener_ota_v2 {
-        confirm_listener_ota_v2_reachable(&version).await
-    } else if transfer.is_ok() {
-        confirm_firmware_ota_version(&version).await
+    let confirm = if transfer.is_ok() {
+        confirm_listener_ota_v1_reachable(&version).await
     } else {
         FirmwareOtaConfirmOutcome {
             confirmed_version: None,
@@ -5943,9 +5852,6 @@ pub async fn transfer_firmware_ota_ble(
         }
     };
     coord.end_firmware_ota_transfer();
-    if transfer.is_err() {
-        sync_firmware_ota_led_preview("LED:PREVIEW warn", "transfer_failed");
-    }
     coord.refresh_embedded_ble_listener();
 
     let stats = transfer?;
@@ -8609,7 +8515,7 @@ mod tests {
             connected: true,
             hardware_revision: Some("keyboard-v1".to_string()),
             firmware_version: version.map(str::to_string),
-            capabilities: vec!["firmware_ota_v1".to_string()],
+            capabilities: vec![crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY.to_string()],
             battery_percent: Some(80),
             usb_powered: Some(true),
             detail: None,
@@ -10795,7 +10701,9 @@ mod tests {
                     connected: true,
                     hardware_revision: Some("keyboard-v1".to_string()),
                     firmware_version: Some("v1.2.3".to_string()),
-                    capabilities: vec!["firmware_ota_v1".to_string()],
+                    capabilities: vec![
+                        crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY.to_string()
+                    ],
                     battery_percent: Some(88),
                     usb_powered: Some(true),
                     detail: None,
@@ -10870,7 +10778,10 @@ mod tests {
                     connected: true,
                     hardware_revision: Some("keyboard-v1".to_string()),
                     firmware_version: Some("v1.2.3".to_string()),
-                    capabilities: vec!["firmware_ota_v1".to_string(), "diag_export_v1".to_string()],
+                    capabilities: vec![
+                        crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY.to_string(),
+                        "diag_export_v1".to_string(),
+                    ],
                     battery_percent: Some(88),
                     usb_powered: Some(true),
                     detail: None,
@@ -11004,7 +10915,9 @@ mod tests {
                 connected: true,
                 hardware_revision: Some("keyboard-v1".to_string()),
                 firmware_version: None,
-                capabilities: vec!["firmware_ota_v1".to_string()],
+                capabilities: vec![
+                    crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY.to_string()
+                ],
                 battery_percent: Some(70),
                 usb_powered: Some(true),
                 detail: None,

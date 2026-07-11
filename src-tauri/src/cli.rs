@@ -49,8 +49,8 @@ pub enum CliIntent {
     SendEmbeddedAudioControlStop { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：读取嵌入式 BLE 音频服务的 readiness/capabilities 状态。
     ReadEmbeddedAudioBleStatus { timeout_ms: Option<u64> },
-    /// 调试 / 自动化入口：只验证 Listener OTA v2 GATT 服务可达，不做版本升级判定。
-    ProbeListenerOtaV2Gatt { timeout_ms: Option<u64> },
+    /// 调试 / 自动化入口：只验证 Listener OTA v1 GATT 服务可达，不做版本升级判定。
+    ProbeListenerOtaV1Gatt { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：扫描未配对 Listener 并触发 Windows 系统配对体验。
     PromptEmbeddedBlePairing { expected_name: Option<String> },
     /// 调试 / 自动化入口：只执行 Windows 配对体验，不先通过串口打开 recovery 窗口。
@@ -164,7 +164,7 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
                 });
             }
             "--probe-listener-ota-v2-gatt" => {
-                return Some(CliIntent::ProbeListenerOtaV2Gatt {
+                return Some(CliIntent::ProbeListenerOtaV1Gatt {
                     timeout_ms: next_u64_arg(&mut args),
                 });
             }
@@ -518,11 +518,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_recognizes_listener_ota_v2_gatt_probe_with_timeout() {
+    fn parse_recognizes_listener_ota_v1_gatt_probe_with_timeout() {
         let args = vec!["listener-type", "--probe-listener-ota-v2-gatt", "20000"];
         assert_eq!(
             parse_cli_intent(&args),
-            Some(CliIntent::ProbeListenerOtaV2Gatt {
+            Some(CliIntent::ProbeListenerOtaV1Gatt {
                 timeout_ms: Some(20000),
             })
         );

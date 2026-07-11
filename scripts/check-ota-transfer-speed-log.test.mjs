@@ -15,7 +15,7 @@ function transferReport(fields = {}) {
     status: "PASS",
     mode: "transfer",
     transfer: {
-      transport: "listener_ble_ota_v2",
+      transport: "denzic_ota_v1",
       bytesTransferred: 960368,
       chunksSent: 1921,
       transferElapsedMs: 57578,
@@ -65,7 +65,7 @@ function runCase(name, text, expectOk) {
 try {
   const legacy = runCase(
     "legacy-pass",
-    "[firmware-ota] BLE OTA result transport=listener_ble_ota_v2 bytes=950944 chunks=1902 transfer_ms=59000 confirm_ms=8992 confirm_attempts=1 confirm_matched=true total_ms=70310\n",
+    "[firmware-ota] BLE OTA result transport=denzic_ota_v1 bytes=950944 chunks=1902 transfer_ms=59000 confirm_ms=8992 confirm_attempts=1 confirm_matched=true total_ms=70310\n",
     true,
   );
   assert.equal(legacy.status, "PASS");
@@ -90,7 +90,7 @@ try {
         status: "FAIL",
         mode: "transfer",
         transfer: null,
-        errors: ["BLE Listener OTA v2 status read timed out after 15000 ms"],
+        errors: ["BLE Listener OTA v1 status read timed out after 15000 ms"],
       }),
     ].join("\n"),
     false,

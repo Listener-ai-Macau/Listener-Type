@@ -5,26 +5,19 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_NAME: &str = "listener_ble_ota";
-pub const FIRMWARE_CAPABILITY: &str = "firmware_ota_v1";
 pub const OTA_FILE_NAME: &str = "firmware_ota.bin";
-pub const OTA_SERVICE_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
-pub const OTA_CONTROL_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092b";
-pub const OTA_DATA_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092c";
-pub const OTA_MAX_CHUNK_BYTES: u64 = 500;
-pub const OTA_CHUNK_BYTES: u64 = OTA_MAX_CHUNK_BYTES;
-pub const LISTENER_OTA_V2_PROTOCOL_NAME: &str = "listener_ble_ota_v2";
-pub const LISTENER_OTA_V2_FIRMWARE_CAPABILITY: &str = "firmware_ota_v2";
-pub const LISTENER_OTA_V2_SERVICE_UUID: &str = OTA_SERVICE_UUID;
-pub const LISTENER_OTA_V2_CONTROL_UUID: &str = OTA_CONTROL_UUID;
-pub const LISTENER_OTA_V2_DATA_UUID: &str = OTA_DATA_UUID;
-pub const LISTENER_OTA_V2_STATUS_UUID: &str = OTA_CONTROL_UUID;
-pub const LISTENER_OTA_V2_CHUNK_BYTES: u64 = 500;
+pub const LISTENER_OTA_V1_PROTOCOL_NAME: &str = denzic_ota_core::PROTOCOL_NAME;
+pub const LISTENER_OTA_V1_FIRMWARE_CAPABILITY: &str = denzic_ota_core::PROTOCOL_NAME;
+pub const LISTENER_OTA_V1_SERVICE_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
+pub const LISTENER_OTA_V1_CONTROL_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3094b";
+pub const LISTENER_OTA_V1_DATA_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3094c";
+pub const LISTENER_OTA_V1_STATUS_UUID: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3094d";
+pub const LISTENER_OTA_V1_CHUNK_BYTES: u64 = 500;
 pub const OTA_MAX_VERSION_CHARS: usize = 31;
 pub const DEFAULT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 pub const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 pub const CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(1800);
-pub const LISTENER_OTA_V2_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
+pub const LISTENER_OTA_V1_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
 
 fn elapsed_ms_u64(started: Instant) -> u64 {
     started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
@@ -58,12 +51,8 @@ pub struct FirmwareOtaManifest {
 }
 
 impl FirmwareOtaManifest {
-    pub fn is_listener_ble_ota(&self) -> bool {
-        self.protocol_name == PROTOCOL_NAME
-    }
-
-    pub fn is_listener_ble_ota_v2(&self) -> bool {
-        self.protocol_name == LISTENER_OTA_V2_PROTOCOL_NAME
+    pub fn is_denzic_ota_v1(&self) -> bool {
+        self.protocol_name == LISTENER_OTA_V1_PROTOCOL_NAME
     }
 }
 
@@ -192,19 +181,8 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
         if let Some(stats) = attempt.stats {
             let expected_version = package.manifest.version.clone();
             let confirm_started = Instant::now();
-            let confirmed_version = if package.manifest.is_listener_ble_ota_v2() {
-                confirm_listener_ota_v2_reachable_version(&expected_version).await
-            } else {
-                confirm_firmware_ota_version_with(
-                    &expected_version,
-                    DEFAULT_CONFIRM_TIMEOUT,
-                    || async {
-                        let snapshot = firmware_ota_device_snapshot_for_manifest(&package.manifest);
-                        firmware_ota_snapshot_version(snapshot.firmware_version.as_deref())
-                    },
-                )
-                .await
-            };
+            let confirmed_version =
+                confirm_listener_ota_v1_reachable_version(&expected_version).await;
             let confirm_elapsed_ms = elapsed_ms_u64(confirm_started);
             let version_confirmed = confirmed_version
                 .as_deref()
@@ -263,13 +241,9 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
 }
 
 fn firmware_ota_device_snapshot_for_manifest(
-    manifest: &FirmwareOtaManifest,
+    _manifest: &FirmwareOtaManifest,
 ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-    if manifest.is_listener_ble_ota_v2() {
-        crate::embedded_ble::listener_ota_v2_device_snapshot()
-    } else {
-        crate::embedded_ble::firmware_ota_device_snapshot()
-    }
+    crate::embedded_ble::listener_ota_v1_device_snapshot()
 }
 
 struct HeadlessTransferAttempt {
@@ -284,72 +258,15 @@ fn run_transfer_preflight_and_write(
     package: &FirmwareOtaPackage,
     options: &FirmwareOtaHeadlessOptions,
 ) -> HeadlessTransferAttempt {
-    if package.manifest.is_listener_ble_ota_v2() {
-        return run_listener_ota_v2_transfer_preflight_and_write(package, options);
-    }
-
-    let preflight_started = Instant::now();
-    let prepared = match crate::embedded_ble::prepare_firmware_ota_transfer() {
-        Ok(prepared) => prepared,
-        Err(err) => {
-            let snapshot = disconnected_ota_snapshot(err);
-            let blockers =
-                preflight_blockers(&package.manifest, &snapshot, options.recording_active);
-            return HeadlessTransferAttempt {
-                preflight: headless_preflight_from_snapshot(options, snapshot, blockers.clone()),
-                stats: None,
-                preflight_elapsed_ms: elapsed_ms_u64(preflight_started),
-                transfer_elapsed_ms: 0,
-                errors: blockers,
-            };
-        }
-    };
-
-    let snapshot = prepared.snapshot().clone();
-    let blockers = preflight_blockers(&package.manifest, &snapshot, options.recording_active);
-    let preflight = headless_preflight_from_snapshot(options, snapshot, blockers.clone());
-    if !blockers.is_empty() {
-        return HeadlessTransferAttempt {
-            preflight,
-            stats: None,
-            preflight_elapsed_ms: elapsed_ms_u64(preflight_started),
-            transfer_elapsed_ms: 0,
-            errors: blockers,
-        };
-    }
-
-    let preflight_elapsed_ms = elapsed_ms_u64(preflight_started);
-    let transfer_started = Instant::now();
-    match prepared.transfer(
-        &package.manifest.version,
-        &package.firmware_sha256,
-        &package.firmware_bytes,
-        package.manifest.gatt_chunk_bytes as usize,
-        None,
-    ) {
-        Ok(stats) => HeadlessTransferAttempt {
-            preflight,
-            stats: Some(stats),
-            preflight_elapsed_ms,
-            transfer_elapsed_ms: elapsed_ms_u64(transfer_started),
-            errors: Vec::new(),
-        },
-        Err(err) => HeadlessTransferAttempt {
-            preflight,
-            stats: None,
-            preflight_elapsed_ms,
-            transfer_elapsed_ms: elapsed_ms_u64(transfer_started),
-            errors: vec![err],
-        },
-    }
+    run_listener_ota_v1_transfer_preflight_and_write(package, options)
 }
 
-fn run_listener_ota_v2_transfer_preflight_and_write(
+fn run_listener_ota_v1_transfer_preflight_and_write(
     package: &FirmwareOtaPackage,
     options: &FirmwareOtaHeadlessOptions,
 ) -> HeadlessTransferAttempt {
     let preflight_started = Instant::now();
-    let prepared = match crate::embedded_ble::prepare_listener_ota_v2_transfer() {
+    let prepared = match crate::embedded_ble::prepare_listener_ota_v1_transfer() {
         Ok(prepared) => prepared,
         Err(err) => {
             let snapshot = disconnected_ota_snapshot(err);
@@ -467,26 +384,14 @@ fn preflight_blockers(
             "Hardware revision mismatch: device={hardware}, package={}.",
             manifest.hardware_revision
         )),
-        None if snapshot.connected && manifest.is_listener_ble_ota() => {
-            blockers.push("Device hardware revision is unknown.".to_string())
-        }
         _ => {}
     }
-    if manifest.is_listener_ble_ota()
-        && !snapshot
-            .capabilities
-            .iter()
-            .any(|item| item == FIRMWARE_CAPABILITY)
+    if !snapshot
+        .capabilities
+        .iter()
+        .any(|item| item == LISTENER_OTA_V1_FIRMWARE_CAPABILITY)
     {
-        blockers.push("Connected firmware does not advertise OTA support.".to_string());
-    }
-    if manifest.is_listener_ble_ota_v2()
-        && !snapshot
-            .capabilities
-            .iter()
-            .any(|item| item == LISTENER_OTA_V2_FIRMWARE_CAPABILITY)
-    {
-        blockers.push("Connected firmware does not advertise Listener OTA v2 support.".to_string());
+        blockers.push("Connected firmware does not advertise Listener OTA v1 support.".to_string());
     }
     if let Some(current) = snapshot.firmware_version.as_deref() {
         if compare_versionish(&manifest.version, current) < 0 {
@@ -553,16 +458,12 @@ pub fn validate_package(
             context.desktop_version, manifest.min_desktop_version
         ));
     }
-    if (manifest.is_listener_ble_ota() || manifest.is_listener_ble_ota_v2())
-        && manifest.version.len() > OTA_MAX_VERSION_CHARS
-    {
+    if manifest.version.len() > OTA_MAX_VERSION_CHARS {
         errors.push(format!(
             "Firmware version is too long for BLE OTA control; expected <= {OTA_MAX_VERSION_CHARS} characters."
         ));
     }
-    if (manifest.is_listener_ble_ota() || manifest.is_listener_ble_ota_v2())
-        && manifest.hardware_revision != context.expected_hardware_revision
-    {
+    if manifest.hardware_revision != context.expected_hardware_revision {
         errors.push(format!(
             "Hardware revision mismatch: package={}, expected={}.",
             manifest.hardware_revision, context.expected_hardware_revision
@@ -670,7 +571,7 @@ where
     }
 }
 
-pub async fn confirm_listener_ota_v2_reachable_version(expected_version: &str) -> Option<String> {
+pub async fn confirm_listener_ota_v1_reachable_version(expected_version: &str) -> Option<String> {
     if normalize_firmware_ota_version(expected_version).is_empty() || expected_version == "unknown"
     {
         return None;
@@ -678,14 +579,14 @@ pub async fn confirm_listener_ota_v2_reachable_version(expected_version: &str) -
 
     tokio::time::sleep(CONFIRM_REBOOT_GRACE).await;
 
-    let deadline = Instant::now() + LISTENER_OTA_V2_REACHABLE_CONFIRM_TIMEOUT;
+    let deadline = Instant::now() + LISTENER_OTA_V1_REACHABLE_CONFIRM_TIMEOUT;
     loop {
-        let snapshot = crate::embedded_ble::listener_ota_v2_device_snapshot();
+        let snapshot = crate::embedded_ble::listener_ota_v1_device_snapshot();
         let reachable = snapshot.connected
             && snapshot
                 .capabilities
                 .iter()
-                .any(|item| item == LISTENER_OTA_V2_FIRMWARE_CAPABILITY);
+                .any(|item| item == LISTENER_OTA_V1_FIRMWARE_CAPABILITY);
         if reachable {
             return Some(expected_version.to_string());
         }
@@ -826,92 +727,20 @@ fn parse_manifest(value: &Value) -> Result<FirmwareOtaManifest, String> {
             .or_else(|| value.get("schemaVersion")),
         "schema_version",
     )?;
-    match schema_version {
-        1 => parse_manifest_v1(value, schema_version),
-        2 => parse_manifest_v2(value, schema_version),
-        other => Err(format!("Unsupported OTA manifest schema_version {other}.")),
+    if schema_version == 2 {
+        parse_manifest_v2(value, schema_version)
+    } else {
+        Err(format!(
+            "Unsupported OTA manifest schema_version {schema_version}."
+        ))
     }
-}
-
-fn parse_manifest_v1(value: &Value, schema_version: u64) -> Result<FirmwareOtaManifest, String> {
-    let protocol = require_object(value.get("protocol"), "protocol")?;
-    let file = require_object(value.get("file"), "file")?;
-    let rollback = require_object(value.get("rollback"), "rollback")?;
-    let recovery = require_object(value.get("recovery"), "recovery")?;
-    let gatt = protocol.get("gatt").and_then(Value::as_object);
-
-    let manifest = FirmwareOtaManifest {
-        schema_version,
-        package_type: require_string(
-            value
-                .get("package_type")
-                .or_else(|| value.get("packageType")),
-            "package_type",
-        )?,
-        project: require_string(value.get("project"), "project")?,
-        version: require_string(value.get("version"), "version")?,
-        protocol_name: require_string(protocol.get("name"), "protocol.name")?,
-        protocol_version: require_u64(protocol.get("version"), "protocol.version")?,
-        hardware_revision: require_string(
-            value
-                .get("hardware_revision")
-                .or_else(|| value.get("hardwareRevision")),
-            "hardware_revision",
-        )?,
-        min_desktop_version: require_string(
-            value
-                .get("min_desktop_version")
-                .or_else(|| value.get("minDesktopVersion")),
-            "min_desktop_version",
-        )?,
-        channel: require_channel(value.get("channel"))?,
-        file_name: require_string(file.get("name"), "file.name")?,
-        file_size_bytes: require_u64(
-            file.get("size_bytes").or_else(|| file.get("sizeBytes")),
-            "file.size_bytes",
-        )?,
-        file_sha256: require_string(file.get("sha256"), "file.sha256")?.to_ascii_lowercase(),
-        firmware_capability: require_string(
-            protocol
-                .get("firmware_capability")
-                .or_else(|| protocol.get("firmwareCapability")),
-            "protocol.firmware_capability",
-        )?,
-        gatt_service_uuid: optional_gatt_string(
-            gatt,
-            "service_uuid",
-            "serviceUuid",
-            OTA_SERVICE_UUID,
-        )?,
-        gatt_control_uuid: optional_gatt_string(
-            gatt,
-            "control_uuid",
-            "controlUuid",
-            OTA_CONTROL_UUID,
-        )?,
-        gatt_data_uuid: optional_gatt_string(gatt, "data_uuid", "dataUuid", OTA_DATA_UUID)?,
-        gatt_confirm_uuid: optional_gatt_optional_string(gatt, "confirm_uuid", "confirmUuid")?,
-        gatt_status_uuid: optional_gatt_optional_string(gatt, "status_uuid", "statusUuid")?,
-        gatt_chunk_bytes: optional_gatt_u64(gatt, "chunk_bytes", "chunkBytes", OTA_CHUNK_BYTES)?,
-        rollback_instructions: require_instructions(
-            rollback.get("instructions"),
-            "rollback.instructions",
-        )?,
-        recovery_instructions: require_instructions(
-            recovery.get("instructions"),
-            "recovery.instructions",
-        )?,
-    };
-    validate_normalized_manifest(manifest)
 }
 
 fn parse_manifest_v2(value: &Value, schema_version: u64) -> Result<FirmwareOtaManifest, String> {
     let firmware = require_object(value.get("firmware"), "firmware")?;
     let requirements = require_object(value.get("requirements"), "requirements")?;
-    let protocol = value.get("protocol").and_then(Value::as_object);
-    let gatt = protocol
-        .and_then(|protocol| protocol.get("gatt"))
-        .and_then(Value::as_object);
+    let protocol = require_object(value.get("protocol"), "protocol")?;
+    let gatt = require_object(protocol.get("gatt"), "protocol.gatt")?;
     let ble_identity = require_object(
         value
             .get("ble_identity")
@@ -980,19 +809,8 @@ fn parse_manifest_v2(value: &Value, schema_version: u64) -> Result<FirmwareOtaMa
         package_type: "listener-firmware-ota".to_string(),
         project: require_string(firmware.get("project"), "firmware.project")?,
         version: require_string(firmware.get("version"), "firmware.version")?,
-        protocol_name: match protocol {
-            Some(protocol) => require_string(protocol.get("name"), "protocol.name")?,
-            None => PROTOCOL_NAME.to_string(),
-        },
-        protocol_version: match protocol {
-            Some(protocol) => require_u64(protocol.get("version"), "protocol.version")?,
-            None => require_u64(
-                requirements
-                    .get("protocol_version")
-                    .or_else(|| requirements.get("protocolVersion")),
-                "requirements.protocol_version",
-            )?,
-        },
+        protocol_name: require_string(protocol.get("name"), "protocol.name")?,
+        protocol_version: require_u64(protocol.get("version"), "protocol.version")?,
         hardware_revision: require_string(
             requirements
                 .get("hardware_revision")
@@ -1015,39 +833,42 @@ fn parse_manifest_v2(value: &Value, schema_version: u64) -> Result<FirmwareOtaMa
         )?,
         file_sha256: require_string(firmware.get("sha256"), "firmware.sha256")?
             .to_ascii_lowercase(),
-        firmware_capability: match protocol {
-            Some(protocol) => require_string(
-                protocol
-                    .get("firmware_capability")
-                    .or_else(|| protocol.get("firmwareCapability")),
-                "protocol.firmware_capability",
-            )?,
-            None => FIRMWARE_CAPABILITY.to_string(),
-        },
+        firmware_capability: require_string(
+            protocol
+                .get("firmware_capability")
+                .or_else(|| protocol.get("firmwareCapability")),
+            "protocol.firmware_capability",
+        )?,
         gatt_service_uuid: optional_gatt_string(
-            gatt,
+            Some(gatt),
             "service_uuid",
             "serviceUuid",
-            OTA_SERVICE_UUID,
+            LISTENER_OTA_V1_SERVICE_UUID,
         )?,
         gatt_control_uuid: optional_gatt_string(
-            gatt,
+            Some(gatt),
             "control_uuid",
             "controlUuid",
-            OTA_CONTROL_UUID,
+            LISTENER_OTA_V1_CONTROL_UUID,
         )?,
-        gatt_data_uuid: optional_gatt_string(gatt, "data_uuid", "dataUuid", OTA_DATA_UUID)?,
-        gatt_confirm_uuid: optional_gatt_optional_string(gatt, "confirm_uuid", "confirmUuid")?,
-        gatt_status_uuid: optional_gatt_optional_string(gatt, "status_uuid", "statusUuid")?,
-        gatt_chunk_bytes: match protocol {
-            Some(_) => optional_gatt_u64(gatt, "chunk_bytes", "chunkBytes", OTA_CHUNK_BYTES)?,
-            None => optional_u64(
-                requirements
-                    .get("gatt_chunk_bytes")
-                    .or_else(|| requirements.get("gattChunkBytes")),
-                OTA_CHUNK_BYTES,
-            )?,
-        },
+        gatt_data_uuid: optional_gatt_string(
+            Some(gatt),
+            "data_uuid",
+            "dataUuid",
+            LISTENER_OTA_V1_DATA_UUID,
+        )?,
+        gatt_confirm_uuid: optional_gatt_optional_string(
+            Some(gatt),
+            "confirm_uuid",
+            "confirmUuid",
+        )?,
+        gatt_status_uuid: optional_gatt_optional_string(Some(gatt), "status_uuid", "statusUuid")?,
+        gatt_chunk_bytes: optional_gatt_u64(
+            Some(gatt),
+            "chunk_bytes",
+            "chunkBytes",
+            LISTENER_OTA_V1_CHUNK_BYTES,
+        )?,
         rollback_instructions: require_instructions(
             rollback.get("instructions"),
             "rollback.instructions",
@@ -1060,7 +881,7 @@ fn parse_manifest_v2(value: &Value, schema_version: u64) -> Result<FirmwareOtaMa
 pub fn validate_normalized_manifest(
     manifest: FirmwareOtaManifest,
 ) -> Result<FirmwareOtaManifest, String> {
-    if !(manifest.is_listener_ble_ota() || manifest.is_listener_ble_ota_v2()) {
+    if !manifest.is_denzic_ota_v1() {
         return Err(format!(
             "Unsupported OTA protocol {}.",
             manifest.protocol_name
@@ -1072,53 +893,38 @@ pub fn validate_normalized_manifest(
             "ota_manifest.json package_type must be {expected_package_type}."
         ));
     }
-    if manifest.protocol_version < 1 {
-        return Err("OTA protocol.version must be >= 1.".to_string());
+    if manifest.protocol_version != 1 {
+        return Err(format!(
+            "Listener OTA protocol.version must be 1, got {}.",
+            manifest.protocol_version
+        ));
     }
-    if manifest.is_listener_ble_ota() {
-        if manifest.firmware_capability != FIRMWARE_CAPABILITY {
-            return Err("OTA package requires unsupported firmware capability.".to_string());
-        }
-        if !uuid_eq(&manifest.gatt_service_uuid, OTA_SERVICE_UUID)
-            || !uuid_eq(&manifest.gatt_control_uuid, OTA_CONTROL_UUID)
-            || !uuid_eq(&manifest.gatt_data_uuid, OTA_DATA_UUID)
-        {
-            return Err("OTA package uses an unsupported BLE OTA GATT boundary.".to_string());
-        }
-        if manifest.gatt_chunk_bytes != OTA_MAX_CHUNK_BYTES {
-            return Err(format!(
-                "OTA package uses unsupported BLE OTA chunk size {}; supported value is {OTA_MAX_CHUNK_BYTES}.",
-                manifest.gatt_chunk_bytes
-            ));
-        }
-    } else if manifest.is_listener_ble_ota_v2() {
-        if manifest.project != "voice-keyboard-firmware" {
-            return Err("Listener OTA v2 project must be voice-keyboard-firmware.".to_string());
-        }
-        if manifest.firmware_capability != LISTENER_OTA_V2_FIRMWARE_CAPABILITY {
-            return Err(
-                "Listener OTA v2 package requires unsupported firmware capability.".to_string(),
-            );
-        }
-        if !uuid_eq(&manifest.gatt_service_uuid, LISTENER_OTA_V2_SERVICE_UUID)
-            || !uuid_eq(&manifest.gatt_control_uuid, LISTENER_OTA_V2_CONTROL_UUID)
-            || !uuid_eq(&manifest.gatt_data_uuid, LISTENER_OTA_V2_DATA_UUID)
-            || manifest
-                .gatt_status_uuid
-                .as_deref()
-                .map_or(true, |value| !uuid_eq(value, LISTENER_OTA_V2_STATUS_UUID))
-        {
-            return Err("Listener OTA v2 package uses an unsupported GATT boundary.".to_string());
-        }
-        if manifest.gatt_confirm_uuid.is_some() {
-            return Err("Listener OTA v2 must use status_uuid, not confirm_uuid.".to_string());
-        }
-        if manifest.gatt_chunk_bytes != LISTENER_OTA_V2_CHUNK_BYTES {
-            return Err(format!(
-                "Listener OTA v2 chunk size must be {LISTENER_OTA_V2_CHUNK_BYTES} bytes, got {}.",
-                manifest.gatt_chunk_bytes
-            ));
-        }
+    if manifest.project != "voice-keyboard-firmware" {
+        return Err("Listener OTA v1 project must be voice-keyboard-firmware.".to_string());
+    }
+    if manifest.firmware_capability != LISTENER_OTA_V1_FIRMWARE_CAPABILITY {
+        return Err(
+            "Listener OTA v1 package requires unsupported firmware capability.".to_string(),
+        );
+    }
+    if !uuid_eq(&manifest.gatt_service_uuid, LISTENER_OTA_V1_SERVICE_UUID)
+        || !uuid_eq(&manifest.gatt_control_uuid, LISTENER_OTA_V1_CONTROL_UUID)
+        || !uuid_eq(&manifest.gatt_data_uuid, LISTENER_OTA_V1_DATA_UUID)
+        || manifest
+            .gatt_status_uuid
+            .as_deref()
+            .map_or(true, |value| !uuid_eq(value, LISTENER_OTA_V1_STATUS_UUID))
+    {
+        return Err("Listener OTA v1 package uses an unsupported GATT boundary.".to_string());
+    }
+    if manifest.gatt_confirm_uuid.is_some() {
+        return Err("Listener OTA v1 must use status_uuid, not confirm_uuid.".to_string());
+    }
+    if manifest.gatt_chunk_bytes != LISTENER_OTA_V1_CHUNK_BYTES {
+        return Err(format!(
+            "Listener OTA v1 chunk size must be {LISTENER_OTA_V1_CHUNK_BYTES} bytes, got {}.",
+            manifest.gatt_chunk_bytes
+        ));
     }
     if manifest.file_size_bytes == 0 {
         return Err("file.size_bytes must be greater than zero.".to_string());
@@ -1338,6 +1144,18 @@ mod tests {
     "protocol_version": 1,
     "min_desktop_version": "1.0.0"
   }},
+  "protocol": {{
+    "name": "{LISTENER_OTA_V1_PROTOCOL_NAME}",
+    "version": 1,
+    "firmware_capability": "{LISTENER_OTA_V1_FIRMWARE_CAPABILITY}",
+    "gatt": {{
+      "service_uuid": "{LISTENER_OTA_V1_SERVICE_UUID}",
+      "control_uuid": "{LISTENER_OTA_V1_CONTROL_UUID}",
+      "data_uuid": "{LISTENER_OTA_V1_DATA_UUID}",
+      "status_uuid": "{LISTENER_OTA_V1_STATUS_UUID}",
+      "chunk_bytes": 500
+    }}
+  }},
   "ble_identity": {{
     "name": "listener",
     "appearance": "0x03C1",
@@ -1362,7 +1180,7 @@ mod tests {
         )
     }
 
-    fn listener_ota_v2_manifest(hardware_revision: &str, version: &str) -> String {
+    fn listener_ota_v1_manifest(hardware_revision: &str, version: &str) -> String {
         format!(
             r#"{{
   "schema_version": 2,
@@ -1380,19 +1198,19 @@ mod tests {
   }},
   "requirements": {{
     "hardware_revision": "{hardware_revision}",
-    "protocol_version": 2,
+    "protocol_version": 1,
     "min_desktop_version": "1.0.0",
     "gatt_chunk_bytes": 500
   }},
   "protocol": {{
-    "name": "{LISTENER_OTA_V2_PROTOCOL_NAME}",
-    "version": 2,
-    "firmware_capability": "{LISTENER_OTA_V2_FIRMWARE_CAPABILITY}",
+    "name": "{LISTENER_OTA_V1_PROTOCOL_NAME}",
+    "version": 1,
+    "firmware_capability": "{LISTENER_OTA_V1_FIRMWARE_CAPABILITY}",
     "gatt": {{
-      "service_uuid": "{LISTENER_OTA_V2_SERVICE_UUID}",
-      "control_uuid": "{LISTENER_OTA_V2_CONTROL_UUID}",
-      "data_uuid": "{LISTENER_OTA_V2_DATA_UUID}",
-      "status_uuid": "{LISTENER_OTA_V2_STATUS_UUID}",
+      "service_uuid": "{LISTENER_OTA_V1_SERVICE_UUID}",
+      "control_uuid": "{LISTENER_OTA_V1_CONTROL_UUID}",
+      "data_uuid": "{LISTENER_OTA_V1_DATA_UUID}",
+      "status_uuid": "{LISTENER_OTA_V1_STATUS_UUID}",
       "chunk_bytes": 500
     }}
   }},
@@ -1427,7 +1245,7 @@ mod tests {
         assert_eq!(result.firmware_sha256.as_deref(), Some(FIRMWARE_SHA256));
         let manifest = result.manifest.unwrap();
         assert_eq!(manifest.version, "1.2.0");
-        assert_eq!(manifest.gatt_chunk_bytes, OTA_MAX_CHUNK_BYTES);
+        assert_eq!(manifest.gatt_chunk_bytes, LISTENER_OTA_V1_CHUNK_BYTES);
     }
 
     #[test]
@@ -1443,16 +1261,15 @@ mod tests {
         assert!(result.ok, "{:?}", result.errors);
         assert_eq!(
             result.manifest.unwrap().gatt_chunk_bytes,
-            OTA_MAX_CHUNK_BYTES
+            LISTENER_OTA_V1_CHUNK_BYTES
         );
     }
 
     #[test]
     fn rejects_gatt_chunk_above_safe_limit() {
+        let manifest = manifest_v2("").replace("\"chunk_bytes\": 500", "\"chunk_bytes\": 499");
         let result = validate_package(
-            &manifest_v2(
-                r#","requirements":{"hardware_revision":"keyboard-v1","protocol_version":1,"min_desktop_version":"1.0.0","gatt_chunk_bytes":499}"#,
-            ),
+            &manifest,
             FIRMWARE_BYTES,
             &context(),
         );
@@ -1534,38 +1351,38 @@ mod tests {
     }
 
     #[test]
-    fn listener_ota_v2_preflight_allows_reachable_device_without_identity_metadata() {
+    fn listener_ota_v1_preflight_allows_reachable_device_without_identity_metadata() {
         let manifest = validate_package(
-            &listener_ota_v2_manifest("keyboard-v1", "1.2.0"),
+            &listener_ota_v1_manifest("keyboard-v1", "1.2.0"),
             FIRMWARE_BYTES,
             &context(),
         )
         .manifest
-        .expect("valid Listener OTA v2 manifest");
-        let snapshot = ota_snapshot(true, None, None, vec![LISTENER_OTA_V2_FIRMWARE_CAPABILITY]);
+        .expect("valid Listener OTA v1 manifest");
+        let snapshot = ota_snapshot(true, None, None, vec![LISTENER_OTA_V1_FIRMWARE_CAPABILITY]);
 
         let blockers = preflight_blockers(&manifest, &snapshot, false);
 
         assert!(
             blockers.is_empty(),
-            "Listener OTA v2 service reachability and capability should be enough when Windows does not expose identity metadata: {blockers:?}"
+            "Listener OTA v1 service reachability and capability should be enough when Windows does not expose identity metadata: {blockers:?}"
         );
     }
 
     #[test]
-    fn listener_ota_v2_preflight_still_rejects_wrong_identity_when_present() {
+    fn listener_ota_v1_preflight_still_rejects_wrong_identity_when_present() {
         let manifest = validate_package(
-            &listener_ota_v2_manifest("keyboard-v1", "1.2.0"),
+            &listener_ota_v1_manifest("keyboard-v1", "1.2.0"),
             FIRMWARE_BYTES,
             &context(),
         )
         .manifest
-        .expect("valid Listener OTA v2 manifest");
+        .expect("valid Listener OTA v1 manifest");
         let snapshot = ota_snapshot(
             true,
             Some("keyboard-v2"),
             None,
-            vec![LISTENER_OTA_V2_FIRMWARE_CAPABILITY],
+            vec![LISTENER_OTA_V1_FIRMWARE_CAPABILITY],
         );
 
         let blockers = preflight_blockers(&manifest, &snapshot, false);

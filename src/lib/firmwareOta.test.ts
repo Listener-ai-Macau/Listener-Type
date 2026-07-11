@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   FIRMWARE_OTA_REQUIRED_PUBLIC_STATES,
-  FIRMWARE_OTA_TRANSPORT_BOUNDARY,
-  LISTENER_OTA_V2_TRANSPORT_BOUNDARY,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY,
   compareVersionish,
   evaluateFirmwareOtaPreflight,
   firmwareOtaConfirmedVersionMatches,
@@ -20,43 +19,6 @@ import {
 
 const firmwareBytes = new Uint8Array([0xe9, 1, 2, 3, 4, 5]);
 const firmwareSha256 = '6d3841935f58db1c3efa67022f2d770184be6fdef93c087bca10c30e70157e84';
-
-function manifest(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
-    schema_version: 1,
-    package_type: 'listener-firmware-ota',
-    project: 'voice-keyboard-firmware',
-    version: '1.2.0',
-    protocol: {
-      name: 'listener_ble_ota',
-      version: 1,
-      firmware_capability: 'firmware_ota_v1',
-      data_plane: 'dedicated OTA GATT service; never BLE audio or HID',
-      gatt: {
-        service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
-        control_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
-        data_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
-        chunk_bytes: 500,
-      },
-    },
-    hardware_revision: 'esp32s3-devkit',
-    min_desktop_version: '1.0.0',
-    channel: 'development',
-    file: {
-      name: 'firmware_ota.bin',
-      size_bytes: firmwareBytes.byteLength,
-      sha256: firmwareSha256,
-    },
-    rollback: {
-      strategy: 'esp_idf_bootloader_rollback',
-      instructions: ['Rollback returns to previous slot if pending verify fails.'],
-    },
-    recovery: {
-      instructions: ['Reconnect Bluetooth and retry, or use factory_flash over USB.'],
-    },
-    ...overrides,
-  });
-}
 
 function manifestV2(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -77,6 +39,19 @@ function manifestV2(overrides: Record<string, unknown> = {}): string {
       hardware_revision: 'keyboard-v2-n16r8',
       protocol_version: 1,
       min_desktop_version: '1.0.0',
+    },
+    protocol: {
+      name: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName,
+      version: 1,
+      firmware_capability: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability,
+      data_plane: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.dataPlane,
+      gatt: {
+        service_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid,
+        control_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid,
+        data_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid,
+        status_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid,
+        chunk_bytes: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
+      },
     },
     ble_identity: {
       name: 'Listener Voice Keyboard',
@@ -107,44 +82,34 @@ function manifestV2(overrides: Record<string, unknown> = {}): string {
   });
 }
 
-function listenerOtaV2Manifest(overrides: Record<string, unknown> = {}): string {
+function listenerOtaV1Manifest(overrides: Record<string, unknown> = {}): string {
   return manifestV2({
     requirements: {
       hardware_revision: 'keyboard-v2-n16r8',
-      protocol_version: 2,
+      protocol_version: 1,
       min_desktop_version: '1.0.0',
     },
     protocol: {
-      name: LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName,
-      version: 2,
-      firmware_capability: LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability,
-      data_plane: LISTENER_OTA_V2_TRANSPORT_BOUNDARY.dataPlane,
+      name: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName,
+      version: 1,
+      firmware_capability: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability,
+      data_plane: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.dataPlane,
       gatt: {
-        service_uuid: LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-        control_uuid: LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.controlUuid,
-        data_uuid: LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid,
-        status_uuid: LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid,
-        chunk_bytes: LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
+        service_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid,
+        control_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid,
+        data_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid,
+        status_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid,
+        chunk_bytes: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
       },
     },
     ...overrides,
   });
 }
 
-const context = {
-  desktopVersion: '1.0.0',
-  expectedHardwareRevision: 'esp32s3-devkit',
-};
-
 const contextV2 = {
   desktopVersion: '1.0.0',
   expectedHardwareRevision: 'keyboard-v2-n16r8',
 };
-
-const valid = await validateFirmwareOtaPackage(manifest(), firmwareBytes, context);
-assert.equal(valid.ok, true);
-assert.equal(valid.firmwareSha256, firmwareSha256);
-assert.equal(valid.manifest?.version, '1.2.0');
 
 const validV2 = await validateFirmwareOtaPackage(manifestV2(), firmwareBytes, contextV2);
 assert.equal(validV2.ok, true);
@@ -152,47 +117,47 @@ assert.equal(validV2.firmwareSha256, firmwareSha256);
 assert.equal(validV2.manifest?.schemaVersion, 2);
 assert.equal(validV2.manifest?.hardwareRevision, 'keyboard-v2-n16r8');
 assert.equal(validV2.manifest?.fileName, 'firmware_ota.bin');
-assert.equal(validV2.manifest?.gattChunkBytes, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes);
+assert.equal(validV2.manifest?.gattChunkBytes, LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes);
 assert.equal(validV2.manifest?.recoveryInstructions.length, 2);
 
-const validListenerOtaV2 = await validateFirmwareOtaPackage(
-  listenerOtaV2Manifest(),
+const validListenerOtaV1 = await validateFirmwareOtaPackage(
+  listenerOtaV1Manifest(),
   firmwareBytes,
   contextV2,
 );
-assert.equal(validListenerOtaV2.ok, true);
-assert.equal(validListenerOtaV2.manifest?.protocolName, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName);
-assert.equal(validListenerOtaV2.manifest?.protocolVersion, 2);
-assert.equal(validListenerOtaV2.manifest?.firmwareCapability, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability);
-assert.equal(validListenerOtaV2.manifest?.gattStatusUuid, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid);
-assert.equal(validListenerOtaV2.manifest?.gattConfirmUuid, null);
+assert.equal(validListenerOtaV1.ok, true);
+assert.equal(validListenerOtaV1.manifest?.protocolName, LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName);
+assert.equal(validListenerOtaV1.manifest?.protocolVersion, 1);
+assert.equal(validListenerOtaV1.manifest?.firmwareCapability, LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability);
+assert.equal(validListenerOtaV1.manifest?.gattStatusUuid, LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid);
+assert.equal(validListenerOtaV1.manifest?.gattConfirmUuid, null);
 
-const sameVersionListenerOtaV2 = await validateFirmwareOtaPackage(
-  listenerOtaV2Manifest(),
+const sameVersionListenerOtaV1 = await validateFirmwareOtaPackage(
+  listenerOtaV1Manifest(),
   firmwareBytes,
   { ...contextV2, currentFirmwareVersion: '1.2.0' },
 );
-assert.equal(sameVersionListenerOtaV2.ok, true);
-assert.deepEqual(sameVersionListenerOtaV2.warnings, []);
+assert.equal(sameVersionListenerOtaV1.ok, true);
+assert.deepEqual(sameVersionListenerOtaV1.warnings, []);
 
-const olderListenerOtaV2 = await validateFirmwareOtaPackage(
-  listenerOtaV2Manifest(),
+const olderListenerOtaV1 = await validateFirmwareOtaPackage(
+  listenerOtaV1Manifest(),
   firmwareBytes,
   { ...contextV2, currentFirmwareVersion: '1.2.1' },
 );
-assert.equal(olderListenerOtaV2.ok, true);
-assert.ok(olderListenerOtaV2.warnings.some(warning => warning.includes('older than the connected firmware version')));
+assert.equal(olderListenerOtaV1.ok, true);
+assert.ok(olderListenerOtaV1.warnings.some(warning => warning.includes('older than the connected firmware version')));
 
-const badListenerOtaV2StatusUuid = JSON.parse(listenerOtaV2Manifest()) as Record<string, unknown>;
-((badListenerOtaV2StatusUuid.protocol as Record<string, unknown>).gatt as Record<string, unknown>).status_uuid =
+const badListenerOtaV1StatusUuid = JSON.parse(listenerOtaV1Manifest()) as Record<string, unknown>;
+((badListenerOtaV1StatusUuid.protocol as Record<string, unknown>).gatt as Record<string, unknown>).status_uuid =
   '710af845-6d9f-6583-0c4d-9e5b3bc309ff';
-const badListenerOtaV2Status = await validateFirmwareOtaPackage(
-  JSON.stringify(badListenerOtaV2StatusUuid),
+const badListenerOtaV1Status = await validateFirmwareOtaPackage(
+  JSON.stringify(badListenerOtaV1StatusUuid),
   firmwareBytes,
   contextV2,
 );
-assert.equal(badListenerOtaV2Status.ok, false);
-assert.ok(badListenerOtaV2Status.errors.some(error => error.includes('Listener OTA v2 package uses an unsupported GATT boundary')));
+assert.equal(badListenerOtaV1Status.ok, false);
+assert.ok(badListenerOtaV1Status.errors.some(error => error.includes('Listener OTA v1 package uses an unsupported GATT boundary')));
 
 const validV2FastChunk = await validateFirmwareOtaPackage(
   manifestV2({
@@ -207,7 +172,7 @@ const validV2FastChunk = await validateFirmwareOtaPackage(
   contextV2,
 );
 assert.equal(validV2FastChunk.ok, true);
-assert.equal(validV2FastChunk.manifest?.gattChunkBytes, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes);
+assert.equal(validV2FastChunk.manifest?.gattChunkBytes, LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.maxChunkBytes);
 
 const missingV2BleIdentity = JSON.parse(manifestV2()) as Record<string, unknown>;
 delete missingV2BleIdentity.ble_identity;
@@ -255,75 +220,87 @@ assert.equal(tooLongV2Version.ok, false);
 assert.ok(tooLongV2Version.errors.some(error => error.includes('too long')));
 
 const badHash = await validateFirmwareOtaPackage(
-  manifest({ file: { name: 'firmware_ota.bin', size_bytes: firmwareBytes.byteLength, sha256: '0'.repeat(64) } }),
+  manifestV2({
+    firmware: {
+      project: 'voice-keyboard-firmware', version: '1.2.0', git_commit: 'a'.repeat(40), git_dirty: false,
+      target: 'esp32s3', file: 'firmware_ota.bin', size_bytes: firmwareBytes.byteLength, sha256: '0'.repeat(64),
+    },
+  }),
   firmwareBytes,
-  context,
+  contextV2,
 );
 assert.equal(badHash.ok, false);
 assert.ok(badHash.errors.some(error => error.includes('SHA256')));
 
 const badSize = await validateFirmwareOtaPackage(
-  manifest({ file: { name: 'firmware_ota.bin', size_bytes: firmwareBytes.byteLength + 1, sha256: firmwareSha256 } }),
+  manifestV2({
+    firmware: {
+      project: 'voice-keyboard-firmware', version: '1.2.0', git_commit: 'a'.repeat(40), git_dirty: false,
+      target: 'esp32s3', file: 'firmware_ota.bin', size_bytes: firmwareBytes.byteLength + 1, sha256: firmwareSha256,
+    },
+  }),
   firmwareBytes,
-  context,
+  contextV2,
 );
 assert.equal(badSize.ok, false);
 assert.ok(badSize.errors.some(error => error.includes('size mismatch')));
 
 const badHardware = await validateFirmwareOtaPackage(
-  manifest({ hardware_revision: 'keyboard-v2' }),
+  manifestV2({ requirements: { hardware_revision: 'keyboard-v2', protocol_version: 1, min_desktop_version: '1.0.0' } }),
   firmwareBytes,
-  context,
+  contextV2,
 );
 assert.equal(badHardware.ok, false);
 assert.ok(badHardware.errors.some(error => error.includes('Hardware revision mismatch')));
 
 const oldDesktop = await validateFirmwareOtaPackage(
-  manifest({ min_desktop_version: '9.0.0' }),
+  manifestV2({ requirements: { hardware_revision: 'keyboard-v2-n16r8', protocol_version: 1, min_desktop_version: '9.0.0' } }),
   firmwareBytes,
-  context,
+  contextV2,
 );
 assert.equal(oldDesktop.ok, false);
 assert.ok(oldDesktop.errors.some(error => error.includes('older than required')));
 
 const badGatt = await validateFirmwareOtaPackage(
-  manifest({
+  manifestV2({
     protocol: {
-      name: 'listener_ble_ota',
+      name: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName,
       version: 1,
-      firmware_capability: 'firmware_ota_v1',
-      data_plane: 'dedicated OTA GATT service; never BLE audio or HID',
+      firmware_capability: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability,
+      data_plane: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.dataPlane,
       gatt: {
         service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc309ff',
-        control_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
-        data_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
+        control_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid,
+        data_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid,
+        status_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid,
         chunk_bytes: 500,
       },
     },
   }),
   firmwareBytes,
-  context,
+  contextV2,
 );
 assert.equal(badGatt.ok, false);
 assert.ok(badGatt.errors.some(error => error.includes('GATT boundary')));
 
 const badGattChunk = await validateFirmwareOtaPackage(
-  manifest({
+  manifestV2({
     protocol: {
-      name: 'listener_ble_ota',
+      name: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName,
       version: 1,
-      firmware_capability: 'firmware_ota_v1',
-      data_plane: 'dedicated OTA GATT service; never BLE audio or HID',
+      firmware_capability: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability,
+      data_plane: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.dataPlane,
       gatt: {
-        service_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
-        control_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
-        data_uuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
+        service_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid,
+        control_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid,
+        data_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid,
+        status_uuid: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid,
         chunk_bytes: 501,
       },
     },
   }),
   firmwareBytes,
-  context,
+  contextV2,
 );
 assert.equal(badGattChunk.ok, false);
 assert.ok(badGattChunk.errors.some(error => error.includes('chunk size')));
@@ -344,27 +321,10 @@ assert.equal(firmwareOtaVersionNotConfirmedAction('v1.1.0', 'v1.2.0').type, 'rol
 assert.equal(firmwareOtaVersionNotConfirmedAction('v1.3.0', 'v1.2.0').type, 'failed');
 assert.equal(firmwareOtaVersionNotConfirmedAction(null, 'v1.2.0').type, 'failed');
 
-const parsedManifest = valid.manifest as FirmwareOtaManifest;
 const parsedV2Manifest = validV2.manifest as FirmwareOtaManifest;
-const parsedListenerOtaV2Manifest = validListenerOtaV2.manifest as FirmwareOtaManifest;
+const parsedListenerOtaV1Manifest = validListenerOtaV1.manifest as FirmwareOtaManifest;
 const readyPreflight = evaluateFirmwareOtaPreflight({
-  manifest: parsedManifest,
-  desktopVersion: '1.0.0',
-  recordingActive: false,
-  transferActive: false,
-  device: {
-    connected: true,
-    hardwareRevision: 'esp32s3-devkit',
-    firmwareVersion: '1.1.0',
-    capabilities: ['firmware_ota_v1'],
-    batteryPercent: 65,
-    usbPowered: false,
-  },
-});
-assert.equal(readyPreflight.ok, true);
-
-const listenerOtaV2PreflightReady = evaluateFirmwareOtaPreflight({
-  manifest: parsedListenerOtaV2Manifest,
+  manifest: parsedV2Manifest,
   desktopVersion: '1.0.0',
   recordingActive: false,
   transferActive: false,
@@ -372,15 +332,31 @@ const listenerOtaV2PreflightReady = evaluateFirmwareOtaPreflight({
     connected: true,
     hardwareRevision: 'keyboard-v2-n16r8',
     firmwareVersion: '1.1.0',
-    capabilities: ['firmware_ota_v2'],
+    capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
     batteryPercent: 65,
     usbPowered: false,
   },
 });
-assert.equal(listenerOtaV2PreflightReady.ok, true);
+assert.equal(readyPreflight.ok, true);
 
-const listenerOtaV2SameVersionPreflightReady = evaluateFirmwareOtaPreflight({
-  manifest: parsedListenerOtaV2Manifest,
+const listenerOtaV1PreflightReady = evaluateFirmwareOtaPreflight({
+  manifest: parsedListenerOtaV1Manifest,
+  desktopVersion: '1.0.0',
+  recordingActive: false,
+  transferActive: false,
+  device: {
+    connected: true,
+    hardwareRevision: 'keyboard-v2-n16r8',
+    firmwareVersion: '1.1.0',
+    capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
+    batteryPercent: 65,
+    usbPowered: false,
+  },
+});
+assert.equal(listenerOtaV1PreflightReady.ok, true);
+
+const listenerOtaV1SameVersionPreflightReady = evaluateFirmwareOtaPreflight({
+  manifest: parsedListenerOtaV1Manifest,
   desktopVersion: '1.0.0',
   recordingActive: false,
   transferActive: false,
@@ -388,15 +364,15 @@ const listenerOtaV2SameVersionPreflightReady = evaluateFirmwareOtaPreflight({
     connected: true,
     hardwareRevision: 'keyboard-v2-n16r8',
     firmwareVersion: '1.2.0',
-    capabilities: ['firmware_ota_v2'],
+    capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
     batteryPercent: 65,
     usbPowered: false,
   },
 });
-assert.equal(listenerOtaV2SameVersionPreflightReady.ok, true);
+assert.equal(listenerOtaV1SameVersionPreflightReady.ok, true);
 
-const listenerOtaV2DowngradeBlocked = evaluateFirmwareOtaPreflight({
-  manifest: parsedListenerOtaV2Manifest,
+const listenerOtaV1DowngradeBlocked = evaluateFirmwareOtaPreflight({
+  manifest: parsedListenerOtaV1Manifest,
   desktopVersion: '1.0.0',
   recordingActive: false,
   transferActive: false,
@@ -404,16 +380,16 @@ const listenerOtaV2DowngradeBlocked = evaluateFirmwareOtaPreflight({
     connected: true,
     hardwareRevision: 'keyboard-v2-n16r8',
     firmwareVersion: '1.2.1',
-    capabilities: ['firmware_ota_v2'],
+    capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
     batteryPercent: 65,
     usbPowered: false,
   },
 });
-assert.equal(listenerOtaV2DowngradeBlocked.ok, false);
-assert.deepEqual(listenerOtaV2DowngradeBlocked.blockers.map(item => item.code), ['downgrade']);
+assert.equal(listenerOtaV1DowngradeBlocked.ok, false);
+assert.deepEqual(listenerOtaV1DowngradeBlocked.blockers.map(item => item.code), ['downgrade']);
 
-const listenerOtaV2PreflightRequiresCapability = evaluateFirmwareOtaPreflight({
-  manifest: parsedListenerOtaV2Manifest,
+const listenerOtaV1PreflightRequiresCapability = evaluateFirmwareOtaPreflight({
+  manifest: parsedListenerOtaV1Manifest,
   desktopVersion: '1.0.0',
   recordingActive: false,
   transferActive: false,
@@ -421,14 +397,14 @@ const listenerOtaV2PreflightRequiresCapability = evaluateFirmwareOtaPreflight({
     connected: true,
     hardwareRevision: 'keyboard-v2-n16r8',
     firmwareVersion: '1.1.0',
-    capabilities: ['firmware_ota_v1'],
+    capabilities: ['unrelated_capability'],
     batteryPercent: 65,
     usbPowered: false,
   },
 });
-assert.equal(listenerOtaV2PreflightRequiresCapability.ok, false);
+assert.equal(listenerOtaV1PreflightRequiresCapability.ok, false);
 assert.deepEqual(
-  listenerOtaV2PreflightRequiresCapability.blockers.map(item => item.code),
+  listenerOtaV1PreflightRequiresCapability.blockers.map(item => item.code),
   ['missingCapability'],
 );
 
@@ -441,7 +417,7 @@ const unknownDeviceStatus = evaluateFirmwareOtaPreflight({
     connected: true,
     hardwareRevision: null,
     firmwareVersion: '1.1.0',
-    capabilities: ['firmware_ota_v1'],
+    capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
     batteryPercent: 80,
     usbPowered: true,
   },
@@ -457,7 +433,7 @@ const unknownPowerStatus = evaluateFirmwareOtaPreflight({
     connected: true,
     hardwareRevision: null,
     firmwareVersion: null,
-    capabilities: ['firmware_ota_v1'],
+    capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
     batteryPercent: null,
     usbPowered: null,
   },
@@ -473,7 +449,7 @@ const unavailableBatteryStatus = evaluateFirmwareOtaPreflight({
     connected: true,
     hardwareRevision: 'keyboard-v2-n16r8',
     firmwareVersion: '1.2.0',
-    capabilities: ['firmware_ota_v1'],
+    capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
     batteryPercent: null,
     usbPowered: false,
   },
@@ -481,7 +457,7 @@ const unavailableBatteryStatus = evaluateFirmwareOtaPreflight({
 assert.equal(unavailableBatteryStatus.ok, true);
 
 const blockedPreflight = evaluateFirmwareOtaPreflight({
-  manifest: parsedManifest,
+  manifest: parsedV2Manifest,
   desktopVersion: '1.0.0',
   recordingActive: true,
   transferActive: true,
@@ -537,16 +513,13 @@ assert.deepEqual(
   FIRMWARE_OTA_REQUIRED_PUBLIC_STATES,
   ['checking', 'ready', 'transferring', 'rebooting', 'verifying', 'success', 'failed', 'rolledBack'],
 );
-assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName, 'listener_ble_ota');
-assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes, 500);
-assert.equal(FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 500);
-assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName, 'listener_ble_ota_v2');
-assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.serviceUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3092a');
-assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.controlUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3092b');
-assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3092c');
-assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3092b');
-assert.equal(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 500);
-assert.ok(FIRMWARE_OTA_TRANSPORT_BOUNDARY.notDataPlane.every(item => item.includes('BLE')));
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName, 'denzic_ota_v1');
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3092a');
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3094b');
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3094c');
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid, '710af845-6d9f-6583-0c4d-9e5b3bc3094d');
+assert.equal(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.maxChunkBytes, 500);
+assert.ok(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.notDataPlane.every(item => item.includes('BLE')));
 assert.equal(
   firmwareOtaSnapshotSatisfiesVersionRefreshFallback(
     {
@@ -556,13 +529,13 @@ assert.equal(
         connected: true,
         hardwareRevision: null,
         firmwareVersion: null,
-        capabilities: [LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability],
+        capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
       },
     },
-    LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName,
+    LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName,
   ),
   true,
-  'Listener OTA v2 refresh fallback must accept a reachable v2 service even when DIS firmware version is unavailable',
+  'Listener OTA v1 refresh fallback must accept a reachable v1 service even when DIS firmware version is unavailable',
 );
 assert.equal(
   firmwareOtaSnapshotSatisfiesVersionRefreshFallback(
@@ -573,21 +546,21 @@ assert.equal(
         connected: true,
         hardwareRevision: null,
         firmwareVersion: null,
-        capabilities: [LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability],
+        capabilities: [LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability],
       },
     },
-    'listener_ota_v2',
+    'listener_ota_v1',
   ),
   false,
-  'old Listener OTA v2 protocol strings must not satisfy the package-selected refresh fallback',
+  'old Listener OTA v1 protocol strings must not satisfy the package-selected refresh fallback',
 );
 
 const rustFirmwareOtaSource = readFileSync('src-tauri/src/firmware_ota.rs', 'utf8');
 for (const expected of [
-  LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-  LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.controlUuid,
-  LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid,
-  LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid,
 ]) {
   assert.ok(
     rustFirmwareOtaSource.includes(expected),
@@ -671,20 +644,20 @@ assert.ok(
 );
 assert.ok(
   firmwareOtaPanelSource.includes('firmwareOtaSnapshotSatisfiesVersionRefreshFallback(snapshot, protocolName)'),
-  'manual Listener OTA v2 refresh must stop polling when the v2 service is reachable even if DIS firmware version is unavailable',
+  'manual Denzic OTA v1 refresh must stop polling when the service is reachable even if DIS firmware version is unavailable',
 );
 assert.ok(
-  !firmwareOtaPanelSource.includes("protocolName === 'listener_ota_v2'"),
-  'manual Listener OTA v2 refresh must not use stale protocol-name strings',
+  !firmwareOtaPanelSource.includes("protocolName === 'listener_ota_v1'"),
+  'manual Listener OTA v1 refresh must not use stale protocol-name strings',
 );
 
 const commandsSource = readFileSync('src-tauri/src/commands.rs', 'utf8');
 assert.ok(
-  commandsSource.includes('FIRMWARE_OTA_PREFLIGHT_SNAPSHOT_TIMEOUT'),
+  commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT'),
   'firmware OTA preflight IPC must keep an outer timeout around Windows BLE snapshot probing',
 );
 assert.ok(
-  commandsSource.includes('tokio::time::timeout(FIRMWARE_OTA_PREFLIGHT_SNAPSHOT_TIMEOUT'),
+  commandsSource.includes('tokio::time::timeout(\n        FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,\n        snapshot_task,'),
   'firmware OTA preflight IPC timeout must wrap the blocking BLE snapshot task',
 );
 assert.ok(
@@ -692,16 +665,18 @@ assert.ok(
   'firmware OTA preflight IPC must accept the selected package protocol',
 );
 assert.ok(
-  commandsSource.includes('crate::embedded_ble::listener_ota_v2_device_snapshot()'),
-  'Listener OTA v2 preflight must use the v2 snapshot path instead of the legacy OTA snapshot',
+  commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT')
+    && commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT')
+    && commandsSource.includes('crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot('),
+  'Denzic OTA v1 preflight must use the bounded GATT probe instead of optional DIS metadata reads',
 );
 assert.ok(
-  commandsSource.includes('confirm_listener_ota_v2_reachable(&version).await'),
-  'Listener OTA v2 UI transfer confirmation must use the fast reachable-service confirmation path',
+  commandsSource.includes('confirm_listener_ota_v1_reachable(&version).await'),
+  'Listener OTA v1 UI transfer confirmation must use the fast reachable-service confirmation path',
 );
 assert.ok(
-  commandsSource.includes('FIRMWARE_OTA_LISTENER_V2_REACHABLE_CONFIRM_TIMEOUT'),
-  'Listener OTA v2 UI transfer confirmation must have a bounded short timeout separate from version polling',
+  commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT'),
+  'Listener OTA v1 UI transfer confirmation must have a bounded short timeout separate from version polling',
 );
 assert.ok(
   commandsSource.includes('struct FirmwareOtaConfirmOutcome'),
@@ -723,45 +698,56 @@ for (const expectedHeadlessTimingField of ['preflight_elapsed_ms', 'transfer_ela
     `firmware OTA headless report must include ${expectedHeadlessTimingField}`,
   );
 }
-for (const removedSlowFallback of ['listener_ota_v2_snapshot_with_identity_fallback', 'merge_listener_ota_v2_snapshot_identity']) {
+for (const removedSlowFallback of ['listener_ota_v1_snapshot_with_identity_fallback', 'merge_listener_ota_v1_snapshot_identity']) {
   assert.ok(
     !rustFirmwareOtaSource.includes(removedSlowFallback),
-    `Listener OTA v2 preflight must not restore slow stable-anchor identity fallback: ${removedSlowFallback}`,
+    `Listener OTA v1 preflight must not restore slow stable-anchor identity fallback: ${removedSlowFallback}`,
   );
 }
 assert.ok(
-  rustFirmwareOtaSource.includes('listener_ota_v2_preflight_allows_reachable_device_without_identity_metadata'),
-  'Listener OTA v2 preflight must allow reachable v2 service when Windows omits optional identity metadata',
+  rustFirmwareOtaSource.includes('listener_ota_v1_preflight_allows_reachable_device_without_identity_metadata'),
+  'Denzic OTA v1 preflight must allow a reachable service when Windows omits optional identity metadata',
 );
 assert.ok(
-  rustFirmwareOtaSource.includes('confirm_listener_ota_v2_reachable_version(&expected_version).await'),
-  'Listener OTA v2 headless transfer confirmation must use the fast reachable-service confirmation path',
+  rustFirmwareOtaSource.includes('confirm_listener_ota_v1_reachable_version(&expected_version).await'),
+  'Listener OTA v1 headless transfer confirmation must use the fast reachable-service confirmation path',
 );
 assert.ok(
-  rustFirmwareOtaSource.includes('LISTENER_OTA_V2_REACHABLE_CONFIRM_TIMEOUT'),
-  'Listener OTA v2 headless transfer confirmation must have a bounded short timeout separate from version polling',
+  rustFirmwareOtaSource.includes('LISTENER_OTA_V1_REACHABLE_CONFIRM_TIMEOUT'),
+  'Listener OTA v1 headless transfer confirmation must have a bounded short timeout separate from version polling',
 );
 
 const embeddedBleSource = readFileSync('src-tauri/src/embedded_ble.rs', 'utf8');
-const listenerOtaV2SnapshotStart = embeddedBleSource.indexOf('fn listener_ota_v2_device_snapshot_from_target');
-const listenerOtaV2SnapshotEnd = embeddedBleSource.indexOf('fn firmware_ota_device_snapshot_from_target', listenerOtaV2SnapshotStart);
-assert.ok(listenerOtaV2SnapshotStart >= 0 && listenerOtaV2SnapshotEnd > listenerOtaV2SnapshotStart);
-const listenerOtaV2SnapshotBody = embeddedBleSource.slice(listenerOtaV2SnapshotStart, listenerOtaV2SnapshotEnd);
+for (const expected of [
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid,
+]) {
+  assert.ok(
+    embeddedBleSource.includes(expected),
+    `Listener OTA UUID ${expected} must match src-tauri/src/embedded_ble.rs`,
+  );
+}
+const listenerOtaV1SnapshotStart = embeddedBleSource.indexOf('fn listener_ota_v1_device_snapshot_from_target');
+const listenerOtaV1SnapshotEnd = embeddedBleSource.indexOf('fn listener_ota_v1_gatt_probe_snapshot_from_target', listenerOtaV1SnapshotStart);
+assert.ok(listenerOtaV1SnapshotStart >= 0 && listenerOtaV1SnapshotEnd > listenerOtaV1SnapshotStart);
+const listenerOtaV1SnapshotBody = embeddedBleSource.slice(listenerOtaV1SnapshotStart, listenerOtaV1SnapshotEnd);
 assert.ok(
   embeddedBleSource.includes('DIS metadata is best-effort'),
-  'Listener OTA v2 snapshot must document that DIS metadata is best-effort and not a hard blocker',
+  'Listener OTA v1 snapshot must document that DIS metadata is best-effort and not a hard blocker',
 );
 assert.ok(
   embeddedBleSource.includes('for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]'),
-  'Listener OTA v2 discovery must try the Windows GATT cache before falling back to uncached discovery',
+  'Listener OTA v1 discovery must try the Windows GATT cache before falling back to uncached discovery',
 );
 assert.ok(
-  !listenerOtaV2SnapshotBody.includes('read_optional_string_characteristic_from_service'),
-  'Listener OTA v2 snapshot must not probe optional readiness/capability characteristics before transfer',
+  !listenerOtaV1SnapshotBody.includes('read_optional_string_characteristic_from_service'),
+  'Listener OTA v1 snapshot must not probe optional readiness/capability characteristics before transfer',
 );
 assert.ok(
-  listenerOtaV2SnapshotBody.includes('read_dis_metadata_from_discovered_services(target.bluetooth_address)'),
-  'Listener OTA v2 snapshot should fill hardware/firmware metadata from bounded DIS discovery when Windows exposes it',
+  listenerOtaV1SnapshotBody.includes('read_dis_metadata_from_discovered_services(target.bluetooth_address)'),
+  'Listener OTA v1 snapshot should fill hardware/firmware metadata from bounded DIS discovery when Windows exposes it',
 );
 
 const ipcSource = readFileSync('src/lib/ipc.ts', 'utf8');

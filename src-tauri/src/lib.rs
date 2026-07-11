@@ -127,7 +127,7 @@ pub fn run() {
             | cli::CliIntent::SubmitEmbeddedAudioBleStream { .. }
             | cli::CliIntent::SendEmbeddedAudioControlStop { .. }
             | cli::CliIntent::ReadEmbeddedAudioBleStatus { .. }
-            | cli::CliIntent::ProbeListenerOtaV2Gatt { .. }
+            | cli::CliIntent::ProbeListenerOtaV1Gatt { .. }
             | cli::CliIntent::PromptEmbeddedBlePairing { .. }
             | cli::CliIntent::PromptEmbeddedBlePairingOnly { .. }
             | cli::CliIntent::CleanupEmbeddedBlePairing { .. } => {
@@ -1528,8 +1528,8 @@ fn dispatch_cli_intent<R: Runtime>(
         cli::CliIntent::ReadEmbeddedAudioBleStatus { .. } => {
             log::warn!("[cli] embedded BLE status read is headless-only and was ignored by the running GUI instance");
         }
-        cli::CliIntent::ProbeListenerOtaV2Gatt { .. } => {
-            log::warn!("[cli] Listener OTA v2 GATT probe is headless-only and was ignored by the running GUI instance");
+        cli::CliIntent::ProbeListenerOtaV1Gatt { .. } => {
+            log::warn!("[cli] Listener OTA v1 GATT probe is headless-only and was ignored by the running GUI instance");
         }
         cli::CliIntent::PromptEmbeddedBlePairing { .. } => {
             log::warn!("[cli] embedded BLE pairing prompt is headless-only and was ignored by the running GUI instance");
@@ -1610,16 +1610,16 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
     sync_headless_embedded_ble_target_name_from_firmware(&coordinator);
 
     match intent {
-        cli::CliIntent::ProbeListenerOtaV2Gatt { timeout_ms } => {
+        cli::CliIntent::ProbeListenerOtaV1Gatt { timeout_ms } => {
             log::info!("[cli] headless probe-listener-ota-v2-gatt: timeout_ms={timeout_ms:?}");
             let timeout_ms = timeout_ms.unwrap_or(20_000).clamp(1_000, 30_000);
-            let snapshot = crate::embedded_ble::listener_ota_v2_gatt_probe_snapshot(
+            let snapshot = crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(
                 Duration::from_millis(timeout_ms),
             );
             let has_capability = snapshot
                 .capabilities
                 .iter()
-                .any(|item| item == "firmware_ota_v2");
+                .any(|item| item == crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY);
             let status = if snapshot.connected && has_capability {
                 "PASS"
             } else {
@@ -1633,8 +1633,8 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
             });
             let report_json = serde_json::to_string(&report)
                 .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
-            headless_print_line(format!("listener_ota_v2_gatt_probe_json={report_json}"));
-            log::info!("listener_ota_v2_gatt_probe_json={report_json}");
+            headless_print_line(format!("listener_ota_v1_gatt_probe_json={report_json}"));
+            log::info!("listener_ota_v1_gatt_probe_json={report_json}");
             if status == "PASS" {
                 0
             } else {

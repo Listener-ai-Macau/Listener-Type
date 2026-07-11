@@ -1,3 +1,8 @@
+import {
+  DENZIC_OTA_V1_PROTOCOL_NAME,
+  DENZIC_OTA_V1_PROTOCOL_VERSION,
+} from '@denzic/ota-core';
+
 export type FirmwareOtaChannel = 'stable' | 'development';
 
 const FIRMWARE_OTA_MAX_VERSION_CHARS = 31;
@@ -136,32 +141,19 @@ export const FIRMWARE_OTA_REQUIRED_PUBLIC_STATES: readonly FirmwareOtaUserState[
   'rolledBack',
 ] as const;
 
-export const FIRMWARE_OTA_TRANSPORT_BOUNDARY = {
-  protocolName: 'listener_ble_ota',
-  firmwareCapability: 'firmware_ota_v1',
+export const LISTENER_OTA_V1_TRANSPORT_BOUNDARY = {
+  protocolName: DENZIC_OTA_V1_PROTOCOL_NAME,
+  protocolVersion: DENZIC_OTA_V1_PROTOCOL_VERSION,
+  firmwareCapability: DENZIC_OTA_V1_PROTOCOL_NAME,
   gatt: {
     serviceUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092a',
-    controlUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092b',
-    dataUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3092c',
+    controlUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3094b',
+    dataUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3094c',
+    statusUuid: '710af845-6d9f-6583-0c4d-9e5b3bc3094d',
     defaultChunkBytes: 500,
     maxChunkBytes: 500,
   },
-  dataPlane: 'dedicated OTA GATT service',
-  notDataPlane: ['BLE audio VKA1 notifications', 'BLE HID keyboard reports'],
-} as const;
-
-export const LISTENER_OTA_V2_TRANSPORT_BOUNDARY = {
-  protocolName: 'listener_ble_ota_v2',
-  firmwareCapability: 'firmware_ota_v2',
-  gatt: {
-    serviceUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-    controlUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
-    dataUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
-    statusUuid: FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
-    defaultChunkBytes: 500,
-    maxChunkBytes: 500,
-  },
-  dataPlane: 'Listener OTA v2 windowed binary protocol over the stable OTA control/data characteristics',
+  dataPlane: 'Denzic OTA v1 windowed binary protocol over the Listener GATT driver',
   notDataPlane: ['BLE audio VKA1 notifications', 'BLE HID keyboard reports'],
 } as const;
 
@@ -198,10 +190,10 @@ export async function validateFirmwareOtaPackage(
   if (!versionsCompatible(context.desktopVersion, manifest.minDesktopVersion)) {
     errors.push(`Listener Type ${context.desktopVersion} is older than required ${manifest.minDesktopVersion}.`);
   }
-  if ((isListenerBleOtaManifest(manifest) || isListenerOtaV2Manifest(manifest)) && manifest.version.length > FIRMWARE_OTA_MAX_VERSION_CHARS) {
+  if (isListenerOtaV1Manifest(manifest) && manifest.version.length > FIRMWARE_OTA_MAX_VERSION_CHARS) {
     errors.push(`Firmware version is too long for BLE OTA control; expected <= ${FIRMWARE_OTA_MAX_VERSION_CHARS} characters.`);
   }
-  if ((isListenerBleOtaManifest(manifest) || isListenerOtaV2Manifest(manifest)) && manifest.hardwareRevision !== context.expectedHardwareRevision) {
+  if (isListenerOtaV1Manifest(manifest) && manifest.hardwareRevision !== context.expectedHardwareRevision) {
     errors.push(`Hardware revision mismatch: package=${manifest.hardwareRevision}, expected=${context.expectedHardwareRevision}.`);
   }
   if (context.currentFirmwareVersion && compareVersionish(manifest.version, context.currentFirmwareVersion) < 0) {
@@ -222,52 +214,8 @@ export function parseFirmwareOtaManifest(value: unknown): FirmwareOtaManifest {
     throw new Error('ota_manifest.json must be a JSON object.');
   }
   const schemaVersion = requireNumber(value.schema_version ?? value.schemaVersion, 'schema_version');
-  if (schemaVersion === 1) return parseFirmwareOtaManifestV1(value, schemaVersion);
   if (schemaVersion === 2) return parseFirmwareOtaManifestV2(value, schemaVersion);
   throw new Error(`Unsupported OTA manifest schema_version ${schemaVersion}.`);
-}
-
-function parseFirmwareOtaManifestV1(value: Record<string, unknown>, schemaVersion: number): FirmwareOtaManifest {
-  const file = requireRecord(value.file, 'file');
-  const protocol = requireRecord(value.protocol, 'protocol');
-  const rollback = requireRecord(value.rollback, 'rollback');
-  const recovery = requireRecord(value.recovery, 'recovery');
-  const gatt = isRecord(protocol.gatt) ? protocol.gatt : null;
-
-  const manifest: FirmwareOtaManifest = {
-    schemaVersion,
-    packageType: requireString(value.package_type ?? value.packageType, 'package_type') as 'listener-firmware-ota',
-    project: requireString(value.project, 'project'),
-    version: requireString(value.version, 'version'),
-    protocolName: requireString(protocol.name, 'protocol.name'),
-    protocolVersion: requireNumber(protocol.version, 'protocol.version'),
-    hardwareRevision: requireString(value.hardware_revision ?? value.hardwareRevision, 'hardware_revision'),
-    minDesktopVersion: requireString(value.min_desktop_version ?? value.minDesktopVersion, 'min_desktop_version'),
-    channel: requireChannel(value.channel),
-    fileName: requireString(file.name, 'file.name'),
-    fileSizeBytes: requireNumber(file.size_bytes ?? file.sizeBytes, 'file.size_bytes'),
-    fileSha256: requireString(file.sha256, 'file.sha256').toLowerCase(),
-    firmwareCapability: requireString(protocol.firmware_capability ?? protocol.firmwareCapability, 'protocol.firmware_capability'),
-    gattServiceUuid: gatt
-      ? requireString(gatt.service_uuid ?? gatt.serviceUuid, 'protocol.gatt.service_uuid')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-    gattControlUuid: gatt
-      ? requireString(gatt.control_uuid ?? gatt.controlUuid, 'protocol.gatt.control_uuid')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
-    gattDataUuid: gatt
-      ? requireString(gatt.data_uuid ?? gatt.dataUuid, 'protocol.gatt.data_uuid')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
-    gattConfirmUuid: optionalString(gatt?.confirm_uuid ?? gatt?.confirmUuid, 'protocol.gatt.confirm_uuid'),
-    gattStatusUuid: optionalString(gatt?.status_uuid ?? gatt?.statusUuid, 'protocol.gatt.status_uuid'),
-    gattChunkBytes: gatt
-      ? requireNumber(gatt.chunk_bytes ?? gatt.chunkBytes, 'protocol.gatt.chunk_bytes')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
-    rollbackInstructions: requireInstructions(rollback.instructions, 'rollback.instructions'),
-    recoveryInstructions: requireInstructions(recovery.instructions, 'recovery.instructions'),
-  };
-
-  validateNormalizedFirmwareOtaManifest(manifest);
-  return manifest;
 }
 
 function parseFirmwareOtaManifestV2(value: Record<string, unknown>, schemaVersion: number): FirmwareOtaManifest {
@@ -277,8 +225,8 @@ function parseFirmwareOtaManifestV2(value: Record<string, unknown>, schemaVersio
   const dis = requireRecord(bleIdentity.dis, 'ble_identity.dis');
   const rollback = requireRecord(value.rollback, 'rollback');
   const recovery = requireRecord(value.recovery, 'recovery');
-  const protocol = isRecord(value.protocol) ? value.protocol : null;
-  const gatt = isRecord(protocol?.gatt) ? protocol.gatt : null;
+  const protocol = requireRecord(value.protocol, 'protocol');
+  const gatt = requireRecord(protocol.gatt, 'protocol.gatt');
   const rollbackSupported = requireBool(rollback.supported, 'rollback.supported');
   if (!rollbackSupported) {
     throw new Error('rollback.supported must be true.');
@@ -306,38 +254,24 @@ function parseFirmwareOtaManifestV2(value: Record<string, unknown>, schemaVersio
     packageType: 'listener-firmware-ota',
     project: requireString(firmware.project, 'firmware.project'),
     version: requireString(firmware.version, 'firmware.version'),
-    protocolName: protocol
-      ? requireString(protocol.name, 'protocol.name')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName,
-    protocolVersion: protocol
-      ? requireNumber(protocol.version, 'protocol.version')
-      : requireNumber(requirements.protocol_version ?? requirements.protocolVersion, 'requirements.protocol_version'),
+    protocolName: requireString(protocol.name, 'protocol.name'),
+    protocolVersion: requireNumber(protocol.version, 'protocol.version'),
     hardwareRevision: requireString(requirements.hardware_revision ?? requirements.hardwareRevision, 'requirements.hardware_revision'),
     minDesktopVersion: requireString(requirements.min_desktop_version ?? requirements.minDesktopVersion, 'requirements.min_desktop_version'),
     channel: requireChannel(value.channel),
     fileName: requireString(firmware.file, 'firmware.file'),
     fileSizeBytes: requireNumber(firmware.size_bytes ?? firmware.sizeBytes, 'firmware.size_bytes'),
     fileSha256: requireString(firmware.sha256, 'firmware.sha256').toLowerCase(),
-    firmwareCapability: protocol
-      ? requireString(protocol.firmware_capability ?? protocol.firmwareCapability, 'protocol.firmware_capability')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.firmwareCapability,
-    gattServiceUuid: gatt
-      ? requireString(gatt.service_uuid ?? gatt.serviceUuid, 'protocol.gatt.service_uuid')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid,
-    gattControlUuid: gatt
-      ? requireString(gatt.control_uuid ?? gatt.controlUuid, 'protocol.gatt.control_uuid')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid,
-    gattDataUuid: gatt
-      ? requireString(gatt.data_uuid ?? gatt.dataUuid, 'protocol.gatt.data_uuid')
-      : FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid,
+    firmwareCapability: requireString(protocol.firmware_capability ?? protocol.firmwareCapability, 'protocol.firmware_capability'),
+    gattServiceUuid: requireString(gatt.service_uuid ?? gatt.serviceUuid, 'protocol.gatt.service_uuid'),
+    gattControlUuid: requireString(gatt.control_uuid ?? gatt.controlUuid, 'protocol.gatt.control_uuid'),
+    gattDataUuid: requireString(gatt.data_uuid ?? gatt.dataUuid, 'protocol.gatt.data_uuid'),
     gattConfirmUuid: optionalString(gatt?.confirm_uuid ?? gatt?.confirmUuid, 'protocol.gatt.confirm_uuid'),
     gattStatusUuid: optionalString(gatt?.status_uuid ?? gatt?.statusUuid, 'protocol.gatt.status_uuid'),
-    gattChunkBytes: protocol
-      ? optionalNumber(gatt?.chunk_bytes ?? gatt?.chunkBytes, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes)
-      : optionalNumber(
-          requirements.gatt_chunk_bytes ?? requirements.gattChunkBytes,
-          FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
-        ),
+    gattChunkBytes: optionalNumber(
+      gatt.chunk_bytes ?? gatt.chunkBytes,
+      LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.defaultChunkBytes,
+    ),
     rollbackInstructions: requireInstructions(rollback.instructions, 'rollback.instructions'),
     recoveryInstructions: [factoryReflash, serialCommands],
   };
@@ -347,56 +281,37 @@ function parseFirmwareOtaManifestV2(value: Record<string, unknown>, schemaVersio
 }
 
 function validateNormalizedFirmwareOtaManifest(manifest: FirmwareOtaManifest): void {
-  if (isListenerBleOtaManifest(manifest) || isListenerOtaV2Manifest(manifest)) {
-    if (manifest.packageType !== 'listener-firmware-ota') {
-      throw new Error('ota_manifest.json package_type must be listener-firmware-ota.');
-    }
-  } else {
+  if (!isListenerOtaV1Manifest(manifest)) {
     throw new Error(`Unsupported OTA protocol ${manifest.protocolName}.`);
   }
-  if (manifest.protocolVersion < 1) {
-    throw new Error('OTA protocol.version must be >= 1.');
+  if (manifest.packageType !== 'listener-firmware-ota') {
+    throw new Error('ota_manifest.json package_type must be listener-firmware-ota.');
   }
-  if (isListenerBleOtaManifest(manifest)) {
-    if (manifest.firmwareCapability !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.firmwareCapability) {
-      throw new Error('OTA package requires unsupported firmware capability.');
-    }
-    if (
-      !uuidEquals(manifest.gattServiceUuid, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.serviceUuid) ||
-      !uuidEquals(manifest.gattControlUuid, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.controlUuid) ||
-      !uuidEquals(manifest.gattDataUuid, FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.dataUuid)
-    ) {
-      throw new Error('OTA package uses an unsupported BLE OTA GATT boundary.');
-    }
-    if (manifest.gattChunkBytes !== FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes) {
-      throw new Error(
-        `OTA package uses unsupported BLE OTA chunk size ${manifest.gattChunkBytes}; supported value is ${FIRMWARE_OTA_TRANSPORT_BOUNDARY.gatt.maxChunkBytes}.`,
-      );
-    }
-  } else if (isListenerOtaV2Manifest(manifest)) {
-    if (manifest.project !== 'voice-keyboard-firmware') {
-      throw new Error('Listener OTA v2 project must be voice-keyboard-firmware.');
-    }
-    if (manifest.firmwareCapability !== LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability) {
-      throw new Error('Listener OTA v2 package requires unsupported firmware capability.');
-    }
-    if (
-      !uuidEquals(manifest.gattServiceUuid, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.serviceUuid) ||
-      !uuidEquals(manifest.gattControlUuid, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.controlUuid) ||
-      !uuidEquals(manifest.gattDataUuid, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.dataUuid) ||
-      !manifest.gattStatusUuid ||
-      !uuidEquals(manifest.gattStatusUuid, LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.statusUuid)
-    ) {
-      throw new Error('Listener OTA v2 package uses an unsupported GATT boundary.');
-    }
-    if (manifest.gattConfirmUuid) {
-      throw new Error('Listener OTA v2 must use status_uuid, not confirm_uuid.');
-    }
-    if (manifest.gattChunkBytes !== LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.maxChunkBytes) {
-      throw new Error(
-        `Listener OTA v2 chunk size must be ${LISTENER_OTA_V2_TRANSPORT_BOUNDARY.gatt.maxChunkBytes} bytes, got ${manifest.gattChunkBytes}.`,
-      );
-    }
+  if (manifest.protocolVersion !== LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolVersion) {
+    throw new Error(`Listener OTA protocol.version must be 1, got ${manifest.protocolVersion}.`);
+  }
+  if (manifest.project !== 'voice-keyboard-firmware') {
+    throw new Error('Listener OTA v1 project must be voice-keyboard-firmware.');
+  }
+  if (manifest.firmwareCapability !== LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability) {
+    throw new Error('Listener OTA v1 package requires unsupported firmware capability.');
+  }
+  if (
+    !uuidEquals(manifest.gattServiceUuid, LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.serviceUuid) ||
+    !uuidEquals(manifest.gattControlUuid, LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.controlUuid) ||
+    !uuidEquals(manifest.gattDataUuid, LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.dataUuid) ||
+    !manifest.gattStatusUuid ||
+    !uuidEquals(manifest.gattStatusUuid, LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.statusUuid)
+  ) {
+    throw new Error('Listener OTA v1 package uses an unsupported GATT boundary.');
+  }
+  if (manifest.gattConfirmUuid) {
+    throw new Error('Listener OTA v1 must use status_uuid, not confirm_uuid.');
+  }
+  if (manifest.gattChunkBytes !== LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.maxChunkBytes) {
+    throw new Error(
+      `Listener OTA v1 chunk size must be ${LISTENER_OTA_V1_TRANSPORT_BOUNDARY.gatt.maxChunkBytes} bytes, got ${manifest.gattChunkBytes}.`,
+    );
   }
   if (manifest.fileSizeBytes <= 0) {
     throw new Error('file.size_bytes must be greater than zero.');
@@ -409,11 +324,9 @@ function validateNormalizedFirmwareOtaManifest(manifest: FirmwareOtaManifest): v
 export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): FirmwareOtaPreflightResult {
   const blockers: FirmwareOtaBlocker[] = [];
   const { manifest, device } = input;
-  const listenerBleOta = isListenerBleOtaManifest(manifest);
-  const listenerOtaV2 = isListenerOtaV2Manifest(manifest);
-  const manifestDeviceSnapshot = listenerBleOta || listenerOtaV2;
+  const listenerOtaV1 = isListenerOtaV1Manifest(manifest);
 
-  if ((listenerBleOta || listenerOtaV2) && !device.connected) {
+  if (listenerOtaV1 && !device.connected) {
     blockers.push(blocker(
       'deviceDisconnected',
       device.detail ? `Device is not ready for OTA: ${device.detail}` : 'Device is not connected.',
@@ -448,14 +361,14 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
       'Use a same-version or newer OTA package, or use USB factory recovery for an intentional rollback.',
     ));
   }
-  if (manifestDeviceSnapshot && device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {
+  if (listenerOtaV1 && device.hardwareRevision && device.hardwareRevision !== manifest.hardwareRevision) {
     blockers.push(blocker(
       'hardwareMismatch',
       'Firmware package is for a different hardware revision.',
       'Use an OTA package built for this device.',
     ));
   }
-  if ((listenerBleOta || listenerOtaV2) && !device.capabilities.includes(manifest.firmwareCapability)) {
+  if (listenerOtaV1 && !device.capabilities.includes(manifest.firmwareCapability)) {
     blockers.push(blocker(
       'missingCapability',
       'Connected firmware does not advertise OTA support.',
@@ -463,7 +376,7 @@ export function evaluateFirmwareOtaPreflight(input: FirmwareOtaPreflightInput): 
     ));
   }
   const battery = device.batteryPercent;
-  if ((listenerBleOta || listenerOtaV2) && device.usbPowered === false && typeof battery === 'number' && battery < MIN_BATTERY_PERCENT) {
+  if (listenerOtaV1 && device.usbPowered === false && typeof battery === 'number' && battery < MIN_BATTERY_PERCENT) {
     blockers.push(blocker(
       'batteryLow',
       'Battery is too low for firmware update.',
@@ -478,9 +391,9 @@ export function firmwareOtaSnapshotSatisfiesVersionRefreshFallback(
   snapshot: FirmwareOtaPreflightSnapshot,
   protocolName: string | null,
 ): boolean {
-  return protocolName === LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName
+  return protocolName === LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName
     && snapshot.device.connected
-    && snapshot.device.capabilities.includes(LISTENER_OTA_V2_TRANSPORT_BOUNDARY.firmwareCapability);
+    && snapshot.device.capabilities.includes(LISTENER_OTA_V1_TRANSPORT_BOUNDARY.firmwareCapability);
 }
 
 export const initialFirmwareOtaState: FirmwareOtaState = {
@@ -658,12 +571,8 @@ function requireChannel(value: unknown): FirmwareOtaChannel {
   throw new Error('channel must be stable or development.');
 }
 
-export function isListenerBleOtaManifest(manifest: FirmwareOtaManifest): boolean {
-  return manifest.protocolName === FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName;
-}
-
-export function isListenerOtaV2Manifest(manifest: FirmwareOtaManifest): boolean {
-  return manifest.protocolName === LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName;
+export function isListenerOtaV1Manifest(manifest: FirmwareOtaManifest): boolean {
+  return manifest.protocolName === LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName;
 }
 
 function uuidEquals(left: string, right: string): boolean {

@@ -159,7 +159,15 @@ export function FirmwareOtaPanel({
       device: snapshot.device,
     });
   }, [otaSnapshot, selectedPackage, transferActive]);
-  const effectiveBlockers = blockers.length > 0 ? blockers : transferActive ? [] : preflight?.blockers ?? [];
+  const preflightPending = !!selectedPackage && (snapshotRefreshing || !otaSnapshot);
+  const effectiveBlockers = blockers.length > 0
+    ? blockers
+    : transferActive || preflightPending
+      ? []
+      : preflight?.blockers ?? [];
+  const visiblePreflightBlockers = snapshotError
+    ? effectiveBlockers.filter(item => item.code !== 'deviceDisconnected')
+    : effectiveBlockers;
   const dynamicWarnings = useMemo(() => {
     if (!selectedPackage) return [];
     const warnings = [...selectedPackage.warnings];
@@ -169,7 +177,11 @@ export function FirmwareOtaPanel({
     }
     return [...new Set(warnings)];
   }, [otaSnapshot?.device.firmwareVersion, selectedPackage]);
-  const canStart = !!selectedPackage && state.userState === 'ready' && effectiveBlockers.length === 0 && !transferActive;
+  const canStart = !!selectedPackage
+    && state.userState === 'ready'
+    && effectiveBlockers.length === 0
+    && !transferActive
+    && !preflightPending;
 
   const choosePackage = async (directory: boolean) => {
     const previousPackage = selectedPackage;
@@ -231,6 +243,9 @@ export function FirmwareOtaPanel({
       sourceLabel,
       sourceKind,
     });
+    setOtaSnapshot(null);
+    setOtaSnapshotFetchedAtMs(null);
+    setSnapshotError(null);
     void refreshOtaSnapshot({ protocolName: result.manifest.protocolName });
     dispatch({ type: 'ready' });
     return true;
@@ -532,14 +547,14 @@ export function FirmwareOtaPanel({
             </div>
           )}
 
-          {(validationErrors.length > 0 || effectiveBlockers.length > 0 || state.failureCode) && (
+          {(validationErrors.length > 0 || visiblePreflightBlockers.length > 0 || state.failureCode) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {validationErrors.map(error => (
                 <div key={error} style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
                   {error}
                 </div>
               ))}
-              {effectiveBlockers.map(item => (
+              {visiblePreflightBlockers.map(item => (
                 <div key={item.code} style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
                   {formatFirmwareOtaBlocker(item, i18n.resolvedLanguage ?? i18n.language)}
                 </div>
@@ -1072,12 +1087,13 @@ function FirmwareOtaReadinessSummary({
   t: ReturnType<typeof useTranslation>['t'];
 }) {
   const device = snapshot?.device;
+  const statusPending = refreshing && !snapshot;
   const rows: Array<[string, string]> = [
-    [t('settings.recording.firmwareOtaDeviceConnected', '连接'), device?.connected ? 'connected' : 'not ready'],
-    [t('settings.recording.firmwareOtaDeviceHardware', '硬件'), device?.hardwareRevision ?? 'unknown'],
-    [t('settings.recording.firmwareOtaDeviceFirmware', '固件'), device?.firmwareVersion ?? 'unknown'],
-    [t('settings.recording.firmwareOtaDevicePower', '供电'), formatPower(device)],
-    [t('settings.recording.firmwareOtaDictationPhase', '录音'), snapshot?.recordingActive ? snapshot.dictationPhase : 'idle'],
+    [t('settings.recording.firmwareOtaDeviceConnected', '连接'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.connected ? t('settings.recording.firmwareOtaConnected', '已连接') : t('settings.recording.firmwareOtaDisconnected', '未连接')],
+    [t('settings.recording.firmwareOtaDeviceHardware', '硬件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.hardwareRevision ?? t('settings.recording.firmwareOtaUnavailable', '未获取')],
+    [t('settings.recording.firmwareOtaDeviceFirmware', '固件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.firmwareVersion ?? t('settings.recording.firmwareOtaUnavailable', '未获取')],
+    [t('settings.recording.firmwareOtaDevicePower', '供电'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : formatPower(device, t)],
+    [t('settings.recording.firmwareOtaDictationPhase', '录音'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : snapshot?.recordingActive ? snapshot.dictationPhase : t('settings.recording.firmwareOtaIdle', '空闲')],
   ];
 
   return (
@@ -1095,22 +1111,35 @@ function FirmwareOtaReadinessSummary({
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(108px, 1fr))', gap: 8 }}>
         {rows.map(([label, value]) => <FirmwareOtaFact key={label} label={label} value={value} />)}
       </div>
-      {snapshotError && (
-        <div style={{ fontSize: 11.5, color: 'var(--ol-err)', lineHeight: 1.5 }}>
-          {snapshotError}
+      {snapshotError && !refreshing && (
+        <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
+          {formatFirmwareOtaSnapshotError(snapshotError, t)}
         </div>
       )}
     </div>
   );
 }
 
-function formatPower(device: FirmwareOtaDeviceSnapshot | null | undefined): string {
-  if (!device) return 'unknown';
+function formatFirmwareOtaSnapshotError(
+  error: string,
+  t: ReturnType<typeof useTranslation>['t'],
+): string {
+  if (/timeout|timed out|超时/i.test(error)) {
+    return t('settings.recording.firmwareOtaSnapshotTimeout', '设备状态暂时没有响应，请重新查询后再更新。');
+  }
+  return t('settings.recording.firmwareOtaSnapshotUnavailable', '暂时无法读取设备状态，请确认蓝牙连接后重新查询。');
+}
+
+function formatPower(
+  device: FirmwareOtaDeviceSnapshot | null | undefined,
+  t: ReturnType<typeof useTranslation>['t'],
+): string {
+  if (!device) return t('settings.recording.firmwareOtaUnavailable', '未获取');
   if (device.usbPowered === true) return 'USB';
   if (device.usbPowered === false && typeof device.batteryPercent === 'number') {
     return `${device.batteryPercent}%`;
   }
-  return 'unknown';
+  return t('settings.recording.firmwareOtaUnavailable', '未获取');
 }
 
 function makeDisconnectedSnapshot(detail: string): FirmwareOtaPreflightSnapshot {

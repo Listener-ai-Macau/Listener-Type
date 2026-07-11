@@ -11,30 +11,10 @@ pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3
 pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093b";
 pub const DIAGNOSTIC_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093c";
 pub const DIAGNOSTIC_COUNT_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093d";
-#[cfg(any())]
-pub const STM32WB_ST_OTA_SERVICE_UUID_TEXT: &str = "8f7a0007-7b7d-4f3d-9d6f-6c2d1b7c0000";
-#[cfg(any())]
-pub const STM32WB_ST_OTA_BASE_UUID_TEXT: &str = "8f7a7002-7b7d-4f3d-9d6f-6c2d1b7c0000";
-#[cfg(any())]
-pub const STM32WB_ST_OTA_CONFIRM_UUID_TEXT: &str = "8f7a7003-7b7d-4f3d-9d6f-6c2d1b7c0000";
-#[cfg(any())]
-pub const STM32WB_ST_OTA_RAW_UUID_TEXT: &str = "8f7a7004-7b7d-4f3d-9d6f-6c2d1b7c0000";
-#[cfg(any())]
-pub const OTA_V2_SERVICE_UUID_TEXT: &str = "8f7a8007-7b7d-4f3d-9d6f-6c2d1b7c0000";
-#[cfg(any())]
-pub const OTA_V2_CONTROL_UUID_TEXT: &str = "8f7a8002-7b7d-4f3d-9d6f-6c2d1b7c0000";
-#[cfg(any())]
-pub const OTA_V2_DATA_UUID_TEXT: &str = "8f7a8004-7b7d-4f3d-9d6f-6c2d1b7c0000";
-#[cfg(any())]
-pub const OTA_V2_STATUS_UUID_TEXT: &str = "8f7a8005-7b7d-4f3d-9d6f-6c2d1b7c0000";
-#[cfg(any())]
-pub const COMPANION_OTA_V2_SERVICE_UUID: &str = OTA_V2_SERVICE_UUID_TEXT;
-#[cfg(any())]
-pub const COMPANION_OTA_V2_STATUS_UUID: &str = OTA_V2_STATUS_UUID_TEXT;
-pub const LISTENER_OTA_V2_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
-pub const LISTENER_OTA_V2_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092b";
-pub const LISTENER_OTA_V2_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092c";
-pub const LISTENER_OTA_V2_STATUS_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092b";
+pub const LISTENER_OTA_V1_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3092a";
+pub const LISTENER_OTA_V1_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3094b";
+pub const LISTENER_OTA_V1_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3094c";
+pub const LISTENER_OTA_V1_STATUS_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3094d";
 pub const DIAGNOSTIC_EVENT_BYTES: usize = 24;
 pub const DIAGNOSTIC_CHUNK_HEADER_BYTES: usize = 8;
 
@@ -617,12 +597,12 @@ mod windows_ble {
     const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b);
     const AUDIO_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091e);
     const OTA_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092a);
-    const OTA_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092b);
-    const OTA_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3092c);
-    const LISTENER_OTA_V2_SERVICE_UUID: GUID = OTA_SERVICE_UUID;
-    const LISTENER_OTA_V2_CONTROL_UUID: GUID = OTA_CONTROL_UUID;
-    const LISTENER_OTA_V2_DATA_UUID: GUID = OTA_DATA_UUID;
-    const LISTENER_OTA_V2_STATUS_UUID: GUID = OTA_CONTROL_UUID;
+    const LISTENER_OTA_V1_SERVICE_UUID: GUID = OTA_SERVICE_UUID;
+    const LISTENER_OTA_V1_CONTROL_UUID: GUID =
+        GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3094b);
+    const LISTENER_OTA_V1_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3094c);
+    const LISTENER_OTA_V1_STATUS_UUID: GUID =
+        GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3094d);
     const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
     const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
     const WINDOWS_BLE_AEP_SELECTOR: &str =
@@ -636,64 +616,7 @@ mod windows_ble {
     const WINDOWS_AEP_BLE_IS_CONNECTABLE_PROPERTY: &str =
         "System.Devices.Aep.Bluetooth.Le.IsConnectable";
     const WINDOWS_ITEM_NAME_DISPLAY_PROPERTY: &str = "System.ItemNameDisplay";
-    #[cfg(any())]
-    const STM32WB_ST_OTA_SERVICE_UUID: GUID =
-        GUID::from_u128(0x8f7a0007_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    #[cfg(any())]
-    const STM32WB_ST_OTA_BASE_UUID: GUID = GUID::from_u128(0x8f7a7002_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    #[cfg(any())]
-    const STM32WB_ST_OTA_CONFIRM_UUID: GUID =
-        GUID::from_u128(0x8f7a7003_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    #[cfg(any())]
-    const STM32WB_ST_OTA_RAW_UUID: GUID = GUID::from_u128(0x8f7a7004_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    #[cfg(any())]
-    const STM32WB_ST_LEGACY_OTA_SERVICE_UUID: GUID =
-        GUID::from_u128(0x0000fe20_cc7a_482a_984a_7f2ed5b3e58f);
-    #[cfg(any())]
-    const STM32WB_ST_LEGACY_OTA_BASE_UUID: GUID =
-        GUID::from_u128(0x0000fe22_8e22_4541_9d4c_21edae82ed19);
-    #[cfg(any())]
-    const STM32WB_ST_LEGACY_OTA_CONFIRM_UUID: GUID =
-        GUID::from_u128(0x0000fe23_8e22_4541_9d4c_21edae82ed19);
-    #[cfg(any())]
-    const STM32WB_ST_LEGACY_OTA_RAW_UUID: GUID =
-        GUID::from_u128(0x0000fe24_8e22_4541_9d4c_21edae82ed19);
-    #[cfg(any())]
-    const OTA_V2_SERVICE_UUID: GUID = GUID::from_u128(0x8f7a8007_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    #[cfg(any())]
-    const OTA_V2_CONTROL_UUID: GUID = GUID::from_u128(0x8f7a8002_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    #[cfg(any())]
-    const OTA_V2_DATA_UUID: GUID = GUID::from_u128(0x8f7a8004_7b7d_4f3d_9d6f_6c2d1b7c0000);
-    #[cfg(any())]
-    const OTA_V2_STATUS_UUID: GUID = GUID::from_u128(0x8f7a8005_7b7d_4f3d_9d6f_6c2d1b7c0000);
 
-    #[cfg(any())]
-    #[derive(Clone, Copy)]
-    struct Stm32wbStOtaUuidSet {
-        label: &'static str,
-        service: GUID,
-        base: GUID,
-        confirm: GUID,
-        raw: GUID,
-    }
-
-    #[cfg(any())]
-    const STM32WB_ST_OTA_UUID_SETS: [Stm32wbStOtaUuidSet; 2] = [
-        Stm32wbStOtaUuidSet {
-            label: "companion",
-            service: STM32WB_ST_OTA_SERVICE_UUID,
-            base: STM32WB_ST_OTA_BASE_UUID,
-            confirm: STM32WB_ST_OTA_CONFIRM_UUID,
-            raw: STM32WB_ST_OTA_RAW_UUID,
-        },
-        Stm32wbStOtaUuidSet {
-            label: "legacy-st",
-            service: STM32WB_ST_LEGACY_OTA_SERVICE_UUID,
-            base: STM32WB_ST_LEGACY_OTA_BASE_UUID,
-            confirm: STM32WB_ST_LEGACY_OTA_CONFIRM_UUID,
-            raw: STM32WB_ST_LEGACY_OTA_RAW_UUID,
-        },
-    ];
     const DIAGNOSTIC_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093a);
     const DIAGNOSTIC_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093b);
     const DIAGNOSTIC_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093c);
@@ -739,14 +662,7 @@ mod windows_ble {
     const DIAGNOSTIC_PULL_CANDIDATE_DELAY: Duration = Duration::from_millis(350);
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
     const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
-    const OTA_DATA_WRITE_OPTION_ENV: &str = "LISTENER_OTA_DATA_WRITE_OPTION";
     const TYPE_READY_COMMAND_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_READY_COMMAND";
-    #[cfg(any())]
-    const STM32WB_ST_OTA_ADVERTISEMENT_NAME: &str = "companion";
-    #[cfg(any())]
-    const STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
-    const OTA_DATA_CHUNK_BYTES_ENV: &str = "LISTENER_OTA_DATA_CHUNK_BYTES";
-    const OTA_DATA_INTER_CHUNK_DELAY_MS_ENV: &str = "LISTENER_OTA_DATA_INTER_CHUNK_DELAY_MS";
     const AUDIO_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
     const BLE_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
     const BLE_PAIRING_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(45);
@@ -781,61 +697,14 @@ mod windows_ble {
         OTA_SERVICE_UUID_TEXT,
         crate::embedded_ble::DIAGNOSTIC_SERVICE_UUID_TEXT,
     ];
-    #[cfg(any())]
-    const STM32WB_ST_OTA_APP_BASE_ADDRESS: u32 = 0x0800_7000;
-    #[cfg(any())]
-    const STM32WB_ST_OTA_RAW_DATA_SIZE: usize = 248;
-    #[cfg(any())]
-    const STM32WB_ST_OTA_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
-    #[cfg(any())]
-    const STM32WB_ST_OTA_REBOOT_HANDOFF_TIMEOUT: Duration = Duration::from_secs(12);
-    #[cfg(any())]
-    const STM32WB_ST_OTA_NO_RESPONSE_CHUNK_DELAY: Duration = Duration::from_millis(50);
-    #[cfg(any())]
-    const STM32WB_ST_OTA_APPLICATION_UPLOAD: u8 = 0x02;
-    #[cfg(any())]
-    const STM32WB_ST_OTA_UPLOAD_FINISHED: u8 = 0x07;
-    #[cfg(any())]
-    const STM32WB_ST_OTA_REBOOT_CONFIRMED: u8 = 0x01;
-    #[cfg(any())]
-    const OTA_V2_MAGIC: &[u8; 4] = b"COV2";
-    const LISTENER_OTA_V2_MAGIC: &[u8; 4] = b"LOV2";
-    const OTA_V2_PROTOCOL_VERSION: u8 = 1;
-    const OTA_V2_OP_BEGIN: u8 = 1;
-    const OTA_V2_OP_SYNC: u8 = 2;
-    const OTA_V2_OP_FINISH: u8 = 3;
-    const OTA_V2_OP_ABORT: u8 = 4;
-    const OTA_V2_STATUS_BYTES: usize = 24;
-    const OTA_V2_PACKET_HEADER_BYTES: usize = 4;
-    const OTA_V2_DATA_PACKET_BYTES: usize = 244;
-    #[cfg(any())]
-    const OTA_V2_CHUNK_PAYLOAD_BYTES: usize = OTA_V2_DATA_PACKET_BYTES - OTA_V2_PACKET_HEADER_BYTES;
-    #[cfg(any())]
-    const OTA_V2_DEFAULT_WINDOW_CHUNKS: usize = 24;
-    #[cfg(any())]
-    const COMPANION_OTA_V2_WINDOW_ENV: &str = "LISTENER_COMPANION_DEV_OTA_V2_WINDOW_CHUNKS";
-    #[cfg(any())]
-    const OTA_V2_WINDOW_ENV: &str = COMPANION_OTA_V2_WINDOW_ENV;
-    const LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES: usize = 500;
-    const LISTENER_OTA_V2_DEFAULT_WINDOW_CHUNKS: usize = 20;
-    const LISTENER_OTA_V2_WINDOW_ENV: &str = "LISTENER_OTA_V2_WINDOW_CHUNKS";
-    const LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS: u64 = 1000;
-    const LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS_ENV: &str = "LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS";
-    const OTA_V2_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(15);
-    const OTA_V2_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(150);
-    const LISTENER_OTA_V2_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
-    const OTA_V2_STATE_IDLE: u8 = 0;
-    const OTA_V2_STATE_ERASING: u8 = 1;
-    const OTA_V2_STATE_RECEIVING: u8 = 2;
-    const OTA_V2_STATE_COMPLETE: u8 = 3;
-    const OTA_V2_STATE_ERROR: u8 = 4;
-    const OTA_V2_ERROR_NONE: u8 = 0;
-    const OTA_V2_ERROR_OFFSET_MISMATCH: u8 = 4;
+    const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(150);
+    const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 500;
+    const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 48;
+    const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 4;
+    const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
+    const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
     const RECORDING_STOP_ACTIVE_CONTROL_TIMEOUT: Duration = Duration::from_millis(700);
-    #[cfg(any())]
-    const COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH: u8 = OTA_V2_ERROR_OFFSET_MISMATCH;
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
-    const OTA_REQUIRED_DATA_CHUNK_BYTES: usize = 500;
     const BLE_TARGET_ADDRESS_CACHE_WINDOW: Duration = Duration::from_secs(60 * 60);
     const BLE_RENAME_ADDRESS_GRACE_WINDOW: Duration = Duration::from_secs(10 * 60);
     const BLE_DEVICE_STATE_FILE: &str = "ble_device_state.json";
@@ -6617,20 +6486,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
-    pub(super) struct PreparedFirmwareOtaTransfer {
-        target: OpenOtaTarget,
-        snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
-        transfer_guard: BleCaptureGuard,
-    }
-
-    #[cfg(any())]
-    pub(super) struct PreparedStm32wbStOtaTransfer {
-        target: OpenStm32wbStOtaTarget,
-        snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
-        transfer_guard: BleCaptureGuard,
-    }
-
-    struct OpenOtaV2Target {
+    struct OpenListenerOtaV1Target {
         control: GattCharacteristic,
         data: GattCharacteristic,
         status: GattCharacteristic,
@@ -6642,7 +6498,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         bluetooth_address: Option<u64>,
     }
 
-    struct PreparedOtaV2Characteristics {
+    struct PreparedListenerOtaV1Characteristics {
         control: GattCharacteristic,
         data: GattCharacteristic,
         status: GattCharacteristic,
@@ -6651,61 +6507,26 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         session: Option<GattSession>,
     }
 
-    type OpenListenerOtaV2Target = OpenOtaV2Target;
-    type PreparedListenerOtaV2Characteristics = PreparedOtaV2Characteristics;
-
-    #[cfg(any())]
-    pub(super) struct PreparedCompanionOtaV2Transfer {
-        target: OpenOtaV2Target,
-        snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
-        transfer_guard: BleCaptureGuard,
-    }
-
-    pub(super) struct PreparedListenerOtaV2Transfer {
-        target: OpenListenerOtaV2Target,
+    pub(super) struct PreparedListenerOtaV1Transfer {
+        target: OpenListenerOtaV1Target,
         snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
         transfer_guard: BleCaptureGuard,
         _ota_process_guard: BleOtaProcessGuard,
     }
 
-    impl PreparedFirmwareOtaTransfer {
+    impl PreparedListenerOtaV1Transfer {
         pub(super) fn snapshot(&self) -> &crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             &self.snapshot
         }
 
         pub(super) fn transfer(
             self,
-            version: &str,
-            firmware_sha256: &str,
+            _firmware_sha256: &str,
             firmware_bytes: &[u8],
             manifest_chunk_bytes: usize,
             on_progress: Option<&dyn Fn(usize, usize)>,
         ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-            transfer_firmware_ota_to_target(
-                &self.target,
-                self.transfer_guard.session_id(),
-                version,
-                firmware_sha256,
-                firmware_bytes,
-                manifest_chunk_bytes,
-                on_progress,
-            )
-        }
-    }
-
-    #[cfg(any())]
-    impl PreparedStm32wbStOtaTransfer {
-        pub(super) fn snapshot(&self) -> &crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-            &self.snapshot
-        }
-
-        pub(super) fn transfer(
-            self,
-            firmware_bytes: &[u8],
-            manifest_chunk_bytes: usize,
-            on_progress: Option<&dyn Fn(usize, usize)>,
-        ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-            transfer_stm32wb_st_ota_to_target(
+            transfer_denzic_ota_v1_to_target(
                 &self.target,
                 self.transfer_guard.session_id(),
                 firmware_bytes,
@@ -6715,268 +6536,190 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
-    #[cfg(any())]
-    impl PreparedCompanionOtaV2Transfer {
-        pub(super) fn snapshot(&self) -> &crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-            &self.snapshot
+    struct ListenerOtaV1Transport<'a> {
+        target: &'a OpenListenerOtaV1Target,
+        transfer_id: u64,
+        data_write_option: GattWriteOption,
+    }
+
+    impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
+        fn write_control(
+            &mut self,
+            packet: &[u8; denzic_ota_core::CONTROL_BYTES],
+        ) -> Result<(), String> {
+            let label = match packet[4] {
+                denzic_ota_core::OP_BEGIN => "Denzic OTA v1 begin",
+                denzic_ota_core::OP_SYNC => "Denzic OTA v1 sync",
+                denzic_ota_core::OP_ABORT => "Denzic OTA v1 abort",
+                _ => "Denzic OTA v1 control",
+            };
+            write_gatt_value_with_timeout(
+                &self.target.control,
+                packet,
+                GattWriteOption::WriteWithResponse,
+                OTA_WRITE_TIMEOUT,
+                label,
+            )
+            .map(|_| ())
         }
 
-        pub(super) fn transfer(
-            self,
-            firmware_bytes: &[u8],
-            manifest_chunk_bytes: usize,
-            on_progress: Option<&dyn Fn(usize, usize)>,
-        ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-            transfer_companion_ota_v2_to_target(
-                &self.target,
-                self.transfer_guard.session_id(),
-                firmware_bytes,
-                manifest_chunk_bytes,
-                on_progress,
+        fn write_data(&mut self, packet: &[u8]) -> Result<(), String> {
+            self.data_write_option = write_listener_ota_v1_value_with_fallback(
+                &self.target.data,
+                packet,
+                self.data_write_option,
+                OTA_WRITE_TIMEOUT,
+                "Denzic OTA v1 data",
+            )?;
+            Ok(())
+        }
+
+        fn read_status(&mut self) -> Result<Vec<u8>, String> {
+            read_characteristic_bytes_with_timeout(
+                &self.target.status,
+                BluetoothCacheMode::Uncached,
+                "Denzic OTA v1 status",
+                LISTENER_OTA_V1_STATUS_READ_TIMEOUT,
             )
+        }
+
+        fn status_retry_wait(&mut self, attempt: u8) {
+            log::warn!(
+                "[embedded-ble] Denzic OTA v1 #{}: retrying transient status read (attempt={})",
+                self.transfer_id,
+                attempt + 1
+            );
+            std::thread::sleep(LISTENER_OTA_V1_STATUS_POLL_INTERVAL);
+        }
+
+        fn write_finish(
+            &mut self,
+            packet: &[u8; denzic_ota_core::CONTROL_BYTES],
+        ) -> Result<(), String> {
+            match write_gatt_value_with_timeout(
+                &self.target.control,
+                packet,
+                GattWriteOption::WriteWithResponse,
+                OTA_FINISH_WRITE_TIMEOUT,
+                "Denzic OTA v1 finish",
+            ) {
+                Ok(_) => Ok(()),
+                Err(error) if is_ota_finish_reboot_handoff_error(&error) => {
+                    log::info!(
+                        "[embedded-ble] Denzic OTA v1 #{}: finish completed through reboot handoff: {}",
+                        self.transfer_id,
+                        error
+                    );
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
         }
     }
 
-    impl PreparedListenerOtaV2Transfer {
-        pub(super) fn snapshot(&self) -> &crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-            &self.snapshot
+    fn transfer_denzic_ota_v1_to_target(
+        target: &OpenListenerOtaV1Target,
+        transfer_id: u64,
+        firmware_bytes: &[u8],
+        manifest_chunk_bytes: usize,
+        on_progress: Option<&dyn Fn(usize, usize)>,
+    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
+        if manifest_chunk_bytes != LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES {
+            return Err(format!(
+                "Denzic OTA v1 manifest chunk size must be {LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES} bytes, got {manifest_chunk_bytes}."
+            ));
         }
-
-        pub(super) fn transfer(
-            self,
-            firmware_sha256: &str,
-            firmware_bytes: &[u8],
-            manifest_chunk_bytes: usize,
-            on_progress: Option<&dyn Fn(usize, usize)>,
-        ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-            transfer_listener_ota_v2_to_target(
-                &self.target,
-                self.transfer_guard.session_id(),
-                firmware_sha256,
-                firmware_bytes,
-                manifest_chunk_bytes,
-                on_progress,
-            )
-        }
-    }
-
-    pub(super) fn prepare_firmware_ota_transfer() -> Result<PreparedFirmwareOtaTransfer, String> {
-        log::info!("[embedded-ble] OTA prepare: acquiring BLE capture guard");
-        let transfer_guard = BleCaptureGuard::enter(None)?;
-        log::info!("[embedded-ble] OTA prepare: discovering OTA service");
-        let target = open_ota_target()?;
-        log::info!("[embedded-ble] OTA prepare: reading device snapshot");
-        let snapshot = firmware_ota_device_snapshot_from_target(&target);
-        log::info!(
-            "[embedded-ble] OTA prepare: ready (firmware={})",
-            snapshot.firmware_version.as_deref().unwrap_or("unknown")
-        );
-        Ok(PreparedFirmwareOtaTransfer {
+        let configured_window = listener_ota_v1_window_chunks()?;
+        let chunk_payload_bytes = manifest_chunk_bytes
+            .min(target.data_chunk_payload_bytes)
+            .min(u16::MAX as usize)
+            .max(1) as u16;
+        let window_chunks = configured_window.min(u16::MAX as usize).max(1) as u16;
+        let mut transport = ListenerOtaV1Transport {
             target,
-            snapshot,
-            transfer_guard,
+            transfer_id,
+            data_write_option: target.data_write_option,
+        };
+
+        log::info!(
+            "[embedded-ble] Denzic OTA v1 #{transfer_id}: clearing interrupted transfer before begin"
+        );
+        let abort = denzic_ota_core::control_packet(denzic_ota_core::Operation::Abort, 0, 0, 0);
+        if let Err(error) = denzic_ota_core::OtaV1Transport::write_control(&mut transport, &abort) {
+            log::warn!(
+                "[embedded-ble] Denzic OTA v1 #{transfer_id}: pre-begin abort unavailable; begin will reset the session: {error}"
+            );
+        }
+
+        let started_at = Instant::now();
+        let report = denzic_ota_core::transfer(
+            &mut transport,
+            firmware_bytes,
+            denzic_ota_core::TransferOptions {
+                chunk_payload_bytes,
+                window_chunks,
+                status_read_attempts: 5,
+                max_stalled_windows: 3,
+                inactive_link_window_chunks: Some(
+                    LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS as u16,
+                ),
+            },
+            |completed, total| {
+                if let Some(callback) = on_progress {
+                    callback(completed, total);
+                }
+            },
+        )?;
+        log::info!(
+            "[embedded-ble] Denzic OTA v1 #{transfer_id}: transferred {}/{} bytes in {} data writes, {} status reads, {} offset recoveries, active_link_confirmed={}, elapsed_ms={}",
+            report.firmware_bytes,
+            firmware_bytes.len(),
+            report.data_writes,
+            report.status_reads,
+            report.recovered_offsets,
+            report.active_link_confirmed,
+            started_at.elapsed().as_millis()
+        );
+        Ok(crate::embedded_ble::FirmwareOtaTransferStats {
+            bytes_transferred: report.firmware_bytes,
+            chunks_sent: report.data_writes as usize,
+            transport: denzic_ota_core::PROTOCOL_NAME,
         })
     }
 
-    #[cfg(any())]
-    pub(super) fn prepare_stm32wb_st_ota_transfer() -> Result<PreparedStm32wbStOtaTransfer, String>
-    {
-        log::info!("[embedded-ble] STM32WB ST OTA prepare: acquiring BLE capture guard");
-        let transfer_guard = BleCaptureGuard::enter(None)?;
-        log::info!("[embedded-ble] STM32WB ST OTA prepare: discovering companion OTA service");
-        let target = open_stm32wb_st_ota_target()?;
-        let snapshot = stm32wb_st_ota_device_snapshot_from_target(&target);
-        log::info!(
-            "[embedded-ble] STM32WB ST OTA prepare: ready (detail={})",
-            snapshot.detail.as_deref().unwrap_or("unknown")
-        );
-        Ok(PreparedStm32wbStOtaTransfer {
-            target,
-            snapshot,
-            transfer_guard,
-        })
-    }
-
-    #[cfg(any())]
-    pub(super) fn prepare_companion_ota_v2_transfer(
-    ) -> Result<PreparedCompanionOtaV2Transfer, String> {
-        log::info!("[embedded-ble] Companion OTA v2 prepare: acquiring BLE capture guard");
-        let transfer_guard = BleCaptureGuard::enter(None)?;
-        log::info!("[embedded-ble] Companion OTA v2 prepare: discovering companion OTA v2 service");
-        let target = open_companion_ota_v2_target()?;
-        let snapshot = companion_ota_v2_device_snapshot_from_target(&target);
-        log::info!(
-            "[embedded-ble] Companion OTA v2 prepare: ready (detail={})",
-            snapshot.detail.as_deref().unwrap_or("unknown")
-        );
-        Ok(PreparedCompanionOtaV2Transfer {
-            target,
-            snapshot,
-            transfer_guard,
-        })
-    }
-
-    pub(super) fn request_listener_ota_v2_active_link() -> Result<(), String> {
+    pub(super) fn request_listener_ota_v1_active_link() -> Result<(), String> {
         send_recording_control_command(
             b"TYPE:OTA\n",
             Duration::from_secs(3),
-            "Listener OTA v2 active-link hint",
+            "Listener OTA v1 active-link hint",
             ActiveControlTransientFallback::TryFreshGatt,
         )
     }
 
-    pub(super) fn prepare_listener_ota_v2_transfer() -> Result<PreparedListenerOtaV2Transfer, String>
+    pub(super) fn prepare_listener_ota_v1_transfer() -> Result<PreparedListenerOtaV1Transfer, String>
     {
-        let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v2")?;
-        match request_listener_ota_v2_active_link() {
-            Ok(()) => log::info!("[embedded-ble] Listener OTA v2 active-link hint sent"),
+        let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v1")?;
+        match request_listener_ota_v1_active_link() {
+            Ok(()) => log::info!("[embedded-ble] Listener OTA v1 active-link hint sent"),
             Err(err) => log::warn!(
-                "[embedded-ble] Listener OTA v2 active-link hint failed; continuing with OTA begin fallback: {err}"
+                "[embedded-ble] Listener OTA v1 active-link hint failed; continuing with OTA begin fallback: {err}"
             ),
         }
-        log::info!("[embedded-ble] Listener OTA v2 prepare: acquiring BLE capture guard");
+        log::info!("[embedded-ble] Listener OTA v1 prepare: acquiring BLE capture guard");
         let transfer_guard = BleCaptureGuard::enter(None)?;
-        let _fresh_guard = BleFreshGattGuard::enter("Listener OTA v2 prepare")?;
-        log::info!("[embedded-ble] Listener OTA v2 prepare: discovering Listener OTA v2 service");
-        let target = open_listener_ota_v2_target()?;
-        let snapshot = listener_ota_v2_device_snapshot_from_target(&target);
+        let _fresh_guard = BleFreshGattGuard::enter("Listener OTA v1 prepare")?;
+        log::info!("[embedded-ble] Listener OTA v1 prepare: discovering Listener OTA v1 service");
+        let target = open_listener_ota_v1_target()?;
+        let snapshot = listener_ota_v1_gatt_probe_snapshot_from_target(&target);
         log::info!(
-            "[embedded-ble] Listener OTA v2 prepare: ready (detail={})",
+            "[embedded-ble] Listener OTA v1 prepare: ready (detail={})",
             snapshot.detail.as_deref().unwrap_or("unknown")
         );
-        Ok(PreparedListenerOtaV2Transfer {
+        Ok(PreparedListenerOtaV1Transfer {
             target,
             snapshot,
             transfer_guard,
             _ota_process_guard: ota_process_guard,
-        })
-    }
-
-    pub fn transfer_firmware_ota(
-        version: &str,
-        firmware_sha256: &str,
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-        if firmware_bytes.is_empty() {
-            return Err("firmware_ota.bin is empty.".to_string());
-        }
-
-        let prepared = prepare_firmware_ota_transfer()?;
-        prepared.transfer(
-            version,
-            firmware_sha256,
-            firmware_bytes,
-            manifest_chunk_bytes,
-            on_progress,
-        )
-    }
-
-    fn transfer_firmware_ota_to_target(
-        target: &OpenOtaTarget,
-        transfer_id: u64,
-        version: &str,
-        firmware_sha256: &str,
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-        if firmware_bytes.is_empty() {
-            return Err("firmware_ota.bin is empty.".to_string());
-        }
-
-        let data_chunk_bytes =
-            ota_transfer_chunk_bytes(target.data_chunk_bytes, manifest_chunk_bytes)?;
-        let inter_chunk_delay = ota_data_inter_chunk_delay()?;
-        let total_chunks = firmware_bytes.len().div_ceil(data_chunk_bytes);
-        log::info!(
-            "[embedded-ble] ota #{transfer_id}: aborting previous OTA (if any) before begin"
-        );
-        let abort_cmd = "{\"op\":\"abort\"}\n".to_string();
-        let _ = write_gatt_value_with_timeout(
-            &target.control,
-            abort_cmd.as_bytes(),
-            GattWriteOption::WriteWithResponse,
-            OTA_WRITE_TIMEOUT,
-            "OTA control abort",
-        );
-
-        log::info!(
-            "[embedded-ble] ota #{transfer_id}: writing begin version={version} size={} chunks={total_chunks}",
-            firmware_bytes.len()
-        );
-        let begin = format!(
-            "{{\"op\":\"begin\",\"version\":\"{}\",\"size\":{},\"sha256\":\"{}\"}}\n",
-            json_escape(version),
-            firmware_bytes.len(),
-            json_escape(firmware_sha256)
-        );
-        write_gatt_value_with_timeout(
-            &target.control,
-            begin.as_bytes(),
-            GattWriteOption::WriteWithResponse,
-            OTA_WRITE_TIMEOUT,
-            "OTA control begin",
-        )?;
-
-        let mut chunks_sent = 0usize;
-        for chunk in firmware_bytes.chunks(data_chunk_bytes) {
-            write_gatt_value_with_timeout(
-                &target.data,
-                chunk,
-                target.data_write_option,
-                OTA_WRITE_TIMEOUT,
-                "OTA data",
-            )?;
-            if !inter_chunk_delay.is_zero() {
-                std::thread::sleep(inter_chunk_delay);
-            }
-            chunks_sent += 1;
-            let bytes_sent = (chunks_sent * data_chunk_bytes).min(firmware_bytes.len());
-            if chunks_sent % 10 == 0 || bytes_sent == firmware_bytes.len() {
-                log::info!(
-                    "[embedded-ble] ota #{transfer_id}: progress {bytes_sent}/{} bytes ({chunks_sent}/{total_chunks} chunks)",
-                    firmware_bytes.len()
-                );
-                if let Some(cb) = &on_progress {
-                    cb(bytes_sent, firmware_bytes.len());
-                }
-            }
-        }
-
-        log::info!("[embedded-ble] ota #{transfer_id}: writing finish");
-        let finish = format!(
-            "{{\"op\":\"finish\",\"size\":{},\"sha256\":\"{}\"}}\n",
-            firmware_bytes.len(),
-            json_escape(firmware_sha256)
-        );
-        let finish_result = write_gatt_value_with_timeout(
-            &target.control,
-            finish.as_bytes(),
-            GattWriteOption::WriteWithResponse,
-            OTA_FINISH_WRITE_TIMEOUT,
-            "OTA control finish",
-        );
-        if let Err(err) = finish_result {
-            if is_ota_finish_reboot_handoff_error(&err) {
-                log::warn!(
-                    "[embedded-ble] ota #{transfer_id}: finish write reported reboot handoff after full payload; continuing to confirmation: {err}"
-                );
-            } else {
-                return Err(err);
-            }
-        }
-        log::info!(
-            "[embedded-ble] ota #{transfer_id}: transferred {} bytes in {chunks_sent} chunks (chunk_bytes={data_chunk_bytes}, transport_limit={}, manifest_limit={})",
-            firmware_bytes.len(),
-            target.data_chunk_bytes,
-            manifest_chunk_bytes
-        );
-        Ok(crate::embedded_ble::FirmwareOtaTransferStats {
-            bytes_transferred: firmware_bytes.len(),
-            chunks_sent,
-            transport: "listener_ble_ota",
         })
     }
 
@@ -6991,35 +6734,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             || (lower.contains("ota control finish") && lower.contains("timed out"))
     }
 
-    #[cfg(any())]
-    pub fn transfer_stm32wb_st_ota(
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-        if firmware_bytes.is_empty() {
-            return Err("firmware_ota.bin is empty.".to_string());
-        }
-
-        let prepared = prepare_stm32wb_st_ota_transfer()?;
-        prepared.transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
-    }
-
-    #[cfg(any())]
-    pub fn transfer_companion_ota_v2(
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-        if firmware_bytes.is_empty() {
-            return Err("firmware_ota.bin is empty.".to_string());
-        }
-
-        let prepared = prepare_companion_ota_v2_transfer()?;
-        prepared.transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
-    }
-
-    pub fn transfer_listener_ota_v2(
+    pub fn transfer_listener_ota_v1(
         firmware_sha256: &str,
         firmware_bytes: &[u8],
         manifest_chunk_bytes: usize,
@@ -7029,925 +6744,34 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             return Err("firmware_ota.bin is empty.".to_string());
         }
 
-        let prepared = prepare_listener_ota_v2_transfer()?;
-        prepared.transfer(firmware_sha256, firmware_bytes, manifest_chunk_bytes, on_progress)
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    struct OtaV2Status {
-        state: u8,
-        last_error: u8,
-        bytes_written: usize,
-        expected_size: usize,
-        chunk_payload_bytes: usize,
-        window_chunks: usize,
-        data_write_count: u32,
-    }
-
-    #[cfg(any())]
-    fn transfer_companion_ota_v2_to_target(
-        target: &OpenOtaV2Target,
-        transfer_id: u64,
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-        if manifest_chunk_bytes != OTA_V2_CHUNK_PAYLOAD_BYTES {
-            return Err(format!(
-                "Companion OTA v2 manifest chunk size must be {OTA_V2_CHUNK_PAYLOAD_BYTES} bytes, got {manifest_chunk_bytes}."
-            ));
-        }
-
-        let configured_window = ota_v2_window_chunks()?;
-        let begin_window = configured_window.min(u16::MAX as usize).max(1);
-        let begin = ota_v2_control_command(
-            OTA_V2_OP_BEGIN,
-            firmware_bytes.len() as u32,
-            manifest_chunk_bytes as u16,
-            begin_window as u16,
-        );
-
-        log::info!(
-            "[embedded-ble] Companion OTA v2 #{transfer_id}: aborting previous transfer (if any)"
-        );
-        let abort = ota_v2_control_command(OTA_V2_OP_ABORT, 0, 0, 0);
-        let _ = write_gatt_value_with_timeout(
-            &target.control,
-            &abort,
-            GattWriteOption::WriteWithResponse,
-            OTA_WRITE_TIMEOUT,
-            "Companion OTA v2 abort",
-        );
-
-        log::info!(
-            "[embedded-ble] Companion OTA v2 #{transfer_id}: begin size={} chunk={} window={begin_window}",
-            firmware_bytes.len(),
-            manifest_chunk_bytes
-        );
-        write_gatt_value_with_timeout(
-            &target.control,
-            &begin,
-            GattWriteOption::WriteWithResponse,
-            OTA_WRITE_TIMEOUT,
-            "Companion OTA v2 begin",
-        )?;
-
-        let mut status = wait_ota_v2_status(
-            target,
-            transfer_id,
-            |status| {
-                status.state == OTA_V2_STATE_RECEIVING
-                    && status.expected_size == firmware_bytes.len()
-            },
-            "begin erase",
-        )?;
-        let mut window_chunks = status.window_chunks.max(1).min(configured_window.max(1));
-        let chunk_payload_bytes = status
-            .chunk_payload_bytes
-            .max(1)
-            .min(manifest_chunk_bytes)
-            .min(target.data_chunk_payload_bytes);
-        log::info!(
-            "[embedded-ble] Companion OTA v2 #{transfer_id}: receiving offset={} device_chunk={} host_chunk={} window={window_chunks}",
-            status.bytes_written,
-            status.chunk_payload_bytes,
-            chunk_payload_bytes
-        );
-
-        let mut chunks_sent = 0usize;
-        let mut confirmed_offset = status.bytes_written.min(firmware_bytes.len());
-        while confirmed_offset < firmware_bytes.len() {
-            let mut sent_until = confirmed_offset;
-            let mut chunks_this_window = 0usize;
-            while chunks_this_window < window_chunks && sent_until < firmware_bytes.len() {
-                let payload_len = chunk_payload_bytes.min(firmware_bytes.len() - sent_until);
-                let mut packet = Vec::with_capacity(OTA_V2_PACKET_HEADER_BYTES + payload_len);
-                packet.extend_from_slice(&(sent_until as u32).to_le_bytes());
-                packet.extend_from_slice(&firmware_bytes[sent_until..sent_until + payload_len]);
-                write_gatt_value_with_timeout(
-                    &target.data,
-                    &packet,
-                    target.data_write_option,
-                    OTA_WRITE_TIMEOUT,
-                    "Companion OTA v2 data",
-                )?;
-                sent_until += payload_len;
-                chunks_sent += 1;
-                chunks_this_window += 1;
-            }
-
-            let sync = ota_v2_control_command(
-                OTA_V2_OP_SYNC,
-                firmware_bytes.len() as u32,
-                manifest_chunk_bytes as u16,
-                window_chunks as u16,
-            );
-            write_gatt_value_with_timeout(
-                &target.control,
-                &sync,
-                GattWriteOption::WriteWithResponse,
-                OTA_WRITE_TIMEOUT,
-                "Companion OTA v2 sync",
-            )?;
-            status = read_ota_v2_status(target)?;
-            ota_v2_status_result(&status)?;
-            if status.expected_size != firmware_bytes.len() {
-                return Err(format!(
-                    "Companion OTA v2 status expected_size={} does not match package size {}.",
-                    status.expected_size,
-                    firmware_bytes.len()
-                ));
-            }
-            if status.bytes_written > sent_until {
-                return Err(format!(
-                    "Companion OTA v2 status offset {} advanced beyond host sent offset {sent_until}.",
-                    status.bytes_written
-                ));
-            }
-            if status.bytes_written < sent_until {
-                log::warn!(
-                    "[embedded-ble] Companion OTA v2 #{transfer_id}: device accepted {}/{} bytes in window; retrying from offset {} last_error={}",
-                    status.bytes_written.saturating_sub(confirmed_offset),
-                    sent_until.saturating_sub(confirmed_offset),
-                    status.bytes_written,
-                    status.last_error
-                );
-                if status.last_error == COMPANION_OTA_V2_ERROR_OFFSET_MISMATCH {
-                    window_chunks = window_chunks.saturating_div(2).max(1);
-                }
-            } else if window_chunks < configured_window {
-                window_chunks += 1;
-            }
-
-            confirmed_offset = status.bytes_written.min(firmware_bytes.len());
-            if chunks_sent % 10 == 0 || confirmed_offset == firmware_bytes.len() {
-                log::info!(
-                    "[embedded-ble] Companion OTA v2 #{transfer_id}: progress {confirmed_offset}/{} bytes (chunks_sent={chunks_sent}, window={window_chunks})",
-                    firmware_bytes.len()
-                );
-                if let Some(cb) = &on_progress {
-                    cb(confirmed_offset, firmware_bytes.len());
-                }
-            }
-        }
-
-        let finish = ota_v2_control_command(
-            OTA_V2_OP_FINISH,
-            firmware_bytes.len() as u32,
-            manifest_chunk_bytes as u16,
-            window_chunks as u16,
-        );
-        log::info!("[embedded-ble] Companion OTA v2 #{transfer_id}: writing finish");
-        let finish_result = write_gatt_value_with_timeout(
-            &target.control,
-            &finish,
-            GattWriteOption::WriteWithResponse,
-            OTA_FINISH_WRITE_TIMEOUT,
-            "Companion OTA v2 finish",
-        );
-        if let Err(err) = finish_result {
-            if is_ota_finish_reboot_handoff_error(&err)
-                || is_stm32wb_st_ota_finish_reboot_handoff_error(&err)
-            {
-                log::warn!(
-                    "[embedded-ble] Companion OTA v2 #{transfer_id}: finish write reported reboot handoff after full payload; accepting completion: {err}"
-                );
-            } else {
-                return Err(err);
-            }
-        }
-        log::info!(
-            "[embedded-ble] Companion OTA v2 #{transfer_id}: transferred {} bytes in {chunks_sent} chunks (chunk_bytes={chunk_payload_bytes}, window_limit={configured_window})",
-            firmware_bytes.len()
-        );
-        Ok(crate::embedded_ble::FirmwareOtaTransferStats {
-            bytes_transferred: firmware_bytes.len(),
-            chunks_sent,
-            transport: "companion_ota_v2",
-        })
-    }
-
-    fn transfer_listener_ota_v2_to_target(
-        target: &OpenListenerOtaV2Target,
-        transfer_id: u64,
-        firmware_sha256: &str,
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-        if manifest_chunk_bytes != LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES {
-            return Err(format!(
-                "Listener OTA v2 manifest chunk size must be {LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES} bytes, got {manifest_chunk_bytes}."
-            ));
-        }
-
-        let configured_window = listener_ota_v2_window_chunks()?;
-        let begin_window = configured_window.min(u16::MAX as usize).max(1);
-        let begin = listener_ota_v2_control_command(
-            OTA_V2_OP_BEGIN,
-            firmware_bytes.len() as u32,
-            manifest_chunk_bytes as u16,
-            begin_window as u16,
-        );
-        let mut data_write_option = target.data_write_option;
-
-        let resume = listener_ota_v2_resume_command(
-            firmware_bytes.len() as u32,
-            manifest_chunk_bytes as u16,
-            begin_window as u16,
+        let prepared = prepare_listener_ota_v1_transfer()?;
+        prepared.transfer(
             firmware_sha256,
-        )?;
-        log::info!(
-            "[embedded-ble] Listener OTA v2 #{transfer_id}: requesting same-package resume before begin"
-        );
-        match write_listener_ota_v2_value_with_fallback(
-            &target.data,
-            &resume,
-            data_write_option,
-            OTA_WRITE_TIMEOUT,
-            "Listener OTA v2 resume",
-        ) {
-            Ok(option) => data_write_option = option,
-            Err(resume_err) => {
-                log::warn!(
-                    "[embedded-ble] Listener OTA v2 #{transfer_id}: resume request was unavailable; falling back to a fresh transfer: {resume_err}"
-                );
-                let abort = listener_ota_v2_control_command(OTA_V2_OP_ABORT, 0, 0, 0);
-                if let Ok(option) = write_listener_ota_v2_value_with_fallback(
-                    &target.data,
-                    &abort,
-                    data_write_option,
-                    OTA_WRITE_TIMEOUT,
-                    "Listener OTA v2 abort fallback",
-                ) {
-                    data_write_option = option;
-                }
-                data_write_option = write_listener_ota_v2_value_with_fallback(
-                    &target.data,
-                    &begin,
-                    data_write_option,
-                    OTA_WRITE_TIMEOUT,
-                    "Listener OTA v2 begin fallback",
-                )?;
-            }
-        }
-
-        let mut status = wait_listener_ota_v2_status(
-            target,
-            transfer_id,
-            |status| {
-                status.state == OTA_V2_STATE_RECEIVING
-                    && status.expected_size == firmware_bytes.len()
-            },
-            "begin",
-        )?;
-        let active_link_settle_delay = listener_ota_v2_active_link_settle_delay()?;
-        if !active_link_settle_delay.is_zero() {
-            log::info!(
-                "[embedded-ble] Listener OTA v2 #{transfer_id}: waiting {} ms for active BLE connection parameters after begin",
-                active_link_settle_delay.as_millis()
-            );
-            std::thread::sleep(active_link_settle_delay);
-            status = read_listener_ota_v2_status_with_retry(
-                target,
-                transfer_id,
-                "active-link settle",
-                Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT,
-            )?;
-            ota_v2_status_result(&status)?;
-            if status.state != OTA_V2_STATE_RECEIVING
-                || status.expected_size != firmware_bytes.len()
-            {
-                return Err(format!(
-                    "Listener OTA v2 status changed during active-link settle: state={} expected_size={} bytes_written={}.",
-                    status.state, status.expected_size, status.bytes_written
-                ));
-            }
-        }
-        let mut window_chunks = status.window_chunks.max(1).min(configured_window.max(1));
-        let chunk_payload_bytes = status
-            .chunk_payload_bytes
-            .max(1)
-            .min(manifest_chunk_bytes)
-            .min(target.data_chunk_payload_bytes);
-        log::info!(
-            "[embedded-ble] Listener OTA v2 #{transfer_id}: receiving offset={} device_chunk={} host_chunk={} window={window_chunks}",
-            status.bytes_written,
-            status.chunk_payload_bytes,
-            chunk_payload_bytes
-        );
-        if status.bytes_written > 0 {
-            log::info!(
-                "[embedded-ble] Listener OTA v2 #{transfer_id}: resuming same package from offset {}/{}",
-                status.bytes_written,
-                firmware_bytes.len()
-            );
-        }
-        if let Some(cb) = &on_progress {
-            cb(status.bytes_written.min(firmware_bytes.len()), firmware_bytes.len());
-        }
-
-        let mut chunks_sent = 0usize;
-        let mut confirmed_offset = status.bytes_written.min(firmware_bytes.len());
-        while confirmed_offset < firmware_bytes.len() {
-            let mut sent_until = confirmed_offset;
-            let mut chunks_this_window = 0usize;
-            while chunks_this_window < window_chunks && sent_until < firmware_bytes.len() {
-                let payload_len = chunk_payload_bytes.min(firmware_bytes.len() - sent_until);
-                let mut packet = Vec::with_capacity(OTA_V2_PACKET_HEADER_BYTES + payload_len);
-                packet.extend_from_slice(&(sent_until as u32).to_le_bytes());
-                packet.extend_from_slice(&firmware_bytes[sent_until..sent_until + payload_len]);
-                data_write_option = write_listener_ota_v2_value_with_fallback(
-                    &target.data,
-                    &packet,
-                    data_write_option,
-                    OTA_WRITE_TIMEOUT,
-                    "Listener OTA v2 data",
-                )?;
-                sent_until += payload_len;
-                chunks_sent += 1;
-                chunks_this_window += 1;
-            }
-
-            let sync = listener_ota_v2_control_command(
-                OTA_V2_OP_SYNC,
-                firmware_bytes.len() as u32,
-                manifest_chunk_bytes as u16,
-                window_chunks as u16,
-            );
-            data_write_option = write_listener_ota_v2_value_with_fallback(
-                &target.data,
-                &sync,
-                data_write_option,
-                OTA_WRITE_TIMEOUT,
-                "Listener OTA v2 sync",
-            )?;
-            status = read_listener_ota_v2_status_with_retry(
-                target,
-                transfer_id,
-                "sync",
-                Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT,
-            )?;
-            ota_v2_status_result(&status)?;
-            if status.expected_size != firmware_bytes.len() {
-                return Err(format!(
-                    "Listener OTA v2 status expected_size={} does not match package size {}.",
-                    status.expected_size,
-                    firmware_bytes.len()
-                ));
-            }
-            if status.bytes_written > sent_until {
-                return Err(format!(
-                    "Listener OTA v2 status offset {} advanced beyond host sent offset {sent_until}.",
-                    status.bytes_written
-                ));
-            }
-            if status.bytes_written < sent_until {
-                log::warn!(
-                    "[embedded-ble] Listener OTA v2 #{transfer_id}: device accepted {}/{} bytes in window; retrying from offset {} last_error={}",
-                    status.bytes_written.saturating_sub(confirmed_offset),
-                    sent_until.saturating_sub(confirmed_offset),
-                    status.bytes_written,
-                    status.last_error
-                );
-                if status.last_error == OTA_V2_ERROR_OFFSET_MISMATCH {
-                    window_chunks = window_chunks.saturating_div(2).max(1);
-                }
-            } else if window_chunks < configured_window {
-                window_chunks += 1;
-            }
-
-            confirmed_offset = status.bytes_written.min(firmware_bytes.len());
-            if chunks_sent % 10 == 0 || confirmed_offset == firmware_bytes.len() {
-                log::info!(
-                    "[embedded-ble] Listener OTA v2 #{transfer_id}: progress {confirmed_offset}/{} bytes (chunks_sent={chunks_sent}, window={window_chunks})",
-                    firmware_bytes.len()
-                );
-                if let Some(cb) = &on_progress {
-                    cb(confirmed_offset, firmware_bytes.len());
-                }
-            }
-        }
-
-        let finish = listener_ota_v2_control_command(
-            OTA_V2_OP_FINISH,
-            firmware_bytes.len() as u32,
-            manifest_chunk_bytes as u16,
-            window_chunks as u16,
-        );
-        log::info!("[embedded-ble] Listener OTA v2 #{transfer_id}: writing finish");
-        let finish_result = write_listener_ota_v2_value_with_fallback(
-            &target.data,
-            &finish,
-            data_write_option,
-            OTA_FINISH_WRITE_TIMEOUT,
-            "Listener OTA v2 finish",
-        );
-        if let Err(err) = finish_result {
-            if is_ota_finish_reboot_handoff_error(&err) {
-                log::warn!(
-                    "[embedded-ble] Listener OTA v2 #{transfer_id}: finish write reported reboot handoff after full payload; accepting completion: {err}"
-                );
-            } else {
-                return Err(err);
-            }
-        }
-        log::info!(
-            "[embedded-ble] Listener OTA v2 #{transfer_id}: transferred {} bytes in {chunks_sent} chunks (chunk_bytes={chunk_payload_bytes}, window_limit={configured_window})",
-            firmware_bytes.len()
-        );
-        Ok(crate::embedded_ble::FirmwareOtaTransferStats {
-            bytes_transferred: firmware_bytes.len(),
-            chunks_sent,
-            transport: "listener_ble_ota_v2",
-        })
-    }
-
-    #[cfg(any())]
-    fn ota_v2_control_command(
-        op: u8,
-        expected_size: u32,
-        chunk_payload_bytes: u16,
-        window_chunks: u16,
-    ) -> [u8; 16] {
-        let mut bytes = [0u8; 16];
-        bytes[0..4].copy_from_slice(OTA_V2_MAGIC);
-        bytes[4] = op;
-        bytes[5] = OTA_V2_PROTOCOL_VERSION;
-        bytes[8..12].copy_from_slice(&expected_size.to_le_bytes());
-        bytes[12..14].copy_from_slice(&chunk_payload_bytes.to_le_bytes());
-        bytes[14..16].copy_from_slice(&window_chunks.to_le_bytes());
-        bytes
-    }
-
-    fn listener_ota_v2_control_command(
-        op: u8,
-        expected_size: u32,
-        chunk_payload_bytes: u16,
-        window_chunks: u16,
-    ) -> Vec<u8> {
-        let op_name = match op {
-            OTA_V2_OP_BEGIN => "begin_v2",
-            OTA_V2_OP_SYNC => "sync_v2",
-            OTA_V2_OP_FINISH => "finish_v2",
-            OTA_V2_OP_ABORT => "abort_v2",
-            _ => "abort_v2",
-        };
-        format!(
-            "{{\"op\":\"{op_name}\",\"size\":{expected_size},\"chunk\":{chunk_payload_bytes},\"window\":{window_chunks}}}\n"
+            firmware_bytes,
+            manifest_chunk_bytes,
+            on_progress,
         )
-        .into_bytes()
     }
 
-    fn listener_ota_v2_resume_command(
-        expected_size: u32,
-        chunk_payload_bytes: u16,
-        window_chunks: u16,
-        firmware_sha256: &str,
-    ) -> Result<Vec<u8>, String> {
-        if firmware_sha256.len() != 64 || !firmware_sha256.chars().all(|ch| ch.is_ascii_hexdigit()) {
-            return Err("Listener OTA v2 resume requires a SHA256 package identity.".to_string());
-        }
-        Ok(format!(
-            "{{\"op\":\"resume_v2\",\"size\":{expected_size},\"chunk\":{chunk_payload_bytes},\"window\":{window_chunks},\"sha256\":\"{}\"}}\n",
-            firmware_sha256.to_ascii_lowercase(),
-        )
-        .into_bytes())
-    }
-
-    #[cfg(any())]
-    fn ota_v2_window_chunks() -> Result<usize, String> {
-        let configured = std::env::var(OTA_V2_WINDOW_ENV)
+    fn listener_ota_v1_window_chunks() -> Result<usize, String> {
+        let configured = std::env::var(LISTENER_OTA_V1_WINDOW_ENV)
             .ok()
             .and_then(ota_env_value);
         match configured.as_deref() {
-            None => Ok(OTA_V2_DEFAULT_WINDOW_CHUNKS),
+            None => Ok(LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS),
             Some(value) => value
                 .parse::<usize>()
                 .ok()
                 .filter(|window| (1..=64).contains(window))
                 .ok_or_else(|| {
                     format!(
-                        "Unsupported {OTA_V2_WINDOW_ENV}={value}; use a window from 1 to 64 chunks."
+                        "Unsupported {LISTENER_OTA_V1_WINDOW_ENV}={value}; use a window from 1 to 64 chunks."
                     )
                 }),
         }
     }
 
-    fn listener_ota_v2_window_chunks() -> Result<usize, String> {
-        let configured = std::env::var(LISTENER_OTA_V2_WINDOW_ENV)
-            .ok()
-            .and_then(ota_env_value);
-        match configured.as_deref() {
-            None => Ok(LISTENER_OTA_V2_DEFAULT_WINDOW_CHUNKS),
-            Some(value) => value
-                .parse::<usize>()
-                .ok()
-                .filter(|window| (1..=64).contains(window))
-                .ok_or_else(|| {
-                    format!(
-                        "Unsupported {LISTENER_OTA_V2_WINDOW_ENV}={value}; use a window from 1 to 64 chunks."
-                    )
-                }),
-        }
-    }
-
-    fn listener_ota_v2_active_link_settle_delay() -> Result<Duration, String> {
-        let value = std::env::var(LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS_ENV)
-            .ok()
-            .and_then(ota_env_value);
-        listener_ota_v2_active_link_settle_delay_from(value.as_deref())
-    }
-
-    fn listener_ota_v2_active_link_settle_delay_from(
-        value: Option<&str>,
-    ) -> Result<Duration, String> {
-        match value.map(str::trim).filter(|value| !value.is_empty()) {
-            None => Ok(Duration::from_millis(LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS)),
-            Some(value) => value
-                .parse::<u64>()
-                .ok()
-                .filter(|ms| *ms <= 30_000)
-                .map(Duration::from_millis)
-                .ok_or_else(|| {
-                    format!(
-                        "Unsupported {LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS_ENV}={value}; use a non-negative millisecond count up to 30000."
-                    )
-                }),
-        }
-    }
-
-    #[cfg(any())]
-    fn wait_ota_v2_status(
-        target: &OpenOtaV2Target,
-        transfer_id: u64,
-        ready: impl Fn(&OtaV2Status) -> bool,
-        label: &str,
-    ) -> Result<OtaV2Status, String> {
-        let deadline = Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT;
-        loop {
-            let status = read_companion_ota_v2_status(target)?;
-            ota_v2_status_result(&status)?;
-            if ready(&status) {
-                return Ok(status);
-            }
-            if Instant::now() >= deadline {
-                return Err(format!(
-                    "Companion OTA v2 #{transfer_id} timed out waiting for {label}; last_status={status:?}"
-                ));
-            }
-            std::thread::sleep(OTA_V2_STATUS_POLL_INTERVAL);
-        }
-    }
-
-    #[cfg(any())]
-    fn read_companion_ota_v2_status(target: &OpenOtaV2Target) -> Result<OtaV2Status, String> {
-        read_ota_v2_status(target)
-    }
-
-    #[cfg(any())]
-    fn read_ota_v2_status(target: &OpenOtaV2Target) -> Result<OtaV2Status, String> {
-        let bytes = read_characteristic_bytes(
-            &target.status,
-            BluetoothCacheMode::Uncached,
-            "Companion OTA v2 status",
-        )?;
-        parse_ota_v2_status(&bytes)
-    }
-
-    fn wait_listener_ota_v2_status(
-        target: &OpenListenerOtaV2Target,
-        transfer_id: u64,
-        ready: impl Fn(&OtaV2Status) -> bool,
-        label: &str,
-    ) -> Result<OtaV2Status, String> {
-        let deadline = Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT;
-        loop {
-            let status =
-                read_listener_ota_v2_status_with_retry(target, transfer_id, label, deadline)?;
-            ota_v2_status_result(&status)?;
-            if ready(&status) {
-                return Ok(status);
-            }
-            if Instant::now() >= deadline {
-                return Err(format!(
-                    "Listener OTA v2 #{transfer_id} timed out waiting for {label}; last_status={status:?}"
-                ));
-            }
-            std::thread::sleep(OTA_V2_STATUS_POLL_INTERVAL);
-        }
-    }
-
-    fn read_listener_ota_v2_status_with_retry(
-        target: &OpenListenerOtaV2Target,
-        transfer_id: u64,
-        phase: &str,
-        deadline: Instant,
-    ) -> Result<OtaV2Status, String> {
-        let mut attempt = 0u32;
-        loop {
-            attempt += 1;
-            match read_listener_ota_v2_status(target) {
-                Ok(status) => {
-                    if attempt > 1 {
-                        log::info!(
-                            "[embedded-ble] Listener OTA v2 #{transfer_id}: status read recovered during {phase} on attempt {attempt}"
-                        );
-                    }
-                    return Ok(status);
-                }
-                Err(err) if is_transient_listener_ota_v2_status_read_error(&err) => {
-                    let now = Instant::now();
-                    if now >= deadline {
-                        return Err(err);
-                    }
-                    let remaining = deadline.saturating_duration_since(now);
-                    let sleep_for = remaining.min(OTA_V2_STATUS_POLL_INTERVAL);
-                    log::warn!(
-                        "[embedded-ble] Listener OTA v2 #{transfer_id}: transient status read failure during {phase} on attempt {attempt}: {err}; retrying in {} ms",
-                        sleep_for.as_millis()
-                    );
-                    std::thread::sleep(sleep_for);
-                }
-                Err(err) => return Err(err),
-            }
-        }
-    }
-
-    fn read_listener_ota_v2_status(
-        target: &OpenListenerOtaV2Target,
-    ) -> Result<OtaV2Status, String> {
-        let bytes = read_characteristic_bytes_with_timeout(
-            &target.status,
-            BluetoothCacheMode::Uncached,
-            "Listener OTA v2 status",
-            LISTENER_OTA_V2_STATUS_READ_TIMEOUT,
-        )?;
-        parse_listener_ota_v2_status(&bytes)
-    }
-
-    fn is_transient_listener_ota_v2_status_read_error(err: &str) -> bool {
-        err.contains("GattCommunicationStatus(1)")
-            || err.contains("GattCommunicationStatus(3)")
-            || err.contains("async error")
-            || err.contains("async canceled")
-            || err.contains("timed out")
-            || err.contains("timeout")
-            || err.contains("Unreachable")
-            || err.contains("unreachable")
-    }
-
-    #[cfg(any())]
-    fn parse_ota_v2_status(bytes: &[u8]) -> Result<OtaV2Status, String> {
-        if bytes.len() < OTA_V2_STATUS_BYTES {
-            return Err(format!(
-                "Companion OTA v2 status is {} bytes; expected {OTA_V2_STATUS_BYTES}.",
-                bytes.len()
-            ));
-        }
-        if &bytes[0..4] != OTA_V2_MAGIC {
-            return Err("Companion OTA v2 status magic mismatch.".to_string());
-        }
-        if bytes[4] != OTA_V2_PROTOCOL_VERSION {
-            return Err(format!(
-                "Companion OTA v2 status protocol version {} is unsupported.",
-                bytes[4]
-            ));
-        }
-        Ok(OtaV2Status {
-            state: bytes[5],
-            last_error: bytes[6],
-            bytes_written: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize,
-            expected_size: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]])
-                as usize,
-            chunk_payload_bytes: u16::from_le_bytes([bytes[16], bytes[17]]) as usize,
-            window_chunks: u16::from_le_bytes([bytes[18], bytes[19]]) as usize,
-            data_write_count: u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
-        })
-    }
-
-    fn parse_listener_ota_v2_status(bytes: &[u8]) -> Result<OtaV2Status, String> {
-        if bytes.len() < OTA_V2_STATUS_BYTES {
-            return Err(format!(
-                "Listener OTA v2 status is {} bytes; expected {OTA_V2_STATUS_BYTES}.",
-                bytes.len()
-            ));
-        }
-        if &bytes[0..4] != LISTENER_OTA_V2_MAGIC {
-            return Err("Listener OTA v2 status magic mismatch.".to_string());
-        }
-        if bytes[4] != OTA_V2_PROTOCOL_VERSION {
-            return Err(format!(
-                "Listener OTA v2 status version {} is unsupported.",
-                bytes[4]
-            ));
-        }
-        Ok(OtaV2Status {
-            state: bytes[5],
-            last_error: bytes[6],
-            bytes_written: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize,
-            expected_size: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]])
-                as usize,
-            chunk_payload_bytes: u16::from_le_bytes([bytes[16], bytes[17]]) as usize,
-            window_chunks: u16::from_le_bytes([bytes[18], bytes[19]]) as usize,
-            data_write_count: u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
-        })
-    }
-
-    fn ota_v2_status_result(status: &OtaV2Status) -> Result<(), String> {
-        if status.state == OTA_V2_STATE_ERROR {
-            return Err(format!(
-                "OTA v2 device entered error state last_error={} offset={} expected_size={} data_writes={}.",
-                status.last_error,
-                status.bytes_written,
-                status.expected_size,
-                status.data_write_count
-            ));
-        }
-        if status.last_error != OTA_V2_ERROR_NONE
-            && status.last_error != OTA_V2_ERROR_OFFSET_MISMATCH
-        {
-            return Err(format!(
-                "OTA v2 device reported fatal last_error={} state={} offset={}.",
-                status.last_error, status.state, status.bytes_written
-            ));
-        }
-        Ok(())
-    }
-
-    #[cfg(any())]
-    fn transfer_stm32wb_st_ota_to_target(
-        target: &OpenStm32wbStOtaTarget,
-        transfer_id: u64,
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-        let data_chunk_bytes =
-            stm32wb_st_ota_transfer_chunk_bytes(target.raw_chunk_bytes, manifest_chunk_bytes)?;
-        let total_chunks = firmware_bytes.len().div_ceil(data_chunk_bytes);
-        let (confirm_tx, confirm_rx) = mpsc::channel::<Vec<u8>>();
-        let mut cleanup = Stm32wbStOtaConfirmCleanup {
-            characteristic: target.confirm.clone(),
-            token: None,
-            cccd_enabled: false,
-        };
-        let use_confirm = stm32wb_st_ota_use_confirm_indication();
-        let confirm_enabled = if use_confirm {
-            let handler = TypedEventHandler::<GattCharacteristic, GattValueChangedEventArgs>::new(
-                move |_sender, args| {
-                    if let Some(args) = args {
-                        match args
-                            .CharacteristicValue()
-                            .map_err(|err| err.to_string())
-                            .and_then(|buffer| {
-                                buffer_to_vec(&buffer).map_err(|err| err.to_string())
-                            }) {
-                            Ok(bytes) => {
-                                let _ = confirm_tx.send(bytes);
-                            }
-                            Err(err) => {
-                                log::warn!(
-                                    "[embedded-ble] STM32WB ST OTA confirm indication read failed: {err}"
-                                );
-                            }
-                        }
-                    }
-                    Ok(())
-                },
-            );
-            let token = target.confirm.ValueChanged(&handler).map_err(|err| {
-                format!("STM32WB ST OTA confirm ValueChanged registration failed: {err}")
-            })?;
-            cleanup.token = Some(token);
-            let confirm_cccd_result = write_cccd_indicate_with_retry(
-                transfer_id,
-                "STM32WB ST OTA confirm",
-                &target.confirm,
-                CCCD_ENABLE_TIMEOUT,
-            )
-            .and_then(|status| {
-                if status == GattCommunicationStatus::Success {
-                    Ok(status)
-                } else {
-                    Err(format!(
-                        "STM32WB ST OTA confirm indication CCCD returned status={status:?}"
-                    ))
-                }
-            });
-            match confirm_cccd_result {
-                Ok(_) => {
-                    cleanup.cccd_enabled = true;
-                    true
-                }
-                Err(err) => {
-                    return Err(format!(
-                        "STM32WB ST OTA confirmation indication is required before transfer; CCCD enable failed: {err}. Set COMPANION_STM32WB_ST_OTA_CONFIRM=0 only when testing the legacy no-confirm loader."
-                    ));
-                }
-            }
-        } else {
-            log::info!(
-                "[embedded-ble] STM32WB ST OTA #{transfer_id}: using explicit no-confirm reboot handoff debug path because COMPANION_STM32WB_ST_OTA_CONFIRM=0"
-            );
-            drop(confirm_tx);
-            false
-        };
-
-        if confirm_enabled {
-            log::info!(
-                "[embedded-ble] STM32WB ST OTA #{transfer_id}: ST reboot confirmation indication enabled"
-            );
-        } else {
-            log::info!(
-                "[embedded-ble] STM32WB ST OTA #{transfer_id}: transfer will verify completion by reboot handoff"
-            );
-        }
-
-        let base_address = STM32WB_ST_OTA_APP_BASE_ADDRESS;
-        let begin = stm32wb_st_ota_base_address_command(base_address);
-        log::info!(
-            "[embedded-ble] STM32WB ST OTA #{transfer_id}: begin base=0x{base_address:08x} size={} chunks={total_chunks}",
-            firmware_bytes.len()
-        );
-        write_stm32wb_st_ota_value_with_fallback(
-            &target.base,
-            &begin,
-            target.base_write_option,
-            OTA_WRITE_TIMEOUT,
-            "STM32WB ST OTA base address",
-        )?;
-
-        let mut chunks_sent = 0usize;
-        let mut raw_write_option = target.raw_write_option;
-        for chunk in firmware_bytes.chunks(data_chunk_bytes) {
-            raw_write_option = write_stm32wb_st_ota_value_with_fallback(
-                &target.raw,
-                chunk,
-                raw_write_option,
-                OTA_WRITE_TIMEOUT,
-                "STM32WB ST OTA raw data",
-            )?;
-            if raw_write_option == GattWriteOption::WriteWithoutResponse {
-                std::thread::sleep(STM32WB_ST_OTA_NO_RESPONSE_CHUNK_DELAY);
-            }
-            chunks_sent += 1;
-            let bytes_sent = (chunks_sent * data_chunk_bytes).min(firmware_bytes.len());
-            if chunks_sent % 10 == 0 || bytes_sent == firmware_bytes.len() {
-                log::info!(
-                    "[embedded-ble] STM32WB ST OTA #{transfer_id}: progress {bytes_sent}/{} bytes ({chunks_sent}/{total_chunks} chunks)",
-                    firmware_bytes.len()
-                );
-                if let Some(cb) = &on_progress {
-                    cb(bytes_sent, firmware_bytes.len());
-                }
-            }
-        }
-
-        let (handoff_tx, handoff_rx) = mpsc::channel::<String>();
-        let mut handoff_cleanup =
-            Stm32wbStOtaHandoffCleanup::install(transfer_id, target, handoff_tx);
-
-        let finish = [STM32WB_ST_OTA_UPLOAD_FINISHED, 0x00, 0x00, 0x00];
-        log::info!("[embedded-ble] STM32WB ST OTA #{transfer_id}: writing finish");
-        let finish_result = write_stm32wb_st_ota_value_with_fallback(
-            &target.base,
-            &finish,
-            target.base_write_option,
-            OTA_WRITE_TIMEOUT,
-            "STM32WB ST OTA finish",
-        );
-        if let Err(err) = finish_result {
-            if is_stm32wb_st_ota_finish_reboot_handoff_error(&err) {
-                log::warn!(
-                    "[embedded-ble] STM32WB ST OTA #{transfer_id}: finish write reported reboot handoff after full payload; continuing to confirmation/handoff: {err}"
-                );
-            } else {
-                return Err(err);
-            }
-        }
-        wait_stm32wb_st_ota_completion(
-            transfer_id,
-            target,
-            confirm_enabled,
-            &confirm_rx,
-            &handoff_rx,
-        )?;
-        handoff_cleanup.finish();
-        cleanup.finish();
-        log::info!(
-            "[embedded-ble] STM32WB ST OTA #{transfer_id}: transferred {} bytes in {chunks_sent} chunks (chunk_bytes={data_chunk_bytes})",
-            firmware_bytes.len()
-        );
-        Ok(crate::embedded_ble::FirmwareOtaTransferStats {
-            bytes_transferred: firmware_bytes.len(),
-            chunks_sent,
-            transport: "stm32wb_st_ble_ota",
-        })
-    }
-
-    #[cfg(any())]
-    fn write_stm32wb_st_ota_value_with_fallback(
+    fn write_listener_ota_v1_value_with_fallback(
         characteristic: &GattCharacteristic,
         bytes: &[u8],
         primary: GattWriteOption,
@@ -7974,239 +6798,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     })
             }
         }
-    }
-
-    fn write_listener_ota_v2_value_with_fallback(
-        characteristic: &GattCharacteristic,
-        bytes: &[u8],
-        primary: GattWriteOption,
-        timeout: Duration,
-        label: &str,
-    ) -> Result<GattWriteOption, String> {
-        match write_gatt_value_with_timeout(characteristic, bytes, primary, timeout, label) {
-            Ok(_) => Ok(primary),
-            Err(primary_err) => {
-                let fallback = match primary {
-                    GattWriteOption::WriteWithoutResponse => GattWriteOption::WriteWithResponse,
-                    GattWriteOption::WriteWithResponse => GattWriteOption::WriteWithoutResponse,
-                    _ => return Err(primary_err),
-                };
-                log::warn!(
-                    "[embedded-ble] {label} failed with {primary:?}: {primary_err}; retrying with {fallback:?}"
-                );
-                write_gatt_value_with_timeout(characteristic, bytes, fallback, timeout, label)
-                    .map(|_| fallback)
-                    .map_err(|fallback_err| {
-                        format!(
-                            "{primary_err}; fallback {fallback:?} for {label} also failed: {fallback_err}"
-                        )
-                    })
-            }
-        }
-    }
-
-    #[cfg(any())]
-    fn wait_stm32wb_st_ota_completion(
-        transfer_id: u64,
-        target: &OpenStm32wbStOtaTarget,
-        confirm_enabled: bool,
-        confirm_rx: &mpsc::Receiver<Vec<u8>>,
-        handoff_rx: &mpsc::Receiver<String>,
-    ) -> Result<(), String> {
-        if confirm_enabled {
-            let deadline = Instant::now() + STM32WB_ST_OTA_CONFIRM_TIMEOUT;
-            loop {
-                match confirm_rx.recv_timeout(Duration::from_millis(200)) {
-                    Ok(confirm)
-                        if confirm.first().copied() == Some(STM32WB_ST_OTA_REBOOT_CONFIRMED) =>
-                    {
-                        log::info!(
-                            "[embedded-ble] STM32WB ST OTA #{transfer_id}: reboot confirmation indication received"
-                        );
-                        return Ok(());
-                    }
-                    Ok(confirm) => {
-                        return Err(format!(
-                            "STM32WB ST OTA returned unexpected confirmation payload: {:02x?}",
-                            confirm
-                        ));
-                    }
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
-                        if let Ok(reason) = handoff_rx.try_recv() {
-                            log::info!(
-                                "[embedded-ble] STM32WB ST OTA #{transfer_id}: reboot handoff observed before confirm: {reason}"
-                            );
-                            return Ok(());
-                        }
-                        if stm32wb_st_ota_target_rebooted(target) {
-                            log::info!(
-                                "[embedded-ble] STM32WB ST OTA #{transfer_id}: reboot handoff observed by polling"
-                            );
-                            return Ok(());
-                        }
-                        if Instant::now() >= deadline {
-                            return Err(
-                                "Timed out waiting for STM32WB ST OTA reboot confirmation indication or reboot handoff".to_string(),
-                            );
-                        }
-                    }
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        return Err(
-                            "STM32WB ST OTA confirm indication channel disconnected".to_string()
-                        );
-                    }
-                }
-            }
-        }
-
-        let deadline = Instant::now() + STM32WB_ST_OTA_REBOOT_HANDOFF_TIMEOUT;
-        loop {
-            match handoff_rx.recv_timeout(Duration::from_millis(200)) {
-                Ok(reason) => {
-                    log::info!(
-                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: no-confirm reboot handoff observed: {reason}"
-                    );
-                    return Ok(());
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if stm32wb_st_ota_target_rebooted(target) {
-                        log::info!(
-                            "[embedded-ble] STM32WB ST OTA #{transfer_id}: no-confirm reboot handoff observed by polling"
-                        );
-                        return Ok(());
-                    }
-                    if Instant::now() >= deadline {
-                        return Err(format!(
-                            "Timed out waiting {} ms for STM32WB ST OTA no-confirm reboot handoff after finish",
-                            STM32WB_ST_OTA_REBOOT_HANDOFF_TIMEOUT.as_millis()
-                        ));
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("STM32WB ST OTA reboot handoff channel disconnected".to_string());
-                }
-            }
-        }
-    }
-
-    #[cfg(any())]
-    fn stm32wb_st_ota_target_rebooted(target: &OpenStm32wbStOtaTarget) -> bool {
-        if let Some(session) = target.session.as_ref() {
-            match session.SessionStatus() {
-                Ok(status) if status != GattSessionStatus::Active => {
-                    return true;
-                }
-                Err(err) => {
-                    log::info!(
-                        "[embedded-ble] STM32WB ST OTA session status read failed after finish; treating as reboot handoff: {err}"
-                    );
-                    return true;
-                }
-                _ => {}
-            }
-        }
-        if let Some(device) = target.device.as_ref() {
-            match device.ConnectionStatus() {
-                Ok(BluetoothConnectionStatus::Disconnected) => {
-                    return true;
-                }
-                Err(err) => {
-                    log::info!(
-                        "[embedded-ble] STM32WB ST OTA device status read failed after finish; treating as reboot handoff: {err}"
-                    );
-                    return true;
-                }
-                _ => {}
-            }
-        }
-        false
-    }
-
-    #[cfg(any())]
-    pub(super) fn is_stm32wb_st_ota_finish_reboot_handoff_error(err: &str) -> bool {
-        let lower = err.to_ascii_lowercase();
-        is_ota_finish_reboot_handoff_error(err)
-            || lower.contains("gattcommunicationstatus(1)")
-            || lower.contains("0x80000013")
-            || (lower.contains("stm32wb st ota finish") && lower.contains("timed out"))
-    }
-
-    #[cfg(any())]
-    fn stm32wb_st_ota_use_confirm_indication() -> bool {
-        std::env::var("COMPANION_STM32WB_ST_OTA_CONFIRM")
-            .ok()
-            .map(|value| {
-                !matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "0" | "false" | "no" | "off"
-                )
-            })
-            .unwrap_or(true)
     }
 
     pub fn firmware_ota_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        let _fresh_guard = match BleFreshGattGuard::enter("firmware OTA snapshot") {
-            Ok(guard) => guard,
-            Err(err) => {
-                return crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-                    connected: false,
-                    hardware_revision: None,
-                    firmware_version: None,
-                    capabilities: Vec::new(),
-                    battery_percent: None,
-                    usb_powered: None,
-                    detail: Some(format!("Listener OTA unavailable: {err}")),
-                };
-            }
-        };
-        match open_ota_target() {
-            Ok(target) => firmware_ota_device_snapshot_from_target(&target),
-            Err(listener_err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-                connected: false,
-                hardware_revision: None,
-                firmware_version: None,
-                capabilities: Vec::new(),
-                battery_percent: None,
-                usb_powered: None,
-                detail: Some(format!("Listener OTA unavailable: {listener_err}")),
-            },
-        }
+        listener_ota_v1_device_snapshot()
     }
 
-    #[cfg(any())]
-    pub fn stm32wb_st_ota_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        match open_stm32wb_st_ota_target() {
-            Ok(target) => stm32wb_st_ota_device_snapshot_from_target(&target),
-            Err(err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-                connected: false,
-                hardware_revision: None,
-                firmware_version: None,
-                capabilities: Vec::new(),
-                battery_percent: None,
-                usb_powered: None,
-                detail: Some(err),
-            },
-        }
-    }
-
-    #[cfg(any())]
-    pub fn companion_ota_v2_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        match open_companion_ota_v2_target() {
-            Ok(target) => companion_ota_v2_device_snapshot_from_target(&target),
-            Err(err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-                connected: false,
-                hardware_revision: None,
-                firmware_version: None,
-                capabilities: Vec::new(),
-                battery_percent: None,
-                usb_powered: None,
-                detail: Some(err),
-            },
-        }
-    }
-
-    pub fn listener_ota_v2_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        let _fresh_guard = match BleFreshGattGuard::enter("Listener OTA v2 snapshot") {
+    pub fn listener_ota_v1_device_snapshot() -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        let _fresh_guard = match BleFreshGattGuard::enter("Listener OTA v1 snapshot") {
             Ok(guard) => guard,
             Err(err) => {
                 return crate::embedded_ble::FirmwareOtaDeviceSnapshot {
@@ -8220,8 +6819,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 };
             }
         };
-        match open_listener_ota_v2_target() {
-            Ok(target) => listener_ota_v2_device_snapshot_from_target(&target),
+        match open_listener_ota_v1_target() {
+            Ok(target) => listener_ota_v1_device_snapshot_from_target(&target),
             Err(err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
                 connected: false,
                 hardware_revision: None,
@@ -8234,10 +6833,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
-    pub fn listener_ota_v2_gatt_probe_snapshot(
+    pub fn listener_ota_v1_gatt_probe_snapshot(
         timeout: Duration,
     ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        let _fresh_guard = match BleFreshGattGuard::enter("Listener OTA v2 GATT probe") {
+        let _fresh_guard = match BleFreshGattGuard::enter("Listener OTA v1 GATT probe") {
             Ok(guard) => guard,
             Err(err) => {
                 return crate::embedded_ble::FirmwareOtaDeviceSnapshot {
@@ -8252,8 +6851,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         };
         let deadline = Instant::now() + timeout.max(Duration::from_millis(1));
-        match open_listener_ota_v2_target_with_deadline(deadline) {
-            Ok(target) => listener_ota_v2_gatt_probe_snapshot_from_target(&target),
+        match open_listener_ota_v1_target_with_deadline(deadline) {
+            Ok(target) => listener_ota_v1_gatt_probe_snapshot_from_target(&target),
             Err(err) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
                 connected: false,
                 hardware_revision: None,
@@ -8266,54 +6865,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
-    #[cfg(any())]
-    fn stm32wb_st_ota_device_snapshot_from_target(
-        target: &OpenStm32wbStOtaTarget,
-    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-            connected: true,
-            hardware_revision: Some("NUCLEO-WB55RG".to_string()),
-            firmware_version: Some("companion OTA loader".to_string()),
-            capabilities: vec!["stm32wb_st_ble_ota_v1".to_string()],
-            battery_percent: None,
-            usb_powered: None,
-            detail: target.bluetooth_address.map(|address| {
-                format!(
-                    "companion ST BLE_Ota loader connected at {}",
-                    crate::embedded_ble::format_bluetooth_address(address)
-                )
-            }),
-        }
-    }
-
-    #[cfg(any())]
-    fn companion_ota_v2_device_snapshot_from_target(
-        target: &OpenOtaV2Target,
-    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-            connected: true,
-            hardware_revision: Some("NUCLEO-WB55RG".to_string()),
-            firmware_version: Some("companion OTA v2 loader".to_string()),
-            capabilities: vec!["companion_ota_v2".to_string()],
-            battery_percent: None,
-            usb_powered: None,
-            detail: target.bluetooth_address.map(|address| {
-                format!(
-                    "companion OTA v2 loader connected at {}",
-                    crate::embedded_ble::format_bluetooth_address(address)
-                )
-            }),
-        }
-    }
-
-    fn listener_ota_v2_device_snapshot_from_target(
-        target: &OpenListenerOtaV2Target,
+    fn listener_ota_v1_device_snapshot_from_target(
+        target: &OpenListenerOtaV1Target,
     ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         let mut snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             connected: true,
             hardware_revision: None,
             firmware_version: None,
-            capabilities: vec!["firmware_ota_v2".to_string()],
+            capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],
             battery_percent: None,
             usb_powered: None,
             detail: None,
@@ -8323,9 +6882,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         if !snapshot
             .capabilities
             .iter()
-            .any(|item| item == "firmware_ota_v2")
+            .any(|item| item == denzic_ota_core::PROTOCOL_NAME)
         {
-            snapshot.capabilities.push("firmware_ota_v2".to_string());
+            snapshot
+                .capabilities
+                .push(denzic_ota_core::PROTOCOL_NAME.to_string());
         }
         let (dis_model, dis_hardware, dis_firmware, dis_battery) =
             read_dis_metadata_from_discovered_services(target.bluetooth_address);
@@ -8371,14 +6932,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 )
             });
             snapshot.detail = Some(format!(
-                "Listener OTA v2 service is reachable{}, but DIS identity metadata was not exposed in this BLE session.",
+                "Listener OTA v1 service is reachable{}, but DIS identity metadata was not exposed in this BLE session.",
                 address.as_deref().unwrap_or("")
             ));
         } else {
-            snapshot.detail = Some("Listener OTA v2 service is reachable; DIS metadata was read when Windows exposed it.".to_string());
+            snapshot.detail = Some("Listener OTA v1 service is reachable; DIS metadata was read when Windows exposed it.".to_string());
         }
         log::info!(
-            "[embedded-ble] Listener OTA v2 snapshot connected={} hardware={:?} firmware={:?} battery={:?} usb_powered={:?} detail={:?}",
+            "[embedded-ble] Listener OTA v1 snapshot connected={} hardware={:?} firmware={:?} battery={:?} usb_powered={:?} detail={:?}",
             snapshot.connected,
             snapshot.hardware_revision,
             snapshot.firmware_version,
@@ -8389,8 +6950,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         snapshot
     }
 
-    fn listener_ota_v2_gatt_probe_snapshot_from_target(
-        target: &OpenListenerOtaV2Target,
+    fn listener_ota_v1_gatt_probe_snapshot_from_target(
+        target: &OpenListenerOtaV1Target,
     ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
         let address = target.bluetooth_address.map(|value| {
             format!(
@@ -8402,175 +6963,18 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             connected: true,
             hardware_revision: None,
             firmware_version: None,
-            capabilities: vec!["firmware_ota_v2".to_string()],
+            capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],
             battery_percent: None,
             usb_powered: None,
             detail: Some(format!(
-                "Listener OTA v2 service is reachable{}; bounded GATT probe skipped optional DIS metadata.",
+                "Listener OTA v1 service is reachable{}; bounded GATT probe skipped optional DIS metadata.",
                 address.as_deref().unwrap_or("")
             )),
         };
         log::info!(
-            "[embedded-ble] Listener OTA v2 GATT probe connected={} capabilities={:?} detail={:?}",
+            "[embedded-ble] Listener OTA v1 GATT probe connected={} capabilities={:?} detail={:?}",
             snapshot.connected,
             snapshot.capabilities,
-            snapshot.detail
-        );
-        snapshot
-    }
-
-    fn firmware_ota_device_snapshot_from_target(
-        target: &OpenOtaTarget,
-    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-        let mut snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-            connected: true,
-            hardware_revision: None,
-            firmware_version: None,
-            capabilities: vec!["firmware_ota_v1".to_string()],
-            battery_percent: None,
-            usb_powered: None,
-            detail: None,
-        };
-        let mut ota_readiness_snapshot: Option<String> = None;
-        if let Some(service) = target.service.as_ref() {
-            let ota_readiness = read_optional_string_characteristic_from_service(
-                service,
-                OTA_READINESS_UUID,
-                BluetoothCacheMode::Uncached,
-            )
-            .or_else(|| {
-                read_optional_string_characteristic_from_discovered_service(
-                    OTA_SERVICE_UUID,
-                    OTA_READINESS_UUID,
-                    target.bluetooth_address,
-                )
-            })
-            .or_else(|| {
-                read_optional_string_characteristic_from_service(
-                    service,
-                    OTA_CONTROL_UUID,
-                    BluetoothCacheMode::Uncached,
-                )
-            });
-            if let Some(readiness) = ota_readiness {
-                snapshot.hardware_revision =
-                    readiness_hardware_revision(&readiness).or(snapshot.hardware_revision);
-                snapshot.firmware_version =
-                    readiness_field(&readiness, "fw_version").or(snapshot.firmware_version);
-                snapshot.usb_powered = readiness_bool(&readiness, "external_power_present")
-                    .or_else(|| readiness_bool(&readiness, "usb_power_present"))
-                    .or_else(|| readiness_bool(&readiness, "charging"))
-                    .or(snapshot.usb_powered);
-                if snapshot.battery_percent.is_none()
-                    && readiness_bool(&readiness, "battery_valid") != Some(false)
-                {
-                    snapshot.battery_percent = readiness_u8(&readiness, "battery_level");
-                }
-                ota_readiness_snapshot = Some(readiness);
-            } else {
-                log::info!(
-                    "[embedded-ble] OTA readiness identity not readable from current OTA service"
-                );
-            }
-            let ota_capabilities = read_optional_string_characteristic_from_service(
-                service,
-                OTA_CAPABILITIES_UUID,
-                BluetoothCacheMode::Uncached,
-            )
-            .or_else(|| {
-                read_optional_string_characteristic_from_discovered_service(
-                    OTA_SERVICE_UUID,
-                    OTA_CAPABILITIES_UUID,
-                    target.bluetooth_address,
-                )
-            })
-            .or_else(|| {
-                read_optional_string_characteristic_from_service(
-                    service,
-                    OTA_DATA_UUID,
-                    BluetoothCacheMode::Uncached,
-                )
-            });
-            if let Some(capabilities) = ota_capabilities {
-                let parsed = split_capability_tokens(&capabilities);
-                if parsed.iter().any(|item| item == "firmware_ota_v1") {
-                    snapshot.capabilities = parsed;
-                }
-            } else {
-                log::info!("[embedded-ble] OTA capabilities not readable from current OTA service");
-            }
-        }
-        let (dis_model, dis_hardware, dis_firmware, dis_battery) =
-            read_dis_metadata_from_discovered_services(target.bluetooth_address);
-        if snapshot.hardware_revision.is_none() {
-            snapshot.hardware_revision =
-                normalize_optional_hardware_revision(dis_hardware).or(dis_model);
-        }
-        if snapshot.firmware_version.is_none() {
-            snapshot.firmware_version = dis_firmware;
-        }
-        let readiness_charging = ota_readiness_snapshot
-            .as_deref()
-            .and_then(|readiness| readiness_bool(readiness, "charging"));
-        let readiness_charge_full = ota_readiness_snapshot
-            .as_deref()
-            .and_then(|readiness| readiness_bool(readiness, "charge_full"));
-        if snapshot.battery_percent.is_none() {
-            snapshot.battery_percent = dis_battery;
-        }
-        if snapshot.battery_percent == Some(100)
-            && readiness_charging == Some(true)
-            && readiness_charge_full != Some(true)
-        {
-            snapshot.battery_percent = Some(99);
-        }
-
-        if let Some(device) = target.device.as_ref() {
-            if snapshot.hardware_revision.is_none() {
-                let model = read_optional_string_characteristic(
-                    device,
-                    DIS_SERVICE_UUID,
-                    DIS_MODEL_NUMBER_UUID,
-                );
-                let hardware = read_optional_string_characteristic(
-                    device,
-                    DIS_SERVICE_UUID,
-                    DIS_HARDWARE_REVISION_UUID,
-                );
-                snapshot.hardware_revision =
-                    normalize_optional_hardware_revision(hardware).or(model);
-            }
-            if snapshot.firmware_version.is_none() {
-                snapshot.firmware_version = read_optional_string_characteristic(
-                    device,
-                    DIS_SERVICE_UUID,
-                    DIS_FIRMWARE_REVISION_UUID,
-                );
-            }
-            if snapshot.battery_percent.is_none() {
-                snapshot.battery_percent = read_optional_u8_characteristic(
-                    device,
-                    BATTERY_SERVICE_UUID,
-                    BATTERY_LEVEL_UUID,
-                );
-            }
-        }
-        if snapshot.hardware_revision.is_none()
-            && snapshot.firmware_version.is_none()
-            && snapshot.battery_percent.is_none()
-        {
-            snapshot.detail = Some(
-                "OTA service is reachable, but Windows did not expose DIS metadata for this BLE session."
-                    .to_string(),
-            );
-        }
-        log::info!(
-            "[embedded-ble] OTA snapshot connected={} hardware={:?} firmware={:?} battery={:?} usb_powered={:?} detail={:?}",
-            snapshot.connected,
-            snapshot.hardware_revision,
-            snapshot.firmware_version,
-            snapshot.battery_percent,
-            snapshot.usb_powered,
             snapshot.detail
         );
         snapshot
@@ -10181,157 +8585,24 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         )
     }
 
-    fn open_ota_target() -> Result<OpenOtaTarget, String> {
-        let mut last_error = None;
-        if let Some(address) = configured_bluetooth_address() {
-            match open_ota_target_for_device(address) {
-                Ok(target) => {
-                    log::info!(
-                        "[embedded-ble] selected configured OTA device address={address:012X}"
-                    );
-                    return Ok(target);
-                }
-                Err(err) => {
-                    let message = format!("configured OTA address {address:012X} failed: {err}");
-                    log::warn!("[embedded-ble] {message}");
-                    last_error = Some(message);
-                }
-            }
-        }
-
-        let selector = GattDeviceService::GetDeviceSelectorFromUuid(OTA_SERVICE_UUID)
-            .map_err(|err| format!("BLE OTA service selector failed: {err}"))?;
+    fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V1_SERVICE_UUID)
+            .map_err(|err| format!("Listener OTA v1 service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
-            .map_err(|err| format!("BLE OTA service discovery failed: {err}"))
-            .and_then(|op| {
-                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA service discovery")
-            })?;
-        let count = devices
-            .Size()
-            .map_err(|err| format!("BLE OTA service collection size failed: {err}"))?;
-        if count == 0 {
-            return Err(format!(
-                "Listener BLE OTA service {OTA_SERVICE_UUID:?} not found; ensure firmware advertises firmware_ota_v1 and the device is paired and online"
-            ));
-        }
-
-        for index in 0..count {
-            let info = match devices.GetAt(index) {
-                Ok(info) => info,
-                Err(err) => {
-                    last_error = Some(format!("read BLE OTA service info failed: {err}"));
-                    continue;
-                }
-            };
-            let name = info
-                .Name()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
-            let id = match info.Id() {
-                Ok(id) => id,
-                Err(err) => {
-                    last_error = Some(format!("read BLE OTA service id failed: {err}"));
-                    continue;
-                }
-            };
-            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
-            if !ble_candidate_allowed("OTA", index, &name, address) {
-                continue;
-            }
-
-            let mut candidate_error = None;
-            if let Some(address) = address {
-                match open_ota_target_for_device(address) {
-                    Ok(target) => {
-                        remember_runtime_bluetooth_target_address_for_candidate(
-                            address,
-                            &name,
-                            "OTA device path",
-                        );
-                        log::info!(
-                            "[embedded-ble] selected OTA device index={index} name={name} address={address:012X}"
-                        );
-                        return Ok(target);
-                    }
-                    Err(err) => {
-                        candidate_error = Some(format!(
-                            "{name}: BLE OTA device path {address:012X} failed: {err}"
-                        ));
-                    }
-                }
-            }
-
-            match open_ota_target_for_service(&id) {
-                Ok(target) => {
-                    if let Some(address) =
-                        parse_bluetooth_address_from_device_id(&id.to_string_lossy())
-                    {
-                        remember_runtime_bluetooth_target_address_for_candidate(
-                            address,
-                            &name,
-                            "OTA service-id fallback",
-                        );
-                    }
-                    log::info!(
-                        "[embedded-ble] selected OTA service-id fallback index={index} name={name}"
-                    );
-                    return Ok(target);
-                }
-                Err(err) => {
-                    last_error = Some(match candidate_error {
-                        Some(previous) => {
-                            format!("{previous}; OTA service-id fallback failed: {err}")
-                        }
-                        None => format!("{name}: {err}"),
-                    });
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| "No writable Listener BLE OTA service found".to_string()))
-    }
-
-    #[cfg(any())]
-    fn open_stm32wb_st_ota_target() -> Result<OpenStm32wbStOtaTarget, String> {
-        let mut errors = Vec::new();
-        for uuid_set in STM32WB_ST_OTA_UUID_SETS.iter() {
-            match open_stm32wb_st_ota_target_for_uuid_set(uuid_set) {
-                Ok(target) => return Ok(target),
-                Err(err) => errors.push(format!("{}: {err}", uuid_set.label)),
-            }
-        }
-        Err(format!(
-            "No writable STM32WB ST OTA service found ({})",
-            errors.join("; ")
-        ))
-    }
-
-    #[cfg(any())]
-    fn open_companion_ota_v2_target() -> Result<OpenOtaV2Target, String> {
-        match open_companion_ota_v2_target_from_advertisement() {
-            Ok(target) => return Ok(target),
-            Err(err) => {
-                log::warn!("[embedded-ble] Companion OTA v2 advertisement fallback failed: {err}");
-            }
-        }
-
-        let selector = GattDeviceService::GetDeviceSelectorFromUuid(OTA_V2_SERVICE_UUID)
-            .map_err(|err| format!("Companion OTA v2 service selector failed: {err}"))?;
-        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
-            .map_err(|err| format!("Companion OTA v2 service discovery failed: {err}"))
+            .map_err(|err| format!("Listener OTA v1 service discovery failed: {err}"))
             .and_then(|op| {
                 wait_async_operation(
                     op,
                     BLE_DISCOVERY_TIMEOUT,
-                    "Companion OTA v2 service discovery",
+                    "Listener OTA v1 service discovery",
                 )
             })?;
         let count = devices
             .Size()
-            .map_err(|err| format!("Companion OTA v2 service collection size failed: {err}"))?;
+            .map_err(|err| format!("Listener OTA v1 service collection size failed: {err}"))?;
         if count == 0 {
-            return Err(format!(
-                "Companion OTA v2 service {OTA_V2_SERVICE_UUID:?} not found; flash the new OTA loader or reset companion into OTA loader"
+            return open_listener_ota_v1_target_from_cached_address(format!(
+                "Listener OTA v1 service {LISTENER_OTA_V1_SERVICE_UUID:?} not found in Windows service index"
             ));
         }
 
@@ -10340,7 +8611,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             let info = match devices.GetAt(index) {
                 Ok(info) => info,
                 Err(err) => {
-                    last_error = Some(format!("read Companion OTA v2 service info failed: {err}"));
+                    last_error = Some(format!("read Listener OTA v1 service info failed: {err}"));
                     continue;
                 }
             };
@@ -10351,45 +8622,43 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             let id = match info.Id() {
                 Ok(id) => id,
                 Err(err) => {
-                    last_error = Some(format!("read Companion OTA v2 service id failed: {err}"));
+                    last_error = Some(format!("read Listener OTA v1 service id failed: {err}"));
                     continue;
                 }
             };
             let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
-            if !ble_candidate_allowed("Companion OTA v2", index, &name, address) {
+            if !ble_candidate_allowed("Listener OTA v1", index, &name, address) {
                 continue;
             }
 
             let mut candidate_error = None;
             if let Some(address) = address {
-                match open_companion_ota_v2_target_for_device(address) {
+                match open_listener_ota_v1_target_for_device(address) {
                     Ok(target) => {
                         log::info!(
-                            "[embedded-ble] selected Companion OTA v2 device index={index} name={name} address={address:012X}"
+                            "[embedded-ble] selected Listener OTA v1 device index={index} name={name} address={address:012X}"
                         );
                         return Ok(target);
                     }
                     Err(err) => {
                         candidate_error = Some(format!(
-                            "{name}: Companion OTA v2 device path {address:012X} failed: {err}"
+                            "{name}: Listener OTA v1 device path {address:012X} failed: {err}"
                         ));
                     }
                 }
             }
 
-            match open_companion_ota_v2_target_for_service(&id) {
+            match open_listener_ota_v1_target_for_service(&id) {
                 Ok(target) => {
                     log::info!(
-                        "[embedded-ble] selected Companion OTA v2 service-id fallback index={index} name={name}"
+                        "[embedded-ble] selected Listener OTA v1 service-id fallback index={index} name={name}"
                     );
                     return Ok(target);
                 }
                 Err(err) => {
                     last_error = Some(match candidate_error {
                         Some(previous) => {
-                            format!(
-                                "{previous}; Companion OTA v2 service-id fallback failed: {err}"
-                            )
+                            format!("{previous}; Listener OTA v1 service-id fallback failed: {err}")
                         }
                         None => format!("{name}: {err}"),
                     });
@@ -10397,122 +8666,38 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         }
 
-        Err(last_error.unwrap_or_else(|| "No writable Companion OTA v2 service found".to_string()))
-    }
-
-    fn open_listener_ota_v2_target() -> Result<OpenListenerOtaV2Target, String> {
-        let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V2_SERVICE_UUID)
-            .map_err(|err| format!("Listener OTA v2 service selector failed: {err}"))?;
-        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
-            .map_err(|err| format!("Listener OTA v2 service discovery failed: {err}"))
-            .and_then(|op| {
-                wait_async_operation(
-                    op,
-                    BLE_DISCOVERY_TIMEOUT,
-                    "Listener OTA v2 service discovery",
-                )
-            })?;
-        let count = devices
-            .Size()
-            .map_err(|err| format!("Listener OTA v2 service collection size failed: {err}"))?;
-        if count == 0 {
-            return open_listener_ota_v2_target_from_stable_ota(format!(
-                "Listener OTA v2 service {LISTENER_OTA_V2_SERVICE_UUID:?} not found in Windows service index"
-            ));
-        }
-
-        let mut last_error = None;
-        for index in 0..count {
-            let info = match devices.GetAt(index) {
-                Ok(info) => info,
-                Err(err) => {
-                    last_error = Some(format!("read Listener OTA v2 service info failed: {err}"));
-                    continue;
-                }
-            };
-            let name = info
-                .Name()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
-            let id = match info.Id() {
-                Ok(id) => id,
-                Err(err) => {
-                    last_error = Some(format!("read Listener OTA v2 service id failed: {err}"));
-                    continue;
-                }
-            };
-            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
-            if !ble_candidate_allowed("Listener OTA v2", index, &name, address) {
-                continue;
-            }
-
-            let mut candidate_error = None;
-            if let Some(address) = address {
-                match open_listener_ota_v2_target_for_device(address) {
-                    Ok(target) => {
-                        log::info!(
-                            "[embedded-ble] selected Listener OTA v2 device index={index} name={name} address={address:012X}"
-                        );
-                        return Ok(target);
-                    }
-                    Err(err) => {
-                        candidate_error = Some(format!(
-                            "{name}: Listener OTA v2 device path {address:012X} failed: {err}"
-                        ));
-                    }
-                }
-            }
-
-            match open_listener_ota_v2_target_for_service(&id) {
-                Ok(target) => {
-                    log::info!(
-                        "[embedded-ble] selected Listener OTA v2 service-id fallback index={index} name={name}"
-                    );
-                    return Ok(target);
-                }
-                Err(err) => {
-                    last_error = Some(match candidate_error {
-                        Some(previous) => {
-                            format!("{previous}; Listener OTA v2 service-id fallback failed: {err}")
-                        }
-                        None => format!("{name}: {err}"),
-                    });
-                }
-            }
-        }
-
-        match open_listener_ota_v2_target_from_stable_ota(
-            last_error.unwrap_or_else(|| "No writable Listener OTA v2 service found".to_string()),
+        match open_listener_ota_v1_target_from_cached_address(
+            last_error.unwrap_or_else(|| "No writable Listener OTA v1 service found".to_string()),
         ) {
             Ok(target) => Ok(target),
             Err(err) => Err(err),
         }
     }
 
-    fn open_listener_ota_v2_target_with_deadline(
+    fn open_listener_ota_v1_target_with_deadline(
         deadline: Instant,
-    ) -> Result<OpenListenerOtaV2Target, String> {
-        let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V2_SERVICE_UUID)
-            .map_err(|err| format!("Listener OTA v2 service selector failed: {err}"))?;
+    ) -> Result<OpenListenerOtaV1Target, String> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V1_SERVICE_UUID)
+            .map_err(|err| format!("Listener OTA v1 service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
-            .map_err(|err| format!("Listener OTA v2 service discovery failed: {err}"))
+            .map_err(|err| format!("Listener OTA v1 service discovery failed: {err}"))
             .and_then(|op| {
                 wait_async_operation(
                     op,
                     remaining_ble_timeout(
                         deadline,
                         BLE_DISCOVERY_TIMEOUT,
-                        "Listener OTA v2 service discovery",
+                        "Listener OTA v1 service discovery",
                     )?,
-                    "Listener OTA v2 service discovery",
+                    "Listener OTA v1 service discovery",
                 )
             })?;
         let count = devices
             .Size()
-            .map_err(|err| format!("Listener OTA v2 service collection size failed: {err}"))?;
+            .map_err(|err| format!("Listener OTA v1 service collection size failed: {err}"))?;
         if count == 0 {
             return Err(format!(
-                "Listener OTA v2 service {LISTENER_OTA_V2_SERVICE_UUID:?} not found in Windows service index"
+                "Listener OTA v1 service {LISTENER_OTA_V1_SERVICE_UUID:?} not found in Windows service index"
             ));
         }
 
@@ -10521,7 +8706,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             let info = match devices.GetAt(index) {
                 Ok(info) => info,
                 Err(err) => {
-                    last_error = Some(format!("read Listener OTA v2 service info failed: {err}"));
+                    last_error = Some(format!("read Listener OTA v1 service info failed: {err}"));
                     continue;
                 }
             };
@@ -10532,43 +8717,43 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             let id = match info.Id() {
                 Ok(id) => id,
                 Err(err) => {
-                    last_error = Some(format!("read Listener OTA v2 service id failed: {err}"));
+                    last_error = Some(format!("read Listener OTA v1 service id failed: {err}"));
                     continue;
                 }
             };
             let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
-            if !ble_candidate_allowed("Listener OTA v2", index, &name, address) {
+            if !ble_candidate_allowed("Listener OTA v1", index, &name, address) {
                 continue;
             }
 
             let mut candidate_error = None;
             if let Some(address) = address {
-                match open_listener_ota_v2_target_for_device_with_deadline(address, deadline) {
+                match open_listener_ota_v1_target_for_device_with_deadline(address, deadline) {
                     Ok(target) => {
                         log::info!(
-                            "[embedded-ble] selected Listener OTA v2 device index={index} name={name} address={address:012X}"
+                            "[embedded-ble] selected Listener OTA v1 device index={index} name={name} address={address:012X}"
                         );
                         return Ok(target);
                     }
                     Err(err) => {
                         candidate_error = Some(format!(
-                            "{name}: Listener OTA v2 device path {address:012X} failed: {err}"
+                            "{name}: Listener OTA v1 device path {address:012X} failed: {err}"
                         ));
                     }
                 }
             }
 
-            match open_listener_ota_v2_target_for_service_with_deadline(&id, deadline) {
+            match open_listener_ota_v1_target_for_service_with_deadline(&id, deadline) {
                 Ok(target) => {
                     log::info!(
-                        "[embedded-ble] selected Listener OTA v2 service-id fallback index={index} name={name}"
+                        "[embedded-ble] selected Listener OTA v1 service-id fallback index={index} name={name}"
                     );
                     return Ok(target);
                 }
                 Err(err) => {
                     last_error = Some(match candidate_error {
                         Some(previous) => {
-                            format!("{previous}; Listener OTA v2 service-id fallback failed: {err}")
+                            format!("{previous}; Listener OTA v1 service-id fallback failed: {err}")
                         }
                         None => format!("{name}: {err}"),
                     });
@@ -10576,195 +8761,24 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         }
 
-        Err(last_error.unwrap_or_else(|| "No writable Listener OTA v2 service found".to_string()))
+        Err(last_error.unwrap_or_else(|| "No writable Listener OTA v1 service found".to_string()))
     }
 
-    fn open_listener_ota_v2_target_from_stable_ota(
+    fn open_listener_ota_v1_target_from_cached_address(
         previous_error: String,
-    ) -> Result<OpenListenerOtaV2Target, String> {
+    ) -> Result<OpenListenerOtaV1Target, String> {
         log::warn!(
-            "[embedded-ble] Listener OTA v2 direct discovery failed; trying stable OTA service anchor: {previous_error}"
+            "[embedded-ble] Denzic OTA v1 direct discovery failed; trying cached Listener address: {previous_error}"
         );
-        let stable = open_ota_target()
-            .map_err(|err| format!("{previous_error}; stable Listener OTA anchor failed: {err}"))?;
-        let address = stable.bluetooth_address.ok_or_else(|| {
-            format!(
-                "{previous_error}; stable Listener OTA anchor did not expose a Bluetooth address"
-            )
+        let address = runtime_bluetooth_target_address().ok_or_else(|| {
+            format!("{previous_error}; no current Listener Bluetooth address is cached")
         })?;
-        open_listener_ota_v2_target_for_device(address).map_err(|err| {
+        open_listener_ota_v1_target_for_device(address).map_err(|err| {
             format!(
-                "{previous_error}; Listener OTA v2 uncached device discovery via stable OTA anchor {} failed: {err}",
+                "{previous_error}; Denzic OTA v1 discovery via cached Listener address {} failed: {err}",
                 crate::embedded_ble::format_bluetooth_address(address)
             )
         })
-    }
-
-    #[cfg(any())]
-    fn open_companion_ota_v2_target_from_advertisement() -> Result<OpenOtaV2Target, String> {
-        let addresses = scan_ble_advertisements_by_name(
-            "Companion OTA v2",
-            STM32WB_ST_OTA_ADVERTISEMENT_NAME,
-            STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT,
-        )?;
-        let mut last_error = None;
-        for address in addresses {
-            match open_companion_ota_v2_target_for_device(address) {
-                Ok(target) => {
-                    log::info!(
-                        "[embedded-ble] selected Companion OTA v2 advertisement address={address:012X}"
-                    );
-                    return Ok(target);
-                }
-                Err(err) => {
-                    last_error = Some(format!(
-                        "advertised companion address {address:012X} failed: {err}"
-                    ));
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| {
-            "companion OTA v2 advertisement scan returned no usable addresses".to_string()
-        }))
-    }
-
-    #[cfg(any())]
-    fn open_stm32wb_st_ota_target_for_uuid_set(
-        uuid_set: &Stm32wbStOtaUuidSet,
-    ) -> Result<OpenStm32wbStOtaTarget, String> {
-        if uuid_set.label == "companion" {
-            match open_stm32wb_st_ota_target_from_advertisement(uuid_set) {
-                Ok(target) => return Ok(target),
-                Err(err) => {
-                    log::warn!(
-                        "[embedded-ble] STM32WB ST OTA companion advertisement fallback failed: {err}"
-                    );
-                }
-            }
-        }
-
-        let selector = GattDeviceService::GetDeviceSelectorFromUuid(uuid_set.service)
-            .map_err(|err| format!("STM32WB ST OTA service selector failed: {err}"))?;
-        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
-            .map_err(|err| format!("STM32WB ST OTA service discovery failed: {err}"))
-            .and_then(|op| {
-                wait_async_operation(
-                    op,
-                    BLE_DISCOVERY_TIMEOUT,
-                    "STM32WB ST OTA service discovery",
-                )
-            })?;
-        let count = devices
-            .Size()
-            .map_err(|err| format!("STM32WB ST OTA service collection size failed: {err}"))?;
-        if count == 0 {
-            return Err(format!(
-                "STM32WB ST OTA service {:?} ({}) not found; flash or reboot into companion OTA loader, then connect companion in Windows Bluetooth if Windows has not cached it yet",
-                uuid_set.service, uuid_set.label
-            ));
-        }
-
-        let mut last_error = None;
-        for index in 0..count {
-            let info = match devices.GetAt(index) {
-                Ok(info) => info,
-                Err(err) => {
-                    last_error = Some(format!("read STM32WB ST OTA service info failed: {err}"));
-                    continue;
-                }
-            };
-            let name = info
-                .Name()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
-            let id = match info.Id() {
-                Ok(id) => id,
-                Err(err) => {
-                    last_error = Some(format!("read STM32WB ST OTA service id failed: {err}"));
-                    continue;
-                }
-            };
-            let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
-            if !ble_candidate_allowed("STM32WB ST OTA", index, &name, address) {
-                continue;
-            }
-
-            let mut candidate_error = None;
-            if let Some(address) = address {
-                match open_stm32wb_st_ota_target_for_device(address, uuid_set) {
-                    Ok(target) => {
-                        log::info!(
-                            "[embedded-ble] selected STM32WB ST OTA {} device index={index} name={name} address={address:012X}",
-                            uuid_set.label
-                        );
-                        return Ok(target);
-                    }
-                    Err(err) => {
-                        candidate_error = Some(format!(
-                            "{name}: STM32WB ST OTA device path {address:012X} failed: {err}"
-                        ));
-                    }
-                }
-            }
-
-            match open_stm32wb_st_ota_target_for_service(&id, uuid_set) {
-                Ok(target) => {
-                    log::info!(
-                        "[embedded-ble] selected STM32WB ST OTA {} service-id fallback index={index} name={name}",
-                        uuid_set.label
-                    );
-                    return Ok(target);
-                }
-                Err(err) => {
-                    last_error = Some(match candidate_error {
-                        Some(previous) => {
-                            format!("{previous}; STM32WB ST OTA service-id fallback failed: {err}")
-                        }
-                        None => format!("{name}: {err}"),
-                    });
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| "No writable STM32WB ST OTA service found".to_string()))
-    }
-
-    #[cfg(any())]
-    fn open_stm32wb_st_ota_target_from_advertisement(
-        uuid_set: &Stm32wbStOtaUuidSet,
-    ) -> Result<OpenStm32wbStOtaTarget, String> {
-        let addresses = scan_stm32wb_st_ota_advertisements()?;
-        let mut last_error = None;
-        for address in addresses {
-            match open_stm32wb_st_ota_target_for_device(address, uuid_set) {
-                Ok(target) => {
-                    log::info!(
-                        "[embedded-ble] selected STM32WB ST OTA {} advertisement address={address:012X}",
-                        uuid_set.label
-                    );
-                    return Ok(target);
-                }
-                Err(err) => {
-                    last_error = Some(format!(
-                        "advertised companion address {address:012X} failed: {err}"
-                    ));
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| {
-            "companion advertisement scan returned no usable addresses".to_string()
-        }))
-    }
-
-    #[cfg(any())]
-    fn scan_stm32wb_st_ota_advertisements() -> Result<Vec<u64>, String> {
-        scan_ble_advertisements_by_name(
-            "STM32WB ST OTA",
-            STM32WB_ST_OTA_ADVERTISEMENT_NAME,
-            STM32WB_ST_OTA_ADVERTISEMENT_SCAN_TIMEOUT,
-        )
     }
 
     fn scan_listener_pairing_advertisements(
@@ -11109,11 +9123,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         name.trim().eq_ignore_ascii_case(expected_name.trim())
     }
 
-    #[cfg(any())]
-    fn stm32wb_st_ota_advertisement_name_matches(name: &str) -> bool {
-        ble_advertisement_name_matches(name, STM32WB_ST_OTA_ADVERTISEMENT_NAME)
-    }
-
     fn diagnostic_target_candidates() -> Result<Vec<DiagnosticTargetCandidate>, String> {
         let mut candidates = Vec::new();
         let mut seen_addresses = Vec::new();
@@ -11224,107 +9233,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         candidates.push(DiagnosticTargetCandidate::Device { label, address });
     }
 
-    fn open_ota_target_for_device(address: u64) -> Result<OpenOtaTarget, String> {
-        let device = open_ble_device(address)?;
-        if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA device access").ok()
-        }) {
-            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
-                return Err(format!("BLE OTA device access denied status={access:?}"));
-            }
-        }
-
-        let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached] {
-            let services_result = match device
-                .GetGattServicesForUuidWithCacheModeAsync(OTA_SERVICE_UUID, cache_mode)
-                .map_err(|err| format!("BLE OTA {cache_mode:?} service discovery failed: {err}"))
-                .and_then(|op| {
-                    wait_async_operation(
-                        op,
-                        BLE_DISCOVERY_TIMEOUT,
-                        &format!("OTA {cache_mode:?} service"),
-                    )
-                    .map_err(|err| {
-                        format!("BLE OTA {cache_mode:?} service discovery wait failed: {err}")
-                    })
-                }) {
-                Ok(result) => result,
-                Err(err) => {
-                    last_error = Some(err);
-                    continue;
-                }
-            };
-            let status = services_result.Status().map_err(|err| {
-                format!("BLE OTA {cache_mode:?} service status read failed: {err}")
-            })?;
-            if status != GattCommunicationStatus::Success {
-                last_error = Some(format!(
-                    "BLE OTA {cache_mode:?} service discovery returned status={status:?}"
-                ));
-                continue;
-            }
-
-            let services = services_result
-                .Services()
-                .map_err(|err| format!("BLE OTA {cache_mode:?} service list read failed: {err}"))?;
-            let count = services
-                .Size()
-                .map_err(|err| format!("BLE OTA {cache_mode:?} service list size failed: {err}"))?;
-            if count == 0 {
-                last_error = Some(format!(
-                    "OTA service {OTA_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
-                ));
-                continue;
-            }
-
-            for index in 0..count {
-                let service = match services.GetAt(index) {
-                    Ok(service) => service,
-                    Err(err) => {
-                        last_error =
-                            Some(format!("read BLE OTA {cache_mode:?} service failed: {err}"));
-                        continue;
-                    }
-                };
-                match open_ota_characteristics_from_service(&service, cache_mode) {
-                    Ok(prepared) => {
-                        return Ok(OpenOtaTarget {
-                            control: prepared.control,
-                            data: prepared.data,
-                            data_write_option: prepared.data_write_option,
-                            data_chunk_bytes: prepared.data_chunk_bytes,
-                            service: Some(service),
-                            session: prepared.session,
-                            device: Some(device),
-                            bluetooth_address: Some(address),
-                        });
-                    }
-                    Err(err) => {
-                        last_error = Some(format!("{cache_mode:?}: {err}"));
-                        let _ = service.Close();
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| {
-            "No writable Listener BLE OTA characteristics found on device".to_string()
-        }))
-    }
-
-    #[cfg(any())]
-    fn open_stm32wb_st_ota_target_for_device(
+    fn open_listener_ota_v1_target_for_device(
         address: u64,
-        uuid_set: &Stm32wbStOtaUuidSet,
-    ) -> Result<OpenStm32wbStOtaTarget, String> {
+    ) -> Result<OpenListenerOtaV1Target, String> {
         let device = open_ble_device(address)?;
         if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "STM32WB ST OTA device access").ok()
+            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v1 device access").ok()
         }) {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!(
-                    "STM32WB ST OTA device access denied status={access:?}"
+                    "Listener OTA v1 device access denied status={access:?}"
                 ));
             }
         }
@@ -11332,19 +9250,19 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let mut last_error = None;
         for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
             let services_result = match device
-                .GetGattServicesForUuidWithCacheModeAsync(uuid_set.service, cache_mode)
+                .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
-                    format!("STM32WB ST OTA {cache_mode:?} service discovery failed: {err}")
+                    format!("Listener OTA v1 {cache_mode:?} service discovery failed: {err}")
                 })
                 .and_then(|op| {
                     wait_async_operation(
                         op,
                         BLE_DISCOVERY_TIMEOUT,
-                        &format!("STM32WB ST OTA {cache_mode:?} service"),
+                        &format!("Listener OTA v1 {cache_mode:?} service"),
                     )
                     .map_err(|err| {
                         format!(
-                            "STM32WB ST OTA {cache_mode:?} service discovery wait failed: {err}"
+                            "Listener OTA v1 {cache_mode:?} service discovery wait failed: {err}"
                         )
                     })
                 }) {
@@ -11355,25 +9273,24 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 }
             };
             let status = services_result.Status().map_err(|err| {
-                format!("STM32WB ST OTA {cache_mode:?} service status read failed: {err}")
+                format!("Listener OTA v1 {cache_mode:?} service status read failed: {err}")
             })?;
             if status != GattCommunicationStatus::Success {
                 last_error = Some(format!(
-                    "STM32WB ST OTA {cache_mode:?} service discovery returned status={status:?}"
+                    "Listener OTA v1 {cache_mode:?} service discovery returned status={status:?}"
                 ));
                 continue;
             }
 
             let services = services_result.Services().map_err(|err| {
-                format!("STM32WB ST OTA {cache_mode:?} service list read failed: {err}")
+                format!("Listener OTA v1 {cache_mode:?} service list read failed: {err}")
             })?;
             let count = services.Size().map_err(|err| {
-                format!("STM32WB ST OTA {cache_mode:?} service list size failed: {err}")
+                format!("Listener OTA v1 {cache_mode:?} service list size failed: {err}")
             })?;
             if count == 0 {
                 last_error = Some(format!(
-                    "STM32WB ST OTA service {:?} ({}) not found from BLE device via {cache_mode:?}",
-                    uuid_set.service, uuid_set.label
+                    "Listener OTA v1 service {LISTENER_OTA_V1_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
                 ));
                 continue;
             }
@@ -11383,216 +9300,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     Ok(service) => service,
                     Err(err) => {
                         last_error = Some(format!(
-                            "read STM32WB ST OTA {cache_mode:?} service failed: {err}"
+                            "read Listener OTA v1 {cache_mode:?} service failed: {err}"
                         ));
                         continue;
                     }
                 };
-                match open_stm32wb_st_ota_characteristics_from_service(
-                    &service, cache_mode, uuid_set,
-                ) {
-                    Ok(prepared) => {
-                        return Ok(OpenStm32wbStOtaTarget {
-                            base: prepared.base,
-                            raw: prepared.raw,
-                            confirm: prepared.confirm,
-                            base_write_option: prepared.base_write_option,
-                            raw_write_option: prepared.raw_write_option,
-                            raw_chunk_bytes: prepared.raw_chunk_bytes,
-                            service: Some(service),
-                            session: prepared.session,
-                            device: Some(device),
-                            bluetooth_address: Some(address),
-                        });
-                    }
-                    Err(err) => {
-                        last_error = Some(format!("{cache_mode:?}: {err}"));
-                        let _ = service.Close();
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| {
-            "No writable STM32WB ST OTA characteristics found on device".to_string()
-        }))
-    }
-
-    #[cfg(any())]
-    fn open_companion_ota_v2_target_for_device(address: u64) -> Result<OpenOtaV2Target, String> {
-        let device = open_ble_device(address)?;
-        if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Companion OTA v2 device access").ok()
-        }) {
-            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
-                return Err(format!(
-                    "Companion OTA v2 device access denied status={access:?}"
-                ));
-            }
-        }
-
-        let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
-            let services_result = match device
-                .GetGattServicesForUuidWithCacheModeAsync(OTA_V2_SERVICE_UUID, cache_mode)
-                .map_err(|err| {
-                    format!("Companion OTA v2 {cache_mode:?} service discovery failed: {err}")
-                })
-                .and_then(|op| {
-                    wait_async_operation(
-                        op,
-                        BLE_DISCOVERY_TIMEOUT,
-                        &format!("Companion OTA v2 {cache_mode:?} service"),
-                    )
-                    .map_err(|err| {
-                        format!(
-                            "Companion OTA v2 {cache_mode:?} service discovery wait failed: {err}"
-                        )
-                    })
-                }) {
-                Ok(result) => result,
-                Err(err) => {
-                    last_error = Some(err);
-                    continue;
-                }
-            };
-            let status = services_result.Status().map_err(|err| {
-                format!("Companion OTA v2 {cache_mode:?} service status read failed: {err}")
-            })?;
-            if status != GattCommunicationStatus::Success {
-                last_error = Some(format!(
-                    "Companion OTA v2 {cache_mode:?} service discovery returned status={status:?}"
-                ));
-                continue;
-            }
-
-            let services = services_result.Services().map_err(|err| {
-                format!("Companion OTA v2 {cache_mode:?} service list read failed: {err}")
-            })?;
-            let count = services.Size().map_err(|err| {
-                format!("Companion OTA v2 {cache_mode:?} service list size failed: {err}")
-            })?;
-            if count == 0 {
-                last_error = Some(format!(
-                    "Companion OTA v2 service {OTA_V2_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
-                ));
-                continue;
-            }
-
-            for index in 0..count {
-                let service = match services.GetAt(index) {
-                    Ok(service) => service,
-                    Err(err) => {
-                        last_error = Some(format!(
-                            "read Companion OTA v2 {cache_mode:?} service failed: {err}"
-                        ));
-                        continue;
-                    }
-                };
-                match open_companion_ota_v2_characteristics_from_service(&service, cache_mode) {
-                    Ok(prepared) => {
-                        return Ok(OpenOtaV2Target {
-                            control: prepared.control,
-                            data: prepared.data,
-                            status: prepared.status,
-                            data_write_option: prepared.data_write_option,
-                            data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
-                            service: Some(service),
-                            session: prepared.session,
-                            device: Some(device),
-                            bluetooth_address: Some(address),
-                        });
-                    }
-                    Err(err) => {
-                        last_error = Some(format!("{cache_mode:?}: {err}"));
-                        let _ = service.Close();
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| {
-            "No writable Companion OTA v2 characteristics found on device".to_string()
-        }))
-    }
-
-    fn open_listener_ota_v2_target_for_device(
-        address: u64,
-    ) -> Result<OpenListenerOtaV2Target, String> {
-        let device = open_ble_device(address)?;
-        if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v2 device access").ok()
-        }) {
-            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
-                return Err(format!(
-                    "Listener OTA v2 device access denied status={access:?}"
-                ));
-            }
-        }
-
-        let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
-            let services_result = match device
-                .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V2_SERVICE_UUID, cache_mode)
-                .map_err(|err| {
-                    format!("Listener OTA v2 {cache_mode:?} service discovery failed: {err}")
-                })
-                .and_then(|op| {
-                    wait_async_operation(
-                        op,
-                        BLE_DISCOVERY_TIMEOUT,
-                        &format!("Listener OTA v2 {cache_mode:?} service"),
-                    )
-                    .map_err(|err| {
-                        format!(
-                            "Listener OTA v2 {cache_mode:?} service discovery wait failed: {err}"
-                        )
-                    })
-                }) {
-                Ok(result) => result,
-                Err(err) => {
-                    last_error = Some(err);
-                    continue;
-                }
-            };
-            let status = services_result.Status().map_err(|err| {
-                format!("Listener OTA v2 {cache_mode:?} service status read failed: {err}")
-            })?;
-            if status != GattCommunicationStatus::Success {
-                last_error = Some(format!(
-                    "Listener OTA v2 {cache_mode:?} service discovery returned status={status:?}"
-                ));
-                continue;
-            }
-
-            let services = services_result.Services().map_err(|err| {
-                format!("Listener OTA v2 {cache_mode:?} service list read failed: {err}")
-            })?;
-            let count = services.Size().map_err(|err| {
-                format!("Listener OTA v2 {cache_mode:?} service list size failed: {err}")
-            })?;
-            if count == 0 {
-                last_error = Some(format!(
-                    "Listener OTA v2 service {LISTENER_OTA_V2_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
-                ));
-                continue;
-            }
-
-            for index in 0..count {
-                let service = match services.GetAt(index) {
-                    Ok(service) => service,
-                    Err(err) => {
-                        last_error = Some(format!(
-                            "read Listener OTA v2 {cache_mode:?} service failed: {err}"
-                        ));
-                        continue;
-                    }
-                };
-                match open_listener_ota_v2_characteristics_from_service_with_retry(
+                match open_listener_ota_v1_characteristics_from_service_with_retry(
                     &service, cache_mode,
                 ) {
                     Ok(prepared) => {
-                        return Ok(OpenListenerOtaV2Target {
+                        return Ok(OpenListenerOtaV1Target {
                             control: prepared.control,
                             data: prepared.data,
                             status: prepared.status,
@@ -11613,20 +9330,20 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         Err(last_error.unwrap_or_else(|| {
-            "No writable Listener OTA v2 characteristics found on device".to_string()
+            "No writable Listener OTA v1 characteristics found on device".to_string()
         }))
     }
 
-    fn open_listener_ota_v2_target_for_device_with_deadline(
+    fn open_listener_ota_v1_target_for_device_with_deadline(
         address: u64,
         deadline: Instant,
-    ) -> Result<OpenListenerOtaV2Target, String> {
+    ) -> Result<OpenListenerOtaV1Target, String> {
         let device = open_ble_device_with_timeout(
             address,
             remaining_ble_timeout(
                 deadline,
                 BLE_DISCOVERY_TIMEOUT,
-                "Listener OTA v2 device open",
+                "Listener OTA v1 device open",
             )?,
         )?;
         if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
@@ -11635,16 +9352,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 remaining_ble_timeout(
                     deadline,
                     BLE_DISCOVERY_TIMEOUT,
-                    "Listener OTA v2 device access",
+                    "Listener OTA v1 device access",
                 )
                 .ok()?,
-                "Listener OTA v2 device access",
+                "Listener OTA v1 device access",
             )
             .ok()
         }) {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!(
-                    "Listener OTA v2 device access denied status={access:?}"
+                    "Listener OTA v1 device access denied status={access:?}"
                 ));
             }
         }
@@ -11652,9 +9369,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let mut last_error = None;
         for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
             let services_result = match device
-                .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V2_SERVICE_UUID, cache_mode)
+                .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
-                    format!("Listener OTA v2 {cache_mode:?} service discovery failed: {err}")
+                    format!("Listener OTA v1 {cache_mode:?} service discovery failed: {err}")
                 })
                 .and_then(|op| {
                     wait_async_operation(
@@ -11662,13 +9379,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         remaining_ble_timeout(
                             deadline,
                             BLE_DISCOVERY_TIMEOUT,
-                            "Listener OTA v2 service",
+                            "Listener OTA v1 service",
                         )?,
-                        &format!("Listener OTA v2 {cache_mode:?} service"),
+                        &format!("Listener OTA v1 {cache_mode:?} service"),
                     )
                     .map_err(|err| {
                         format!(
-                            "Listener OTA v2 {cache_mode:?} service discovery wait failed: {err}"
+                            "Listener OTA v1 {cache_mode:?} service discovery wait failed: {err}"
                         )
                     })
                 }) {
@@ -11679,24 +9396,24 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 }
             };
             let status = services_result.Status().map_err(|err| {
-                format!("Listener OTA v2 {cache_mode:?} service status read failed: {err}")
+                format!("Listener OTA v1 {cache_mode:?} service status read failed: {err}")
             })?;
             if status != GattCommunicationStatus::Success {
                 last_error = Some(format!(
-                    "Listener OTA v2 {cache_mode:?} service discovery returned status={status:?}"
+                    "Listener OTA v1 {cache_mode:?} service discovery returned status={status:?}"
                 ));
                 continue;
             }
 
             let services = services_result.Services().map_err(|err| {
-                format!("Listener OTA v2 {cache_mode:?} service list read failed: {err}")
+                format!("Listener OTA v1 {cache_mode:?} service list read failed: {err}")
             })?;
             let count = services.Size().map_err(|err| {
-                format!("Listener OTA v2 {cache_mode:?} service list size failed: {err}")
+                format!("Listener OTA v1 {cache_mode:?} service list size failed: {err}")
             })?;
             if count == 0 {
                 last_error = Some(format!(
-                    "Listener OTA v2 service {LISTENER_OTA_V2_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
+                    "Listener OTA v1 service {LISTENER_OTA_V1_SERVICE_UUID:?} not found from BLE device via {cache_mode:?}"
                 ));
                 continue;
             }
@@ -11706,16 +9423,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     Ok(service) => service,
                     Err(err) => {
                         last_error = Some(format!(
-                            "read Listener OTA v2 {cache_mode:?} service failed: {err}"
+                            "read Listener OTA v1 {cache_mode:?} service failed: {err}"
                         ));
                         continue;
                     }
                 };
-                match open_listener_ota_v2_characteristics_from_service_with_retry_deadline(
+                match open_listener_ota_v1_characteristics_from_service_with_retry_deadline(
                     &service, cache_mode, deadline,
                 ) {
                     Ok(prepared) => {
-                        return Ok(OpenListenerOtaV2Target {
+                        return Ok(OpenListenerOtaV1Target {
                             control: prepared.control,
                             data: prepared.data,
                             status: prepared.status,
@@ -11736,7 +9453,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         Err(last_error.unwrap_or_else(|| {
-            "No writable Listener OTA v2 characteristics found on device".to_string()
+            "No writable Listener OTA v1 characteristics found on device".to_string()
         }))
     }
 
@@ -12135,90 +9852,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
-    fn open_ota_target_for_service(service_id: &HSTRING) -> Result<OpenOtaTarget, String> {
-        let service = GattDeviceService::FromIdAsync(service_id)
-            .map_err(|err| format!("BLE OTA service open failed: {err}"))
-            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA service open"))?;
-        let device = service.DeviceId().ok().and_then(|device_id| {
-            BluetoothLEDevice::FromIdAsync(&device_id)
-                .ok()
-                .and_then(|op| {
-                    wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA service device").ok()
-                })
-        });
-
-        let prepared =
-            open_ota_characteristics_from_service(&service, BluetoothCacheMode::Uncached)?;
-        Ok(OpenOtaTarget {
-            control: prepared.control,
-            data: prepared.data,
-            data_write_option: prepared.data_write_option,
-            data_chunk_bytes: prepared.data_chunk_bytes,
-            service: Some(service),
-            session: prepared.session,
-            device,
-            bluetooth_address: parse_bluetooth_address_from_device_id(
-                &service_id.to_string_lossy(),
-            ),
-        })
-    }
-
-    #[cfg(any())]
-    fn open_stm32wb_st_ota_target_for_service(
+    fn open_listener_ota_v1_target_for_service(
         service_id: &HSTRING,
-        uuid_set: &Stm32wbStOtaUuidSet,
-    ) -> Result<OpenStm32wbStOtaTarget, String> {
+    ) -> Result<OpenListenerOtaV1Target, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
-            .map_err(|err| format!("STM32WB ST OTA service open failed: {err}"))
+            .map_err(|err| format!("Listener OTA v1 service open failed: {err}"))
             .and_then(|op| {
-                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "STM32WB ST OTA service open")
-            })?;
-        let device = service.DeviceId().ok().and_then(|device_id| {
-            BluetoothLEDevice::FromIdAsync(&device_id)
-                .ok()
-                .and_then(|op| {
-                    wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "STM32WB ST OTA service device")
-                        .ok()
-                })
-        });
-
-        let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
-            match open_stm32wb_st_ota_characteristics_from_service(&service, cache_mode, uuid_set) {
-                Ok(prepared) => {
-                    return Ok(OpenStm32wbStOtaTarget {
-                        base: prepared.base,
-                        raw: prepared.raw,
-                        confirm: prepared.confirm,
-                        base_write_option: prepared.base_write_option,
-                        raw_write_option: prepared.raw_write_option,
-                        raw_chunk_bytes: prepared.raw_chunk_bytes,
-                        service: Some(service),
-                        session: prepared.session,
-                        device,
-                        bluetooth_address: parse_bluetooth_address_from_device_id(
-                            &service_id.to_string_lossy(),
-                        ),
-                    });
-                }
-                Err(err) => {
-                    last_error = Some(format!("{cache_mode:?}: {err}"));
-                }
-            }
-        }
-        return Err(last_error.unwrap_or_else(|| {
-            "No writable STM32WB ST OTA characteristics found from service id".to_string()
-        }));
-    }
-
-    #[cfg(any())]
-    fn open_companion_ota_v2_target_for_service(
-        service_id: &HSTRING,
-    ) -> Result<OpenOtaV2Target, String> {
-        let service = GattDeviceService::FromIdAsync(service_id)
-            .map_err(|err| format!("Companion OTA v2 service open failed: {err}"))
-            .and_then(|op| {
-                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Companion OTA v2 service open")
+                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v1 service open")
             })?;
         let device = service.DeviceId().ok().and_then(|device_id| {
             BluetoothLEDevice::FromIdAsync(&device_id)
@@ -12227,56 +9867,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     wait_async_operation(
                         op,
                         BLE_DISCOVERY_TIMEOUT,
-                        "Companion OTA v2 service device",
-                    )
-                    .ok()
-                })
-        });
-
-        let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
-            match open_companion_ota_v2_characteristics_from_service(&service, cache_mode) {
-                Ok(prepared) => {
-                    return Ok(OpenOtaV2Target {
-                        control: prepared.control,
-                        data: prepared.data,
-                        status: prepared.status,
-                        data_write_option: prepared.data_write_option,
-                        data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
-                        service: Some(service),
-                        session: prepared.session,
-                        device,
-                        bluetooth_address: parse_bluetooth_address_from_device_id(
-                            &service_id.to_string_lossy(),
-                        ),
-                    });
-                }
-                Err(err) => {
-                    last_error = Some(format!("{cache_mode:?}: {err}"));
-                }
-            }
-        }
-        Err(last_error.unwrap_or_else(|| {
-            "No writable Companion OTA v2 characteristics found from service id".to_string()
-        }))
-    }
-
-    fn open_listener_ota_v2_target_for_service(
-        service_id: &HSTRING,
-    ) -> Result<OpenListenerOtaV2Target, String> {
-        let service = GattDeviceService::FromIdAsync(service_id)
-            .map_err(|err| format!("Listener OTA v2 service open failed: {err}"))
-            .and_then(|op| {
-                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v2 service open")
-            })?;
-        let device = service.DeviceId().ok().and_then(|device_id| {
-            BluetoothLEDevice::FromIdAsync(&device_id)
-                .ok()
-                .and_then(|op| {
-                    wait_async_operation(
-                        op,
-                        BLE_DISCOVERY_TIMEOUT,
-                        "Listener OTA v2 service device",
+                        "Listener OTA v1 service device",
                     )
                     .ok()
                 })
@@ -12284,10 +9875,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
         let mut last_error = None;
         for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
-            match open_listener_ota_v2_characteristics_from_service_with_retry(&service, cache_mode)
+            match open_listener_ota_v1_characteristics_from_service_with_retry(&service, cache_mode)
             {
                 Ok(prepared) => {
-                    return Ok(OpenListenerOtaV2Target {
+                    return Ok(OpenListenerOtaV1Target {
                         control: prepared.control,
                         data: prepared.data,
                         status: prepared.status,
@@ -12307,25 +9898,25 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         }
         Err(last_error.unwrap_or_else(|| {
-            "No writable Listener OTA v2 characteristics found from service id".to_string()
+            "No writable Listener OTA v1 characteristics found from service id".to_string()
         }))
     }
 
-    fn open_listener_ota_v2_target_for_service_with_deadline(
+    fn open_listener_ota_v1_target_for_service_with_deadline(
         service_id: &HSTRING,
         deadline: Instant,
-    ) -> Result<OpenListenerOtaV2Target, String> {
+    ) -> Result<OpenListenerOtaV1Target, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
-            .map_err(|err| format!("Listener OTA v2 service open failed: {err}"))
+            .map_err(|err| format!("Listener OTA v1 service open failed: {err}"))
             .and_then(|op| {
                 wait_async_operation(
                     op,
                     remaining_ble_timeout(
                         deadline,
                         BLE_DISCOVERY_TIMEOUT,
-                        "Listener OTA v2 service open",
+                        "Listener OTA v1 service open",
                     )?,
-                    "Listener OTA v2 service open",
+                    "Listener OTA v1 service open",
                 )
             })?;
         let device = service.DeviceId().ok().and_then(|device_id| {
@@ -12337,10 +9928,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         remaining_ble_timeout(
                             deadline,
                             BLE_DISCOVERY_TIMEOUT,
-                            "Listener OTA v2 service device",
+                            "Listener OTA v1 service device",
                         )
                         .ok()?,
-                        "Listener OTA v2 service device",
+                        "Listener OTA v1 service device",
                     )
                     .ok()
                 })
@@ -12348,11 +9939,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
         let mut last_error = None;
         for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
-            match open_listener_ota_v2_characteristics_from_service_with_retry_deadline(
+            match open_listener_ota_v1_characteristics_from_service_with_retry_deadline(
                 &service, cache_mode, deadline,
             ) {
                 Ok(prepared) => {
-                    return Ok(OpenListenerOtaV2Target {
+                    return Ok(OpenListenerOtaV1Target {
                         control: prepared.control,
                         data: prepared.data,
                         status: prepared.status,
@@ -12372,7 +9963,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         }
         Err(last_error.unwrap_or_else(|| {
-            "No writable Listener OTA v2 characteristics found from service id".to_string()
+            "No writable Listener OTA v1 characteristics found from service id".to_string()
         }))
     }
 
@@ -12471,198 +10062,52 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         })
     }
 
-    fn open_ota_characteristics_from_service(
+    fn open_listener_ota_v1_characteristics_from_service(
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
-    ) -> Result<PreparedOtaCharacteristics, String> {
+    ) -> Result<PreparedListenerOtaV1Characteristics, String> {
         if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "OTA service access").ok()
-        }) {
-            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
-                return Err(format!("BLE OTA service access denied status={access:?}"));
-            }
-        }
-        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
-        let control = open_write_characteristic_from_service(
-            service,
-            OTA_CONTROL_UUID,
-            "OTA control",
-            cache_mode,
-        )?;
-        let data =
-            open_write_characteristic_from_service(service, OTA_DATA_UUID, "OTA data", cache_mode)?;
-        let data_properties = data
-            .CharacteristicProperties()
-            .map_err(|err| format!("BLE OTA data characteristic properties read failed: {err}"))?;
-        let data_write_option = ota_data_write_option(data_properties)?;
-        let data_chunk_bytes = ota_data_chunk_bytes(session.as_ref(), data_write_option);
-        log::info!(
-            "[embedded-ble] OTA data write option={data_write_option:?} chunk_bytes={data_chunk_bytes}"
-        );
-        Ok(PreparedOtaCharacteristics {
-            control,
-            data,
-            data_write_option,
-            data_chunk_bytes,
-            session,
-        })
-    }
-
-    #[cfg(any())]
-    fn open_stm32wb_st_ota_characteristics_from_service(
-        service: &GattDeviceService,
-        cache_mode: BluetoothCacheMode,
-        uuid_set: &Stm32wbStOtaUuidSet,
-    ) -> Result<PreparedStm32wbStOtaCharacteristics, String> {
-        if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "STM32WB ST OTA service access").ok()
+            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v1 service access").ok()
         }) {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!(
-                    "STM32WB ST OTA service access denied status={access:?}"
-                ));
-            }
-        }
-        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
-        let base = open_write_characteristic_from_service(
-            service,
-            uuid_set.base,
-            "STM32WB ST OTA base",
-            cache_mode,
-        )?;
-        let raw = open_write_characteristic_from_service(
-            service,
-            uuid_set.raw,
-            "STM32WB ST OTA raw",
-            cache_mode,
-        )?;
-        let confirm = open_indicate_characteristic_from_service(
-            service,
-            uuid_set.confirm,
-            "STM32WB ST OTA confirm",
-            cache_mode,
-        )?;
-        let base_properties = base.CharacteristicProperties().map_err(|err| {
-            format!("STM32WB ST OTA base characteristic properties read failed: {err}")
-        })?;
-        let base_write_option = stm32wb_st_ota_write_option(base_properties)?;
-        let raw_properties = raw.CharacteristicProperties().map_err(|err| {
-            format!("STM32WB ST OTA raw characteristic properties read failed: {err}")
-        })?;
-        let raw_write_option = stm32wb_st_ota_write_option(raw_properties)?;
-        let raw_chunk_bytes = stm32wb_st_ota_raw_chunk_bytes(session.as_ref(), raw_write_option);
-        log::info!(
-            "[embedded-ble] STM32WB ST OTA {} base write option={base_write_option:?} raw write option={raw_write_option:?} chunk_bytes={raw_chunk_bytes}",
-            uuid_set.label
-        );
-        Ok(PreparedStm32wbStOtaCharacteristics {
-            base,
-            raw,
-            confirm,
-            base_write_option,
-            raw_write_option,
-            raw_chunk_bytes,
-            session,
-        })
-    }
-
-    #[cfg(any())]
-    fn open_companion_ota_v2_characteristics_from_service(
-        service: &GattDeviceService,
-        cache_mode: BluetoothCacheMode,
-    ) -> Result<PreparedOtaV2Characteristics, String> {
-        if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Companion OTA v2 service access").ok()
-        }) {
-            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
-                return Err(format!(
-                    "Companion OTA v2 service access denied status={access:?}"
+                    "Listener OTA v1 service access denied status={access:?}"
                 ));
             }
         }
         let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
         let control = open_write_characteristic_from_service(
             service,
-            OTA_V2_CONTROL_UUID,
-            "Companion OTA v2 control",
+            LISTENER_OTA_V1_CONTROL_UUID,
+            "Listener OTA v1 control",
             cache_mode,
         )?;
         let data = open_write_characteristic_from_service(
             service,
-            OTA_V2_DATA_UUID,
-            "Companion OTA v2 data",
+            LISTENER_OTA_V1_DATA_UUID,
+            "Listener OTA v1 data",
             cache_mode,
         )?;
-        let status = open_read_characteristic_from_service(
-            service,
-            OTA_V2_STATUS_UUID,
-            "Companion OTA v2 status",
-            cache_mode,
-        )?;
-        let data_properties = data.CharacteristicProperties().map_err(|err| {
-            format!("Companion OTA v2 data characteristic properties read failed: {err}")
-        })?;
-        let data_write_option = ota_v2_data_write_option(data_properties)?;
-        let payload_bytes = ota_v2_data_chunk_payload_bytes(session.as_ref());
-        log::info!(
-            "[embedded-ble] Companion OTA v2 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes}"
-        );
-        Ok(PreparedOtaV2Characteristics {
-            control,
-            data,
-            status,
-            data_write_option,
-            data_chunk_payload_bytes: payload_bytes,
-            session,
-        })
-    }
-
-    fn open_listener_ota_v2_characteristics_from_service(
-        service: &GattDeviceService,
-        cache_mode: BluetoothCacheMode,
-    ) -> Result<PreparedListenerOtaV2Characteristics, String> {
-        if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v2 service access").ok()
-        }) {
-            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
-                return Err(format!(
-                    "Listener OTA v2 service access denied status={access:?}"
-                ));
-            }
-        }
-        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
-        let control = open_write_characteristic_from_service(
-            service,
-            LISTENER_OTA_V2_CONTROL_UUID,
-            "Listener OTA v2 control",
-            cache_mode,
-        )?;
-        let data = open_write_characteristic_from_service(
-            service,
-            LISTENER_OTA_V2_DATA_UUID,
-            "Listener OTA v2 data",
-            cache_mode,
-        )?;
-        let status = if LISTENER_OTA_V2_STATUS_UUID == LISTENER_OTA_V2_CONTROL_UUID {
+        let status = if LISTENER_OTA_V1_STATUS_UUID == LISTENER_OTA_V1_CONTROL_UUID {
             control.clone()
         } else {
             open_read_characteristic_from_service(
                 service,
-                LISTENER_OTA_V2_STATUS_UUID,
-                "Listener OTA v2 status",
+                LISTENER_OTA_V1_STATUS_UUID,
+                "Listener OTA v1 status",
                 cache_mode,
             )?
         };
         let data_properties = data.CharacteristicProperties().map_err(|err| {
-            format!("Listener OTA v2 data characteristic properties read failed: {err}")
+            format!("Listener OTA v1 data characteristic properties read failed: {err}")
         })?;
-        let data_write_option = listener_ota_v2_data_write_option(data_properties)?;
+        let data_write_option = listener_ota_v1_data_write_option(data_properties)?;
         let payload_bytes =
-            listener_ota_v2_data_chunk_payload_bytes(session.as_ref(), data_write_option);
+            listener_ota_v1_data_chunk_payload_bytes(session.as_ref(), data_write_option);
         log::info!(
-            "[embedded-ble] Listener OTA v2 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes}"
+            "[embedded-ble] Listener OTA v1 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes}"
         );
-        Ok(PreparedListenerOtaV2Characteristics {
+        Ok(PreparedListenerOtaV1Characteristics {
             control,
             data,
             status,
@@ -12672,81 +10117,81 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         })
     }
 
-    fn open_listener_ota_v2_characteristics_from_service_with_deadline(
+    fn open_listener_ota_v1_characteristics_from_service_with_deadline(
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
         deadline: Instant,
-    ) -> Result<PreparedListenerOtaV2Characteristics, String> {
+    ) -> Result<PreparedListenerOtaV1Characteristics, String> {
         if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
             wait_async_operation(
                 op,
                 remaining_ble_timeout(
                     deadline,
                     BLE_DISCOVERY_TIMEOUT,
-                    "Listener OTA v2 service access",
+                    "Listener OTA v1 service access",
                 )
                 .ok()?,
-                "Listener OTA v2 service access",
+                "Listener OTA v1 service access",
             )
             .ok()
         }) {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!(
-                    "Listener OTA v2 service access denied status={access:?}"
+                    "Listener OTA v1 service access denied status={access:?}"
                 ));
             }
         }
         let session = prepare_gatt_session(
             service,
-            remaining_ble_timeout(deadline, GATT_READY_TIMEOUT, "Listener OTA v2 GATT session")?,
+            remaining_ble_timeout(deadline, GATT_READY_TIMEOUT, "Listener OTA v1 GATT session")?,
         )?;
         let control = open_write_characteristic_from_service_with_timeout(
             service,
-            LISTENER_OTA_V2_CONTROL_UUID,
-            "Listener OTA v2 control",
+            LISTENER_OTA_V1_CONTROL_UUID,
+            "Listener OTA v1 control",
             cache_mode,
             remaining_ble_timeout(
                 deadline,
                 BLE_DISCOVERY_TIMEOUT,
-                "Listener OTA v2 control characteristic",
+                "Listener OTA v1 control characteristic",
             )?,
         )?;
         let data = open_write_characteristic_from_service_with_timeout(
             service,
-            LISTENER_OTA_V2_DATA_UUID,
-            "Listener OTA v2 data",
+            LISTENER_OTA_V1_DATA_UUID,
+            "Listener OTA v1 data",
             cache_mode,
             remaining_ble_timeout(
                 deadline,
                 BLE_DISCOVERY_TIMEOUT,
-                "Listener OTA v2 data characteristic",
+                "Listener OTA v1 data characteristic",
             )?,
         )?;
-        let status = if LISTENER_OTA_V2_STATUS_UUID == LISTENER_OTA_V2_CONTROL_UUID {
+        let status = if LISTENER_OTA_V1_STATUS_UUID == LISTENER_OTA_V1_CONTROL_UUID {
             control.clone()
         } else {
             open_read_characteristic_from_service_with_timeout(
                 service,
-                LISTENER_OTA_V2_STATUS_UUID,
-                "Listener OTA v2 status",
+                LISTENER_OTA_V1_STATUS_UUID,
+                "Listener OTA v1 status",
                 cache_mode,
                 remaining_ble_timeout(
                     deadline,
                     BLE_DISCOVERY_TIMEOUT,
-                    "Listener OTA v2 status characteristic",
+                    "Listener OTA v1 status characteristic",
                 )?,
             )?
         };
         let data_properties = data.CharacteristicProperties().map_err(|err| {
-            format!("Listener OTA v2 data characteristic properties read failed: {err}")
+            format!("Listener OTA v1 data characteristic properties read failed: {err}")
         })?;
-        let data_write_option = listener_ota_v2_data_write_option(data_properties)?;
+        let data_write_option = listener_ota_v1_data_write_option(data_properties)?;
         let payload_bytes =
-            listener_ota_v2_data_chunk_payload_bytes(session.as_ref(), data_write_option);
+            listener_ota_v1_data_chunk_payload_bytes(session.as_ref(), data_write_option);
         log::info!(
-            "[embedded-ble] Listener OTA v2 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes}"
+            "[embedded-ble] Listener OTA v1 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes}"
         );
-        Ok(PreparedListenerOtaV2Characteristics {
+        Ok(PreparedListenerOtaV1Characteristics {
             control,
             data,
             status,
@@ -12756,29 +10201,29 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         })
     }
 
-    fn open_listener_ota_v2_characteristics_from_service_with_retry(
+    fn open_listener_ota_v1_characteristics_from_service_with_retry(
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
-    ) -> Result<PreparedListenerOtaV2Characteristics, String> {
+    ) -> Result<PreparedListenerOtaV1Characteristics, String> {
         let mut last_error = None;
         for attempt in 1..=AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() + 1 {
-            match open_listener_ota_v2_characteristics_from_service(service, cache_mode) {
+            match open_listener_ota_v1_characteristics_from_service(service, cache_mode) {
                 Ok(prepared) => {
                     if attempt > 1 {
                         log::info!(
-                            "[embedded-ble] Listener OTA v2 characteristics recovered via {cache_mode:?} on attempt {attempt}"
+                            "[embedded-ble] Listener OTA v1 characteristics recovered via {cache_mode:?} on attempt {attempt}"
                         );
                     }
                     return Ok(prepared);
                 }
                 Err(err) => {
-                    let transient = is_transient_listener_ota_v2_discovery_error(&err);
+                    let transient = is_transient_listener_ota_v1_discovery_error(&err);
                     if attempt > AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() || !transient {
                         return Err(err);
                     }
                     let delay = AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS[attempt - 1];
                     log::warn!(
-                        "[embedded-ble] Listener OTA v2 characteristic discovery attempt {attempt} via {cache_mode:?} returned transient error: {err}; retrying in {} ms",
+                        "[embedded-ble] Listener OTA v1 characteristic discovery attempt {attempt} via {cache_mode:?} returned transient error: {err}; retrying in {} ms",
                         delay.as_millis()
                     );
                     last_error = Some(err);
@@ -12787,30 +10232,30 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         }
         Err(last_error.unwrap_or_else(|| {
-            "Listener OTA v2 characteristic discovery did not complete".to_string()
+            "Listener OTA v1 characteristic discovery did not complete".to_string()
         }))
     }
 
-    fn open_listener_ota_v2_characteristics_from_service_with_retry_deadline(
+    fn open_listener_ota_v1_characteristics_from_service_with_retry_deadline(
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
         deadline: Instant,
-    ) -> Result<PreparedListenerOtaV2Characteristics, String> {
+    ) -> Result<PreparedListenerOtaV1Characteristics, String> {
         let mut last_error = None;
         for attempt in 1..=AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() + 1 {
-            match open_listener_ota_v2_characteristics_from_service_with_deadline(
+            match open_listener_ota_v1_characteristics_from_service_with_deadline(
                 service, cache_mode, deadline,
             ) {
                 Ok(prepared) => {
                     if attempt > 1 {
                         log::info!(
-                            "[embedded-ble] Listener OTA v2 characteristics recovered via {cache_mode:?} on attempt {attempt}"
+                            "[embedded-ble] Listener OTA v1 characteristics recovered via {cache_mode:?} on attempt {attempt}"
                         );
                     }
                     return Ok(prepared);
                 }
                 Err(err) => {
-                    let transient = is_transient_listener_ota_v2_discovery_error(&err);
+                    let transient = is_transient_listener_ota_v1_discovery_error(&err);
                     if attempt > AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS.len() || !transient {
                         return Err(err);
                     }
@@ -12818,13 +10263,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     let sleep_for = match remaining_ble_timeout(
                         deadline,
                         delay,
-                        "Listener OTA v2 characteristic retry delay",
+                        "Listener OTA v1 characteristic retry delay",
                     ) {
                         Ok(value) => value,
                         Err(_) => return Err(err),
                     };
                     log::warn!(
-                        "[embedded-ble] Listener OTA v2 characteristic discovery attempt {attempt} via {cache_mode:?} returned transient error: {err}; retrying in {} ms",
+                        "[embedded-ble] Listener OTA v1 characteristic discovery attempt {attempt} via {cache_mode:?} returned transient error: {err}; retrying in {} ms",
                         sleep_for.as_millis()
                     );
                     last_error = Some(err);
@@ -12833,11 +10278,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         }
         Err(last_error.unwrap_or_else(|| {
-            "Listener OTA v2 characteristic discovery did not complete".to_string()
+            "Listener OTA v1 characteristic discovery did not complete".to_string()
         }))
     }
 
-    fn is_transient_listener_ota_v2_discovery_error(err: &str) -> bool {
+    fn is_transient_listener_ota_v1_discovery_error(err: &str) -> bool {
         err.contains("GattCommunicationStatus(1)")
             || err.contains("GattCommunicationStatus(3)")
             || err.contains("Unreachable")
@@ -12913,97 +10358,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Ok(PreparedAudioControlCharacteristic { control, session })
     }
 
-    fn ota_data_write_option(
-        data_properties: GattCharacteristicProperties,
-    ) -> Result<GattWriteOption, String> {
-        let requested = std::env::var(OTA_DATA_WRITE_OPTION_ENV)
-            .ok()
-            .and_then(ota_env_value);
-        ota_data_write_option_from_request(data_properties, requested.as_deref())
-    }
-
-    fn ota_data_write_option_from_request(
-        data_properties: GattCharacteristicProperties,
-        requested: Option<&str>,
-    ) -> Result<GattWriteOption, String> {
-        let supports_write = data_properties.contains(GattCharacteristicProperties::Write);
-        let supports_without_response =
-            data_properties.contains(GattCharacteristicProperties::WriteWithoutResponse);
-        let requested = requested
-            .map(|value| value.trim().to_ascii_lowercase())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "auto".to_string());
-        let option = match requested.as_str() {
-            "auto" => {
-                if supports_write {
-                    GattWriteOption::WriteWithResponse
-                } else if supports_without_response {
-                    GattWriteOption::WriteWithoutResponse
-                } else {
-                    return Err(
-                        "BLE OTA data characteristic must support Write or WriteWithoutResponse."
-                            .to_string(),
-                    );
-                }
-            }
-            "with-response" | "with_response" | "response" => {
-                if supports_write {
-                    GattWriteOption::WriteWithResponse
-                } else {
-                    return Err(format!(
-                        "{OTA_DATA_WRITE_OPTION_ENV}=with-response requested, but BLE OTA data characteristic does not support Write."
-                    ));
-                }
-            }
-            "without-response" | "without_response" | "no-response" | "no_response" => {
-                if supports_without_response {
-                    GattWriteOption::WriteWithoutResponse
-                } else {
-                    return Err(format!(
-                        "{OTA_DATA_WRITE_OPTION_ENV}=without-response requested, but BLE OTA data characteristic does not support WriteWithoutResponse."
-                    ));
-                }
-            }
-            other => {
-                return Err(format!(
-                    "Unsupported {OTA_DATA_WRITE_OPTION_ENV}={other}; use auto, with-response, or without-response."
-                ));
-            }
-        };
-        log::info!("[embedded-ble] OTA data write option request={requested} selected={option:?}");
-        Ok(option)
-    }
-
-    fn ota_data_chunk_bytes(session: Option<&GattSession>, write_option: GattWriteOption) -> usize {
-        let payload_bytes = session
-            .and_then(|session| session.MaxPduSize().ok())
-            .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
-            .filter(|payload_bytes| *payload_bytes > 0)
-            .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
-        if write_option == GattWriteOption::WriteWithoutResponse {
-            return payload_bytes.min(ATT_DEFAULT_PAYLOAD_BYTES).max(1);
-        }
-        payload_bytes.max(1)
-    }
-
-    #[cfg(any())]
-    fn stm32wb_st_ota_write_option(
-        properties: GattCharacteristicProperties,
-    ) -> Result<GattWriteOption, String> {
-        // The Companion loader exposes Write on top of ST's original
-        // Write-Without-Response path so Windows waits for the WB55 write
-        // permit response instead of silently dropping queued raw data.
-        if properties.contains(GattCharacteristicProperties::Write) {
-            Ok(GattWriteOption::WriteWithResponse)
-        } else if properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
-            Ok(GattWriteOption::WriteWithoutResponse)
-        } else {
-            Err("STM32WB ST OTA raw characteristic is not writable".to_string())
-        }
-    }
-
-    #[cfg(any())]
-    fn ota_v2_data_write_option(
+    fn listener_ota_v1_data_write_option(
         properties: GattCharacteristicProperties,
     ) -> Result<GattWriteOption, String> {
         if properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
@@ -13011,44 +10366,20 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         } else if properties.contains(GattCharacteristicProperties::Write) {
             Ok(GattWriteOption::WriteWithResponse)
         } else {
-            Err("Companion OTA v2 data characteristic is not writable".to_string())
+            Err("Listener OTA v1 data characteristic is not writable".to_string())
         }
     }
 
-    fn listener_ota_v2_data_write_option(
-        properties: GattCharacteristicProperties,
-    ) -> Result<GattWriteOption, String> {
-        if properties.contains(GattCharacteristicProperties::WriteWithoutResponse) {
-            Ok(GattWriteOption::WriteWithoutResponse)
-        } else if properties.contains(GattCharacteristicProperties::Write) {
-            Ok(GattWriteOption::WriteWithResponse)
-        } else {
-            Err("Listener OTA v2 data characteristic is not writable".to_string())
-        }
-    }
-
-    #[cfg(any())]
-    fn ota_v2_data_chunk_payload_bytes(session: Option<&GattSession>) -> usize {
-        let payload_bytes = session
-            .and_then(|session| session.MaxPduSize().ok())
-            .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
-            .filter(|payload_bytes| *payload_bytes > OTA_V2_PACKET_HEADER_BYTES)
-            .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
-        payload_bytes
-            .saturating_sub(OTA_V2_PACKET_HEADER_BYTES)
-            .min(OTA_V2_CHUNK_PAYLOAD_BYTES)
-            .max(1)
-    }
-
-    fn listener_ota_v2_data_chunk_payload_bytes(
+    fn listener_ota_v1_data_chunk_payload_bytes(
         session: Option<&GattSession>,
         write_option: GattWriteOption,
     ) -> usize {
-        let desired_payload = LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES + OTA_V2_PACKET_HEADER_BYTES;
+        let desired_payload =
+            LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES + denzic_ota_core::DATA_HEADER_BYTES;
         let mut payload_bytes = session
             .and_then(|session| session.MaxPduSize().ok())
             .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
-            .filter(|payload_bytes| *payload_bytes > OTA_V2_PACKET_HEADER_BYTES)
+            .filter(|payload_bytes| *payload_bytes > denzic_ota_core::DATA_HEADER_BYTES)
             .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
 
         if write_option == GattWriteOption::WriteWithoutResponse && payload_bytes < desired_payload
@@ -13061,159 +10392,23 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     .map(|max_pdu_size| {
                         usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES)
                     })
-                    .filter(|payload_bytes| *payload_bytes > OTA_V2_PACKET_HEADER_BYTES)
+                    .filter(|payload_bytes| *payload_bytes > denzic_ota_core::DATA_HEADER_BYTES)
                 {
                     payload_bytes = payload_bytes.max(next_payload);
                 }
             }
             if payload_bytes < desired_payload {
                 log::warn!(
-                    "[embedded-ble] Listener OTA v2 MaxPduSize stayed at payload_bytes={payload_bytes}; using {LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES} byte payload for WriteWithoutResponse and relying on WinRT write status"
+                    "[embedded-ble] Listener OTA v1 MaxPduSize stayed at payload_bytes={payload_bytes}; using {LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES} byte payload for WriteWithoutResponse and relying on WinRT write status"
                 );
-                return LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES;
+                return LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES;
             }
         }
 
         payload_bytes
-            .saturating_sub(OTA_V2_PACKET_HEADER_BYTES)
-            .min(LISTENER_OTA_V2_CHUNK_PAYLOAD_BYTES)
+            .saturating_sub(denzic_ota_core::DATA_HEADER_BYTES)
+            .min(LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES)
             .max(1)
-    }
-
-    #[cfg(any())]
-    fn stm32wb_st_ota_base_address_command(base_address: u32) -> [u8; 4] {
-        [
-            STM32WB_ST_OTA_APPLICATION_UPLOAD,
-            ((base_address >> 16) & 0xff) as u8,
-            ((base_address >> 8) & 0xff) as u8,
-            (base_address & 0xff) as u8,
-        ]
-    }
-
-    #[cfg(any())]
-    fn stm32wb_st_ota_raw_chunk_bytes(
-        session: Option<&GattSession>,
-        write_option: GattWriteOption,
-    ) -> usize {
-        let payload_bytes = session
-            .and_then(|session| session.MaxPduSize().ok())
-            .map(|max_pdu_size| usize::from(max_pdu_size).saturating_sub(ATT_WRITE_HEADER_BYTES))
-            .filter(|payload_bytes| *payload_bytes > 0)
-            .unwrap_or(ATT_DEFAULT_PAYLOAD_BYTES);
-        stm32wb_st_ota_raw_chunk_bytes_from_payload(payload_bytes, write_option)
-    }
-
-    #[cfg(any())]
-    fn stm32wb_st_ota_raw_chunk_bytes_from_payload(
-        payload_bytes: usize,
-        write_option: GattWriteOption,
-    ) -> usize {
-        let payload_bytes = payload_bytes.max(1);
-        let transport_limit = if write_option == GattWriteOption::WriteWithoutResponse {
-            payload_bytes.min(ATT_DEFAULT_PAYLOAD_BYTES)
-        } else {
-            payload_bytes
-        };
-        transport_limit.min(STM32WB_ST_OTA_RAW_DATA_SIZE).max(1)
-    }
-
-    #[cfg(any())]
-    fn stm32wb_st_ota_transfer_chunk_bytes(
-        transport_limit_bytes: usize,
-        manifest_chunk_bytes: usize,
-    ) -> Result<usize, String> {
-        if manifest_chunk_bytes != STM32WB_ST_OTA_RAW_DATA_SIZE {
-            return Err(format!(
-                "STM32WB ST OTA manifest chunk size must be {STM32WB_ST_OTA_RAW_DATA_SIZE} bytes, got {manifest_chunk_bytes}."
-            ));
-        }
-        if transport_limit_bytes == 0 {
-            return Err(
-                "STM32WB ST OTA transport payload limit is zero; cannot transfer firmware."
-                    .to_string(),
-            );
-        }
-        Ok(transport_limit_bytes.min(STM32WB_ST_OTA_RAW_DATA_SIZE))
-    }
-
-    pub(super) fn ota_transfer_chunk_bytes(
-        transport_limit_bytes: usize,
-        manifest_chunk_bytes: usize,
-    ) -> Result<usize, String> {
-        if manifest_chunk_bytes != OTA_REQUIRED_DATA_CHUNK_BYTES {
-            return Err(format!(
-                "OTA manifest chunk size must be {OTA_REQUIRED_DATA_CHUNK_BYTES} bytes, got {manifest_chunk_bytes}."
-            ));
-        }
-        let test_chunk_bytes = ota_data_test_chunk_bytes_override()?;
-        ota_transfer_chunk_bytes_with_override(
-            transport_limit_bytes,
-            manifest_chunk_bytes,
-            test_chunk_bytes,
-        )
-    }
-
-    fn ota_transfer_chunk_bytes_with_override(
-        transport_limit_bytes: usize,
-        manifest_chunk_bytes: usize,
-        test_chunk_bytes: Option<usize>,
-    ) -> Result<usize, String> {
-        if transport_limit_bytes == 0 {
-            return Err(format!(
-                "BLE transport payload limit is {transport_limit_bytes} bytes; OTA requires a positive data chunk size."
-            ));
-        }
-        let mut chunk_bytes = manifest_chunk_bytes.min(transport_limit_bytes);
-        if let Some(test_chunk_bytes) = test_chunk_bytes {
-            chunk_bytes = chunk_bytes.min(test_chunk_bytes);
-        }
-        if chunk_bytes == 0 {
-            return Err("BLE OTA data chunk size resolved to 0 bytes.".to_string());
-        }
-        Ok(chunk_bytes)
-    }
-
-    fn ota_data_test_chunk_bytes_override() -> Result<Option<usize>, String> {
-        let value = std::env::var(OTA_DATA_CHUNK_BYTES_ENV)
-            .ok()
-            .and_then(ota_env_value);
-        ota_data_test_chunk_bytes_override_from(value.as_deref())
-    }
-
-    fn ota_data_test_chunk_bytes_override_from(
-        value: Option<&str>,
-    ) -> Result<Option<usize>, String> {
-        match value.map(str::trim).filter(|value| !value.is_empty()) {
-            None => Ok(None),
-            Some(value) => value
-                .parse::<usize>()
-                .ok()
-                .filter(|chunk_bytes| *chunk_bytes > 0)
-                .map(Some)
-                .ok_or_else(|| {
-                    format!(
-                        "Unsupported {OTA_DATA_CHUNK_BYTES_ENV}={value}; use a positive byte count."
-                    )
-                }),
-        }
-    }
-
-    fn ota_data_inter_chunk_delay() -> Result<Duration, String> {
-        let value = std::env::var(OTA_DATA_INTER_CHUNK_DELAY_MS_ENV)
-            .ok()
-            .and_then(ota_env_value);
-        ota_data_inter_chunk_delay_from(value.as_deref())
-    }
-
-    fn ota_data_inter_chunk_delay_from(value: Option<&str>) -> Result<Duration, String> {
-        match value.map(str::trim).filter(|value| !value.is_empty()) {
-            None => Ok(Duration::ZERO),
-            Some(value) => value.parse::<u64>().map(Duration::from_millis).map_err(|_| {
-                format!(
-                    "Unsupported {OTA_DATA_INTER_CHUNK_DELAY_MS_ENV}={value}; use a non-negative millisecond count."
-                )
-            }),
-        }
     }
 
     fn ota_env_value(value: String) -> Option<String> {
@@ -14651,14 +11846,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
-    fn json_escape(value: &str) -> String {
-        value
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-    }
-
     #[derive(Default)]
     struct BleCaptureGateState {
         next_session_id: u64,
@@ -14762,31 +11949,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         session: Option<GattSession>,
     }
 
-    struct OpenOtaTarget {
-        control: GattCharacteristic,
-        data: GattCharacteristic,
-        data_write_option: GattWriteOption,
-        data_chunk_bytes: usize,
-        service: Option<GattDeviceService>,
-        session: Option<GattSession>,
-        device: Option<BluetoothLEDevice>,
-        bluetooth_address: Option<u64>,
-    }
-
-    #[cfg(any())]
-    struct OpenStm32wbStOtaTarget {
-        base: GattCharacteristic,
-        raw: GattCharacteristic,
-        confirm: GattCharacteristic,
-        base_write_option: GattWriteOption,
-        raw_write_option: GattWriteOption,
-        raw_chunk_bytes: usize,
-        service: Option<GattDeviceService>,
-        session: Option<GattSession>,
-        device: Option<BluetoothLEDevice>,
-        bluetooth_address: Option<u64>,
-    }
-
     struct OpenDiagnosticTarget {
         control: GattCharacteristic,
         data: GattCharacteristic,
@@ -14821,25 +11983,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
-    struct PreparedOtaCharacteristics {
-        control: GattCharacteristic,
-        data: GattCharacteristic,
-        data_write_option: GattWriteOption,
-        data_chunk_bytes: usize,
-        session: Option<GattSession>,
-    }
-
-    #[cfg(any())]
-    struct PreparedStm32wbStOtaCharacteristics {
-        base: GattCharacteristic,
-        raw: GattCharacteristic,
-        confirm: GattCharacteristic,
-        base_write_option: GattWriteOption,
-        raw_write_option: GattWriteOption,
-        raw_chunk_bytes: usize,
-        session: Option<GattSession>,
-    }
-
     struct PreparedDiagnosticCharacteristics {
         control: GattCharacteristic,
         data: GattCharacteristic,
@@ -14847,7 +11990,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         session: Option<GattSession>,
     }
 
-    impl Drop for OpenOtaTarget {
+    impl Drop for OpenListenerOtaV1Target {
         fn drop(&mut self) {
             if let Some(session) = self.session.take() {
                 let _ = session.Close();
@@ -14858,232 +12001,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             if let Some(device) = self.device.take() {
                 let _ = device.Close();
             }
-        }
-    }
-
-    #[cfg(any())]
-    impl Drop for OpenStm32wbStOtaTarget {
-        fn drop(&mut self) {
-            if let Some(session) = self.session.take() {
-                let _ = session.Close();
-            }
-            if let Some(service) = self.service.take() {
-                let _ = service.Close();
-            }
-            if let Some(device) = self.device.take() {
-                let _ = device.Close();
-            }
-        }
-    }
-
-    impl Drop for OpenOtaV2Target {
-        fn drop(&mut self) {
-            if let Some(session) = self.session.take() {
-                let _ = session.Close();
-            }
-            if let Some(service) = self.service.take() {
-                let _ = service.Close();
-            }
-            if let Some(device) = self.device.take() {
-                let _ = device.Close();
-            }
-        }
-    }
-
-    #[cfg(any())]
-    struct Stm32wbStOtaHandoffCleanup {
-        transfer_id: u64,
-        device: Option<BluetoothLEDevice>,
-        session: Option<GattSession>,
-        connection_status_token: Option<EventRegistrationToken>,
-        session_status_token: Option<EventRegistrationToken>,
-    }
-
-    #[cfg(any())]
-    impl Stm32wbStOtaHandoffCleanup {
-        fn install(
-            transfer_id: u64,
-            target: &OpenStm32wbStOtaTarget,
-            tx: mpsc::Sender<String>,
-        ) -> Self {
-            let mut cleanup = Self {
-                transfer_id,
-                device: None,
-                session: None,
-                connection_status_token: None,
-                session_status_token: None,
-            };
-
-            if let Some(device) = target.device.as_ref() {
-                if let Ok(status) = device.ConnectionStatus() {
-                    log::info!(
-                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: device connection status before finish={status:?}"
-                    );
-                    if status == BluetoothConnectionStatus::Disconnected {
-                        let _ = tx.send("device already disconnected before finish".to_string());
-                    }
-                }
-                let handler_tx = tx.clone();
-                let handler = TypedEventHandler::<BluetoothLEDevice, IInspectable>::new(
-                    move |sender, _| {
-                        if let Some(device) = sender {
-                            match device.ConnectionStatus() {
-                                Ok(status) => {
-                                    log::info!(
-                                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: device connection status changed to {status:?}"
-                                    );
-                                    if status == BluetoothConnectionStatus::Disconnected {
-                                        let _ = handler_tx.send(
-                                            "device connection changed to Disconnected".to_string(),
-                                        );
-                                    }
-                                }
-                                Err(err) => {
-                                    let _ = handler_tx.send(format!(
-                                        "device connection status read failed after finish: {err}"
-                                    ));
-                                }
-                            }
-                        }
-                        Ok(())
-                    },
-                );
-                match device.ConnectionStatusChanged(&handler) {
-                    Ok(token) => {
-                        cleanup.device = Some(device.clone());
-                        cleanup.connection_status_token = Some(token);
-                    }
-                    Err(err) => log::warn!(
-                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: device connection status handler registration failed: {err}"
-                    ),
-                }
-            }
-
-            if let Some(session) = target.session.as_ref() {
-                if let Ok(status) = session.SessionStatus() {
-                    log::info!(
-                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: GATT session status before finish={status:?}"
-                    );
-                    if status != GattSessionStatus::Active {
-                        let _ = tx.send(format!(
-                            "GATT session already non-active before finish: {status:?}"
-                        ));
-                    }
-                }
-                let handler_tx = tx;
-                let handler =
-                    TypedEventHandler::<GattSession, GattSessionStatusChangedEventArgs>::new(
-                        move |_sender, args| {
-                            if let Some(args) = args {
-                                let status = args.Status().ok();
-                                let error = args.Error().ok();
-                                log::info!(
-                                    "[embedded-ble] STM32WB ST OTA #{transfer_id}: GATT session status changed status={status:?} error={error:?}"
-                                );
-                                if status.is_some_and(|status| status != GattSessionStatus::Active)
-                                {
-                                    let _ = handler_tx.send(format!(
-                                        "GATT session changed to {status:?} error={error:?}"
-                                    ));
-                                }
-                            }
-                            Ok(())
-                        },
-                    );
-                match session.SessionStatusChanged(&handler) {
-                    Ok(token) => {
-                        cleanup.session = Some(session.clone());
-                        cleanup.session_status_token = Some(token);
-                    }
-                    Err(err) => log::warn!(
-                        "[embedded-ble] STM32WB ST OTA #{transfer_id}: GATT session status handler registration failed: {err}"
-                    ),
-                }
-            }
-
-            cleanup
-        }
-
-        fn finish(&mut self) {
-            if let Some(token) = self.connection_status_token.take() {
-                if let Some(device) = self.device.as_ref() {
-                    if let Err(err) = device.RemoveConnectionStatusChanged(token) {
-                        log::warn!(
-                            "[embedded-ble] STM32WB ST OTA #{}: device connection status handler remove failed: {err}",
-                            self.transfer_id
-                        );
-                    }
-                }
-            }
-            if let Some(token) = self.session_status_token.take() {
-                if let Some(session) = self.session.as_ref() {
-                    if let Err(err) = session.RemoveSessionStatusChanged(token) {
-                        log::warn!(
-                            "[embedded-ble] STM32WB ST OTA #{}: GATT session status handler remove failed: {err}",
-                            self.transfer_id
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(any())]
-    impl Drop for Stm32wbStOtaHandoffCleanup {
-        fn drop(&mut self) {
-            self.finish();
-        }
-    }
-
-    #[cfg(any())]
-    struct Stm32wbStOtaConfirmCleanup {
-        characteristic: GattCharacteristic,
-        token: Option<EventRegistrationToken>,
-        cccd_enabled: bool,
-    }
-
-    #[cfg(any())]
-    impl Stm32wbStOtaConfirmCleanup {
-        fn finish(&mut self) {
-            if let Some(token) = self.token.take() {
-                if let Err(err) = self.characteristic.RemoveValueChanged(token) {
-                    log::warn!(
-                        "[embedded-ble] STM32WB ST OTA confirm ValueChanged remove failed: {err}"
-                    );
-                }
-            }
-            if self.cccd_enabled {
-                match self
-                    .characteristic
-                    .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
-                        GattClientCharacteristicConfigurationDescriptorValue::None,
-                    ) {
-                    Ok(operation) => {
-                        if let Err(err) = wait_gatt_write_result(
-                            operation,
-                            Duration::from_secs(2),
-                            "STM32WB ST OTA confirm CCCD",
-                        ) {
-                            log::warn!(
-                                "[embedded-ble] STM32WB ST OTA confirm CCCD disable failed: {err}"
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        log::warn!(
-                            "[embedded-ble] STM32WB ST OTA confirm CCCD disable launch failed: {err}"
-                        );
-                    }
-                }
-                self.cccd_enabled = false;
-            }
-        }
-    }
-
-    #[cfg(any())]
-    impl Drop for Stm32wbStOtaConfirmCleanup {
-        fn drop(&mut self) {
-            self.finish();
         }
     }
 
@@ -15538,58 +12455,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             LOCK.get_or_init(|| Mutex::new(()))
         }
 
-        #[cfg(any())]
-        fn stm32wb_st_ota_confirm_env_test_lock() -> &'static Mutex<()> {
-            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-            LOCK.get_or_init(|| Mutex::new(()))
-        }
-
         #[test]
-        #[cfg(any())]
-        fn stm32wb_st_ota_confirm_indication_defaults_on_and_accepts_explicit_opt_out() {
-            let _guard = stm32wb_st_ota_confirm_env_test_lock().lock().unwrap();
-            const ENV_NAME: &str = "COMPANION_STM32WB_ST_OTA_CONFIRM";
-            let previous = std::env::var_os(ENV_NAME);
-
-            std::env::remove_var(ENV_NAME);
-            assert!(stm32wb_st_ota_use_confirm_indication());
-
-            for value in ["0", "false", "no", "off", " OFF "] {
-                std::env::set_var(ENV_NAME, value);
-                assert!(!stm32wb_st_ota_use_confirm_indication(), "{value}");
-            }
-
-            for value in ["1", "true", "yes", "on", "unexpected"] {
-                std::env::set_var(ENV_NAME, value);
-                assert!(stm32wb_st_ota_use_confirm_indication(), "{value}");
-            }
-
-            match previous {
-                Some(value) => std::env::set_var(ENV_NAME, value),
-                None => std::env::remove_var(ENV_NAME),
-            }
-        }
-
         #[test]
-        fn ota_write_option_prefers_with_response_and_accepts_overrides() {
-            let both = GattCharacteristicProperties::Write
-                | GattCharacteristicProperties::WriteWithoutResponse;
-
-            assert_eq!(
-                ota_data_write_option_from_request(both, None),
-                Ok(GattWriteOption::WriteWithResponse)
-            );
-            assert_eq!(
-                ota_data_write_option_from_request(both, Some("without-response")),
-                Ok(GattWriteOption::WriteWithoutResponse)
-            );
-            assert!(ota_data_write_option_from_request(
-                GattCharacteristicProperties::WriteWithoutResponse,
-                Some("with-response")
-            )
-            .is_err());
-        }
-
         #[test]
         fn type_heartbeat_prefers_no_response_when_available() {
             let both = GattCharacteristicProperties::Write
@@ -15673,32 +12540,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        #[cfg(any())]
-        fn stm32wb_st_ota_prefers_with_response_when_available() {
-            let both = GattCharacteristicProperties::Write
-                | GattCharacteristicProperties::WriteWithoutResponse;
-            assert_eq!(
-                stm32wb_st_ota_write_option(both),
-                Ok(GattWriteOption::WriteWithResponse)
-            );
-            assert_eq!(
-                stm32wb_st_ota_write_option(GattCharacteristicProperties::Write),
-                Ok(GattWriteOption::WriteWithResponse)
-            );
-            assert_eq!(
-                stm32wb_st_ota_write_option(GattCharacteristicProperties::WriteWithoutResponse),
-                Ok(GattWriteOption::WriteWithoutResponse)
-            );
-        }
-
         #[test]
-        #[cfg(any())]
-        fn stm32wb_st_ota_advertisement_name_is_case_insensitive() {
-            assert!(stm32wb_st_ota_advertisement_name_matches("companion"));
-            assert!(stm32wb_st_ota_advertisement_name_matches(" Companion "));
-            assert!(!stm32wb_st_ota_advertisement_name_matches("listener"));
-        }
-
         #[test]
         fn ble_advertisement_name_matching_trims_expected_target() {
             assert!(ble_advertisement_name_matches(" Companion ", "companion"));
@@ -17086,41 +13928,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        #[cfg(any())]
-        fn stm32wb_st_ota_base_address_command_uses_st_24bit_flash_offset() {
-            assert_eq!(
-                stm32wb_st_ota_base_address_command(0x0800_7000),
-                [STM32WB_ST_OTA_APPLICATION_UPLOAD, 0x00, 0x70, 0x00]
-            );
-        }
-
         #[test]
-        #[cfg(any())]
-        fn stm32wb_st_ota_uses_large_confirmed_chunks_and_caps_no_response() {
-            assert_eq!(
-                stm32wb_st_ota_raw_chunk_bytes(None, GattWriteOption::WriteWithoutResponse),
-                ATT_DEFAULT_PAYLOAD_BYTES
-            );
-            assert_eq!(
-                stm32wb_st_ota_raw_chunk_bytes(None, GattWriteOption::WriteWithResponse),
-                ATT_DEFAULT_PAYLOAD_BYTES
-            );
-            assert_eq!(
-                stm32wb_st_ota_raw_chunk_bytes_from_payload(
-                    248,
-                    GattWriteOption::WriteWithoutResponse
-                ),
-                ATT_DEFAULT_PAYLOAD_BYTES
-            );
-            assert_eq!(
-                stm32wb_st_ota_raw_chunk_bytes_from_payload(
-                    248,
-                    GattWriteOption::WriteWithResponse
-                ),
-                STM32WB_ST_OTA_RAW_DATA_SIZE
-            );
-        }
-
         #[test]
         fn ota_transfer_chunk_selection_uses_transport_and_test_override() {
             assert_eq!(
@@ -17141,15 +13949,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 ota_data_inter_chunk_delay_from(Some("25")),
                 Ok(Duration::from_millis(25))
             );
-            assert_eq!(
-                listener_ota_v2_active_link_settle_delay_from(None),
-                Ok(Duration::from_millis(1000))
-            );
-            assert_eq!(
-                listener_ota_v2_active_link_settle_delay_from(Some("0")),
-                Ok(Duration::ZERO)
-            );
-            assert!(listener_ota_v2_active_link_settle_delay_from(Some("30001")).is_err());
         }
 
         #[test]
@@ -17539,32 +14338,6 @@ pub fn is_background_listener_deferred_for_ota_error(err: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-pub fn transfer_firmware_ota(
-    version: &str,
-    firmware_sha256: &str,
-    firmware_bytes: &[u8],
-    manifest_chunk_bytes: usize,
-    on_progress: Option<&dyn Fn(usize, usize)>,
-) -> Result<FirmwareOtaTransferStats, String> {
-    windows_ble::transfer_firmware_ota(
-        version,
-        firmware_sha256,
-        firmware_bytes,
-        manifest_chunk_bytes,
-        on_progress,
-    )
-}
-
-#[cfg(any())]
-pub fn transfer_stm32wb_st_ota(
-    firmware_bytes: &[u8],
-    manifest_chunk_bytes: usize,
-    on_progress: Option<&dyn Fn(usize, usize)>,
-) -> Result<FirmwareOtaTransferStats, String> {
-    windows_ble::transfer_stm32wb_st_ota(firmware_bytes, manifest_chunk_bytes, on_progress)
-}
-
-#[cfg(target_os = "windows")]
 pub fn transfer_stm32wb_st_ota(
     _firmware_bytes: &[u8],
     _manifest_chunk_bytes: usize,
@@ -17573,102 +14346,36 @@ pub fn transfer_stm32wb_st_ota(
     Err("STM32WB ST BLE OTA is handled by the separate Companion-Type app.".to_string())
 }
 
-#[cfg(any())]
-pub fn transfer_companion_ota_v2(
-    firmware_bytes: &[u8],
-    manifest_chunk_bytes: usize,
-    on_progress: Option<&dyn Fn(usize, usize)>,
-) -> Result<FirmwareOtaTransferStats, String> {
-    windows_ble::transfer_companion_ota_v2(firmware_bytes, manifest_chunk_bytes, on_progress)
-}
-
 #[cfg(target_os = "windows")]
-pub fn transfer_companion_ota_v2(
-    _firmware_bytes: &[u8],
-    _manifest_chunk_bytes: usize,
-    _on_progress: Option<&dyn Fn(usize, usize)>,
-) -> Result<FirmwareOtaTransferStats, String> {
-    Err("Companion OTA v2 is handled by the separate Companion-Type app.".to_string())
-}
-
-#[cfg(target_os = "windows")]
-pub fn request_listener_ota_v2_active_link() -> Result<(), String> {
-    windows_ble::request_listener_ota_v2_active_link()
+pub fn request_listener_ota_v1_active_link() -> Result<(), String> {
+    windows_ble::request_listener_ota_v1_active_link()
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn request_listener_ota_v2_active_link() -> Result<(), String> {
+pub fn request_listener_ota_v1_active_link() -> Result<(), String> {
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-pub fn transfer_listener_ota_v2(
+pub fn transfer_listener_ota_v1(
     firmware_sha256: &str,
     firmware_bytes: &[u8],
     manifest_chunk_bytes: usize,
     on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<FirmwareOtaTransferStats, String> {
-    windows_ble::transfer_listener_ota_v2(firmware_sha256, firmware_bytes, manifest_chunk_bytes, on_progress)
+    windows_ble::transfer_listener_ota_v1(
+        firmware_sha256,
+        firmware_bytes,
+        manifest_chunk_bytes,
+        on_progress,
+    )
 }
-
-#[cfg(target_os = "windows")]
-pub struct FirmwareOtaPreparedTransfer(windows_ble::PreparedFirmwareOtaTransfer);
-
-#[cfg(any())]
-pub struct Stm32wbStOtaPreparedTransfer(windows_ble::PreparedStm32wbStOtaTransfer);
 
 #[cfg(target_os = "windows")]
 pub struct Stm32wbStOtaPreparedTransfer;
 
-#[cfg(any())]
-pub struct CompanionOtaV2PreparedTransfer(windows_ble::PreparedCompanionOtaV2Transfer);
-
 #[cfg(target_os = "windows")]
-pub struct CompanionOtaV2PreparedTransfer;
-
-#[cfg(target_os = "windows")]
-pub struct ListenerOtaV2PreparedTransfer(windows_ble::PreparedListenerOtaV2Transfer);
-
-#[cfg(target_os = "windows")]
-impl FirmwareOtaPreparedTransfer {
-    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-        self.0.snapshot()
-    }
-
-    pub fn transfer(
-        self,
-        version: &str,
-        firmware_sha256: &str,
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<FirmwareOtaTransferStats, String> {
-        self.0.transfer(
-            version,
-            firmware_sha256,
-            firmware_bytes,
-            manifest_chunk_bytes,
-            on_progress,
-        )
-    }
-}
-
-#[cfg(any())]
-impl Stm32wbStOtaPreparedTransfer {
-    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-        self.0.snapshot()
-    }
-
-    pub fn transfer(
-        self,
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<FirmwareOtaTransferStats, String> {
-        self.0
-            .transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
-    }
-}
+pub struct ListenerOtaV1PreparedTransfer(windows_ble::PreparedListenerOtaV1Transfer);
 
 #[cfg(target_os = "windows")]
 impl Stm32wbStOtaPreparedTransfer {
@@ -17686,41 +14393,8 @@ impl Stm32wbStOtaPreparedTransfer {
     }
 }
 
-#[cfg(any())]
-impl CompanionOtaV2PreparedTransfer {
-    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-        self.0.snapshot()
-    }
-
-    pub fn transfer(
-        self,
-        firmware_bytes: &[u8],
-        manifest_chunk_bytes: usize,
-        on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<FirmwareOtaTransferStats, String> {
-        self.0
-            .transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
-    }
-}
-
 #[cfg(target_os = "windows")]
-impl CompanionOtaV2PreparedTransfer {
-    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-        unreachable!("prepare_companion_ota_v2_transfer is handled by Companion-Type")
-    }
-
-    pub fn transfer(
-        self,
-        _firmware_bytes: &[u8],
-        _manifest_chunk_bytes: usize,
-        _on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<FirmwareOtaTransferStats, String> {
-        Err("Companion OTA v2 is handled by the separate Companion-Type app.".to_string())
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl ListenerOtaV2PreparedTransfer {
+impl ListenerOtaV1PreparedTransfer {
     pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
         self.0.snapshot()
     }
@@ -17732,19 +14406,13 @@ impl ListenerOtaV2PreparedTransfer {
         manifest_chunk_bytes: usize,
         on_progress: Option<&dyn Fn(usize, usize)>,
     ) -> Result<FirmwareOtaTransferStats, String> {
-        self.0
-            .transfer(firmware_sha256, firmware_bytes, manifest_chunk_bytes, on_progress)
+        self.0.transfer(
+            firmware_sha256,
+            firmware_bytes,
+            manifest_chunk_bytes,
+            on_progress,
+        )
     }
-}
-
-#[cfg(target_os = "windows")]
-pub fn prepare_firmware_ota_transfer() -> Result<FirmwareOtaPreparedTransfer, String> {
-    windows_ble::prepare_firmware_ota_transfer().map(FirmwareOtaPreparedTransfer)
-}
-
-#[cfg(any())]
-pub fn prepare_stm32wb_st_ota_transfer() -> Result<Stm32wbStOtaPreparedTransfer, String> {
-    windows_ble::prepare_stm32wb_st_ota_transfer().map(Stm32wbStOtaPreparedTransfer)
 }
 
 #[cfg(target_os = "windows")]
@@ -17752,29 +14420,14 @@ pub fn prepare_stm32wb_st_ota_transfer() -> Result<Stm32wbStOtaPreparedTransfer,
     Err("STM32WB ST BLE OTA is handled by the separate Companion-Type app.".to_string())
 }
 
-#[cfg(any())]
-pub fn prepare_companion_ota_v2_transfer() -> Result<CompanionOtaV2PreparedTransfer, String> {
-    windows_ble::prepare_companion_ota_v2_transfer().map(CompanionOtaV2PreparedTransfer)
-}
-
 #[cfg(target_os = "windows")]
-pub fn prepare_companion_ota_v2_transfer() -> Result<CompanionOtaV2PreparedTransfer, String> {
-    Err("Companion OTA v2 is handled by the separate Companion-Type app.".to_string())
-}
-
-#[cfg(target_os = "windows")]
-pub fn prepare_listener_ota_v2_transfer() -> Result<ListenerOtaV2PreparedTransfer, String> {
-    windows_ble::prepare_listener_ota_v2_transfer().map(ListenerOtaV2PreparedTransfer)
+pub fn prepare_listener_ota_v1_transfer() -> Result<ListenerOtaV1PreparedTransfer, String> {
+    windows_ble::prepare_listener_ota_v1_transfer().map(ListenerOtaV1PreparedTransfer)
 }
 
 #[cfg(target_os = "windows")]
 pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     windows_ble::firmware_ota_device_snapshot()
-}
-
-#[cfg(any())]
-pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
-    windows_ble::stm32wb_st_ota_device_snapshot()
 }
 
 #[cfg(target_os = "windows")]
@@ -17792,32 +14445,14 @@ pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     }
 }
 
-#[cfg(any())]
-pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
-    windows_ble::companion_ota_v2_device_snapshot()
+#[cfg(target_os = "windows")]
+pub fn listener_ota_v1_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+    windows_ble::listener_ota_v1_device_snapshot()
 }
 
 #[cfg(target_os = "windows")]
-pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
-    FirmwareOtaDeviceSnapshot {
-        connected: false,
-        hardware_revision: None,
-        firmware_version: None,
-        capabilities: Vec::new(),
-        battery_percent: None,
-        usb_powered: None,
-        detail: Some("Companion OTA v2 is handled by the separate Companion-Type app.".to_string()),
-    }
-}
-
-#[cfg(target_os = "windows")]
-pub fn listener_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
-    windows_ble::listener_ota_v2_device_snapshot()
-}
-
-#[cfg(target_os = "windows")]
-pub fn listener_ota_v2_gatt_probe_snapshot(timeout: Duration) -> FirmwareOtaDeviceSnapshot {
-    windows_ble::listener_ota_v2_gatt_probe_snapshot(timeout)
+pub fn listener_ota_v1_gatt_probe_snapshot(timeout: Duration) -> FirmwareOtaDeviceSnapshot {
+    windows_ble::listener_ota_v1_gatt_probe_snapshot(timeout)
 }
 
 #[cfg(target_os = "windows")]
@@ -18082,109 +14717,22 @@ pub fn is_background_listener_deferred_for_ota_error(_err: &str) -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn transfer_firmware_ota(
-    _version: &str,
+pub fn transfer_listener_ota_v1(
     _firmware_sha256: &str,
     _firmware_bytes: &[u8],
     _manifest_chunk_bytes: usize,
     _on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<FirmwareOtaTransferStats, String> {
-    Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
-}
-
-#[cfg(any())]
-pub fn transfer_stm32wb_st_ota(
-    _firmware_bytes: &[u8],
-    _manifest_chunk_bytes: usize,
-    _on_progress: Option<&dyn Fn(usize, usize)>,
-) -> Result<FirmwareOtaTransferStats, String> {
-    Err("STM32WB ST BLE OTA is only supported on Windows".to_string())
-}
-
-#[cfg(any())]
-pub fn transfer_companion_ota_v2(
-    _firmware_bytes: &[u8],
-    _manifest_chunk_bytes: usize,
-    _on_progress: Option<&dyn Fn(usize, usize)>,
-) -> Result<FirmwareOtaTransferStats, String> {
-    Err("Companion OTA v2 over BLE is only supported on Windows".to_string())
+    Err("Listener OTA v1 over BLE is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn transfer_listener_ota_v2(
-    _firmware_sha256: &str,
-    _firmware_bytes: &[u8],
-    _manifest_chunk_bytes: usize,
-    _on_progress: Option<&dyn Fn(usize, usize)>,
-) -> Result<FirmwareOtaTransferStats, String> {
-    Err("Listener OTA v2 over BLE is only supported on Windows".to_string())
-}
+pub struct ListenerOtaV1PreparedTransfer;
 
 #[cfg(not(target_os = "windows"))]
-pub struct FirmwareOtaPreparedTransfer;
-
-#[cfg(any())]
-pub struct Stm32wbStOtaPreparedTransfer;
-
-#[cfg(any())]
-pub struct CompanionOtaV2PreparedTransfer;
-
-#[cfg(not(target_os = "windows"))]
-pub struct ListenerOtaV2PreparedTransfer;
-
-#[cfg(not(target_os = "windows"))]
-impl FirmwareOtaPreparedTransfer {
+impl ListenerOtaV1PreparedTransfer {
     pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-        unreachable!("prepare_firmware_ota_transfer is unsupported on this platform")
-    }
-
-    pub fn transfer(
-        self,
-        _version: &str,
-        _firmware_sha256: &str,
-        _firmware_bytes: &[u8],
-        _manifest_chunk_bytes: usize,
-    ) -> Result<FirmwareOtaTransferStats, String> {
-        Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
-    }
-}
-
-#[cfg(any())]
-impl Stm32wbStOtaPreparedTransfer {
-    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-        unreachable!("prepare_stm32wb_st_ota_transfer is unsupported on this platform")
-    }
-
-    pub fn transfer(
-        self,
-        _firmware_bytes: &[u8],
-        _manifest_chunk_bytes: usize,
-        _on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<FirmwareOtaTransferStats, String> {
-        Err("STM32WB ST BLE OTA is only supported on Windows".to_string())
-    }
-}
-
-#[cfg(any())]
-impl CompanionOtaV2PreparedTransfer {
-    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-        unreachable!("prepare_companion_ota_v2_transfer is unsupported on this platform")
-    }
-
-    pub fn transfer(
-        self,
-        _firmware_bytes: &[u8],
-        _manifest_chunk_bytes: usize,
-        _on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<FirmwareOtaTransferStats, String> {
-        Err("Companion OTA v2 over BLE is only supported on Windows".to_string())
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-impl ListenerOtaV2PreparedTransfer {
-    pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-        unreachable!("prepare_listener_ota_v2_transfer is unsupported on this platform")
+        unreachable!("prepare_listener_ota_v1_transfer is unsupported on this platform")
     }
 
     pub fn transfer(
@@ -18194,28 +14742,13 @@ impl ListenerOtaV2PreparedTransfer {
         _manifest_chunk_bytes: usize,
         _on_progress: Option<&dyn Fn(usize, usize)>,
     ) -> Result<FirmwareOtaTransferStats, String> {
-        Err("Listener OTA v2 over BLE is only supported on Windows".to_string())
+        Err("Listener OTA v1 over BLE is only supported on Windows".to_string())
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn prepare_firmware_ota_transfer() -> Result<FirmwareOtaPreparedTransfer, String> {
-    Err("Firmware OTA over Listener BLE is only supported on Windows".to_string())
-}
-
-#[cfg(any())]
-pub fn prepare_stm32wb_st_ota_transfer() -> Result<Stm32wbStOtaPreparedTransfer, String> {
-    Err("STM32WB ST BLE OTA is only supported on Windows".to_string())
-}
-
-#[cfg(any())]
-pub fn prepare_companion_ota_v2_transfer() -> Result<CompanionOtaV2PreparedTransfer, String> {
-    Err("Companion OTA v2 over BLE is only supported on Windows".to_string())
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn prepare_listener_ota_v2_transfer() -> Result<ListenerOtaV2PreparedTransfer, String> {
-    Err("Listener OTA v2 over BLE is only supported on Windows".to_string())
+pub fn prepare_listener_ota_v1_transfer() -> Result<ListenerOtaV1PreparedTransfer, String> {
+    Err("Listener OTA v1 over BLE is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -18231,8 +14764,8 @@ pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     }
 }
 
-#[cfg(any())]
-pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+#[cfg(not(target_os = "windows"))]
+pub fn listener_ota_v1_device_snapshot() -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
         hardware_revision: None,
@@ -18240,25 +14773,12 @@ pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
         capabilities: Vec::new(),
         battery_percent: None,
         usb_powered: None,
-        detail: Some("STM32WB ST BLE OTA is only supported on Windows".to_string()),
-    }
-}
-
-#[cfg(any())]
-pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
-    FirmwareOtaDeviceSnapshot {
-        connected: false,
-        hardware_revision: None,
-        firmware_version: None,
-        capabilities: Vec::new(),
-        battery_percent: None,
-        usb_powered: None,
-        detail: Some("Companion OTA v2 over BLE is only supported on Windows".to_string()),
+        detail: Some("Listener OTA v1 over BLE is only supported on Windows".to_string()),
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn listener_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+pub fn listener_ota_v1_gatt_probe_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
         hardware_revision: None,
@@ -18266,20 +14786,7 @@ pub fn listener_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
         capabilities: Vec::new(),
         battery_percent: None,
         usb_powered: None,
-        detail: Some("Listener OTA v2 over BLE is only supported on Windows".to_string()),
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn listener_ota_v2_gatt_probe_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
-    FirmwareOtaDeviceSnapshot {
-        connected: false,
-        hardware_revision: None,
-        firmware_version: None,
-        capabilities: Vec::new(),
-        battery_percent: None,
-        usb_powered: None,
-        detail: Some("Listener OTA v2 over BLE is only supported on Windows".to_string()),
+        detail: Some("Listener OTA v1 over BLE is only supported on Windows".to_string()),
     }
 }
 
@@ -18644,13 +15151,13 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn listener_ota_v2_blocks_cross_process_background_heartbeat() {
+    fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
         let source = include_str!("embedded_ble.rs");
         assert!(
             source.contains("BLE_OTA_OPERATION_MUTEX_NAME")
                 && source.contains("Local\\\\Denzic.Listener.Type.BleOtaOperation")
-                && source.contains("acquire_ble_ota_process_mutex(\"listener_ota_v2\")"),
-            "Listener OTA v2 must hold a Windows named mutex shared by headless CLI and the installed tray process"
+                && source.contains("acquire_ble_ota_process_mutex(\"listener_ota_v1\")"),
+            "Listener OTA v1 must hold a Windows named mutex shared by headless CLI and the installed tray process"
         );
         assert!(
             source.contains("BLE OTA operation active in another process; deferring background listener before notify open")
@@ -18659,22 +15166,22 @@ mod tests {
             "background capture must not keep sending Type heartbeat or report recovery failures while another process owns Listener OTA"
         );
         let prepare_start = source
-            .find("pub(super) fn prepare_listener_ota_v2_transfer")
-            .expect("Listener OTA v2 prepare helper should exist");
+            .find("pub(super) fn prepare_listener_ota_v1_transfer")
+            .expect("Listener OTA v1 prepare helper should exist");
         let prepare_end = source[prepare_start..]
             .find("pub fn transfer_firmware_ota")
             .map(|offset| prepare_start + offset)
-            .expect("Listener OTA v2 prepare helper boundary should exist");
+            .expect("Listener OTA v1 prepare helper boundary should exist");
         let prepare = &source[prepare_start..prepare_end];
         assert!(
             prepare.contains("_ota_process_guard: ota_process_guard")
                 && prepare.contains("TYPE:OTA")
-                && prepare.contains("Listener OTA v2 active-link hint")
+                && prepare.contains("Listener OTA v1 active-link hint")
                 && prepare.find("acquire_ble_ota_process_mutex").unwrap()
                     < prepare.find("TYPE:OTA").unwrap()
                 && prepare.find("TYPE:OTA").unwrap()
                     < prepare.find("BleCaptureGuard::enter").unwrap(),
-            "Listener OTA v2 must acquire the cross-process OTA lock, send TYPE:OTA, then open BLE GATT"
+            "Listener OTA v1 must acquire the cross-process OTA lock, send TYPE:OTA, then open BLE GATT"
         );
     }
 
@@ -18912,16 +15419,6 @@ mod tests {
         assert!(!super::windows_ble::is_ota_finish_reboot_handoff_error(
             "BLE OTA control begin write returned status=GattCommunicationStatus(1)"
         ));
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn stm32wb_finish_reboot_handoff_accepts_windows_timeout_then_disconnect() {
-        assert!(
-            super::windows_ble::is_stm32wb_st_ota_finish_reboot_handoff_error(
-                "BLE STM32WB ST OTA finish write timed out after 8000 ms; fallback GattWriteOption(1) for STM32WB ST OTA finish also failed: BLE STM32WB ST OTA finish write async error: Some(HRESULT(0x80000013))"
-            )
-        );
     }
 
     #[cfg(target_os = "windows")]

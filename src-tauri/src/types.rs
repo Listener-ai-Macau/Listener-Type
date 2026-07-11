@@ -951,11 +951,7 @@ fn is_legacy_device_custom_keys_default(keys: &DeviceCustomKeys) -> bool {
     keys == &legacy_device_custom_keys_default()
         || device_custom_key_defaults_match(keys, &legacy_device_custom_keys_default(), true)
         || keys == &current_default_with_legacy_knob_disabled
-        || device_custom_key_defaults_match(
-            keys,
-            &current_default_with_legacy_knob_disabled,
-            false,
-        )
+        || device_custom_key_defaults_match(keys, &current_default_with_legacy_knob_disabled, false)
         || keys == &current_default_with_legacy_knob
         || device_custom_key_defaults_match(keys, &current_default_with_legacy_knob, false)
         || keys == &previous_action_default

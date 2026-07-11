@@ -23,143 +23,35 @@ mod embedded_ble {
         pub detail: Option<String>,
     }
 
-    pub fn transfer_firmware_ota(
-        _version: &str,
-        _firmware_sha256: &str,
-        _firmware_bytes: &[u8],
-        _manifest_chunk_bytes: usize,
-        _on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<FirmwareOtaTransferStats, String> {
-        Err(
-            "Firmware OTA over Listener BLE is only available from the Tauri app on Windows."
-                .to_string(),
-        )
-    }
-
-    pub fn transfer_stm32wb_st_ota(
-        _firmware_bytes: &[u8],
-        _manifest_chunk_bytes: usize,
-        _on_progress: Option<&dyn Fn(usize, usize)>,
-    ) -> Result<FirmwareOtaTransferStats, String> {
-        Err(
-            "STM32WB ST BLE OTA is only available from the Tauri app on Windows."
-                .to_string(),
-        )
-    }
-
-    pub struct PreparedFirmwareOtaTransfer {
+    pub struct PreparedListenerOtaV1Transfer {
         snapshot: FirmwareOtaDeviceSnapshot,
     }
 
-    impl PreparedFirmwareOtaTransfer {
+    impl PreparedListenerOtaV1Transfer {
         pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
             &self.snapshot
         }
 
         pub fn transfer(
             self,
-            version: &str,
-            firmware_sha256: &str,
+            _firmware_sha256: &str,
             firmware_bytes: &[u8],
             manifest_chunk_bytes: usize,
             on_progress: Option<&dyn Fn(usize, usize)>,
         ) -> Result<FirmwareOtaTransferStats, String> {
-            transfer_firmware_ota(
-                version,
-                firmware_sha256,
-                firmware_bytes,
-                manifest_chunk_bytes,
-                on_progress,
+            let _ = (firmware_bytes, manifest_chunk_bytes, on_progress);
+            Err(
+                "Denzic OTA v1 BLE transfer is only available from Listener Type on Windows."
+                    .to_string(),
             )
         }
     }
 
-    pub fn prepare_firmware_ota_transfer() -> Result<PreparedFirmwareOtaTransfer, String> {
-        Err(
-            "Firmware OTA over Listener BLE is only available from the Tauri app on Windows."
-                .to_string(),
-        )
+    pub fn prepare_listener_ota_v1_transfer() -> Result<PreparedListenerOtaV1Transfer, String> {
+        Err("Listener OTA v1 over BLE is only available from the Tauri app on Windows.".to_string())
     }
 
-    pub struct PreparedStm32wbStOtaTransfer {
-        snapshot: FirmwareOtaDeviceSnapshot,
-    }
-
-    impl PreparedStm32wbStOtaTransfer {
-        pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-            &self.snapshot
-        }
-
-        pub fn transfer(
-            self,
-            firmware_bytes: &[u8],
-            manifest_chunk_bytes: usize,
-            on_progress: Option<&dyn Fn(usize, usize)>,
-        ) -> Result<FirmwareOtaTransferStats, String> {
-            transfer_stm32wb_st_ota(firmware_bytes, manifest_chunk_bytes, on_progress)
-        }
-    }
-
-    pub fn prepare_stm32wb_st_ota_transfer() -> Result<PreparedStm32wbStOtaTransfer, String> {
-        Err(
-            "STM32WB ST BLE OTA is only available from the Tauri app on Windows."
-                .to_string(),
-        )
-    }
-
-    pub struct PreparedListenerOtaV2Transfer {
-        snapshot: FirmwareOtaDeviceSnapshot,
-    }
-
-    impl PreparedListenerOtaV2Transfer {
-        pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-            &self.snapshot
-        }
-
-        pub fn transfer(
-            self,
-            firmware_bytes: &[u8],
-            manifest_chunk_bytes: usize,
-            on_progress: Option<&dyn Fn(usize, usize)>,
-        ) -> Result<FirmwareOtaTransferStats, String> {
-            transfer_firmware_ota("", "", firmware_bytes, manifest_chunk_bytes, on_progress)
-        }
-    }
-
-    pub fn prepare_listener_ota_v2_transfer() -> Result<PreparedListenerOtaV2Transfer, String> {
-        Err(
-            "Listener OTA v2 over BLE is only available from the Tauri app on Windows."
-                .to_string(),
-        )
-    }
-
-    pub struct PreparedCompanionOtaV2Transfer {
-        snapshot: FirmwareOtaDeviceSnapshot,
-    }
-
-    impl PreparedCompanionOtaV2Transfer {
-        pub fn snapshot(&self) -> &FirmwareOtaDeviceSnapshot {
-            &self.snapshot
-        }
-
-        pub fn transfer(
-            self,
-            firmware_bytes: &[u8],
-            manifest_chunk_bytes: usize,
-            on_progress: Option<&dyn Fn(usize, usize)>,
-        ) -> Result<FirmwareOtaTransferStats, String> {
-            transfer_stm32wb_st_ota(firmware_bytes, manifest_chunk_bytes, on_progress)
-        }
-    }
-
-    pub fn prepare_companion_ota_v2_transfer() -> Result<PreparedCompanionOtaV2Transfer, String> {
-        Err(
-            "Companion OTA v2 over BLE is only available from the Tauri app on Windows."
-                .to_string(),
-        )
-    }
-
-    pub fn firmware_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
+    pub fn listener_ota_v1_device_snapshot() -> FirmwareOtaDeviceSnapshot {
         FirmwareOtaDeviceSnapshot {
             connected: false,
             hardware_revision: None,
@@ -168,33 +60,9 @@ mod embedded_ble {
             battery_percent: None,
             usb_powered: None,
             detail: Some(
-                "Standalone headless helper only supports package validation; use listener-type --firmware-ota-transfer for BLE transfer."
-                    .to_string(),
+                "Standalone headless validation cannot access the Windows BLE adapter.".to_string(),
             ),
         }
-    }
-
-    pub fn stm32wb_st_ota_device_snapshot() -> FirmwareOtaDeviceSnapshot {
-        FirmwareOtaDeviceSnapshot {
-            connected: false,
-            hardware_revision: None,
-            firmware_version: None,
-            capabilities: Vec::new(),
-            battery_percent: None,
-            usb_powered: None,
-            detail: Some(
-                "Standalone headless helper only supports package validation; use Listener Type for STM32WB ST BLE OTA transfer."
-                    .to_string(),
-            ),
-        }
-    }
-
-    pub fn listener_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
-        firmware_ota_device_snapshot()
-    }
-
-    pub fn companion_ota_v2_device_snapshot() -> FirmwareOtaDeviceSnapshot {
-        stm32wb_st_ota_device_snapshot()
     }
 }
 
@@ -213,7 +81,7 @@ Usage:
 Options:
   --manifest <file>              OTA manifest path.
   --firmware <file>              OTA binary path.
-  --desktop-version <version>    Listener Type version. Defaults to CARGO_PKG_VERSION.
+  --desktop-version <version>    Listener Type version. Defaults to the repository package.json version.
   --hardware <revision>          Expected hardware revision. Defaults to keyboard-v2-n16r8.
   --current-version <version>    Optional connected/current firmware version for warning checks.
   --preflight                    Include a device preflight snapshot. Standalone helper reports unsupported BLE.
@@ -278,7 +146,7 @@ fn parse_args(args: Vec<String>) -> Result<Option<Args>, String> {
     }
     let mut manifest_path = None;
     let mut firmware_path = None;
-    let mut desktop_version = env!("CARGO_PKG_VERSION").to_string();
+    let mut desktop_version = repository_desktop_version()?;
     let mut expected_hardware_revision = "keyboard-v2-n16r8".to_string();
     let mut current_firmware_version = None;
     let mut preflight = false;
@@ -309,6 +177,17 @@ fn parse_args(args: Vec<String>) -> Result<Option<Args>, String> {
         preflight,
         json_out,
     }))
+}
+
+fn repository_desktop_version() -> Result<String, String> {
+    let package: serde_json::Value = serde_json::from_str(include_str!("../../../package.json"))
+        .map_err(|err| format!("Listener Type package.json is invalid: {err}"))?;
+    package
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .filter(|version| !version.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| "Listener Type package.json is missing version".to_string())
 }
 
 fn next_value(iter: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
@@ -355,6 +234,18 @@ mod tests {
     "hardware_revision": "keyboard-v2-n16r8",
     "protocol_version": 1,
     "min_desktop_version": "1.0.0"
+  }},
+  "protocol": {{
+    "name": "denzic_ota_v1",
+    "version": 1,
+    "firmware_capability": "denzic_ota_v1",
+    "gatt": {{
+      "service_uuid": "710af845-6d9f-6583-0c4d-9e5b3bc3092a",
+      "control_uuid": "710af845-6d9f-6583-0c4d-9e5b3bc3094b",
+      "data_uuid": "710af845-6d9f-6583-0c4d-9e5b3bc3094c",
+      "status_uuid": "710af845-6d9f-6583-0c4d-9e5b3bc3094d",
+      "chunk_bytes": 500
+    }}
   }},
   "ble_identity": {{
     "name": "listener",
@@ -406,6 +297,21 @@ mod tests {
     fn parse_requires_manifest_and_firmware() {
         assert!(parse_args(vec![]).is_err());
         assert!(parse_args(vec!["--manifest".into(), "m.json".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_defaults_to_repository_desktop_version() {
+        let args = parse_args(vec![
+            "--manifest".into(),
+            "ota_manifest.json".into(),
+            "--firmware".into(),
+            "firmware_ota.bin".into(),
+        ])
+        .expect("parse")
+        .expect("args");
+
+        assert_eq!(args.desktop_version, repository_desktop_version().unwrap());
+        assert_eq!(args.desktop_version, "1.0.2");
     }
 
     #[test]
@@ -509,7 +415,7 @@ mod tests {
         assert!(preflight
             .detail
             .as_deref()
-            .is_some_and(|item| item.contains("Standalone headless helper")));
+            .is_some_and(|item| item.contains("Standalone headless validation")));
         assert!(preflight
             .blockers
             .iter()

@@ -306,39 +306,36 @@ for (const token of [
 
 const embeddedBle = readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble.rs"), "utf8");
 const listenerOtaWindow = embeddedBle.match(
-  /const\s+LISTENER_OTA_V2_DEFAULT_WINDOW_CHUNKS:\s*usize\s*=\s*(\d+);/,
+  /const\s+LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS:\s*usize\s*=\s*(\d+);/,
 );
 if (!listenerOtaWindow) {
-  fail("Listener OTA v2 default window constant is missing");
+  fail("Listener OTA v1 default window constant is missing");
 }
 if (Number(listenerOtaWindow[1]) < 20) {
-  fail("Listener OTA v2 default window must stay at least 20 chunks for the <=60000 ms OTA target");
+  fail("Listener OTA v1 default window must stay at least 20 chunks for the <=60000 ms OTA target");
 }
-if (!embeddedBle.includes("LISTENER_OTA_V2_WINDOW_ENV")) {
-  fail("Listener OTA v2 must keep the window override env for controlled bench experiments");
+if (!embeddedBle.includes("LISTENER_OTA_V1_WINDOW_ENV")) {
+  fail("Listener OTA v1 must keep the window override env for controlled bench experiments");
 }
-if (!embeddedBle.includes("LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS")) {
-  fail("Listener OTA v2 must keep the post-begin active-link settle guard for low-power OTA speed");
-}
-if (!embeddedBle.includes("waiting {} ms for active BLE connection parameters after begin")) {
-  fail("Listener OTA v2 must log the active-link settle wait before streaming OTA data");
+if (!embeddedBle.includes("continuing with OTA begin fallback")) {
+  fail("Listener OTA v1 must not block begin on an active-link hint that can collide with a central BLE procedure");
 }
 for (const token of [
   "BLE_OTA_OPERATION_MUTEX_NAME",
-  "acquire_ble_ota_process_mutex(\"listener_ota_v2\")",
+  "acquire_ble_ota_process_mutex(\"listener_ota_v1\")",
   "BLE OTA operation active in another process; deferring background listener before notify open",
   "BLE OTA operation active in another process; closing idle background listener",
   "BACKGROUND_LISTENER_DEFERRED_FOR_OTA",
   "EMBEDDED_BLE_RETRY_OTA_DEFER_DELAY",
   "TYPE:OTA",
-  "Listener OTA v2 active-link hint",
+  "Listener OTA v1 active-link hint",
   "background listener deferred while firmware OTA is active",
 ]) {
   if (!embeddedBle.includes(token)) {
     const coordinatorSource = readFileSync(join(repoRoot, "src-tauri", "src", "coordinator.rs"), "utf8");
     const haystack = `${embeddedBle}\n${coordinatorSource}`;
     if (!haystack.includes(token)) {
-      fail(`Listener OTA v2 speed guard must keep cross-process BLE exclusivity token: ${token}`);
+      fail(`Listener OTA v1 speed guard must keep cross-process BLE exclusivity token: ${token}`);
     }
   }
 }

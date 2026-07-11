@@ -7884,7 +7884,7 @@ mod tests {
             hardware_revision: connected.then(|| "keyboard-v2".to_string()),
             firmware_version: connected.then(|| "v-test".to_string()),
             capabilities: connected
-                .then(|| vec!["firmware_ota_v1".to_string()])
+                .then(|| vec![crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY.to_string()])
                 .unwrap_or_default(),
             battery_percent: connected.then_some(91),
             usb_powered: connected.then_some(true),

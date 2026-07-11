@@ -119,8 +119,8 @@ const result = {
 };
 
 const failures = [];
-if (result.transport !== "listener_ble_ota_v2") {
-  failures.push(`transport=${result.transport}, expected listener_ble_ota_v2`);
+if (result.transport !== "denzic_ota_v1") {
+  failures.push(`transport=${result.transport}, expected denzic_ota_v1`);
 }
 if (result.bytes < minBytes) {
   failures.push(`bytes=${result.bytes}, expected >=${minBytes}`);
@@ -149,5 +149,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `PASS: Listener OTA v2 transfer ${result.bytes} bytes in ${result.transferMs} ms, total ${result.totalMs} ms`,
+  `PASS: Listener OTA v1 transfer ${result.bytes} bytes in ${result.transferMs} ms, total ${result.totalMs} ms`,
 );

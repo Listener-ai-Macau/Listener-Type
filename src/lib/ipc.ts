@@ -38,8 +38,7 @@ import type {
   WindowsImeStatus,
 } from './types';
 import {
-  FIRMWARE_OTA_TRANSPORT_BOUNDARY,
-  LISTENER_OTA_V2_TRANSPORT_BOUNDARY,
+  LISTENER_OTA_V1_TRANSPORT_BOUNDARY,
   type FirmwareOtaManifest,
   type FirmwareOtaPreflightSnapshot,
 } from './firmwareOta';
@@ -1275,9 +1274,7 @@ export interface FirmwareOtaBleTransferResult {
   totalElapsedMs: number;
 }
 
-export type FirmwareOtaBleTransferTransport =
-  | typeof FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName
-  | typeof LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName;
+export type FirmwareOtaBleTransferTransport = typeof LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName;
 
 export function transferFirmwareOtaBle(
   request: FirmwareOtaBleTransferRequest,
@@ -1293,9 +1290,7 @@ export function transferFirmwareOtaBle(
       bytesTransferred: request.firmwareBytes.byteLength,
       chunksSent: Math.ceil(request.firmwareBytes.byteLength / Math.max(1, request.manifest.gattChunkBytes)),
       confirmedVersion: null,
-      transport: request.manifest.protocolName === LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName
-        ? LISTENER_OTA_V2_TRANSPORT_BOUNDARY.protocolName
-        : FIRMWARE_OTA_TRANSPORT_BOUNDARY.protocolName,
+      transport: LISTENER_OTA_V1_TRANSPORT_BOUNDARY.protocolName,
       transferElapsedMs: 0,
       confirmElapsedMs: 0,
       totalElapsedMs: 0,
