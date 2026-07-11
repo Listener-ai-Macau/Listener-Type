@@ -308,6 +308,22 @@
       ]
     },
     {
+      "id": "firmware_key_dma_rmt_dark_latch",
+      "repo": "firmware",
+      "commit": "ac16a4f0dd85493f69bcad8bc07aece28240cab0",
+      "subject": "Validate key DMA and dark RMT latch together",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "KEY lit feedback frames stay on SPI DMA, including the accepted white-to-purple single-click transition.",
+        "RMT may only write the final two-frame all-dark latch after a SPI DMA pre-latch; it must never drive a lit KEY frame.",
+        "Multiple KEY effects retain independent fade behavior instead of clearing another active key."
+      ],
+      "guards": [
+        "python tools/verify_status_led_static.py",
+        "pwsh -NoProfile -File ./tools/run_v1_0_2_regression.ps1 -Port COM3 -DeviceName listener -SkipBuild -SkipFlash -SkipLowPowerBrightnessProbe"
+      ]
+    },
+    {
       "id": "platform_audio_v1_core",
       "repo": "platform",
       "commit": "6ce017f5e792d175f822d9cf071c100429758016",
