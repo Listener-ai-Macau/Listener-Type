@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
-#[path = "../../../src-tauri/src/embedded_audio.rs"]
-mod embedded_audio;
+use denzic_audio_v1_core as embedded_audio;
 
 use std::collections::BTreeSet;
 use std::env;

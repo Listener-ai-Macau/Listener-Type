@@ -24,6 +24,22 @@ const embeddedFileSmokePath = join(
   "run_embedded_audio_file_smoke.ps1",
 );
 const embeddedFileSmoke = readFileSync(embeddedFileSmokePath, "utf8");
+const embeddedAudioReplayCargo = readFileSync(
+  join(root, "tools", "embedded_audio_replay", "Cargo.toml"),
+  "utf8",
+);
+const embeddedAudioReplayMain = readFileSync(
+  join(root, "tools", "embedded_audio_replay", "src", "main.rs"),
+  "utf8",
+);
+const volcengineProbeCargo = readFileSync(
+  join(root, "tools", "volcengine_asr_probe", "Cargo.toml"),
+  "utf8",
+);
+const volcengineProbeMain = readFileSync(
+  join(root, "tools", "volcengine_asr_probe", "src", "main.rs"),
+  "utf8",
+);
 
 function fail(message) {
   throw new Error(message);
@@ -272,6 +288,27 @@ requireExcludes(
   "prefs.active_asr_provider =",
   "ASR provider marker migration must not overwrite the user's selected ASR provider",
 );
+
+for (const [label, cargo, source] of [
+  ["Embedded audio replay", embeddedAudioReplayCargo, embeddedAudioReplayMain],
+  ["Volcengine ASR probe", volcengineProbeCargo, volcengineProbeMain],
+]) {
+  requireIncludes(
+    cargo,
+    "denzic-audio-v1-core = { path = \"../../third_party/denzic-platform/audio/host/rust\" }",
+    `${label} shared VKA1 dependency`,
+  );
+  requireIncludes(
+    source,
+    "use denzic_audio_v1_core as embedded_audio;",
+    `${label} shared VKA1 import`,
+  );
+  requireExcludes(
+    source,
+    "#[path = \"../../../src-tauri/src/embedded_audio.rs\"]",
+    `${label} must not revive a local VKA1 protocol copy`,
+  );
+}
 
 function runNpmScript(scriptName) {
   const commandLine = `npm run ${scriptName}`;
