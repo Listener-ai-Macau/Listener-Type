@@ -5911,6 +5911,7 @@ pub async fn transfer_firmware_ota_ble(
         };
         if is_listener_ota_v2 {
             crate::embedded_ble::transfer_listener_ota_v2(
+                &transfer_sha256,
                 &firmware_bytes,
                 manifest_chunk_bytes,
                 Some(&progress),

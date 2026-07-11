@@ -381,6 +381,7 @@ fn run_listener_ota_v2_transfer_preflight_and_write(
     let preflight_elapsed_ms = elapsed_ms_u64(preflight_started);
     let transfer_started = Instant::now();
     match prepared.transfer(
+        &package.manifest.file_sha256,
         &package.firmware_bytes,
         package.manifest.gatt_chunk_bytes as usize,
         None,

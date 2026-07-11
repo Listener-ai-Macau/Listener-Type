@@ -6743,6 +6743,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
         pub(super) fn transfer(
             self,
+            firmware_sha256: &str,
             firmware_bytes: &[u8],
             manifest_chunk_bytes: usize,
             on_progress: Option<&dyn Fn(usize, usize)>,
@@ -6750,6 +6751,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             transfer_listener_ota_v2_to_target(
                 &self.target,
                 self.transfer_guard.session_id(),
+                firmware_sha256,
                 firmware_bytes,
                 manifest_chunk_bytes,
                 on_progress,
@@ -7017,6 +7019,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     pub fn transfer_listener_ota_v2(
+        firmware_sha256: &str,
         firmware_bytes: &[u8],
         manifest_chunk_bytes: usize,
         on_progress: Option<&dyn Fn(usize, usize)>,
@@ -7026,7 +7029,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let prepared = prepare_listener_ota_v2_transfer()?;
-        prepared.transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
+        prepared.transfer(firmware_sha256, firmware_bytes, manifest_chunk_bytes, on_progress)
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7226,6 +7229,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     fn transfer_listener_ota_v2_to_target(
         target: &OpenListenerOtaV2Target,
         transfer_id: u64,
+        firmware_sha256: &str,
         firmware_bytes: &[u8],
         manifest_chunk_bytes: usize,
         on_progress: Option<&dyn Fn(usize, usize)>,
@@ -7246,32 +7250,46 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         );
         let mut data_write_option = target.data_write_option;
 
-        log::info!(
-            "[embedded-ble] Listener OTA v2 #{transfer_id}: aborting previous transfer (if any)"
-        );
-        let abort = listener_ota_v2_control_command(OTA_V2_OP_ABORT, 0, 0, 0);
-        if let Ok(option) = write_listener_ota_v2_value_with_fallback(
-            &target.data,
-            &abort,
-            data_write_option,
-            OTA_WRITE_TIMEOUT,
-            "Listener OTA v2 abort",
-        ) {
-            data_write_option = option;
-        }
-
-        log::info!(
-            "[embedded-ble] Listener OTA v2 #{transfer_id}: begin size={} chunk={} window={begin_window}",
-            firmware_bytes.len(),
-            manifest_chunk_bytes
-        );
-        data_write_option = write_listener_ota_v2_value_with_fallback(
-            &target.data,
-            &begin,
-            data_write_option,
-            OTA_WRITE_TIMEOUT,
-            "Listener OTA v2 begin",
+        let resume = listener_ota_v2_resume_command(
+            firmware_bytes.len() as u32,
+            manifest_chunk_bytes as u16,
+            begin_window as u16,
+            firmware_sha256,
         )?;
+        log::info!(
+            "[embedded-ble] Listener OTA v2 #{transfer_id}: requesting same-package resume before begin"
+        );
+        match write_listener_ota_v2_value_with_fallback(
+            &target.data,
+            &resume,
+            data_write_option,
+            OTA_WRITE_TIMEOUT,
+            "Listener OTA v2 resume",
+        ) {
+            Ok(option) => data_write_option = option,
+            Err(resume_err) => {
+                log::warn!(
+                    "[embedded-ble] Listener OTA v2 #{transfer_id}: resume request was unavailable; falling back to a fresh transfer: {resume_err}"
+                );
+                let abort = listener_ota_v2_control_command(OTA_V2_OP_ABORT, 0, 0, 0);
+                if let Ok(option) = write_listener_ota_v2_value_with_fallback(
+                    &target.data,
+                    &abort,
+                    data_write_option,
+                    OTA_WRITE_TIMEOUT,
+                    "Listener OTA v2 abort fallback",
+                ) {
+                    data_write_option = option;
+                }
+                data_write_option = write_listener_ota_v2_value_with_fallback(
+                    &target.data,
+                    &begin,
+                    data_write_option,
+                    OTA_WRITE_TIMEOUT,
+                    "Listener OTA v2 begin fallback",
+                )?;
+            }
+        }
 
         let mut status = wait_listener_ota_v2_status(
             target,
@@ -7312,6 +7330,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             status.chunk_payload_bytes,
             chunk_payload_bytes
         );
+        if status.bytes_written > 0 {
+            log::info!(
+                "[embedded-ble] Listener OTA v2 #{transfer_id}: resuming same package from offset {}/{}",
+                status.bytes_written,
+                firmware_bytes.len()
+            );
+        }
+        if let Some(cb) = &on_progress {
+            cb(status.bytes_written.min(firmware_bytes.len()), firmware_bytes.len());
+        }
 
         let mut chunks_sent = 0usize;
         let mut confirmed_offset = status.bytes_written.min(firmware_bytes.len());
@@ -7458,6 +7486,22 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             "{{\"op\":\"{op_name}\",\"size\":{expected_size},\"chunk\":{chunk_payload_bytes},\"window\":{window_chunks}}}\n"
         )
         .into_bytes()
+    }
+
+    fn listener_ota_v2_resume_command(
+        expected_size: u32,
+        chunk_payload_bytes: u16,
+        window_chunks: u16,
+        firmware_sha256: &str,
+    ) -> Result<Vec<u8>, String> {
+        if firmware_sha256.len() != 64 || !firmware_sha256.chars().all(|ch| ch.is_ascii_hexdigit()) {
+            return Err("Listener OTA v2 resume requires a SHA256 package identity.".to_string());
+        }
+        Ok(format!(
+            "{{\"op\":\"resume_v2\",\"size\":{expected_size},\"chunk\":{chunk_payload_bytes},\"window\":{window_chunks},\"sha256\":\"{}\"}}\n",
+            firmware_sha256.to_ascii_lowercase(),
+        )
+        .into_bytes())
     }
 
     #[cfg(any())]
@@ -17485,11 +17529,12 @@ pub fn request_listener_ota_v2_active_link() -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 pub fn transfer_listener_ota_v2(
+    firmware_sha256: &str,
     firmware_bytes: &[u8],
     manifest_chunk_bytes: usize,
     on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<FirmwareOtaTransferStats, String> {
-    windows_ble::transfer_listener_ota_v2(firmware_bytes, manifest_chunk_bytes, on_progress)
+    windows_ble::transfer_listener_ota_v2(firmware_sha256, firmware_bytes, manifest_chunk_bytes, on_progress)
 }
 
 #[cfg(target_os = "windows")]
@@ -17608,12 +17653,13 @@ impl ListenerOtaV2PreparedTransfer {
 
     pub fn transfer(
         self,
+        firmware_sha256: &str,
         firmware_bytes: &[u8],
         manifest_chunk_bytes: usize,
         on_progress: Option<&dyn Fn(usize, usize)>,
     ) -> Result<FirmwareOtaTransferStats, String> {
         self.0
-            .transfer(firmware_bytes, manifest_chunk_bytes, on_progress)
+            .transfer(firmware_sha256, firmware_bytes, manifest_chunk_bytes, on_progress)
     }
 }
 
@@ -17992,6 +18038,7 @@ pub fn transfer_companion_ota_v2(
 
 #[cfg(not(target_os = "windows"))]
 pub fn transfer_listener_ota_v2(
+    _firmware_sha256: &str,
     _firmware_bytes: &[u8],
     _manifest_chunk_bytes: usize,
     _on_progress: Option<&dyn Fn(usize, usize)>,
@@ -18068,6 +18115,7 @@ impl ListenerOtaV2PreparedTransfer {
 
     pub fn transfer(
         self,
+        _firmware_sha256: &str,
         _firmware_bytes: &[u8],
         _manifest_chunk_bytes: usize,
         _on_progress: Option<&dyn Fn(usize, usize)>,
