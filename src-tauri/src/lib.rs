@@ -21,7 +21,7 @@ mod commands;
 mod coordinator;
 mod coordinator_state;
 mod correction;
-mod embedded_audio;
+pub(crate) use denzic_audio_v1_core as embedded_audio;
 mod embedded_ble;
 mod firmware_ota;
 mod github_oauth;

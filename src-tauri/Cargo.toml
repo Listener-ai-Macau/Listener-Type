@@ -48,6 +48,7 @@ url = "2"
 raw-window-handle = "0.6"
 ferrous-opencc = "0.4"
 denzic-ota-core = { path = "../third_party/denzic-platform/ota/host/rust" }
+denzic-audio-v1-core = { path = "../third_party/denzic-platform/audio/host/rust" }
 
 # Hotkey + audio + insertion
 global-hotkey = "0.6"

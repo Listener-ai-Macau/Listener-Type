@@ -1310,6 +1310,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "denzic-audio-v1-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "denzic-ota-core"
 version = "0.1.0"
 
@@ -3191,6 +3199,7 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-graphics 0.24.0",
  "cpal",
+ "denzic-audio-v1-core",
  "denzic-ota-core",
  "enigo",
  "env_logger",
