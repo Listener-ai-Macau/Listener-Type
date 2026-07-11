@@ -415,6 +415,7 @@ export function FirmwareOtaPanel({
               </span>
               <span className="ol-firmware-selected-package-meta">
                 v{selectedPackage.manifest.version} · {formatBytes(selectedPackage.manifest.fileSizeBytes)}
+                <Icon name="refresh" size={12} />
               </span>
             </button>
           ) : (
@@ -422,9 +423,11 @@ export function FirmwareOtaPanel({
               {t('settings.recording.firmwareOtaChoosePackage', '选择固件 zip')}
             </Btn>
           )}
-          <Btn variant="soft" size="sm" icon="archive" onClick={() => void choosePackage(true)} disabled={firmwareActionBusy}>
-            {t('settings.recording.firmwareOtaChoosePackageDir', '目录')}
-          </Btn>
+          {!selectedPackage && (
+            <Btn variant="soft" size="sm" icon="archive" onClick={() => void choosePackage(true)} disabled={firmwareActionBusy}>
+              {t('settings.recording.firmwareOtaChoosePackageDir', '目录')}
+            </Btn>
+          )}
         </div>
       </div>
 
