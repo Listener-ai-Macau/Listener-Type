@@ -823,6 +823,7 @@ mod windows_ble {
     const LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS_ENV: &str = "LISTENER_OTA_V2_ACTIVE_LINK_SETTLE_MS";
     const OTA_V2_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(15);
     const OTA_V2_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(150);
+    const LISTENER_OTA_V2_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
     const OTA_V2_STATE_IDLE: u8 = 0;
     const OTA_V2_STATE_ERASING: u8 = 1;
     const OTA_V2_STATE_RECEIVING: u8 = 2;
@@ -7307,7 +7308,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 active_link_settle_delay.as_millis()
             );
             std::thread::sleep(active_link_settle_delay);
-            status = read_listener_ota_v2_status(target)?;
+            status = read_listener_ota_v2_status_with_retry(
+                target,
+                transfer_id,
+                "active-link settle",
+                Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT,
+            )?;
             ota_v2_status_result(&status)?;
             if status.state != OTA_V2_STATE_RECEIVING
                 || status.expected_size != firmware_bytes.len()
@@ -7376,7 +7382,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 OTA_WRITE_TIMEOUT,
                 "Listener OTA v2 sync",
             )?;
-            status = read_listener_ota_v2_status(target)?;
+            status = read_listener_ota_v2_status_with_retry(
+                target,
+                transfer_id,
+                "sync",
+                Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT,
+            )?;
             ota_v2_status_result(&status)?;
             if status.expected_size != firmware_bytes.len() {
                 return Err(format!(
@@ -7612,7 +7623,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     ) -> Result<OtaV2Status, String> {
         let deadline = Instant::now() + OTA_V2_STATUS_POLL_TIMEOUT;
         loop {
-            let status = read_listener_ota_v2_status(target)?;
+            let status =
+                read_listener_ota_v2_status_with_retry(target, transfer_id, label, deadline)?;
             ota_v2_status_result(&status)?;
             if ready(&status) {
                 return Ok(status);
@@ -7626,15 +7638,63 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
+    fn read_listener_ota_v2_status_with_retry(
+        target: &OpenListenerOtaV2Target,
+        transfer_id: u64,
+        phase: &str,
+        deadline: Instant,
+    ) -> Result<OtaV2Status, String> {
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            match read_listener_ota_v2_status(target) {
+                Ok(status) => {
+                    if attempt > 1 {
+                        log::info!(
+                            "[embedded-ble] Listener OTA v2 #{transfer_id}: status read recovered during {phase} on attempt {attempt}"
+                        );
+                    }
+                    return Ok(status);
+                }
+                Err(err) if is_transient_listener_ota_v2_status_read_error(&err) => {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        return Err(err);
+                    }
+                    let remaining = deadline.saturating_duration_since(now);
+                    let sleep_for = remaining.min(OTA_V2_STATUS_POLL_INTERVAL);
+                    log::warn!(
+                        "[embedded-ble] Listener OTA v2 #{transfer_id}: transient status read failure during {phase} on attempt {attempt}: {err}; retrying in {} ms",
+                        sleep_for.as_millis()
+                    );
+                    std::thread::sleep(sleep_for);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
     fn read_listener_ota_v2_status(
         target: &OpenListenerOtaV2Target,
     ) -> Result<OtaV2Status, String> {
-        let bytes = read_characteristic_bytes(
+        let bytes = read_characteristic_bytes_with_timeout(
             &target.status,
             BluetoothCacheMode::Uncached,
             "Listener OTA v2 status",
+            LISTENER_OTA_V2_STATUS_READ_TIMEOUT,
         )?;
         parse_listener_ota_v2_status(&bytes)
+    }
+
+    fn is_transient_listener_ota_v2_status_read_error(err: &str) -> bool {
+        err.contains("GattCommunicationStatus(1)")
+            || err.contains("GattCommunicationStatus(3)")
+            || err.contains("async error")
+            || err.contains("async canceled")
+            || err.contains("timed out")
+            || err.contains("timeout")
+            || err.contains("Unreachable")
+            || err.contains("unreachable")
     }
 
     #[cfg(any())]
@@ -14125,10 +14185,24 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         cache_mode: BluetoothCacheMode,
         label: &str,
     ) -> Result<Vec<u8>, String> {
+        read_characteristic_bytes_with_timeout(
+            characteristic,
+            cache_mode,
+            label,
+            BLE_DISCOVERY_TIMEOUT,
+        )
+    }
+
+    fn read_characteristic_bytes_with_timeout(
+        characteristic: &GattCharacteristic,
+        cache_mode: BluetoothCacheMode,
+        label: &str,
+        timeout: Duration,
+    ) -> Result<Vec<u8>, String> {
         let read = characteristic
             .ReadValueWithCacheModeAsync(cache_mode)
             .map_err(|err| format!("BLE {label} read failed: {err}"))?
-            .wait_ble_result(BLE_DISCOVERY_TIMEOUT, &format!("{label} read"))
+            .wait_ble_result(timeout, &format!("{label} read"))
             .map_err(|err| format!("BLE {label} read wait failed: {err}"))?;
         let status = read
             .Status()
