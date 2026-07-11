@@ -94,7 +94,7 @@ for (const requiredGuard of manifest.required_guards ?? []) {
   }
 }
 
-console.log(`PASS: ${manifest.entries.length} regression guard entries map to existing Type/Firmware commits.`);
+console.log(`PASS: ${manifest.entries.length} regression guard entries map to existing repository commits.`);
 for (const entry of manifest.entries) {
   console.log(`- ${entry.repo} ${entry.commit.slice(0, 7)} ${entry.id}: ${entry.subject}`);
 }

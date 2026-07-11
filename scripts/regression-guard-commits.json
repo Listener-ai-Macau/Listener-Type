@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-10",
+  "updated_at": "2026-07-12",
   "purpose": "Machine-readable index from critical Listener regression guards to the exact repository commit that introduced or hardened the guard. Use this first when a protected behavior regresses: git show the linked commit, inspect the guard, then rerun the listed validation commands.",
   "repositories": {
     "type": {
@@ -8,6 +8,9 @@
     },
     "firmware": {
       "path": "Listener-Firmware"
+    },
+    "platform": {
+      "path": "../Denzic-Platform"
     }
   },
   "required_guards": [
@@ -46,6 +49,10 @@
     {
       "repo": "firmware",
       "guard": "pwsh -NoProfile -File ./tools/verify_ble_audio_backpressure_static.ps1"
+    },
+    {
+      "repo": "platform",
+      "guard": "pwsh -NoProfile -File ./tools/verify.ps1"
     }
   ],
   "entries": [
@@ -298,6 +305,49 @@
         "python tools/verify_status_led_static.py",
         "pwsh -NoProfile -File ./tools/build.ps1",
         "git grep -n status_led_dma_history.md"
+      ]
+    },
+    {
+      "id": "platform_audio_v1_core",
+      "repo": "platform",
+      "commit": "6ce017f5e792d175f822d9cf071c100429758016",
+      "subject": "Extract shared audio v1 core",
+      "state": "machine_validated_guard_for_human_accepted_recording",
+      "protects": [
+        "VKA1 packet fields, packet/error codes, and 16 kHz mono PCM constants have one generated protocol source.",
+        "Shared Rust session parsing preserves the accepted recording packet, tail-audio, silence-fill, and preview-boundary behavior.",
+        "Embedded C packet layout and constructor remain byte-compatible with the desktop core."
+      ],
+      "guards": [
+        "pwsh -NoProfile -File ./tools/verify.ps1"
+      ]
+    },
+    {
+      "id": "type_platform_audio_v1_consumer",
+      "repo": "type",
+      "commit": "2ff8bbbee6503215da6bc9fcdc39ffa03e011e35",
+      "subject": "Use shared audio v1 core",
+      "state": "machine_validated_guard_for_human_accepted_recording",
+      "protects": [
+        "Type has no second copy of the VKA1 parser or session collector.",
+        "Existing recording callers link against the Denzic Platform audio core."
+      ],
+      "guards": [
+        "cargo build --manifest-path ./src-tauri/Cargo.toml"
+      ]
+    },
+    {
+      "id": "firmware_platform_audio_v1_consumer",
+      "repo": "firmware",
+      "commit": "c447ca9ab56fb05e4d1d462806e096ea2c9828bb",
+      "subject": "Use shared audio v1 protocol",
+      "state": "machine_validated_guard_for_human_accepted_recording",
+      "protects": [
+        "Firmware VKA1 constants, packed packet header, and constructor come from the Denzic Platform generated C contract.",
+        "Existing Firmware protocol names stay compatible while the platform source remains authoritative."
+      ],
+      "guards": [
+        "pwsh -NoProfile -File ./tools/build.ps1"
       ]
     }
   ]
