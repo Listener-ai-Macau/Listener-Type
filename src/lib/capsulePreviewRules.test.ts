@@ -32,6 +32,11 @@ assertEqual(
   assertOk(result.startsWith('...'), 'should start with ...');
   const chars = Array.from(result.slice(3));
   assertEqual(chars.length, PREVIEW_MAX_CHARS.win.processing, 'should truncate to max chars');
+  assertEqual(
+    PREVIEW_MAX_CHARS.win.processing,
+    28,
+    'win processing preview must fit its two-line capsule column with the ellipsis',
+  );
 }
 
 // Whitespace normalization

@@ -13,7 +13,10 @@
 
 /** Max visible characters in the pill center text (OS + kind dependent). */
 export const PREVIEW_MAX_CHARS: Record<string, { default: number; processing: number; error: number }> = {
-  win: { default: 28, processing: 34, error: 28 },
+  // Windows processing text shares a 175px two-line column with the spinner.
+  // 28 CJK characters plus the leading ellipsis fit without the browser applying
+  // a second, invisible line-clamp truncation.
+  win: { default: 28, processing: 28, error: 28 },
   mac: { default: 14, processing: 18, error: 14 },
 };
 
