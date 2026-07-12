@@ -801,6 +801,7 @@ export const ja: typeof zhCN = {
     },
     deviceKeys: {
       title: 'デバイスカスタムキー',
+      description: '各キーによく使う操作を設定します。',
       restoreKeyboardDefaults: '既定のキー出力に戻す',
       keyLabel: '{{key}}',
       actionSelectAria: 'デバイスキー動作を選択',

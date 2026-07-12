@@ -843,6 +843,7 @@ export const en: typeof zhCN = {
     },
       deviceKeys: {
         title: 'Device custom keys',
+      description: 'Set a common action for each key.',
       restoreKeyboardDefaults: 'Restore default key output',
       keyLabel: '{{key}}',
         actionSelectAria: 'Select device key action',

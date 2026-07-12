@@ -240,6 +240,9 @@ export function DeviceSection() {
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
               {t('settings.deviceKeys.title')}
             </div>
+            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.35 }}>
+              {t('settings.deviceKeys.description')}
+            </div>
           </div>
           <Btn
             variant="ghost"

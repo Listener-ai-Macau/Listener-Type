@@ -841,6 +841,7 @@ export const zhCN = {
     },
       deviceKeys: {
         title: '设备自定义键',
+        description: '为每个按键设置常用操作。',
         restoreKeyboardDefaults: '恢复默认按键输出',
         keyLabel: '{{key}}',
         actionSelectAria: '选择设备键动作',

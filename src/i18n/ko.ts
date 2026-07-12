@@ -801,6 +801,7 @@ export const ko: typeof zhCN = {
     },
     deviceKeys: {
       title: '장치 사용자 지정 키',
+      description: '각 키에 자주 쓰는 동작을 설정합니다.',
       restoreKeyboardDefaults: '기본 키 출력 복원',
       keyLabel: '{{key}}',
       actionSelectAria: '장치 키 동작 선택',

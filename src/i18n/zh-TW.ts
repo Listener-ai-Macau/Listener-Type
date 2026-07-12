@@ -843,6 +843,7 @@ export const zhTW: typeof zhCN = {
     },
     deviceKeys: {
       title: '設備自定義鍵',
+      description: '為每個按鍵設定常用操作。',
       restoreKeyboardDefaults: '恢復預設按鍵輸出',
       keyLabel: '{{key}}',
       actionSelectAria: '選擇設備鍵動作',
