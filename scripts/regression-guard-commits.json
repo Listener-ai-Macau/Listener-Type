@@ -258,21 +258,26 @@
         "Processing/AI LED has a stale timeout and idle-wake recording key evidence stays checkable."
       ],
       "accepted_scope": [
-        "Human review accepted PWR boot warm amber first frame, truthful BLE-ready handoff to normal PWR state, EC11 straight press not decoding as rotation, and shutdown confirmation/EC11 long-press continuity."
+        "Human review accepted PWR boot warm amber first frame, truthful BLE-ready handoff to normal PWR state, EC11 straight press not decoding as rotation, and shutdown confirmation/EC11 long-press continuity.",
+        "2026-07-12 total acceptance reconfirmed that startup is measured from the PWR amber cue to stable visible BLE readiness, not an early normal-PWR color; the observed current startup speed is acceptable."
       ],
       "pending_human_scope": [
         "AI/processing LED stale-timeout behavior and idle-wake recording key remain machine-validated pending focused human acceptance."
       ],
       "human_acceptance_evidence": [
-        ".cache/validation/preproduction-human-review-pwr-boot-shutdown-20260710-2149/preproduction-human-review-summary.json"
+        ".cache/validation/preproduction-human-review-pwr-boot-shutdown-20260710-2149/preproduction-human-review-summary.json",
+        "../Listener-Firmware/.cache/validation/preproduction-human-review-total-20260712-081300/step-02-pwr-boot-shutdown-led-observation.json"
       ],
       "machine_evidence": [
-        "../Listener-Firmware/.cache/validation/pwr-ai-machine-refresh-20260710/pwr-ai-machine-summary.json"
+        "../Listener-Firmware/.cache/validation/pwr-ai-machine-refresh-20260710/pwr-ai-machine-summary.json",
+        "../Listener-Firmware/.cache/validation/preproduction-human-review-total-20260712-081300/step-02-pwr-boot-shutdown-led-current-status.log",
+        "../Listener-Firmware/.cache/validation/pwr-boot-speed-optimized-20260709-144100/boot-speed-reset-log.txt"
       ],
       "guards": [
         "python tools/verify_status_led_static.py",
         "python tools/verify_power_manager_static.py",
         "pwsh -NoProfile -File ./tools/build.ps1",
+        "python tools/verify_pwr_boot_shutdown_log.py <serial-transcript> --boot-diag-decoded <decoded-diag-json>",
         "python tools/verify_idle_wake_recording_key_log.py <serial-log>"
       ]
     },
