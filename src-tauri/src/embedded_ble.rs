@@ -689,6 +689,8 @@ mod windows_ble {
         "embedded_ble_background_listener_deferred_for_ota";
     const BLE_RECENT_PAIRING_FAST_GATT_WINDOW: Duration = Duration::from_secs(45);
     const BLE_RECENT_PAIRING_CACHED_PROBE_WINDOW: Duration = Duration::from_millis(2250);
+    const RECENT_PAIRING_CACHED_GATT_PROBE_ERROR: &str =
+        "recent pairing cached GATT readiness probe";
     const BLE_ADAPTER_RESTART_SETTLE: Duration = Duration::from_millis(2500);
     const BLE_PAIRING_IN_PROGRESS_SETTLE: Duration = Duration::from_millis(2200);
     const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -7369,7 +7371,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     }
                     Err(err) => {
                         return Err(format!(
-                            "recent pairing cached GATT readiness probe target={:?}: {err}",
+                            "{RECENT_PAIRING_CACHED_GATT_PROBE_ERROR} target={:?}: {err}",
                             state.target_name
                         ));
                     }
@@ -7567,7 +7569,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     {
                         return Err(err);
                     }
-                    let delay = NOTIFY_TARGET_OPEN_RETRY_DELAYS[attempt - 1];
+                    let delay = if err.contains(RECENT_PAIRING_CACHED_GATT_PROBE_ERROR) {
+                        Duration::from_millis(250)
+                    } else {
+                        NOTIFY_TARGET_OPEN_RETRY_DELAYS[attempt - 1]
+                    };
                     log::warn!(
                         "[embedded-ble] capture #{capture_id}: notify target open attempt {attempt} failed: {err}; retrying in {} ms",
                         delay.as_millis()
@@ -7855,7 +7861,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             || err.contains("GATT session did not become active")
             || err.contains("device open by address")
             || err.contains("device open by id")
-            || err.contains("recent pairing cached GATT readiness probe")
+            || err.contains(RECENT_PAIRING_CACHED_GATT_PROBE_ERROR)
     }
 
     fn is_transient_audio_control_write_error(err: &str) -> bool {
