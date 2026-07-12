@@ -83,6 +83,14 @@ pub struct DeviceSettingsStatus {
     pub raw_line: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceSettingsCommandTransport {
+    ActiveCapture,
+    UsbSerial,
+    FreshGatt,
+    StatusReadback,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BleFailureKind {
@@ -544,6 +552,8 @@ fn stop_drain_timeout_reason(stats: &crate::embedded_audio::SessionStats) -> Str
 
 #[cfg(target_os = "windows")]
 mod windows_ble {
+    use super::DeviceSettingsCommandTransport;
+    use std::cell::RefCell;
     use std::fmt;
     use std::fs;
     use std::io::{Read, Write};
@@ -683,6 +693,53 @@ mod windows_ble {
     const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
+
+    // A background capture owns the cross-process GATT gate.  Keep its caller's
+    // cancellation flag available to the blocking WinRT wait helpers so a rename,
+    // OTA handoff, or recovery cleanup does not leave an obsolete target holding
+    // the gate until its long Windows timeout expires.
+    thread_local! {
+        static ACTIVE_NOTIFY_CAPTURE_CANCEL: RefCell<Option<Arc<AtomicBool>>> = RefCell::new(None);
+    }
+
+    static NOTIFY_CAPTURE_SESSION_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+    struct NotifyCaptureCancelScope {
+        previous: Option<Arc<AtomicBool>>,
+    }
+
+    impl NotifyCaptureCancelScope {
+        fn install(cancel_requested: &Arc<AtomicBool>) -> Self {
+            let previous = ACTIVE_NOTIFY_CAPTURE_CANCEL.with(|slot| {
+                std::mem::replace(&mut *slot.borrow_mut(), Some(Arc::clone(cancel_requested)))
+            });
+            Self { previous }
+        }
+    }
+
+    impl Drop for NotifyCaptureCancelScope {
+        fn drop(&mut self) {
+            ACTIVE_NOTIFY_CAPTURE_CANCEL.with(|slot| {
+                *slot.borrow_mut() = self.previous.take();
+            });
+        }
+    }
+
+    fn notify_capture_cancel_requested() -> bool {
+        ACTIVE_NOTIFY_CAPTURE_CANCEL.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+        })
+    }
+
+    fn notify_capture_cancelled_error(label: &str) -> String {
+        format!("BLE {label} cancelled by background listener recovery")
+    }
+
+    pub(super) fn notify_capture_session_active() -> bool {
+        NOTIFY_CAPTURE_SESSION_ACTIVE.load(Ordering::SeqCst)
+    }
     const DEVICE_SETTINGS_SERIAL_DRAIN_MAX_DURATION: Duration = Duration::from_millis(1800);
     const DEVICE_SETTINGS_SERIAL_DRAIN_QUIET_DURATION: Duration = Duration::from_millis(180);
     const DEFAULT_BLUETOOTH_TARGET_NAME: &str = "listener";
@@ -1987,17 +2044,20 @@ mod windows_ble {
             listener_pairing_candidates(Some(&target_name))?
         };
         if type_recovery_command_confirmed {
-            let trusted_addresses = listener_recovery_target_addresses();
+            let mut trusted_addresses = None;
             for candidate in &mut candidates {
-                if !candidate.fresh_pairing_advertisement
-                    && listener_pairing_candidate_has_trusted_address(candidate, &trusted_addresses)
-                {
+                if candidate.fresh_pairing_advertisement {
+                    continue;
+                }
+                let trusted_addresses =
+                    trusted_addresses.get_or_insert_with(listener_recovery_target_addresses);
+                if listener_pairing_candidate_has_trusted_address(candidate, trusted_addresses) {
                     log::warn!(
                         "[embedded-ble] Type recovery command confirmed for {}; allowing stale paired cache cleanup without fresh advertisement",
                         candidate.label
                     );
                     candidate.fresh_pairing_advertisement = true;
-                } else if candidate.address.is_some() && !candidate.fresh_pairing_advertisement {
+                } else if candidate.address.is_some() {
                     log::warn!(
                         "[embedded-ble] Type recovery command confirmed, but {} is only a same-name cached candidate without trusted address proof; not using it for stale cache cleanup",
                         candidate.label
@@ -2464,7 +2524,11 @@ mod windows_ble {
             .map(str::trim)
             .filter(|value| !value.is_empty());
         let mut seen_ids = Vec::new();
-        let mut addresses = listener_recovery_target_addresses();
+        let mut addresses = if observed_recovery_addresses.is_empty() {
+            listener_recovery_target_addresses()
+        } else {
+            Vec::new()
+        };
         let mut fresh_advertised_addresses = Vec::new();
 
         if !observed_recovery_addresses.is_empty() {
@@ -4970,7 +5034,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
-    pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<(), String> {
+    fn send_device_settings_command_with_transport(
+        command: &str,
+        timeout: Duration,
+    ) -> Result<DeviceSettingsCommandTransport, String> {
         let payload = device_settings_payload(command)?;
         let payload_len = payload.as_bytes().len();
         let mut active_capture_error: Option<String> = None;
@@ -4994,7 +5061,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         log::info!(
                             "[embedded-ble] device settings command sent via active capture"
                         );
-                        return Ok(());
+                        return Ok(DeviceSettingsCommandTransport::ActiveCapture);
                     }
                     Err(err) if is_transient_audio_control_write_error(&err) => {
                         log::warn!(
@@ -5016,7 +5083,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         match &serial_result {
             Ok(()) => {
                 log::info!("[embedded-ble] device settings command acknowledged via USB serial");
-                return Ok(());
+                return Ok(DeviceSettingsCommandTransport::UsbSerial);
             }
             Err(err) if err.is_firmware_rejection() => return Err(err.to_string()),
             Err(err) => {
@@ -5069,10 +5136,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             )
         })?;
         log::info!("[embedded-ble] device settings command sent");
-        Ok(())
+        Ok(DeviceSettingsCommandTransport::FreshGatt)
     }
 
-    pub fn apply_pending_ble_name(timeout: Duration) -> Result<(), String> {
+    pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<(), String> {
+        send_device_settings_command_with_transport(command, timeout).map(|_| ())
+    }
+
+    pub fn apply_pending_ble_name(
+        timeout: Duration,
+    ) -> Result<DeviceSettingsCommandTransport, String> {
         if !has_active_runtime_bluetooth_target_address(Instant::now()) {
             let target_name = effective_bluetooth_target_name(None);
             let _ = remember_current_bluetooth_target_address_for_name(
@@ -5081,7 +5154,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 "device settings BLE name apply",
             );
         }
-        send_device_settings_command("DEVICE:APPLY_BLE_NAME", timeout)
+        send_device_settings_command_with_transport("DEVICE:APPLY_BLE_NAME", timeout)
     }
 
     pub fn send_status_led_command(command: &str, timeout: Duration) -> Result<(), String> {
@@ -5914,6 +5987,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             on_ready,
             on_event,
             CaptureTerminalBehavior::StopCapture,
+            None,
         )
     }
 
@@ -5929,6 +6003,24 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             on_ready,
             on_event,
             CaptureTerminalBehavior::ContinueListening,
+            None,
+        )
+    }
+
+    pub fn capture_notification_events_continuous_with_connection_handoff_until_cancelled(
+        idle_timeout: Option<Duration>,
+        cancel_requested: Arc<AtomicBool>,
+        leave_notify_cccd_enabled_on_cancel: Arc<AtomicBool>,
+        on_ready: &mut crate::embedded_ble::BleReadyHandler<'_>,
+        on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
+    ) -> Result<(), String> {
+        capture_notification_events_until_cancelled_impl(
+            idle_timeout,
+            cancel_requested,
+            on_ready,
+            on_event,
+            CaptureTerminalBehavior::ContinueListening,
+            Some(leave_notify_cccd_enabled_on_cancel),
         )
     }
 
@@ -5938,7 +6030,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         on_ready: &mut crate::embedded_ble::BleReadyHandler<'_>,
         on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
         terminal_behavior: CaptureTerminalBehavior,
+        leave_notify_cccd_enabled_on_cancel: Option<Arc<AtomicBool>>,
     ) -> Result<(), String> {
+        let _cancel_scope = NotifyCaptureCancelScope::install(&cancel_requested);
+        if notify_capture_cancel_requested() {
+            return Err(notify_capture_cancelled_error("notify capture open"));
+        }
         let capture_guard = BleCaptureGuard::enter(idle_timeout)?;
         let capture_id = capture_guard.session_id();
         if terminal_behavior == CaptureTerminalBehavior::ContinueListening
@@ -6163,7 +6260,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 log::info!(
                     "[embedded-ble] capture #{capture_id}: cancelled by caller; closing notify"
                 );
-                cleanup.finish_after_caller_cancel(terminal_behavior);
+                cleanup.finish_after_caller_cancel(
+                    terminal_behavior,
+                    leave_notify_cccd_enabled_on_cancel
+                        .as_ref()
+                        .is_some_and(|handoff| handoff.load(Ordering::SeqCst)),
+                );
                 return Ok(());
             }
             if deadline.is_some_and(|deadline| now >= deadline) {
@@ -6214,7 +6316,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         log::info!(
                             "[embedded-ble] capture #{capture_id}: cancelled by caller; closing notify"
                         );
-                        cleanup.finish_after_caller_cancel(terminal_behavior);
+                        cleanup.finish_after_caller_cancel(
+                            terminal_behavior,
+                            leave_notify_cccd_enabled_on_cancel
+                                .as_ref()
+                                .is_some_and(|handoff| handoff.load(Ordering::SeqCst)),
+                        );
                         return Ok(());
                     }
                     if stop_drain_deadline.is_some_and(|drain_deadline| now >= drain_deadline) {
@@ -7181,6 +7288,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     fn open_notify_target() -> Result<OpenNotifyTarget, String> {
+        if notify_capture_cancel_requested() {
+            return Err(notify_capture_cancelled_error("notify target open"));
+        }
         let recent_pairing = recent_pairing_fast_gatt_active(Instant::now());
         if let Some(state) = recent_pairing.as_ref() {
             match open_notify_target_for_known_addresses("recent pairing fast GATT", state.address)
@@ -7193,6 +7303,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     return Ok(target);
                 }
                 Err(err) => {
+                    if notify_capture_cancel_requested() {
+                        return Err(err);
+                    }
                     log::info!(
                         "[embedded-ble] recent-pairing fast GATT path not ready target={:?}: {}",
                         state.target_name,
@@ -7351,6 +7464,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     fn open_notify_target_with_retry(capture_id: u64) -> Result<OpenNotifyTarget, String> {
         let mut last_error = None;
         for attempt in 1..=NOTIFY_TARGET_OPEN_RETRY_DELAYS.len() + 1 {
+            if notify_capture_cancel_requested() {
+                return Err(notify_capture_cancelled_error("notify target open"));
+            }
             match open_notify_target() {
                 Ok(target) => {
                     if attempt > 1 {
@@ -7361,6 +7477,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     return Ok(target);
                 }
                 Err(err) => {
+                    if notify_capture_cancel_requested() {
+                        return Err(err);
+                    }
                     if attempt > NOTIFY_TARGET_OPEN_RETRY_DELAYS.len()
                         || !is_transient_notify_target_open_error(&err)
                     {
@@ -11000,6 +11119,30 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Some(state.address)
     }
 
+    pub(super) fn verified_bluetooth_target_rename_handoff_address() -> Option<u64> {
+        let target_name = effective_bluetooth_target_name(None);
+        let now = Instant::now();
+        let mut slot = RUNTIME_BLUETOOTH_TARGET_ADDRESS
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .ok()?;
+        let state = slot.as_ref()?.clone();
+        if now.saturating_duration_since(state.learned_at) >= state.valid_for {
+            *slot = None;
+            return None;
+        }
+        if state.valid_for != BLE_RENAME_ADDRESS_GRACE_WINDOW
+            || !bluetooth_name_matches_expected(&state.target_name, &target_name)
+        {
+            return None;
+        }
+        log::info!(
+            "[embedded-ble] using verified Listener BLE rename handoff address {} target={target_name:?}",
+            crate::embedded_ble::format_bluetooth_address(state.address)
+        );
+        Some(state.address)
+    }
+
     fn ble_device_state_path() -> Option<PathBuf> {
         let appdata = std::env::var_os("APPDATA")?;
         Some(
@@ -11783,6 +11926,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     ) -> Result<T, String> {
         let deadline = Instant::now() + timeout;
         loop {
+            if notify_capture_cancel_requested() {
+                let _ = operation.Cancel();
+                let _ = operation.Close();
+                return Err(notify_capture_cancelled_error(label));
+            }
             match operation
                 .Status()
                 .map_err(|err| format!("BLE {label} async status failed: {err}"))?
@@ -11955,6 +12103,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     "[embedded-ble] capture #{session_id}: opening serialized BLE notify session timeout_ms=none"
                 ),
             }
+            NOTIFY_CAPTURE_SESSION_ACTIVE.store(true, Ordering::SeqCst);
             Ok(Self {
                 guard,
                 session_id,
@@ -11971,6 +12120,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         fn drop(&mut self) {
             let elapsed_ms = self.started_at.elapsed().as_millis();
             self.guard.last_closed_at = Some(Instant::now());
+            NOTIFY_CAPTURE_SESSION_ACTIVE.store(false, Ordering::SeqCst);
             log::info!(
                 "[embedded-ble] capture #{}: released BLE notify session after {} ms",
                 self.session_id,
@@ -12231,10 +12381,15 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             self.finish(NotifyCccdTeardown::Disable);
         }
 
-        fn finish_after_caller_cancel(&mut self, terminal_behavior: CaptureTerminalBehavior) {
+        fn finish_after_caller_cancel(
+            &mut self,
+            terminal_behavior: CaptureTerminalBehavior,
+            controlled_connection_handoff: bool,
+        ) {
             let teardown = NotifyCccdTeardown::for_capture_cancel(
                 terminal_behavior,
                 ble_ota_process_mutex_busy(),
+                controlled_connection_handoff,
             );
             self.finish(teardown);
         }
@@ -12498,8 +12653,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         fn for_capture_cancel(
             terminal_behavior: CaptureTerminalBehavior,
             ota_process_busy: bool,
+            controlled_connection_handoff: bool,
         ) -> Self {
-            if terminal_behavior == CaptureTerminalBehavior::ContinueListening && ota_process_busy {
+            if terminal_behavior == CaptureTerminalBehavior::ContinueListening
+                && (ota_process_busy || controlled_connection_handoff)
+            {
                 Self::LeaveEnabled
             } else {
                 Self::Disable
@@ -12534,6 +12692,48 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         fn bluetooth_target_name_test_lock() -> &'static Mutex<()> {
             static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
             LOCK.get_or_init(|| Mutex::new(()))
+        }
+
+        #[test]
+        fn background_capture_cancel_scope_is_visible_to_winrt_waits() {
+            let cancel = Arc::new(AtomicBool::new(false));
+            assert!(!notify_capture_cancel_requested());
+
+            let scope = NotifyCaptureCancelScope::install(&cancel);
+            assert!(!notify_capture_cancel_requested());
+            cancel.store(true, Ordering::SeqCst);
+            assert!(notify_capture_cancel_requested());
+
+            drop(scope);
+            assert!(!notify_capture_cancel_requested());
+        }
+
+        #[test]
+        fn background_capture_cancellation_interrupts_target_open_before_fallback_scans() {
+            let source = include_str!("embedded_ble.rs");
+            let open_start = source
+                .find("fn open_notify_target()")
+                .expect("notify target helper should exist");
+            let open_end = source[open_start..]
+                .find("fn open_notify_target_with_retry")
+                .map(|offset| open_start + offset)
+                .expect("notify target helper boundary should exist");
+            let open_body = &source[open_start..open_end];
+            assert!(
+                open_body.contains("if notify_capture_cancel_requested() {\n                        return Err(err);"),
+                "a cancelled recent-pairing open must stop before service-selector or advertisement fallbacks"
+            );
+
+            let wait_start = source
+                .find("fn wait_async_operation<T")
+                .expect("WinRT async wait helper should exist");
+            let wait_end = source[wait_start..]
+                .find("fn wait_gatt_write_result")
+                .map(|offset| wait_start + offset)
+                .expect("WinRT async wait helper boundary should exist");
+            let wait_body = &source[wait_start..wait_end];
+            assert!(wait_body.contains("notify_capture_cancel_requested()"));
+            assert!(wait_body.contains("operation.Cancel()"));
         }
 
         #[test]
@@ -12748,9 +12948,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 observed_index < direct_index && direct_index < scan_index,
                 "once Type has observed the recovery advertisement address, PairAsync must use that address before any duplicate scan"
             );
+            assert!(
+                helper.contains(
+                    "let mut addresses = if observed_recovery_addresses.is_empty() {\n            listener_recovery_target_addresses()\n        } else {\n            Vec::new()\n        };"
+                ),
+                "a current recovery advertisement address must bypass the redundant PnP address enumeration before direct PairAsync"
+            );
             assert!(helper.contains(
                 "recovery pairing using {} Type-observed direct address candidate(s) before slow advertisement/AEP discovery"
             ));
+
+            let prompt_start = source
+                .find("fn prompt_listener_pairing_inner")
+                .expect("pairing prompt helper should exist");
+            let prompt_end = source[prompt_start..]
+                .find("let mut result = crate::embedded_ble::BleDevicePairingPromptResult")
+                .map(|offset| prompt_start + offset)
+                .expect("pairing prompt candidate boundary should exist");
+            let prompt = &source[prompt_start..prompt_end];
+            assert!(
+                prompt.contains("if candidate.fresh_pairing_advertisement {\n                    continue;\n                }")
+                    && prompt.contains(
+                        "trusted_addresses.get_or_insert_with(listener_recovery_target_addresses)"
+                    ),
+                "a freshly advertised candidate must not pay another PnP trust lookup; stale candidates still require the existing trusted-address check"
+            );
 
             let fallback_start = source
                 .find("fn listener_recovery_pairing_selector_fallback_candidates_for_addresses")
@@ -13071,8 +13293,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 pre_cleanup_index < candidate_scan_index,
                 "confirmed Type recovery must remove stale Windows PnP/bond cache before pairing the Type-observed or freshly scanned recovery address"
             );
-            assert!(body.contains("let trusted_addresses = listener_recovery_target_addresses();"));
-            assert!(body.contains("listener_pairing_candidate_has_trusted_address"));
+            assert!(
+                body.contains("get_or_insert_with(listener_recovery_target_addresses)")
+                    && body.contains("listener_pairing_candidate_has_trusted_address"),
+                "confirmed Type recovery may lazily resolve trusted addresses, but every stale cached candidate must still be checked against that trusted set"
+            );
             assert!(
                 body.contains("same-name cached candidate without trusted address proof"),
                 "confirmed Type recovery must not promote arbitrary same-name stale AEP cache entries"
@@ -14140,6 +14365,60 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
+        fn verified_rename_handoff_address_requires_matching_name_and_rename_grace() {
+            let _guard = bluetooth_target_name_test_lock().lock().unwrap();
+            if configured_bluetooth_address_from_env().is_some()
+                || std::env::var("LISTENER_TYPE_BLE_TARGET_NAME").is_ok()
+                || std::env::var("LISTENER_TYPE_BLUETOOTH_TARGET_NAME").is_ok()
+            {
+                return;
+            }
+
+            let previous_name = configured_bluetooth_target_name();
+            let previous_address = RUNTIME_BLUETOOTH_TARGET_ADDRESS
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone());
+
+            set_configured_bluetooth_target_name("RenameTarget");
+            remember_runtime_bluetooth_target_address_for_name(
+                0xA4CB8FF2B512,
+                "RenameTarget",
+                BLE_RENAME_ADDRESS_GRACE_WINDOW,
+                "unit test rename handoff",
+            );
+            assert_eq!(
+                verified_bluetooth_target_rename_handoff_address(),
+                Some(0xA4CB8FF2B512),
+                "a current target address learned for the rename grace window is safe only after firmware confirms the name transition"
+            );
+
+            remember_runtime_bluetooth_target_address_for_name(
+                0xA4CB8FF2B512,
+                "RenameTarget",
+                BLE_TARGET_ADDRESS_CACHE_WINDOW,
+                "unit test ordinary cache",
+            );
+            assert_eq!(
+                verified_bluetooth_target_rename_handoff_address(),
+                None,
+                "an ordinary runtime cache address must not become a rename recovery shortcut"
+            );
+
+            match previous_name {
+                Some(name) => set_configured_bluetooth_target_name(&name),
+                None => set_configured_bluetooth_target_name(""),
+            }
+            if let Ok(mut slot) = RUNTIME_BLUETOOTH_TARGET_ADDRESS
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+            {
+                *slot = previous_address;
+            }
+        }
+
+        #[test]
         fn default_target_name_accepts_discovered_custom_listener_service_name() {
             let _guard = bluetooth_target_name_test_lock().lock().unwrap();
             if configured_bluetooth_address_from_env().is_some()
@@ -14262,6 +14541,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 NotifyCccdTeardown::for_capture_cancel(
                     CaptureTerminalBehavior::ContinueListening,
                     true,
+                    false,
                 ),
                 NotifyCccdTeardown::LeaveEnabled
             );
@@ -14269,12 +14549,39 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 NotifyCccdTeardown::for_capture_cancel(
                     CaptureTerminalBehavior::ContinueListening,
                     false,
+                    false,
                 ),
                 NotifyCccdTeardown::Disable
             );
             assert_eq!(
-                NotifyCccdTeardown::for_capture_cancel(CaptureTerminalBehavior::StopCapture, true),
+                NotifyCccdTeardown::for_capture_cancel(
+                    CaptureTerminalBehavior::StopCapture,
+                    true,
+                    false,
+                ),
                 NotifyCccdTeardown::Disable
+            );
+        }
+
+        #[test]
+        fn confirmed_name_change_handoff_skips_old_cccd_only_for_continuous_listener() {
+            assert_eq!(
+                NotifyCccdTeardown::for_capture_cancel(
+                    CaptureTerminalBehavior::ContinueListening,
+                    false,
+                    true,
+                ),
+                NotifyCccdTeardown::LeaveEnabled,
+                "a firmware-confirmed BLE rename terminates the old connection, so its background listener must not wait on an obsolete CCCD disable"
+            );
+            assert_eq!(
+                NotifyCccdTeardown::for_capture_cancel(
+                    CaptureTerminalBehavior::StopCapture,
+                    false,
+                    true,
+                ),
+                NotifyCccdTeardown::Disable,
+                "foreground capture cancellation still tears down its CCCD normally"
             );
         }
     }
@@ -14360,7 +14667,7 @@ pub fn send_device_settings_command_via_active_capture_only(
 }
 
 #[cfg(target_os = "windows")]
-pub fn apply_pending_ble_name(timeout: Duration) -> Result<(), String> {
+pub fn apply_pending_ble_name(timeout: Duration) -> Result<DeviceSettingsCommandTransport, String> {
     windows_ble::apply_pending_ble_name(timeout)
 }
 
@@ -14388,6 +14695,11 @@ pub fn capture_notification_events(
 }
 
 #[cfg(target_os = "windows")]
+pub fn notify_capture_session_active() -> bool {
+    windows_ble::notify_capture_session_active()
+}
+
+#[cfg(target_os = "windows")]
 pub fn capture_notification_events_until_cancelled(
     idle_timeout: Option<Duration>,
     cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -14412,6 +14724,23 @@ pub fn capture_notification_events_continuous_until_cancelled(
     windows_ble::capture_notification_events_continuous_until_cancelled(
         idle_timeout,
         cancel_requested,
+        on_ready,
+        on_event,
+    )
+}
+
+#[cfg(target_os = "windows")]
+pub fn capture_notification_events_continuous_with_connection_handoff_until_cancelled(
+    idle_timeout: Option<Duration>,
+    cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    leave_notify_cccd_enabled_on_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_ready: &mut BleReadyHandler<'_>,
+    on_event: &mut BleNotificationHandler<'_>,
+) -> Result<(), String> {
+    windows_ble::capture_notification_events_continuous_with_connection_handoff_until_cancelled(
+        idle_timeout,
+        cancel_requested,
+        leave_notify_cccd_enabled_on_cancel,
         on_ready,
         on_event,
     )
@@ -14689,6 +15018,11 @@ pub fn wait_for_bluetooth_target_advertisement_by_name(
     windows_ble::wait_for_bluetooth_target_advertisement_by_name(target_name, timeout, context)
 }
 
+#[cfg(target_os = "windows")]
+pub fn verified_bluetooth_target_rename_handoff_address() -> Option<u64> {
+    windows_ble::verified_bluetooth_target_rename_handoff_address()
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn capture_notifications_once(_timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
     Err("Embedded BLE audio input is only supported on Windows".to_string())
@@ -14769,7 +15103,9 @@ pub fn send_device_settings_command_via_active_capture_only(
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn apply_pending_ble_name(_timeout: Duration) -> Result<(), String> {
+pub fn apply_pending_ble_name(
+    _timeout: Duration,
+) -> Result<DeviceSettingsCommandTransport, String> {
     Err("Embedded BLE name apply is only supported on Windows".to_string())
 }
 
@@ -14792,6 +15128,11 @@ pub fn capture_notification_events(
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn notify_capture_session_active() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn capture_notification_events_until_cancelled(
     _idle_timeout: Option<Duration>,
     _cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -14805,6 +15146,17 @@ pub fn capture_notification_events_until_cancelled(
 pub fn capture_notification_events_continuous_until_cancelled(
     _idle_timeout: Option<Duration>,
     _cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    _on_ready: &mut BleReadyHandler<'_>,
+    _on_event: &mut BleNotificationHandler<'_>,
+) -> Result<(), String> {
+    Err("Embedded BLE audio input is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn capture_notification_events_continuous_with_connection_handoff_until_cancelled(
+    _idle_timeout: Option<Duration>,
+    _cancel_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    _leave_notify_cccd_enabled_on_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     _on_ready: &mut BleReadyHandler<'_>,
     _on_event: &mut BleNotificationHandler<'_>,
 ) -> Result<(), String> {
@@ -15079,6 +15431,11 @@ pub fn wait_for_bluetooth_target_advertisement_by_name(
     _context: &str,
 ) -> Result<u64, String> {
     Err("Embedded BLE advertisement scan is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn verified_bluetooth_target_rename_handoff_address() -> Option<u64> {
+    None
 }
 
 #[cfg(test)]

@@ -2623,15 +2623,29 @@ pub(super) async fn submit_embedded_audio_ble_stream(
     inner: &Arc<Inner>,
     timeout_ms: Option<u64>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-    submit_embedded_audio_ble_stream_impl(inner, timeout_ms, true, Arc::new(AtomicBool::new(false)))
-        .await
+    submit_embedded_audio_ble_stream_impl(
+        inner,
+        timeout_ms,
+        true,
+        Arc::new(AtomicBool::new(false)),
+        None,
+    )
+    .await
 }
 
 pub(super) async fn submit_embedded_audio_ble_stream_background(
     inner: &Arc<Inner>,
     cancel_capture: Arc<AtomicBool>,
+    leave_notify_cccd_enabled_on_cancel: Arc<AtomicBool>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-    submit_embedded_audio_ble_stream_impl(inner, None, false, cancel_capture).await
+    submit_embedded_audio_ble_stream_impl(
+        inner,
+        None,
+        false,
+        cancel_capture,
+        Some(leave_notify_cccd_enabled_on_cancel),
+    )
+    .await
 }
 
 fn embedded_ble_stream_idle_timeout(
@@ -2777,6 +2791,7 @@ async fn submit_embedded_audio_ble_stream_impl(
     timeout_ms: Option<u64>,
     emit_idle_capture_errors: bool,
     cancel_capture: Arc<AtomicBool>,
+    leave_notify_cccd_enabled_on_cancel: Option<Arc<AtomicBool>>,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000).max(1_000));
     if emit_idle_capture_errors && embedded_ble_stats_only_enabled() {
@@ -2789,6 +2804,8 @@ async fn submit_embedded_audio_ble_stream_impl(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<EmbeddedBleStreamSignal>();
     register_embedded_ble_cancel_flag(inner, &cancel_capture);
     let cancel_capture_for_task = Arc::clone(&cancel_capture);
+    let leave_notify_cccd_enabled_on_cancel_for_task =
+        leave_notify_cccd_enabled_on_cancel.map(|handoff| Arc::clone(&handoff));
     let ready_inner = (!emit_idle_capture_errors).then(|| Arc::clone(inner));
     let ready_cancel = Arc::clone(&cancel_capture);
     let capture_task = tauri::async_runtime::spawn_blocking(move || {
@@ -2814,9 +2831,11 @@ async fn submit_embedded_audio_ble_stream_impl(
                 },
             )
         } else {
-            crate::embedded_ble::capture_notification_events_continuous_until_cancelled(
+            crate::embedded_ble::capture_notification_events_continuous_with_connection_handoff_until_cancelled(
                 embedded_ble_stream_idle_timeout(timeout, emit_idle_capture_errors),
                 cancel_capture_for_task,
+                leave_notify_cccd_enabled_on_cancel_for_task
+                    .expect("background Listener capture always has a cancellation handoff flag"),
                 &mut on_ready,
                 &mut |event| {
                     tx.send(EmbeddedBleStreamSignal::Notification(event.notification))
@@ -5401,7 +5420,11 @@ mod tests {
         let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
         mark_embedded_ble_listener_ready(&coordinator.inner, &active);
 
-        cancel_embedded_ble_listener_capture(&coordinator.inner, "notify cleanup delay test");
+        cancel_embedded_ble_listener_capture(
+            &coordinator.inner,
+            "notify cleanup delay test",
+            false,
+        );
 
         assert!(active.load(Ordering::SeqCst));
         let history = embedded_ble_session_actor_history(&coordinator.inner);

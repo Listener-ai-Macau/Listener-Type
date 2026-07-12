@@ -236,6 +236,10 @@ struct Inner {
     /// 当前 Listener BLE 后台订阅的取消旗标。刷新输入源或退出时主动置位，
     /// 避免旧 WinRT notify 订阅等待 60s 超时后才释放设备。
     embedded_ble_listener_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// 与当前后台订阅取消旗标绑定。仅固件确认的 BLE 改名会让旧连接马上被设备端
+    /// 终止，此时跳过旧 CCCD 写入，避免 Windows 对已失效连接的额外等待。
+    embedded_ble_listener_leave_cccd_enabled_on_cancel:
+        Mutex<Option<(Arc<AtomicBool>, Arc<AtomicBool>)>>,
     /// 当前 Listener BLE 后台订阅已完成 CCCD notify 写入，可以接收设备音频。
     embedded_ble_listener_ready: AtomicBool,
     /// 启动时必须先把 Type 目标名同步到固件广播名，再允许后台 BLE 监听启动。
@@ -554,6 +558,7 @@ impl Coordinator {
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     embedded_ble_ota_active: AtomicBool::new(false),
                     embedded_ble_listener_cancel: Mutex::new(None),
+                    embedded_ble_listener_leave_cccd_enabled_on_cancel: Mutex::new(None),
                     embedded_ble_listener_ready: AtomicBool::new(false),
                     embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                     embedded_ble_listener_last_error: Mutex::new(None),
@@ -629,6 +634,7 @@ impl Coordinator {
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 embedded_ble_ota_active: AtomicBool::new(false),
                 embedded_ble_listener_cancel: Mutex::new(None),
+                embedded_ble_listener_leave_cccd_enabled_on_cancel: Mutex::new(None),
                 embedded_ble_listener_ready: AtomicBool::new(false),
                 embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
@@ -823,7 +829,7 @@ impl Coordinator {
                 }
             }
         }
-        cancel_embedded_ble_listener_capture(&self.inner, "shutdown");
+        cancel_embedded_ble_listener_capture(&self.inner, "shutdown", false);
     }
 
     pub fn start_hotkey_listener(&self) {
@@ -1544,6 +1550,14 @@ impl Coordinator {
         timeout: Duration,
     ) -> bool {
         pause_embedded_ble_listener_capture(&self.inner, "customer recovery cleanup");
+        wait_for_embedded_ble_listener_inactive(&self.inner, timeout).await
+    }
+
+    pub async fn pause_embedded_ble_listener_for_ble_name_apply_handoff(
+        &self,
+        timeout: Duration,
+    ) -> bool {
+        pause_embedded_ble_listener_capture_for_ble_name_apply_handoff(&self.inner);
         wait_for_embedded_ble_listener_inactive(&self.inner, timeout).await
     }
 
@@ -4327,7 +4341,7 @@ fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
     }
     if let Some(remaining) = embedded_ble_pairing_confirmation_hold_remaining(inner, Instant::now())
     {
-        cancel_embedded_ble_listener_capture(inner, "Windows pairing confirmation hold");
+        cancel_embedded_ble_listener_capture(inner, "Windows pairing confirmation hold", false);
         log::info!(
             "[embedded-ble] background listener refresh skipped while waiting for Windows pairing confirmation remaining_ms={}",
             remaining.as_millis()
@@ -4338,7 +4352,7 @@ fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
         .embedded_ble_listener_generation
         .fetch_add(1, Ordering::SeqCst)
         + 1;
-    cancel_embedded_ble_listener_capture(inner, "refresh");
+    cancel_embedded_ble_listener_capture(inner, "refresh", false);
     if std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
         .ok()
         .as_deref()
@@ -4799,8 +4813,15 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
         }
 
         let cancel_capture = install_embedded_ble_listener_cancel(&inner, generation);
+        let leave_notify_cccd_enabled_on_cancel =
+            embedded_ble_listener_cccd_handoff_flag(&inner, &cancel_capture);
         record_embedded_ble_reconnect_attempt(&inner, "background_listener_loop");
-        match submit_embedded_audio_ble_stream_background(&inner, Arc::clone(&cancel_capture)).await
+        match submit_embedded_audio_ble_stream_background(
+            &inner,
+            Arc::clone(&cancel_capture),
+            leave_notify_cccd_enabled_on_cancel,
+        )
+        .await
         {
             Ok(result) => {
                 log::info!(
@@ -5870,7 +5891,9 @@ async fn wait_for_embedded_ble_listener_ready(
 async fn wait_for_embedded_ble_listener_inactive(inner: &Arc<Inner>, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
-        if !embedded_ble_listener_capture_active(inner) {
+        if !embedded_ble_listener_capture_active(inner)
+            && !crate::embedded_ble::notify_capture_session_active()
+        {
             return true;
         }
         if Instant::now() >= deadline {
@@ -5914,6 +5937,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
 
 fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> Arc<AtomicBool> {
     let cancel = Arc::new(AtomicBool::new(false));
+    let leave_notify_cccd_enabled_on_cancel = Arc::new(AtomicBool::new(false));
     inner
         .embedded_ble_listener_ready
         .store(false, Ordering::SeqCst);
@@ -5921,6 +5945,12 @@ fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> 
         let mut slot = inner.embedded_ble_listener_cancel.lock();
         slot.replace(Arc::clone(&cancel))
     };
+    *inner
+        .embedded_ble_listener_leave_cccd_enabled_on_cancel
+        .lock() = Some((
+        Arc::clone(&cancel),
+        Arc::clone(&leave_notify_cccd_enabled_on_cancel),
+    ));
     if let Some(previous) = previous {
         previous.store(true, Ordering::SeqCst);
         log::warn!(
@@ -5931,13 +5961,42 @@ fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> 
     cancel
 }
 
-fn clear_embedded_ble_listener_cancel(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>) {
-    let mut slot = inner.embedded_ble_listener_cancel.lock();
-    if slot
+fn embedded_ble_listener_cccd_handoff_flag(
+    inner: &Arc<Inner>,
+    cancel: &Arc<AtomicBool>,
+) -> Arc<AtomicBool> {
+    inner
+        .embedded_ble_listener_leave_cccd_enabled_on_cancel
+        .lock()
         .as_ref()
-        .is_some_and(|active| Arc::ptr_eq(active, cancel))
-    {
-        *slot = None;
+        .filter(|(active_cancel, _)| Arc::ptr_eq(active_cancel, cancel))
+        .map(|(_, handoff)| Arc::clone(handoff))
+        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)))
+}
+
+fn clear_embedded_ble_listener_cancel(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>) {
+    let cleared = {
+        let mut slot = inner.embedded_ble_listener_cancel.lock();
+        if slot
+            .as_ref()
+            .is_some_and(|active| Arc::ptr_eq(active, cancel))
+        {
+            *slot = None;
+            true
+        } else {
+            false
+        }
+    };
+    if cleared {
+        let mut handoff_slot = inner
+            .embedded_ble_listener_leave_cccd_enabled_on_cancel
+            .lock();
+        if handoff_slot
+            .as_ref()
+            .is_some_and(|(active_cancel, _)| Arc::ptr_eq(active_cancel, cancel))
+        {
+            *handoff_slot = None;
+        }
         inner
             .embedded_ble_listener_ready
             .store(false, Ordering::SeqCst);
@@ -5945,12 +6004,30 @@ fn clear_embedded_ble_listener_cancel(inner: &Arc<Inner>, cancel: &Arc<AtomicBoo
     }
 }
 
-fn cancel_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
+fn cancel_embedded_ble_listener_capture(
+    inner: &Arc<Inner>,
+    reason: &str,
+    leave_notify_cccd_enabled_on_cancel: bool,
+) {
     inner
         .embedded_ble_listener_ready
         .store(false, Ordering::SeqCst);
     let previous = inner.embedded_ble_listener_cancel.lock().take();
     if let Some(cancel) = previous {
+        if leave_notify_cccd_enabled_on_cancel {
+            if let Some((active_cancel, handoff)) = inner
+                .embedded_ble_listener_leave_cccd_enabled_on_cancel
+                .lock()
+                .as_ref()
+            {
+                if Arc::ptr_eq(active_cancel, &cancel) {
+                    handoff.store(true, Ordering::SeqCst);
+                    log::info!(
+                        "[embedded-ble] confirmed BLE-name change will leave old notify CCCD enabled for firmware disconnect handoff"
+                    );
+                }
+            }
+        }
         record_embedded_ble_session_actor_command(
             inner,
             EmbeddedBleSessionActorCommand::NotifyCleanupDelay,
@@ -5969,7 +6046,18 @@ fn pause_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
         .fetch_add(1, Ordering::SeqCst)
         + 1;
     log::info!("[embedded-ble] paused background listener generation={generation} ({reason})");
-    cancel_embedded_ble_listener_capture(inner, reason);
+    cancel_embedded_ble_listener_capture(inner, reason, false);
+}
+
+fn pause_embedded_ble_listener_capture_for_ble_name_apply_handoff(inner: &Arc<Inner>) {
+    let generation = inner
+        .embedded_ble_listener_generation
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+    log::info!(
+        "[embedded-ble] paused background listener generation={generation} (BLE name apply handoff)"
+    );
+    cancel_embedded_ble_listener_capture(inner, "BLE name apply handoff", true);
 }
 
 fn hotkey_bridge_loop(inner: Arc<Inner>, rx: mpsc::Receiver<HotkeyEvent>) {
@@ -8264,7 +8352,7 @@ mod tests {
             .as_ref()
             .is_some_and(|active| Arc::ptr_eq(active, &second)));
 
-        cancel_embedded_ble_listener_capture(&coordinator.inner, "test");
+        cancel_embedded_ble_listener_capture(&coordinator.inner, "test", false);
         assert!(second.load(Ordering::SeqCst));
         assert!(coordinator
             .inner
@@ -8273,6 +8361,50 @@ mod tests {
             .is_none());
         assert!(!embedded_ble_listener_capture_active(&coordinator.inner));
         assert!(!embedded_ble_listener_capture_ready(&coordinator.inner));
+    }
+
+    #[test]
+    fn ble_name_apply_handoff_marks_only_the_active_capture_for_disconnect_handoff() {
+        let coordinator = Coordinator::new();
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        let handoff = embedded_ble_listener_cccd_handoff_flag(&coordinator.inner, &active);
+
+        pause_embedded_ble_listener_capture_for_ble_name_apply_handoff(&coordinator.inner);
+
+        assert!(active.load(Ordering::SeqCst));
+        assert!(handoff.load(Ordering::SeqCst));
+        assert!(coordinator
+            .inner
+            .embedded_ble_listener_cancel
+            .lock()
+            .is_none());
+        assert!(
+            coordinator
+                .inner
+                .embedded_ble_listener_leave_cccd_enabled_on_cancel
+                .lock()
+                .as_ref()
+                .is_some_and(|(active_cancel, _)| Arc::ptr_eq(active_cancel, &active)),
+            "the active capture keeps its handoff marker until its cleanup finishes"
+        );
+    }
+
+    #[test]
+    fn recovery_cleanup_waits_for_the_actual_notify_capture_to_release() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn wait_for_embedded_ble_listener_inactive")
+            .expect("BLE listener inactive wait should exist");
+        let end = source[start..]
+            .find("fn mark_embedded_ble_listener_ready")
+            .map(|offset| start + offset)
+            .expect("BLE listener inactive wait boundary should exist");
+        let body = &source[start..end];
+        assert!(body.contains("embedded_ble_listener_capture_active(inner)"));
+        assert!(
+            body.contains("crate::embedded_ble::notify_capture_session_active()"),
+            "a cancelled flag alone is not proof that the serialized Windows GATT session released"
+        );
     }
 
     #[test]
@@ -8404,7 +8536,7 @@ mod tests {
             EmbeddedBleForegroundProbeMode::RefreshBackgroundListener
         );
 
-        cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup");
+        cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup", false);
         assert!(active.load(Ordering::SeqCst));
     }
 
@@ -8440,7 +8572,7 @@ mod tests {
             embedded_ble_foreground_probe_mode(&coordinator.inner),
             EmbeddedBleForegroundProbeMode::RefreshBackgroundListener
         );
-        cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup");
+        cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup", false);
         assert!(active.load(Ordering::SeqCst));
     }
 
