@@ -1249,6 +1249,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_retired_listener_ble_ota_v2_protocol() {
+        let manifest =
+            manifest_v2("").replace(LISTENER_OTA_V1_PROTOCOL_NAME, "listener_ble_ota_v2");
+        let result = validate_package(&manifest, FIRMWARE_BYTES, &context());
+
+        assert!(!result.ok);
+        assert!(result
+            .errors
+            .iter()
+            .any(|item| item.contains("Unsupported OTA protocol listener_ble_ota_v2")));
+    }
+
+    #[test]
     fn schema_v2_accepts_required_gatt_chunk_size() {
         let result = validate_package(
             &manifest_v2(
