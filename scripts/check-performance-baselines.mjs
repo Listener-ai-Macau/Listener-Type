@@ -119,20 +119,29 @@ for (const key of [
 ]) {
   requireNumber(rename[key], `BLE rename ${key}`);
 }
-if (rename.max_random_rename_elapsed_ms > 25000) {
-  fail("BLE random rename latency ceiling must not drift above 25000 ms");
+if (rename.max_random_rename_elapsed_ms > 10000) {
+  fail("BLE random rename latency ceiling must not drift above 10000 ms");
 }
-if (rename.max_restore_elapsed_ms > 25000) {
-  fail("BLE rename restore latency ceiling must not drift above 25000 ms");
+if (rename.max_restore_elapsed_ms > 10000) {
+  fail("BLE rename restore latency ceiling must not drift above 10000 ms");
 }
-if (!rename.validation_command?.includes("--rename-random-name")) {
+if (rename.measured_random_rename_elapsed_ms > rename.max_random_rename_elapsed_ms) {
+  fail("accepted BLE random rename evidence exceeds its latency ceiling");
+}
+if (rename.measured_restore_elapsed_ms > rename.max_restore_elapsed_ms) {
+  fail("accepted BLE rename restore evidence exceeds its latency ceiling");
+}
+if (!rename.validation_command?.includes("windows-installed-device-settings-ui-e2e.py")) {
+  fail("BLE rename recovery command must use the visible installed Type UI probe");
+}
+if (!rename.validation_command?.includes("--different-random-name-roundtrip")) {
   fail("BLE rename recovery command must run the full random-name rename path");
 }
-if (!rename.validation_command?.includes("--max-write-ms 25000")) {
-  fail("BLE rename recovery command must enforce the random rename latency ceiling");
+if (!rename.validation_command?.includes("--max-rename-total-ms 10000")) {
+  fail("BLE rename recovery command must enforce the 10000 ms rename ceiling");
 }
-if (!rename.validation_command?.includes("--max-restore-ms 25000")) {
-  fail("BLE rename recovery command must enforce the restore latency ceiling");
+if (!rename.validation_command?.includes("notify ready <=10000 ms")) {
+  fail("BLE rename recovery command must measure completion at notify ready");
 }
 
 const takeover = contracts.type_takeover_no_forced_repair;

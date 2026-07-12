@@ -28,12 +28,13 @@
     },
     "ble_rename_recovery": {
       "accepted": true,
-      "evidence": ".cache/validation/rename-speed-optimized-msi-20260709/installed-random-rename-speed-optimized.json",
-      "measured_random_rename_elapsed_ms": 15336,
-      "measured_restore_elapsed_ms": 18942,
-      "max_random_rename_elapsed_ms": 25000,
-      "max_restore_elapsed_ms": 25000,
-      "validation_command": "python scripts/windows-installed-device-settings-write-e2e.py --remote-debugging-port <port> --rename-random-name --max-write-ms 25000 --max-restore-ms 25000 --output-json <artifact>.json"
+      "evidence": ".cache/validation/rename-speed-msi-8718c6d-20260712-1925/installed-ui-random-roundtrip.json",
+      "measurement_scope": "visible Program Files Type UI write click through Windows PairAsync to background listener notify ready",
+      "measured_random_rename_elapsed_ms": 7812,
+      "measured_restore_elapsed_ms": 7610,
+      "max_random_rename_elapsed_ms": 10000,
+      "max_restore_elapsed_ms": 10000,
+      "validation_command": "Launch C:\\Program Files\\Listener Type\\listener-type.exe with WebView CDP, then run python scripts/windows-installed-device-settings-ui-e2e.py --remote-debugging-port <port> --different-random-name-roundtrip --type-log <listener-type.log> --max-rename-total-ms 10000 --output-json <artifact>.json; artifact must prove both visible UI renames restore background listener notify ready <=10000 ms without Windows Settings or a user pairing prompt."
     },
     "type_takeover_no_forced_repair": {
       "accepted": true,
