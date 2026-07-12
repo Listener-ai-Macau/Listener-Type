@@ -688,6 +688,7 @@ mod windows_ble {
     const BACKGROUND_LISTENER_DEFERRED_FOR_OTA: &str =
         "embedded_ble_background_listener_deferred_for_ota";
     const BLE_RECENT_PAIRING_FAST_GATT_WINDOW: Duration = Duration::from_secs(45);
+    const BLE_RECENT_PAIRING_CACHED_PROBE_WINDOW: Duration = Duration::from_millis(2250);
     const BLE_ADAPTER_RESTART_SETTLE: Duration = Duration::from_millis(2500);
     const BLE_PAIRING_IN_PROGRESS_SETTLE: Duration = Duration::from_millis(2200);
     const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -7349,6 +7350,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
         let recent_pairing = recent_pairing_fast_gatt_active(Instant::now());
         if let Some(state) = recent_pairing.as_ref() {
+            let paired_elapsed = Instant::now().saturating_duration_since(state.attempted_at);
+            if let Some(address) = state
+                .address
+                .filter(|_| paired_elapsed < BLE_RECENT_PAIRING_CACHED_PROBE_WINDOW)
+            {
+                match open_notify_target_for_startup_cached_address(address) {
+                    Ok(target) => {
+                        remember_runtime_bluetooth_target_address_for_current(
+                            address,
+                            "recent pairing cached audio notify",
+                        );
+                        log::info!(
+                            "[embedded-ble] selected recent-pairing cached GATT readiness path target={:?}",
+                            state.target_name
+                        );
+                        return Ok(target);
+                    }
+                    Err(err) => {
+                        return Err(format!(
+                            "recent pairing cached GATT readiness probe target={:?}: {err}",
+                            state.target_name
+                        ));
+                    }
+                }
+            }
             match open_notify_target_for_known_addresses("recent pairing fast GATT", state.address)
             {
                 Ok(target) => {
@@ -7829,6 +7855,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             || err.contains("GATT session did not become active")
             || err.contains("device open by address")
             || err.contains("device open by id")
+            || err.contains("recent pairing cached GATT readiness probe")
     }
 
     fn is_transient_audio_control_write_error(err: &str) -> bool {
