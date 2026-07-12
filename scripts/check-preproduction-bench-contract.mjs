@@ -200,15 +200,16 @@ for (const requiredToken of [
 }
 
 for (const requiredToken of [
-  "Find-CarryForwardHumanSummary",
-  "Test-CarryForwardHumanSummaryCandidate",
-  "Find-CarryForwardHumanRecordSet",
+  "Get-ExplicitTotalReviewRecordSet",
+  "TotalReviewStatePath",
   "Get-NormalizedExistingPath",
   "carried_forward_summary",
   "carried_forward_count",
   "carried_forward_sources",
   "carried_forward_blocked_items",
-  "Latest human result is authoritative",
+  "total_review_state",
+  "total_review_next_step_id",
+  "Current total review state",
   "carried forward from previous PASS summary",
 ]) {
   if (!human.includes(requiredToken)) {
@@ -329,7 +330,7 @@ for (const requiredToken of [
   "operatorNotesProperty",
   "triageSourceProperty",
   "carriedForwardProperty",
-  "resultProperty",
+  "completed_records",
   'HUMAN_REVIEW_INCOMPLETE',
 ]) {
   if (!human.includes(requiredToken)) {
