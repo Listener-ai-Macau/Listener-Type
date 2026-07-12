@@ -365,21 +365,23 @@ def apply_and_read_back(client: CdpClient, expected: dict[str, int], max_write_m
     return read_back, {"writeElapsedMs": write_elapsed_ms, "typed": typed}
 
 
-def write_current_ble_name_and_read_back(client: CdpClient, max_write_ms: int) -> tuple[dict, dict]:
+def write_ble_name_and_read_back(
+    client: CdpClient,
+    ble_name: str,
+    max_write_ms: int,
+) -> tuple[dict, dict]:
     before = ui_snapshot(client)
     if not before.get("ready"):
         raise RuntimeError(f"device settings UI not visible: {before}")
     before_numeric = numeric_form_values(before)
-    ble_name = before.get("bleName")
-    if not isinstance(ble_name, str) or not ble_name:
-        raise RuntimeError(f"visible BLE name is unavailable: {ble_name!r}")
 
     client.click(ble_name_input_center(client))
     client.replace_focused_text(ble_name)
     typed = ui_snapshot(client)
-    if typed.get("bleName") != ble_name or numeric_form_values(typed) != before_numeric:
+    numeric_form_values(typed)
+    if typed.get("bleName") != ble_name:
         raise RuntimeError(
-            f"same-name UI input changed the form unexpectedly: expected_name={ble_name!r} actual={typed.get('bleName')!r}"
+            f"BLE-name UI input did not retain the requested name: expected_name={ble_name!r} actual={typed.get('bleName')!r}"
         )
 
     write_started = time.monotonic()
@@ -403,6 +405,13 @@ def write_current_ble_name_and_read_back(client: CdpClient, max_write_ms: int) -
         "same-name device UI Read did not return the original form values",
     )
     return read_back, {"writeElapsedMs": write_elapsed_ms, "bleName": ble_name, "numericValues": before_numeric}
+
+
+def random_ble_name(excluding: str) -> str:
+    while True:
+        candidate = secrets.token_hex(12).upper()
+        if candidate != excluding and all(token not in candidate.lower() for token in ("listener", "type", "lt")):
+            return candidate
 
 
 def same_name_log_evidence(log_path: Path, start_offset: int, output_json: Path) -> dict:
@@ -434,6 +443,40 @@ def same_name_log_evidence(log_path: Path, start_offset: int, output_json: Path)
     }
 
 
+def changed_name_log_evidence(
+    log_path: Path,
+    start_offset: int,
+    expected_name: str,
+    output_json: Path,
+    phase: str,
+) -> dict:
+    if not log_path.exists():
+        raise RuntimeError(f"Type log does not exist: {log_path}")
+    with log_path.open("rb") as stream:
+        stream.seek(start_offset)
+        delta = stream.read().decode("utf-8", errors="replace")
+    delta_path = output_json.with_name(f"{output_json.stem}.{phase}-type-log-delta.log")
+    delta_path.write_text(delta, encoding="utf-8")
+    pair_lines = [line for line in delta.splitlines() if "device BLE name change Windows PairAsync" in line]
+    required = {
+        "firmware_name_write": f"command=DEVICE:SET ble_name={expected_name}" in delta,
+        "name_apply": "ble_name_changed=true apply_needed=true" in delta,
+        "cache_refresh": "BLE name Windows cache refresh" in delta,
+        "silent_pairing_policy": any("allow_user_prompt=false" in line for line in pair_lines),
+        "no_bluetooth_settings": any("open_settings=false" in line for line in pair_lines),
+        "pairing_completed": any(
+            "status=Paired" in line or "status=AlreadyPaired" in line for line in pair_lines
+        ),
+    }
+    return {
+        "path": str(log_path),
+        "startByteOffset": start_offset,
+        "deltaPath": str(delta_path),
+        "pairLines": pair_lines,
+        "required": required,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--remote-debugging-port", type=int, required=True)
@@ -441,6 +484,7 @@ def main() -> int:
     parser.add_argument("--restore-from-json", type=Path)
     parser.add_argument("--read-only", action="store_true")
     parser.add_argument("--same-name-write", action="store_true")
+    parser.add_argument("--different-random-name-roundtrip", action="store_true")
     parser.add_argument("--type-log", type=Path)
     parser.add_argument("--max-write-ms", type=int, default=2500)
     args = parser.parse_args()
@@ -449,8 +493,10 @@ def main() -> int:
     try:
         start_snapshot = ensure_device_settings_card(client)
         before = numeric_form_values(start_snapshot)
-        if args.same_name_write and (args.read_only or args.restore_from_json):
-            raise RuntimeError("--same-name-write cannot be combined with --read-only or --restore-from-json")
+        if args.same_name_write and (args.read_only or args.restore_from_json or args.different_random_name_roundtrip):
+            raise RuntimeError("--same-name-write cannot be combined with another settings operation")
+        if args.different_random_name_roundtrip and (args.read_only or args.restore_from_json):
+            raise RuntimeError("--different-random-name-roundtrip cannot be combined with another settings operation")
         if args.read_only:
             client.click(button_center(client, "读取"))
             time.sleep(0.2)
@@ -481,7 +527,10 @@ def main() -> int:
             if not args.type_log.exists():
                 raise RuntimeError(f"Type log does not exist: {args.type_log}")
             log_start_offset = args.type_log.stat().st_size
-            read_back, timing = write_current_ble_name_and_read_back(client, args.max_write_ms)
+            current_name = start_snapshot.get("bleName")
+            if not isinstance(current_name, str) or not current_name:
+                raise RuntimeError(f"visible BLE name is unavailable: {current_name!r}")
+            read_back, timing = write_ble_name_and_read_back(client, current_name, args.max_write_ms)
             time.sleep(0.4)
             log_evidence = same_name_log_evidence(args.type_log, log_start_offset, args.output_json)
             result = {
@@ -492,6 +541,83 @@ def main() -> int:
                 "displayed_after_read": {"bleName": read_back["bleName"], **numeric_form_values(read_back)},
                 "timing": {"writeElapsedMs": timing["writeElapsedMs"]},
                 "typeLog": log_evidence,
+                "interaction": "Chrome DevTools Input mouse/keyboard events against visible Program Files Type UI; no Tauri settings invoke",
+            }
+            args.output_json.parent.mkdir(parents=True, exist_ok=True)
+            args.output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["ok"] else 2
+        if args.different_random_name_roundtrip:
+            if not args.type_log:
+                raise RuntimeError("--different-random-name-roundtrip requires --type-log for recovery-path evidence")
+            if not args.type_log.exists():
+                raise RuntimeError(f"Type log does not exist: {args.type_log}")
+            original_name = start_snapshot.get("bleName")
+            if not isinstance(original_name, str) or not original_name:
+                raise RuntimeError(f"visible BLE name is unavailable: {original_name!r}")
+            target_name = random_ble_name(original_name)
+            random_log_offset = args.type_log.stat().st_size
+            random_readback = None
+            random_timing = None
+            random_log = None
+            random_error = None
+            try:
+                random_readback, random_timing = write_ble_name_and_read_back(client, target_name, args.max_write_ms)
+                time.sleep(0.4)
+                random_log = changed_name_log_evidence(
+                    args.type_log,
+                    random_log_offset,
+                    target_name,
+                    args.output_json,
+                    "random-name",
+                )
+            except Exception as error:
+                random_error = str(error)
+
+            restore_readback = None
+            restore_timing = None
+            restore_log = None
+            restore_error = None
+            try:
+                restore_log_offset = args.type_log.stat().st_size
+                restore_readback, restore_timing = write_ble_name_and_read_back(client, original_name, args.max_write_ms)
+                time.sleep(0.4)
+                restore_log = changed_name_log_evidence(
+                    args.type_log,
+                    restore_log_offset,
+                    original_name,
+                    args.output_json,
+                    "restore-name",
+                )
+            except Exception as error:
+                restore_error = str(error)
+            result = {
+                "schema": "listener.installed_type_device_settings_ui_e2e.v1",
+                "ok": (
+                    random_error is None
+                    and restore_error is None
+                    and random_readback is not None
+                    and restore_readback is not None
+                    and random_log is not None
+                    and restore_log is not None
+                    and random_readback.get("bleName") == target_name
+                    and restore_readback.get("bleName") == original_name
+                    and all(random_log["required"].values())
+                    and all(restore_log["required"].values())
+                ),
+                "phase": "different_random_name_roundtrip",
+                "originalName": original_name,
+                "randomName": target_name,
+                "randomReadback": random_readback.get("bleName") if random_readback else None,
+                "restoreReadback": restore_readback.get("bleName") if restore_readback else None,
+                "timing": {
+                    "randomWriteElapsedMs": random_timing["writeElapsedMs"] if random_timing else None,
+                    "restoreWriteElapsedMs": restore_timing["writeElapsedMs"] if restore_timing else None,
+                },
+                "randomNameLog": random_log,
+                "restoreNameLog": restore_log,
+                "randomError": random_error,
+                "restoreError": restore_error,
                 "interaction": "Chrome DevTools Input mouse/keyboard events against visible Program Files Type UI; no Tauri settings invoke",
             }
             args.output_json.parent.mkdir(parents=True, exist_ok=True)

@@ -2181,7 +2181,7 @@ fn embedded_ble_windows_pairing_result(
         ))
     };
     log::info!(
-        "[embedded-ble] {context} Windows PairAsync status={:?} matched={} prompted={} already_paired={} failed={} open_settings={} recovery_command_confirmed={type_recovery_command_confirmed} allow_user_prompt={}",
+        "[embedded-ble] {context} Windows PairAsync status={:?} matched={} paired_now={} already_paired={} failed={} open_settings={} recovery_command_confirmed={type_recovery_command_confirmed} allow_user_prompt={}",
         pairing.status,
         pairing.matched_devices,
         pairing.prompted_devices,

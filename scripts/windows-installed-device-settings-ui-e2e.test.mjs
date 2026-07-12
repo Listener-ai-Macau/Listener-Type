@@ -15,6 +15,12 @@ expect(/button_center\(client, "读取"\)/, 'installed settings E2E must read ba
 expect(/--restore-from-json/, 'installed settings E2E must support restoring the original personal values');
 expect(/--same-name-write/, 'installed settings E2E must exercise a visible same-name write');
 expect(/ble_name_changed=false apply_needed=false/, 'same-name E2E must require a Type log proving the BLE-name recovery path stayed idle');
+expect(/--different-random-name-roundtrip/, 'installed settings E2E must exercise a visible random BLE-name change and restore');
+expect(/token_hex\(12\)/, 'random BLE-name E2E must generate a genuine random non-family name');
+expect(/allow_user_prompt=false/, 'random BLE-name E2E must require silent Type recovery');
+expect(/open_settings=false/, 'random BLE-name E2E must reject Windows Settings escalation');
+expect(/restore_error/, 'random BLE-name E2E must report a failed restore instead of hiding it');
+expect(/numeric_form_values\(typed\)/, 'BLE-name E2E must keep the numeric form parseable while editing the BLE name');
 
 for (const forbidden of ['set_device_settings', 'get_device_settings', 'invoke_retry']) {
   if (source.includes(forbidden)) {
