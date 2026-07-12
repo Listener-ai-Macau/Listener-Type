@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync } from "node:fs";
-import { basename } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname } from "node:path";
 
 function fail(message) {
   throw new Error(message);
@@ -33,6 +33,9 @@ const outputJson = takeArg("--output-json", null);
 
 if (!logPath) {
   fail("--log requires a value");
+}
+if (outputJson) {
+  mkdirSync(dirname(outputJson), { recursive: true });
 }
 
 const text = readFileSync(logPath, "utf8");
