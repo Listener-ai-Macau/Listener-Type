@@ -101,6 +101,11 @@ assert.match(script, /\[int\]\$CargoBuildJobs = 0/, "script should leave Cargo p
 assert.match(script, /\[switch\]\$ReuseExistingExe/, "script should support fast MSI relink for docs/scripts-only commits");
 assert.match(script, /\[switch\]\$SkipDesktopShortcut/, "script should support opting out of local desktop shortcut refresh");
 assert.match(script, /\[switch\]\$UseSccache/, "script should support opt-in sccache acceleration");
+assert.ok(
+  script.indexOf('if ($UseSccache.IsPresent -and -not (Test-Command "sccache"))')
+    < script.indexOf('Write-Host "[info] Install validation requested; stopping installed Listener Type before the long MSI build"'),
+  'missing sccache must fail before install validation stops the user-facing app',
+);
 assert.match(script, /\[switch\]\$IncrementalReleaseBuild/, "script should support opt-in local incremental release builds");
 assert.match(script, /\[switch\]\$InstallMsi/, "script should support installing the freshly built MSI");
 assert.match(script, /\[switch\]\$LaunchInstalledApp/, "script should support launching the installed Program Files app after MSI update");

@@ -776,6 +776,9 @@ try {
 
   $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
   Write-Host "[info] Default Windows package does not bundle or register the optional TSF IME."
+  if ($UseSccache.IsPresent -and -not (Test-Command "sccache")) {
+    throw "-UseSccache was set, but sccache is not installed or not on PATH."
+  }
   if ($InstallMsi.IsPresent -or $LaunchInstalledApp.IsPresent) {
     Write-Host "[info] Install validation requested; stopping installed Listener Type before the long MSI build"
     Stop-InstalledListenerType
