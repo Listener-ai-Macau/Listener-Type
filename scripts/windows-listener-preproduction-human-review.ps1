@@ -924,11 +924,10 @@ function Get-NormalizedExistingPath {
     }
 }
 
-function Test-CarryForwardHumanSummaryCandidate {
+function Test-CarryForwardHumanRecordSummaryCandidate {
     param(
         [Parameter(Mandatory = $true)]$Candidate,
-        [Parameter(Mandatory = $true)]$Summary,
-        [Parameter(Mandatory = $true)][string[]]$RequiredStepIds
+        [Parameter(Mandatory = $true)]$Summary
     )
 
     $candidateDir = Get-NormalizedExistingPath -Path $Candidate.Directory.FullName
@@ -936,10 +935,7 @@ function Test-CarryForwardHumanSummaryCandidate {
         return $false
     }
 
-    $candidateLeaf = Split-Path -Leaf $candidateDir
-    if ($candidateLeaf -notlike "preproduction-human-review*") {
-        return $false
-    }
+    # preproduction-human-review* is a conventional directory name; validated output/session files are authoritative.
 
     $candidatePathText = $Candidate.FullName.ToLowerInvariant()
     foreach ($fixtureMarker in @("operator-note", "dryrun", "dry-run", "smoke", "fixture", "script-gate", "format-check", "no-hardware")) {
@@ -958,6 +954,72 @@ function Test-CarryForwardHumanSummaryCandidate {
         return $false
     }
 
+    if ($Summary.status -notin @("HUMAN_REVIEW_PASS", "HUMAN_REVIEW_INCOMPLETE", "HUMAN_REVIEW_FAIL")) {
+        return $false
+    }
+
+    $records = @($Summary.records)
+    if ($records.Count -eq 0) {
+        return $false
+    }
+
+    foreach ($record in $records) {
+        if ($null -eq $record -or $null -eq $record.PSObject.Properties["id"]) {
+            return $false
+        }
+        $recordId = [string]$record.id
+        if ([string]::IsNullOrWhiteSpace($recordId)) {
+            return $false
+        }
+        $recordJson = $record | ConvertTo-Json -Depth 10 -Compress
+        if ($recordJson -match "NoPrompt dry run" -or $recordJson -match "dryrun" -or $recordJson -match "operator-note") {
+            return $false
+        }
+    }
+
+    $operatorNotesProperty = $Summary.PSObject.Properties["operator_notes"]
+    $operatorNotes = @()
+    if ($operatorNotesProperty) {
+        $operatorNotes = @($operatorNotesProperty.Value | Where-Object { $null -ne $_ })
+    }
+    if ($operatorNotes.Count -gt 0) {
+        $triagePath = Join-Path $candidateDir "preproduction-operator-note-triage.json"
+        if (-not (Test-Path -LiteralPath $triagePath)) {
+            return $false
+        }
+        try {
+            $triage = Get-Content -Raw -LiteralPath $triagePath | ConvertFrom-Json
+        } catch {
+            return $false
+        }
+        $triageStatusProperty = $triage.PSObject.Properties["status"]
+        $triageSourceProperty = $triage.PSObject.Properties["source_summary"]
+        # triage.source_summary must match the candidate summary before its record can be carried forward.
+        if ($null -eq $triageStatusProperty -or $null -eq $triageSourceProperty) {
+            return $false
+        }
+        if ([string]$triageStatusProperty.Value -ne "PASS") {
+            return $false
+        }
+        $triageSource = Get-NormalizedExistingPath -Path ([string]$triageSourceProperty.Value)
+        if ($triageSource -ne (Get-NormalizedExistingPath -Path $Candidate.FullName)) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-CarryForwardHumanSummaryCandidate {
+    param(
+        [Parameter(Mandatory = $true)]$Candidate,
+        [Parameter(Mandatory = $true)]$Summary,
+        [Parameter(Mandatory = $true)][string[]]$RequiredStepIds
+    )
+
+    if (-not (Test-CarryForwardHumanRecordSummaryCandidate -Candidate $Candidate -Summary $Summary)) {
+        return $false
+    }
     if ($Summary.status -notin @("HUMAN_REVIEW_PASS", "HUMAN_REVIEW_INCOMPLETE")) {
         return $false
     }
@@ -969,41 +1031,10 @@ function Test-CarryForwardHumanSummaryCandidate {
 
     $recordById = @{}
     foreach ($record in $records) {
-        if ($null -eq $record -or $null -eq $record.PSObject.Properties["id"]) {
-            return $false
-        }
-        $recordId = [string]$record.id
-        if ([string]::IsNullOrWhiteSpace($recordId)) {
-            return $false
-        }
-        $recordById[$recordId] = $record
-        $recordJson = $record | ConvertTo-Json -Depth 10 -Compress
-        if ($recordJson -match "NoPrompt dry run" -or $recordJson -match "dryrun" -or $recordJson -match "operator-note") {
-            return $false
-        }
+        $recordById[[string]$record.id] = $record
     }
     foreach ($stepId in $RequiredStepIds) {
         if (-not $recordById.ContainsKey($stepId)) {
-            return $false
-        }
-    }
-
-    $operatorNoteCount = @($Summary.operator_notes).Count
-    if ($operatorNoteCount -gt 0) {
-        $triagePath = Join-Path $candidateDir "preproduction-operator-note-triage.json"
-        if (-not (Test-Path -LiteralPath $triagePath)) {
-            return $false
-        }
-        try {
-            $triage = Get-Content -Raw -LiteralPath $triagePath | ConvertFrom-Json
-        } catch {
-            return $false
-        }
-        if ($triage.status -ne "PASS") {
-            return $false
-        }
-        $triageSource = Get-NormalizedExistingPath -Path ([string]$triage.source_summary)
-        if ($triageSource -ne (Get-NormalizedExistingPath -Path $Candidate.FullName)) {
             return $false
         }
     }
@@ -1065,6 +1096,90 @@ function Find-CarryForwardHumanSummary {
     }
 
     return $null
+}
+
+function Find-CarryForwardHumanRecordSet {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$RequiredStepIds
+    )
+
+    $roots = @(
+        (Join-Path $repoRoot ".cache\validation"),
+        (Join-Path $repoRoot ".artifacts\v1.0.2-regression")
+    ) | Where-Object { Test-Path -LiteralPath $_ }
+
+    $candidates = foreach ($root in $roots) {
+        Get-ChildItem -LiteralPath $root -Recurse -File -Filter "preproduction-human-review-summary.json" -ErrorAction SilentlyContinue
+    }
+
+    $latestById = @{}
+    foreach ($candidate in @($candidates | Sort-Object LastWriteTime -Descending)) {
+        try {
+            $summary = Get-Content -Raw -LiteralPath $candidate.FullName | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        if (-not (Test-CarryForwardHumanRecordSummaryCandidate -Candidate $candidate -Summary $summary)) {
+            continue
+        }
+
+        $focusStepIds = @()
+        $focusStepIdsProperty = $summary.PSObject.Properties["focus_step_ids"]
+        if ($focusStepIdsProperty) {
+            $focusStepIds = @($focusStepIdsProperty.Value | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        }
+        foreach ($record in @($summary.records)) {
+            $recordId = ([string]$record.id).Trim()
+            if ([string]::IsNullOrWhiteSpace($recordId) -or $RequiredStepIds -notcontains $recordId) {
+                continue
+            }
+            if ($focusStepIds.Count -gt 0 -and $focusStepIds -notcontains $recordId) {
+                continue
+            }
+            $carriedForwardProperty = $record.PSObject.Properties["carried_forward"]
+            $isCarriedForward = $carriedForwardProperty -and $carriedForwardProperty.Value -eq $true
+            if ($isCarriedForward -or $latestById.ContainsKey($recordId)) {
+                continue
+            }
+
+            $resultProperty = $record.PSObject.Properties["result"]
+            if ($null -eq $resultProperty) {
+                continue
+            }
+            $result = ([string]$resultProperty.Value).Trim()
+            if ([string]::IsNullOrWhiteSpace($result)) {
+                continue
+            }
+            $latestById[$recordId] = [pscustomobject]@{
+                result = $result
+                record = $record
+                source_summary = $candidate.FullName
+            }
+        }
+    }
+
+    $passRecords = @{}
+    $sourceById = @{}
+    $blockedItems = [System.Collections.Generic.List[string]]::new()
+    foreach ($stepId in $RequiredStepIds) {
+        if (-not $latestById.ContainsKey($stepId)) {
+            continue
+        }
+        $latest = $latestById[$stepId]
+        # Latest human result is authoritative: a later FAIL/SKIP must block carry-forward of an earlier PASS.
+        if ($latest.result -eq "PASS") {
+            $passRecords[$stepId] = $latest.record
+            $sourceById[$stepId] = $latest.source_summary
+        } else {
+            $blockedItems.Add(("{0}:{1}" -f $stepId, $latest.result)) | Out-Null
+        }
+    }
+
+    return [pscustomobject]@{
+        records = $passRecords
+        sources_by_id = $sourceById
+        blocked_items = @($blockedItems)
+    }
 }
 
 function Copy-ReviewRecordForSummary {
@@ -1241,10 +1356,17 @@ if ($requestedStepIds.Count -gt 0) {
 }
 
 $carryForwardSummary = $null
+$carryForwardRecordSet = [pscustomobject]@{
+    records = @{}
+    sources_by_id = @{}
+    blocked_items = @()
+}
 if ($requestedStepIds.Count -gt 0) {
     $carryForwardSummary = Find-CarryForwardHumanSummary `
         -RequiredStepIds @($allSteps | ForEach-Object { [string]$_.id }) `
         -FocusStepIds @($requestedStepIds)
+    $carryForwardRecordSet = Find-CarryForwardHumanRecordSet `
+        -RequiredStepIds @($allSteps | ForEach-Object { [string]$_.id })
 }
 
 $existingRecords = @()
@@ -1276,6 +1398,7 @@ $startLines = @(
     "NoPrompt: $($NoPrompt.IsPresent)"
     "FocusStepIds: $(if ($requestedStepIds.Count -gt 0) { ($requestedStepIds -join ',') } else { 'FULL' })"
     "CarryForwardSummary: $(if ($carryForwardSummary) { $carryForwardSummary.path } else { 'NONE' })"
+    "CarryForwardRecordCount: $($carryForwardRecordSet.records.Count)"
     "TypeHead: $($typeHeadInfo.head) $($typeHeadInfo.commit_time) $($typeHeadInfo.subject)"
     "TypeDirty: $($typeWorktreeInfo.dirty) dirty_count=$($typeWorktreeInfo.dirty_count)"
     "FirmwareHead: $($firmwareHeadInfo.head) $($firmwareHeadInfo.commit_time) $($firmwareHeadInfo.subject)"
@@ -1330,19 +1453,14 @@ if ($requestedStepIds.Count -gt 0) {
     foreach ($record in $records) {
         $newRecordById[[string]$record.id] = $record
     }
-    $carryRecordById = @{}
-    if ($carryForwardSummary) {
-        foreach ($record in @($carryForwardSummary.summary.records)) {
-            $carryRecordById[[string]$record.id] = $record
-        }
-    }
+    $carryRecordById = $carryForwardRecordSet.records
 
     for ($summaryIndex = 0; $summaryIndex -lt $allSteps.Count; $summaryIndex++) {
         $stepId = [string]$allSteps[$summaryIndex].id
         if ($newRecordById.ContainsKey($stepId)) {
             $summaryRecords.Add((Copy-ReviewRecordForSummary -Record $newRecordById[$stepId] -Index ($summaryIndex + 1))) | Out-Null
         } elseif ($carryRecordById.ContainsKey($stepId)) {
-            $summaryRecords.Add((Copy-ReviewRecordForSummary -Record $carryRecordById[$stepId] -Index ($summaryIndex + 1) -CarriedForward $true -CarriedForwardFrom $carryForwardSummary.path)) | Out-Null
+            $summaryRecords.Add((Copy-ReviewRecordForSummary -Record $carryRecordById[$stepId] -Index ($summaryIndex + 1) -CarriedForward $true -CarriedForwardFrom ([string]$carryForwardRecordSet.sources_by_id[$stepId])) ) | Out-Null
             $carriedForwardCount += 1
         }
     }
@@ -1400,6 +1518,7 @@ $progress = [ordered]@{
     missing_result_items = $missingResultCount
     incomplete_items = $incompleteCount
     carried_forward_items = $carriedForwardCount
+    carried_forward_blocked_items = @($carryForwardRecordSet.blocked_items)
     stopped_after_operator_note = $stoppedAfterOperatorNote
     focus_mode = $requestedStepIds.Count -gt 0
 }
@@ -1465,6 +1584,18 @@ $triageTemplate | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $triageTem
     progress = $progress
     carried_forward_summary = $(if ($carryForwardSummary) { $carryForwardSummary.path } else { "" })
     carried_forward_count = $carriedForwardCount
+    carried_forward_sources = @(
+        foreach ($step in $allSteps) {
+            $stepId = [string]$step.id
+            if ($carryForwardRecordSet.sources_by_id.ContainsKey($stepId)) {
+                [ordered]@{
+                    id = $stepId
+                    summary_path = [string]$carryForwardRecordSet.sources_by_id[$stepId]
+                }
+            }
+        }
+    )
+    carried_forward_blocked_items = @($carryForwardRecordSet.blocked_items)
     stopped_after_operator_note = $stoppedAfterOperatorNote
     operator_note_review_status = $(if ($operatorNoteArray.Count -gt 0) { "PENDING" } else { "PASS" })
     operator_note_review_required_count = $operatorNoteArray.Count

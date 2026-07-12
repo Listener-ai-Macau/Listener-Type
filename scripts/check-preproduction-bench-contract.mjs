@@ -202,9 +202,13 @@ for (const requiredToken of [
 for (const requiredToken of [
   "Find-CarryForwardHumanSummary",
   "Test-CarryForwardHumanSummaryCandidate",
+  "Find-CarryForwardHumanRecordSet",
   "Get-NormalizedExistingPath",
   "carried_forward_summary",
   "carried_forward_count",
+  "carried_forward_sources",
+  "carried_forward_blocked_items",
+  "Latest human result is authoritative",
   "carried forward from previous PASS summary",
 ]) {
   if (!human.includes(requiredToken)) {
@@ -322,6 +326,10 @@ for (const requiredToken of [
   "Summary.session_jsonl",
   "preproduction-operator-note-triage.json",
   "triage.source_summary",
+  "operatorNotesProperty",
+  "triageSourceProperty",
+  "carriedForwardProperty",
+  "resultProperty",
   'HUMAN_REVIEW_INCOMPLETE',
 ]) {
   if (!human.includes(requiredToken)) {
