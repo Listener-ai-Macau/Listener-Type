@@ -1,0 +1,415 @@
+#!/usr/bin/env python3
+"""Exercise Listener Type device settings through the installed UI controls only.
+
+The caller launches the Program Files app with a WebView remote-debugging port.
+This script uses Chrome DevTools mouse/keyboard input to edit the visible form and
+click its Read/Write buttons. It intentionally never calls Tauri settings commands.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import secrets
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+from websockets.sync.client import connect
+
+
+NUMBER_FIELD_NAMES = (
+    "pluggedLowPowerIdleMinutes",
+    "batteryLowPowerIdleMinutes",
+    "batteryAutoShutdownMinutes",
+    "statusLedBrightnessPercent",
+    "keyLedBrightnessPercent",
+    "knobLedBrightnessPercent",
+    "edgeLedBrightnessPercent",
+)
+
+
+def cdp_page_ws(port: int) -> str:
+    deadline = time.monotonic() + 20
+    last_targets: list[str] = []
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1) as response:
+                targets = json.loads(response.read().decode("utf-8"))
+            last_targets = [target.get("url", "") for target in targets]
+            for target in targets:
+                url = target.get("url", "")
+                if url.startswith("http://tauri.localhost") and "?window=" not in url:
+                    return target["webSocketDebuggerUrl"]
+        except Exception:
+            pass
+        time.sleep(0.25)
+    raise RuntimeError(f"main Listener Type page not found; targets={last_targets}")
+
+
+class CdpClient:
+    def __init__(self, websocket_url: str):
+        self.ws = connect(websocket_url)
+        self.next_id = 1
+
+    def send(self, method: str, params: dict | None = None) -> dict:
+        message_id = self.next_id
+        self.next_id += 1
+        payload = {"id": message_id, "method": method}
+        if params is not None:
+            payload["params"] = params
+        self.ws.send(json.dumps(payload))
+        while True:
+            message = json.loads(self.ws.recv())
+            if message.get("id") == message_id:
+                if "error" in message:
+                    raise RuntimeError(f"CDP {method} failed: {message['error']}")
+                return message.get("result", {})
+
+    def evaluate(self, expression: str):
+        result = self.send(
+            "Runtime.evaluate",
+            {"expression": expression, "returnByValue": True, "awaitPromise": True},
+        )
+        if "exceptionDetails" in result:
+            raise RuntimeError(json.dumps(result["exceptionDetails"], ensure_ascii=False))
+        return result.get("result", {}).get("value")
+
+    def click(self, point: dict[str, float]) -> None:
+        for event_type in ("mousePressed", "mouseReleased"):
+            self.send(
+                "Input.dispatchMouseEvent",
+                {
+                    "type": event_type,
+                    "x": point["x"],
+                    "y": point["y"],
+                    "button": "left",
+                    "clickCount": 1,
+                },
+            )
+
+    def key(self, event_type: str, key: str, code: str, virtual_key_code: int, modifiers: int = 0) -> None:
+        self.send(
+            "Input.dispatchKeyEvent",
+            {
+                "type": event_type,
+                "key": key,
+                "code": code,
+                "windowsVirtualKeyCode": virtual_key_code,
+                "modifiers": modifiers,
+            },
+        )
+
+    def replace_focused_text(self, value: str) -> None:
+        self.key("rawKeyDown", "Control", "ControlLeft", 17, modifiers=2)
+        self.key("keyDown", "a", "KeyA", 65, modifiers=2)
+        self.key("keyUp", "a", "KeyA", 65, modifiers=2)
+        self.key("keyUp", "Control", "ControlLeft", 17)
+        self.key("keyDown", "Backspace", "Backspace", 8)
+        self.key("keyUp", "Backspace", "Backspace", 8)
+        self.send("Input.insertText", {"text": value})
+
+    def screenshot(self, output_path: Path) -> None:
+        result = self.send("Page.captureScreenshot", {"format": "png"})
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        import base64
+
+        output_path.write_bytes(base64.b64decode(result["data"]))
+
+    def close(self) -> None:
+        self.ws.close()
+
+
+def wait_for(predicate, timeout_seconds: float, error: str):
+    deadline = time.monotonic() + timeout_seconds
+    last = None
+    while time.monotonic() < deadline:
+        last = predicate()
+        if last:
+            return last
+        time.sleep(0.2)
+    raise RuntimeError(f"{error}; last={last}")
+
+
+def ui_snapshot(client: CdpClient) -> dict:
+    return client.evaluate(
+        """
+        (() => {
+          const card = document.querySelector('.ol-device-settings-card');
+          if (!card) return { ready: false, body: document.body.innerText.slice(0, 2000) };
+          const numberInputs = [...card.querySelectorAll('input[type="number"]')];
+          const buttonRows = [...card.querySelectorAll('button')].map((button, index) => ({
+            index,
+            text: button.innerText.trim(),
+            disabled: button.disabled,
+          }));
+          return {
+            ready: true,
+            numberInputs: numberInputs.map((input, index) => ({
+              index,
+              value: input.value,
+              min: input.min,
+              max: input.max,
+              disabled: input.disabled,
+              context: (input.closest('.ol-device-timing-control, .ol-device-led-row')?.innerText || '').trim(),
+            })),
+            buttons: buttonRows,
+            text: card.innerText,
+          };
+        })()
+        """
+    )
+
+
+def visible_button_center(client: CdpClient, *, text: str | None = None, title: str | None = None, within_overlay: bool = False) -> dict[str, float] | None:
+    scope = "overlay" if within_overlay else "document"
+    point = client.evaluate(
+        f"""
+        (() => {{
+          const overlays = [...document.querySelectorAll('div')].filter(candidate => {{
+            const style = getComputedStyle(candidate);
+            const rect = candidate.getBoundingClientRect();
+            return style.position === 'absolute' && Number(style.zIndex) >= 70 && rect.width > 0 && rect.height > 0;
+          }});
+          const overlay = overlays.at(-1);
+          const scope = {scope};
+          if (!scope) return null;
+          const button = [...scope.querySelectorAll('button')].find(candidate => {{
+            const rect = candidate.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0
+              && !candidate.disabled
+              && ({json.dumps(text)} === null || candidate.innerText.trim() === {json.dumps(text)})
+              && ({json.dumps(title)} === null || candidate.title === {json.dumps(title)});
+          }});
+          if (!button) return null;
+          const rect = button.getBoundingClientRect();
+          return {{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }};
+        }})()
+        """
+    )
+    return point or None
+
+
+def has_provider_setup_overlay(client: CdpClient) -> bool:
+    return bool(client.evaluate(
+        """
+        (() => [...document.querySelectorAll('div')].some(candidate => {
+          const style = getComputedStyle(candidate);
+          const rect = candidate.getBoundingClientRect();
+          return style.position === 'absolute' && Number(style.zIndex) >= 70
+            && rect.width > 0 && rect.height > 0 && candidate.innerText.includes('稍后');
+        }))()
+        """
+    ))
+
+
+def ensure_device_settings_card(client: CdpClient) -> dict:
+    snapshot = ui_snapshot(client)
+    if snapshot.get("ready"):
+        return snapshot
+
+    if has_provider_setup_overlay(client):
+        later = visible_button_center(client, text="稍后", within_overlay=True)
+        if not later:
+            raise RuntimeError("provider setup overlay is blocking settings but its Later button is unavailable")
+        client.click(later)
+        wait_for(lambda: not has_provider_setup_overlay(client), 5, "provider setup overlay did not dismiss")
+
+    settings_button = visible_button_center(client, title="设置")
+    if not settings_button:
+        raise RuntimeError("main-window Settings button is unavailable")
+    client.click(settings_button)
+
+    def open_device_section() -> dict | None:
+        card = ui_snapshot(client)
+        if card.get("ready"):
+            return card
+        device_button = visible_button_center(client, text="设备")
+        if device_button:
+            client.click(device_button)
+        card = ui_snapshot(client)
+        return card if card.get("ready") else None
+
+    return wait_for(open_device_section, 20, "device settings card did not render after normal UI navigation")
+
+
+def input_center(client: CdpClient, index: int) -> dict[str, float]:
+    point = client.evaluate(
+        f"""
+        (() => {{
+          const card = document.querySelector('.ol-device-settings-card');
+          const input = card?.querySelectorAll('input[type="number"]')[{index}];
+          if (!input) return null;
+          input.scrollIntoView({{ block: 'center', inline: 'nearest' }});
+          const rect = input.getBoundingClientRect();
+          return {{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, visible: rect.width > 0 && rect.height > 0 }};
+        }})()
+        """
+    )
+    if not point or not point.get("visible"):
+        raise RuntimeError(f"device-settings number input {index} is not visible")
+    return point
+
+
+def card_button_center(client: CdpClient, text: str) -> dict[str, float] | None:
+    return client.evaluate(
+        f"""
+        (() => {{
+          const button = [...document.querySelectorAll('.ol-device-settings-card button')]
+            .find(candidate => candidate.innerText.trim() === {json.dumps(text)});
+          if (!button || button.disabled) return null;
+          button.scrollIntoView({{ block: 'center', inline: 'nearest' }});
+          const rect = button.getBoundingClientRect();
+          return {{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, visible: rect.width > 0 && rect.height > 0 }};
+        }})()
+        """
+    )
+
+
+def button_center(client: CdpClient, text: str) -> dict[str, float]:
+    point = wait_for(
+        lambda: card_button_center(client, text),
+        3,
+        f"visible enabled device-settings button not found: {text}",
+    )
+    if not point or not point.get("visible"):
+        raise RuntimeError(f"visible enabled device-settings button not found: {text}")
+    return point
+
+
+def numeric_form_values(snapshot: dict) -> dict[str, int]:
+    inputs = snapshot.get("numberInputs", [])
+    if len(inputs) != len(NUMBER_FIELD_NAMES):
+        raise RuntimeError(f"expected {len(NUMBER_FIELD_NAMES)} device-setting number inputs, found {len(inputs)}: {inputs}")
+    return {name: int(inputs[index]["value"]) for index, name in enumerate(NUMBER_FIELD_NAMES)}
+
+
+def different_random(current: int, low: int, high: int) -> int:
+    value = secrets.randbelow(high - low + 1) + low
+    return value if value != current else low + ((value - low + 1) % (high - low + 1))
+
+
+def random_test_values(before: dict[str, int]) -> dict[str, int]:
+    return {
+        "pluggedLowPowerIdleMinutes": different_random(before["pluggedLowPowerIdleMinutes"], 1, 2),
+        "batteryLowPowerIdleMinutes": different_random(before["batteryLowPowerIdleMinutes"], 3, 29),
+        "batteryAutoShutdownMinutes": before["batteryAutoShutdownMinutes"],
+        "statusLedBrightnessPercent": different_random(before["statusLedBrightnessPercent"], 31, 87),
+        "keyLedBrightnessPercent": different_random(before["keyLedBrightnessPercent"], 33, 89),
+        "knobLedBrightnessPercent": different_random(before["knobLedBrightnessPercent"], 35, 91),
+        "edgeLedBrightnessPercent": different_random(before["edgeLedBrightnessPercent"], 37, 93),
+    }
+
+
+def apply_and_read_back(client: CdpClient, expected: dict[str, int], max_write_ms: int) -> tuple[dict, dict]:
+    before = ui_snapshot(client)
+    if not before.get("ready"):
+        raise RuntimeError(f"device settings UI not visible: {before}")
+    numeric_form_values(before)
+
+    for index, name in enumerate(NUMBER_FIELD_NAMES):
+        point = input_center(client, index)
+        client.click(point)
+        client.replace_focused_text(str(expected[name]))
+
+    typed = numeric_form_values(ui_snapshot(client))
+    if typed != expected:
+        raise RuntimeError(f"UI input values differ before Write: expected={expected} actual={typed}")
+
+    write_started = time.monotonic()
+    client.click(button_center(client, "写入"))
+    wait_for(
+        lambda: "已发送到设备" in str(ui_snapshot(client).get("text", "")),
+        max_write_ms / 1000,
+        "device UI did not show saved confirmation",
+    )
+    write_elapsed_ms = round((time.monotonic() - write_started) * 1000)
+
+    client.click(button_center(client, "读取"))
+    read_back = wait_for(
+        lambda: (
+            (snapshot := ui_snapshot(client)).get("ready")
+            and numeric_form_values(snapshot) == expected
+            and snapshot
+        ),
+        max_write_ms / 1000,
+        "device UI Read did not return the written values",
+    )
+    return read_back, {"writeElapsedMs": write_elapsed_ms, "typed": typed}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--remote-debugging-port", type=int, required=True)
+    parser.add_argument("--output-json", type=Path, required=True)
+    parser.add_argument("--restore-from-json", type=Path)
+    parser.add_argument("--read-only", action="store_true")
+    parser.add_argument("--max-write-ms", type=int, default=2500)
+    args = parser.parse_args()
+
+    client = CdpClient(cdp_page_ws(args.remote_debugging_port))
+    try:
+        start_snapshot = ensure_device_settings_card(client)
+        before = numeric_form_values(start_snapshot)
+        if args.read_only:
+            client.click(button_center(client, "读取"))
+            time.sleep(0.2)
+            refreshed = wait_for(
+                lambda: (
+                    (snapshot := ui_snapshot(client)).get("ready")
+                    and all(button["text"] != "读取中" for button in snapshot.get("buttons", []))
+                    and snapshot
+                ),
+                max(args.max_write_ms / 1000, 2.5),
+                "device UI did not finish the read-only refresh",
+            )
+            current = numeric_form_values(refreshed)
+            result = {
+                "schema": "listener.installed_type_device_settings_ui_e2e.v1",
+                "ok": True,
+                "phase": "read_only",
+                "displayed_after_read": current,
+                "interaction": "Chrome DevTools Input mouse click against visible Program Files Type UI; no Tauri settings invoke",
+            }
+            args.output_json.parent.mkdir(parents=True, exist_ok=True)
+            args.output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.restore_from_json:
+            source = json.loads(args.restore_from_json.read_text(encoding="utf-8"))
+            expected = {name: int(source["before"][name]) for name in NUMBER_FIELD_NAMES}
+            phase = "restore"
+        else:
+            expected = random_test_values(before)
+            phase = "random_write"
+
+        args.output_json.parent.mkdir(parents=True, exist_ok=True)
+        client.screenshot(args.output_json.with_suffix(".before.png"))
+        read_back, timing = apply_and_read_back(client, expected, args.max_write_ms)
+        client.screenshot(args.output_json.with_suffix(".after.png"))
+        result = {
+            "schema": "listener.installed_type_device_settings_ui_e2e.v1",
+            "ok": True,
+            "phase": phase,
+            "before": before,
+            "requested": expected,
+            "displayed_after_read": numeric_form_values(read_back),
+            "timing": timing,
+            "interaction": "Chrome DevTools Input mouse/keyboard events against visible Program Files Type UI; no Tauri settings invoke",
+        }
+        args.output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    except Exception as exc:
+        result = {"schema": "listener.installed_type_device_settings_ui_e2e.v1", "ok": False, "error": str(exc)}
+        args.output_json.parent.mkdir(parents=True, exist_ok=True)
+        args.output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps(result, ensure_ascii=False, indent=2), file=sys.stderr)
+        return 1
+    finally:
+        client.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

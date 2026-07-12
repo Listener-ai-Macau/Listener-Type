@@ -159,15 +159,30 @@
       "repo": "type",
       "commit": "ac43b90e0a592065a8f74d80cadc67d99c1f113d",
       "subject": "Stabilize Type device settings keys",
-      "state": "partially_human_accepted_with_machine_guard",
+      "state": "machine_accepted_brightness_pending_custom_keys_review",
       "protects": [
         "Type writes exact low-power minutes instead of turning values such as 12 into 13.",
         "Type syncs firmware readback values into local preferences exactly.",
         "Default device key output stays KEY1 RightCtrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z.",
         "Device custom-key UI keeps a single recorder control while preserving dictation/custom function choices."
       ],
+      "machine_accepted_scope": [
+        "Operator delegated the brightness/low-power acceptance to installed-Type UI automation on 2026-07-12.",
+        "Random UI values wrote and read back exactly; firmware NVS and an actual low-power LED frame matched; original personal values were restored through the same UI."
+      ],
+      "machine_evidence": [
+        ".cache/validation/type-settings-ui-physical-20260712-091500/random-write-ui.json",
+        "../Listener-Firmware/.cache/validation/type-settings-ui-physical-20260712-091500/random-nvs-readback.log",
+        "../Listener-Firmware/.cache/validation/type-settings-ui-physical-20260712-091500/random-low-power-led.log",
+        ".cache/validation/type-settings-ui-physical-20260712-091500/restore-ui.json",
+        "../Listener-Firmware/.cache/validation/type-settings-ui-physical-20260712-091500/restored-nvs-readback.log"
+      ],
+      "pending_human_scope": [
+        "Custom-key interaction behavior remains a separate review item."
+      ],
       "guards": [
         "npm run test:device-settings-mock",
+        "npm run test:device-settings-ui-e2e-contract",
         "npm run build",
         "cargo test --manifest-path ./src-tauri/Cargo.toml device_settings_firmware_readback_syncs_local_preferences_exactly --lib",
         "cargo test --manifest-path ./src-tauri/Cargo.toml device_settings_update_commands --lib"

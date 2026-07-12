@@ -35,6 +35,7 @@
     "test:capsule-display": "node --experimental-strip-types src/lib/capsuleDisplayMessage.test.ts",
     "test:device-health": "node --experimental-strip-types src/lib/deviceHealth.test.ts",
     "test:device-settings-mock": "node --experimental-strip-types src/lib/deviceSettingsMockWrite.test.ts",
+    "test:device-settings-ui-e2e-contract": "node scripts/windows-installed-device-settings-ui-e2e.test.mjs",
     "test:ble-recovery-ui": "node --experimental-strip-types src/lib/bleRecoveryUi.test.ts",
     "test:first-run-pairing": "node --experimental-strip-types src/lib/firstRunPairingWizard.test.ts",
     "test:provider-setup": "node --experimental-strip-types src/lib/providerSetup.test.ts",

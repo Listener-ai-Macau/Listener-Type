@@ -91,16 +91,19 @@
       "id": "type_settings_custom_keys_and_device_write",
       "repo": "type",
       "item": "Device settings write speed, exact low-power values, brightness defaults, and custom key UI/HID mapping",
-      "state": "partially_human_accepted_pending_full_item_review",
+      "state": "machine_accepted_brightness_pending_custom_keys_review",
       "evidence": [
         "scripts/performance-baselines.json device_settings_compact_write",
         ".cache validation artifacts referenced by performance baseline",
+        ".cache/validation/type-settings-ui-physical-20260712-091500/random-write-ui.json and Firmware physical NVS/low-power/restore evidence",
         ".cache/validation/preproduction-human-review-type-settings-write-speed-20260709-2255/preproduction-human-review-summary.json",
         ".cache/validation/preproduction-human-review-type-settings-write-speed-20260709-2255/preproduction-operator-note-triage.json",
         "Custom key UI/use still pending focused human review"
       ],
       "patterns": [
         "scripts/windows-installed-device-settings-write-e2e.py",
+        "scripts/windows-installed-device-settings-ui-e2e.py",
+        "scripts/windows-installed-device-settings-ui-e2e.test.mjs",
         "src-tauri/src/commands.rs",
         "src-tauri/src/shortcut_binding.rs",
         "src-tauri/src/shortcut_dispatch.rs",

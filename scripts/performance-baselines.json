@@ -1,15 +1,16 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-11",
+  "updated_at": "2026-07-12",
   "contracts": {
     "device_settings_compact_write": {
       "accepted": true,
-      "evidence": ".cache/validation/installed-device-settings-compact-write-latest-warm-20260709-2253.json",
-      "measured_write_elapsed_ms": 1167,
-      "measured_restore_elapsed_ms": 1568,
+      "evidence": ".cache/validation/type-settings-ui-physical-20260712-091500/random-write-ui.json",
+      "restore_evidence": ".cache/validation/type-settings-ui-physical-20260712-091500/restore-ui.json",
+      "measured_write_elapsed_ms": 1641,
+      "measured_restore_elapsed_ms": 1625,
       "max_write_elapsed_ms": 2500,
       "max_restore_elapsed_ms": 3000,
-      "validation_command": "python scripts/windows-installed-device-settings-write-e2e.py --remote-debugging-port <port> --max-write-ms 2500 --max-restore-ms 3000 --output-json <artifact>.json"
+      "validation_command": "Launch C:\\Program Files\\Listener Type\\listener-type.exe with WebView CDP, then run python scripts/windows-installed-device-settings-ui-e2e.py --remote-debugging-port <port> --max-write-ms 2500 --output-json <artifact>.json; read firmware ~DEVICE:SETTINGS, verify low-power RGB, then rerun with --restore-from-json <artifact>.json."
     },
     "recording_low_latency": {
       "accepted": true,
