@@ -152,6 +152,9 @@ assertMatch(
   /mapping\.action === 'sendShortcut'[\s\S]*<ShortcutRecorder[\s\S]*value=\{shortcut\}/,
   'device send-key UI should use the recorder as its single key-entry control',
 );
+if (deviceSectionTsx.includes('settings.deviceKeys.actualOutput')) {
+  throw new Error('device send-key UI should not restore the redundant actual-output helper text');
+}
 for (const forbidden of ['DEVICE_KEYBOARD_PRIMARY_OPTIONS', 'DEVICE_SHORTCUT_MODIFIERS', 'deviceShortcutWithPrimary', 'deviceShortcutWithModifier']) {
   if (deviceSectionTsx.includes(forbidden)) {
     throw new Error(`device send-key UI should not bring back the extra selector control: ${forbidden}`);

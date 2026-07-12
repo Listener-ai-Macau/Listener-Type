@@ -9,7 +9,6 @@ import {
   listInstalledApplications,
   setDeviceSettings,
 } from '../../lib/ipc';
-import { formatComboLabel } from '../../lib/hotkey';
 import type {
   DeviceCustomKeyAction,
   DeviceCustomKeyAppPage,
@@ -1260,9 +1259,6 @@ function DeviceKeyMappingControl({
               await onChange({ ...mapping, shortcut });
             }}
           />
-          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--ol-ink-4)' }}>
-            {t('settings.deviceKeys.actualOutput', { shortcut: formatComboLabel(shortcut) })}
-          </div>
         </div>
       )}
     </div>

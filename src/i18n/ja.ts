@@ -803,7 +803,6 @@ export const ja: typeof zhCN = {
       title: 'デバイスカスタムキー',
       desc: '既定: KEY1 Ctrl、KEY2 Ctrl+C、KEY3 Ctrl+V、KEY4 Ctrl+Z、EC11 クリックで録音開始 / 停止。すべてカスタマイズできます。',
       restoreKeyboardDefaults: '既定のキー出力に戻す',
-      actualOutput: '送信: {{shortcut}}',
       keyLabel: '{{key}}',
       actionSelectAria: 'デバイスキー動作を選択',
       keyboardKeySelectAria: '送信するキーを選択',

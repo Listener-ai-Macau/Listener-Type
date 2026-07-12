@@ -803,7 +803,6 @@ export const ko: typeof zhCN = {
       title: '장치 사용자 지정 키',
       desc: '기본값: KEY1 Ctrl, KEY2 Ctrl+C, KEY3 Ctrl+V, KEY4 Ctrl+Z, EC11 클릭은 녹음 시작 / 중지입니다. 모두 사용자 지정할 수 있습니다.',
       restoreKeyboardDefaults: '기본 키 출력 복원',
-      actualOutput: '전송: {{shortcut}}',
       keyLabel: '{{key}}',
       actionSelectAria: '장치 키 동작 선택',
       keyboardKeySelectAria: '실제로 보낼 키 선택',
