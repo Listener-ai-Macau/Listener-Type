@@ -13,6 +13,8 @@ expect(/input\.scrollIntoView/, 'installed settings E2E must scroll each form fi
 expect(/button_center\(client, "写入"\)/, 'installed settings E2E must submit through the visible Write button');
 expect(/button_center\(client, "读取"\)/, 'installed settings E2E must read back through the visible Read button');
 expect(/--restore-from-json/, 'installed settings E2E must support restoring the original personal values');
+expect(/--same-name-write/, 'installed settings E2E must exercise a visible same-name write');
+expect(/ble_name_changed=false apply_needed=false/, 'same-name E2E must require a Type log proving the BLE-name recovery path stayed idle');
 
 for (const forbidden of ['set_device_settings', 'get_device_settings', 'invoke_retry']) {
   if (source.includes(forbidden)) {

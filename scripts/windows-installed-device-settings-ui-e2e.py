@@ -139,6 +139,7 @@ def ui_snapshot(client: CdpClient) -> dict:
           const card = document.querySelector('.ol-device-settings-card');
           if (!card) return { ready: false, body: document.body.innerText.slice(0, 2000) };
           const numberInputs = [...card.querySelectorAll('input[type="number"]')];
+          const bleNameInput = card.querySelector('input:not([type="number"])');
           const buttonRows = [...card.querySelectorAll('button')].map((button, index) => ({
             index,
             text: button.innerText.trim(),
@@ -146,6 +147,7 @@ def ui_snapshot(client: CdpClient) -> dict:
           }));
           return {
             ready: true,
+            bleName: bleNameInput?.value ?? null,
             numberInputs: numberInputs.map((input, index) => ({
               index,
               value: input.value,
@@ -252,6 +254,30 @@ def input_center(client: CdpClient, index: int) -> dict[str, float]:
     return point
 
 
+def enabled_ble_name_input_center(client: CdpClient) -> dict[str, float] | None:
+    return client.evaluate(
+        """
+        (() => {
+          const card = document.querySelector('.ol-device-settings-card');
+          const input = card?.querySelector('input:not([type="number"])');
+          if (!input || input.disabled) return null;
+          input.scrollIntoView({ block: 'center', inline: 'nearest' });
+          const rect = input.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, visible: rect.width > 0 && rect.height > 0 };
+        })()
+        """
+    )
+def ble_name_input_center(client: CdpClient) -> dict[str, float]:
+    point = wait_for(
+        lambda: enabled_ble_name_input_center(client),
+        3,
+        "visible enabled BLE-name input not found",
+    )
+    if not point or not point.get("visible"):
+        raise RuntimeError("visible BLE-name input not found")
+    return point
+
+
 def card_button_center(client: CdpClient, text: str) -> dict[str, float] | None:
     return client.evaluate(
         f"""
@@ -339,12 +365,83 @@ def apply_and_read_back(client: CdpClient, expected: dict[str, int], max_write_m
     return read_back, {"writeElapsedMs": write_elapsed_ms, "typed": typed}
 
 
+def write_current_ble_name_and_read_back(client: CdpClient, max_write_ms: int) -> tuple[dict, dict]:
+    before = ui_snapshot(client)
+    if not before.get("ready"):
+        raise RuntimeError(f"device settings UI not visible: {before}")
+    before_numeric = numeric_form_values(before)
+    ble_name = before.get("bleName")
+    if not isinstance(ble_name, str) or not ble_name:
+        raise RuntimeError(f"visible BLE name is unavailable: {ble_name!r}")
+
+    client.click(ble_name_input_center(client))
+    client.replace_focused_text(ble_name)
+    typed = ui_snapshot(client)
+    if typed.get("bleName") != ble_name or numeric_form_values(typed) != before_numeric:
+        raise RuntimeError(
+            f"same-name UI input changed the form unexpectedly: expected_name={ble_name!r} actual={typed.get('bleName')!r}"
+        )
+
+    write_started = time.monotonic()
+    client.click(button_center(client, "写入"))
+    wait_for(
+        lambda: "已发送到设备" in str(ui_snapshot(client).get("text", "")),
+        max_write_ms / 1000,
+        "same-name device UI write did not show saved confirmation",
+    )
+    write_elapsed_ms = round((time.monotonic() - write_started) * 1000)
+
+    client.click(button_center(client, "读取"))
+    read_back = wait_for(
+        lambda: (
+            (snapshot := ui_snapshot(client)).get("ready")
+            and snapshot.get("bleName") == ble_name
+            and numeric_form_values(snapshot) == before_numeric
+            and snapshot
+        ),
+        max_write_ms / 1000,
+        "same-name device UI Read did not return the original form values",
+    )
+    return read_back, {"writeElapsedMs": write_elapsed_ms, "bleName": ble_name, "numericValues": before_numeric}
+
+
+def same_name_log_evidence(log_path: Path, start_offset: int, output_json: Path) -> dict:
+    if not log_path.exists():
+        raise RuntimeError(f"Type log does not exist: {log_path}")
+    with log_path.open("rb") as stream:
+        stream.seek(start_offset)
+        delta = stream.read().decode("utf-8", errors="replace")
+    delta_path = output_json.with_suffix(".same-name-type-log-delta.log")
+    delta_path.write_text(delta, encoding="utf-8")
+    forbidden_tokens = (
+        "DEVICE:SET ble_name=",
+        "apply pending BLE name",
+        "PairAsync",
+        "Windows cache refresh",
+        "Windows pairing prompt",
+    )
+    forbidden = {
+        token: [line for line in delta.splitlines() if token.lower() in line.lower()]
+        for token in forbidden_tokens
+    }
+    forbidden = {token: lines for token, lines in forbidden.items() if lines}
+    return {
+        "path": str(log_path),
+        "startByteOffset": start_offset,
+        "deltaPath": str(delta_path),
+        "writePlanBleNameUnchanged": "ble_name_changed=false apply_needed=false" in delta,
+        "forbiddenMatches": forbidden,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--remote-debugging-port", type=int, required=True)
     parser.add_argument("--output-json", type=Path, required=True)
     parser.add_argument("--restore-from-json", type=Path)
     parser.add_argument("--read-only", action="store_true")
+    parser.add_argument("--same-name-write", action="store_true")
+    parser.add_argument("--type-log", type=Path)
     parser.add_argument("--max-write-ms", type=int, default=2500)
     args = parser.parse_args()
 
@@ -352,6 +449,8 @@ def main() -> int:
     try:
         start_snapshot = ensure_device_settings_card(client)
         before = numeric_form_values(start_snapshot)
+        if args.same_name_write and (args.read_only or args.restore_from_json):
+            raise RuntimeError("--same-name-write cannot be combined with --read-only or --restore-from-json")
         if args.read_only:
             client.click(button_center(client, "读取"))
             time.sleep(0.2)
@@ -376,6 +475,29 @@ def main() -> int:
             args.output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
+        if args.same_name_write:
+            if not args.type_log:
+                raise RuntimeError("--same-name-write requires --type-log for recovery-path evidence")
+            if not args.type_log.exists():
+                raise RuntimeError(f"Type log does not exist: {args.type_log}")
+            log_start_offset = args.type_log.stat().st_size
+            read_back, timing = write_current_ble_name_and_read_back(client, args.max_write_ms)
+            time.sleep(0.4)
+            log_evidence = same_name_log_evidence(args.type_log, log_start_offset, args.output_json)
+            result = {
+                "schema": "listener.installed_type_device_settings_ui_e2e.v1",
+                "ok": not log_evidence["forbiddenMatches"] and log_evidence["writePlanBleNameUnchanged"],
+                "phase": "same_name_write",
+                "before": {"bleName": timing["bleName"], **timing["numericValues"]},
+                "displayed_after_read": {"bleName": read_back["bleName"], **numeric_form_values(read_back)},
+                "timing": {"writeElapsedMs": timing["writeElapsedMs"]},
+                "typeLog": log_evidence,
+                "interaction": "Chrome DevTools Input mouse/keyboard events against visible Program Files Type UI; no Tauri settings invoke",
+            }
+            args.output_json.parent.mkdir(parents=True, exist_ok=True)
+            args.output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["ok"] else 2
         if args.restore_from_json:
             source = json.loads(args.restore_from_json.read_text(encoding="utf-8"))
             expected = {name: int(source["before"][name]) for name in NUMBER_FIELD_NAMES}
