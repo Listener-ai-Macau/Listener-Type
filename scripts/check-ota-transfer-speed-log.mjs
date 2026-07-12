@@ -31,6 +31,10 @@ const maxTotalMs = takeNumber("--max-total-ms", 90000);
 const minBytes = takeNumber("--min-bytes", 900000);
 const outputJson = takeArg("--output-json", null);
 
+if (!logPath) {
+  fail("--log requires a value");
+}
+
 const text = readFileSync(logPath, "utf8");
 const pattern =
   /BLE OTA result transport=(?<transport>\S+) bytes=(?<bytes>\d+) chunks=(?<chunks>\d+) transfer_ms=(?<transferMs>\d+) confirm_ms=(?<confirmMs>\d+) confirm_attempts=(?<confirmAttempts>\d+) confirm_matched=(?<confirmMatched>true|false) total_ms=(?<totalMs>\d+)/g;
