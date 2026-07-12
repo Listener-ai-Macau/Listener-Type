@@ -24,6 +24,7 @@ expect(/output_json\.parent\.mkdir\(parents=True, exist_ok=True\)/, 'BLE-name E2
 expect(/allow_user_prompt=false/, 'random BLE-name E2E must require silent Type recovery');
 expect(/open_settings=false/, 'random BLE-name E2E must reject Windows Settings escalation');
 expect(/--max-rename-total-ms/, 'BLE-name E2E must enforce a bounded end-to-end rename recovery time');
+expect(/ble_name_write_wait_ms = max\(args\.max_write_ms, args\.max_rename_total_ms\)/, 'BLE-name E2E must let the visible saved confirmation consume the same bounded rename budget instead of incorrectly applying the numeric-settings write limit');
 expect(/background listener notify ready/, 'BLE-name E2E must require Type audio notifications to recover after each rename');
 expect(/wait_for_listener_notify_ready/, 'BLE-name E2E must wait for the post-pairing notify subscription instead of accepting only UI confirmation');
 expect(/pair_indices\[-1\] \+ 1/, 'BLE-name E2E must associate notify-ready evidence with the current rename PairAsync rather than an earlier operation');

@@ -568,6 +568,7 @@ def main() -> int:
     parser.add_argument("--max-write-ms", type=int, default=2500)
     parser.add_argument("--max-rename-total-ms", type=int, default=10000)
     args = parser.parse_args()
+    ble_name_write_wait_ms = max(args.max_write_ms, args.max_rename_total_ms)
 
     client = CdpClient(cdp_page_ws(args.remote_debugging_port))
     try:
@@ -601,7 +602,7 @@ def main() -> int:
                 raise RuntimeError("--set-ble-name requires a non-empty name")
             log_start_offset = args.type_log.stat().st_size
             started_at = time.monotonic()
-            read_back, timing = write_ble_name_and_read_back(client, target_name, args.max_write_ms)
+            read_back, timing = write_ble_name_and_read_back(client, target_name, ble_name_write_wait_ms)
             notify_ready = wait_for_listener_notify_ready(
                 args.type_log,
                 log_start_offset,
@@ -677,7 +678,9 @@ def main() -> int:
             random_error = None
             try:
                 random_started_at = time.monotonic()
-                random_readback, random_timing = write_ble_name_and_read_back(client, target_name, args.max_write_ms)
+                random_readback, random_timing = write_ble_name_and_read_back(
+                    client, target_name, ble_name_write_wait_ms
+                )
                 random_notify_ready = wait_for_listener_notify_ready(
                     args.type_log,
                     random_log_offset,
@@ -716,7 +719,9 @@ def main() -> int:
             try:
                 restore_log_offset = args.type_log.stat().st_size
                 restore_started_at = time.monotonic()
-                restore_readback, restore_timing = write_ble_name_and_read_back(client, original_name, args.max_write_ms)
+                restore_readback, restore_timing = write_ble_name_and_read_back(
+                    client, original_name, ble_name_write_wait_ms
+                )
                 restore_notify_ready = wait_for_listener_notify_ready(
                     args.type_log,
                     restore_log_offset,
