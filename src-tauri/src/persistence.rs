@@ -2599,7 +2599,7 @@ mod tests {
         .expect("write legacy prefs");
 
         let prefs = read_preferences(&path).expect("read prefs");
-        assert_eq!(prefs.device_status_led_brightness_percent, 80);
+        assert_eq!(prefs.device_status_led_brightness_percent, 50);
         assert_eq!(prefs.device_key_led_brightness_percent, 80);
         assert_eq!(prefs.device_knob_led_brightness_percent, 100);
         assert_eq!(prefs.device_edge_led_brightness_percent, 100);
@@ -2614,7 +2614,7 @@ mod tests {
             saved
                 .get("deviceStatusLedBrightnessPercent")
                 .and_then(|value| value.as_u64()),
-            Some(80)
+            Some(50)
         );
         assert_eq!(
             saved
@@ -2668,7 +2668,7 @@ mod tests {
         .expect("write legacy prefs");
 
         let prefs = read_preferences(&path).expect("read prefs");
-        assert_eq!(prefs.device_status_led_brightness_percent, 80);
+        assert_eq!(prefs.device_status_led_brightness_percent, 50);
         assert_eq!(prefs.device_key_led_brightness_percent, 80);
         assert_eq!(prefs.device_knob_led_brightness_percent, 100);
         assert_eq!(prefs.device_edge_led_brightness_percent, 100);
@@ -2684,7 +2684,7 @@ mod tests {
             saved
                 .get("deviceStatusLedBrightnessPercent")
                 .and_then(|value| value.as_u64()),
-            Some(80)
+            Some(50)
         );
         assert_eq!(
             saved

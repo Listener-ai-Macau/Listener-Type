@@ -2896,18 +2896,19 @@ fn apply_device_ble_name_windows_refresh_blocking(
         )
     });
     let observed_recovery_addresses = if recovery_error.is_none() {
-        let pairing_address = match verified_handoff_address {
-            Some(address) => {
-                log::info!(
-                    "[device-settings] BLE name recovery will use the firmware-confirmed handoff address without waiting for recovery advertisement address={address:012X}"
+        let advertised_address =
+            wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name);
+        let pairing_address = advertised_address.or(verified_handoff_address);
+        if advertised_address.is_none() {
+            if let Some(address) = verified_handoff_address {
+                log::warn!(
+                    "[device-settings] BLE name recovery advertisement was not observed; falling back to the firmware-confirmed handoff address={address:012X}"
                 );
-                Some(address)
             }
-            None => wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name),
-        };
+        }
         if pairing_address.is_some() && firmware_name_confirmed {
             log::info!(
-                "[device-settings] BLE name recovery has a firmware-confirmed pairing address for name={expected_ble_name:?}"
+                "[device-settings] BLE name recovery has a pairing address for the applied name={expected_ble_name:?}"
             );
         }
         pairing_address.into_iter().collect::<Vec<_>>()
@@ -9258,10 +9259,9 @@ mod tests {
             "rename recovery must carry the first confirmed recovery advertisement address into the silent PairAsync path instead of rescanning Windows BLE"
         );
         assert!(
-            helper.contains("Some(address) => {")
-                && helper.contains("without waiting for recovery advertisement")
-                && helper.contains("None => wait_for_device_ble_name_recovery_pairing_ready"),
-            "only a firmware-confirmed rename handoff address may start silent PairAsync without waiting for a duplicate advertisement; all other recovery paths must still confirm new advertising"
+            helper.contains("let advertised_address =\n            wait_for_device_ble_name_recovery_pairing_ready")
+                && helper.contains("advertised_address.or(verified_handoff_address)"),
+            "rename recovery must prefer a freshly observed applied-name advertisement before silent PairAsync, retaining the firmware-confirmed address only as a bounded fallback"
         );
         assert!(
             helper.contains("firmware_name_confirmed")
@@ -9272,8 +9272,7 @@ mod tests {
     }
 
     #[test]
-    fn firmware_confirmed_rename_handoff_starts_silent_pairasync_without_duplicate_advertisement_scan(
-    ) {
+    fn firmware_confirmed_rename_handoff_falls_back_only_after_applied_name_advertisement_scan() {
         let source = include_str!("commands.rs");
         let helper_start = source
             .find("fn apply_device_ble_name_windows_refresh_blocking")
@@ -9289,19 +9288,21 @@ mod tests {
         let early_unpair = helper.find("early_unpair_result").expect(
             "rename should start exact-address cleanup while waiting for recovery advertising",
         );
-        let handoff_pairing = helper
-            .find("without waiting for recovery advertisement")
-            .expect("a firmware-confirmed handoff address should avoid a duplicate advertisement scan after exact unpair");
-        let fallback_advertisement_wait = helper
-            .find("None => wait_for_device_ble_name_recovery_pairing_ready")
-            .expect("recovery without a verified handoff must still confirm the new Listener advertisement");
-        assert!(verified_address < early_unpair && early_unpair < handoff_pairing);
-        assert!(handoff_pairing < fallback_advertisement_wait);
+        let advertisement_wait = helper
+            .find("wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name)")
+            .expect(
+                "rename recovery must confirm the applied Listener advertisement before PairAsync",
+            );
+        let handoff_fallback = helper
+            .find("advertised_address.or(verified_handoff_address)")
+            .expect("a verified handoff address should remain available only after the advertisement scan");
+        assert!(verified_address < early_unpair && early_unpair < advertisement_wait);
+        assert!(advertisement_wait < handoff_fallback);
         assert!(helper.contains("firmware_name_confirmed"));
-        assert!(helper.contains("match verified_handoff_address"));
+        assert!(helper.contains("if advertised_address.is_none()"));
         assert!(
             helper.contains("observed_recovery_addresses.as_slice()"),
-            "the existing silent PairAsync path must receive the firmware-confirmed handoff address or a fresh advertisement address"
+            "the existing silent PairAsync path must receive the fresh advertisement address or the bounded firmware-confirmed fallback"
         );
         assert!(
             helper.contains("early recovery-address BLE cache cleanup status"),
@@ -10350,10 +10351,9 @@ mod tests {
             "BLE rename refresh must run the bounded Windows pairing/cache refresh path after firmware applies a different name"
         );
         assert!(
-            rename_helper.contains("Some(address) => {")
-                && rename_helper.contains("without waiting for recovery advertisement")
-                && rename_helper.contains("None => wait_for_device_ble_name_recovery_pairing_ready"),
-            "a firmware-confirmed rename handoff may pair directly after exact cache cleanup, while unverified recovery still waits for a new advertisement"
+            rename_helper.contains("wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name)")
+                && rename_helper.contains("advertised_address.or(verified_handoff_address)"),
+            "rename recovery must prefer a newly observed applied-name advertisement and retain the exact handoff only as its bounded fallback"
         );
 
         let one_click_start = source

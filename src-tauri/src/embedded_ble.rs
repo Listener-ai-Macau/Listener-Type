@@ -13992,10 +13992,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .map(|offset| open_start + offset)
                 .expect("notify target helper boundary should exist");
             let open_body = &source[open_start..open_end];
-            let guard_index = open_body
+            let persisted_branch_start = open_body
+                .find("if recent_pairing.is_none()")
+                .expect("persisted startup notify path should follow recent PairAsync recovery");
+            let persisted_body = &open_body[persisted_branch_start..];
+            let guard_index = persisted_body
                 .find("recovery_swift_pair_advertisement_visible_for_persisted_address(address)")
                 .expect("persisted notify path must probe the recovery Swift Pair window");
-            let persisted_index = open_body
+            let persisted_index = persisted_body
                 .find("open_notify_target_for_startup_cached_address(address)")
                 .expect("persisted startup notify path should still exist");
             assert!(
@@ -14003,11 +14007,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 "EC11 Type-controlled recovery must not let the persisted GATT fast path send TYPE:READY before PairAsync recovery"
             );
             assert!(
-                open_body.contains("missing pairing must use Type automatic PairAsync recovery"),
+                persisted_body.contains("missing pairing must use Type automatic PairAsync recovery"),
                 "the guard error must classify as missing pairing so coordinator routes into the existing Type PairAsync recovery path"
             );
             assert!(
-                open_body.contains(
+                persisted_body.contains(
                     "recovery_swift_pair_advertisement_visible_for_persisted_address(address)"
                 ),
                 "the guard must also protect Type cold start after an interrupted EC11 recovery"
