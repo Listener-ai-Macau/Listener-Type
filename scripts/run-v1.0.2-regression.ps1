@@ -334,6 +334,11 @@ try {
       }
 
       $null = [scriptblock]::Create((Get-Content -LiteralPath $humanGate -Raw))
+      & pwsh -NoProfile -File $humanGate -StatusSelfTest -NoSound -OutputDir (Join-Path $OutputDir "preproduction-human-review-status-selftest")
+      $exit = $LASTEXITCODE
+      if ($null -ne $exit -and $exit -ne 0) {
+        throw "Preproduction human review focused-status self-test exited with code $exit"
+      }
       $steps = @(& pwsh -NoProfile -File $humanGate -ListSteps)
       $exit = $LASTEXITCODE
       if ($null -ne $exit -and $exit -ne 0) {

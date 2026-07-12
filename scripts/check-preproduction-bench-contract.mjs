@@ -191,6 +191,8 @@ for (const requiredToken of [
   "FOCUSED_HUMAN_REVIEW_PASS",
   "focused_human_review_status=",
   '$focusedReviewStatus -eq "FOCUSED_HUMAN_REVIEW_PASS"',
+  "Get-FocusedReviewStatus",
+  "StatusSelfTest",
 ]) {
   if (!human.includes(requiredToken)) {
     failures.push(`focused human review must let a selected PASS step complete without claiming full release acceptance: ${requiredToken}`);

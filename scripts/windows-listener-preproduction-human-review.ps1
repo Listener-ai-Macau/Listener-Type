@@ -7,7 +7,8 @@ param(
     [string]$RandomName = "",
     [switch]$ListSteps,
     [switch]$NoPrompt,
-    [switch]$NoSound
+    [switch]$NoSound,
+    [switch]$StatusSelfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -1162,6 +1163,27 @@ function Get-OperatorNoteText {
     return ""
 }
 
+function Get-FocusedReviewStatus {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Records,
+        [Parameter(Mandatory = $true)][int]$ExpectedRecordCount,
+        [Parameter(Mandatory = $true)][bool]$StoppedAfterOperatorNote
+    )
+
+    $recordsWithResult = @($Records | Where-Object { $null -ne (Get-ReviewRecordField -Record $_ -Name "result") })
+    $missingResultCount = $Records.Count - $recordsWithResult.Count
+    $failCount = @($recordsWithResult | Where-Object { [string](Get-ReviewRecordField -Record $_ -Name "result") -eq "FAIL" }).Count
+    $incompleteCount = @($recordsWithResult | Where-Object { [string](Get-ReviewRecordField -Record $_ -Name "result") -in @("SKIP", "ABORT") }).Count + $missingResultCount
+
+    if ($failCount -gt 0) {
+        return "FOCUSED_HUMAN_REVIEW_FAIL"
+    }
+    if ($incompleteCount -gt 0 -or $Records.Count -ne $ExpectedRecordCount -or $StoppedAfterOperatorNote) {
+        return "FOCUSED_HUMAN_REVIEW_INCOMPLETE"
+    }
+    return "FOCUSED_HUMAN_REVIEW_PASS"
+}
+
 function Get-TextSha256 {
     param([string]$Text = "")
 
@@ -1171,6 +1193,23 @@ function Get-TextSha256 {
         return ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace "-", "").ToLowerInvariant()
     } finally {
         $sha.Dispose()
+    }
+}
+
+if ($StatusSelfTest.IsPresent) {
+    try {
+        $syntheticRecords = @([ordered]@{ result = "PASS" })
+        $syntheticStatus = Get-FocusedReviewStatus -Records $syntheticRecords -ExpectedRecordCount 1 -StoppedAfterOperatorNote $false
+        if ($syntheticStatus -ne "FOCUSED_HUMAN_REVIEW_PASS") {
+            throw "Focused PASS self-test expected FOCUSED_HUMAN_REVIEW_PASS, got $syntheticStatus"
+        }
+        Write-Host "PASS: focused human-review status recognizes an OrderedDictionary PASS record"
+        exit 0
+    } finally {
+        if ($null -ne $singleInstanceMutex) {
+            try { $singleInstanceMutex.ReleaseMutex() | Out-Null } catch {}
+            $singleInstanceMutex.Dispose()
+        }
     }
 }
 
@@ -1340,17 +1379,10 @@ $status = if ($failCount -gt 0) {
 
 $focusedReviewStatus = ""
 if ($requestedStepIds.Count -gt 0) {
-    $focusedRecordsWithResult = @($records | Where-Object { $null -ne $_.PSObject.Properties["result"] })
-    $focusedMissingResultCount = $records.Count - $focusedRecordsWithResult.Count
-    $focusedFailCount = @($focusedRecordsWithResult | Where-Object { $_.result -eq "FAIL" }).Count
-    $focusedIncompleteCount = @($focusedRecordsWithResult | Where-Object { $_.result -in @("SKIP", "ABORT") }).Count + $focusedMissingResultCount
-    $focusedReviewStatus = if ($focusedFailCount -gt 0) {
-        "FOCUSED_HUMAN_REVIEW_FAIL"
-    } elseif ($focusedIncompleteCount -gt 0 -or $records.Count -ne $steps.Count -or $stoppedAfterOperatorNote) {
-        "FOCUSED_HUMAN_REVIEW_INCOMPLETE"
-    } else {
-        "FOCUSED_HUMAN_REVIEW_PASS"
-    }
+    $focusedReviewStatus = Get-FocusedReviewStatus `
+        -Records @($records | ForEach-Object { $_ }) `
+        -ExpectedRecordCount $steps.Count `
+        -StoppedAfterOperatorNote $stoppedAfterOperatorNote
 }
 
 $passCount = @($recordsWithResult | Where-Object { $_.result -eq "PASS" }).Count
