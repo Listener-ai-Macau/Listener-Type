@@ -9,6 +9,7 @@ const activeBleScript = path.join(repoRoot, "scripts", "windows-listener-preprod
 const focusedBleHumanScript = path.join(repoRoot, "scripts", "windows-ble-focused-human-review.ps1");
 const humanScript = path.join(repoRoot, "scripts", "windows-listener-preproduction-human-review.ps1");
 const operatorNoteTriageScript = path.join(repoRoot, "scripts", "check-preproduction-operator-note-triage.mjs");
+const totalReviewAdvanceScript = path.join(repoRoot, "scripts", "advance-preproduction-total-review.ps1");
 const scenarioManifestPath = path.join(repoRoot, "scripts", "listener-preproduction-scenarios.json");
 const deviceSectionPath = path.join(repoRoot, "src", "pages", "settings", "DeviceSection.tsx");
 const firmwareOtaPanelPath = path.join(repoRoot, "src", "pages", "settings", "FirmwareOtaPanel.tsx");
@@ -21,6 +22,9 @@ const activeBle = fs.readFileSync(activeBleScript, "utf8");
 const focusedBleHuman = fs.readFileSync(focusedBleHumanScript, "utf8");
 const human = fs.readFileSync(humanScript, "utf8");
 const operatorNoteTriage = fs.readFileSync(operatorNoteTriageScript, "utf8");
+const totalReviewAdvance = fs.existsSync(totalReviewAdvanceScript)
+  ? fs.readFileSync(totalReviewAdvanceScript, "utf8")
+  : "";
 const scenarioManifest = JSON.parse(fs.readFileSync(scenarioManifestPath, "utf8"));
 const deviceSection = fs.readFileSync(deviceSectionPath, "utf8");
 const firmwareOtaPanel = fs.readFileSync(firmwareOtaPanelPath, "utf8");
@@ -214,6 +218,28 @@ for (const requiredToken of [
 ]) {
   if (!human.includes(requiredToken)) {
     failures.push(`focused human review must merge old PASS records instead of forcing all canonical steps to be repeated: ${requiredToken}`);
+  }
+}
+
+for (const requiredToken of [
+  "total_review_advance_script",
+  "advance-preproduction-total-review.ps1",
+  '$copy["operator_note"] = ""',
+  "carried_forward_operator_note_status",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`focused human review must close carried-forward notes and expose the guarded total-review advance path: ${requiredToken}`);
+  }
+}
+for (const requiredToken of [
+  "Focused review triage is required because the summary contains an operator note",
+  "check-preproduction-operator-note-triage.mjs",
+  "Move-Item -LiteralPath $tempPath -Destination $statePath -Force",
+  "last_advanced_summary",
+  "next_step_id",
+]) {
+  if (!totalReviewAdvance.includes(requiredToken)) {
+    failures.push(`total-review advance guard is missing ${requiredToken}`);
   }
 }
 

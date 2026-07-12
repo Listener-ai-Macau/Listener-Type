@@ -1149,6 +1149,10 @@ function Copy-ReviewRecordForSummary {
         $copy["carried_forward_from_summary"] = $CarriedForwardFrom
         $copy["carried_forward_at"] = (Get-Date).ToString("o")
         $copy["carried_forward_reason"] = "Previously PASS and not selected for this focused re-review."
+        $copy["operator_note"] = ""
+        $copy["operator_action"] = ""
+        $copy["observation"] = ""
+        $copy["carried_forward_operator_note_status"] = "closed_in_source"
     }
     return [pscustomobject]$copy
 }
@@ -1479,6 +1483,11 @@ $operatorNoteArray = @(
     }
 )
 $triageTemplatePath = Join-Path $OutputDir "preproduction-operator-note-triage.template.json"
+$totalReviewAdvanceScript = if (-not [string]::IsNullOrWhiteSpace($carryForwardRecordSet.state_path)) {
+    Join-Path $PSScriptRoot "advance-preproduction-total-review.ps1"
+} else {
+    ""
+}
 $triageTemplate = [ordered]@{
     schema_version = 1
     status = "PENDING"
@@ -1521,6 +1530,7 @@ $triageTemplate | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $triageTem
     carried_forward_count = $carriedForwardCount
     total_review_state = $carryForwardRecordSet.state_path
     total_review_next_step_id = $carryForwardRecordSet.next_step_id
+    total_review_advance_script = $totalReviewAdvanceScript
     carried_forward_sources = @(
         foreach ($step in $allSteps) {
             $stepId = [string]$step.id
@@ -1559,6 +1569,7 @@ $lines.Add("- Random BLE name: $RandomName") | Out-Null
 $lines.Add("- Focus steps: $(if ($requestedStepIds.Count -gt 0) { $requestedStepIds -join ', ' } else { 'FULL' })") | Out-Null
 $lines.Add("- Progress: passed $passCount/$expectedRecordCount, failed $failCount, incomplete $incompleteCount, carried forward $carriedForwardCount, current session $($steps.Count) item(s).") | Out-Null
 $lines.Add("- Review rule: one overall acceptance session shows total scope and progress, then advances one focused item at a time; any operator note stops progress for triage.") | Out-Null
+$lines.Add("- Total-review advance script: $(if ([string]::IsNullOrWhiteSpace($totalReviewAdvanceScript)) { 'not applicable' } else { $totalReviewAdvanceScript })") | Out-Null
 $lines.Add("- Carried forward: $carriedForwardCount") | Out-Null
 $lines.Add("- Stopped after operator note: $stoppedAfterOperatorNote") | Out-Null
 $lines.Add("- Operator notes requiring triage: $($operatorNoteArray.Count)") | Out-Null
