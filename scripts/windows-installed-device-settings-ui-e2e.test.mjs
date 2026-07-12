@@ -9,6 +9,8 @@ function expect(pattern, message) {
 expect(/Input\.dispatchMouseEvent/, 'installed settings E2E must drive visible controls with mouse input');
 expect(/Input\.insertText/, 'installed settings E2E must type into the visible number fields');
 expect(/ensure_device_settings_card/, 'installed settings E2E must reach the settings card through the normal UI');
+expect(/return visible_button_center\(client, text="稍后"\) is not None/, 'installed settings E2E must dismiss the visible startup provider panel without relying on its CSS overlay layout');
+expect(/later = visible_button_center\(client, text="稍后"\)/, 'installed settings E2E must click the visible Later action before navigating to Settings');
 expect(/input\.scrollIntoView/, 'installed settings E2E must scroll each form field into view before editing');
 expect(/button_center\(client, "写入"\)/, 'installed settings E2E must submit through the visible Write button');
 expect(/button_center\(client, "读取"\)/, 'installed settings E2E must read back through the visible Read button');

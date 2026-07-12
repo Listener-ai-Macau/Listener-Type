@@ -195,16 +195,9 @@ def visible_button_center(client: CdpClient, *, text: str | None = None, title: 
 
 
 def has_provider_setup_overlay(client: CdpClient) -> bool:
-    return bool(client.evaluate(
-        """
-        (() => [...document.querySelectorAll('div')].some(candidate => {
-          const style = getComputedStyle(candidate);
-          const rect = candidate.getBoundingClientRect();
-          return style.position === 'absolute' && Number(style.zIndex) >= 70
-            && rect.width > 0 && rect.height > 0 && candidate.innerText.includes('稍后');
-        }))()
-        """
-    ))
+    # The startup provider panel is not consistently positioned as an absolute
+    # overlay by WebView2, so key off its visible action instead of CSS layout.
+    return visible_button_center(client, text="稍后") is not None
 
 
 def ensure_device_settings_card(client: CdpClient) -> dict:
@@ -213,7 +206,7 @@ def ensure_device_settings_card(client: CdpClient) -> dict:
         return snapshot
 
     if has_provider_setup_overlay(client):
-        later = visible_button_center(client, text="稍后", within_overlay=True)
+        later = visible_button_center(client, text="稍后")
         if not later:
             raise RuntimeError("provider setup overlay is blocking settings but its Later button is unavailable")
         client.click(later)
