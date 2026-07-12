@@ -7293,6 +7293,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
         let recent_pairing = recent_pairing_fast_gatt_active(Instant::now());
         if let Some(state) = recent_pairing.as_ref() {
+            if let Some(address) = state.address {
+                match open_notify_target_for_startup_cached_address(address) {
+                    Ok(target) => {
+                        remember_runtime_bluetooth_target_address_for_current(
+                            address,
+                            "recent pairing cached audio notify",
+                        );
+                        log::info!(
+                            "[embedded-ble] selected recent-pairing cached GATT path address={address:012X} target={:?}",
+                            state.target_name
+                        );
+                        return Ok(target);
+                    }
+                    Err(err) => {
+                        if notify_capture_cancel_requested() {
+                            return Err(err);
+                        }
+                        log::info!(
+                            "[embedded-ble] recent-pairing cached GATT path not ready target={:?}: {}",
+                            state.target_name,
+                            err.chars().take(240).collect::<String>()
+                        );
+                    }
+                }
+            }
             match open_notify_target_for_known_addresses("recent pairing fast GATT", state.address)
             {
                 Ok(target) => {
