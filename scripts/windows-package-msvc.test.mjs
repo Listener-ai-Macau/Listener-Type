@@ -130,7 +130,12 @@ assert.match(script, /WScript\.Shell/, "desktop shortcut refresh should use the 
 assert.match(script, /Listener Type\.lnk/, "desktop shortcut refresh should target the stable Listener Type shortcut name");
 assert.match(script, /C:\\Program Files\\Listener Type\\listener-type\.exe/, "desktop shortcut refresh must target the installed MSI application");
 assert.match(script, /installed Listener Type exe does not match the freshly built MSI payload/, "desktop shortcut refresh must refuse stale installed apps");
-assert.match(script, /Desktop shortcut already current/, "desktop shortcut refresh must be idempotent when the installed shortcut already targets Program Files");
+assert.match(script, /Desktop shortcut refreshed/, "desktop shortcut refresh must rewrite the user-facing shortcut after every MSI update");
+assert.match(script, /\$refreshedShortcut = \$shell\.CreateShortcut\(\$shortcutPath\)/, "desktop shortcut refresh must reread the saved link before reporting success");
+assert.match(script, /Desktop shortcut verification failed after refresh/, "desktop shortcut refresh must fail instead of claiming success when the saved link is missing or stale");
+assert.match(script, /CommonDesktopDirectory/, "desktop shortcut refresh must reuse the MSI-owned common desktop location when present");
+assert.match(script, /Removed duplicate user desktop shortcut/, "desktop shortcut refresh must clean up its duplicate user-desktop link after an MSI update");
+assert.match(script, /\$isScriptManagedDuplicate/, "desktop shortcut cleanup must only remove the link created by this packaging script");
 assert.match(script, /-LaunchInstalledApp requires -InstallMsi/, "launching the app must require a freshly installed MSI in validation");
 assert.match(script, /Install validation requested; stopping installed Listener Type before the long MSI build[\s\S]*Stop-InstalledListenerType[\s\S]*Stop-RunningReleaseApp[\s\S]*Invoke-MsvcBuild/, "install validation must stop the Program Files app before the long MSI build so users do not keep interacting with a stale or stuck exe");
 assert.match(script, /Stop-InstalledListenerType[\s\S]*msiexec\.exe[\s\S]*Assert-InstalledPayloadMatchesRelease/, "MSI update must stop the installed app, install with msiexec, and verify the Program Files payload hash");

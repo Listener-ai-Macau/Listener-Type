@@ -683,42 +683,66 @@ function Update-DesktopShortcut {
     return
   }
 
-  $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
-  if ([string]::IsNullOrWhiteSpace($desktop) -and -not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
-    $desktop = Join-Path $env:USERPROFILE "Desktop"
+  $userDesktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+  if ([string]::IsNullOrWhiteSpace($userDesktop) -and -not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+    $userDesktop = Join-Path $env:USERPROFILE "Desktop"
   }
-  if ([string]::IsNullOrWhiteSpace($desktop) -or -not (Test-Path -LiteralPath $desktop)) {
+  $commonDesktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory)
+  if ([string]::IsNullOrWhiteSpace($userDesktop) -or -not (Test-Path -LiteralPath $userDesktop)) {
     throw "Cannot update desktop shortcut; Desktop directory not found."
   }
 
   $resolvedExe = (Resolve-Path -LiteralPath $installedExePath).Path
   $resolvedInstallRoot = Split-Path -Parent $resolvedExe
-  $shortcutPath = Join-Path $desktop "Listener Type.lnk"
+  $userShortcutPath = Join-Path $userDesktop "Listener Type.lnk"
+  $commonShortcutPath = if (-not [string]::IsNullOrWhiteSpace($commonDesktop) -and (Test-Path -LiteralPath $commonDesktop)) {
+    Join-Path $commonDesktop "Listener Type.lnk"
+  } else {
+    ""
+  }
+  # Tauri's MSI owns the common-desktop shortcut. Reuse it so an MSI update
+  # does not leave a second, indistinguishable link on the user's desktop.
+  $shortcutPath = if (-not [string]::IsNullOrWhiteSpace($commonShortcutPath) -and (Test-Path -LiteralPath $commonShortcutPath -PathType Leaf)) {
+    $commonShortcutPath
+  } else {
+    $userShortcutPath
+  }
   $desiredIconLocation = "$resolvedExe,0"
   $desiredDescription = "Listener Type installed application"
   $shell = New-Object -ComObject WScript.Shell
   $shortcutExists = Test-Path -LiteralPath $shortcutPath
   $shortcut = $shell.CreateShortcut($shortcutPath)
-
-  $shortcutAlreadyCurrent = $shortcutExists -and
-    [System.String]::Equals([string]$shortcut.TargetPath, $resolvedExe, [System.StringComparison]::OrdinalIgnoreCase) -and
-    [System.String]::Equals([string]$shortcut.WorkingDirectory, $resolvedInstallRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
-    [System.String]::Equals([string]$shortcut.IconLocation, $desiredIconLocation, [System.StringComparison]::OrdinalIgnoreCase) -and
-    [System.String]::Equals([string]$shortcut.Description, $desiredDescription, [System.StringComparison]::Ordinal)
-  if ($shortcutAlreadyCurrent) {
-    Write-Host "[ok] Desktop shortcut already current -> $shortcutPath"
-    Write-Host "     target: $resolvedExe"
-    return
-  }
-
   $shortcut.TargetPath = $resolvedExe
   $shortcut.WorkingDirectory = $resolvedInstallRoot
   $shortcut.IconLocation = $desiredIconLocation
   $shortcut.Description = $desiredDescription
   $shortcut.Save()
 
+  # MSI updates may remove a previously valid link. Always save and reread it.
+  $refreshedShortcut = $shell.CreateShortcut($shortcutPath)
+  $shortcutVerified =
+    (Test-Path -LiteralPath $shortcutPath -PathType Leaf) -and
+    [System.String]::Equals([string]$refreshedShortcut.TargetPath, $resolvedExe, [System.StringComparison]::OrdinalIgnoreCase) -and
+    [System.String]::Equals([string]$refreshedShortcut.WorkingDirectory, $resolvedInstallRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+    [System.String]::Equals([string]$refreshedShortcut.IconLocation, $desiredIconLocation, [System.StringComparison]::OrdinalIgnoreCase) -and
+    [System.String]::Equals([string]$refreshedShortcut.Description, $desiredDescription, [System.StringComparison]::Ordinal)
+  if (-not $shortcutVerified) {
+    throw "Desktop shortcut verification failed after refresh: $shortcutPath"
+  }
+
+  if ($shortcutPath -ne $userShortcutPath -and (Test-Path -LiteralPath $userShortcutPath -PathType Leaf)) {
+    $userShortcut = $shell.CreateShortcut($userShortcutPath)
+    $isScriptManagedDuplicate =
+      [System.String]::Equals([string]$userShortcut.TargetPath, $resolvedExe, [System.StringComparison]::OrdinalIgnoreCase) -and
+      [System.String]::Equals([string]$userShortcut.Description, $desiredDescription, [System.StringComparison]::Ordinal)
+    if ($isScriptManagedDuplicate) {
+      Remove-Item -LiteralPath $userShortcutPath -Force
+      Write-Host "[ok] Removed duplicate user desktop shortcut -> $userShortcutPath"
+    }
+  }
+
   if ($shortcutExists) {
-    Write-Host "[ok] Desktop shortcut repaired -> $shortcutPath"
+    Write-Host "[ok] Desktop shortcut refreshed -> $shortcutPath"
   } else {
     Write-Host "[ok] Desktop shortcut created -> $shortcutPath"
   }
