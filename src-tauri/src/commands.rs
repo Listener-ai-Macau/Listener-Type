@@ -58,7 +58,8 @@ use crate::types::{
     ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics, StyleSystemPrompts,
     UserPreferences, VocabPresetStore, WindowsImeStatus,
     DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES, DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
-    MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES, MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
+    DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
+    MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
 };
 
 type CoordinatorState<'a> = State<'a, Arc<Coordinator>>;
@@ -3470,7 +3471,7 @@ fn device_settings_snapshot_from_device(
         low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
-        plugged_low_power_enabled: true,
+        plugged_low_power_enabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
         plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         knob_rotation_action: ui_knob_rotation_action_from_firmware(
@@ -3504,7 +3505,7 @@ fn device_settings_snapshot_from_request(
         low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
-        plugged_low_power_enabled: true,
+        plugged_low_power_enabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
         plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         knob_rotation_action: ui_knob_rotation_action_from_firmware(
