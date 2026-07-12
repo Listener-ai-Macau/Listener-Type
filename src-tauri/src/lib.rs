@@ -118,6 +118,12 @@ fn apply_webview2_test_browser_args_from_env<R: Runtime>(context: &mut tauri::Co
 #[cfg(not(target_os = "windows"))]
 fn apply_webview2_test_browser_args_from_env<R: Runtime>(_context: &mut tauri::Context<R>) {}
 
+fn exit_after_headless_cli(exit_code: i32) -> ! {
+    // `process::exit` skips logger drop, so persist the result line before returning to the caller.
+    log::logger().flush();
+    std::process::exit(exit_code);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let first_run_args: Vec<String> = std::env::args().collect();
@@ -131,18 +137,18 @@ pub fn run() {
             | cli::CliIntent::PromptEmbeddedBlePairing { .. }
             | cli::CliIntent::PromptEmbeddedBlePairingOnly { .. }
             | cli::CliIntent::CleanupEmbeddedBlePairing { .. } => {
-                std::process::exit(run_embedded_ble_headless_cli(intent));
+                exit_after_headless_cli(run_embedded_ble_headless_cli(intent));
             }
             cli::CliIntent::ProbeEmbeddedAudioBleSubscription { .. }
                 if std::env::var_os("LISTENER_TYPE_FORCE_HEADLESS_BLE_CLI").is_some() =>
             {
-                std::process::exit(run_embedded_ble_headless_cli(intent));
+                exit_after_headless_cli(run_embedded_ble_headless_cli(intent));
             }
             cli::CliIntent::FirmwareOta { .. } => {
-                std::process::exit(run_firmware_ota_headless_cli(intent));
+                exit_after_headless_cli(run_firmware_ota_headless_cli(intent));
             }
             cli::CliIntent::WiredFirmware { .. } => {
-                std::process::exit(run_wired_firmware_headless_cli(intent));
+                exit_after_headless_cli(run_wired_firmware_headless_cli(intent));
             }
             _ => {}
         }
