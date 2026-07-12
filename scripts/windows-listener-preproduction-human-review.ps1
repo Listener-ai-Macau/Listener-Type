@@ -984,10 +984,16 @@ function Test-CarryForwardHumanRecordSummaryCandidate {
         }
     }
 
-    $operatorNotesProperty = $Summary.PSObject.Properties["operator_notes"]
     $operatorNotes = @()
-    if ($operatorNotesProperty) {
-        $operatorNotes = @($operatorNotesProperty.Value | Where-Object { $null -ne $_ })
+    foreach ($record in $records) {
+        $carriedForwardProperty = $record.PSObject.Properties["carried_forward"]
+        if ($carriedForwardProperty -and $carriedForwardProperty.Value -eq $true) {
+            continue
+        }
+        $operatorNoteProperty = $record.PSObject.Properties["operator_note"]
+        if ($operatorNoteProperty -and -not [string]::IsNullOrWhiteSpace([string]$operatorNoteProperty.Value)) {
+            $operatorNotes += $operatorNoteProperty.Value
+        }
     }
     if ($operatorNotes.Count -gt 0) {
         $triagePath = Join-Path $candidateDir "preproduction-operator-note-triage.json"

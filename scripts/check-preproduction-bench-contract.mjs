@@ -327,7 +327,7 @@ for (const requiredToken of [
   "Summary.session_jsonl",
   "preproduction-operator-note-triage.json",
   "triage.source_summary",
-  "operatorNotesProperty",
+  "operatorNoteProperty",
   "triageSourceProperty",
   "carriedForwardProperty",
   "completed_records",
