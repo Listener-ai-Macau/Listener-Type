@@ -593,7 +593,7 @@ pub fn run() {
         });
 }
 
-fn request_app_quit(app: &AppHandle) {
+fn request_app_quit<R: Runtime>(app: &AppHandle<R>) {
     log::info!("[main] explicit quit requested");
     APP_QUIT_REQUESTED.store(true, Ordering::Relaxed);
     TRAY_MICROPHONE_WATCHER_STOPPING.store(true, Ordering::Relaxed);
@@ -1364,6 +1364,10 @@ fn dispatch_cli_intent<R: Runtime>(
         return;
     };
     match intent {
+        cli::CliIntent::Quit => {
+            log::info!("[cli] quit: requesting normal Listener Type shutdown");
+            request_app_quit(app);
+        }
         cli::CliIntent::ToggleDictation => {
             let coord = Arc::clone(&coordinator);
             tauri::async_runtime::spawn(async move {

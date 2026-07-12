@@ -10,7 +10,11 @@ $ErrorActionPreference = "Stop"
 
 function Convert-LogTimestamp {
   param([string]$Value)
-  [datetimeoffset]::Parse($Value)
+  $parsed = [datetimeoffset]::MinValue
+  if ([datetimeoffset]::TryParse($Value, [ref]$parsed)) {
+    return $parsed
+  }
+  return $null
 }
 
 function Read-StartupSessions {
@@ -30,6 +34,9 @@ function Read-StartupSessions {
       continue
     }
     $timestamp = Convert-LogTimestamp $Matches.ts
+    if ($null -eq $timestamp) {
+      continue
+    }
     $message = $Matches.msg
     if ($message -like "*=== Listener Type 启动 ===*") {
       if ($current) {
@@ -80,10 +87,22 @@ New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
 $logPath = Join-Path $env:LOCALAPPDATA "Listener Type\Logs\listener-type.log"
 $statePath = Join-Path $env:APPDATA "Listener Type\ble_device_state.json"
-$marker = [datetimeoffset]::UtcNow
+$running = @(Get-Process -Name "listener-type" -ErrorAction SilentlyContinue)
+$gracefulShutdown = $true
+if ($running.Count -gt 0) {
+  Start-Process -FilePath $ListenerExe -ArgumentList "--quit" -WindowStyle Hidden | Out-Null
+  $shutdownDeadline = (Get-Date).AddSeconds(6)
+  while ((Get-Date) -lt $shutdownDeadline -and (Get-Process -Name "listener-type" -ErrorAction SilentlyContinue)) {
+    Start-Sleep -Milliseconds 150
+  }
+  $remaining = @(Get-Process -Name "listener-type" -ErrorAction SilentlyContinue)
+  if ($remaining.Count -gt 0) {
+    $gracefulShutdown = $false
+    $remaining | Stop-Process -Force
+  }
+}
 
-Get-Process -Name "listener-type" -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 800
+$marker = [datetimeoffset]::UtcNow
 $process = Start-Process -FilePath $ListenerExe -PassThru
 
 $deadline = (Get-Date).AddSeconds($ReadyTimeoutSeconds)
@@ -131,6 +150,7 @@ $summary = [ordered]@{
   process_id                       = $process.Id
   persisted_path_used              = [bool]$persistedSelected
   no_pair_async                    = ($pairAsync.Count -eq 0)
+  graceful_shutdown                = $gracefulShutdown
   start_to_notify_ready_ms         = if ($ready) { $ready.ms } else { $null }
   start_to_type_heartbeat_ready_ms = if ($heartbeat) { $heartbeat.ms } else { $null }
   max_start_to_notify_ready_ms     = $MaxNotifyReadyMs

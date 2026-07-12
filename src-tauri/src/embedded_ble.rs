@@ -857,6 +857,10 @@ mod windows_ble {
         ContinueListening,
     }
 
+    fn notify_cccd_prereset_required(terminal_behavior: CaptureTerminalBehavior) -> bool {
+        terminal_behavior == CaptureTerminalBehavior::StopCapture
+    }
+
     pub fn capture_notifications_once(timeout: Duration) -> Result<Vec<Vec<u8>>, String> {
         let mut notifications = Vec::new();
         capture_notification_events(timeout, &mut |event| {
@@ -5651,21 +5655,37 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             optional_u8_field(&fields, "led_ec11").unwrap_or(default_zone_brightness);
         let edge_led_brightness_percent =
             optional_u8_field(&fields, "led_edge").unwrap_or(default_zone_brightness);
-        let legacy_low_power_idle_minutes = optional_u32_field(&fields, "low_power_idle_ms")
-            .map(low_power_minutes_from_ms)
-            .unwrap_or(crate::types::DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES);
+        let legacy_low_power_idle_minutes =
+            optional_u32_field(&fields, "low_power_idle_ms").map(low_power_minutes_from_ms);
         let plugged_low_power_idle_minutes =
             optional_u32_field(&fields, "plugged_low_power_idle_ms")
                 .or_else(|| optional_minutes_field(&fields, "plugged_low_power_idle_minutes"))
                 .map(low_power_minutes_from_ms)
-                .unwrap_or(legacy_low_power_idle_minutes);
+                .unwrap_or_else(|| {
+                    legacy_low_power_idle_minutes
+                        .unwrap_or(crate::types::DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES)
+                });
         let battery_low_power_idle_minutes =
             optional_u32_field(&fields, "battery_low_power_idle_ms")
                 .or_else(|| optional_minutes_field(&fields, "battery_low_power_idle_minutes"))
                 .map(low_power_minutes_from_ms)
-                .unwrap_or(legacy_low_power_idle_minutes);
-        let plugged_low_power_enabled =
-            optional_bool_field(&fields, "plugged_low_power_enabled").unwrap_or(true);
+                .unwrap_or_else(|| {
+                    legacy_low_power_idle_minutes
+                        .unwrap_or(crate::types::DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES)
+                });
+        let plugged_low_power_enabled = optional_bool_field(&fields, "plugged_low_power_enabled")
+            .unwrap_or_else(|| {
+                if legacy_low_power_idle_minutes.is_some()
+                    || fields.contains_key("plugged_low_power_idle_ms")
+                    || fields.contains_key("plugged_low_power_idle_minutes")
+                    || fields.contains_key("battery_low_power_idle_ms")
+                    || fields.contains_key("battery_low_power_idle_minutes")
+                {
+                    false
+                } else {
+                    crate::types::DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED
+                }
+            });
         let legacy_auto_shutdown_minutes = optional_u32_field(&fields, "auto_shutdown_ms")
             .map(auto_shutdown_minutes_from_ms)
             .unwrap_or(crate::types::DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES);
@@ -5994,30 +6014,38 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             Arc::clone(&cancel_requested),
         );
 
-        log::info!("[embedded-ble] capture #{capture_id}: resetting notify CCCD before enable");
-        match write_cccd_with_timeout(
-            &characteristic,
-            GattClientCharacteristicConfigurationDescriptorValue::None,
-            Duration::from_secs(2),
-        ) {
-            Ok(status) => {
-                log::info!(
-                    "[embedded-ble] capture #{capture_id}: notify CCCD reset status={status:?}"
-                )
-            }
-            Err(err) => {
-                if let Some(recovery_error) =
-                    cccd_notify_recovery_pairing_error(&err, cleanup.target.bluetooth_address)
-                {
-                    log::warn!(
-                        "[embedded-ble] capture #{capture_id}: notify CCCD reset hit recovery pairing window; entering Type PairAsync recovery before notify-enable retries: {err}"
-                    );
-                    return Err(recovery_error);
+        if notify_cccd_prereset_required(terminal_behavior) {
+            log::info!("[embedded-ble] capture #{capture_id}: resetting notify CCCD before enable");
+            match write_cccd_with_timeout(
+                &characteristic,
+                GattClientCharacteristicConfigurationDescriptorValue::None,
+                Duration::from_secs(2),
+            ) {
+                Ok(status) => {
+                    log::info!(
+                        "[embedded-ble] capture #{capture_id}: notify CCCD reset status={status:?}"
+                    )
                 }
-                log::warn!("[embedded-ble] capture #{capture_id}: notify CCCD reset skipped: {err}")
+                Err(err) => {
+                    if let Some(recovery_error) =
+                        cccd_notify_recovery_pairing_error(&err, cleanup.target.bluetooth_address)
+                    {
+                        log::warn!(
+                            "[embedded-ble] capture #{capture_id}: notify CCCD reset hit recovery pairing window; entering Type PairAsync recovery before notify-enable retries: {err}"
+                        );
+                        return Err(recovery_error);
+                    }
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: notify CCCD reset skipped: {err}"
+                    )
+                }
             }
+            std::thread::sleep(Duration::from_millis(150));
+        } else {
+            log::info!(
+                "[embedded-ble] capture #{capture_id}: continuous listener enables notify CCCD without pre-reset"
+            );
         }
-        std::thread::sleep(Duration::from_millis(150));
         log::info!("[embedded-ble] capture #{capture_id}: enabling notify CCCD");
         let status = write_cccd_notify_with_retry(
             capture_id,
@@ -12509,6 +12537,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
+        fn continuous_listener_skips_notify_cccd_prereset() {
+            assert!(!notify_cccd_prereset_required(
+                CaptureTerminalBehavior::ContinueListening
+            ));
+            assert!(notify_cccd_prereset_required(
+                CaptureTerminalBehavior::StopCapture
+            ));
+        }
+
+        #[test]
         fn type_heartbeat_prefers_no_response_when_available() {
             let both = GattCharacteristicProperties::Write
                 | GattCharacteristicProperties::WriteWithoutResponse;
@@ -15761,10 +15799,13 @@ mod tests {
         assert_eq!(status.brightness_percent, 100);
         assert_eq!(status.plugged_brightness_percent, 100);
         assert_eq!(status.battery_brightness_percent, 100);
-        assert_eq!(status.status_led_brightness_percent, 80);
+        assert_eq!(status.status_led_brightness_percent, 50);
         assert_eq!(status.key_led_brightness_percent, 80);
         assert_eq!(status.knob_led_brightness_percent, 100);
         assert_eq!(status.edge_led_brightness_percent, 100);
+        assert_eq!(status.plugged_low_power_idle_minutes, 1);
+        assert_eq!(status.battery_low_power_idle_minutes, 1);
+        assert!(!status.plugged_low_power_enabled);
         assert!(!status.led_zone_brightness_supported);
     }
 

@@ -271,6 +271,8 @@ for (const token of [
   "background listener notify ready",
   "PairAsync appeared during Type restart validation",
   "MaxNotifyReadyMs",
+  "TryParse",
+  "$null -eq $timestamp",
 ]) {
   if (!startupReconnectGate.includes(token)) {
     fail(`Type startup reconnect speed gate must keep token: ${token}`);

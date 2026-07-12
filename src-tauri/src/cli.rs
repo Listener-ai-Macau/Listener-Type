@@ -23,6 +23,8 @@ use std::path::PathBuf;
 /// （桌面 OS 级快捷键大多只在 key-press 触发，不传 key-release，无法支持「按住说话」）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliIntent {
+    /// 让已运行的单实例完成正常 shutdown；仅供 MSI 更新和本地验证调用。
+    Quit,
     /// 等价于按一次主听写热键：Idle → 开始；Listening → 结束。
     ToggleDictation,
     /// 等价于按一次 QA 热键：toggle QA 浮窗显隐。
@@ -90,6 +92,7 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
     let mut args = args.iter().skip(1).peekable();
     while let Some(arg) = args.next() {
         match arg.as_ref() {
+            "--quit" => return Some(CliIntent::Quit),
             "--toggle-dictation" => return Some(CliIntent::ToggleDictation),
             "--toggle-qa" => return Some(CliIntent::ToggleQa),
             "--cancel-dictation" | "--cancel" => return Some(CliIntent::CancelDictation),
@@ -336,6 +339,12 @@ mod tests {
     fn parse_recognizes_toggle_dictation() {
         let args = vec!["listener-type", "--toggle-dictation"];
         assert_eq!(parse_cli_intent(&args), Some(CliIntent::ToggleDictation));
+    }
+
+    #[test]
+    fn parse_recognizes_quit() {
+        let args = vec!["listener-type", "--quit"];
+        assert_eq!(parse_cli_intent(&args), Some(CliIntent::Quit));
     }
 
     #[test]

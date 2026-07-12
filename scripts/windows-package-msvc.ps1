@@ -561,8 +561,21 @@ function Stop-InstalledListenerType {
       continue
     }
 
-    Write-Host "[info] Stopping installed Listener Type before MSI update: pid=$($process.ProcessId)"
-    Stop-Process -Id $process.ProcessId -Force
+    Write-Host "[info] Requesting normal Listener Type shutdown before MSI update: pid=$($process.ProcessId)"
+    Start-Process -FilePath $resolvedInstalledExe -ArgumentList "--quit" -WindowStyle Hidden | Out-Null
+    $deadline = (Get-Date).AddSeconds(6)
+    do {
+      if (-not (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue)) {
+        Write-Host "[ok] Installed Listener Type shut down cleanly before MSI update"
+        break
+      }
+      Start-Sleep -Milliseconds 150
+    } while ((Get-Date) -lt $deadline)
+
+    if (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue) {
+      Write-Warning "Installed Listener Type did not honor normal shutdown in 6 seconds; forcing stop for MSI compatibility: pid=$($process.ProcessId)"
+      Stop-Process -Id $process.ProcessId -Force
+    }
   }
 }
 
