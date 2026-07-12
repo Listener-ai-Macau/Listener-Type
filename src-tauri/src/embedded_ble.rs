@@ -688,9 +688,6 @@ mod windows_ble {
     const BACKGROUND_LISTENER_DEFERRED_FOR_OTA: &str =
         "embedded_ble_background_listener_deferred_for_ota";
     const BLE_RECENT_PAIRING_FAST_GATT_WINDOW: Duration = Duration::from_secs(45);
-    const BLE_RECENT_PAIRING_CACHED_PROBE_WINDOW: Duration = Duration::from_millis(2250);
-    const RECENT_PAIRING_CACHED_GATT_PROBE_ERROR: &str =
-        "recent pairing cached GATT readiness probe";
     const BLE_ADAPTER_RESTART_SETTLE: Duration = Duration::from_millis(2500);
     const BLE_PAIRING_IN_PROGRESS_SETTLE: Duration = Duration::from_millis(2200);
     const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -1543,7 +1540,6 @@ mod windows_ble {
         target_name: String,
         address: Option<u64>,
         attempted_at: Instant,
-        cached_gatt_probe_consumed: bool,
     }
 
     fn recent_pairing_fast_gatt_slot() -> &'static Mutex<Option<RecentPairingFastGattState>> {
@@ -1729,7 +1725,6 @@ mod windows_ble {
                 target_name: target_name.to_string(),
                 address,
                 attempted_at: now,
-                cached_gatt_probe_consumed: false,
             });
         }
     }
@@ -1743,26 +1738,6 @@ mod windows_ble {
             return None;
         }
         Some(state)
-    }
-
-    fn reserve_recent_pairing_cached_gatt_probe(
-        now: Instant,
-    ) -> Option<RecentPairingFastGattState> {
-        let mut guard = recent_pairing_fast_gatt_slot().lock().ok()?;
-        let state = guard.as_mut()?;
-        let paired_elapsed = now.saturating_duration_since(state.attempted_at);
-        if paired_elapsed >= BLE_RECENT_PAIRING_FAST_GATT_WINDOW {
-            *guard = None;
-            return None;
-        }
-        if state.address.is_none()
-            || state.cached_gatt_probe_consumed
-            || paired_elapsed >= BLE_RECENT_PAIRING_CACHED_PROBE_WINDOW
-        {
-            return None;
-        }
-        state.cached_gatt_probe_consumed = true;
-        Some(state.clone())
     }
 
     pub fn prompt_listener_pairing(
@@ -7374,30 +7349,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
         let recent_pairing = recent_pairing_fast_gatt_active(Instant::now());
         if let Some(state) = recent_pairing.as_ref() {
-            if let Some(cached_probe) = reserve_recent_pairing_cached_gatt_probe(Instant::now()) {
-                let address = cached_probe
-                    .address
-                    .expect("reserved cached GATT probe must retain its Listener address");
-                match open_notify_target_for_startup_cached_address(address) {
-                    Ok(target) => {
-                        remember_runtime_bluetooth_target_address_for_current(
-                            address,
-                            "recent pairing cached audio notify",
-                        );
-                        log::info!(
-                            "[embedded-ble] selected recent-pairing cached GATT readiness path target={:?}",
-                            cached_probe.target_name
-                        );
-                        return Ok(target);
-                    }
-                    Err(err) => {
-                        return Err(format!(
-                            "{RECENT_PAIRING_CACHED_GATT_PROBE_ERROR} target={:?}: {err}",
-                            cached_probe.target_name
-                        ));
-                    }
-                }
-            }
             match open_notify_target_for_known_addresses("recent pairing fast GATT", state.address)
             {
                 Ok(target) => {
@@ -7590,11 +7541,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     {
                         return Err(err);
                     }
-                    let delay = if err.contains(RECENT_PAIRING_CACHED_GATT_PROBE_ERROR) {
-                        Duration::from_millis(250)
-                    } else {
-                        NOTIFY_TARGET_OPEN_RETRY_DELAYS[attempt - 1]
-                    };
+                    let delay = NOTIFY_TARGET_OPEN_RETRY_DELAYS[attempt - 1];
                     log::warn!(
                         "[embedded-ble] capture #{capture_id}: notify target open attempt {attempt} failed: {err}; retrying in {} ms",
                         delay.as_millis()
@@ -7882,7 +7829,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             || err.contains("GATT session did not become active")
             || err.contains("device open by address")
             || err.contains("device open by id")
-            || err.contains(RECENT_PAIRING_CACHED_GATT_PROBE_ERROR)
     }
 
     fn is_transient_audio_control_write_error(err: &str) -> bool {
@@ -14131,38 +14077,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 !helper_body.contains("audio_target_advertisement_addresses"),
                 "recent pairing fallback must not reuse stale configured Bluetooth addresses"
             );
-        }
-
-        #[test]
-        fn recent_pairing_cached_gatt_probe_is_consumed_before_exact_address_fallback() {
-            let source = include_str!("embedded_ble.rs");
-            let reserve_start = source
-                .find("fn reserve_recent_pairing_cached_gatt_probe")
-                .expect("recent PairAsync recovery should reserve its bounded cached GATT probe");
-            let reserve_end = source[reserve_start..]
-                .find("fn open_notify_target()")
-                .map(|offset| reserve_start + offset)
-                .expect("cached GATT probe reservation boundary should exist");
-            let reserve_body = &source[reserve_start..reserve_end];
-            assert!(reserve_body.contains("state.cached_gatt_probe_consumed"));
-            assert!(reserve_body.contains("state.cached_gatt_probe_consumed = true"));
-            assert!(reserve_body.contains("BLE_RECENT_PAIRING_CACHED_PROBE_WINDOW"));
-
-            let notify_start = reserve_end;
-            let notify_end = source[notify_start..]
-                .find("fn open_notify_target_with_retry")
-                .map(|offset| notify_start + offset)
-                .expect("notify retry helper boundary should exist");
-            let notify_body = &source[notify_start..notify_end];
-            let reserve_index = notify_body
-                .find("reserve_recent_pairing_cached_gatt_probe")
-                .expect("recent PairAsync recovery should consume one cached GATT probe");
-            let known_address_index = notify_body
-                .find("open_notify_target_for_known_addresses(\"recent pairing fast GATT\"")
-                .expect(
-                    "cached probe failure should fall back to the exact recent pairing address",
-                );
-            assert!(reserve_index < known_address_index);
         }
 
         #[test]
