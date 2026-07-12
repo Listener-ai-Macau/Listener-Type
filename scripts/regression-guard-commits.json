@@ -98,6 +98,28 @@
       ]
     },
     {
+      "id": "type_msi_desktop_shortcut_single_entry",
+      "repo": "type",
+      "commit": "d2745bdbcbab2a498515012358a89e04a2a742d1",
+      "subject": "Harden installed desktop shortcut refresh",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "An MSI update leaves one visible Listener Type desktop shortcut, not duplicate common- and user-desktop entries.",
+        "The surviving desktop shortcut targets the installed Program Files executable and is reread before packaging reports success.",
+        "MSI validation restarts the installed application instead of a repository build."
+      ],
+      "human_acceptance_evidence": [
+        ".cache/validation/preproduction-human-review-total-20260712-081300/step-01-baseline-type-tray-ui-single-shortcut-recheck-observation.json"
+      ],
+      "machine_evidence": [
+        ".cache/validation/preproduction-human-review-total-20260712-081300/step-01-baseline-type-tray-ui-single-shortcut-verified.json"
+      ],
+      "guards": [
+        "node scripts/windows-package-msvc.test.mjs",
+        "pwsh -NoProfile -File ./scripts/windows-package-msvc.ps1 -ReuseExistingExe -SkipRustInstall -SkipNpmCi -InstallMsi -LaunchInstalledApp"
+      ]
+    },
+    {
       "id": "type_recording_preview_text_stability",
       "repo": "type",
       "commit": "b77bfd8dc0d28d0f74ed10d04ddf6369e8591ce5",
