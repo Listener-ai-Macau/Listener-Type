@@ -4883,7 +4883,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     pub fn send_recording_control_recovery(timeout: Duration) -> Result<(), String> {
-        let serial_result = send_control_command_via_usb_serial("VREC:RECOVERY:TYPE", timeout);
+        let serial_result =
+            send_recovery_control_command_via_usb_serial("VREC:RECOVERY:TYPE", timeout);
         match &serial_result {
             Ok(()) => {
                 log::info!("[embedded-ble] audio control recovery sent via USB serial");
@@ -4905,7 +4906,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
     pub fn send_recording_control_silent_recovery(timeout: Duration) -> Result<(), String> {
         let serial_result =
-            send_control_command_via_usb_serial("VREC:RECOVERY:TYPE:SILENT", timeout);
+            send_recovery_control_command_via_usb_serial("VREC:RECOVERY:TYPE:SILENT", timeout);
         match &serial_result {
             Ok(()) => {
                 log::info!("[embedded-ble] audio control silent recovery sent via USB serial");
@@ -5354,6 +5355,36 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         )))
     }
 
+    fn send_recovery_control_command_via_usb_serial(
+        command: &str,
+        timeout: Duration,
+    ) -> Result<(), DeviceSettingsSerialError> {
+        let ports = serialport::available_ports().map_err(|err| {
+            DeviceSettingsSerialError::Unavailable(format!(
+                "USB serial port enumeration failed: {err}"
+            ))
+        })?;
+        let candidates = listener_usb_serial_candidates(&ports);
+        if candidates.is_empty() {
+            return Err(DeviceSettingsSerialError::Unavailable(
+                "no Listener USB serial port found".to_string(),
+            ));
+        }
+
+        let mut errors = Vec::new();
+        for port in candidates {
+            match send_recovery_control_command_via_serial_port(&port.port_name, command, timeout) {
+                Ok(()) => return Ok(()),
+                Err(err) => errors.push(format!("{}: {err}", port.port_name)),
+            }
+        }
+
+        Err(DeviceSettingsSerialError::Transport(format!(
+            "all Listener USB serial candidates failed: {}",
+            errors.join("; ")
+        )))
+    }
+
     #[cfg(test)]
     fn exchange_status_led_via_usb_serial(
         command: &str,
@@ -5560,6 +5591,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             DEVICE_SETTINGS_SERIAL_DRAIN_MAX_DURATION,
             DEVICE_SETTINGS_SERIAL_DRAIN_QUIET_DURATION,
         );
+        let payload = format!("~{command}\n");
+        port.write_all(payload.as_bytes())
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("write failed: {err}")))?;
+        port.flush()
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("flush failed: {err}")))?;
+        std::thread::sleep(timeout.min(Duration::from_millis(500)));
+        Ok(())
+    }
+
+    fn send_recovery_control_command_via_serial_port(
+        port_name: &str,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<(), DeviceSettingsSerialError> {
+        let serial_timeout = Duration::from_millis(120);
+        let mut port = serialport::new(port_name, DEVICE_SETTINGS_SERIAL_BAUD_RATE)
+            .dtr_on_open(false)
+            .timeout(serial_timeout)
+            .open()
+            .map_err(|err| DeviceSettingsSerialError::Transport(format!("open failed: {err}")))?;
+        let _ = port.write_data_terminal_ready(false);
+        let _ = port.write_request_to_send(false);
+
+        // Recovery commands are write-only. Draining diagnostics cannot validate
+        // one, and delaying it shortens the firmware's pairing recovery window.
         let payload = format!("~{command}\n");
         port.write_all(payload.as_bytes())
             .map_err(|err| DeviceSettingsSerialError::Transport(format!("write failed: {err}")))?;
@@ -7293,31 +7349,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
         let recent_pairing = recent_pairing_fast_gatt_active(Instant::now());
         if let Some(state) = recent_pairing.as_ref() {
-            if let Some(address) = state.address {
-                match open_notify_target_for_startup_cached_address(address) {
-                    Ok(target) => {
-                        remember_runtime_bluetooth_target_address_for_current(
-                            address,
-                            "recent pairing cached audio notify",
-                        );
-                        log::info!(
-                            "[embedded-ble] selected recent-pairing cached GATT path address={address:012X} target={:?}",
-                            state.target_name
-                        );
-                        return Ok(target);
-                    }
-                    Err(err) => {
-                        if notify_capture_cancel_requested() {
-                            return Err(err);
-                        }
-                        log::info!(
-                            "[embedded-ble] recent-pairing cached GATT path not ready target={:?}: {}",
-                            state.target_name,
-                            err.chars().take(240).collect::<String>()
-                        );
-                    }
-                }
-            }
             match open_notify_target_for_known_addresses("recent pairing fast GATT", state.address)
             {
                 Ok(target) => {
