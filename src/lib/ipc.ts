@@ -46,6 +46,9 @@ import { applyMockDeviceSettingsWrite } from './deviceSettingsMock';
 import {
   DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
   DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+  DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
+  DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
   DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
   LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT,
 } from './deviceSettingsDefaults';
@@ -162,10 +165,10 @@ let mockSettings: UserPreferences = {
   deviceStatusLedDefaultMigrated: true,
   deviceKeyLedDefaultMigrated: true,
   deviceLedBrightness102DefaultMigrated: true,
-  deviceLowPowerIdleMinutes: 1,
-  devicePluggedLowPowerIdleMinutes: 1,
-  deviceBatteryLowPowerIdleMinutes: 1,
-  devicePluggedLowPowerEnabled: true,
+  deviceLowPowerIdleMinutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+  devicePluggedLowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
+  deviceBatteryLowPowerIdleMinutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+  devicePluggedLowPowerEnabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
   deviceBatteryAutoShutdownMinutes: 10,
   deviceBleName: 'listener',
   localAsrActiveModel: 'qwen3-asr-0.6b',
@@ -208,10 +211,10 @@ let mockDeviceSettings: DeviceSettingsSnapshot = {
   knobLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   edgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   ledZoneBrightnessSupported: true,
-  lowPowerIdleMinutes: 1,
-  pluggedLowPowerIdleMinutes: 1,
-  batteryLowPowerIdleMinutes: 1,
-  pluggedLowPowerEnabled: true,
+  lowPowerIdleMinutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+  pluggedLowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
+  batteryLowPowerIdleMinutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+  pluggedLowPowerEnabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
   pluggedAutoShutdownMs: 0,
   batteryAutoShutdownMs: 10 * 60 * 1000,
   knobRotationAction: 'systemVolume',
@@ -320,13 +323,15 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
   }
   const legacyDeviceLowPowerIdleMinutes = clampMinutePreference(
     prefs.deviceLowPowerIdleMinutes,
-    1,
+    DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
     0,
     1440,
   );
   const devicePluggedLowPowerIdleMinutes = clampMinutePreference(
     prefs.devicePluggedLowPowerIdleMinutes,
-    legacyDeviceLowPowerIdleMinutes,
+    prefs.deviceLowPowerIdleMinutes === undefined
+      ? DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES
+      : legacyDeviceLowPowerIdleMinutes,
     0,
     1440,
   );
@@ -377,7 +382,10 @@ function normalizeUserPreferences(prefs: UserPreferences): UserPreferences {
     deviceLowPowerIdleMinutes: deviceBatteryLowPowerIdleMinutes,
     devicePluggedLowPowerIdleMinutes,
     deviceBatteryLowPowerIdleMinutes,
-    devicePluggedLowPowerEnabled: prefs.devicePluggedLowPowerEnabled ?? true,
+    devicePluggedLowPowerEnabled: prefs.devicePluggedLowPowerEnabled
+      ?? (prefs.deviceLowPowerIdleMinutes === undefined
+        ? DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED
+        : false),
     deviceBatteryAutoShutdownMinutes: clampNumber(prefs.deviceBatteryAutoShutdownMinutes, 10, 0, 1440),
     deviceBleName: normalizeDeviceBleName(prefs.deviceBleName),
   };

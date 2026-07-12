@@ -843,7 +843,6 @@ export const zhTW: typeof zhCN = {
     },
     deviceKeys: {
       title: '設備自定義鍵',
-      desc: '預設：KEY1 Ctrl，KEY2 Ctrl+C，KEY3 Ctrl+V，KEY4 Ctrl+Z，EC11 單擊開始 / 停止錄音；都可自訂。',
       restoreKeyboardDefaults: '恢復預設按鍵輸出',
       keyLabel: '{{key}}',
       actionSelectAria: '選擇設備鍵動作',

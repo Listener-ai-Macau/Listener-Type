@@ -22,7 +22,7 @@
       "bench_title": "Type LED brightness and low-power exact sync",
       "bench_capabilities": ["type_runtime", "wired_flash_port"],
       "bench_evidence": ["type_log", "device_settings_readback"],
-      "product_contract": "Type defaults status/key LED brightness to 80, writes each LED zone brightness as firmware caps, allows brightness number fields to be cleared and retyped without a leading-zero value such as 050, and preserves every low-power minute value exactly without hidden dimming or readback rounding."
+      "product_contract": "Type defaults status/key LED brightness to 50/80, writes each LED zone brightness as firmware caps, allows brightness number fields to be cleared and retyped without a leading-zero value such as 050, and preserves every low-power minute value exactly without hidden dimming or readback rounding."
     },
     {
       "id": "same-name-write-no-repair",

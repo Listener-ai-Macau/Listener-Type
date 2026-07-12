@@ -841,7 +841,6 @@ export const zhCN = {
     },
       deviceKeys: {
         title: '设备自定义键',
-        desc: '默认：KEY1 Ctrl，KEY2 Ctrl+C，KEY3 Ctrl+V，KEY4 Ctrl+Z，EC11 单击开始 / 停止录音；都可自定义。',
         restoreKeyboardDefaults: '恢复默认按键输出',
         keyLabel: '{{key}}',
         actionSelectAria: '选择设备键动作',

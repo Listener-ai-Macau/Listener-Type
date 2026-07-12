@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs';
 import {
   DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
   DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+  DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
+  DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
   DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
   LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT,
 } from './deviceSettingsDefaults.ts';
@@ -26,10 +29,10 @@ const initial: DeviceSettingsSnapshot = {
   knobLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   edgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
   ledZoneBrightnessSupported: true,
-  lowPowerIdleMinutes: 1,
-  pluggedLowPowerIdleMinutes: 1,
-  batteryLowPowerIdleMinutes: 1,
-  pluggedLowPowerEnabled: true,
+  lowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
+  pluggedLowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
+  batteryLowPowerIdleMinutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+  pluggedLowPowerEnabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
   pluggedAutoShutdownMs: 0,
   batteryAutoShutdownMs: 10 * 60 * 1000,
   knobRotationAction: 'systemVolume',
@@ -70,12 +73,27 @@ const currentSettings = {
 assert.equal(
   initial.statusLedBrightnessPercent,
   DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
-  'Type frontend mock/default status LED brightness must start at 80 percent',
+  'Type frontend mock/default status LED brightness must start at 50 percent',
 );
 assert.equal(
   initial.keyLedBrightnessPercent,
   DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
   'Type frontend mock/default key LED brightness must start at 80 percent',
+);
+assert.equal(
+  initial.pluggedLowPowerIdleMinutes,
+  DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
+  'Type frontend mock/default plugged low-power idle must start at three minutes',
+);
+assert.equal(
+  initial.batteryLowPowerIdleMinutes,
+  DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
+  'Type frontend mock/default battery low-power idle must start at one minute',
+);
+assert.equal(
+  initial.pluggedLowPowerEnabled,
+  DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
+  'Type frontend mock/default plugged low-power must start enabled',
 );
 assert.equal(
   LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT,
@@ -132,7 +150,7 @@ assert.ok(
 );
 assert.ok(
   deviceSectionSource.includes('DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT'),
-  'device settings form must keep status LED default tied to the shared 80 percent contract',
+  'device settings form must keep status LED default tied to the shared 50 percent contract',
 );
 assert.ok(
   deviceSectionSource.includes('return Math.max(0, Math.min(100, Math.trunc(value)));'),
@@ -192,11 +210,11 @@ assert.ok(
 );
 assert.ok(
   ipcSource.includes('deviceStatusLedBrightnessPercent = DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT'),
-  'Type IPC normalization must migrate legacy status LED 50 default to 80',
+  'Type IPC normalization must map legacy status/key defaults through the shared current defaults',
 );
 assert.ok(
   ipcSource.includes('deviceKeyLedBrightnessPercent = DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT'),
-  'Type IPC normalization must migrate legacy key LED 50 default to 80',
+  'Type IPC normalization must map legacy key defaults through the shared current defaults',
 );
 assert.ok(
   ipcSource.includes('deviceLowPowerIdleMinutes: deviceBatteryLowPowerIdleMinutes'),

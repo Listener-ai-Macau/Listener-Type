@@ -30,6 +30,8 @@ import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusP
 import {
   DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
   DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
+  DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
+  DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
   DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
 } from '../../lib/deviceSettingsDefaults';
 
@@ -238,9 +240,6 @@ export function DeviceSection() {
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
               {t('settings.deviceKeys.title')}
             </div>
-            <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', marginTop: 4, marginBottom: 2 }}>
-              {t('settings.deviceKeys.desc')}
-            </div>
           </div>
           <Btn
             variant="ghost"
@@ -307,9 +306,9 @@ function DeviceFirmwareSettingsCard() {
     keyLedBrightnessPercent: DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
     knobLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
     edgeLedBrightnessPercent: DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT,
-    pluggedLowPowerIdleMinutes: 1,
+    pluggedLowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
     batteryLowPowerIdleMinutes: 1,
-    pluggedLowPowerEnabled: true,
+    pluggedLowPowerEnabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
     pluggedAutoShutdownMinutes: 0,
     batteryAutoShutdownMinutes: DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES,
     bleName: 'listener',

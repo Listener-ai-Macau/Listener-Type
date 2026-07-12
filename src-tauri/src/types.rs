@@ -485,12 +485,13 @@ fn default_true() -> bool {
     true
 }
 
-pub const DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT: u8 = 80;
+pub const DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT: u8 = 50;
 pub const DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT: u8 = 80;
 pub const DEFAULT_DEVICE_LED_ZONE_BRIGHTNESS_PERCENT: u8 = 100;
 pub const LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT: u8 = 50;
 pub const DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 1;
-pub const DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED: bool = false;
+pub const DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES: u32 = 3;
+pub const DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED: bool = true;
 pub const DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES: u32 = 10;
 pub const DEFAULT_DEVICE_BLE_NAME: &str = "listener";
 pub const MAX_DEVICE_LOW_POWER_IDLE_MINUTES: u32 = 24 * 60;
@@ -510,6 +511,10 @@ fn default_device_led_zone_brightness_percent() -> u8 {
 
 fn default_device_low_power_idle_minutes() -> u32 {
     DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES
+}
+
+fn default_device_plugged_low_power_idle_minutes() -> u32 {
+    DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES
 }
 
 fn default_device_plugged_low_power_enabled() -> bool {
@@ -1298,7 +1303,7 @@ pub struct UserPreferences {
     /// One-time migration marker for the old key-zone-100 default.
     #[serde(default = "default_true")]
     pub device_key_led_default_migrated: bool,
-    /// One-time migration marker for the 1.0.2 status/key LED 50 -> 80 default correction.
+    /// One-time migration marker for the old 50/50 status/key LED default correction.
     #[serde(default = "default_true")]
     pub device_led_brightness_102_default_migrated: bool,
     /// Legacy low-power idle timeout in minutes. Newer preferences keep
@@ -1307,7 +1312,7 @@ pub struct UserPreferences {
     #[serde(default = "default_device_low_power_idle_minutes")]
     pub device_low_power_idle_minutes: u32,
     /// Plugged/external-power low-power idle timeout in minutes.
-    #[serde(default = "default_device_low_power_idle_minutes")]
+    #[serde(default = "default_device_plugged_low_power_idle_minutes")]
     pub device_plugged_low_power_idle_minutes: u32,
     /// Battery low-power idle timeout in minutes.
     #[serde(default = "default_device_low_power_idle_minutes")]
@@ -1521,14 +1526,14 @@ struct UserPreferencesWire {
     device_key_led_default_migrated: bool,
     #[serde(default)]
     device_led_brightness_102_default_migrated: bool,
-    #[serde(default = "default_device_low_power_idle_minutes")]
-    device_low_power_idle_minutes: u32,
+    #[serde(default)]
+    device_low_power_idle_minutes: Option<u32>,
     #[serde(default)]
     device_plugged_low_power_idle_minutes: Option<u32>,
     #[serde(default)]
     device_battery_low_power_idle_minutes: Option<u32>,
-    #[serde(default = "default_device_plugged_low_power_enabled")]
-    device_plugged_low_power_enabled: bool,
+    #[serde(default)]
+    device_plugged_low_power_enabled: Option<bool>,
     #[serde(default = "default_device_battery_auto_shutdown_minutes")]
     device_battery_auto_shutdown_minutes: u32,
     #[serde(default = "default_device_ble_name")]
@@ -1624,14 +1629,12 @@ impl Default for UserPreferencesWire {
             device_key_led_default_migrated: prefs.device_key_led_default_migrated,
             device_led_brightness_102_default_migrated: prefs
                 .device_led_brightness_102_default_migrated,
-            device_low_power_idle_minutes: prefs.device_low_power_idle_minutes,
-            device_plugged_low_power_idle_minutes: Some(
-                prefs.device_plugged_low_power_idle_minutes,
-            ),
-            device_battery_low_power_idle_minutes: Some(
-                prefs.device_battery_low_power_idle_minutes,
-            ),
-            device_plugged_low_power_enabled: prefs.device_plugged_low_power_enabled,
+            // Keep these optional in the wire format so deserialization can distinguish an
+            // empty/new preferences file from a legacy file that saved only one timeout.
+            device_low_power_idle_minutes: None,
+            device_plugged_low_power_idle_minutes: None,
+            device_battery_low_power_idle_minutes: None,
+            device_plugged_low_power_enabled: None,
             device_battery_auto_shutdown_minutes: prefs.device_battery_auto_shutdown_minutes,
             device_ble_name: prefs.device_ble_name,
             local_asr_active_model: prefs.local_asr_active_model,
@@ -1729,16 +1732,33 @@ impl<'de> Deserialize<'de> for UserPreferences {
             device_status_led_brightness_percent = DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT;
             device_key_led_brightness_percent = DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT;
         }
-        let legacy_low_power_idle_minutes =
-            clamp_device_low_power_idle_minutes(wire.device_low_power_idle_minutes);
+        let legacy_low_power_idle_minutes = wire
+            .device_low_power_idle_minutes
+            .map(clamp_device_low_power_idle_minutes);
         let device_plugged_low_power_idle_minutes = clamp_device_low_power_idle_minutes(
             wire.device_plugged_low_power_idle_minutes
-                .unwrap_or(legacy_low_power_idle_minutes),
+                .unwrap_or_else(|| {
+                    legacy_low_power_idle_minutes
+                        .unwrap_or(DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES)
+                }),
         );
         let device_battery_low_power_idle_minutes = clamp_device_low_power_idle_minutes(
             wire.device_battery_low_power_idle_minutes
-                .unwrap_or(legacy_low_power_idle_minutes),
+                .unwrap_or_else(|| {
+                    legacy_low_power_idle_minutes.unwrap_or(DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES)
+                }),
         );
+        let device_plugged_low_power_enabled =
+            wire.device_plugged_low_power_enabled.unwrap_or_else(|| {
+                if legacy_low_power_idle_minutes.is_some()
+                    || wire.device_plugged_low_power_idle_minutes.is_some()
+                    || wire.device_battery_low_power_idle_minutes.is_some()
+                {
+                    false
+                } else {
+                    DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED
+                }
+            });
 
         Ok(Self {
             hotkey,
@@ -1799,7 +1819,7 @@ impl<'de> Deserialize<'de> for UserPreferences {
             device_low_power_idle_minutes: device_battery_low_power_idle_minutes,
             device_plugged_low_power_idle_minutes,
             device_battery_low_power_idle_minutes,
-            device_plugged_low_power_enabled: wire.device_plugged_low_power_enabled,
+            device_plugged_low_power_enabled,
             device_battery_auto_shutdown_minutes: clamp_device_battery_auto_shutdown_minutes(
                 wire.device_battery_auto_shutdown_minutes,
             ),
@@ -2217,7 +2237,7 @@ impl Default for UserPreferences {
             device_key_led_default_migrated: true,
             device_led_brightness_102_default_migrated: true,
             device_low_power_idle_minutes: default_device_low_power_idle_minutes(),
-            device_plugged_low_power_idle_minutes: default_device_low_power_idle_minutes(),
+            device_plugged_low_power_idle_minutes: default_device_plugged_low_power_idle_minutes(),
             device_battery_low_power_idle_minutes: default_device_low_power_idle_minutes(),
             device_plugged_low_power_enabled: default_device_plugged_low_power_enabled(),
             device_battery_auto_shutdown_minutes: default_device_battery_auto_shutdown_minutes(),
@@ -3231,23 +3251,27 @@ mod tests {
     }
 
     #[test]
-    fn device_led_zone_defaults_keep_status_and_key_at_eighty() {
+    fn device_defaults_keep_status_at_fifty_and_plugged_idle_at_three_minutes() {
         let prefs = UserPreferences::default();
-        assert_eq!(prefs.device_status_led_brightness_percent, 80);
+        assert_eq!(prefs.device_status_led_brightness_percent, 50);
         assert_eq!(prefs.device_key_led_brightness_percent, 80);
         assert_eq!(prefs.device_knob_led_brightness_percent, 100);
         assert_eq!(prefs.device_edge_led_brightness_percent, 100);
-        assert!(!prefs.device_plugged_low_power_enabled);
+        assert_eq!(prefs.device_plugged_low_power_idle_minutes, 3);
+        assert_eq!(prefs.device_battery_low_power_idle_minutes, 1);
+        assert!(prefs.device_plugged_low_power_enabled);
         assert!(prefs.device_status_led_default_migrated);
         assert!(prefs.device_key_led_default_migrated);
         assert!(prefs.device_led_brightness_102_default_migrated);
 
         let from_empty: UserPreferences = serde_json::from_str("{}").unwrap();
-        assert_eq!(from_empty.device_status_led_brightness_percent, 80);
+        assert_eq!(from_empty.device_status_led_brightness_percent, 50);
         assert_eq!(from_empty.device_key_led_brightness_percent, 80);
         assert_eq!(from_empty.device_knob_led_brightness_percent, 100);
         assert_eq!(from_empty.device_edge_led_brightness_percent, 100);
-        assert!(!from_empty.device_plugged_low_power_enabled);
+        assert_eq!(from_empty.device_plugged_low_power_idle_minutes, 3);
+        assert_eq!(from_empty.device_battery_low_power_idle_minutes, 1);
+        assert!(from_empty.device_plugged_low_power_enabled);
         assert!(from_empty.device_status_led_default_migrated);
         assert!(from_empty.device_key_led_default_migrated);
         assert!(from_empty.device_led_brightness_102_default_migrated);
@@ -3255,6 +3279,14 @@ mod tests {
         let saved_enabled: UserPreferences =
             serde_json::from_str(r#"{"devicePluggedLowPowerEnabled": true}"#).unwrap();
         assert!(saved_enabled.device_plugged_low_power_enabled);
+        let saved_disabled: UserPreferences =
+            serde_json::from_str(r#"{"devicePluggedLowPowerEnabled": false}"#).unwrap();
+        assert!(!saved_disabled.device_plugged_low_power_enabled);
+        let legacy_low_power: UserPreferences =
+            serde_json::from_str(r#"{"deviceLowPowerIdleMinutes":1}"#).unwrap();
+        assert_eq!(legacy_low_power.device_plugged_low_power_idle_minutes, 1);
+        assert_eq!(legacy_low_power.device_battery_low_power_idle_minutes, 1);
+        assert!(!legacy_low_power.device_plugged_low_power_enabled);
 
         let old_all_full_default: UserPreferences = serde_json::from_str(
             r#"{
@@ -3267,7 +3299,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             old_all_full_default.device_status_led_brightness_percent,
-            80
+            50
         );
         assert_eq!(old_all_full_default.device_key_led_brightness_percent, 80);
         assert!(old_all_full_default.device_status_led_default_migrated);
@@ -3287,7 +3319,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             old_fifty_status_key_default.device_status_led_brightness_percent,
-            80
+            50
         );
         assert_eq!(
             old_fifty_status_key_default.device_key_led_brightness_percent,
