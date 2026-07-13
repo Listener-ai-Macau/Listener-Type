@@ -11,6 +11,9 @@ expect(/Input\.insertText/, 'installed settings E2E must type into the visible n
 expect(/ensure_device_settings_card/, 'installed settings E2E must reach the settings card through the normal UI');
 expect(/return visible_button_center\(client, text="稍后"\) is not None/, 'installed settings E2E must dismiss the visible startup provider panel without relying on its CSS overlay layout');
 expect(/later = visible_button_center\(client, text="稍后"\)/, 'installed settings E2E must click the visible Later action before navigating to Settings');
+expect(/entry = wait_for\([\s\S]*main_entry,[\s\S]*20,[\s\S]*main-window UI did not become ready/, 'installed settings E2E must wait for the real main UI instead of racing the first WebView target');
+expect(/main-window Settings button did not become visible/, 'installed settings E2E must wait for the visible Settings control after dismissing startup UI');
+expect(/\.with_suffix\("\.error\.png"\)/, 'installed settings E2E must retain a screenshot when visible navigation fails');
 expect(/input\.scrollIntoView/, 'installed settings E2E must scroll each form field into view before editing');
 expect(/button_center\(client, "写入"\)/, 'installed settings E2E must submit through the visible Write button');
 expect(/button_center\(client, "读取"\)/, 'installed settings E2E must read back through the visible Read button');

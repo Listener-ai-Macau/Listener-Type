@@ -201,20 +201,36 @@ def has_provider_setup_overlay(client: CdpClient) -> bool:
 
 
 def ensure_device_settings_card(client: CdpClient) -> dict:
-    snapshot = ui_snapshot(client)
-    if snapshot.get("ready"):
-        return snapshot
+    def main_entry() -> dict | None:
+        snapshot = ui_snapshot(client)
+        if snapshot.get("ready"):
+            return {"kind": "device-card", "snapshot": snapshot}
+        if has_provider_setup_overlay(client):
+            return {"kind": "provider-overlay"}
+        if settings_button := visible_button_center(client, title="设置"):
+            return {"kind": "settings", "point": settings_button}
+        return None
 
-    if has_provider_setup_overlay(client):
+    entry = wait_for(
+        main_entry,
+        20,
+        "main-window UI did not become ready for device-settings navigation",
+    )
+    if entry["kind"] == "device-card":
+        return entry["snapshot"]
+
+    if entry["kind"] == "provider-overlay":
         later = visible_button_center(client, text="稍后")
         if not later:
             raise RuntimeError("provider setup overlay is blocking settings but its Later button is unavailable")
         client.click(later)
         wait_for(lambda: not has_provider_setup_overlay(client), 5, "provider setup overlay did not dismiss")
 
-    settings_button = visible_button_center(client, title="设置")
-    if not settings_button:
-        raise RuntimeError("main-window Settings button is unavailable")
+    settings_button = wait_for(
+        lambda: visible_button_center(client, title="设置"),
+        20,
+        "main-window Settings button did not become visible",
+    )
     client.click(settings_button)
 
     def open_device_section() -> dict | None:
@@ -794,7 +810,20 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
-        result = {"schema": "listener.installed_type_device_settings_ui_e2e.v1", "ok": False, "error": str(exc)}
+        diagnostics = None
+        screenshot_path = args.output_json.with_suffix(".error.png")
+        try:
+            diagnostics = ui_snapshot(client)
+            client.screenshot(screenshot_path)
+        except Exception as diagnostics_error:
+            diagnostics = {"captureError": str(diagnostics_error)}
+        result = {
+            "schema": "listener.installed_type_device_settings_ui_e2e.v1",
+            "ok": False,
+            "error": str(exc),
+            "diagnostics": diagnostics,
+            "screenshot": str(screenshot_path) if screenshot_path.exists() else None,
+        }
         args.output_json.parent.mkdir(parents=True, exist_ok=True)
         args.output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False, indent=2), file=sys.stderr)
