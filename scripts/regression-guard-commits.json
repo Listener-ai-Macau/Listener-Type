@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-12",
+  "updated_at": "2026-07-13",
   "purpose": "Machine-readable index from critical Listener regression guards to the exact repository commit that introduced or hardened the guard. Use this first when a protected behavior regresses: git show the linked commit, inspect the guard, then rerun the listed validation commands.",
   "repositories": {
     "type": {
@@ -152,6 +152,31 @@
         "cargo test --manifest-path ./src-tauri/Cargo.toml type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan --lib",
         "cargo test --manifest-path ./src-tauri/Cargo.toml embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path --lib",
         "cargo test --manifest-path ./src-tauri/Cargo.toml type_recovery_promotes_only_trusted_cached_addresses --lib"
+      ]
+    },
+    {
+      "id": "type_boot_auto_reconnect",
+      "repo": "type",
+      "commit": "1e17a82dcc98462a5e359ae8c7a4c97e713ecc47",
+      "subject": "Recover Type after Listener boot",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "Type reconnects after a Listener boot without consuming the first recording press as a recovery-only action.",
+        "A successful read-only GATT probe may clear a transient false manual-unpair hold without invoking PairAsync.",
+        "The no-Type/manual-delete path remains user controlled and background recovery does not open pairing UI."
+      ],
+      "human_acceptance_evidence": [
+        ".cache/validation/boot-reconnect-20260713/human-observation.json",
+        ".cache/validation/boot-reconnect-20260713/human-note-triage.json"
+      ],
+      "machine_evidence": [
+        ".cache/validation/boot-reconnect-20260713/installed-type-restart.json",
+        ".cache/validation/boot-reconnect-20260713/firmware-watchdog-reboot.log"
+      ],
+      "guards": [
+        "cargo test --manifest-path ./src-tauri/Cargo.toml embedded_ble_manual_ --lib",
+        "pwsh -NoProfile -File ./scripts/check-type-startup-reconnect-speed.ps1 -RequirePersistedPath -MaxNotifyReadyMs 3000",
+        "npm run check:performance-baselines"
       ]
     },
     {
