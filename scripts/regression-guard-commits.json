@@ -504,6 +504,31 @@
         "cargo test --manifest-path ./src-tauri/Cargo.toml embedded_ble_manual_windows_unpair_suppresses_background_pairasync --lib",
         "cargo test --manifest-path ./src-tauri/Cargo.toml embedded_ble_manual_unpair_requires_windows_pairing_before_gatt --lib"
       ]
+    },
+    {
+      "id": "firmware_no_type_native_windows_pairing",
+      "repo": "firmware",
+      "commit": "ace8fbd77a052de092ce1aa0ffd289fc04cc4f1b",
+      "subject": "Advertise native pairing during recovery",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "With Listener Type fully exited, Windows native Add device pairs Listener without any Type PairAsync path.",
+        "A native pair exposes the Listener BTHLE node plus HID service 00001812 and a COL01 keyboard.inf/kbdhid keyboard path.",
+        "Native recovery remains a bounded user-controlled pairing path instead of a connected/disconnected loop."
+      ],
+      "human_acceptance_evidence": [
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-08-no-type-native-pairing-20260713-1441/preproduction-human-review-summary.json",
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-08-no-type-native-pairing-20260713-1441/preproduction-operator-note-triage.json"
+      ],
+      "machine_evidence": [
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-08-no-type-native-pairing-20260713-1441/step-01-no-type-native-pairing-after-bluetooth.txt",
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-08-no-type-native-pairing-20260713-1441/step-01-no-type-native-pairing-after-windows-events.txt"
+      ],
+      "guards": [
+        "pwsh -NoProfile -File ./tools/verify_ble_status_led_connected_sync.ps1",
+        "pwsh -NoProfile -File ./tools/verify_ble_hid.ps1",
+        "pwsh -NoProfile -File ./tools/build.ps1"
+      ]
     }
   ]
 }
