@@ -5055,7 +5055,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         {
             Ok(Ok(addresses)) if !addresses.is_empty() => {
                 log::info!(
-                    "[embedded-ble] background stale pairing cleanup found native Windows HID pairing evidence addresses={addresses:?}; preserving Type takeover without PairAsync"
+                    "[embedded-ble] background stale pairing cleanup found native Windows HID pairing evidence addresses={addresses:?}; evaluating whether it is current or stale"
                 );
                 true
             }
@@ -5076,12 +5076,27 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     } else {
         false
     };
+    let native_windows_hid_pairing_blocks_pairasync =
+        native_windows_hid_pairing_blocks_type_pairasync(
+            native_windows_hid_pairing_visible,
+            recovery_pairing_probe,
+            pairing_before_cleanup.as_ref(),
+        );
+    if native_windows_hid_pairing_visible && !native_windows_hid_pairing_blocks_pairasync {
+        log::warn!(
+            "[embedded-ble] recovery advertisement proves native Windows HID evidence is stale; allowing bounded Type PairAsync cleanup"
+        );
+    }
     if !embedded_ble_recovery_error_still_current(inner, err, "after_pairing_preflight") {
         return EmbeddedBleStalePairingCleanupOutcome::Skipped;
     }
     // Seeing a recovery advertisement after a link loss does not prove that
     // Type initiated recovery. Windows manual delete creates the same signal.
-    let recovery_advertisement_type_owned_cleanup = type_observed_recovery_advertisement;
+    let stale_native_hid_recovery =
+        native_windows_hid_pairing_visible && !native_windows_hid_pairing_blocks_pairasync;
+    let type_controlled_recovery =
+        type_observed_recovery_advertisement || stale_native_hid_recovery;
+    let recovery_advertisement_type_owned_cleanup = type_controlled_recovery;
     let noisy_cccd_stale_cache_type_owned_cleanup =
         pairing_before_cleanup.as_ref().is_some_and(|pairing| {
             noisy_cccd_stale_windows_cache_evidence_allows_type_recovery(
@@ -5092,7 +5107,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         });
     let type_owned_stale_cache_cleanup =
         recovery_advertisement_type_owned_cleanup || noisy_cccd_stale_cache_type_owned_cleanup;
-    let manual_unpair_hold = !native_windows_hid_pairing_visible
+    let manual_unpair_hold = !native_windows_hid_pairing_blocks_pairasync
         && !usb_ble_name_synced
         && pairing_before_cleanup.as_ref().is_some_and(|pairing| {
             should_hold_embedded_ble_background_recovery_after_manual_unpair(
@@ -5108,7 +5123,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                     || pairing.matched_devices > 0
                     || pairing.failed_devices > 0)
         });
-    let automatic_cleanup_allowed = !native_windows_hid_pairing_visible
+    let automatic_cleanup_allowed = !native_windows_hid_pairing_blocks_pairasync
         && embedded_ble_background_pairasync_is_authorized(
             manual_unpair_hold,
             type_observed_recovery_advertisement,
@@ -5142,7 +5157,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         && !automatic_cleanup_allowed
         && !manual_unpair_hold
     {
-        if native_windows_hid_pairing_visible {
+        if native_windows_hid_pairing_blocks_pairasync {
             log::info!(
                 "[embedded-ble] native Windows HID pairing remains installed; retrying direct GATT without pairing cleanup"
             );
@@ -5262,20 +5277,20 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         hold_embedded_ble_listener_for_pairing_confirmation(inner, recovery_reason);
 
     let pairing_expected_name = expected_ble_name.clone();
-    let observed_recovery_addresses = if type_observed_recovery_advertisement {
+    let observed_recovery_addresses = if type_controlled_recovery {
         listener_recovery_addresses_from_error(err)
     } else {
         Vec::new()
     };
     let pairing = async_runtime::spawn_blocking(move || {
-        if type_observed_recovery_advertisement {
+        if type_controlled_recovery {
             let cleanup_names = vec![pairing_expected_name.clone()];
             let unpair = crate::embedded_ble::unpair_listener_devices_for_known_addresses(
                 &cleanup_names,
                 &observed_recovery_addresses,
             );
             log::warn!(
-                "[embedded-ble] background Type observed-recovery known-address cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={} active_capture={active_capture_type_recovery} addresses={observed_recovery_addresses:?}",
+                "[embedded-ble] background Type controlled-recovery known-address cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={} active_capture={active_capture_type_recovery} stale_native_hid_recovery={stale_native_hid_recovery} addresses={observed_recovery_addresses:?}",
                 unpair.status,
                 unpair.matched_devices,
                 unpair.unpaired_devices,
@@ -5308,9 +5323,9 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
 
             if embedded_ble_pairing_prompt_ready(&pairing) {
                 arm_embedded_ble_type_pairasync_startup_guard(inner);
-                if type_observed_recovery_advertisement {
+                if type_controlled_recovery {
                     log::info!(
-                        "[embedded-ble] background Type observed-recovery PairAsync paired; reopening notify immediately for GATT/notify validation active_capture={active_capture_type_recovery}"
+                        "[embedded-ble] background Type controlled-recovery PairAsync paired; reopening notify immediately for GATT/notify validation active_capture={active_capture_type_recovery} stale_native_hid_recovery={stale_native_hid_recovery}"
                     );
                     resume_embedded_ble_listener_after_pairing_recovery(
                         inner,
@@ -5553,6 +5568,33 @@ fn noisy_cccd_stale_windows_cache_evidence_allows_type_recovery(
         && pairing.open_bluetooth_settings
         && pairing.matched_devices > 0
         && pairing.failed_devices > 0
+}
+
+fn native_windows_hid_pairing_blocks_type_pairasync(
+    native_windows_hid_pairing_visible: bool,
+    recovery_pairing_probe: crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe,
+    pairing: Option<&crate::embedded_ble::BleDevicePairingPromptResult>,
+) -> bool {
+    if !native_windows_hid_pairing_visible {
+        return false;
+    }
+
+    // A random recovery advertisement plus a Windows record that cannot be
+    // reopened is a stale local pairing key, not a live HID takeover. The
+    // physical double-click is allowed to rebuild that key through PairAsync.
+    let stale_native_hid_evidence = recovery_pairing_probe.visible
+        && recovery_pairing_probe.has_random_identity
+        && pairing.is_some_and(|pairing| {
+            pairing.already_paired_devices == 0
+                && pairing.matched_devices > 0
+                && pairing.failed_devices > 0
+                && matches!(
+                    pairing.status,
+                    crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction
+                )
+                && pairing.open_bluetooth_settings
+        });
+    !stale_native_hid_evidence
 }
 
 fn should_hold_embedded_ble_background_recovery_after_manual_unpair(
@@ -9944,7 +9986,7 @@ mod tests {
             .find("background stale pairing cleanup preflight Windows pairing")
             .expect("Windows pairing preflight should exist before cleanup");
         let automatic_allowed = body
-            .find("let automatic_cleanup_allowed = !native_windows_hid_pairing_visible")
+            .find("let automatic_cleanup_allowed = !native_windows_hid_pairing_blocks_pairasync")
             .expect("automatic cleanup decision should exist after Windows pairing preflight");
         let visible_hold = body
             .find("recovery pairing advertisement visible from hardware/user action")
@@ -9983,15 +10025,20 @@ mod tests {
             "Type-observed fast recovery must not steal back connections while a manual/hardware pairing hold is active"
         );
         assert!(
-            body.contains("background Type observed-recovery known-address cleanup")
+            body.contains("background Type controlled-recovery known-address cleanup")
                 && body.contains("unpair_listener_devices_for_known_addresses")
                 && body.contains("prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses")
                 && body.contains("&observed_recovery_addresses"),
-            "Type-observed recovery should share the rename-style path: clear stale local cache once, then PairAsync through the after-cache no-popup API using the same observed address evidence"
+            "Type-controlled recovery should share the rename-style path: clear stale local cache once, then PairAsync through the after-cache no-popup API using the same observed address evidence"
         );
         assert!(
-            body.contains("background Type observed-recovery PairAsync paired; reopening notify immediately for GATT/notify validation"),
-            "after PairAsync succeeds, Type-observed recovery should let the real notify-open path provide GATT evidence instead of doing a duplicate status probe"
+            body.contains("background Type controlled-recovery PairAsync paired; reopening notify immediately for GATT/notify validation"),
+            "after PairAsync succeeds, Type-controlled recovery should let the real notify-open path provide GATT evidence instead of doing a duplicate status probe"
+        );
+        assert!(
+            body.contains("let stale_native_hid_recovery =")
+                && body.contains("type_observed_recovery_advertisement || stale_native_hid_recovery"),
+            "a random recovery advertisement with an unusable native HID record must reuse the no-popup Type-controlled path instead of falling back to generic Windows pairing"
         );
     }
 
@@ -10246,6 +10293,45 @@ mod tests {
                 true,
             ),
             "the Type-confirmed direct GATT recovery path may still rebuild Windows pairing"
+        );
+    }
+
+    #[test]
+    fn stale_native_hid_evidence_does_not_block_physical_double_recovery() {
+        let stale_pairing = crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+            attempted: false,
+            matched_devices: 2,
+            prompted_devices: 0,
+            already_paired_devices: 0,
+            failed_devices: 2,
+            open_bluetooth_settings: true,
+            details: Vec::new(),
+        };
+        let random_recovery = crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
+            visible: true,
+            has_random_identity: true,
+        };
+
+        assert!(
+            !native_windows_hid_pairing_blocks_type_pairasync(
+                true,
+                random_recovery,
+                Some(&stale_pairing),
+            ),
+            "a physical double-click recovery must rebuild an unusable local HID pairing key instead of retrying that stale address forever"
+        );
+        assert!(
+            native_windows_hid_pairing_blocks_type_pairasync(true, random_recovery, None),
+            "without Windows evidence that the HID record is unusable, a random recovery advertisement stays conservative for a possible computer switch"
+        );
+        assert!(
+            native_windows_hid_pairing_blocks_type_pairasync(
+                true,
+                crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe::default(),
+                Some(&stale_pairing),
+            ),
+            "ordinary startup and transient link handling must keep the accepted native-HID takeover path"
         );
     }
 
