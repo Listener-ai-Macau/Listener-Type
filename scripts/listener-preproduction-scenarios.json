@@ -5,9 +5,10 @@
   "pending_operator_steering": {
     "idle_ble_audio_wake_latency": {
       "target_notify_ready_ms": 500,
-      "status": "pending_focused_human_acceptance",
+      "status": "machine_evidence_passed_human_acceptance_pending",
       "recorded_at": "2026-07-13",
-      "requirement": "After a connected low-power Idle state, the first valid device-key wake must restore BLE audio notify readiness within 500 ms without swallowing the key action."
+      "requirement": "After a connected low-power Idle state, the first valid device-key wake must restore BLE audio notify readiness within 500 ms without swallowing the key action.",
+      "last_machine_evidence": ".cache/validation/idle-audio-wake-20260713/idle-audio-wake-summary.json"
     }
   },
   "scenarios": [
