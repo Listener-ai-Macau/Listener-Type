@@ -85,6 +85,10 @@ $summary = Read-JsonFile -Path $summaryPath -Label "Focused review summary"
 if (-not (Test-SamePath -Left ([string]$summary.total_review_state) -Right $statePath)) {
     throw "Focused review summary belongs to a different total review state: $summaryPath"
 }
+$machineValidated = [string]$summary.status -eq "MACHINE_VALIDATION_PASS"
+if ($machineValidated -and [string]$summary.review_mode -ne "machine") {
+    throw "Machine validation summary must declare review_mode=machine: $summaryPath"
+}
 $focusedIds = @($summary.focus_step_ids | ForEach-Object { ([string]$_).Trim() })
 if ($focusedIds.Count -ne 1 -or $focusedIds[0] -ne $currentId) {
     throw "Focused review summary must contain exactly the current total-review step '$currentId': $summaryPath"
@@ -98,7 +102,18 @@ if ($matchingRecords.Count -eq 1) {
     }
 }
 if ($matchingRecords.Count -ne 1 -or [string]$matchingRecords[0].result -ne "PASS" -or $matchingRecordCarriedForward) {
-    throw "Focused review summary does not prove an original human PASS for '$currentId': $summaryPath"
+    throw "Focused review summary does not prove an original accepted PASS for '$currentId': $summaryPath"
+}
+if ($machineValidated) {
+    if ([string]$matchingRecords[0].acceptance_kind -ne "machine") {
+        throw "Machine validation record must declare acceptance_kind=machine: $summaryPath"
+    }
+    $machineEvidence = @($matchingRecords[0].machine_evidence)
+    if ($machineEvidence.Count -eq 0 -or @($machineEvidence | Where-Object {
+        [string]::IsNullOrWhiteSpace([string]$_.path) -or -not (Test-Path -LiteralPath ([string]$_.path))
+    }).Count -gt 0) {
+        throw "Machine validation record must reference existing evidence files: $summaryPath"
+    }
 }
 
 $summaryHasOperatorNote = @($summary.records | Where-Object {
@@ -142,6 +157,7 @@ foreach ($property in $state.PSObject.Properties) {
 $nextState.completed_records = @($state.completed_records) + @([ordered]@{
     id = $currentId
     source_summary = $summaryPath
+    acceptance_kind = if ($machineValidated) { "machine" } else { "human" }
 })
 $nextState.last_advanced_at = (Get-Date).ToString("o")
 $nextState.last_advanced_by = "advance-preproduction-total-review.ps1"

@@ -989,7 +989,7 @@ function Get-NormalizedExistingPath {
     }
 }
 
-function Test-CarryForwardHumanRecordSummaryCandidate {
+function Test-CarryForwardAcceptedRecordSummaryCandidate {
     param(
         [Parameter(Mandatory = $true)]$Candidate,
         [Parameter(Mandatory = $true)]$Summary
@@ -1017,6 +1017,25 @@ function Test-CarryForwardHumanRecordSummaryCandidate {
     $sessionPath = Get-NormalizedExistingPath -Path ([string]$Summary.session_jsonl)
     if ([string]::IsNullOrWhiteSpace($sessionPath) -or (Split-Path -Parent $sessionPath) -ne $candidateDir) {
         return $false
+    }
+
+    $machineValidated = [string]$Summary.status -eq "MACHINE_VALIDATION_PASS"
+    if ($machineValidated) {
+        if ([string]$Summary.review_mode -ne "machine") {
+            return $false
+        }
+        foreach ($record in @($Summary.records)) {
+            if ([string]$record.acceptance_kind -ne "machine" -or [string]$record.result -ne "PASS") {
+                return $false
+            }
+            $evidence = @($record.machine_evidence)
+            if ($evidence.Count -eq 0 -or @($evidence | Where-Object {
+                [string]::IsNullOrWhiteSpace([string]$_.path) -or -not (Test-Path -LiteralPath ([string]$_.path))
+            }).Count -gt 0) {
+                return $false
+            }
+        }
+        return $true
     }
 
     if ($Summary.status -notin @("HUMAN_REVIEW_PASS", "HUMAN_REVIEW_INCOMPLETE", "HUMAN_REVIEW_FAIL")) {
@@ -1141,8 +1160,8 @@ function Get-ExplicitTotalReviewRecordSet {
             throw "Current total review state source summary is unreadable for '$recordId': $sourceSummaryPath"
         }
         $candidate = Get-Item -LiteralPath $sourceSummaryPath
-        if (-not (Test-CarryForwardHumanRecordSummaryCandidate -Candidate $candidate -Summary $summary)) {
-            throw "Current total review state source summary is not a triaged real human record for '$recordId': $sourceSummaryPath"
+        if (-not (Test-CarryForwardAcceptedRecordSummaryCandidate -Candidate $candidate -Summary $summary)) {
+            throw "Current total review state source summary is not a validated accepted record for '$recordId': $sourceSummaryPath"
         }
         $matchingRecords = @($summary.records | Where-Object { [string]$_.id -eq $recordId })
         if ($matchingRecords.Count -ne 1 -or [string]$matchingRecords[0].result -ne "PASS") {
