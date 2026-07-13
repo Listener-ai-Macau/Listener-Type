@@ -9,6 +9,20 @@
       "recorded_at": "2026-07-13",
       "requirement": "From the physical EC11 press edge in connected low-power Idle, audio must begin within 50 ms. Preserve the accepted EC11 single/double-click behavior and do not swallow the first action; do not redefine the timer to start only after the existing single-click classification window.",
       "last_machine_evidence": "../Listener-Firmware/.cache/validation/idle-audio-wake-20260713/machine-validation-summary.json"
+    },
+    "recording_chain_quality_speed_no_regression": {
+      "status": "active_machine_triage",
+      "recorded_at": "2026-07-13",
+      "priority": "highest",
+      "requirement": "Product-owner priority is now the end-to-end recording chain before the remaining release gates: improve the recording path while preserving accuracy, wake speed, completion speed, and a durable no-regression contract so fixes do not repeatedly regress.",
+      "acceptance_targets": [
+        "Accuracy evidence must compare the retained audio sample or fixture input with the transcript/history output for the active dictation path.",
+        "Wake evidence must include the device or hotkey trigger-to-recording-start timeline for the accepted user path.",
+        "Completion evidence must include submit-to-preview and submit-to-Done timings against the accepted recording_low_latency baseline.",
+        "Regression evidence must run the root-cause guard that protects recording latency, BLE audio control, and accepted preview stability."
+      ],
+      "baseline_contract": "scripts/performance-baselines.json#contracts.recording_low_latency",
+      "related_scenario_id": "recording-response-and-led-priority"
     }
   },
   "scenarios": [
@@ -112,7 +126,7 @@
       "bench_title": "Recording response and LED priority",
       "bench_capabilities": ["physical_input_fixture", "audio_fixture", "type_runtime", "led_optical_capture"],
       "bench_evidence": ["input_trace", "capsule_timeline", "audio_wav", "led_capture"],
-      "product_contract": "When any device custom key is configured as Dictation, the first valid press after connected/disconnected low-power idle wake must not be swallowed: firmware records wake activity, continues the ordinary debounce path instead of synthesizing a false click, sends the F13-F24 fallback HID event for the configured key/gesture, Type maps that device key action to Dictation, and the capsule/audio/LED recording path begins normally."
+      "product_contract": "When any device custom key is configured as Dictation, the first valid press after connected/disconnected low-power idle wake must not be swallowed: firmware records wake activity, continues the ordinary debounce path instead of synthesizing a false click, sends the F13-F24 fallback HID event for the configured key/gesture, Type maps that device key action to Dictation, and the capsule/audio/LED recording path begins normally. The same focused acceptance must prove the full recording chain is production-ready: transcript accuracy is checked against retained audio or fixture input, wake-to-recording and submit-to-preview/Done timings stay within the accepted recording_low_latency baseline, and the root-cause regression guard is run so future fixes cannot silently degrade the path again."
     },
     {
       "id": "ble-audio-type-link",
