@@ -727,6 +727,125 @@ function Show-ReviewStep {
     }
 }
 
+function Show-CanonicalReviewStep {
+    param(
+        [Parameter(Mandatory = $true)][int]$Index,
+        [Parameter(Mandatory = $true)][int]$Total,
+        [Parameter(Mandatory = $true)][int]$OverallIndex,
+        [Parameter(Mandatory = $true)][int]$OverallTotal,
+        [Parameter(Mandatory = $true)][string]$ReviewScope,
+        [Parameter(Mandatory = $true)][pscustomobject]$Step
+    )
+
+    $startedAt = Get-Date
+    $before = Save-Snapshot -Index $Index -StepId $Step.id -Phase "before"
+
+    if (-not [string]::IsNullOrWhiteSpace($Step.clipboard_text)) {
+        try {
+            Ensure-FormsLoaded
+            [System.Windows.Forms.Clipboard]::SetText($Step.clipboard_text)
+        } catch {
+        }
+    }
+
+    if ($NoPrompt.IsPresent) {
+        $endedAt = Get-Date
+        return [pscustomobject][ordered]@{
+            index = $Index
+            id = $Step.id
+            title = $Step.title
+            result = "SKIP"
+            operator_note = ""
+            operator_action = ""
+            observation = ""
+            dry_run_note = "NoPrompt dry run"
+            started_at = $startedAt.ToString("o")
+            ended_at = $endedAt.ToString("o")
+            before = $before
+            during = Save-Snapshot -Index $Index -StepId $Step.id -Phase "during" -StartTime $startedAt -EndTime $endedAt
+            after = Save-Snapshot -Index $Index -StepId $Step.id -Phase "after"
+        }
+    }
+
+    $overallIndexSafe = if ($OverallIndex -gt 0) { $OverallIndex } else { $Index }
+    $progressText = if ($OverallTotal -gt $Total) {
+        "$overallIndexSafe/$OverallTotal（本次 $Index/$Total）"
+    } else {
+        "$Index/$Total"
+    }
+    $scopeText = if ($OverallTotal -gt $Total) {
+        "总体验收范围 $OverallTotal 项；当前总进度 $overallIndexSafe/$OverallTotal；本次$($ReviewScope)第 $Index/$Total 项；有备注会停下修备注"
+    } else {
+        "总体验收范围 $OverallTotal 项；第 $Index/$Total 项；有备注会停下修备注"
+    }
+
+    $safeStep = ($Step.id -replace "[^A-Za-z0-9._-]", "_")
+    $promptTextPath = Join-Path $OutputDir ("step-{0:D2}-{1}-operator-note.txt" -f $Index, $safeStep)
+    $promptJsonPath = Join-Path $OutputDir ("step-{0:D2}-{1}-operator-prompt.json" -f $Index, $safeStep)
+    $workflowRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_WORKFLOW_REPO) -and (Test-Path -LiteralPath (Join-Path $env:AI_WORKFLOW_REPO "scripts\\aiw.ps1"))) {
+        $env:AI_WORKFLOW_REPO
+    } else {
+        "C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow"
+    }
+    $workflowAiw = Join-Path $workflowRoot "scripts\\aiw.ps1"
+    if (-not (Test-Path -LiteralPath $workflowAiw)) {
+        throw "Canonical operator prompt is unavailable: $workflowAiw"
+    }
+
+    $promptArgs = @(
+        "operator-prompt",
+        "-Title", "Listener 1.0.2 总验收  $($Step.title)",
+        "-ProgressText", $progressText,
+        "-ScopeText", $scopeText,
+        "-Message", (Convert-ReviewText $Step.action),
+        "-ExpectedText", (Convert-ReviewText $Step.expected),
+        "-Input",
+        "-ReviewStyle",
+        "-OutputPath", $promptTextPath,
+        "-Json",
+        "-Position", "TopLeft"
+    )
+    $promptOutput = & pwsh -NoProfile -File $workflowAiw @promptArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Canonical operator prompt failed with exit code $LASTEXITCODE."
+    }
+    $prompt = ((@($promptOutput) -join [Environment]::NewLine) | ConvertFrom-Json)
+    $prompt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $promptJsonPath -Encoding UTF8
+
+    $selected = [string]$prompt.selected
+    $result = switch ($selected) {
+        "通过" { "PASS" }
+        "失败" { "FAIL" }
+        "跳过" { "SKIP" }
+        "中止" { "ABORT" }
+        default { "ABORT" }
+    }
+    $operatorNote = [string]$prompt.text
+    $endedAt = Get-Date
+    $during = Save-Snapshot -Index $Index -StepId $Step.id -Phase "during" -StartTime $startedAt -EndTime $endedAt
+    $after = Save-Snapshot -Index $Index -StepId $Step.id -Phase "after"
+
+    [ordered]@{
+        index = $Index
+        id = $Step.id
+        title = $Step.title
+        result = $result
+        operator_note = $operatorNote
+        operator_action = $operatorNote
+        observation = $operatorNote
+        action = $Step.action
+        expected = $Step.expected
+        evidence_hint = $Step.evidence_hint
+        started_at = $startedAt.ToString("o")
+        ended_at = $endedAt.ToString("o")
+        before = $before
+        during = $during
+        after = $after
+        operator_prompt = $promptJsonPath
+        operator_note_artifact = $promptTextPath
+    }
+}
+
 $steps = @(
     New-ReviewStep `
         -Id "baseline-type-tray-ui" `
@@ -870,15 +989,10 @@ $steps = @(
         -Id "ec11-single-not-double" `
         -Title "EC11 单击/双击边界" `
         -Action (Join-Text @(
-            "保持 Type 打开且当前不要录音。"
-            "先单击一次 EC11 旋钮，等待约 1 秒。确认这是单击行为。"
-            "如果录音被单击启动，请用 EC11 单击或 Type 取消让它回到空闲后再继续。"
-            "然后快速双击一次 EC11 旋钮，只看它是否被识别成双击；本步骤不要求完整自动重连通过。")) `
+            "保持 Type 打开且空闲，不要点击 Windows 蓝牙弹窗；快速双击一次 EC11 旋钮，然后观察这一次双击的蓝色重配提示。")) `
         -Expected (Join-Text @(
-            "单击必须只触发单击/本地反馈或单击录音动作，不能打开重配流程，不能弹 Windows 连接通知。"
-            "快速双击必须取消第一下单击，不应该先进入录音或显示单击录音胶囊。"
-            "快速双击应进入双击重配提示/蓝色重配灯效；如果后续自动重连失败，只在备注里写自动重连现象，边界本身按是否误判来判定。"
-            "EC11 的按键行为要和 key1-key4 的单/双击窗口一致。"))
+            "快速双击直接进入双击重配提示/蓝色重配灯效，不能先显示单击录音胶囊或启动录音。"
+            "Type 日志不能在 PairAsync 成功后的服务重建短窗口里误判为用户手动删除配对；完整自动接回在下一项单独验收。"))
     New-ReviewStep `
         -Id "ec11-double-repair-with-type" `
         -Title "有 Type 的双击重配" `
@@ -1440,7 +1554,7 @@ try {
 
     for ($i = $existingRecords.Count; $i -lt $steps.Count; $i++) {
         $overallIndex = if ($overallIndexById.ContainsKey([string]$steps[$i].id)) { [int]$overallIndexById[[string]$steps[$i].id] } else { $i + 1 }
-        $record = Show-ReviewStep -Index ($i + 1) -Total $steps.Count -OverallIndex $overallIndex -OverallTotal $allSteps.Count -ReviewScope $reviewScopeLabel -Step $steps[$i]
+        $record = Show-CanonicalReviewStep -Index ($i + 1) -Total $steps.Count -OverallIndex $overallIndex -OverallTotal $allSteps.Count -ReviewScope $reviewScopeLabel -Step $steps[$i]
         $records.Add($record) | Out-Null
         ($record | ConvertTo-Json -Depth 10 -Compress) | Add-Content -LiteralPath $sessionPath -Encoding UTF8
         $operatorNote = Get-OperatorNoteText -Record $record
