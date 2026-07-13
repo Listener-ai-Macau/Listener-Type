@@ -6,7 +6,7 @@
     "idle_ble_audio_wake_latency": {
       "target_notify_ready_ms": 50,
       "status": "physical_edge_evidence_pending",
-      "recorded_at": "2026-07-13",
+      "recorded_at": "2026-07-14",
       "requirement": "From the physical EC11 press edge in connected low-power Idle, audio must begin within 50 ms. Preserve the accepted EC11 single/double-click behavior and do not swallow the first action; do not redefine the timer to start only after the existing single-click classification window.",
       "last_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-diagnostic-20260713/physical-gate-ready-pending-press.json",
       "diagnostic_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-diagnostic-20260713/machine-validation-summary.json",
@@ -41,11 +41,11 @@
         ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/file-smoke-low10/embedded-file-smoke.20260713-234656.json",
         ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/installed-file-smoke-tail-and-gain-log-excerpt.txt"
       ],
-      "latest_operator_observation": "During live installed-Type use, the operator saw recording text regress/repeat and then selected failure again with note `完全不行, 你看看日志修吧, 你先修好再给我验收`. Latest machine evidence now covers log-based repair, low-level Volcengine streaming gain, terminal short-tail preview cleanup, capsule partial no-backtracking, virtual-audio accuracy, and installed Program Files MSI validation, but focused human re-review is still pending.",
+      "latest_operator_observation": "During live installed-Type use, the operator saw recording text regress/repeat and then selected failure again with note `完全不行, 你看看日志修吧, 你先修好再给我验收`. Latest machine evidence now covers log-based repair, low-level Volcengine streaming gain, terminal short-tail preview cleanup, capsule partial no-backtracking, virtual-audio accuracy, and installed Program Files MSI validation. A 2026-07-14 focused re-review prompt timed out after 1200 seconds with no operator result file, so focused human re-review is still pending.",
       "operator_acceptance_evidence": ".cache/validation/recording-chain-regression-20260713-post-fix-installed/operator-review-recording-chain-1-of-1.json",
       "operator_note_triage_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-rereview-note-triage.json",
-      "operator_review_timeout_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-review-recording-chain-1-of-1-timeout.json",
-      "acceptance_blocker": "Post-tail-and-gain-fix installed Program Files Type machine evidence is PASS for normal/low-volume virtual audio accuracy, duplicate-preview no-regression, low-level streaming gain without clipping, static/build/full-lib gates, and installed MSI hash validation, but the focused recording-chain operator re-review has not yet returned PASS."
+      "operator_review_timeout_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-review-recording-chain-1-of-1-timeout-20260714-0033.json",
+      "acceptance_blocker": "Post-tail-and-gain-fix installed Program Files Type machine evidence is PASS for normal/low-volume virtual audio accuracy, duplicate-preview no-regression, low-level streaming gain without clipping, static/build/full-lib gates, and installed MSI hash validation, but the 2026-07-14 focused recording-chain operator re-review timed out without returning PASS."
     }
   },
   "scenarios": [
