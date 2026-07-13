@@ -7373,11 +7373,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
         if recent_pairing.is_none() {
             if let Some(address) = persisted_successful_notify_target_address_for_current() {
-                if recovery_swift_pair_advertisement_visible_for_persisted_address(address) {
-                    return Err(format!(
-                        "Listener recovery Swift Pair advertisement visible for persisted address {address:012X} before TYPE:READY; missing pairing must use Type automatic PairAsync recovery before declaring notify ready"
-                    ));
-                }
                 match open_notify_target_for_startup_cached_address(address) {
                     Ok(target) => {
                         remember_runtime_bluetooth_target_address_for_current(
@@ -13949,7 +13944,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        fn persisted_notify_fast_path_blocks_type_ready_during_recovery_swift_pair_window() {
+        fn persisted_notify_fast_path_validates_gatt_before_recovery_advertising() {
             let source = include_str!("embedded_ble.rs");
             let open_start = source
                 .find("fn open_notify_target()")
@@ -13963,25 +13958,20 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .find("if recent_pairing.is_none()")
                 .expect("persisted startup notify path should follow recent PairAsync recovery");
             let persisted_body = &open_body[persisted_branch_start..];
-            let guard_index = persisted_body
-                .find("recovery_swift_pair_advertisement_visible_for_persisted_address(address)")
-                .expect("persisted notify path must probe the recovery Swift Pair window");
             let persisted_index = persisted_body
                 .find("open_notify_target_for_startup_cached_address(address)")
                 .expect("persisted startup notify path should still exist");
+            let selector_index = persisted_body
+                .find("let selector = GattDeviceService::GetDeviceSelectorFromUuid")
+                .expect("normal service discovery should follow the persisted startup path");
             assert!(
-                guard_index < persisted_index,
-                "EC11 Type-controlled recovery must not let the persisted GATT fast path send TYPE:READY before PairAsync recovery"
+                persisted_index < selector_index,
+                "the persisted bond/GATT path must run before slower discovery and recovery"
             );
             assert!(
-                persisted_body.contains("missing pairing must use Type automatic PairAsync recovery"),
-                "the guard error must classify as missing pairing so coordinator routes into the existing Type PairAsync recovery path"
-            );
-            assert!(
-                persisted_body.contains(
-                    "recovery_swift_pair_advertisement_visible_for_persisted_address(address)"
-                ),
-                "the guard must also protect Type cold start after an interrupted EC11 recovery"
+                !persisted_body[..selector_index]
+                    .contains("recovery_swift_pair_advertisement_visible_for_persisted_address"),
+                "cached Swift Pair metadata must not preempt a working persisted bond; recovery advertising is evidence only after a real GATT/CCCD failure"
             );
 
             let scan_start = source
