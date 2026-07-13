@@ -204,6 +204,21 @@ for (const requiredToken of [
 }
 
 for (const requiredToken of [
+  "Show-ReviewPreparationWindow",
+  "正在收集验收前的设备、日志和桌面证据，请稍候。",
+  "[System.Windows.Forms.Application]::DoEvents()",
+]) {
+  if (!human.includes(requiredToken)) {
+    failures.push(`human review must show immediate preparation feedback before collecting slow evidence: ${requiredToken}`);
+  }
+}
+const preparationCallIndex = human.indexOf("$preparationForm = Show-ReviewPreparationWindow");
+const beforeSnapshotIndex = human.indexOf("$before = Save-Snapshot", preparationCallIndex);
+if (preparationCallIndex < 0 || beforeSnapshotIndex < 0 || preparationCallIndex > beforeSnapshotIndex) {
+  failures.push("human review must show its preparation window before collecting the before snapshot");
+}
+
+for (const requiredToken of [
   "Get-ExplicitTotalReviewRecordSet",
   "TotalReviewStatePath",
   "Get-NormalizedExistingPath",

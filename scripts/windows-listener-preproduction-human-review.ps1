@@ -486,6 +486,49 @@ function Invoke-NoticeSound {
     }
 }
 
+function Show-ReviewPreparationWindow {
+    param(
+        [Parameter(Mandatory = $true)][int]$OverallIndex,
+        [Parameter(Mandatory = $true)][int]$OverallTotal,
+        [Parameter(Mandatory = $true)][string]$Title
+    )
+
+    Ensure-FormsLoaded
+    $form = [System.Windows.Forms.Form]::new()
+    $form.Text = "Listener 1.0.2 总验收 $OverallIndex/$OverallTotal"
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+    $form.ClientSize = [System.Drawing.Size]::new(520, 116)
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.ControlBox = $false
+    $form.TopMost = $true
+    $form.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 10)
+    $workingArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $form.Location = [System.Drawing.Point]::new(
+        $workingArea.Left + 12,
+        $workingArea.Top + 72
+    )
+
+    $heading = [System.Windows.Forms.Label]::new()
+    $heading.Text = "正在准备 $OverallIndex/$OverallTotal  $Title"
+    $heading.Font = [System.Drawing.Font]::new("Microsoft YaHei UI", 11, [System.Drawing.FontStyle]::Bold)
+    $heading.Location = [System.Drawing.Point]::new(18, 18)
+    $heading.Size = [System.Drawing.Size]::new(484, 28)
+    $form.Controls.Add($heading)
+
+    $detail = [System.Windows.Forms.Label]::new()
+    $detail.Text = "正在收集验收前的设备、日志和桌面证据，请稍候。"
+    $detail.Location = [System.Drawing.Point]::new(18, 58)
+    $detail.Size = [System.Drawing.Size]::new(484, 28)
+    $form.Controls.Add($detail)
+
+    [void]$form.Show()
+    $form.Activate()
+    [System.Windows.Forms.Application]::DoEvents()
+    return $form
+}
+
 function Show-ReviewStep {
     param(
         [Parameter(Mandatory = $true)][int]$Index,
@@ -497,7 +540,22 @@ function Show-ReviewStep {
     )
 
     $startedAt = Get-Date
-    $before = Save-Snapshot -Index $Index -StepId $Step.id -Phase "before"
+    $preparationForm = $null
+    if (-not $NoPrompt.IsPresent) {
+        $preparationForm = Show-ReviewPreparationWindow `
+            -OverallIndex $OverallIndex `
+            -OverallTotal $OverallTotal `
+            -Title $Step.title
+    }
+    try {
+        $before = Save-Snapshot -Index $Index -StepId $Step.id -Phase "before"
+    } finally {
+        if ($null -ne $preparationForm) {
+            $preparationForm.Close()
+            $preparationForm.Dispose()
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($Step.clipboard_text)) {
         try {
