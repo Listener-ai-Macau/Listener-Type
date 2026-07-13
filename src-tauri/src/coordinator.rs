@@ -8012,6 +8012,12 @@ mod tests {
     use crate::types::{DictationInputSource, HotkeyMode, HotkeyTrigger};
     use once_cell::sync::Lazy;
 
+    macro_rules! include_str {
+        ("coordinator.rs") => {
+            std::include_str!("coordinator.rs").replace("\r\n", "\n")
+        };
+    }
+
     static ENV_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
 
     fn temp_path_for_test(name: &str) -> std::path::PathBuf {

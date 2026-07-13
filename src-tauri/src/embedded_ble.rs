@@ -12819,6 +12819,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     mod tests {
         use super::*;
 
+        macro_rules! include_str {
+            ("embedded_ble.rs") => {
+                std::include_str!("embedded_ble.rs").replace("\r\n", "\n")
+            };
+        }
+
         fn active_audio_control_test_lock() -> &'static Mutex<()> {
             static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
             LOCK.get_or_init(|| Mutex::new(()))

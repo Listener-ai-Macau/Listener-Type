@@ -8696,6 +8696,10 @@ mod tests {
         PROVIDER_MODELS_CACHE_TEST_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
     }
 
+    fn normalized_commands_source() -> String {
+        include_str!("commands.rs").replace("\r\n", "\n")
+    }
+
     fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
         FirmwareOtaDeviceSnapshot {
             connected: true,
@@ -9155,7 +9159,7 @@ mod tests {
 
     #[test]
     fn ble_name_readback_unavailable_still_refreshes_windows_when_name_changed() {
-        let source = include_str!("commands.rs");
+        let source = normalized_commands_source();
         let start = source
             .find("Err(readback_error) =>")
             .expect("BLE name readback error branch should exist");
@@ -9176,7 +9180,7 @@ mod tests {
 
     #[test]
     fn ble_name_apply_confirmation_polls_firmware_instead_of_fixed_blind_wait() {
-        let source = include_str!("commands.rs");
+        let source = normalized_commands_source();
         let helper_start = source
             .find("async fn read_device_ble_name_apply_confirmation")
             .expect("BLE name apply confirmation helper should exist");
@@ -9206,7 +9210,7 @@ mod tests {
 
     #[test]
     fn usb_confirmed_ble_name_apply_overlaps_cache_recovery_but_keeps_final_readback() {
-        let source = include_str!("commands.rs");
+        let source = normalized_commands_source();
         let start = source
             .find("pub async fn set_device_settings")
             .expect("set_device_settings should exist");
@@ -9233,7 +9237,7 @@ mod tests {
 
     #[test]
     fn device_ble_name_change_path_refreshes_windows_cache_after_apply() {
-        let source = include_str!("commands.rs");
+        let source = normalized_commands_source();
         let start = source
             .find("pub async fn set_device_settings")
             .expect("set_device_settings should exist");
@@ -9292,7 +9296,7 @@ mod tests {
 
     #[test]
     fn firmware_confirmed_rename_handoff_falls_back_only_after_applied_name_advertisement_scan() {
-        let source = include_str!("commands.rs");
+        let source = normalized_commands_source();
         let helper_start = source
             .find("fn apply_device_ble_name_windows_refresh_blocking")
             .expect("BLE name Windows refresh helper should exist");
@@ -9936,7 +9940,7 @@ mod tests {
             super::device_settings_readback_unavailable_allowed_after_write(false, true),
             "pending BLE-name apply can use the existing deferred confirmation path"
         );
-        let source = include_str!("commands.rs");
+        let source = normalized_commands_source();
         assert!(
             source.contains("无法确认写入是否生效"),
             "plain settings write failures must tell the UI that firmware readback did not confirm persistence"
@@ -9945,7 +9949,7 @@ mod tests {
 
     #[test]
     fn device_settings_write_retries_stale_readback_before_failing() {
-        let source = include_str!("commands.rs");
+        let source = normalized_commands_source();
         let settings_start = source
             .find("pub async fn set_device_settings")
             .expect("set_device_settings should exist");
@@ -10326,7 +10330,7 @@ mod tests {
 
     #[test]
     fn ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery() {
-        let source = include_str!("commands.rs");
+        let source = normalized_commands_source();
         let helper_start = source
             .find("fn embedded_ble_windows_pairing_result")
             .expect("Windows pairing helper should exist");
@@ -10430,7 +10434,7 @@ mod tests {
 
     #[test]
     fn ble_name_refresh_uses_silent_recovery_while_one_click_keeps_user_prompt() {
-        let source = include_str!("commands.rs");
+        let source = normalized_commands_source();
         let rename_helper_start = source
             .find("fn apply_device_ble_name_windows_refresh_blocking")
             .expect("BLE name Windows refresh helper should exist");
