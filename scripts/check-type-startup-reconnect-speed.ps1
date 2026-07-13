@@ -30,14 +30,21 @@ function Read-StartupSessions {
   $sessions = @()
   $current = $null
   foreach ($line in Get-Content -LiteralPath $LogPath) {
-    if ($line -notmatch "^(?<ts>\d{4}-\d{2}-\d{2}T[^ ]+) \[(?<lvl>[^\]]+)\] (?<msg>.*)$") {
+    # A process handoff can append the new startup record after a partial final
+    # timestamp from the old logger. Match the last complete record in the line.
+    $records = [regex]::Matches(
+      $line,
+      "(?<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})) \[(?<lvl>[^\]]+)\] (?<msg>.*)$"
+    )
+    if ($records.Count -eq 0) {
       continue
     }
-    $timestamp = Convert-LogTimestamp $Matches.ts
+    $record = $records[$records.Count - 1]
+    $timestamp = Convert-LogTimestamp $record.Groups["ts"].Value
     if ($null -eq $timestamp) {
       continue
     }
-    $message = $Matches.msg
+    $message = $record.Groups["msg"].Value
     if ($message -like "*=== Listener Type 启动 ===*") {
       if ($current) {
         $sessions += $current
