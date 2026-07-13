@@ -479,6 +479,31 @@
         "python tools/verify_status_led_static.py",
         "pwsh -NoProfile -File ./tools/build.ps1"
       ]
+    },
+    {
+      "id": "type_manual_windows_delete_no_autopair",
+      "repo": "type",
+      "commit": "23117418dc3999a3f23bde7c93a92a8ef647b7d2",
+      "subject": "Respect manual Windows Bluetooth removal",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "After a user manually removes Listener in Windows, Type must not invoke PairAsync to reclaim that computer.",
+        "A persisted GATT path must not reopen the audio listener or emit Listener 音频已恢复 until Windows reports a confirmed new pairing.",
+        "The held state may show a bounded manual-pairing cue, while rename and Type-owned recovery retain their separate recovery path."
+      ],
+      "human_acceptance_evidence": [
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-07-manual-windows-delete-no-type-autopair-final-rerun-20260713-141954/preproduction-human-review-summary.json",
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-07-manual-windows-delete-no-type-autopair-final-rerun-20260713-141954/preproduction-operator-note-triage.json"
+      ],
+      "machine_evidence": [
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-07-manual-windows-delete-no-type-autopair-final-rerun-20260713-141954/step-01-manual-windows-delete-no-type-autopair-after-bluetooth.txt",
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-07-manual-windows-delete-no-type-autopair-final-rerun-20260713-141954/step-01-manual-windows-delete-no-type-autopair-after-type-log-tail.txt"
+      ],
+      "guards": [
+        "cargo test --manifest-path ./src-tauri/Cargo.toml embedded_ble_background_stale_cleanup_respects_manual_windows_unpair --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml embedded_ble_manual_windows_unpair_suppresses_background_pairasync --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml embedded_ble_manual_unpair_requires_windows_pairing_before_gatt --lib"
+      ]
     }
   ]
 }
