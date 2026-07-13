@@ -432,6 +432,53 @@
       "guards": [
         "pwsh -NoProfile -File ./tools/build.ps1"
       ]
+    },
+    {
+      "id": "type_restore_default_listener_gatt_first",
+      "repo": "type",
+      "commit": "bd13adc03d60616f59876addc87f5bc947abd41d",
+      "subject": "Restore persisted GATT before recovery advertising",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "Changing a random Listener name back to listener uses the same cache-cleanup, PairAsync, GATT, notify and heartbeat recovery path as any other changed name.",
+        "Cached Swift Pair metadata never preempts a working persisted GATT/CCCD path or sends the recovery flow down an unnecessary PairAsync branch.",
+        "The installed Type reconnects to listener without a local pairing prompt and reaches notify ready within the 3 s startup guard."
+      ],
+      "human_acceptance_evidence": [
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-06-restore-default-listener-rerun-20260713-1321/preproduction-human-review-summary.json",
+        ".cache/validation/preproduction-human-review-total-20260712-081300-step-06-restore-default-listener-rerun-20260713-1321/preproduction-operator-note-triage.json"
+      ],
+      "machine_evidence": [
+        ".cache/validation/restore-default-led-ealready-fix-20260713/installed-ui-random-listener-roundtrip.json",
+        ".cache/validation/type-startup-reconnect-20260713-132848/summary.json"
+      ],
+      "guards": [
+        "cargo test --manifest-path ./src-tauri/Cargo.toml persisted_notify_fast_path_validates_gatt_before_recovery_advertising --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml device_ble_name --lib",
+        "pwsh -NoProfile -File ./scripts/check-type-startup-reconnect-speed.ps1 -RequirePersistedPath -MaxNotifyReadyMs 3000"
+      ]
+    },
+    {
+      "id": "firmware_silent_repair_pre_reset_guard",
+      "repo": "firmware",
+      "commit": "5ad44237fa357cc01e93641fab29b968ce3c6093",
+      "subject": "Keep silent Type recovery open until re-pair",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "A pre-reset Type audio event cannot close a new silent re-pair window before the old connection disconnects.",
+        "Firmware leaves recovery SMP ownership to Windows PairAsync and keeps unbonded Type-ready recovery silent.",
+        "A concurrent disconnect reported as BLE_HS_EALREADY remains a valid recovery transition instead of an error path."
+      ],
+      "human_acceptance_evidence": [
+        "../Listener-Type/.cache/validation/preproduction-human-review-total-20260712-081300-step-06-restore-default-listener-rerun-20260713-1321/preproduction-human-review-summary.json"
+      ],
+      "machine_evidence": [
+        "../Listener-Type/.cache/validation/restore-default-led-ealready-fix-20260713/installed-ui-random-listener-roundtrip.json"
+      ],
+      "guards": [
+        "python tools/verify_status_led_static.py",
+        "pwsh -NoProfile -File ./tools/build.ps1"
+      ]
     }
   ]
 }
