@@ -5,10 +5,10 @@
   "pending_operator_steering": {
     "idle_ble_audio_wake_latency": {
       "target_notify_ready_ms": 50,
-      "status": "machine_evidence_passed_human_acceptance_pending",
+      "status": "physical_edge_evidence_pending",
       "recorded_at": "2026-07-13",
       "requirement": "From the physical EC11 press edge in connected low-power Idle, audio must begin within 50 ms. Preserve the accepted EC11 single/double-click behavior and do not swallow the first action; do not redefine the timer to start only after the existing single-click classification window.",
-      "last_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-20260713/03-type-synced-settings.log"
+      "last_machine_evidence": "../Listener-Firmware/.cache/validation/idle-audio-wake-20260713/machine-validation-summary.json"
     }
   },
   "scenarios": [
