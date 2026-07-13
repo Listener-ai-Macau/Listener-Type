@@ -246,6 +246,10 @@ struct Inner {
         Mutex<Option<(Arc<AtomicBool>, Arc<AtomicBool>)>>,
     /// 当前 Listener BLE 后台订阅已完成 CCCD notify 写入，可以接收设备音频。
     embedded_ble_listener_ready: AtomicBool,
+    /// 设备键从 Idle 唤醒音频时，指定下一代后台监听跳过慢速的启动期手动解配预检。
+    /// 能收到这枚物理键已证明本机的原生 HID 配对仍在，不能再为重复 PnP 枚举阻塞
+    /// 首次录音；代次绑定，避免旧监听循环误消费该唤醒请求。
+    embedded_ble_device_key_wake_generation: AtomicU64,
     /// 启动时必须先把 Type 目标名同步到固件广播名，再允许后台 BLE 监听启动。
     /// 否则前端/托盘的早期 refresh 会用旧 prefs 名字扫一轮，造成第一次连接失败。
     embedded_ble_startup_name_sync_done: AtomicBool,
@@ -567,6 +571,7 @@ impl Coordinator {
                     embedded_ble_listener_cancel: Mutex::new(None),
                     embedded_ble_listener_leave_cccd_enabled_on_cancel: Mutex::new(None),
                     embedded_ble_listener_ready: AtomicBool::new(false),
+                    embedded_ble_device_key_wake_generation: AtomicU64::new(0),
                     embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                     embedded_ble_listener_last_error: Mutex::new(None),
                     embedded_ble_pairing_hold_until: Mutex::new(None),
@@ -644,6 +649,7 @@ impl Coordinator {
                 embedded_ble_listener_cancel: Mutex::new(None),
                 embedded_ble_listener_leave_cccd_enabled_on_cancel: Mutex::new(None),
                 embedded_ble_listener_ready: AtomicBool::new(false),
+                embedded_ble_device_key_wake_generation: AtomicU64::new(0),
                 embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
                 embedded_ble_pairing_hold_until: Mutex::new(None),
@@ -2687,6 +2693,7 @@ async fn handle_device_dictation_action(
 ) {
     let input_source = inner.prefs.get().dictation_input_source;
     let phase = inner.state.lock().phase;
+    let wake_started_at = (!embedded_ble_listener_capture_ready(&inner)).then(Instant::now);
     crate::timeline::mark(
         "backend.device_key",
         "dictation_action",
@@ -2707,7 +2714,7 @@ async fn handle_device_dictation_action(
                 queue_pending_start_on_wait_failure = true;
             }
             record_embedded_ble_reconnect_attempt(&inner, "device_key_recording_control");
-            refresh_embedded_ble_listener(&inner);
+            refresh_embedded_ble_listener_for_device_key_wake(&inner);
             emit_capsule(
                 &inner,
                 CapsuleState::Reconnecting,
@@ -2757,6 +2764,23 @@ async fn handle_device_dictation_action(
             );
             schedule_capsule_idle(&inner, 6000, None);
             return;
+        }
+        if let Some(started_at) = wake_started_at {
+            let elapsed_ms = started_at.elapsed().as_millis();
+            crate::timeline::mark(
+                "backend.device_key",
+                "idle_audio_notify_ready",
+                format!(
+                    "key={} gesture={} elapsed_ms={elapsed_ms} target_ms=500 met={}",
+                    key.label(),
+                    gesture.label(),
+                    elapsed_ms <= 500,
+                ),
+            );
+            log::info!(
+                "[embedded-ble] device-key Idle audio notify ready elapsed_ms={elapsed_ms} target_ms=500 met={}",
+                elapsed_ms <= 500,
+            );
         }
 
         let control_decision = device_key_ble_recording_control_decision(&inner);
@@ -4354,6 +4378,20 @@ fn record_embedded_ble_device_settings_power_status(
 }
 
 fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
+    refresh_embedded_ble_listener_with_options(inner, false);
+}
+
+fn refresh_embedded_ble_listener_for_device_key_wake(inner: &Arc<Inner>) {
+    if embedded_ble_listener_capture_active(inner) {
+        log::info!(
+            "[embedded-ble] device-key Idle wake joined active notify recovery without replacing the capture"
+        );
+        return;
+    }
+    refresh_embedded_ble_listener_with_options(inner, true);
+}
+
+fn refresh_embedded_ble_listener_with_options(inner: &Arc<Inner>, device_key_idle_wake: bool) {
     if !inner
         .embedded_ble_startup_name_sync_done
         .load(Ordering::SeqCst)
@@ -4380,6 +4418,11 @@ fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
         .embedded_ble_listener_generation
         .fetch_add(1, Ordering::SeqCst)
         + 1;
+    if device_key_idle_wake {
+        inner
+            .embedded_ble_device_key_wake_generation
+            .store(generation, Ordering::SeqCst);
+    }
     cancel_embedded_ble_listener_capture(inner, "refresh", false);
     if std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
         .ok()
@@ -4812,22 +4855,30 @@ fn mark_translation_modifier_seen(inner: &Arc<Inner>) {
     }
 }
 
+fn embedded_ble_listener_generation_is_current(inner: &Arc<Inner>, generation: u64) -> bool {
+    !inner.shutdown.load(Ordering::SeqCst)
+        && inner
+            .embedded_ble_listener_generation
+            .load(Ordering::SeqCst)
+            == generation
+        && !inner.embedded_ble_ota_active.load(Ordering::SeqCst)
+        && inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle
+}
+
+fn take_embedded_ble_device_key_wake_preflight_bypass(inner: &Arc<Inner>, generation: u64) -> bool {
+    inner
+        .embedded_ble_device_key_wake_generation
+        .compare_exchange(generation, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
 async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u64) {
     log::info!("[embedded-ble] background listener started generation={generation}");
     let mut retry_delay = EMBEDDED_BLE_RETRY_BASE_DELAY;
     let mut last_stale_cleanup_at: Option<Instant> = None;
     let mut startup_pairing_preflight_checked = false;
     loop {
-        if inner.shutdown.load(Ordering::SeqCst)
-            || inner
-                .embedded_ble_listener_generation
-                .load(Ordering::SeqCst)
-                != generation
-            || inner.embedded_ble_ota_active.load(Ordering::SeqCst)
-        {
-            break;
-        }
-        if inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle {
+        if !embedded_ble_listener_generation_is_current(&inner, generation) {
             break;
         }
         if let Some(remaining) =
@@ -4842,8 +4893,17 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
         }
         if !startup_pairing_preflight_checked {
             startup_pairing_preflight_checked = true;
-            if maybe_hold_embedded_ble_startup_after_manual_windows_unpair(&inner).await {
+            if take_embedded_ble_device_key_wake_preflight_bypass(&inner, generation) {
+                log::info!(
+                    "[embedded-ble] device-key Idle wake bypassed slow manual-delete preflight generation={generation}; physical HID input proves the local pairing remains installed"
+                );
+            } else if maybe_hold_embedded_ble_startup_after_manual_windows_unpair(&inner).await {
                 continue;
+            }
+            // The PnP preflight runs in a blocking task. A device-key wake may have
+            // superseded this loop while that task was still enumerating Windows.
+            if !embedded_ble_listener_generation_is_current(&inner, generation) {
+                break;
             }
         }
 
@@ -8543,6 +8603,55 @@ mod tests {
                 && action.key == DeviceCustomKeyId::Key1
                 && action.gesture == DeviceCustomKeyGesture::SingleClick
         }));
+    }
+
+    #[test]
+    fn device_key_idle_wake_preflight_bypass_is_generation_scoped() {
+        let coordinator = Coordinator::new();
+        coordinator
+            .inner
+            .embedded_ble_device_key_wake_generation
+            .store(7, Ordering::SeqCst);
+
+        assert!(!take_embedded_ble_device_key_wake_preflight_bypass(
+            &coordinator.inner,
+            6
+        ));
+        assert!(take_embedded_ble_device_key_wake_preflight_bypass(
+            &coordinator.inner,
+            7
+        ));
+        assert!(!take_embedded_ble_device_key_wake_preflight_bypass(
+            &coordinator.inner,
+            7
+        ));
+    }
+
+    #[test]
+    fn device_key_idle_wake_joins_an_active_notify_recovery() {
+        let coordinator = Coordinator::new();
+        let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        let generation_before = coordinator
+            .inner
+            .embedded_ble_listener_generation
+            .load(Ordering::SeqCst);
+
+        refresh_embedded_ble_listener_for_device_key_wake(&coordinator.inner);
+
+        assert_eq!(
+            coordinator
+                .inner
+                .embedded_ble_listener_generation
+                .load(Ordering::SeqCst),
+            generation_before
+        );
+        assert!(!active.load(Ordering::SeqCst));
+        assert!(coordinator
+            .inner
+            .embedded_ble_listener_cancel
+            .lock()
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &active)));
     }
 
     #[test]

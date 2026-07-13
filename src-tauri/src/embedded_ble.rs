@@ -7421,12 +7421,39 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let native_windows_hid_pairing =
             recent_pairing.is_none() && native_windows_hid_pairing_visible_for_startup();
         if recent_pairing.is_none() {
-            if let Some(address) = persisted_successful_notify_target_address_for_current() {
-                let gatt_ready_timeout = if native_windows_hid_pairing {
-                    STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT
-                } else {
-                    STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT
-                };
+            let gatt_ready_timeout = if native_windows_hid_pairing {
+                STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT
+            } else {
+                STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT
+            };
+            // An Idle wake happens in the same Type process that most recently had
+            // a working notify subscription. Prefer that verified in-memory address
+            // over an older on-disk address, which may belong to the pre-recovery
+            // BLE identity and otherwise burns the entire cached-service timeout.
+            let runtime_address = runtime_bluetooth_target_address();
+            if let Some(address) = runtime_address {
+                match open_notify_target_for_startup_cached_address(address, gatt_ready_timeout) {
+                    Ok(target) => {
+                        remember_runtime_bluetooth_target_address_for_current(
+                            address,
+                            "runtime startup audio notify",
+                        );
+                        log::info!(
+                            "[embedded-ble] selected runtime startup audio notify address={address:012X}"
+                        );
+                        return Ok(target);
+                    }
+                    Err(err) => {
+                        log::info!(
+                            "[embedded-ble] runtime startup audio notify address={address:012X} not ready: {}",
+                            err.chars().take(240).collect::<String>()
+                        );
+                    }
+                }
+            }
+            if let Some(address) = persisted_successful_notify_target_address_for_current()
+                .filter(|address| Some(*address) != runtime_address)
+            {
                 match open_notify_target_for_startup_cached_address(address, gatt_ready_timeout) {
                     Ok(target) => {
                         remember_runtime_bluetooth_target_address_for_current(
@@ -14140,6 +14167,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             let recent_index = notify_body
                 .find("recent_pairing_fast_gatt_active")
                 .expect("recent pairing path must remain first");
+            let runtime_index = notify_body
+                .find("runtime_bluetooth_target_address()")
+                .expect("same-process verified address fast path should exist");
             let persisted_index = notify_body
                 .find("persisted_successful_notify_target_address_for_current")
                 .expect("startup persisted address fast path should exist");
@@ -14148,8 +14178,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .expect("service selector fallback should remain");
 
             assert!(
-                recent_index < persisted_index && persisted_index < service_selector_index,
-                "persisted startup fast path must not steal recent-pairing recovery and must fall back before service selector"
+                recent_index < runtime_index
+                    && runtime_index < persisted_index
+                    && persisted_index < service_selector_index,
+                "recent-pairing recovery stays first; an Idle wake must prefer the verified same-process address before an older persisted address and then fall back to service discovery"
             );
             assert!(notify_body.contains("if recent_pairing.is_none()"));
             assert!(source.contains(
