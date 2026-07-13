@@ -5019,6 +5019,35 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     } else {
         None
     };
+    let native_windows_hid_pairing_visible = if should_query_pairing_preflight {
+        match async_runtime::spawn_blocking(|| {
+            crate::embedded_ble::native_windows_hid_pairing_addresses()
+        })
+        .await
+        {
+            Ok(Ok(addresses)) if !addresses.is_empty() => {
+                log::info!(
+                    "[embedded-ble] background stale pairing cleanup found native Windows HID pairing evidence addresses={addresses:?}; preserving Type takeover without PairAsync"
+                );
+                true
+            }
+            Ok(Ok(_)) => false,
+            Ok(Err(err)) => {
+                log::warn!(
+                    "[embedded-ble] background native Windows HID pairing evidence unavailable; preserving manual-delete safety: {err}"
+                );
+                false
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] background native Windows HID pairing evidence task failed; preserving manual-delete safety: {err}"
+                );
+                false
+            }
+        }
+    } else {
+        false
+    };
     if !embedded_ble_recovery_error_still_current(inner, err, "after_pairing_preflight") {
         return EmbeddedBleStalePairingCleanupOutcome::Skipped;
     }
@@ -5035,7 +5064,8 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         });
     let type_owned_stale_cache_cleanup =
         recovery_advertisement_type_owned_cleanup || noisy_cccd_stale_cache_type_owned_cleanup;
-    let manual_unpair_hold = !usb_ble_name_synced
+    let manual_unpair_hold = !native_windows_hid_pairing_visible
+        && !usb_ble_name_synced
         && pairing_before_cleanup.as_ref().is_some_and(|pairing| {
             should_hold_embedded_ble_background_recovery_after_manual_unpair(
                 pairing,
@@ -5050,15 +5080,16 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                     || pairing.matched_devices > 0
                     || pairing.failed_devices > 0)
         });
-    let automatic_cleanup_allowed = embedded_ble_background_pairasync_is_authorized(
-        manual_unpair_hold,
-        type_observed_recovery_advertisement,
-        visible_recovery_allows_cleanup,
-        stale_cleanup_candidate,
-        noisy_cccd_stale_cache_type_owned_cleanup,
-        local_stale_cache_recovery_allows_cleanup,
-        usb_ble_name_synced,
-    );
+    let automatic_cleanup_allowed = !native_windows_hid_pairing_visible
+        && embedded_ble_background_pairasync_is_authorized(
+            manual_unpair_hold,
+            type_observed_recovery_advertisement,
+            visible_recovery_allows_cleanup,
+            stale_cleanup_candidate,
+            noisy_cccd_stale_cache_type_owned_cleanup,
+            local_stale_cache_recovery_allows_cleanup,
+            usb_ble_name_synced,
+        );
     if noisy_cccd_stale_cache_type_owned_cleanup {
         log::warn!(
             "[embedded-ble] noisy CCCD stale Windows cache evidence allows Type automatic PairAsync recovery even though recovery advertisement scan may have missed err={}",
@@ -5083,6 +5114,12 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         && !automatic_cleanup_allowed
         && !manual_unpair_hold
     {
+        if native_windows_hid_pairing_visible {
+            log::info!(
+                "[embedded-ble] native Windows HID pairing remains installed; retrying direct GATT without pairing cleanup"
+            );
+            return EmbeddedBleStalePairingCleanupOutcome::RetrySoon;
+        }
         *last_cleanup_at = Some(now);
         log::warn!(
             "[embedded-ble] recovery pairing advertisement visible from hardware/user action; holding background listener without automatic PairAsync err={}",
@@ -5579,8 +5616,32 @@ async fn hold_embedded_ble_for_manual_windows_unpair(inner: &Arc<Inner>, expecte
 
 async fn maybe_hold_embedded_ble_startup_after_manual_windows_unpair(inner: &Arc<Inner>) -> bool {
     let expected_ble_name = inner.prefs.get().device_ble_name;
-    let expected_for_query = expected_ble_name.clone();
     let started_at = Instant::now();
+    let native_pairing = async_runtime::spawn_blocking(|| {
+        crate::embedded_ble::native_windows_hid_pairing_addresses()
+    })
+    .await;
+    match native_pairing {
+        Ok(Ok(addresses)) if !addresses.is_empty() => {
+            let labels = addresses
+                .iter()
+                .map(|address| format!("{address:012X}"))
+                .collect::<Vec<_>>();
+            log::info!(
+                "[embedded-ble] startup native Windows HID pairing evidence allows persisted GATT reopen addresses={labels:?} elapsed_ms={}",
+                started_at.elapsed().as_millis(),
+            );
+            return false;
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(err)) => log::warn!(
+            "[embedded-ble] startup native Windows HID pairing evidence unavailable; checking manual-delete state: {err}"
+        ),
+        Err(err) => log::warn!(
+            "[embedded-ble] startup native Windows HID pairing evidence task failed; checking manual-delete state: {err}"
+        ),
+    }
+    let expected_for_query = expected_ble_name.clone();
     let query = async_runtime::spawn_blocking(move || {
         crate::embedded_ble::query_listener_pairing(Some(&expected_for_query))
     })
@@ -9421,6 +9482,23 @@ mod tests {
                 && startup_helper.contains("hold_embedded_ble_for_manual_windows_unpair"),
             "startup must hold an explicitly manually removed Windows device before persisted GATT can reopen"
         );
+        let native_hid_index = startup_helper
+            .find("native_windows_hid_pairing_addresses")
+            .expect("startup must recognize a complete native Windows Listener HID pairing");
+        let manual_query_index = startup_helper.find("query_listener_pairing").expect(
+            "startup manual-delete preflight must still query the weaker Windows BLE pairing view",
+        );
+        assert!(
+            native_hid_index < manual_query_index
+                && startup_helper.contains("startup native Windows HID pairing evidence allows persisted GATT reopen"),
+            "a matching Listener BTHLE root plus HID keyboard must take over before a stale GATT pairing view can be mistaken for a manual delete"
+        );
+        assert!(
+            body.contains("native_windows_hid_pairing_addresses")
+                && body.contains("native Windows HID pairing remains installed; retrying direct GATT without pairing cleanup")
+                && body.contains("!native_windows_hid_pairing_visible\n        && embedded_ble_background_pairasync_is_authorized"),
+            "a native Windows HID pairing must also stay out of the manual-delete hold after a transient GATT failure"
+        );
         let listener_loop_start = source
             .find("async fn embedded_ble_background_listener_loop")
             .expect("background listener loop should exist");
@@ -9790,7 +9868,7 @@ mod tests {
             .find("background stale pairing cleanup preflight Windows pairing")
             .expect("Windows pairing preflight should exist before cleanup");
         let automatic_allowed = body
-            .find("let automatic_cleanup_allowed = embedded_ble_background_pairasync_is_authorized")
+            .find("let automatic_cleanup_allowed = !native_windows_hid_pairing_visible")
             .expect("automatic cleanup decision should exist after Windows pairing preflight");
         let visible_hold = body
             .find("recovery pairing advertisement visible from hardware/user action")
@@ -9801,7 +9879,8 @@ mod tests {
         );
         assert!(
             body.contains("recovery_advertisement_allows_cleanup")
-                && body.contains("local_stale_cache_recovery_allows_cleanup"),
+                && body.contains("local_stale_cache_recovery_allows_cleanup")
+                && body.contains("&& embedded_ble_background_pairasync_is_authorized"),
             "MissingPairing/StaleGatt recovery advertisements and stale Windows cache evidence must still reach the ownership-aware cleanup decision"
         );
     }

@@ -769,10 +769,12 @@ mod windows_ble {
     const STARTUP_NOTIFY_FAST_PATH_TIMEOUT: Duration = Duration::from_millis(2500);
     const STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT: Duration = Duration::from_millis(1200);
     const STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT: Duration = Duration::from_millis(1800);
+    const STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT: Duration = Duration::from_millis(600);
     static RUNTIME_BLUETOOTH_TARGET_NAME: OnceLock<Mutex<Option<String>>> = OnceLock::new();
     static RUNTIME_BLUETOOTH_TARGET_ADDRESS: OnceLock<
         Mutex<Option<RuntimeBluetoothTargetAddress>>,
     > = OnceLock::new();
+    static NATIVE_WINDOWS_HID_PAIRING_VISIBLE: AtomicBool = AtomicBool::new(false);
     static LAST_PAIRING_PROMPT: OnceLock<Mutex<Option<PairingPromptThrottleState>>> =
         OnceLock::new();
     static LISTENER_PAIRING_MAINTENANCE_TOKEN: AtomicUsize = AtomicUsize::new(1);
@@ -1507,6 +1509,7 @@ mod windows_ble {
         pub(super) address: Option<u64>,
         pub(super) has_listener_service_signature: bool,
         pub(super) is_ble_device_root: bool,
+        pub(super) is_listener_hid_keyboard: bool,
     }
 
     #[derive(Deserialize)]
@@ -1908,6 +1911,39 @@ mod windows_ble {
                 }
             }
         }
+    }
+
+    pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
+        let entries = powershell_listener_pnp_entries()?;
+        let addresses = native_windows_hid_pairing_addresses_from_entries(&entries);
+        NATIVE_WINDOWS_HID_PAIRING_VISIBLE.store(!addresses.is_empty(), Ordering::SeqCst);
+        Ok(addresses)
+    }
+
+    fn native_windows_hid_pairing_visible_for_startup() -> bool {
+        NATIVE_WINDOWS_HID_PAIRING_VISIBLE.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn native_windows_hid_pairing_addresses_from_entries(
+        entries: &[ListenerPnpEntry],
+    ) -> Vec<u64> {
+        let mut roots = Vec::new();
+        let mut keyboards = Vec::new();
+        for entry in entries {
+            let Some(address) = entry.address else {
+                continue;
+            };
+            if entry.is_ble_device_root && !roots.contains(&address) {
+                roots.push(address);
+            }
+            if entry.is_listener_hid_keyboard && !keyboards.contains(&address) {
+                keyboards.push(address);
+            }
+        }
+        roots
+            .into_iter()
+            .filter(|address| keyboards.contains(address))
+            .collect()
     }
 
     fn query_listener_pairing_inner(
@@ -4076,6 +4112,7 @@ mod windows_ble {
         Some(ListenerPnpEntry {
             name,
             is_ble_device_root: pnp_instance_is_ble_device_root(&instance_id),
+            is_listener_hid_keyboard: pnp_instance_is_listener_hid_keyboard(&instance_id),
             has_listener_service_signature: pnp_instance_has_listener_service_signature(
                 &instance_id,
             ),
@@ -4181,6 +4218,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
     pub(super) fn pnp_instance_is_ble_device_root(instance_id: &str) -> bool {
         instance_id.to_ascii_uppercase().starts_with(r"BTHLE\DEV_")
+    }
+
+    pub(super) fn pnp_instance_is_listener_hid_keyboard(instance_id: &str) -> bool {
+        let upper = instance_id.to_ascii_uppercase();
+        upper.starts_with(r"HID\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0216C0_PID&05DF_")
+            && upper.contains("&COL01\\")
     }
 
     fn bthport_listener_cache_candidates(
@@ -7239,6 +7282,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
     fn open_notify_target_for_startup_cached_address(
         address: u64,
+        gatt_ready_timeout: Duration,
     ) -> Result<OpenNotifyTarget, String> {
         let deadline = Instant::now() + STARTUP_NOTIFY_FAST_PATH_TIMEOUT;
         let device = open_ble_device_with_timeout(
@@ -7318,8 +7362,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     continue;
                 }
             };
-            match open_notify_characteristic_from_service_for_startup_fast_path(&service, deadline)
-            {
+            match open_notify_characteristic_from_service_for_startup_fast_path(
+                &service,
+                deadline,
+                gatt_ready_timeout,
+            ) {
                 Ok(prepared) => {
                     return Ok(OpenNotifyTarget {
                         characteristic: prepared.characteristic,
@@ -7371,9 +7418,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         }
 
+        let native_windows_hid_pairing =
+            recent_pairing.is_none() && native_windows_hid_pairing_visible_for_startup();
         if recent_pairing.is_none() {
             if let Some(address) = persisted_successful_notify_target_address_for_current() {
-                match open_notify_target_for_startup_cached_address(address) {
+                let gatt_ready_timeout = if native_windows_hid_pairing {
+                    STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT
+                } else {
+                    STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT
+                };
+                match open_notify_target_for_startup_cached_address(address, gatt_ready_timeout) {
                     Ok(target) => {
                         remember_runtime_bluetooth_target_address_for_current(
                             address,
@@ -7444,9 +7498,15 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                                 &name,
                                 "audio notify device path",
                             );
-                            log::info!(
-                                "[embedded-ble] selected device path index={index} name={name} address={address:012X}"
-                            );
+                            if native_windows_hid_pairing {
+                                log::info!(
+                                    "[embedded-ble] selected native Windows HID startup audio notify address={address:012X}"
+                                );
+                            } else {
+                                log::info!(
+                                    "[embedded-ble] selected device path index={index} name={name} address={address:012X}"
+                                );
+                            }
                             return Ok(target);
                         }
                         Err(err) => {
@@ -10946,6 +11006,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     fn open_notify_characteristic_from_service_for_startup_fast_path(
         service: &GattDeviceService,
         deadline: Instant,
+        gatt_ready_timeout: Duration,
     ) -> Result<PreparedNotifyCharacteristic, String> {
         if let Ok(operation) = service.RequestAccessAsync() {
             if let Some(access) = wait_async_operation(
@@ -10968,11 +11029,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
         let session = prepare_gatt_session(
             service,
-            remaining_ble_timeout(
-                deadline,
-                STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT,
-                "persisted startup GATT ready",
-            )?,
+            remaining_ble_timeout(deadline, gatt_ready_timeout, "persisted startup GATT ready")?,
         )?;
         let control = open_write_characteristic_from_service_with_timeout(
             service,
@@ -14109,6 +14166,37 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
+        fn native_windows_hid_takeover_uses_system_service_selector_without_advertisement_wait() {
+            let source = include_str!("embedded_ble.rs");
+            let notify_start = source
+                .find("fn open_notify_target()")
+                .expect("notify target helper should exist");
+            let notify_end = source[notify_start..]
+                .find("fn open_notify_target_with_retry")
+                .map(|offset| notify_start + offset)
+                .expect("notify target helper boundary should exist");
+            let notify_body = &source[notify_start..notify_end];
+            let native_pairing_index = notify_body
+                .find("native_windows_hid_pairing_visible_for_startup")
+                .expect("native Windows HID pairing marker should exist");
+            let service_selector_index = notify_body
+                .find("GetDeviceSelectorFromUuid(SERVICE_UUID)")
+                .expect("system GATT service selector should remain");
+
+            assert!(
+                native_pairing_index < service_selector_index,
+                "native Windows HID takeover must retain the system service selector fallback"
+            );
+            assert!(notify_body.contains(
+                "selected native Windows HID startup audio notify address={address:012X}"
+            ));
+            assert!(
+                !source.contains("open_notify_target_from_native_windows_hid_advertisement"),
+                "native HID pairing can be connected but no longer discoverable by advertisement, so takeover must not wait for an advertisement"
+            );
+        }
+
+        #[test]
         fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
             let legacy = PersistedBleDeviceState {
                 last_successful_address: Some("FB8FBDD8C90F".to_string()),
@@ -15021,6 +15109,11 @@ pub fn query_listener_pairing(expected_name: Option<&str>) -> BleDevicePairingPr
 }
 
 #[cfg(target_os = "windows")]
+pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
+    windows_ble::native_windows_hid_pairing_addresses()
+}
+
+#[cfg(target_os = "windows")]
 pub fn listener_pairing_maintenance_active() -> bool {
     windows_ble::listener_pairing_maintenance_active()
 }
@@ -15438,6 +15531,11 @@ pub fn query_listener_pairing(_expected_name: Option<&str>) -> BleDevicePairingP
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn listener_pairing_maintenance_active() -> bool {
     false
 }
@@ -15809,6 +15907,7 @@ mod tests {
             address: Some(0xFD2F_988D_B40D),
             has_listener_service_signature: true,
             is_ble_device_root: false,
+            is_listener_hid_keyboard: false,
         };
         assert!(windows_ble::listener_pnp_entry_matches_cleanup(
             &service_entry,
@@ -15825,6 +15924,48 @@ mod tests {
         ));
         assert!(!windows_ble::pnp_instance_is_ble_device_root(
             r#"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_FD2F988DB40D\9&2E60A20C&0&004B"#
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_windows_hid_pairing_requires_matching_listener_root_and_keyboard() {
+        let address = 0xFD2F_988D_B40D;
+        let entries = vec![
+            windows_ble::ListenerPnpEntry {
+                name: "listener".to_string(),
+                instance_id: r"BTHLE\DEV_FD2F988DB40D\8&25948282&0&FD2F988DB40D".to_string(),
+                address: Some(address),
+                has_listener_service_signature: false,
+                is_ble_device_root: true,
+                is_listener_hid_keyboard: false,
+            },
+            windows_ble::ListenerPnpEntry {
+                name: "HID Keyboard Device".to_string(),
+                instance_id: r"HID\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0216C0_PID&05DF_REV&0001_FD2F988DB40D&COL01\A&220D8BA7&0&0000".to_string(),
+                address: Some(address),
+                has_listener_service_signature: false,
+                is_ble_device_root: false,
+                is_listener_hid_keyboard: true,
+            },
+            windows_ble::ListenerPnpEntry {
+                name: "HID Keyboard Device".to_string(),
+                instance_id: r"HID\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&0216C0_PID&05DF_REV&0001_14C19F48FE72&COL01\A&220D8BA7&0&0000".to_string(),
+                address: Some(0x14C1_9F48_FE72),
+                has_listener_service_signature: false,
+                is_ble_device_root: false,
+                is_listener_hid_keyboard: true,
+            },
+        ];
+        assert_eq!(
+            windows_ble::native_windows_hid_pairing_addresses_from_entries(&entries),
+            vec![address]
+        );
+        assert!(windows_ble::pnp_instance_is_listener_hid_keyboard(
+            &entries[1].instance_id
+        ));
+        assert!(!windows_ble::pnp_instance_is_listener_hid_keyboard(
+            &entries[1].instance_id.replace("&COL01\\", "&COL02\\")
         ));
     }
 
