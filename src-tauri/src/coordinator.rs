@@ -83,6 +83,10 @@ const EMBEDDED_BLE_TYPE_NATIVE_PAIRING_HANDOFF_REASON: &str =
 const EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON: &str = "manual Windows pairing removal";
 const EMBEDDED_BLE_HARDWARE_RECOVERY_PAIRING_HOLD_REASON: &str = "hardware recovery pairing window";
 const EMBEDDED_BLE_TYPE_RECOVERY_PAIRING_SETTLE: Duration = Duration::from_millis(2600);
+// Windows can report the freshly paired device as absent while it rebuilds its
+// BLE/HID service graph. Do not mistake that short post-PairAsync interval for
+// a user-driven manual delete and reopen the recovery window.
+const EMBEDDED_BLE_TYPE_PAIRASYNC_STARTUP_GUARD: Duration = Duration::from_secs(20);
 const EMBEDDED_BLE_RECOVERY_PAIRING_ADV_SCAN_TIMEOUT: Duration = Duration::from_secs(4);
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);
@@ -259,6 +263,9 @@ struct Inner {
     /// fresh GATT link-check 的完整窗口，避免第二个后台 cleanup 在第一轮刚配好时
     /// 又删掉 Windows link key，造成系统 UI 在已连接/未连接之间反复跳。
     embedded_ble_pairing_recovery_active: AtomicBool,
+    /// Type 自动 PairAsync 成功后的短服务重建窗口。Windows 此时可能暂时还没有
+    /// 暴露 HID/GATT 配对证据，不能被启动期手动删除探测误判为用户主动解配。
+    embedded_ble_type_pairasync_startup_guard_until: Mutex<Option<Instant>>,
     /// 用户动作触发 BLE 恢复时的结构化快照。用于 Overview、胶囊错误文案和诊断导出，
     /// 避免把底层 transport/notify 错误直接暴露给用户。
     embedded_ble_wake_recovery: Mutex<EmbeddedBleWakeRecoverySnapshot>,
@@ -565,6 +572,7 @@ impl Coordinator {
                     embedded_ble_pairing_hold_until: Mutex::new(None),
                     embedded_ble_pairing_hold_generation: AtomicU64::new(0),
                     embedded_ble_pairing_recovery_active: AtomicBool::new(false),
+                    embedded_ble_type_pairasync_startup_guard_until: Mutex::new(None),
                     embedded_ble_wake_recovery: Mutex::new(
                         EmbeddedBleWakeRecoverySnapshot::default(),
                     ),
@@ -641,6 +649,7 @@ impl Coordinator {
                 embedded_ble_pairing_hold_until: Mutex::new(None),
                 embedded_ble_pairing_hold_generation: AtomicU64::new(0),
                 embedded_ble_pairing_recovery_active: AtomicBool::new(false),
+                embedded_ble_type_pairasync_startup_guard_until: Mutex::new(None),
                 embedded_ble_wake_recovery: Mutex::new(EmbeddedBleWakeRecoverySnapshot::default()),
                 device_key_pending_ble_action: Mutex::new(None),
                 embedded_ble_session_actor: Mutex::new(EmbeddedBleSessionActorState::default()),
@@ -4045,6 +4054,25 @@ fn resume_embedded_ble_listener_after_pairing_recovery(
     refresh_embedded_ble_listener(inner);
 }
 
+fn arm_embedded_ble_type_pairasync_startup_guard(inner: &Arc<Inner>) {
+    let until = Instant::now() + EMBEDDED_BLE_TYPE_PAIRASYNC_STARTUP_GUARD;
+    *inner.embedded_ble_type_pairasync_startup_guard_until.lock() = Some(until);
+    log::info!(
+        "[embedded-ble] Type PairAsync startup manual-delete guard armed duration_ms={}",
+        EMBEDDED_BLE_TYPE_PAIRASYNC_STARTUP_GUARD.as_millis()
+    );
+}
+
+fn embedded_ble_type_pairasync_startup_guard_active(inner: &Arc<Inner>) -> bool {
+    let now = Instant::now();
+    let mut guard_until = inner.embedded_ble_type_pairasync_startup_guard_until.lock();
+    if guard_until.is_some_and(|until| now < until) {
+        return true;
+    }
+    *guard_until = None;
+    false
+}
+
 async fn embedded_ble_pairing_recovery_link_reachable(
     inner: &Arc<Inner>,
     reason: &'static str,
@@ -5279,6 +5307,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             );
 
             if embedded_ble_pairing_prompt_ready(&pairing) {
+                arm_embedded_ble_type_pairasync_startup_guard(inner);
                 if type_observed_recovery_advertisement {
                     log::info!(
                         "[embedded-ble] background Type observed-recovery PairAsync paired; reopening notify immediately for GATT/notify validation active_capture={active_capture_type_recovery}"
@@ -5615,6 +5644,12 @@ async fn hold_embedded_ble_for_manual_windows_unpair(inner: &Arc<Inner>, expecte
 }
 
 async fn maybe_hold_embedded_ble_startup_after_manual_windows_unpair(inner: &Arc<Inner>) -> bool {
+    if embedded_ble_type_pairasync_startup_guard_active(inner) {
+        log::info!(
+            "[embedded-ble] startup manual-delete pairing preflight deferred while Type PairAsync services rebuild"
+        );
+        return false;
+    }
     let expected_ble_name = inner.prefs.get().device_ble_name;
     let started_at = Instant::now();
     let native_pairing = async_runtime::spawn_blocking(|| {
@@ -8929,6 +8964,47 @@ mod tests {
             )
             .is_some(),
             "guard must release after the recovery flow returns"
+        );
+    }
+
+    #[test]
+    fn type_pairasync_recovery_defers_startup_manual_delete_preflight() {
+        let coordinator = Coordinator::new();
+        assert!(!embedded_ble_type_pairasync_startup_guard_active(
+            &coordinator.inner
+        ));
+
+        arm_embedded_ble_type_pairasync_startup_guard(&coordinator.inner);
+        assert!(embedded_ble_type_pairasync_startup_guard_active(
+            &coordinator.inner
+        ));
+
+        *coordinator
+            .inner
+            .embedded_ble_type_pairasync_startup_guard_until
+            .lock() = Some(Instant::now());
+        assert!(!embedded_ble_type_pairasync_startup_guard_active(
+            &coordinator.inner
+        ));
+        assert!(coordinator
+            .inner
+            .embedded_ble_type_pairasync_startup_guard_until
+            .lock()
+            .is_none());
+
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn maybe_hold_embedded_ble_startup_after_manual_windows_unpair")
+            .expect("startup manual-delete preflight helper should exist");
+        let end = source[start..]
+            .find("fn embedded_ble_background_pairasync_is_authorized")
+            .map(|offset| start + offset)
+            .expect("startup manual-delete preflight boundary should exist");
+        let body = &source[start..end];
+        assert!(
+            body.find("embedded_ble_type_pairasync_startup_guard_active")
+                < body.find("native_windows_hid_pairing_addresses"),
+            "a successful Type PairAsync must suppress startup manual-delete classification until Windows finishes rebuilding services"
         );
     }
 
