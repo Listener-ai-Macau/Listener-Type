@@ -989,10 +989,10 @@ $steps = @(
         -Id "ec11-single-not-double" `
         -Title "EC11 单击/双击边界" `
         -Action (Join-Text @(
-            "保持 Type 打开且空闲，不要点击 Windows 蓝牙弹窗；快速双击一次 EC11 旋钮，然后观察这一次双击的蓝色重配提示。")) `
+            "保持 Type 打开且空闲，不要点击 Windows 蓝牙弹窗；快速双击一次 EC11 旋钮，看到蓝色重配提示后等待最多 10 秒。")) `
         -Expected (Join-Text @(
             "快速双击直接进入双击重配提示/蓝色重配灯效，不能先显示单击录音胶囊或启动录音。"
-            "Type 日志不能在 PairAsync 成功后的服务重建短窗口里误判为用户手动删除配对；完整自动接回在下一项单独验收。"))
+            "10 秒内 Type 应自动恢复本机连接；不能停在手动配对等待、已连接/未连接循环，也不能弹 Windows 添加设备窗口。"))
     New-ReviewStep `
         -Id "ec11-double-repair-with-type" `
         -Title "有 Type 的双击重配" `
