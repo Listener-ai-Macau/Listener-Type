@@ -3975,12 +3975,18 @@ fn embedded_ble_pairing_recovery_accepts_link_reachable(
         return true;
     }
 
+    // Windows can temporarily report the retained bond as unpaired while a
+    // Listener is booting. A successful read-only GATT status probe is stronger
+    // evidence than that stale pairing view, and does not invoke PairAsync.
+    if reason == EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON {
+        return true;
+    }
+
     !matches!(
         reason,
         EMBEDDED_BLE_TYPE_NATIVE_PAIRING_HANDOFF_REASON
             | EMBEDDED_BLE_STALE_PAIRING_CLEANUP_REASON
             | EMBEDDED_BLE_DIRECT_GATT_PAIRING_RECOVERY_REASON
-            | EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON
             | EMBEDDED_BLE_HARDWARE_RECOVERY_PAIRING_HOLD_REASON
     )
 }
@@ -10003,8 +10009,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_ble_user_controlled_pairing_recovery_requires_confirmed_windows_pairing_before_resume(
-    ) {
+    fn embedded_ble_manual_unpair_rechecks_live_gatt_without_pairasync() {
         assert!(!embedded_ble_pairing_recovery_accepts_link_reachable(
             EMBEDDED_BLE_DIRECT_GATT_PAIRING_RECOVERY_REASON,
             false,
@@ -10017,10 +10022,10 @@ mod tests {
             EMBEDDED_BLE_STALE_PAIRING_CLEANUP_REASON,
             false,
         ));
-        assert!(!embedded_ble_pairing_recovery_accepts_link_reachable(
+        assert!(embedded_ble_pairing_recovery_accepts_link_reachable(
             EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON,
             false,
-        ));
+        ), "a read-only successful GATT probe must clear a false manual-unpair hold without PairAsync");
         assert!(!embedded_ble_pairing_recovery_accepts_link_reachable(
             EMBEDDED_BLE_HARDWARE_RECOVERY_PAIRING_HOLD_REASON,
             false,
