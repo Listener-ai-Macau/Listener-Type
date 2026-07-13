@@ -91,7 +91,7 @@ const EMBEDDED_BLE_RECOVERY_PAIRING_ADV_SCAN_TIMEOUT: Duration = Duration::from_
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);
 const EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(12);
-const EMBEDDED_BLE_IDLE_AUDIO_WAKE_TARGET: Duration = Duration::from_millis(200);
+const EMBEDDED_BLE_IDLE_AUDIO_WAKE_TARGET: Duration = Duration::from_millis(50);
 const EMBEDDED_BLE_RECORDING_CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_PAIRING_CONFIRMATION_HOLD: Duration = Duration::from_secs(180);
@@ -4621,10 +4621,16 @@ fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationActio
 }
 
 fn sync_device_knob_rotation_action_to_firmware(inner: &Arc<Inner>, reason: &'static str) {
-    let action = inner.prefs.get().device_knob_rotation_action;
+    let prefs = inner.prefs.get();
+    let action = prefs.device_knob_rotation_action;
     let mode = firmware_mode_for_device_knob_rotation_action(action);
+    let ec11_fast_recording = prefs.dictation_input_source == DictationInputSource::EmbeddedBle
+        && prefs.device_custom_keys.knob.action == DeviceCustomKeyAction::Dictation;
     async_runtime::spawn_blocking(move || {
-        let command = format!("DEVICE:SET knob_rotation={mode}");
+        let command = format!(
+            "DEVICE:SET knob_rotation={mode} e11r={}",
+            if ec11_fast_recording { 1 } else { 0 }
+        );
         let deadline = Instant::now() + Duration::from_secs(90);
         let mut attempt = 0u32;
         let last_err = loop {
@@ -4636,7 +4642,8 @@ fn sync_device_knob_rotation_action_to_firmware(inner: &Arc<Inner>, reason: &'st
             ) {
                 Ok(()) => {
                     log::info!(
-                        "[device-knob] synced knob_rotation setting via active capture mode={mode} reason={reason} attempts={attempt}"
+                        "[device-knob] synced knob_rotation and EC11 fast-recording settings via active capture mode={mode} fast_recording={} reason={reason} attempts={attempt}",
+                        ec11_fast_recording as u8,
                     );
                     return;
                 }
@@ -4649,7 +4656,8 @@ fn sync_device_knob_rotation_action_to_firmware(inner: &Arc<Inner>, reason: &'st
             }
         };
         log::warn!(
-            "[device-knob] knob_rotation active-capture sync deferred reason={reason} mode={mode} attempts={attempt} last_error={}",
+            "[device-knob] knob_rotation/EC11 fast-recording active-capture sync deferred reason={reason} mode={mode} fast_recording={} attempts={attempt} last_error={}",
+            ec11_fast_recording as u8,
             last_err
         );
     });
@@ -9725,7 +9733,8 @@ mod tests {
         assert!(
             body.contains("native_windows_hid_pairing_addresses")
                 && body.contains("native Windows HID pairing remains installed; retrying direct GATT without pairing cleanup")
-                && body.contains("!native_windows_hid_pairing_visible\n        && embedded_ble_background_pairasync_is_authorized"),
+                && body.contains("let manual_unpair_hold = !native_windows_hid_pairing_blocks_pairasync")
+                && body.contains("let automatic_cleanup_allowed = !native_windows_hid_pairing_blocks_pairasync"),
             "a native Windows HID pairing must also stay out of the manual-delete hold after a transient GATT failure"
         );
         let listener_loop_start = source

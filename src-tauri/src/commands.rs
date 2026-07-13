@@ -461,6 +461,7 @@ fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPrefe
         || previous.device_plugged_low_power_enabled != next.device_plugged_low_power_enabled
         || previous.device_battery_auto_shutdown_minutes
             != next.device_battery_auto_shutdown_minutes
+        || device_ec11_fast_recording_enabled(previous) != device_ec11_fast_recording_enabled(next)
         || previous.device_ble_name != next.device_ble_name
 }
 
@@ -502,6 +503,11 @@ fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationActio
         DeviceKnobRotationAction::ScreenBrightness => "screen_brightness",
         DeviceKnobRotationAction::Disabled => "disabled",
     }
+}
+
+fn device_ec11_fast_recording_enabled(prefs: &UserPreferences) -> bool {
+    prefs.dictation_input_source == DictationInputSource::EmbeddedBle
+        && prefs.device_custom_keys.knob.action == DeviceCustomKeyAction::Dictation
 }
 
 struct DeviceSettingPacket {
@@ -614,6 +620,19 @@ fn device_setting_packets_for_changes(
         packets.push(DeviceSettingPacket {
             id: "knob_rotation",
             command: format!("DEVICE:SET knob_rotation={mode}"),
+        });
+    }
+    if device_ec11_fast_recording_enabled(previous) != device_ec11_fast_recording_enabled(next) {
+        packets.push(DeviceSettingPacket {
+            id: "ec11_fast_recording",
+            command: format!(
+                "DEVICE:SET e11r={}",
+                if device_ec11_fast_recording_enabled(next) {
+                    1
+                } else {
+                    0
+                }
+            ),
         });
     }
     if previous.device_plugged_low_power_idle_minutes != next.device_plugged_low_power_idle_minutes
@@ -9712,6 +9731,28 @@ mod tests {
                     && command != "DEVICE:SET low_power_idle_minutes=7"
             }),
             "Type settings save must not reintroduce global brightness or merged low-power writes"
+        );
+    }
+
+    #[test]
+    fn settings_save_syncs_ec11_fast_recording_only_for_dictation() {
+        let previous = UserPreferences::default();
+        let mut next = previous.clone();
+        next.device_custom_keys.knob.action = DeviceCustomKeyAction::Disabled;
+
+        assert!(
+            super::device_firmware_settings_changed(&previous, &next),
+            "changing EC11 away from Dictation must update firmware's fast recording gate"
+        );
+        let commands = super::device_setting_packets_for_changes(&previous, &next)
+            .into_iter()
+            .map(|packet| packet.command)
+            .collect::<Vec<_>>();
+        assert!(
+            commands
+                .iter()
+                .any(|command| command == "DEVICE:SET e11r=0"),
+            "non-dictation EC11 mappings must disable immediate firmware recording"
         );
     }
 

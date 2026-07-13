@@ -14043,7 +14043,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .expect("persisted startup notify path should follow recent PairAsync recovery");
             let persisted_body = &open_body[persisted_branch_start..];
             let persisted_index = persisted_body
-                .find("open_notify_target_for_startup_cached_address(address)")
+                .find("open_notify_target_for_startup_cached_address(address,")
                 .expect("persisted startup notify path should still exist");
             let selector_index = persisted_body
                 .find("let selector = GattDeviceService::GetDeviceSelectorFromUuid")
@@ -14222,8 +14222,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             assert!(notify_body.contains(
                 "selected native Windows HID startup audio notify address={address:012X}"
             ));
+            let legacy_advertisement_helper = format!(
+                "{}{}",
+                "open_notify_target_from_native_windows_hid_", "advertisement"
+            );
             assert!(
-                !source.contains("open_notify_target_from_native_windows_hid_advertisement"),
+                !source.contains(&legacy_advertisement_helper),
                 "native HID pairing can be connected but no longer discoverable by advertisement, so takeover must not wait for an advertisement"
             );
         }
