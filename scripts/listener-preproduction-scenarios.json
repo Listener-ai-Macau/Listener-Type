@@ -8,10 +8,13 @@
       "status": "physical_edge_evidence_pending",
       "recorded_at": "2026-07-13",
       "requirement": "From the physical EC11 press edge in connected low-power Idle, audio must begin within 50 ms. Preserve the accepted EC11 single/double-click behavior and do not swallow the first action; do not redefine the timer to start only after the existing single-click classification window.",
-      "last_machine_evidence": "../Listener-Firmware/.cache/validation/idle-audio-wake-20260713/machine-validation-summary.json"
+      "last_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-diagnostic-20260713/physical-gate-ready-pending-press.json",
+      "diagnostic_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-diagnostic-20260713/machine-validation-summary.json",
+      "previous_machine_evidence": "../Listener-Firmware/.cache/validation/idle-audio-wake-20260713/machine-validation-summary.json",
+      "acceptance_blocker": "No current artifact contains a real EC11 physical press edge followed by voice_rec_ctrl EC11 fast Idle recording dispatch with press_to_control_ms <= 50."
     },
     "recording_chain_quality_speed_no_regression": {
-      "status": "active_machine_triage",
+      "status": "pending_operator_acceptance",
       "recorded_at": "2026-07-13",
       "priority": "highest",
       "requirement": "Product-owner priority is now the end-to-end recording chain before the remaining release gates: improve the recording path while preserving accuracy, wake speed, completion speed, and a durable no-regression contract so fixes do not repeatedly regress.",
@@ -22,7 +25,27 @@
         "Regression evidence must run the root-cause guard that protects recording latency, BLE audio control, and accepted preview stability."
       ],
       "baseline_contract": "scripts/performance-baselines.json#contracts.recording_low_latency",
-      "related_scenario_id": "recording-response-and-led-priority"
+      "related_scenario_id": "recording-response-and-led-priority",
+      "last_machine_evidence": [
+        ".cache/validation/recording-chain-regression-20260713-live-repro/machine-validation-summary.json",
+        ".cache/validation/recording-chain-regression-20260713-live-repro/live-repro-log-excerpt.txt",
+        ".cache/validation/recording-chain-quality-20260713-installed-retest-short-sequential/embedded-file-smoke.20260713-224039.json",
+        ".cache/validation/recording-chain-quality-20260713-installed-retest-delayed-sequential/embedded-file-smoke.20260713-224056.json",
+        ".cache/validation/recording-chain-regression-20260713-live-repro/repro-and-installed-retest-log-excerpt.txt",
+        ".cache/validation/recording-chain-regression-20260713-post-fix-installed/machine-validation-summary.json",
+        ".cache/validation/recording-chain-regression-20260713-post-fix-installed/file-smoke-16k/embedded-file-smoke.20260713-230010.json",
+        ".cache/validation/recording-chain-regression-20260713-post-fix-installed/non-force-raw/non-force-raw-polish-fallback-summary.json",
+        ".cache/validation/recording-chain-regression-20260713-post-fix-installed/non-force-raw/non-force-raw-log-excerpt.txt",
+        ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/machine-validation-summary.json",
+        ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/file-smoke-16k/embedded-file-smoke.20260713-234639.json",
+        ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/file-smoke-low10/embedded-file-smoke.20260713-234656.json",
+        ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/installed-file-smoke-tail-and-gain-log-excerpt.txt"
+      ],
+      "latest_operator_observation": "During live installed-Type use, the operator saw recording text regress/repeat and then selected failure again with note `完全不行, 你看看日志修吧, 你先修好再给我验收`. Latest machine evidence now covers log-based repair, low-level Volcengine streaming gain, terminal short-tail preview cleanup, capsule partial no-backtracking, virtual-audio accuracy, and installed Program Files MSI validation, but focused human re-review is still pending.",
+      "operator_acceptance_evidence": ".cache/validation/recording-chain-regression-20260713-post-fix-installed/operator-review-recording-chain-1-of-1.json",
+      "operator_note_triage_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-rereview-note-triage.json",
+      "operator_review_timeout_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-review-recording-chain-1-of-1-timeout.json",
+      "acceptance_blocker": "Post-tail-and-gain-fix installed Program Files Type machine evidence is PASS for normal/low-volume virtual audio accuracy, duplicate-preview no-regression, low-level streaming gain without clipping, static/build/full-lib gates, and installed MSI hash validation, but the focused recording-chain operator re-review has not yet returned PASS."
     }
   },
   "scenarios": [

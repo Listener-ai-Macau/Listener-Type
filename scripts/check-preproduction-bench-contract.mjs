@@ -16,20 +16,24 @@ const firmwareOtaPanelPath = path.join(repoRoot, "src", "pages", "settings", "Fi
 const commandsPath = path.join(repoRoot, "src-tauri", "src", "commands.rs");
 const coordinatorPath = path.join(repoRoot, "src-tauri", "src", "coordinator.rs");
 
-const bench = fs.readFileSync(benchScript, "utf8");
-const collect = fs.readFileSync(collectScript, "utf8");
-const activeBle = fs.readFileSync(activeBleScript, "utf8");
-const focusedBleHuman = fs.readFileSync(focusedBleHumanScript, "utf8");
-const human = fs.readFileSync(humanScript, "utf8");
-const operatorNoteTriage = fs.readFileSync(operatorNoteTriageScript, "utf8");
+function readText(filePath) {
+  return fs.readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
+}
+
+const bench = readText(benchScript);
+const collect = readText(collectScript);
+const activeBle = readText(activeBleScript);
+const focusedBleHuman = readText(focusedBleHumanScript);
+const human = readText(humanScript);
+const operatorNoteTriage = readText(operatorNoteTriageScript);
 const totalReviewAdvance = fs.existsSync(totalReviewAdvanceScript)
-  ? fs.readFileSync(totalReviewAdvanceScript, "utf8")
+  ? readText(totalReviewAdvanceScript)
   : "";
-const scenarioManifest = JSON.parse(fs.readFileSync(scenarioManifestPath, "utf8"));
-const deviceSection = fs.readFileSync(deviceSectionPath, "utf8");
-const firmwareOtaPanel = fs.readFileSync(firmwareOtaPanelPath, "utf8");
-const commands = fs.readFileSync(commandsPath, "utf8");
-const coordinator = fs.readFileSync(coordinatorPath, "utf8");
+const scenarioManifest = JSON.parse(readText(scenarioManifestPath));
+const deviceSection = readText(deviceSectionPath);
+const firmwareOtaPanel = readText(firmwareOtaPanelPath);
+const commands = readText(commandsPath);
+const coordinator = readText(coordinatorPath);
 
 const scenarios = Array.isArray(scenarioManifest.scenarios) ? scenarioManifest.scenarios : [];
 const requiredStepIds = scenarios.map((scenario) => scenario.id);

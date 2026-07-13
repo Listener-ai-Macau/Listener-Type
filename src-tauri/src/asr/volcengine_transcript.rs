@@ -205,45 +205,88 @@ pub(super) fn trim_repeated_short_streaming_tail(text: &str) -> String {
     const MIN_SHORT_TAIL_CHARS: usize = 3;
     const MAX_SHORT_TAIL_CHARS: usize = 6;
     const MIN_PREFIX_CHARS: usize = 12;
+    const MIN_TERMINAL_PREFIX_CHARS: usize = 6;
     const MAX_RECENT_ECHO_GAP_CHARS: usize = 32;
 
     let trimmed = text.trim();
+    if let Some(boundary) = last_sentence_terminal_boundary(trimmed) {
+        let prefix = trimmed[..boundary].trim_end();
+        let suffix = trimmed[boundary..].trim_start();
+        if let Some(cleaned) = trim_streaming_short_echo_tail(
+            prefix,
+            suffix,
+            MIN_SHORT_TAIL_CHARS,
+            MAX_SHORT_TAIL_CHARS,
+            MIN_TERMINAL_PREFIX_CHARS,
+            MAX_RECENT_ECHO_GAP_CHARS,
+            true,
+        ) {
+            return cleaned;
+        }
+    }
+
     let Some((space_start, space_end)) = last_whitespace_run(trimmed) else {
         return trimmed.to_string();
     };
     let prefix = trimmed[..space_start].trim_end();
     let suffix = trimmed[space_end..].trim_start();
+    trim_streaming_short_echo_tail(
+        prefix,
+        suffix,
+        MIN_SHORT_TAIL_CHARS,
+        MAX_SHORT_TAIL_CHARS,
+        MIN_PREFIX_CHARS,
+        MAX_RECENT_ECHO_GAP_CHARS,
+        false,
+    )
+    .unwrap_or_else(|| trimmed.to_string())
+}
+
+fn trim_streaming_short_echo_tail(
+    prefix: &str,
+    suffix: &str,
+    min_short_tail_chars: usize,
+    max_short_tail_chars: usize,
+    min_prefix_chars: usize,
+    max_recent_echo_gap_chars: usize,
+    allow_terminal_revision_fuzz: bool,
+) -> Option<String> {
     if prefix.is_empty() || suffix.is_empty() {
-        return trimmed.to_string();
+        return None;
     }
-    if suffix
-        .chars()
-        .any(|ch| is_sentence_terminal_punctuation(ch) || ch == '，' || ch == ',' || ch == '、')
-    {
-        return trimmed.to_string();
+    if suffix.chars().any(|ch| {
+        is_sentence_terminal_punctuation(ch)
+            || (!allow_terminal_revision_fuzz && matches!(ch, '，' | ',' | '、'))
+    }) {
+        return None;
     }
 
     let suffix_compact = compact_transcript_for_duplicate_check(suffix);
     let suffix_len = suffix_compact.chars().count();
-    if !(MIN_SHORT_TAIL_CHARS..=MAX_SHORT_TAIL_CHARS).contains(&suffix_len) {
-        return trimmed.to_string();
+    if !(min_short_tail_chars..=max_short_tail_chars).contains(&suffix_len) {
+        return None;
     }
     if !suffix_compact.chars().all(is_cjk_unified_ideograph) {
-        return trimmed.to_string();
+        return None;
     }
 
     let prefix_compact = compact_transcript_for_duplicate_check(prefix);
     let prefix_len = prefix_compact.chars().count();
-    if prefix_len < MIN_PREFIX_CHARS {
-        return trimmed.to_string();
+    if prefix_len < min_prefix_chars {
+        return None;
     }
 
-    if recent_short_tail_echo_gap(&prefix_compact, &suffix_compact, MAX_RECENT_ECHO_GAP_CHARS)
-        .is_some()
+    if recent_short_tail_echo_gap(
+        &prefix_compact,
+        &suffix_compact,
+        max_recent_echo_gap_chars,
+        allow_terminal_revision_fuzz,
+    )
+    .is_some()
     {
-        prefix.to_string()
+        Some(prefix.to_string())
     } else {
-        trimmed.to_string()
+        None
     }
 }
 
@@ -251,6 +294,7 @@ fn recent_short_tail_echo_gap(
     prefix_compact: &str,
     suffix_compact: &str,
     max_gap_chars: usize,
+    allow_terminal_revision_fuzz: bool,
 ) -> Option<usize> {
     let prefix_chars: Vec<char> = prefix_compact.chars().collect();
     let suffix_chars: Vec<char> = suffix_compact.chars().collect();
@@ -258,7 +302,8 @@ fn recent_short_tail_echo_gap(
     if suffix_len == 0 || prefix_chars.len() < suffix_len {
         return None;
     }
-    let max_distance = usize::from(suffix_len >= 3);
+    let max_distance =
+        usize::from(suffix_len >= 3) + usize::from(allow_terminal_revision_fuzz && suffix_len >= 6);
     for start in (0..=prefix_chars.len() - suffix_len).rev() {
         let gap = prefix_chars.len().saturating_sub(start + suffix_len);
         if gap > max_gap_chars {
@@ -798,10 +843,6 @@ fn is_timed_segment_revision_match(
     const CONTAINMENT_TOLERANCE_MS: i64 = 500;
     const MIN_OVERLAP_RATIO: f64 = 0.82;
 
-    if !transcript_segments_share_revision_origin(&existing.text, &incoming.text) {
-        return false;
-    }
-
     let Some(existing_end) = existing.end_ms else {
         return false;
     };
@@ -815,7 +856,18 @@ fn is_timed_segment_revision_match(
     let existing_covers_incoming = existing.start_ms
         <= incoming.start_ms + CONTAINMENT_TOLERANCE_MS
         && existing_end + CONTAINMENT_TOLERANCE_MS >= incoming_end;
-    if incoming_covers_existing || existing_covers_incoming {
+    let one_segment_covers_the_other = incoming_covers_existing || existing_covers_incoming;
+    if !transcript_segments_share_revision_origin(&existing.text, &incoming.text)
+        && !(one_segment_covers_the_other
+            && transcript_segments_share_short_prefix_revision_origin(
+                &existing.text,
+                &incoming.text,
+            ))
+    {
+        return false;
+    }
+
+    if one_segment_covers_the_other {
         return true;
     }
 
@@ -861,6 +913,17 @@ fn transcript_segments_share_revision_origin(left: &str, right: &str) -> bool {
 
     let distance = char_edit_distance(&left, &right);
     (distance as f64 / longer_len as f64) <= MAX_REVISION_CER
+}
+
+fn transcript_segments_share_short_prefix_revision_origin(left: &str, right: &str) -> bool {
+    const MIN_SHORTER_CHARS: usize = 6;
+    const MIN_COMMON_PREFIX_CHARS: usize = 4;
+
+    let left = compact_transcript_for_duplicate_check(left);
+    let right = compact_transcript_for_duplicate_check(right);
+    let shorter_len = left.chars().count().min(right.chars().count());
+    shorter_len >= MIN_SHORTER_CHARS
+        && common_prefix_char_count(&left, &right) >= MIN_COMMON_PREFIX_CHARS
 }
 
 fn common_suffix_char_count(left: &str, right: &str) -> usize {
@@ -1160,6 +1223,30 @@ mod tests {
     }
 
     #[test]
+    fn trim_repeated_short_streaming_tail_removes_terminal_suffix_echo() {
+        assert_eq!(
+            trim_repeated_short_streaming_tail("帮我录音，怎么退？怎么退"),
+            "帮我录音，怎么退？"
+        );
+    }
+
+    #[test]
+    fn trim_repeated_short_streaming_tail_removes_terminal_prefix_echo_revision() {
+        assert_eq!(
+            trim_repeated_short_streaming_tail("帮我录音吧。会，怎么退？帮我录音，怎么"),
+            "帮我录音吧。会，怎么退？"
+        );
+    }
+
+    #[test]
+    fn trim_repeated_short_streaming_tail_keeps_short_intentional_repeat() {
+        assert_eq!(
+            trim_repeated_short_streaming_tail("怎么退？怎么退"),
+            "怎么退？怎么退"
+        );
+    }
+
+    #[test]
     fn trim_repeated_short_streaming_tail_keeps_new_short_continuation() {
         assert_eq!(
             trim_repeated_short_streaming_tail("现在继续做长录音预览测试 后续"),
@@ -1235,6 +1322,56 @@ mod tests {
             timed_segments: vec![TranscriptSegment {
                 start_ms: 880,
                 end_ms: Some(7902),
+                text: final_text.into(),
+            }],
+        };
+
+        let (merged, segments) =
+            merge_streaming_candidate(previous_text, &previous_segments, candidate);
+
+        assert_eq!(merged, final_text);
+        assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn merge_streaming_candidate_replaces_short_overlapping_two_pass_revision() {
+        let previous_text = "我现在正在印象";
+        let final_text = "我现在正在迎接他们。";
+        let previous_segments = vec![TranscriptSegment {
+            start_ms: 1000,
+            end_ms: Some(2099),
+            text: previous_text.into(),
+        }];
+        let candidate = TranscriptCandidate {
+            text: final_text.into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 560,
+                end_ms: Some(2582),
+                text: final_text.into(),
+            }],
+        };
+
+        let (merged, segments) =
+            merge_streaming_candidate(previous_text, &previous_segments, candidate);
+
+        assert_eq!(merged, final_text);
+        assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn merge_streaming_candidate_replaces_covered_short_prefix_stop_revision() {
+        let previous_text = "帮我录音，怎么";
+        let final_text = "帮我录音吧。会，怎么退？";
+        let previous_segments = vec![TranscriptSegment {
+            start_ms: 1240,
+            end_ms: Some(2799),
+            text: previous_text.into(),
+        }];
+        let candidate = TranscriptCandidate {
+            text: final_text.into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 840,
+                end_ms: Some(3342),
                 text: final_text.into(),
             }],
         };
