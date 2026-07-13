@@ -91,6 +91,7 @@ const EMBEDDED_BLE_RECOVERY_PAIRING_ADV_SCAN_TIMEOUT: Duration = Duration::from_
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);
 const EMBEDDED_BLE_WAKE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(12);
+const EMBEDDED_BLE_IDLE_AUDIO_WAKE_TARGET: Duration = Duration::from_millis(200);
 const EMBEDDED_BLE_RECORDING_CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const EMBEDDED_BLE_PAIRING_CONFIRMATION_HOLD: Duration = Duration::from_secs(180);
@@ -2767,19 +2768,20 @@ async fn handle_device_dictation_action(
         }
         if let Some(started_at) = wake_started_at {
             let elapsed_ms = started_at.elapsed().as_millis();
+            let target_ms = EMBEDDED_BLE_IDLE_AUDIO_WAKE_TARGET.as_millis();
             crate::timeline::mark(
                 "backend.device_key",
                 "idle_audio_notify_ready",
                 format!(
-                    "key={} gesture={} elapsed_ms={elapsed_ms} target_ms=500 met={}",
+                    "key={} gesture={} elapsed_ms={elapsed_ms} target_ms={target_ms} met={}",
                     key.label(),
                     gesture.label(),
-                    elapsed_ms <= 500,
+                    elapsed_ms <= target_ms,
                 ),
             );
             log::info!(
-                "[embedded-ble] device-key Idle audio notify ready elapsed_ms={elapsed_ms} target_ms=500 met={}",
-                elapsed_ms <= 500,
+                "[embedded-ble] device-key Idle audio notify ready elapsed_ms={elapsed_ms} target_ms={target_ms} met={}",
+                elapsed_ms <= target_ms,
             );
         }
 
