@@ -16,6 +16,15 @@
       "diagnostic_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-diagnostic-20260713/machine-validation-summary.json",
       "previous_machine_evidence": "../Listener-Firmware/.cache/validation/idle-audio-wake-20260713/machine-validation-summary.json"
     },
+    "computer_switch_second_host_deferred": {
+      "status": "deferred_by_product_owner",
+      "recorded_at": "2026-07-14T23:00:00+08:00",
+      "source": "Step 14/20 operator prompt: selected=通过; non-empty note=这个先跳过, 做下一项.",
+      "requirement": "Do not convert this operator-directed deferment into a PASS. The old-Type cross-host pairing arbitration repair has machine validation and an installed Program Files MSI, but the actual second Windows host did not perform the requested pairing action in this review window.",
+      "current_scope": "computer-switch-product-flow remains the active total-review cursor and a release NO-GO until a real second BLE host completes the native pairing path while the old Type instance proves it did not clean the local cache or run PairAsync.",
+      "evidence": ".cache/validation/preproduction-human-review-total-20260712-081300-step-14-second-host-20260714-2235/operator-feedback-triage-20260714-2300-owner-deferred.json",
+      "next_action": "When a second Windows BLE host is available, reopen only Step 14 with the installed Program Files Type and capture both hosts' pairing outcome plus the old Type log arbitration lines."
+    },
     "accepted_human_regression_contract": {
       "status": "accepted",
       "recorded_at": "2026-07-14",
