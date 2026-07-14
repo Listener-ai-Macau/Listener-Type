@@ -1630,7 +1630,7 @@ if ($resumeExistingFullReview) {
 
 $records = [System.Collections.Generic.List[object]]::new()
 $stoppedAfterOperatorNote = $false
-$reviewScopeLabel = if ($requestedStepIds.Count -gt 0) { "聚焦验收 " } else { "" }
+$reviewScopeLabel = if ($requestedStepIds.Count -gt 0) { "聚焦验收 " } else { "总体验收 " }
 $overallIndexById = @{}
 for ($overallStepIndex = 0; $overallStepIndex -lt $allSteps.Count; $overallStepIndex++) {
     $overallIndexById[[string]$allSteps[$overallStepIndex].id] = $overallStepIndex + 1
