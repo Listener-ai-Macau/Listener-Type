@@ -25,9 +25,11 @@
       "root_contract_evidence": "../../ai-collaboration-workflow/.cache/v1.0.2-release-gate/20260714-180356/summary.json"
     },
     "recording_chain_quality_speed_no_regression": {
-      "status": "in_progress",
+      "status": "accepted",
       "recorded_at": "2026-07-14",
+      "accepted_at": "2026-07-14T19:23:48+08:00",
       "priority": "highest",
+      "closure": "The installed Program Files candidate passed the strict 12-session normal/low10 recording baseline, focused human acceptance, and the cross-repo release gate. Future recording work must preserve these accepted metrics and reopen this contract only when it touches the recording, ASR, capsule-preview, BLE-audio, or completion risk surface.",
       "requirement": "Product-owner priority is now the end-to-end recording chain before the remaining release gates: improve the recording path while preserving accuracy, wake speed, completion speed, and a durable no-regression contract so fixes do not repeatedly regress.",
       "current_preview_quality_feedback": {
         "status": "accepted",
@@ -87,8 +89,9 @@
         "Capsule preview quality is part of the recording contract: the preview is a stabilized partial transcript, the final transcript is authoritative, and release evidence must measure preview-to-final consistency across the visible preview stream, not only the final text."
       ],
       "stricter_metric_revision": {
-        "status": "in_progress",
+        "status": "accepted",
         "recorded_at": "2026-07-14",
+        "accepted_at": "2026-07-14T19:23:48+08:00",
         "source": "Product-owner steering during Listener 1.0.2 preproduction recording-chain acceptance: recording is the core competitive capability, sensitivity must remain consistently high, preview must match the accurate transcript path, and regressions must identify whether the cause is external provider/network or internal pipeline.",
         "requirements": [
           "Tighten the recording metric instead of accepting one good sample: accuracy, wake/first-preview speed, completion speed, low-volume sensitivity, preview smoothness, and no-regression stability must be validated together.",
@@ -116,7 +119,8 @@
           "Every smoke report must include issue_attribution.primary; PASS release runs require primary=none, while FAIL runs must classify external_provider_credentials, external_provider_network, external_provider_unavailable, internal_ble_transport, internal_recording_pipeline, internal_insertion_pipeline, or internal_preview_pipeline."
         ],
         "machine_evidence_status": "A retained local human WAV was replayed twice through the latest installed Program Files Type after the authoritative cumulative-snapshot repair. Both Volcengine bigmodel_async finals were identical; after the first two-pass correction, neither capsule timeline returned to the old stream branch. This repairs the classified internal preview-pipeline regression in machine evidence only. It does not score semantic accuracy against the literal because the operator stated the retained wording may have differed, and it does not accept strict full-chain speed.",
-        "operator_acceptance_status": "not offered: product owner explicitly requested virtual/diagnostic work be fixed before human acceptance",
+        "pre_acceptance_operator_status": "not offered: product owner explicitly requested virtual/diagnostic work be fixed before human acceptance",
+        "operator_acceptance_status": "accepted: the focused installed Program Files recording sensitivity/stability review passed, and the non-empty polish-fallback observation was triaged and re-reviewed as accepted.",
         "latest_real_human_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/machine-observation-shifted-preview-rerun-4.json",
         "latest_real_human_post_fix_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/post-fix-real-human-session-be50cf8f.json",
     "latest_operator_note_triage": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-note-triage-20260714-0658-shared-merge-rerun.json",
@@ -171,7 +175,8 @@
       "previous_operator_acceptance_evidence": ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/operator-review-recording-chain-1-of-1-result.json",
       "previous_operator_note_triage_evidence": ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/operator-rereview-note-triage-20260714.json",
       "operator_review_timeout_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-review-recording-chain-1-of-1-timeout-20260714-0033.json",
-      "acceptance_blocker": "2026-07-14 installed Program Files long randomized session bc1b3ebb-399a-4edb-bac0-91c9d4f67780 had missing_packets=0 and a core Volcengine final that matched the operator-observed inaccurate text. The preview/final branch repair held, but 801 short PCM chunks were independently boosted with max_gain=16.00. Replace that stateless gain path with voice-gated session AGC, retain a new real-device acoustic-attribution artifact, and rerun a correctly bound long human sample before human acceptance."
+      "resolved_acceptance_blocker": "2026-07-14 installed Program Files long randomized session bc1b3ebb-399a-4edb-bac0-91c9d4f67780 had missing_packets=0 and a core Volcengine final that matched the operator-observed inaccurate text. The preview/final branch repair held, but 801 short PCM chunks were independently boosted with max_gain=16.00. The stateless gain path was replaced with voice-gated session AGC, followed by real-device acoustic attribution, strict installed-path validation, and focused human acceptance.",
+      "acceptance_closure": "The accepted baseline is 12 unique installed Program Files sessions, at least six normal and six low10 runs, retained-fixture accuracy=1.0, missing_packets=0, normal first preview <=1500 ms, low10 first preview <=2200 ms, per-group spread <=600 ms, maximum preview gap <=1500 ms, Done <=800 ms, preview/final CER <=0.10, preview coverage >=0.90, core Volcengine engine identity, and explicit issue attribution. The release gate at ../../ai-collaboration-workflow/.cache/v1.0.2-release-gate/20260714-191006/summary.json passed after this acceptance."
     }
   },
   "scenarios": [
