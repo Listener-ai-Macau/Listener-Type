@@ -15,26 +15,33 @@ const checks = [
   ['performance baseline contract', 'npm run check:performance-baselines'],
   ['frontend verification', 'npm run verify'],
   ['updater manifest generation', 'node scripts/write-updater-manifest.test.mjs'],
-  ['tauri library tests', 'cargo test --manifest-path src-tauri/Cargo.toml --lib'],
+  [
+    'tauri library tests',
+    'cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1',
+    { LISTENER_TYPE_DISABLE_BACKGROUND_BLE: '1' },
+  ],
   ['firmware OTA headless helper tests', 'cargo test --manifest-path tools/firmware_ota_headless/Cargo.toml'],
 ];
 
-function runCommand(commandLine) {
+function runCommand(commandLine, environment = {}) {
+  const env = { ...process.env, ...environment };
   if (process.platform === 'win32') {
     return spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandLine], {
       cwd: process.cwd(),
+      env,
       stdio: 'inherit',
     });
   }
   return spawnSync('sh', ['-lc', commandLine], {
     cwd: process.cwd(),
+    env,
     stdio: 'inherit',
   });
 }
 
-for (const [label, commandLine] of checks) {
+for (const [label, commandLine, environment] of checks) {
   console.log(`\n=== ${label} ===`);
-  const result = runCommand(commandLine);
+  const result = runCommand(commandLine, environment);
   if (result.error) {
     console.error(result.error.message);
     process.exit(1);

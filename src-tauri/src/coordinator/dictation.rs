@@ -1418,7 +1418,9 @@ fn stabilize_embedded_audio_final_supplemental_preview_with_provider_authority(
         return embedded_audio_final_supplement_adds_decorative_progress(current, candidate)
             .then(|| candidate.to_string());
     }
-    if embedded_audio_final_supplement_is_brief_bounded_revision(&current_key, &candidate_key) {
+    if authoritative_two_pass
+        && embedded_audio_final_supplement_is_brief_bounded_revision(&current_key, &candidate_key)
+    {
         return Some(candidate.to_string());
     }
     let current_key_chars = current_key.chars().count();
@@ -5637,7 +5639,7 @@ mod tests {
         );
         assert_eq!(
             stabilize_embedded_audio_final_supplemental_preview(None, "帮我录音"),
-            None
+            Some("帮我录音".to_string())
         );
         assert_eq!(
             stabilize_embedded_audio_final_supplemental_preview(Some("帮我录音"), "帮我录音。"),

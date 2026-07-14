@@ -71,6 +71,18 @@ function Invoke-External {
   }
 }
 
+function Invoke-ListenerTypeLibraryTest {
+  param([Parameter(Mandatory = $true)][string[]]$CargoArgs)
+
+  $previous = [Environment]::GetEnvironmentVariable("LISTENER_TYPE_DISABLE_BACKGROUND_BLE", "Process")
+  [Environment]::SetEnvironmentVariable("LISTENER_TYPE_DISABLE_BACKGROUND_BLE", "1", "Process")
+  try {
+    Invoke-External "cargo" $CargoArgs $tauriRoot
+  } finally {
+    [Environment]::SetEnvironmentVariable("LISTENER_TYPE_DISABLE_BACKGROUND_BLE", $previous, "Process")
+  }
+}
+
 function Join-ProcessArguments {
   param([string[]]$ProcessArgs = @())
 
@@ -321,9 +333,9 @@ try {
 
     Invoke-Gate "rust format and BLE/OTA tests" {
       Invoke-External "cargo" @("fmt", "--", "--check") $tauriRoot
-      Invoke-External "cargo" @("test", "embedded_ble_", "--lib") $tauriRoot
-      Invoke-External "cargo" @("test", "device_ble_name", "--lib") $tauriRoot
-      Invoke-External "cargo" @("test", "firmware_ota", "--lib") $tauriRoot
+      Invoke-ListenerTypeLibraryTest @("test", "embedded_ble_", "--lib", "--", "--test-threads=1")
+      Invoke-ListenerTypeLibraryTest @("test", "device_ble_name", "--lib", "--", "--test-threads=1")
+      Invoke-ListenerTypeLibraryTest @("test", "firmware_ota", "--lib", "--", "--test-threads=1")
     }
 
     Invoke-Gate "preproduction human review script smoke" {
