@@ -164,10 +164,11 @@ pub struct BleDevicePairingPromptResult {
     pub details: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ListenerRecoveryPairingAdvertisementProbe {
     pub visible: bool,
     pub has_random_identity: bool,
+    pub addresses: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -520,6 +521,12 @@ fn crc32(bytes: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+const EC11_HARDWARE_RECOVERY_NOTICE: &[u8] = b"listener-ec11-recovery-v1";
+
+fn is_ec11_hardware_recovery_notice(notification: &[u8]) -> bool {
+    notification == EC11_HARDWARE_RECOVERY_NOTICE
 }
 
 fn is_terminal_notification(notification: &[u8]) -> bool {
@@ -1321,22 +1328,7 @@ mod windows_ble {
             Err(err) => errors.push(err),
         }
 
-        if candidates.is_empty() {
-            if errors.is_empty() {
-                return Ok(crate::embedded_ble::BleDeviceUnpairResult {
-                    status: crate::embedded_ble::BleDeviceUnpairStatus::NotFound,
-                    attempted: false,
-                    matched_devices: 0,
-                    unpaired_devices: 0,
-                    already_unpaired_devices: 0,
-                    failed_devices: 0,
-                    needs_user_action: true,
-                    details: vec![
-                        "No Listener pairing entry was found for the known recovery address."
-                            .to_string(),
-                    ],
-                });
-            }
+        if !errors.is_empty() {
             return Err(errors.join("; "));
         }
 
@@ -1350,6 +1342,13 @@ mod windows_ble {
             needs_user_action: true,
             details: Vec::new(),
         };
+
+        if candidates.is_empty() {
+            result.details.push(
+                "No BLE DeviceInformation pairing entry was found for the known recovery address; checking local Windows device/cache records."
+                    .to_string(),
+            );
+        }
 
         for candidate in candidates {
             match unpair_listener_candidate(&candidate) {
@@ -1375,6 +1374,105 @@ mod windows_ble {
                         .push(format!("Could not fast-remove {}: {err}", candidate.label));
                 }
             }
+        }
+
+        match listener_pnp_remove_candidates(&target_addresses, &target_names) {
+            Ok(pnp_candidates) => {
+                result.matched_devices = result
+                    .matched_devices
+                    .saturating_add(pnp_candidates.len() as u32);
+                for candidate in pnp_candidates {
+                    if let Some(address) =
+                        parse_bluetooth_address_from_device_id(&candidate.instance_id)
+                    {
+                        push_unique_address(&mut target_addresses, address);
+                    }
+                    match remove_pnp_device_candidate(&candidate) {
+                        Ok(DeviceUnpairOutcome::Unpaired) => {
+                            result.unpaired_devices = result.unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Removed stale Listener device node for known recovery address: {}",
+                                candidate.label
+                            ));
+                        }
+                        Ok(DeviceUnpairOutcome::AlreadyUnpaired) => {
+                            result.already_unpaired_devices =
+                                result.already_unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Listener device node was already removed for known recovery address: {}",
+                                candidate.label
+                            ));
+                        }
+                        Err(err) => {
+                            result.failed_devices = result.failed_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Could not remove stale Listener device node {}: {err}",
+                                candidate.label
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                log::warn!("[embedded-ble] known-address Listener PnP stale-node cleanup unavailable: {err}");
+                result.details.push(format!(
+                    "Known-address Listener PnP stale-node cleanup unavailable: {err}"
+                ));
+            }
+        }
+
+        match bthport_listener_cache_candidates(&target_addresses, &target_names) {
+            Ok(cache_candidates) => {
+                result.matched_devices = result
+                    .matched_devices
+                    .saturating_add(cache_candidates.len() as u32);
+                for candidate in cache_candidates {
+                    if let Some(address) = candidate.address {
+                        push_unique_address(&mut target_addresses, address);
+                    }
+                    match delete_bthport_cache_candidate(&candidate) {
+                        Ok(DeviceUnpairOutcome::Unpaired) => {
+                            result.unpaired_devices = result.unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Removed stale Windows Bluetooth cache for known recovery address: {}",
+                                candidate.label
+                            ));
+                        }
+                        Ok(DeviceUnpairOutcome::AlreadyUnpaired) => {
+                            result.already_unpaired_devices =
+                                result.already_unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Windows Bluetooth cache was already removed for known recovery address: {}",
+                                candidate.label
+                            ));
+                        }
+                        Err(err) => {
+                            result.failed_devices = result.failed_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Could not remove Windows Bluetooth cache {}: {err}",
+                                candidate.label
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                log::warn!("[embedded-ble] known-address Listener BTHPORT cache cleanup unavailable: {err}");
+                result.details.push(format!(
+                    "Known-address Listener BTHPORT cache cleanup unavailable: {err}"
+                ));
+            }
+        }
+
+        if result.matched_devices == 0 {
+            result.status = crate::embedded_ble::BleDeviceUnpairStatus::NotFound;
+            result.attempted = false;
+            result.needs_user_action = true;
+            result.details.push(
+                "No local Listener pairing/cache entry remained for the known recovery address."
+                    .to_string(),
+            );
+            return Ok(result);
         }
 
         result.status = if result.unpaired_devices > 0 && result.failed_devices == 0 {
@@ -6505,6 +6603,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     return Err(reason);
                 }
             };
+            if super::is_ec11_hardware_recovery_notice(&notification) {
+                log::warn!(
+                    "[embedded-ble] capture #{capture_id}: received EC11 hardware recovery notice before pairing reset; handing recovery to Type immediately"
+                );
+                cleanup.defer_type_heartbeat_bye_until_processing_done();
+                cleanup.finish(NotifyCccdTeardown::LeaveEnabled);
+                return Err(
+                    "Listener EC11 hardware recovery notice received before pairing reset; Type must scan the matching recovery advertisement and run automatic PairAsync recovery".to_string(),
+                );
+            }
             let terminal = super::is_terminal_notification(&notification);
             let local_event = collector.handle_notification(&notification).ok();
             on_event(crate::embedded_ble::BleNotificationEvent {
@@ -9139,6 +9247,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     has_random_identity: candidates
                         .iter()
                         .any(|(_, address_type, _)| *address_type == BluetoothAddressType::Random),
+                    addresses: candidates.iter().map(|(address, _, _)| *address).collect(),
                 }
             }
             Err(err) => {
@@ -15715,6 +15824,14 @@ mod tests {
     #[test]
     fn invalid_notification_is_not_terminal() {
         assert!(!is_terminal_notification(b"not-vka1"));
+    }
+
+    #[test]
+    fn ec11_hardware_recovery_notice_is_not_audio_terminal() {
+        assert!(is_ec11_hardware_recovery_notice(
+            b"listener-ec11-recovery-v1"
+        ));
+        assert!(!is_terminal_notification(b"listener-ec11-recovery-v1"));
     }
 
     #[cfg(target_os = "windows")]

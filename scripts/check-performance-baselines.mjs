@@ -195,11 +195,31 @@ for (const key of [
   "measured_human_disconnect_to_type_heartbeat_ready_ms",
   "measured_human_recovery_adv_to_notify_ready_ms",
   "max_recovery_trigger_to_notify_ready_ms",
+  "machine_randomized_sample_count",
+  "machine_randomized_observed_max_trigger_to_type_ready_ms",
 ]) {
   requireNumber(ec11Recovery[key], `EC11 Type recovery ${key}`);
 }
-if (ec11Recovery.max_recovery_trigger_to_notify_ready_ms > 20000) {
-  fail("EC11 Type recovery notify-ready latency ceiling must not drift above 20000 ms");
+if (ec11Recovery.max_recovery_trigger_to_notify_ready_ms !== 12000) {
+  fail("EC11 Type recovery notify-ready latency ceiling must stay at the strict 12000 ms target");
+}
+if (ec11Recovery.machine_randomized_sample_count < 5) {
+  fail("EC11 Type recovery machine gate must retain at least five randomized samples");
+}
+if (
+  ec11Recovery.machine_randomized_observed_max_trigger_to_type_ready_ms >
+  ec11Recovery.max_recovery_trigger_to_notify_ready_ms
+) {
+  fail("EC11 Type recovery randomized machine evidence exceeds the strict notify-ready target");
+}
+for (const key of [
+  "machine_speed_gate_requires_all_samples",
+  "machine_speed_gate_requires_firmware_pre_reset_notice",
+  "machine_speed_gate_requires_type_pre_reset_notice",
+]) {
+  if (ec11Recovery[key] !== true) {
+    fail("EC11 Type recovery machine speed gate must keep " + key + "=true");
+  }
 }
 if (ec11Recovery.shared_type_recovery_path_required !== true) {
   fail("EC11 Type recovery must stay on the shared Type PairAsync/GATT/notify path");
@@ -226,16 +246,24 @@ if (
   fail("EC11 Type recovery baseline must cite the focused root-fix human acceptance note");
 }
 if (
-  !ec11Recovery.evidence?.includes("ec11-boundary-20260710-20s") ||
-  !ec11Recovery.evidence?.endsWith("firmware-ec11-double-observed-address.log")
+  !ec11Recovery.evidence?.includes("ec11-double-root-capture-20260714") ||
+  !ec11Recovery.evidence?.endsWith("randomized-phase-machine-speed-20260714-2120/summary.json")
 ) {
-  fail("EC11 Type recovery baseline must cite the observed-address firmware double-click artifact");
+  fail("EC11 Type recovery baseline must cite the randomized machine speed summary");
 }
 if (
-  !ec11Recovery.type_log_evidence?.includes("ec11-boundary-20260710-20s") ||
-  !ec11Recovery.type_log_evidence?.endsWith("type-log-after-human-rootfix-recovery-slice.txt")
+  !ec11Recovery.type_log_evidence?.includes("ec11-double-root-capture-20260714") ||
+  !ec11Recovery.type_log_evidence?.endsWith("type-log-pre-reset-notice-slice.txt")
 ) {
-  fail("EC11 Type recovery baseline must cite the human-run Type recovery log slice");
+  fail("EC11 Type recovery baseline must cite the pre-reset notice Type log slice");
+}
+if (
+  !ec11Recovery.historical_firmware_double_click_evidence?.includes("ec11-boundary-20260710-20s") ||
+  !ec11Recovery.historical_firmware_double_click_evidence?.endsWith("firmware-ec11-double-observed-address.log") ||
+  !ec11Recovery.historical_type_log_evidence?.includes("ec11-boundary-20260710-20s") ||
+  !ec11Recovery.historical_type_log_evidence?.endsWith("type-log-after-human-rootfix-recovery-slice.txt")
+) {
+  fail("EC11 Type recovery baseline must retain its pre-fix accepted diagnostic evidence");
 }
 if (
   !ec11Recovery.single_click_boundary_evidence?.includes("ec11-boundary-20260710-20s") ||
@@ -259,7 +287,13 @@ for (const token of [
   "embedded_ble_notify_advertisement_evidence_skips_only_the_duplicate_scan",
   "ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery",
   "Program Files\\Listener Type\\listener-type.exe",
-  "<=20000 ms",
+  "check-ec11-type-recovery-randomized.ps1",
+  "-Iterations 5",
+  "-MaxTriggerToTypeReadyMs 12000",
+  "<=12000 ms",
+  "firmware pre-reset notice",
+  "Type pre-reset notice",
+  "not a physical GPIO edge measurement",
   "Type-observed direct PairAsync",
   "no duplicate advertisement scan",
   "no paired link check",
@@ -267,6 +301,36 @@ for (const token of [
 ]) {
   if (!ec11Recovery.validation_command?.includes(token)) {
     fail(`EC11 Type recovery validation command must preserve token: ${token}`);
+  }
+}
+
+for (const scriptName of [
+  "check-ec11-type-recovery-speed.ps1",
+  "check-ec11-type-recovery-randomized.ps1",
+]) {
+  const ec11SpeedGate = readFileSync(join(repoRoot, "scripts", scriptName), "utf8");
+  for (const token of [
+    "MaxTriggerToTypeReadyMs = 12000",
+    "firmware_generated_ec11_double_after_debounce",
+    "physical_gpio_measurement = $false",
+  ]) {
+    if (!ec11SpeedGate.includes(token)) {
+      fail("EC11 Type recovery speed gate " + scriptName + " must keep token: " + token);
+    }
+  }
+}
+const ec11SingleSampleGate = readFileSync(
+  join(repoRoot, "scripts", "check-ec11-type-recovery-speed.ps1"),
+  "utf8",
+);
+for (const token of [
+  "type recovery notice sent before EC11 pairing reset",
+  "received EC11 hardware recovery notice before pairing reset",
+  "TYPE:READY",
+  "The installed Program Files Listener Type process is not running",
+]) {
+  if (!ec11SingleSampleGate.includes(token)) {
+    fail("EC11 Type recovery single-sample gate must keep token: " + token);
   }
 }
 
