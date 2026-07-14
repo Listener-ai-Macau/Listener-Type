@@ -15,7 +15,7 @@
     },
     "recording_chain_quality_speed_no_regression": {
       "status": "pending_operator_acceptance",
-      "recorded_at": "2026-07-13",
+      "recorded_at": "2026-07-14",
       "priority": "highest",
       "requirement": "Product-owner priority is now the end-to-end recording chain before the remaining release gates: improve the recording path while preserving accuracy, wake speed, completion speed, and a durable no-regression contract so fixes do not repeatedly regress.",
       "acceptance_targets": [
@@ -39,13 +39,16 @@
         ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/machine-validation-summary.json",
         ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/file-smoke-16k/embedded-file-smoke.20260713-234639.json",
         ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/file-smoke-low10/embedded-file-smoke.20260713-234656.json",
-        ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/installed-file-smoke-tail-and-gain-log-excerpt.txt"
+        ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/installed-file-smoke-tail-and-gain-log-excerpt.txt",
+        ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/machine-validation-summary.json",
+        ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/file-smoke-16k/embedded-file-smoke.20260714-081450.json",
+        ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/file-smoke-low10/embedded-file-smoke.20260714-081506.json"
       ],
-      "latest_operator_observation": "During live installed-Type use, the operator saw recording text regress/repeat and then selected failure again with note `完全不行, 你看看日志修吧, 你先修好再给我验收`. Latest machine evidence now covers log-based repair, low-level Volcengine streaming gain, terminal short-tail preview cleanup, capsule partial no-backtracking, virtual-audio accuracy, and installed Program Files MSI validation. A 2026-07-14 focused re-review prompt timed out after 1200 seconds with no operator result file, so focused human re-review is still pending.",
+      "latest_operator_observation": "During live installed-Type use on 2026-07-14, the operator reported the recording chain had regressed again: `回退了, 准确率太差, 以前你看看是啥样吧` and `这个功能很早前就做好了我记得`. Log/history triage found zero missing BLE audio packets, but the final/two-pass Volcengine candidate degraded the stable live preview while polish fallback inserted raw text. Latest machine evidence now covers the stable-preview-over-degraded-final guard, the previous low-level gain and short-tail cleanup regressions, full Type lib tests, performance/static gates, normal and low-volume virtual-audio accuracy, and installed Program Files MSI validation. Focused human re-review is still pending.",
       "operator_acceptance_evidence": ".cache/validation/recording-chain-regression-20260713-post-fix-installed/operator-review-recording-chain-1-of-1.json",
       "operator_note_triage_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-rereview-note-triage.json",
       "operator_review_timeout_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-review-recording-chain-1-of-1-timeout-20260714-0033.json",
-      "acceptance_blocker": "Post-tail-and-gain-fix installed Program Files Type machine evidence is PASS for normal/low-volume virtual audio accuracy, duplicate-preview no-regression, low-level streaming gain without clipping, static/build/full-lib gates, and installed MSI hash validation, but the 2026-07-14 focused recording-chain operator re-review timed out without returning PASS."
+      "acceptance_blocker": "Final-candidate-guard installed Program Files Type machine evidence is PASS for normal/low-volume virtual audio accuracy, stable-preview protection, duplicate-preview no-regression, low-level streaming gain without clipping, static/build/full-lib/performance gates, and installed MSI hash validation, but the focused recording-chain operator re-review has not yet returned PASS."
     }
   },
   "scenarios": [

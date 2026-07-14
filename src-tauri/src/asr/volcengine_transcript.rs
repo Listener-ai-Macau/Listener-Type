@@ -729,9 +729,16 @@ pub(super) fn merge_streaming_candidate(
 
     let mut merged_segments = previous_segments.to_vec();
     let mut replaced_existing = false;
+    let mut preserved_degraded_revision = false;
     for segment in incoming_segments {
         if let Some(index) = find_matching_timed_segment(&merged_segments, &segment) {
             replaced_existing = true;
+            if incoming_revision_likely_degrades_stable_segment(
+                &merged_segments[index].text,
+                &segment.text,
+            ) {
+                preserved_degraded_revision = true;
+            }
             merged_segments[index] = merge_timed_segment(&merged_segments[index], &segment);
         } else {
             merged_segments.push(segment);
@@ -756,7 +763,11 @@ pub(super) fn merge_streaming_candidate(
             merged_text.push_str(&new_segment_text);
             merged_text.push_str(&previous_text[index + old_segment_text.len()..]);
             return (
-                choose_revision_text(&candidate_text, &merged_text),
+                if preserved_degraded_revision {
+                    merged_text
+                } else {
+                    choose_revision_text(&candidate_text, &merged_text)
+                },
                 merged_segments,
             );
         }
@@ -764,7 +775,11 @@ pub(super) fn merge_streaming_candidate(
 
     if replaced_existing {
         return (
-            choose_revision_text(&new_segment_text, previous_text),
+            if preserved_degraded_revision {
+                previous_text.to_string()
+            } else {
+                choose_revision_text(&new_segment_text, previous_text)
+            },
             merged_segments,
         );
     }
@@ -938,7 +953,7 @@ fn merge_timed_segment(
     existing: &TranscriptSegment,
     incoming: &TranscriptSegment,
 ) -> TranscriptSegment {
-    let text = choose_transcript_text(&existing.text, &incoming.text);
+    let text = choose_timed_segment_revision_text(&existing.text, &incoming.text);
     TranscriptSegment {
         start_ms: existing.start_ms.min(incoming.start_ms),
         end_ms: match (existing.end_ms, incoming.end_ms) {
@@ -949,6 +964,102 @@ fn merge_timed_segment(
         },
         text,
     }
+}
+
+fn choose_timed_segment_revision_text(existing: &str, incoming: &str) -> String {
+    if incoming_revision_likely_degrades_stable_segment(existing, incoming) {
+        return existing.trim().to_string();
+    }
+    choose_transcript_text(existing, incoming)
+}
+
+fn incoming_revision_likely_degrades_stable_segment(existing: &str, incoming: &str) -> bool {
+    const MIN_STABLE_SEGMENT_CHARS: usize = 10;
+    const MIN_DIVERGENT_PREFIX_CHARS: usize = 4;
+    const MAX_DIVERGENT_PREFIX_CHARS: usize = 5;
+    const MAX_DIVERGENT_SUFFIX_CHARS: usize = 3;
+    const MAX_LENGTH_MULTIPLIER: usize = 3;
+    const MIN_DIVERGENT_CER: f64 = 0.45;
+
+    let existing_compact = compact_transcript_for_duplicate_check(existing);
+    let incoming_compact = compact_transcript_for_duplicate_check(incoming);
+    let existing_len = existing_compact.chars().count();
+    let incoming_len = incoming_compact.chars().count();
+    if existing_len < MIN_STABLE_SEGMENT_CHARS
+        || incoming_len < MIN_STABLE_SEGMENT_CHARS
+        || existing_compact.is_empty()
+        || incoming_compact.is_empty()
+        || existing_compact == incoming_compact
+        || existing_compact.contains(&incoming_compact)
+        || incoming_compact.contains(&existing_compact)
+        || incoming_len > existing_len.saturating_mul(MAX_LENGTH_MULTIPLIER)
+    {
+        return false;
+    }
+
+    if incoming_adds_adjacent_duplicate_phrase_seen_once(&existing_compact, &incoming_compact) {
+        return true;
+    }
+
+    let common_prefix = common_prefix_char_count(&existing_compact, &incoming_compact);
+    let common_suffix = common_suffix_char_count(&existing_compact, &incoming_compact);
+    if !(MIN_DIVERGENT_PREFIX_CHARS..=MAX_DIVERGENT_PREFIX_CHARS).contains(&common_prefix)
+        || common_suffix > MAX_DIVERGENT_SUFFIX_CHARS
+    {
+        return false;
+    }
+
+    let longer_len = existing_len.max(incoming_len);
+    let distance = char_edit_distance(&existing_compact, &incoming_compact);
+    (distance as f64 / longer_len as f64) >= MIN_DIVERGENT_CER
+}
+
+fn incoming_adds_adjacent_duplicate_phrase_seen_once(
+    existing_compact: &str,
+    incoming_compact: &str,
+) -> bool {
+    const MIN_DUP_PHRASE_CHARS: usize = 2;
+    const MAX_DUP_PHRASE_CHARS: usize = 4;
+    const MAX_COLLAPSED_CER: f64 = 0.25;
+
+    let chars: Vec<char> = incoming_compact.chars().collect();
+    for phrase_len in MIN_DUP_PHRASE_CHARS..=MAX_DUP_PHRASE_CHARS {
+        if chars.len() < phrase_len * 2 {
+            continue;
+        }
+        for start in 0..=chars.len() - phrase_len * 2 {
+            let phrase: String = chars[start..start + phrase_len].iter().collect();
+            if !phrase.chars().all(is_cjk_unified_ideograph) {
+                continue;
+            }
+            let repeated: String = chars[start + phrase_len..start + phrase_len * 2]
+                .iter()
+                .collect();
+            if repeated != phrase {
+                continue;
+            }
+            let doubled = format!("{phrase}{phrase}");
+            if !existing_compact.contains(&phrase) || existing_compact.contains(&doubled) {
+                continue;
+            }
+            let collapsed: String = chars[..start + phrase_len]
+                .iter()
+                .chain(chars[start + phrase_len * 2..].iter())
+                .collect();
+            let longer_len = existing_compact
+                .chars()
+                .count()
+                .max(collapsed.chars().count());
+            if longer_len == 0 {
+                continue;
+            }
+            let distance = char_edit_distance(existing_compact, &collapsed);
+            if (distance as f64 / longer_len as f64) <= MAX_COLLAPSED_CER {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn join_timed_segment_text(segments: &[TranscriptSegment]) -> String {
@@ -1380,6 +1491,56 @@ mod tests {
             merge_streaming_candidate(previous_text, &previous_segments, candidate);
 
         assert_eq!(merged, final_text);
+        assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn merge_streaming_candidate_keeps_stable_partial_over_duplicate_final_revision() {
+        let previous_text = "我现在在复印，然后我看一下东西有没有什么问题";
+        let bad_final_text = "我现在在复印复印，然后看一下东西有没有什么问题。";
+        let previous_segments = vec![TranscriptSegment {
+            start_ms: 992,
+            end_ms: Some(4863),
+            text: previous_text.into(),
+        }];
+        let candidate = TranscriptCandidate {
+            text: bad_final_text.into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 840,
+                end_ms: Some(4863),
+                text: bad_final_text.into(),
+            }],
+        };
+
+        let (merged, segments) =
+            merge_streaming_candidate(previous_text, &previous_segments, candidate);
+
+        assert_eq!(merged, previous_text);
+        assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn merge_streaming_candidate_keeps_stable_partial_over_divergent_final_revision() {
+        let previous_text = "我现在在这个领域帮我看";
+        let bad_final_text = "我现在在行知格林路。好看，准确，那些有什么问题";
+        let previous_segments = vec![TranscriptSegment {
+            start_ms: 992,
+            end_ms: Some(4922),
+            text: previous_text.into(),
+        }];
+        let candidate = TranscriptCandidate {
+            text: bad_final_text.into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 840,
+                end_ms: Some(6090),
+                text: bad_final_text.into(),
+            }],
+        };
+
+        let (merged, segments) =
+            merge_streaming_candidate(previous_text, &previous_segments, candidate);
+
+        assert_eq!(merged, previous_text);
         assert_eq!(segments.len(), 1);
     }
 
