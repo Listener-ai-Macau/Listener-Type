@@ -5,13 +5,16 @@
   "pending_operator_steering": {
     "idle_ble_audio_wake_latency": {
       "target_notify_ready_ms": 50,
-      "status": "physical_edge_evidence_pending",
+      "status": "accepted",
       "recorded_at": "2026-07-14",
+      "accepted_at": "2026-07-14T17:44:00+08:00",
       "requirement": "From the physical EC11 press edge in connected low-power Idle, audio must begin within 50 ms. Preserve the accepted EC11 single/double-click behavior and do not swallow the first action; do not redefine the timer to start only after the existing single-click classification window.",
-      "last_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-diagnostic-20260713/physical-gate-ready-pending-press.json",
+      "last_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/machine-ec11-idle-wake-20260714-1744.json",
+      "acceptance_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/operator-acceptance-ec11-idle-wake-1-of-1.txt",
+      "operator_note_triage": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/operator-note-triage-20260714-1744-ec11-idle-wake-accepted.json",
+      "root_contract_evidence": "docs/validation/listener-1-0-2-ec11-idle-wake-20260714.json",
       "diagnostic_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-diagnostic-20260713/machine-validation-summary.json",
-      "previous_machine_evidence": "../Listener-Firmware/.cache/validation/idle-audio-wake-20260713/machine-validation-summary.json",
-      "acceptance_blocker": "No current artifact contains a real EC11 physical press edge followed by voice_rec_ctrl EC11 fast Idle recording dispatch with press_to_control_ms <= 50."
+      "previous_machine_evidence": "../Listener-Firmware/.cache/validation/idle-audio-wake-20260713/machine-validation-summary.json"
     },
     "recording_chain_quality_speed_no_regression": {
       "status": "in_progress",

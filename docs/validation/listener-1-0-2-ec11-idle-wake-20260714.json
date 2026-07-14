@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "feature": "Listener 1.0.2 EC11 connected-idle recording wake",
+  "status": "accepted",
+  "accepted_at": "2026-07-14T17:44:00+08:00",
+  "product_contract": {
+    "physical_boundary": "real EC11 press edge to firmware recording-control dispatch",
+    "target_ms": 50,
+    "preserve": [
+      "500 ms single/double-click boundary",
+      "double-click reconfiguration cancels pending fast recording",
+      "long-press shutdown cancels pending fast recording",
+      "Type writes e11r=1 only for EmbeddedBle dictation mapped to EC11 single click"
+    ]
+  },
+  "physical_evidence": {
+    "firmware_commit": "f4ea541408c09e9e9626efecf6144f3c4ef282e0",
+    "fast_path_commit": "6e2bdb0",
+    "port": "COM3",
+    "precondition_log": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/connected-idle-before-physical-press-20260714-1739.log",
+    "capture_log": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/physical-ec11-idle-wake-20260714-1742.log",
+    "required_lines": [
+      "voice_key_input: ec11_key.gpio18 fast Idle recording queued: origin=isr_edge target_ms=50 type_link_ready=1",
+      "voice_rec_ctrl: EC11 fast Idle recording dispatch: press_to_control_ms=0 target_ms=50 fallback_hid_suppressed=1"
+    ],
+    "observed_press_to_control_ms": 0,
+    "result": "PASS: one real physical edge-to-control sample is within the 50 ms target. The firmware timestamp has millisecond tick resolution; this result does not claim sub-millisecond accuracy or population-level stability."
+  },
+  "human_acceptance": {
+    "window": "1/1",
+    "selection": "through",
+    "operator_note": "I am recording now. It looks okay. Please check whether there is any issue.",
+    "acceptance_artifact": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/operator-acceptance-ec11-idle-wake-1-of-1.txt",
+    "triage_artifact": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/operator-note-triage-20260714-1744-ec11-idle-wake-accepted.json",
+    "same_session": {
+      "id": "cb90019f-1b54-4e61-bc39-df7d6dc71fc5",
+      "transcript": "感觉看着还行啊，你看着还有什么问题？",
+      "first_preview_ms": 1064,
+      "final_text_ms": 3461,
+      "done_ms": 3664,
+      "result": "No recognition failure, transport loss, or abnormal termination was recorded."
+    }
+  },
+  "root_cause_regression_contract": {
+    "cause": "The activity-resume path could cancel a just-queued fast recording event when it ran before dispatch.",
+    "guard": "Listener-Firmware/tools/verify_ec11_fast_idle_recording_static.py",
+    "guard_assertion": "Both raw-edge and ISR-edge fast requests are ordered before power_manager_record_activity, alongside target, readiness, fallback-suppression, and long-press-cancel checks.",
+    "related_guard": "Listener-Firmware/tools/verify_ec11_input_contract.py",
+    "related_assertion": "The 500 ms click boundary, raw-gesture latching, double-click guard, and reconfiguration cue remain intact.",
+    "post_acceptance_validation": [
+      "python .\\tools\\verify_ec11_fast_idle_recording_static.py: PASS",
+      "python .\\tools\\verify_ec11_input_contract.py: PASS",
+      "pwsh -NoProfile -File .\\tools\\verify_device_settings_static.ps1: PASS",
+      "pwsh -NoProfile -File .\\tools\\build.ps1: PASS"
+    ]
+  },
+  "release_scope": "This accepts only the EC11 connected-idle wake contract. Final package replacement, listener-release-gate, and final total human acceptance remain separate release work."
+}
