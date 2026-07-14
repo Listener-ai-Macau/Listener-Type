@@ -1169,8 +1169,8 @@ function Test-CarryForwardAcceptedRecordSummaryCandidate {
         if ([string]::IsNullOrWhiteSpace($recordId)) {
             return $false
         }
-        $recordJson = $record | ConvertTo-Json -Depth 10 -Compress
-        if ($recordJson -match "NoPrompt dry run" -or $recordJson -match "dryrun" -or $recordJson -match "operator-note") {
+        $dryRunNoteProperty = $record.PSObject.Properties["dry_run_note"]
+        if ($dryRunNoteProperty -and [string]$dryRunNoteProperty.Value -eq "NoPrompt dry run") {
             return $false
         }
     }
