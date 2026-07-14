@@ -14,16 +14,113 @@
       "acceptance_blocker": "No current artifact contains a real EC11 physical press edge followed by voice_rec_ctrl EC11 fast Idle recording dispatch with press_to_control_ms <= 50."
     },
     "recording_chain_quality_speed_no_regression": {
-      "status": "pending_operator_acceptance",
+      "status": "in_progress",
       "recorded_at": "2026-07-14",
       "priority": "highest",
       "requirement": "Product-owner priority is now the end-to-end recording chain before the remaining release gates: improve the recording path while preserving accuracy, wake speed, completion speed, and a durable no-regression contract so fixes do not repeatedly regress.",
+      "current_preview_quality_feedback": {
+        "status": "accepted",
+        "recorded_at": "2026-07-14",
+        "accepted_at": "2026-07-14T17:25:34+08:00",
+        "source": "Product-owner feedback after the installed Program Files voice-gated AGC review: the capsule preview text differs from the eventual displayed text and its updates visibly stall, producing poor perceived quality. On the next focused review the owner clarified that final text is overall usable while the capsule preview remains unacceptable, and directed a root-cause repair rather than symptom-by-symptom patches. The owner's spoken 'through' at the end of the next sample was only a speech-completion marker, not acceptance; the actual preview/final timeline must be reviewed before any human acceptance is recorded. The next installed random-long-speech review surfaced a new visible failure: the preview completed but the capsule reported recognition failure because the client declared an incomplete final result after a 1.2 second provider grace, despite retaining a 12 second final-result timeout. Treat final-result completion as part of this same active recording-chain issue; preserve accuracy coverage checks while removing the premature failure branch.",
+        "requirement": "Treat the recording capsule preview specifically as the current focused user-visible issue. Diagnose, in one bound installed Program Files session, the complete path from first PCM through streaming-ASR candidates, preview merge/stabilizer, frontend event delivery, and final convergence before changing code. Preserve the accepted installed-path AGC and final-transcript behavior. Repair the smallest shared root cause and re-review only preview behavior after machine evidence; do not apply phrase-specific replacements or cosmetic animation masking.",
+        "opening_triage_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-feedback-triage-20260714-1704-final-coverage-premature-failure-open.json",
+        "triage_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-feedback-triage-20260714-1711-capsule-preview-final-result-accepted.json",
+        "acceptance_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-acceptance-capsule-preview-final-result-1-of-1.txt",
+        "root_contract_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/machine-root-contract-capsule-preview-final-result-20260714-1725.json",
+        "root_contract_command": "node .\\scripts\\check-volcengine-low-latency-preview.mjs"
+      },
+      "synthetic_asr_preroll_policy": {
+        "status": "accepted",
+        "recorded_at": "2026-07-14",
+        "accepted_at": "2026-07-14T17:25:34+08:00",
+        "source": "Product-owner direction during preview root-cause review: a synthetic 800 ms silence prefix in the real recording path is a symptomatic workaround and must not remain.",
+        "requirement": "For EmbeddedBle dictation, the first audio supplied to every ASR connection must be the first real device PCM available to Type. Do not prepend generated silence or other fabricated audio to accommodate provider startup or VAD behavior. Provider readiness must be handled by connection lifecycle and bounded buffering without changing recording content.",
+        "triage_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-feedback-triage-20260714-1637-remove-synthetic-preroll.json",
+        "root_contract_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/machine-root-contract-capsule-preview-final-result-20260714-1725.json"
+      },
+      "recording_workaround_audit": {
+        "status": "accepted",
+        "recorded_at": "2026-07-14",
+        "accepted_at": "2026-07-14T17:25:34+08:00",
+        "source": "Product-owner direction after identifying synthetic ASR startup silence: find and remove similar symptomatic recording/preview repairs.",
+        "scope": "Audit only the active recording, ASR, and capsule-preview chain for fabricated audio, unlabelled audio replay, artificial delay that masks actual readiness, or display behavior that pretends recognition has occurred. Preserve normal bounded connection buffering, explicit failure attribution, and authoritative final-text correction unless evidence shows they alter captured content.",
+        "requirement": "For every audited mechanism, retain its original purpose, observed runtime effect, classification, removal or retention decision, and validation evidence. Delete mechanisms that alter real recording content to accommodate a provider or cosmetically hide a pipeline fault.",
+        "opening_triage_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-feedback-triage-20260714-1637-recording-workaround-audit-open.json",
+        "closure": "The active EmbeddedBle Volcengine streaming and batch paths now receive only real device PCM. The audit removed the batch-path trim/padding mechanism in addition to the earlier startup preroll removal. Non-core local ASR providers are not selected by the accepted Volcengine path and remain outside this focused contract.",
+        "root_contract_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/machine-root-contract-capsule-preview-final-result-20260714-1725.json"
+      },
+      "root_cause_remediation_policy": {
+        "status": "required",
+        "recorded_at": "2026-07-14",
+        "source": "Product-owner direction: recording fixes must not be symptomatic patches.",
+        "requirement": "Before changing active recording, ASR, or capsule-preview behavior, record the observed user failure, the concrete code and same-session log evidence for its cause, the captured-data contract being preserved, and the focused validation that could falsify the proposed repair. Reject a change that merely adds delay, fabricated data, phrase-specific substitution, visual masking, or an unbounded retry unless it is shown to repair the identified cause without changing real captured content.",
+        "enforcement": "A focused human-accepted behavior becomes the only basis for a durable root-cause regression contract. Machine checks before that point are diagnostic evidence, not permission to introduce workaround gates.",
+        "evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-feedback-triage-20260714-1637-root-cause-policy.json"
+      },
+      "recording_platform_reuse": {
+        "status": "planned_after_current_acceptance",
+        "recorded_at": "2026-07-14",
+        "source": "Product-owner direction: make the repaired recording path a reusable platform capability for all products.",
+        "requirement": "Do not copy an unaccepted Listener implementation into other products. After focused real-human acceptance of this path, extract a product-neutral recording contract with: captured-PCM-only input, explicit preview versus authoritative-final responsibilities, connection buffering that preserves byte order, provider/network/internal attribution, measurable first-preview/progression/completion evidence, and per-product adapters for hardware transport and UI insertion.",
+        "non_goal": "Do not turn the current Listener Type repair into a cross-product migration before the current preview issue has real-user acceptance evidence.",
+        "evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-feedback-triage-20260714-1645-recording-platform-reuse.json"
+      },
       "acceptance_targets": [
         "Accuracy evidence must compare the retained audio sample or fixture input with the transcript/history output for the active dictation path.",
         "Wake evidence must include the device or hotkey trigger-to-recording-start timeline for the accepted user path.",
         "Completion evidence must include submit-to-preview and submit-to-Done timings against the accepted recording_low_latency baseline.",
-        "Regression evidence must run the root-cause guard that protects recording latency, BLE audio control, and accepted preview stability."
+        "Regression evidence must run the root-cause guard that protects recording latency, BLE audio control, and accepted preview stability.",
+        "Every dictation validation must record the active ASR engine identity; if the session is not using the core Volcengine accurate engine, Type must make the accuracy risk visible instead of letting a lower-accuracy provider look like a Listener regression.",
+        "Every failed dictation validation must classify whether the primary cause is external provider/network/credential availability or an internal recording, BLE transport, insertion, or preview pipeline issue.",
+        "Capsule preview quality is part of the recording contract: the preview is a stabilized partial transcript, the final transcript is authoritative, and release evidence must measure preview-to-final consistency across the visible preview stream, not only the final text."
       ],
+      "stricter_metric_revision": {
+        "status": "in_progress",
+        "recorded_at": "2026-07-14",
+        "source": "Product-owner steering during Listener 1.0.2 preproduction recording-chain acceptance: recording is the core competitive capability, sensitivity must remain consistently high, preview must match the accurate transcript path, and regressions must identify whether the cause is external provider/network or internal pipeline.",
+        "requirements": [
+          "Tighten the recording metric instead of accepting one good sample: accuracy, wake/first-preview speed, completion speed, low-volume sensitivity, preview smoothness, and no-regression stability must be validated together.",
+          "Product owner directed that the next acceptance evidence must prioritize real human speech on the installed Listener path. Synthetic corpus evidence remains diagnostic only and must not delay or replace a user-ready physical recording/preview observation.",
+          "For every focused real-speech review, show one randomly selected literal sentence inside the canonical operator popup itself before the operator acts; chat may duplicate it, but cannot replace the popup text. The popup must visibly delimit the exact words to speak and say that no surrounding operating instruction is to be spoken. The popup records the result and any observation and must not make the operator search for the test text.",
+          "After each spoken-popup attempt, capture and classify the matching real session logs before offering the next popup: report the actual ASR provider, packet integrity, preview timing and progression, completion timing, transcript match, and whether any fault is internal, external provider credentials, or network. Repair a classified product failure before continuing the acceptance sequence.",
+          "Capsule preview is a first-class recording quality requirement: on real speech it must appear promptly, progress coherently, and agree with the final transcript. For every mismatch, retain per-session evidence that identifies the realtime preview result, final-transcript result, and final selection decision; do not mask the issue with cosmetic animation changes or a phrase-specific replacement.",
+          "A fixed short sentence is only a reproducible regression anchor, never sufficient release evidence. Final recording acceptance must use a seeded, retained randomized corpus spanning distinct topics, sentence lengths, phrasing, numbers, proper nouns, pauses, and normal/low-volume conditions so a fix cannot pass one phrase while regressing ordinary dictation. A small family of product-term rewrites is not randomized evidence and must not be used for the human popup loop.",
+          "For the capsule-preview human acceptance loop, use a randomly selected long natural sample with an expected spoken duration of at least about fifteen seconds. Short samples remain useful only for first-preview responsiveness and cannot by themselves accept preview smoothness, duplication, truncation, or convergence.",
+          "A validation run is invalid rather than PASS or product FAIL when a real device capture or another active recording session overlaps its replay session; the evidence must name the collision and rerun the affected randomized sample after the bench is isolated.",
+          "Record the ASR provider used by each dictation session and warn when the active provider is not the core accurate Volcengine path.",
+          "Record provider/network/credential attribution separately from internal BLE, recorder, insertion, or preview failures so a bad external service does not get misdiagnosed as a product regression.",
+          "Embedded microphone conditioning must use a session-level, voice-gated adaptive gain controller rather than independently maximizing every transport PCM block. It must retain peak headroom, avoid changing its control state on quiet chunks, and record voiced/quiet chunk counts, first/final/max gain, gain-update count, and clipped samples for every real-device attempt so sensitivity instability is attributable and reproducible.",
+          "Make the capsule preview use the same authoritative recognition path for correction: low-latency partial text may appear early, but final-stream supplemental text must be able to repair the preview before Done.",
+          "Add a preview anti-regression metric based on the mainstream streaming-ASR partial/final model: partial preview may revise while unstable, but stable visible preview updates must converge toward the final transcript."
+        ],
+        "proposed_quantitative_targets": [
+          "Release smoke summary must contain 12 unique installed Program Files sessions, at least 6 normal and 6 low-volume runs, with missing_packets=0 and retained-fixture transcript accuracy=1.0.",
+          "Release evidence must contain a retained seeded randomized-corpus manifest and its installed Program Files results; every selected sample must retain its expected transcript, source/transform identity, volume condition, session id, accuracy, packet-loss result, engine identity, attribution, preview/final consistency, and timing result.",
+          "Normal-volume first visible preview must be <=1300 ms, low-volume first visible preview must be <=2000 ms, per-group first-preview spread must be <=500 ms, max visible preview gap must be <=1300 ms, and stop-received-to-Done must be <=600 ms.",
+          "For retained replay fixtures with speech starting at frame zero, first audio PCM to first visible preview must be <=1000 ms for normal volume and <=1500 ms for low-volume runs, with per-group PCM-to-preview spread <=200 ms. For real human speech, sensitivity is measured from detected speech onset to first visible preview (normal <=800 ms, quiet <=1200 ms); raw PCM-to-preview remains a separate transport/startup attribution field because user deliberation before speaking is not a sensitivity failure. Until local PCM voice-onset telemetry is added, machine evidence may derive onset from the first authoritative core-ASR word timestamp and must label it as such.",
+          "Last stable recording preview must have preview/final CER <=0.10 and final-text coverage >=0.90 for every retained fixture run.",
+          "For every visible preview update after at least 4 normalized characters, at least 90% of updates must remain compatible with the final transcript by either preview-content support coverage >=0.90 or partial CER <=0.30; any consecutive divergent-preview window must stay <=1200 ms.",
+          "Every smoke report must include asr_engine.core_accurate=true for release acceptance, or a user-visible non-core-engine accuracy warning plus an intentional test label.",
+          "Every smoke report must include issue_attribution.primary; PASS release runs require primary=none, while FAIL runs must classify external_provider_credentials, external_provider_network, external_provider_unavailable, internal_ble_transport, internal_recording_pipeline, internal_insertion_pipeline, or internal_preview_pipeline."
+        ],
+        "machine_evidence_status": "A retained local human WAV was replayed twice through the latest installed Program Files Type after the authoritative cumulative-snapshot repair. Both Volcengine bigmodel_async finals were identical; after the first two-pass correction, neither capsule timeline returned to the old stream branch. This repairs the classified internal preview-pipeline regression in machine evidence only. It does not score semantic accuracy against the literal because the operator stated the retained wording may have differed, and it does not accept strict full-chain speed.",
+        "operator_acceptance_status": "not offered: product owner explicitly requested virtual/diagnostic work be fixed before human acceptance",
+        "latest_real_human_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/machine-observation-shifted-preview-rerun-4.json",
+        "latest_real_human_post_fix_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/post-fix-real-human-session-be50cf8f.json",
+    "latest_operator_note_triage": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-note-triage-20260714-0658-shared-merge-rerun.json",
+        "operator_confirmed_literal_prompt_accuracy_failure": "On 2026-07-14 the product owner confirmed that the full long randomized literal prompt was spoken verbatim in session daff4286-0638-4e76-a009-990dc504da6b. The initial phrase loss is therefore a core product failure, not an operator reading variation.",
+        "operator_audio_retention_consent": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-audio-retention-consent-20260714-0641.json",
+        "latest_real_human_triage": "2026-07-14 correctly bound installed Program Files session f97c9f3d-d572-4020-97ae-fdd4eaa6844b used Volcengine bigmodel_async with core_accurate=true and missing_packets=0. After the shared timed-segment merge repair, every capsule update and the raw provider final converged to the same complete randomized text without duplicate branches or truncation; the operator observed the same result. This establishes the focused preview/final repair, but not full recording-chain acceptance: device stop action to Done was 705ms against the strict 600ms target.",
+        "latest_retained_audio_replay_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/machine-observation-authoritative-cumulative-snapshot.json",
+        "latest_retained_audio_replay_triage": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-note-triage-20260714-0724-authoritative-cumulative-snapshot.json",
+        "current_open_real_human_failure_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-review-preview-final-acceptance-1-of-1-result.json",
+        "current_open_real_human_triage": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-note-triage-20260714-1529-voice-gated-agc.json",
+        "current_voice_gated_agc_install_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/machine-build-install-voice-gated-agc-20260714.json",
+        "voice_gated_agc_human_acceptance_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-review-voice-gated-agc-accuracy-1-of-1-result.json",
+        "voice_gated_agc_human_note_triage": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-note-triage-20260714-1549-voice-gated-agc-human-pass.json",
+        "voice_gated_agc_machine_observation": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/machine-observation-voice-gated-agc-human-session-8729cd80.json"
+      },
       "baseline_contract": "scripts/performance-baselines.json#contracts.recording_low_latency",
       "related_scenario_id": "recording-response-and-led-priority",
       "last_machine_evidence": [
@@ -42,13 +139,28 @@
         ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/installed-file-smoke-tail-and-gain-log-excerpt.txt",
         ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/machine-validation-summary.json",
         ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/file-smoke-16k/embedded-file-smoke.20260714-081450.json",
-        ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/file-smoke-low10/embedded-file-smoke.20260714-081506.json"
+        ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/file-smoke-low10/embedded-file-smoke.20260714-081506.json",
+        ".cache/validation/recording-sensitivity-stability-20260714/known-bad-e1bff.json",
+        ".cache/validation/recording-sensitivity-stability-20260714/known-bad-e1bff-v2.json",
+        ".cache/validation/recording-sensitivity-stability-20260714/msvc-post-final-supplement/ListenerType_1.0.2_x64_en-US.msi",
+        ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-post-final-supplement-12/smoke-summary.json",
+        ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-post-final-supplement-12-sensitivity.json",
+        ".cache/validation/recording-sensitivity-stability-20260714/msvc-final-short-seed-staggered-preview-startup-live/ListenerType_1.0.2_x64_en-US.msi",
+        ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-final-short-seed-staggered-preview-startup-live-12/smoke-summary.json",
+        ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-final-short-seed-staggered-preview-startup-live-12-sensitivity.json",
+        ".cache/validation/recording-sensitivity-stability-20260714/msvc-final-startup-live-polish-fallback-quiet/ListenerType_1.0.2_x64_en-US.msi",
+        ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-polish-fallback-quiet-1/polish-fallback-quiet-summary.json",
+        ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-final-polish-fallback-quiet-12-v2/smoke-summary.json",
+        ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-final-polish-fallback-quiet-12-v2-sensitivity.json"
       ],
-      "latest_operator_observation": "During live installed-Type use on 2026-07-14, the operator reported the recording chain had regressed again: `回退了, 准确率太差, 以前你看看是啥样吧` and `这个功能很早前就做好了我记得`. Log/history triage found zero missing BLE audio packets, but the final/two-pass Volcengine candidate degraded the stable live preview while polish fallback inserted raw text. Latest machine evidence now covers the stable-preview-over-degraded-final guard, the previous low-level gain and short-tail cleanup regressions, full Type lib tests, performance/static gates, normal and low-volume virtual-audio accuracy, and installed Program Files MSI validation. Focused human re-review is still pending.",
-      "operator_acceptance_evidence": ".cache/validation/recording-chain-regression-20260713-post-fix-installed/operator-review-recording-chain-1-of-1.json",
-      "operator_note_triage_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-rereview-note-triage.json",
+      "latest_operator_observation": "During live installed-Type use on 2026-07-14, the operator reported the recording chain had regressed again and clarified that `灵敏` means consistent sensitivity across repeated recordings, not one good sample. After the initial focused acceptance passed, the product owner tightened the requirement because recording is Listener's core competitive capability. The accepted durable metric is grouped by normal vs low10 fixture volume and now requires the release smoke summary to contain 12 unique sessions with at least 6 normal and 6 low-volume runs: normal first visible preview <=1500 ms, low10 first visible preview <=2200 ms, per-group first-preview spread <=600 ms, max visible preview gap <=1500 ms, stop-received-to-Done <=800 ms, missing_packets=0, accuracy=1.0 for retained fixture audio, preview/final CER <=0.10, preview content coverage >=0.90, and no final text regression from the last stable recording preview. The known-bad 2026-07-14 session e1bff1e7-5415-43bf-bad5-ec5d7e06fd70 still fails this metric. Latest installed Program Files MSI validation on 2026-07-14 passed 12 alternating normal/low10 runs with unique session ids: smoke status PASS for all 12, accuracy=1.0, missing_packets=0; sensitivity report PASS with normal first preview 996-1182 ms (spread 186 ms), low10 first preview 1565-2127 ms (spread 562 ms), max preview gap <=1241 ms, slowest stop-received-to-Done 491 ms, preview/final coverage=1, preview/final CER=0, and final_regression_cer=0 for every session. A focused operator review passed recording sensitivity/stability, then a note rereview passed the polish-fallback UX: invalid LLM credentials still log HTTP 401, but successful raw insertion no longer shows '润色不可用' as the completion message. The operator's remaining daily-use intermittent smoothness concern is triaged as a deferred independent follow-up by explicit operator instruction: pass this item and do not continue fixing recording next.",
+      "operator_acceptance_evidence": ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-final-short-seed-staggered-preview-startup-live-12/operator-review-recording-sensitivity-1-of-1-result.json",
+      "operator_note_triage_evidence": ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-final-polish-fallback-quiet-12-v2/operator-rereview-note-triage-20260714.json",
+      "operator_rereview_evidence": ".cache/validation/recording-sensitivity-stability-20260714/installed-file-smoke-final-polish-fallback-quiet-12-v2/operator-rereview-polish-fallback-quiet-1-of-1-result.json",
+      "previous_operator_acceptance_evidence": ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/operator-review-recording-chain-1-of-1-result.json",
+      "previous_operator_note_triage_evidence": ".cache/validation/recording-chain-regression-20260714-final-candidate-guard-installed/operator-rereview-note-triage-20260714.json",
       "operator_review_timeout_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-review-recording-chain-1-of-1-timeout-20260714-0033.json",
-      "acceptance_blocker": "Final-candidate-guard installed Program Files Type machine evidence is PASS for normal/low-volume virtual audio accuracy, stable-preview protection, duplicate-preview no-regression, low-level streaming gain without clipping, static/build/full-lib/performance gates, and installed MSI hash validation, but the focused recording-chain operator re-review has not yet returned PASS."
+      "acceptance_blocker": "2026-07-14 installed Program Files long randomized session bc1b3ebb-399a-4edb-bac0-91c9d4f67780 had missing_packets=0 and a core Volcengine final that matched the operator-observed inaccurate text. The preview/final branch repair held, but 801 short PCM chunks were independently boosted with max_gain=16.00. Replace that stateless gain path with voice-gated session AGC, retain a new real-device acoustic-attribution artifact, and rerun a correctly bound long human sample before human acceptance."
     }
   },
   "scenarios": [

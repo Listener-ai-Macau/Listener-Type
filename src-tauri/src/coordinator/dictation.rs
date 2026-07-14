@@ -22,10 +22,8 @@ use super::*;
 /// 避免微动开关回弹 / 用户手抖双击造成的空转写报错和 ASR session 抢资源。
 pub(super) const HOTKEY_DEBOUNCE: Duration = Duration::from_millis(250);
 const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
-const EMBEDDED_AUDIO_ASR_PREROLL_MS: usize = 800;
-const EMBEDDED_AUDIO_ASR_PREROLL_BYTES: usize = 16_000 * 2 * EMBEDDED_AUDIO_ASR_PREROLL_MS / 1_000;
 const VOLCENGINE_PREVIEW_STALL_RESTART_MS: u64 = 2_500;
-const VOLCENGINE_PREVIEW_STALL_MIN_FRAMES: usize = 20;
+const VOLCENGINE_PREVIEW_STALL_MIN_FRAMES: usize = 60;
 const VOLCENGINE_PREVIEW_REPLAY_MS: usize = 1_500;
 const VOLCENGINE_PREVIEW_REPLAY_BYTES: usize = 16_000 * 2 * VOLCENGINE_PREVIEW_REPLAY_MS / 1_000;
 const VOLCENGINE_PREVIEW_RESTART_REPLAY_MS: usize = 3_500;
@@ -35,16 +33,13 @@ const VOLCENGINE_PREVIEW_MAX_RESTARTS: usize = 1;
 const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
-const EMBEDDED_AUDIO_STREAMING_NORMALIZE_MIN_RMS: f64 = 180.0;
-const EMBEDDED_AUDIO_STREAMING_NORMALIZE_MIN_PEAK: u16 = 512;
-const EMBEDDED_AUDIO_TRIM_MIN_INPUT_MS: usize = 3_000;
-const EMBEDDED_AUDIO_TRIM_WINDOW_MS: usize = 100;
-const EMBEDDED_AUDIO_TRIM_LEADING_MARGIN_MS: usize = 200;
-const EMBEDDED_AUDIO_TRIM_TRAILING_MARGIN_MS: usize = 400;
-const EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS: usize = 500;
-const EMBEDDED_AUDIO_TRIM_MIN_RMS: f64 = 300.0;
-const EMBEDDED_AUDIO_TRIM_NOISE_MULTIPLIER: f64 = 3.0;
-const EMBEDDED_AUDIO_TRIM_PEAK_RATIO: f64 = 0.12;
+const EMBEDDED_AUDIO_STREAMING_NORMALIZE_SPEECH_RMS: f64 = 120.0;
+const EMBEDDED_AUDIO_STREAMING_NORMALIZE_QUIET_SPEECH_RMS: f64 = 45.0;
+const EMBEDDED_AUDIO_STREAMING_NORMALIZE_QUIET_SPEECH_PEAK: u16 = 256;
+const EMBEDDED_AUDIO_STREAMING_AGC_ENVELOPE_ALPHA: f64 = 0.15;
+const EMBEDDED_AUDIO_STREAMING_AGC_MAX_RISE_PER_VOICED_CHUNK: f64 = 1.06;
+const EMBEDDED_AUDIO_STREAMING_AGC_MAX_FALL_PER_VOICED_CHUNK: f64 = 0.60;
+const EMBEDDED_AUDIO_STREAMING_AGC_PEAK_HEADROOM: f64 = 0.90;
 const EMBEDDED_BLE_PCM_EVENT_TRACE_PACKET_INTERVAL: u16 = 50;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
 const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 750;
@@ -162,6 +157,61 @@ fn foundry_language_hint_for_working_language(language: &str) -> Option<&'static
     None
 }
 
+fn dictation_asr_engine_backend_id(active_asr: &str) -> &'static str {
+    if crate::asr::local::is_local_qwen3(active_asr) {
+        "local-qwen3"
+    } else if foundry::is_foundry_local_whisper(active_asr) {
+        "foundry-local-whisper"
+    } else if is_bailian_provider(active_asr) {
+        "bailian"
+    } else if is_whisper_compatible_provider(active_asr) {
+        "whisper-compatible"
+    } else {
+        "volcengine"
+    }
+}
+
+fn dictation_asr_engine_label(active_asr: &str) -> String {
+    match dictation_asr_engine_backend_id(active_asr) {
+        "volcengine" => "Volcengine".to_string(),
+        "local-qwen3" => "Local Qwen3-ASR".to_string(),
+        "foundry-local-whisper" => "Foundry Local Whisper".to_string(),
+        "bailian" => "Bailian".to_string(),
+        "whisper-compatible" => format!("Whisper-compatible ({})", active_asr.trim()),
+        _ => active_asr.trim().to_string(),
+    }
+}
+
+fn dictation_asr_uses_core_accurate_engine(active_asr: &str) -> bool {
+    dictation_asr_engine_backend_id(active_asr) == "volcengine"
+}
+
+fn dictation_asr_quality_warning(active_asr: &str) -> Option<String> {
+    if dictation_asr_uses_core_accurate_engine(active_asr) {
+        return None;
+    }
+    Some(format!(
+        "当前识别引擎为{}，不是核心 Volcengine 准确引擎，识别可能不准。",
+        dictation_asr_engine_label(active_asr)
+    ))
+}
+
+fn log_dictation_asr_engine_selection(session_id: SessionId, active_asr: &str) {
+    let backend = dictation_asr_engine_backend_id(active_asr);
+    let label = dictation_asr_engine_label(active_asr);
+    let core_accurate = dictation_asr_uses_core_accurate_engine(active_asr);
+    log::info!(
+        "[coord] dictation ASR engine selected: session_id={session_id} provider={} backend={backend} label=\"{label}\" core_accurate={core_accurate}",
+        active_asr.trim()
+    );
+    if !core_accurate {
+        log::warn!(
+            "[coord] dictation ASR non-core accuracy warning: session_id={session_id} provider={} backend={backend}",
+            active_asr.trim()
+        );
+    }
+}
+
 struct VolcengineAsrPair {
     final_asr: Arc<VolcengineStreamingASR>,
     preview_sidecar: Arc<VolcenginePreviewSidecar>,
@@ -170,17 +220,28 @@ struct VolcengineAsrPair {
 
 struct VolcenginePreviewTeeConsumer {
     final_asr: Arc<VolcengineStreamingASR>,
+}
+
+struct VolcengineStartupPreviewConsumer {
+    final_bridge: Arc<DeferredAsrBridge>,
     preview_sidecar: Arc<VolcenginePreviewSidecar>,
+    _target_guard: Arc<dyn crate::asr::AudioConsumer>,
 }
 
 impl crate::asr::AudioConsumer for VolcenginePreviewTeeConsumer {
     fn consume_pcm_chunk(&self, pcm: &[u8]) {
-        self.preview_sidecar.consume_pcm_chunk(pcm);
         crate::asr::AudioConsumer::consume_pcm_chunk(&*self.final_asr, pcm);
     }
 }
 
-impl Drop for VolcenginePreviewTeeConsumer {
+impl crate::recorder::AudioConsumer for VolcengineStartupPreviewConsumer {
+    fn consume_pcm_chunk(&self, pcm: &[u8]) {
+        crate::recorder::AudioConsumer::consume_pcm_chunk(&*self.final_bridge, pcm);
+        self.preview_sidecar.consume_pcm_chunk(pcm);
+    }
+}
+
+impl Drop for VolcengineStartupPreviewConsumer {
     fn drop(&mut self) {
         self.preview_sidecar.cancel();
         log::info!("[asr] low-latency preview sidecar cancelled");
@@ -194,8 +255,10 @@ struct VolcenginePreviewSidecar {
     session_id: SessionId,
     current: ParkingMutex<Arc<VolcengineStreamingASR>>,
     recent_pcm: ParkingMutex<Vec<u8>>,
+    initial_open_requested: AtomicBool,
     restarting: AtomicBool,
     restart_count: AtomicUsize,
+    cancel_requested: AtomicBool,
 }
 
 impl VolcenginePreviewSidecar {
@@ -213,8 +276,10 @@ impl VolcenginePreviewSidecar {
             session_id,
             current: ParkingMutex::new(initial),
             recent_pcm: ParkingMutex::new(Vec::new()),
+            initial_open_requested: AtomicBool::new(false),
             restarting: AtomicBool::new(false),
             restart_count: AtomicUsize::new(0),
+            cancel_requested: AtomicBool::new(false),
         }
     }
 
@@ -223,6 +288,9 @@ impl VolcenginePreviewSidecar {
     }
 
     fn consume_pcm_chunk(self: &Arc<Self>, pcm: &[u8]) {
+        if self.cancel_requested.load(Ordering::SeqCst) {
+            return;
+        }
         self.remember_recent_pcm(pcm);
         let preview = self.current_asr();
         crate::asr::AudioConsumer::consume_pcm_chunk(&*preview, pcm);
@@ -230,12 +298,19 @@ impl VolcenginePreviewSidecar {
     }
 
     fn cancel(&self) {
+        self.cancel_requested.store(true, Ordering::SeqCst);
         self.current_asr().cancel();
     }
 
-    fn open_initial_preview_in_background(self: &Arc<Self>) {
+    fn open_initial_preview_in_background(self: &Arc<Self>) -> bool {
+        if self.cancel_requested.load(Ordering::SeqCst) {
+            return false;
+        }
+        if self.initial_open_requested.swap(true, Ordering::SeqCst) {
+            return false;
+        }
         if self.restarting.swap(true, Ordering::SeqCst) {
-            return;
+            return false;
         }
 
         let sidecar = Arc::clone(self);
@@ -244,19 +319,27 @@ impl VolcenginePreviewSidecar {
             let started = Instant::now();
             match preview.open_session().await {
                 Ok(()) => {
-                    let replay = {
-                        let recent = sidecar.recent_pcm.lock();
-                        preview_replay_tail(&recent, VOLCENGINE_PREVIEW_REPLAY_BYTES)
-                    };
-                    if !replay.is_empty() {
-                        crate::asr::AudioConsumer::consume_pcm_chunk(&*preview, &replay);
+                    if sidecar.cancel_requested.load(Ordering::SeqCst) {
+                        preview.cancel();
+                        log::info!(
+                            "[asr] low-latency preview sidecar opened after cancellation; closed immediately elapsed_ms={}",
+                            started.elapsed().as_millis()
+                        );
+                    } else {
+                        let replay = {
+                            let recent = sidecar.recent_pcm.lock();
+                            preview_replay_tail(&recent, VOLCENGINE_PREVIEW_REPLAY_BYTES)
+                        };
+                        if !replay.is_empty() {
+                            crate::asr::AudioConsumer::consume_pcm_chunk(&*preview, &replay);
+                        }
+                        log::info!(
+                            "[asr] low-latency preview sidecar opened asynchronously elapsed_ms={} replay_bytes={} replay_ms={}",
+                            started.elapsed().as_millis(),
+                            replay.len(),
+                            replay.len() / 32
+                        );
                     }
-                    log::info!(
-                        "[asr] low-latency preview sidecar opened asynchronously elapsed_ms={} replay_bytes={} replay_ms={}",
-                        started.elapsed().as_millis(),
-                        replay.len(),
-                        replay.len() / 32
-                    );
                 }
                 Err(err) => {
                     log::warn!(
@@ -266,6 +349,7 @@ impl VolcenginePreviewSidecar {
             }
             sidecar.restarting.store(false, Ordering::SeqCst);
         });
+        true
     }
 
     fn remember_recent_pcm(&self, pcm: &[u8]) {
@@ -278,6 +362,9 @@ impl VolcenginePreviewSidecar {
     }
 
     fn restart_silent_preview_if_needed(self: &Arc<Self>, preview: Arc<VolcengineStreamingASR>) {
+        if self.cancel_requested.load(Ordering::SeqCst) {
+            return;
+        }
         if !preview.low_latency_preview_silent_stalled(
             Duration::from_millis(VOLCENGINE_PREVIEW_STALL_RESTART_MS),
             VOLCENGINE_PREVIEW_STALL_MIN_FRAMES,
@@ -323,6 +410,15 @@ impl VolcenginePreviewSidecar {
         set_volcengine_partial_preview_callback(&replacement, &self.inner, self.session_id);
         match replacement.open_session().await {
             Ok(()) => {
+                if self.cancel_requested.load(Ordering::SeqCst) {
+                    replacement.cancel();
+                    log::info!(
+                        "[asr] low-latency preview sidecar restart opened after cancellation; closed immediately attempt={}",
+                        attempt
+                    );
+                    self.restarting.store(false, Ordering::SeqCst);
+                    return;
+                }
                 old_preview.cancel();
                 {
                     *self.current.lock() = Arc::clone(&replacement);
@@ -368,29 +464,44 @@ fn set_volcengine_partial_preview_callback(
     })));
 }
 
+fn set_volcengine_final_supplemental_preview_callback(
+    asr: &Arc<VolcengineStreamingASR>,
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) {
+    let inner_for_partial = Arc::clone(inner);
+    asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
+        update_embedded_audio_partial_preview_from_final_supplement(
+            &inner_for_partial,
+            session_id,
+            update,
+        );
+    })));
+}
+
 fn build_volcengine_asr_pair(inner: &Arc<Inner>, session_id: SessionId) -> VolcengineAsrPair {
     let credentials = read_volc_credentials();
-    let hotwords = enabled_hotwords(inner);
+    let final_hotwords = enabled_hotwords(inner);
     let final_asr = Arc::new(VolcengineStreamingASR::new(
         credentials.clone(),
-        hotwords.clone(),
+        final_hotwords.clone(),
     ));
     let preview_asr = Arc::new(VolcengineStreamingASR::new_low_latency_preview(
         credentials.clone(),
-        hotwords.clone(),
+        final_hotwords.clone(),
     ));
     set_volcengine_partial_preview_callback(&final_asr, inner, session_id);
+    set_volcengine_final_supplemental_preview_callback(&final_asr, inner, session_id);
     set_volcengine_partial_preview_callback(&preview_asr, inner, session_id);
     let preview_sidecar = Arc::new(VolcenginePreviewSidecar::new(
         credentials,
-        hotwords,
+        final_hotwords,
         inner,
         session_id,
-        Arc::clone(&preview_asr),
+        preview_asr,
     ));
     let target: Arc<dyn crate::asr::AudioConsumer> = Arc::new(VolcenginePreviewTeeConsumer {
         final_asr: Arc::clone(&final_asr),
-        preview_sidecar: Arc::clone(&preview_sidecar),
     });
     VolcengineAsrPair {
         final_asr,
@@ -402,14 +513,15 @@ fn build_volcengine_asr_pair(inner: &Arc<Inner>, session_id: SessionId) -> Volce
 async fn open_volcengine_asr_pair(
     pair: &VolcengineAsrPair,
 ) -> Result<(), crate::asr::volcengine::VolcengineASRError> {
-    let final_asr = Arc::clone(&pair.final_asr);
     let started = Instant::now();
-    final_asr.open_session().await?;
+    pair.final_asr.open_session().await?;
     log::info!(
-        "[asr] final ASR ready; preview sidecar will open asynchronously elapsed_ms={}",
+        "[asr] final ASR ready; low-latency preview sidecar opening asynchronously elapsed_ms={}",
         started.elapsed().as_millis()
     );
-    pair.preview_sidecar.open_initial_preview_in_background();
+    if !pair.preview_sidecar.open_initial_preview_in_background() {
+        log::warn!("[asr] low-latency preview sidecar was not scheduled");
+    }
     Ok(())
 }
 
@@ -1026,6 +1138,125 @@ pub(super) fn current_embedded_audio_partial_preview(inner: &Arc<Inner>) -> Opti
     inner.embedded_audio_partial_preview.lock().clone()
 }
 
+fn reconcile_final_transcript_with_preview_hotwords(
+    final_text: &str,
+    preview: &str,
+    hotwords: &[DictionaryHotword],
+) -> String {
+    let preview_key = ascii_alphanumeric_key(preview);
+    if preview_key.is_empty() {
+        return final_text.to_string();
+    }
+
+    let mut corrected = final_text.to_string();
+    for hotword in hotwords {
+        if !hotword.enabled {
+            continue;
+        }
+        let phrase = hotword.phrase.trim();
+        if phrase.len() < 3 || !phrase.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+            continue;
+        }
+        let phrase_key = phrase.to_ascii_lowercase();
+        if !preview_key.contains(&phrase_key)
+            || ascii_alphanumeric_key(&corrected).contains(&phrase_key)
+        {
+            continue;
+        }
+
+        let replacement =
+            spaced_ascii_token_spans(&corrected)
+                .into_iter()
+                .find_map(|(start, end, candidate)| {
+                    (ascii_edit_distance_at_most_one(&candidate, &phrase_key) == Some(1))
+                        .then_some((start, end))
+                });
+        if let Some((start, end)) = replacement {
+            corrected.replace_range(start..end, phrase);
+            log::info!(
+                "[coord] restored preview-confirmed ASR hotword in final transcript: {phrase}"
+            );
+        }
+    }
+    corrected
+}
+
+fn ascii_alphanumeric_key(text: &str) -> String {
+    text.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect()
+}
+
+fn spaced_ascii_token_spans(text: &str) -> Vec<(usize, usize, String)> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut spans = Vec::new();
+    let mut index = 0;
+    while index < chars.len() {
+        let (start, first) = chars[index];
+        if !first.is_ascii_alphanumeric() {
+            index += 1;
+            continue;
+        }
+
+        let mut end = start + first.len_utf8();
+        let mut token = String::from(first.to_ascii_lowercase());
+        index += 1;
+        loop {
+            let separator_start = index;
+            while index < chars.len() && chars[index].1.is_ascii_whitespace() {
+                index += 1;
+            }
+            if index < chars.len() && chars[index].1.is_ascii_alphanumeric() {
+                let (next_offset, next) = chars[index];
+                token.push(next.to_ascii_lowercase());
+                end = next_offset + next.len_utf8();
+                index += 1;
+                continue;
+            }
+            index = if separator_start == index {
+                index
+            } else {
+                separator_start
+            };
+            break;
+        }
+        spans.push((start, end, token));
+    }
+    spans
+}
+
+fn ascii_edit_distance_at_most_one(left: &str, right: &str) -> Option<usize> {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len().abs_diff(right.len()) > 1 {
+        return None;
+    }
+
+    let (mut left_index, mut right_index, mut edits) = (0, 0, 0);
+    while left_index < left.len() && right_index < right.len() {
+        if left[left_index] == right[right_index] {
+            left_index += 1;
+            right_index += 1;
+            continue;
+        }
+        edits += 1;
+        if edits > 1 {
+            return None;
+        }
+        if left.len() > right.len() {
+            left_index += 1;
+        } else if right.len() > left.len() {
+            right_index += 1;
+        } else {
+            left_index += 1;
+            right_index += 1;
+        }
+    }
+    edits += left.len().saturating_sub(left_index) + right.len().saturating_sub(right_index);
+    (edits <= 1).then_some(edits)
+}
+
 fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: SessionId, text: String) {
     let preview = text.trim().to_string();
     if preview.is_empty() {
@@ -1040,6 +1271,42 @@ fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: Session
             let mut slot = inner.embedded_audio_partial_preview.lock();
             let Some(stabilized_preview) =
                 stabilize_embedded_audio_partial_preview(slot.as_deref(), &preview)
+            else {
+                return false;
+            };
+            *slot = Some(stabilized_preview.clone());
+            emit_embedded_audio_partial_preview_if_active(inner, session_id, stabilized_preview)
+        },
+    );
+}
+
+fn update_embedded_audio_partial_preview_from_final_supplement(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    update: crate::asr::volcengine::FinalIntermediateTranscript,
+) {
+    let authoritative_two_pass = update.authoritative_two_pass;
+    let preview = update.text.trim().to_string();
+    if preview.is_empty() {
+        return;
+    }
+    dispatch_embedded_ble_session_actor_command(
+        inner,
+        EmbeddedBleSessionActorCommand::AsrPartial,
+        Some(session_id),
+        format!(
+            "final_supplement chars={} authoritative_two_pass={}",
+            preview.chars().count(),
+            authoritative_two_pass
+        ),
+        |_| {
+            let mut slot = inner.embedded_audio_partial_preview.lock();
+            let Some(stabilized_preview) =
+                stabilize_embedded_audio_final_supplemental_preview_with_provider_authority(
+                    slot.as_deref(),
+                    &preview,
+                    authoritative_two_pass,
+                )
             else {
                 return false;
             };
@@ -1092,6 +1359,327 @@ fn stabilize_embedded_audio_partial_preview(
     None
 }
 
+fn stabilize_embedded_audio_final_supplemental_preview(
+    current: Option<&str>,
+    candidate: &str,
+) -> Option<String> {
+    stabilize_embedded_audio_final_supplemental_preview_with_provider_authority(
+        current, candidate, false,
+    )
+}
+
+fn stabilize_embedded_audio_final_supplemental_preview_with_provider_authority(
+    current: Option<&str>,
+    candidate: &str,
+    authoritative_two_pass: bool,
+) -> Option<String> {
+    const FINAL_SUPPLEMENT_SEED_CHARS: usize = 2;
+    const SHORT_PREFIX_REPAIR_MAX_CURRENT_CHARS: usize = 12;
+    const SHORT_PREFIX_REPAIR_MAX_REWRITE_CHARS: usize = 2;
+    const SHORT_PREFIX_REPAIR_MIN_EXTENSION_CHARS: usize = 3;
+    const SHORT_PREFIX_REPAIR_MIN_SHARED_PREFIX_CHARS: usize = 2;
+    const LONG_PREFIX_REPAIR_MIN_SHARED_PREFIX_CHARS: usize = 12;
+    const LONG_PREFIX_REPAIR_MIN_EXTENSION_CHARS: usize = 6;
+    const LONG_SHIFTED_REPAIR_MIN_TOTAL_GROWTH_CHARS: usize = 2;
+    const AUTHORITATIVE_EARLY_REWRITE_MIN_SHARED_PREFIX_CHARS: usize = 2;
+    const AUTHORITATIVE_EARLY_REWRITE_MIN_EXTENSION_CHARS: usize = 4;
+    const AUTHORITATIVE_EARLY_REWRITE_MAX_EDIT_CHARS: usize = 4;
+    const AUTHORITATIVE_LONG_REVISION_MIN_SHARED_PREFIX_CHARS: usize = 12;
+    const AUTHORITATIVE_LONG_REVISION_MAX_LENGTH_DELTA_CHARS: usize = 4;
+    const AUTHORITATIVE_LONG_REVISION_MAX_EDIT_CHARS: usize = 4;
+    const AUTHORITATIVE_REWRITE_MIN_SHARED_PREFIX_CHARS: usize = 6;
+    const AUTHORITATIVE_REWRITE_MIN_EXTENSION_CHARS: usize = 8;
+
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return None;
+    }
+    let candidate_key = embedded_audio_partial_preview_stability_key(candidate);
+    if candidate_key.is_empty() {
+        return None;
+    }
+    let candidate_key_chars = candidate_key.chars().count();
+    let Some(current) = current.map(str::trim).filter(|value| !value.is_empty()) else {
+        return (candidate_key_chars >= FINAL_SUPPLEMENT_SEED_CHARS).then(|| candidate.to_string());
+    };
+    let current_key = embedded_audio_partial_preview_stability_key(current);
+    if current_key.is_empty() {
+        return None;
+    }
+    if authoritative_two_pass && current_key != candidate_key {
+        log::info!(
+            "[coord] applied provider-authoritative two-pass preview correction current_chars={} candidate_chars={}",
+            current_key.chars().count(),
+            candidate_key_chars
+        );
+        return Some(candidate.to_string());
+    }
+    if current_key == candidate_key {
+        return embedded_audio_final_supplement_adds_decorative_progress(current, candidate)
+            .then(|| candidate.to_string());
+    }
+    if embedded_audio_final_supplement_is_brief_bounded_revision(&current_key, &candidate_key) {
+        return Some(candidate.to_string());
+    }
+    let current_key_chars = current_key.chars().count();
+    if candidate_key.starts_with(&current_key) {
+        if embedded_audio_partial_preview_repeats_recent_short_tail(
+            &current_key,
+            &candidate_key,
+            current_key_chars,
+        ) {
+            return None;
+        }
+        return stitch_embedded_audio_partial_preview(current, candidate, current_key_chars);
+    }
+    if current_key.starts_with(&candidate_key) {
+        return None;
+    }
+    let shared_prefix =
+        embedded_audio_partial_preview_common_prefix_chars(&current_key, &candidate_key);
+    let bounded_long_revision = current_key_chars > SHORT_PREFIX_REPAIR_MAX_CURRENT_CHARS
+        && embedded_audio_final_supplement_has_bounded_long_rewrite_alignment(
+            &current_key,
+            &candidate_key,
+            shared_prefix,
+            AUTHORITATIVE_LONG_REVISION_MIN_SHARED_PREFIX_CHARS,
+            AUTHORITATIVE_LONG_REVISION_MAX_LENGTH_DELTA_CHARS,
+            AUTHORITATIVE_LONG_REVISION_MAX_EDIT_CHARS,
+        );
+    if candidate_key_chars
+        < current_key_chars.saturating_add(SHORT_PREFIX_REPAIR_MIN_EXTENSION_CHARS)
+        && !bounded_long_revision
+    {
+        return None;
+    }
+    if current_key_chars > SHORT_PREFIX_REPAIR_MAX_CURRENT_CHARS {
+        let stable_long_prefix = shared_prefix >= LONG_PREFIX_REPAIR_MIN_SHARED_PREFIX_CHARS
+            && candidate_key_chars
+                >= current_key_chars.saturating_add(LONG_PREFIX_REPAIR_MIN_EXTENSION_CHARS);
+        let bounded_prefix_insertion =
+            embedded_audio_final_supplement_has_bounded_prefix_insertion_alignment(
+                &current_key,
+                &candidate_key,
+                shared_prefix,
+                LONG_SHIFTED_REPAIR_MIN_TOTAL_GROWTH_CHARS,
+            );
+        let bounded_early_rewrite =
+            embedded_audio_final_supplement_has_bounded_early_rewrite_alignment(
+                &current_key,
+                &candidate_key,
+                shared_prefix,
+                AUTHORITATIVE_EARLY_REWRITE_MIN_SHARED_PREFIX_CHARS,
+                AUTHORITATIVE_EARLY_REWRITE_MIN_EXTENSION_CHARS,
+                AUTHORITATIVE_EARLY_REWRITE_MAX_EDIT_CHARS,
+            );
+        let authoritative_midstream_rewrite = shared_prefix
+            >= AUTHORITATIVE_REWRITE_MIN_SHARED_PREFIX_CHARS
+            && candidate_key_chars
+                >= current_key_chars.saturating_add(AUTHORITATIVE_REWRITE_MIN_EXTENSION_CHARS);
+        if bounded_early_rewrite {
+            log::info!(
+                "[coord] accepted bounded authoritative early preview rewrite current_chars={} candidate_chars={} shared_prefix_chars={}",
+                current_key_chars,
+                candidate_key_chars,
+                shared_prefix
+            );
+            return Some(candidate.to_string());
+        }
+        if bounded_long_revision {
+            log::info!(
+                "[coord] accepted bounded authoritative long preview revision current_chars={} candidate_chars={} shared_prefix_chars={}",
+                current_key_chars,
+                candidate_key_chars,
+                shared_prefix
+            );
+            return Some(candidate.to_string());
+        }
+        return (stable_long_prefix || bounded_prefix_insertion || authoritative_midstream_rewrite)
+            .then(|| candidate.to_string());
+    }
+    if current_key_chars <= 4 || shared_prefix >= SHORT_PREFIX_REPAIR_MIN_SHARED_PREFIX_CHARS {
+        return Some(candidate.to_string());
+    }
+    if current_key_chars.saturating_sub(shared_prefix) > SHORT_PREFIX_REPAIR_MAX_REWRITE_CHARS {
+        return None;
+    }
+    Some(candidate.to_string())
+}
+
+fn embedded_audio_final_supplement_adds_decorative_progress(
+    current: &str,
+    candidate: &str,
+) -> bool {
+    candidate
+        .strip_prefix(current)
+        .filter(|suffix| !suffix.is_empty())
+        .is_some_and(|suffix| {
+            suffix
+                .chars()
+                .all(is_embedded_audio_partial_preview_decorative)
+        })
+}
+
+// Final-session two-pass corrections can replace a short early branch without
+// adding characters. Both ends must still agree before the visible preview is
+// allowed to change, so unrelated short phrases cannot overwrite it.
+fn embedded_audio_final_supplement_is_brief_bounded_revision(
+    current_key: &str,
+    candidate_key: &str,
+) -> bool {
+    const MIN_CHARS: usize = 5;
+    const MAX_CHARS: usize = 12;
+    const MAX_LENGTH_DELTA_CHARS: usize = 2;
+    const MIN_SHARED_PREFIX_CHARS: usize = 2;
+    const MIN_SHARED_SUFFIX_CHARS: usize = 2;
+
+    let current_chars = current_key.chars().count();
+    let candidate_chars = candidate_key.chars().count();
+    current_chars >= MIN_CHARS
+        && candidate_chars >= MIN_CHARS
+        && current_chars <= MAX_CHARS
+        && candidate_chars <= MAX_CHARS
+        && current_chars.abs_diff(candidate_chars) <= MAX_LENGTH_DELTA_CHARS
+        && embedded_audio_partial_preview_common_prefix_chars(current_key, candidate_key)
+            >= MIN_SHARED_PREFIX_CHARS
+        && embedded_audio_partial_preview_common_suffix_chars(current_key, candidate_key)
+            >= MIN_SHARED_SUFFIX_CHARS
+}
+
+fn embedded_audio_final_supplement_has_bounded_prefix_insertion_alignment(
+    current_key: &str,
+    candidate_key: &str,
+    shared_prefix_chars: usize,
+    min_total_growth_chars: usize,
+) -> bool {
+    const MIN_SHARED_PREFIX_CHARS: usize = 2;
+    const MAX_INSERTED_PREFIX_CHARS: usize = 2;
+
+    if shared_prefix_chars < MIN_SHARED_PREFIX_CHARS {
+        return false;
+    }
+
+    let current: Vec<char> = current_key.chars().collect();
+    let candidate: Vec<char> = candidate_key.chars().collect();
+    if candidate.len() < current.len().saturating_add(min_total_growth_chars) {
+        return false;
+    }
+
+    let mut current_index = shared_prefix_chars;
+    let mut candidate_index = shared_prefix_chars;
+    let mut inserted_chars = 0usize;
+    while current_index < current.len() && candidate_index < candidate.len() {
+        if current[current_index] == candidate[candidate_index] {
+            current_index += 1;
+            candidate_index += 1;
+        } else if inserted_chars < MAX_INSERTED_PREFIX_CHARS {
+            inserted_chars += 1;
+            candidate_index += 1;
+        } else {
+            return false;
+        }
+    }
+
+    current_index == current.len() && inserted_chars > 0
+}
+
+fn embedded_audio_final_supplement_has_bounded_early_rewrite_alignment(
+    current_key: &str,
+    candidate_key: &str,
+    shared_prefix_chars: usize,
+    min_shared_prefix_chars: usize,
+    min_extension_chars: usize,
+    max_edit_chars: usize,
+) -> bool {
+    if shared_prefix_chars < min_shared_prefix_chars {
+        return false;
+    }
+
+    let current: Vec<char> = current_key.chars().collect();
+    let candidate: Vec<char> = candidate_key.chars().collect();
+    if candidate.len() < current.len().saturating_add(min_extension_chars) {
+        return false;
+    }
+
+    let min_prefix_len = current.len().saturating_sub(max_edit_chars);
+    let max_prefix_len = current
+        .len()
+        .saturating_add(max_edit_chars)
+        .min(candidate.len());
+    (min_prefix_len..=max_prefix_len).any(|candidate_prefix_len| {
+        embedded_audio_partial_preview_edit_distance_at_most(
+            &current,
+            &candidate[..candidate_prefix_len],
+            max_edit_chars,
+        )
+    })
+}
+
+fn embedded_audio_final_supplement_has_bounded_long_rewrite_alignment(
+    current_key: &str,
+    candidate_key: &str,
+    shared_prefix_chars: usize,
+    min_shared_prefix_chars: usize,
+    max_length_delta_chars: usize,
+    max_edit_chars: usize,
+) -> bool {
+    if shared_prefix_chars < min_shared_prefix_chars {
+        return false;
+    }
+
+    let current: Vec<char> = current_key.chars().collect();
+    let candidate: Vec<char> = candidate_key.chars().collect();
+    current.len().abs_diff(candidate.len()) <= max_length_delta_chars
+        && embedded_audio_partial_preview_edit_distance_at_most(
+            &current,
+            &candidate,
+            max_edit_chars,
+        )
+}
+
+fn embedded_audio_partial_preview_edit_distance_at_most(
+    left: &[char],
+    right: &[char],
+    max_distance: usize,
+) -> bool {
+    if left.len().abs_diff(right.len()) > max_distance {
+        return false;
+    }
+
+    let mut previous: Vec<usize> = (0..=right.len()).collect();
+    for (left_index, left_char) in left.iter().enumerate() {
+        let mut current = Vec::with_capacity(right.len() + 1);
+        current.push(left_index + 1);
+        for (right_index, right_char) in right.iter().enumerate() {
+            let replace_cost = previous[right_index] + usize::from(left_char != right_char);
+            let insert_cost = current[right_index] + 1;
+            let delete_cost = previous[right_index + 1] + 1;
+            current.push(replace_cost.min(insert_cost).min(delete_cost));
+        }
+        if current.iter().copied().min().unwrap_or_default() > max_distance {
+            return false;
+        }
+        previous = current;
+    }
+
+    previous[right.len()] <= max_distance
+}
+
+fn embedded_audio_partial_preview_common_prefix_chars(left: &str, right: &str) -> usize {
+    left.chars()
+        .zip(right.chars())
+        .take_while(|(left, right)| left == right)
+        .count()
+}
+
+fn embedded_audio_partial_preview_common_suffix_chars(left: &str, right: &str) -> usize {
+    left.chars()
+        .rev()
+        .zip(right.chars().rev())
+        .take_while(|(left, right)| left == right)
+        .count()
+}
+
 fn embedded_audio_partial_preview_stability_key(text: &str) -> String {
     let mut key = String::new();
     for ch in text.chars() {
@@ -1137,7 +1725,7 @@ fn embedded_audio_partial_preview_repeats_recent_short_tail(
     current_key_chars: usize,
 ) -> bool {
     const MIN_CURRENT_CHARS: usize = 6;
-    const MIN_SUFFIX_CHARS: usize = 3;
+    const MIN_SUFFIX_CHARS: usize = 2;
     const MAX_SUFFIX_CHARS: usize = 6;
 
     if current_key_chars < MIN_CURRENT_CHARS {
@@ -1456,7 +2044,7 @@ struct EmbeddedAudioDictationSession {
     boosted_chunk_count: usize,
     max_gain: f64,
     clipped_samples: usize,
-    asr_preroll_sent: bool,
+    streaming_agc: EmbeddedStreamingAgcState,
     device_ai_processing_started: bool,
 }
 
@@ -1469,7 +2057,7 @@ impl EmbeddedAudioDictationSession {
             return Err("嵌入式音频 PCM chunk 长度不是 16-bit 对齐".to_string());
         }
 
-        let (asr_pcm, gain_stats) = prepare_embedded_streaming_pcm_for_asr(&self.active_asr, pcm);
+        let (asr_pcm, gain_stats) = self.prepare_streaming_pcm_for_asr(pcm);
         if embedded_audio_stop_feedback_latched(inner) {
             if !embedded_audio_streaming_session_accepts_pcm(inner, self.session_id) {
                 log::debug!(
@@ -1506,37 +2094,19 @@ impl EmbeddedAudioDictationSession {
             self.clipped_samples += gain_stats.clipped_samples;
         }
 
-        feed_embedded_asr_preroll_if_needed(self);
         for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
             self.consumer.consume_pcm_chunk(chunk);
         }
         Ok(())
     }
-}
 
-fn embedded_audio_asr_preroll_enabled(active_asr: &str) -> bool {
-    active_asr == "volcengine"
-}
+    fn prepare_streaming_pcm_for_asr(&mut self, pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
+        if self.active_asr == "volcengine" {
+            return normalize_embedded_streaming_pcm_for_asr(pcm, &mut self.streaming_agc);
+        }
 
-fn feed_embedded_asr_preroll_if_needed(session: &mut EmbeddedAudioDictationSession) {
-    if session.asr_preroll_sent {
-        return;
+        normalize_embedded_pcm_for_asr(pcm)
     }
-    session.asr_preroll_sent = true;
-    if !embedded_audio_asr_preroll_enabled(&session.active_asr) {
-        return;
-    }
-
-    let silence = vec![0u8; EMBEDDED_AUDIO_ASR_PREROLL_BYTES];
-    for chunk in silence.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
-        session.consumer.consume_pcm_chunk(chunk);
-    }
-    log::info!(
-        "[coord] embedded audio ASR preroll inserted (asr={}, ms={}, bytes={})",
-        session.active_asr,
-        EMBEDDED_AUDIO_ASR_PREROLL_MS,
-        EMBEDDED_AUDIO_ASR_PREROLL_BYTES
-    );
 }
 
 #[derive(Default)]
@@ -1890,18 +2460,16 @@ fn default_done_message(status: InsertStatus, polish_failed: bool) -> Option<Str
     if polish_failed {
         // polish 失败仍写 history error_code，但录音原文已成功落地时不要把整个
         // dictation 呈现成失败；否则无效 LLM key 会让成功录音看起来像回退。
-        Some(match status {
-            InsertStatus::Inserted => "已插入原文（润色不可用）".to_string(),
-            InsertStatus::PasteSent => "已尝试粘贴原文（润色不可用）".to_string(),
-            InsertStatus::CopiedFallback => {
-                if cfg!(target_os = "windows") {
-                    "已复制原文（润色不可用），请 Ctrl+V".to_string()
-                } else {
-                    "已复制原文（润色不可用），请粘贴".to_string()
-                }
-            }
-            InsertStatus::Failed => "润色不可用，插入失败".to_string(),
-        })
+        match status {
+            InsertStatus::Inserted => None,
+            InsertStatus::PasteSent => Some("已尝试粘贴原文".to_string()),
+            InsertStatus::CopiedFallback => Some(if cfg!(target_os = "windows") {
+                "已复制原文，请 Ctrl+V".to_string()
+            } else {
+                "已复制原文，请粘贴".to_string()
+            }),
+            InsertStatus::Failed => Some("润色不可用，插入失败".to_string()),
+        }
     } else {
         match status {
             InsertStatus::Inserted => None,
@@ -2084,6 +2652,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
 
     let active_asr = active_asr_provider_from_preferences(inner);
     sync_active_asr_provider_to_credentials_for_runtime(&active_asr);
+    log_dictation_asr_engine_selection(current_session_id, &active_asr);
 
     if let Err(message) = ensure_asr_credentials(&active_asr) {
         log::warn!("[coord] ASR credential gate failed: {message}");
@@ -2264,7 +2833,12 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         let volcengine = build_volcengine_asr_pair(inner, current_session_id);
         let asr = Arc::clone(&volcengine.final_asr);
         let bridge = Arc::new(DeferredAsrBridge::new());
-        let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> =
+            Arc::new(VolcengineStartupPreviewConsumer {
+                final_bridge: Arc::clone(&bridge),
+                preview_sidecar: Arc::clone(&volcengine.preview_sidecar),
+                _target_guard: Arc::clone(&volcengine.target),
+            });
         store_asr_for_session(
             inner,
             current_session_id,
@@ -2280,12 +2854,14 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                         "[coord] stale ASR open_session error from session {current_session_id} — ignoring"
                     );
                     asr.cancel();
+                    volcengine.preview_sidecar.cancel();
                     discard_startup_resources_for_session(inner, current_session_id);
                     restore_prepared_windows_ime_session(inner, current_session_id);
                     return Ok(());
                 }
                 StartupRaceStatus::CancelRaced => {
                     asr.cancel();
+                    volcengine.preview_sidecar.cancel();
                     discard_startup_resources_for_session(inner, current_session_id);
                     restore_prepared_windows_ime_session(inner, current_session_id);
                     set_phase_idle_if_session_matches(inner, current_session_id);
@@ -2311,6 +2887,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
             StartupRaceStatus::CancelRaced => {
                 log::info!("[coord] cancel raced during ASR open_session — aborting begin");
                 asr.cancel();
+                volcengine.preview_sidecar.cancel();
                 discard_startup_resources_for_session(inner, current_session_id);
                 restore_prepared_windows_ime_session(inner, current_session_id);
                 set_phase_idle_if_session_matches(inner, current_session_id);
@@ -2321,13 +2898,14 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                     "[coord] stale ASR open_session continuation from session {current_session_id} — ignoring"
                 );
                 asr.cancel();
+                volcengine.preview_sidecar.cancel();
                 discard_startup_resources_for_session(inner, current_session_id);
                 restore_prepared_windows_ime_session(inner, current_session_id);
                 return Ok(());
             }
         }
-        let target = Arc::clone(&volcengine.target);
-        let flushed_bytes = bridge.attach(target);
+        let final_target: Arc<dyn crate::asr::AudioConsumer> = volcengine.final_asr.clone();
+        let flushed_bytes = bridge.attach(final_target);
         log::info!("[coord] ASR connected; flushed {flushed_bytes} deferred audio bytes");
         finish_starting_session(inner, current_session_id).await;
     }
@@ -2343,6 +2921,8 @@ pub(super) async fn start_recorder_for_starting(
 ) -> Result<(), String> {
     let inner_for_level = Arc::clone(inner);
     let session_id_for_level = session_id;
+    let asr_quality_warning = Arc::new(dictation_asr_quality_warning(active_asr));
+    let asr_quality_warning_pending = Arc::new(AtomicBool::new(asr_quality_warning.is_some()));
     // 节流：电平回调本身约 185 Hz（cpal 默认音频块），全部转发到前端会让 CSS
     // transition 互相覆盖、视觉上"被平均"成静止。限制为 ~30 Hz（33ms 最少间隔），
     // 配合 CSS 短 transition 让每次 emit 完整可见。
@@ -2367,12 +2947,17 @@ pub(super) async fn start_recorder_for_starting(
             }
             *last = Some(now);
         }
+        let message = if asr_quality_warning_pending.swap(false, Ordering::SeqCst) {
+            asr_quality_warning.as_ref().clone()
+        } else {
+            None
+        };
         publish_dictation_capsule(
             &inner_for_level,
             session_id_for_level,
             DictationUiState::Recording,
             level,
-            None,
+            message,
             None,
         );
     });
@@ -3247,14 +3832,17 @@ impl EmbeddedStreamingDictation {
         inner
             .audio_archive_active
             .store(archive_active, std::sync::atomic::Ordering::Relaxed);
-        if session.boosted_chunk_count > 0 {
-            log::info!(
-                "[coord] embedded audio streaming normalized for ASR (boosted_chunks={}, max_gain={:.2}, clipped_samples={})",
-                session.boosted_chunk_count,
-                session.max_gain,
-                session.clipped_samples
-            );
-        }
+        log::info!(
+            "[coord] embedded audio streaming AGC summary (boosted_chunks={}, max_gain={:.2}, clipped_samples={}, voiced_chunks={}, quiet_chunks={}, gain_updates={}, first_gain={:.2}, final_gain={:.2})",
+            session.boosted_chunk_count,
+            session.max_gain,
+            session.clipped_samples,
+            session.streaming_agc.voiced_chunks,
+            session.streaming_agc.quiet_chunks,
+            session.streaming_agc.gain_updates,
+            session.streaming_agc.first_gain.unwrap_or(1.0),
+            session.streaming_agc.gain
+        );
         log::info!(
             "[coord] embedded audio streaming submitted to dictation pipeline (asr={}, pcm_bytes={}, asr_pcm_bytes={}, archive={})",
             session.active_asr,
@@ -3471,17 +4059,17 @@ async fn begin_embedded_audio_dictation_session(
     inner
         .audio_archive_active
         .store(false, std::sync::atomic::Ordering::Relaxed);
+    let active_asr = active_asr_provider_from_preferences(inner);
+    sync_active_asr_provider_to_credentials_for_runtime(&active_asr);
+    log_dictation_asr_engine_selection(current_session_id, &active_asr);
     publish_dictation_capsule(
         inner,
         current_session_id,
         DictationUiState::Recording,
         0.0,
-        None,
+        dictation_asr_quality_warning(&active_asr),
         None,
     );
-
-    let active_asr = active_asr_provider_from_preferences(inner);
-    sync_active_asr_provider_to_credentials_for_runtime(&active_asr);
 
     if let Err(message) = ensure_asr_credentials(&active_asr) {
         log::warn!("[coord] embedded audio ASR credential gate failed: {message}");
@@ -3514,7 +4102,7 @@ async fn begin_embedded_audio_dictation_session(
         boosted_chunk_count: 0,
         max_gain: 1.0,
         clipped_samples: 0,
-        asr_preroll_sent: false,
+        streaming_agc: EmbeddedStreamingAgcState::default(),
         device_ai_processing_started: false,
     })
 }
@@ -3573,7 +4161,7 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
     pcm: &[u8],
     stats: Option<crate::embedded_audio::SessionStats>,
 ) -> Result<(), String> {
-    let mut session = begin_embedded_audio_dictation_session(inner).await?;
+    let session = begin_embedded_audio_dictation_session(inner).await?;
     let current_session_id = session.session_id;
     let active_asr = session.active_asr.clone();
     let consumer = Arc::clone(&session.consumer);
@@ -3582,22 +4170,7 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
     inner
         .audio_archive_active
         .store(archive_active, std::sync::atomic::Ordering::Relaxed);
-    let (trimmed_pcm, trim_stats) = trim_embedded_pcm_for_asr(pcm);
-    if let Some(trim_stats) = trim_stats {
-        log::info!(
-            "[coord] embedded audio trimmed for ASR (original_pcm_bytes={}, speech_pcm_bytes={}, asr_input_pcm_bytes={}, speech_start_ms={}, speech_end_ms={}, active_windows={}, noise_floor_rms={:.1}, max_window_rms={:.1}, threshold_rms={:.1})",
-            trim_stats.original_pcm_bytes,
-            trim_stats.speech_pcm_bytes,
-            trim_stats.asr_input_pcm_bytes,
-            trim_stats.speech_start_ms,
-            trim_stats.speech_end_ms,
-            trim_stats.active_windows,
-            trim_stats.noise_floor_rms,
-            trim_stats.max_window_rms,
-            trim_stats.threshold_rms
-        );
-    }
-    let (asr_pcm, gain_stats) = normalize_embedded_pcm_for_asr(&trimmed_pcm);
+    let (asr_pcm, gain_stats) = normalize_embedded_pcm_for_asr(pcm);
     if gain_stats.gain > 1.0 {
         log::info!(
             "[coord] embedded audio normalized for ASR (rms_before={:.1}, peak_before={}, gain={:.2}, clipped_samples={})",
@@ -3615,7 +4188,6 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
     ) {
         return Ok(());
     }
-    feed_embedded_asr_preroll_if_needed(&mut session);
     for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
         consumer.consume_pcm_chunk(chunk);
     }
@@ -3756,17 +4328,63 @@ async fn build_embedded_audio_asr_consumer(
     }
 
     let volcengine = build_volcengine_asr_pair(inner, session_id);
-    open_volcengine_asr_pair(&volcengine)
-        .await
-        .map_err(|err| format!("打开火山 ASR 连接失败: {err}"))?;
+    let final_asr = Arc::clone(&volcengine.final_asr);
+    let target_guard = Arc::clone(&volcengine.target);
+    let bridge = Arc::new(DeferredAsrBridge::new());
+    let consumer: Arc<dyn crate::recorder::AudioConsumer> =
+        Arc::new(VolcengineStartupPreviewConsumer {
+            final_bridge: Arc::clone(&bridge),
+            preview_sidecar: Arc::clone(&volcengine.preview_sidecar),
+            _target_guard: target_guard,
+        });
     store_asr_for_session(
         inner,
         session_id,
-        ActiveAsr::Volcengine(Arc::clone(&volcengine.final_asr)),
+        ActiveAsr::Volcengine(Arc::clone(&final_asr)),
     );
-    let bridge = Arc::new(DeferredAsrBridge::new());
-    bridge.attach(Arc::clone(&volcengine.target));
-    let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge;
+    let inner_for_open = Arc::clone(inner);
+    tauri::async_runtime::spawn(async move {
+        match open_volcengine_asr_pair(&volcengine).await {
+            Ok(()) => {
+                let still_current = {
+                    let state = inner_for_open.state.lock();
+                    state.session_id == session_id
+                        && !state.cancelled
+                        && state.phase != SessionPhase::Idle
+                };
+                if !still_current {
+                    volcengine.final_asr.cancel();
+                    volcengine.preview_sidecar.cancel();
+                    log::info!(
+                        "[coord] embedded Volcengine ASR opened after stale session {session_id} - discarded"
+                    );
+                    return;
+                }
+                let flushed_bytes = bridge.attach(Arc::clone(&volcengine.target));
+                log::info!(
+                    "[coord] embedded Volcengine ASR connected; flushed {flushed_bytes} deferred audio bytes"
+                );
+            }
+            Err(err) => {
+                volcengine.final_asr.cancel();
+                volcengine.preview_sidecar.cancel();
+                let still_current = {
+                    let state = inner_for_open.state.lock();
+                    state.session_id == session_id
+                        && !state.cancelled
+                        && state.phase != SessionPhase::Idle
+                };
+                if still_current {
+                    log::error!("[coord] embedded Volcengine ASR open failed: {err}");
+                    finish_dictation_pipeline_error(
+                        &inner_for_open,
+                        session_id,
+                        format!("ASR 连接失败: {err}"),
+                    );
+                }
+            }
+        }
+    });
     Ok(consumer)
 }
 
@@ -3832,97 +4450,27 @@ struct EmbeddedPcmGainStats {
     clipped_samples: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct EmbeddedPcmTrimStats {
-    original_pcm_bytes: usize,
-    speech_start_ms: usize,
-    speech_end_ms: usize,
-    speech_pcm_bytes: usize,
-    asr_input_pcm_bytes: usize,
-    active_windows: usize,
-    noise_floor_rms: f64,
-    max_window_rms: f64,
-    threshold_rms: f64,
+#[derive(Debug)]
+struct EmbeddedStreamingAgcState {
+    gain: f64,
+    speech_rms_ema: Option<f64>,
+    voiced_chunks: usize,
+    quiet_chunks: usize,
+    gain_updates: usize,
+    first_gain: Option<f64>,
 }
 
-fn embedded_pcm_bytes_for_ms(ms: usize) -> usize {
-    let bytes = crate::embedded_audio::PCM_BYTES_PER_SECOND * ms / 1_000;
-    bytes - (bytes % 2)
-}
-
-fn trim_embedded_pcm_for_asr(pcm: &[u8]) -> (Vec<u8>, Option<EmbeddedPcmTrimStats>) {
-    if pcm.len() < embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_MIN_INPUT_MS) {
-        return (pcm.to_vec(), None);
+impl Default for EmbeddedStreamingAgcState {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            speech_rms_ema: None,
+            voiced_chunks: 0,
+            quiet_chunks: 0,
+            gain_updates: 0,
+            first_gain: None,
+        }
     }
-
-    let window_bytes = embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_WINDOW_MS);
-    if window_bytes == 0 || pcm.len() < window_bytes {
-        return (pcm.to_vec(), None);
-    }
-
-    let mut windows = Vec::new();
-    let mut offset = 0usize;
-    while offset + window_bytes <= pcm.len() {
-        let (rms, _) = embedded_pcm_rms_and_peak(&pcm[offset..offset + window_bytes]);
-        windows.push((offset, offset + window_bytes, rms));
-        offset += window_bytes;
-    }
-    if windows.is_empty() {
-        return (pcm.to_vec(), None);
-    }
-
-    let mut sorted_rms: Vec<f64> = windows.iter().map(|(_, _, rms)| *rms).collect();
-    sorted_rms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let noise_floor_rms = sorted_rms[sorted_rms.len() / 4];
-    let max_window_rms = sorted_rms.last().copied().unwrap_or(noise_floor_rms);
-    let threshold_rms = EMBEDDED_AUDIO_TRIM_MIN_RMS
-        .max(noise_floor_rms * EMBEDDED_AUDIO_TRIM_NOISE_MULTIPLIER)
-        .max(max_window_rms * EMBEDDED_AUDIO_TRIM_PEAK_RATIO);
-
-    let active_windows: Vec<(usize, usize, f64)> = windows
-        .iter()
-        .copied()
-        .filter(|(_, _, rms)| *rms >= threshold_rms)
-        .collect();
-    let Some(first_active) = active_windows.first() else {
-        return (pcm.to_vec(), None);
-    };
-    let Some(last_active) = active_windows.last() else {
-        return (pcm.to_vec(), None);
-    };
-
-    let leading_margin = embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_LEADING_MARGIN_MS);
-    let trailing_margin = embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_TRAILING_MARGIN_MS);
-    let mut start = first_active.0.saturating_sub(leading_margin);
-    let mut end = (last_active.1 + trailing_margin).min(pcm.len());
-    start -= start % 2;
-    end -= end % 2;
-    if start == 0 && end == pcm.len() {
-        return (pcm.to_vec(), None);
-    }
-    if end <= start {
-        return (pcm.to_vec(), None);
-    }
-
-    let pad_bytes = embedded_pcm_bytes_for_ms(EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS);
-    let speech_pcm_bytes = end - start;
-    let mut trimmed = Vec::with_capacity(pad_bytes + speech_pcm_bytes + pad_bytes);
-    trimmed.resize(pad_bytes, 0);
-    trimmed.extend_from_slice(&pcm[start..end]);
-    trimmed.resize(trimmed.len() + pad_bytes, 0);
-
-    let stats = EmbeddedPcmTrimStats {
-        original_pcm_bytes: pcm.len(),
-        speech_start_ms: start * 1_000 / crate::embedded_audio::PCM_BYTES_PER_SECOND,
-        speech_end_ms: end * 1_000 / crate::embedded_audio::PCM_BYTES_PER_SECOND,
-        speech_pcm_bytes,
-        asr_input_pcm_bytes: trimmed.len(),
-        active_windows: active_windows.len(),
-        noise_floor_rms,
-        max_window_rms,
-        threshold_rms,
-    };
-    (trimmed, Some(stats))
 }
 
 fn normalize_embedded_pcm_for_asr(pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
@@ -3967,22 +4515,94 @@ fn normalize_embedded_pcm_for_asr_with_stats(
     (normalized, stats)
 }
 
-fn normalize_embedded_streaming_pcm_for_asr(pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
+fn normalize_embedded_streaming_pcm_for_asr(
+    pcm: &[u8],
+    agc: &mut EmbeddedStreamingAgcState,
+) -> (Vec<u8>, EmbeddedPcmGainStats) {
     let (rms_before, peak_before) = embedded_pcm_rms_and_peak(pcm);
-    let stats = EmbeddedPcmGainStats {
+    let mut stats = EmbeddedPcmGainStats {
         rms_before,
         peak_before,
         gain: 1.0,
         clipped_samples: 0,
     };
 
-    if rms_before < EMBEDDED_AUDIO_STREAMING_NORMALIZE_MIN_RMS
-        || peak_before < EMBEDDED_AUDIO_STREAMING_NORMALIZE_MIN_PEAK
-    {
+    if !embedded_streaming_chunk_has_speech_energy(rms_before, peak_before) {
+        agc.quiet_chunks += 1;
         return (pcm.to_vec(), stats);
     }
 
-    normalize_embedded_pcm_for_asr_with_stats(pcm, stats)
+    agc.voiced_chunks += 1;
+    let had_speech_envelope = agc.speech_rms_ema.is_some();
+    let speech_rms = agc
+        .speech_rms_ema
+        .map(|previous| {
+            previous * (1.0 - EMBEDDED_AUDIO_STREAMING_AGC_ENVELOPE_ALPHA)
+                + rms_before * EMBEDDED_AUDIO_STREAMING_AGC_ENVELOPE_ALPHA
+        })
+        .unwrap_or(rms_before);
+    agc.speech_rms_ema = Some(speech_rms);
+
+    let peak_limited_gain = if peak_before == 0 {
+        EMBEDDED_AUDIO_MAX_GAIN
+    } else {
+        (i16::MAX as f64 * EMBEDDED_AUDIO_STREAMING_AGC_PEAK_HEADROOM / peak_before as f64)
+            .min(EMBEDDED_AUDIO_MAX_GAIN)
+    };
+    let desired_gain = (EMBEDDED_AUDIO_TARGET_RMS / speech_rms)
+        .min(peak_limited_gain)
+        .clamp(1.0, EMBEDDED_AUDIO_MAX_GAIN);
+    let gain = if !had_speech_envelope {
+        desired_gain
+    } else if desired_gain > agc.gain {
+        desired_gain.min(agc.gain * EMBEDDED_AUDIO_STREAMING_AGC_MAX_RISE_PER_VOICED_CHUNK)
+    } else {
+        desired_gain.max(agc.gain * EMBEDDED_AUDIO_STREAMING_AGC_MAX_FALL_PER_VOICED_CHUNK)
+    };
+
+    if (gain - agc.gain).abs() > f64::EPSILON {
+        agc.gain_updates += 1;
+    }
+    agc.gain = gain;
+    agc.first_gain.get_or_insert(gain);
+    stats.gain = gain;
+
+    if gain < EMBEDDED_AUDIO_MIN_GAIN {
+        return (pcm.to_vec(), stats);
+    }
+
+    apply_embedded_pcm_gain(pcm, stats)
+}
+
+fn apply_embedded_pcm_gain(
+    pcm: &[u8],
+    mut stats: EmbeddedPcmGainStats,
+) -> (Vec<u8>, EmbeddedPcmGainStats) {
+    let gain = stats.gain;
+    if gain < EMBEDDED_AUDIO_MIN_GAIN {
+        return (pcm.to_vec(), stats);
+    }
+
+    let mut normalized = Vec::with_capacity(pcm.len());
+    let mut clipped_samples = 0usize;
+    for chunk in pcm.chunks_exact(2) {
+        let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+        let scaled = (sample as f64 * gain).round();
+        let clamped = scaled.clamp(i16::MIN as f64, i16::MAX as f64);
+        if (scaled - clamped).abs() > f64::EPSILON {
+            clipped_samples += 1;
+        }
+        normalized.extend_from_slice(&(clamped as i16).to_le_bytes());
+    }
+
+    stats.clipped_samples = clipped_samples;
+    (normalized, stats)
+}
+
+fn embedded_streaming_chunk_has_speech_energy(rms: f64, peak: u16) -> bool {
+    rms >= EMBEDDED_AUDIO_STREAMING_NORMALIZE_SPEECH_RMS
+        || (rms >= EMBEDDED_AUDIO_STREAMING_NORMALIZE_QUIET_SPEECH_RMS
+            && peak >= EMBEDDED_AUDIO_STREAMING_NORMALIZE_QUIET_SPEECH_PEAK)
 }
 
 fn embedded_pcm_rms_and_peak(pcm: &[u8]) -> (f64, u16) {
@@ -4317,6 +4937,13 @@ async fn finish_end_session_after_stop_transition(
         return Err("ASR returned empty transcript".to_string());
     }
 
+    if let Some(preview) = current_embedded_audio_partial_preview(inner) {
+        raw.text = reconcile_final_transcript_with_preview_hotwords(
+            &raw.text,
+            &preview,
+            &enabled_hotwords(inner),
+        );
+    }
     publish_embedded_ble_asr_final(inner, current_session_id, false, Some(raw.text.clone()));
     device_ai_processing.start_if_needed("dictation_text_ready_processing_start");
 
@@ -4911,24 +5538,25 @@ mod tests {
         cancel_embedded_ble_listener_capture, cancel_session, clear_embedded_ble_cancel_flag,
         current_embedded_audio_partial_preview, default_done_message,
         device_ai_processing_completion_delay, device_processing_final_succeeded,
-        dictation_error_code, embedded_audio_stop_feedback_latched,
-        embedded_ble_listener_capture_ready, embedded_ble_processing_sync_disabled,
-        embedded_ble_session_actor_history, embedded_ble_session_event_should_trace,
-        embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak,
-        embedded_streaming_chunk_is_asr_input, emit_embedded_audio_transcribing_if_active,
-        end_embedded_ble_session, finalize_polished_text, finish_dictation_pipeline_error,
-        finish_dictation_timeout, install_embedded_ble_listener_cancel,
-        mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
-        prepare_embedded_streaming_pcm_for_asr, preview_replay_tail,
-        publish_embedded_ble_asr_final, record_embedded_ble_session_actor_command,
-        register_embedded_ble_cancel_flag, request_embedded_audio_stop_feedback,
-        request_embedded_ble_recording_stop_from_host, stabilize_embedded_audio_partial_preview,
-        store_embedded_audio_stats, streaming_insert_eligible, trim_embedded_pcm_for_asr,
-        update_embedded_audio_partial_preview, wayland_done_message, EmbeddedAudioDictationSession,
-        EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
-        DEVICE_AI_PROCESSING_MAX_VISIBLE_MS, DEVICE_AI_PROCESSING_MIN_VISIBLE_MS,
-        EMBEDDED_AUDIO_ASR_PREROLL_BYTES, EMBEDDED_AUDIO_ASR_PREROLL_MS,
-        EMBEDDED_AUDIO_FEED_CHUNK_BYTES, EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS,
+        dictation_asr_engine_backend_id, dictation_asr_quality_warning,
+        dictation_asr_uses_core_accurate_engine, dictation_error_code,
+        embedded_audio_stop_feedback_latched, embedded_ble_listener_capture_ready,
+        embedded_ble_processing_sync_disabled, embedded_ble_session_actor_history,
+        embedded_ble_session_event_should_trace, embedded_ble_stream_idle_timeout,
+        embedded_pcm_rms_and_peak, embedded_streaming_chunk_is_asr_input,
+        emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
+        finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
+        install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
+        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
+        preview_replay_tail, publish_embedded_ble_asr_final,
+        record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
+        request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
+        stabilize_embedded_audio_final_supplemental_preview,
+        stabilize_embedded_audio_partial_preview, store_embedded_audio_stats,
+        streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
+        EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingAgcState,
+        EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
+        DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
         EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, VOLCENGINE_PREVIEW_REPLAY_BYTES,
         VOLCENGINE_PREVIEW_REPLAY_MS, VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES,
         VOLCENGINE_PREVIEW_RESTART_REPLAY_MS, VOLCENGINE_PREVIEW_STALL_RESTART_MS,
@@ -4981,6 +5609,135 @@ mod tests {
     }
 
     #[test]
+    fn dictation_asr_quality_warning_marks_non_core_engines() {
+        assert_eq!(dictation_asr_engine_backend_id("volcengine"), "volcengine");
+        assert!(dictation_asr_uses_core_accurate_engine("volcengine"));
+        assert_eq!(dictation_asr_quality_warning("volcengine"), None);
+
+        assert_eq!(
+            dictation_asr_engine_backend_id("whisper"),
+            "whisper-compatible"
+        );
+        assert!(!dictation_asr_uses_core_accurate_engine("whisper"));
+        assert_eq!(
+            dictation_asr_quality_warning("whisper").as_deref(),
+            Some("当前识别引擎为Whisper-compatible (whisper)，不是核心 Volcengine 准确引擎，识别可能不准。")
+        );
+    }
+
+    #[test]
+    fn embedded_audio_final_supplement_seeds_short_prefix_extends_or_repairs() {
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(None, "帮"),
+            None
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(None, "帮我"),
+            Some("帮我".to_string())
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(None, "帮我录音"),
+            None
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(Some("帮我录音"), "帮我录音。"),
+            Some("帮我录音。".to_string())
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(Some("帮我录音"), "帮我录音。怎么"),
+            Some("帮我录音。怎么".to_string())
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some("帮我录音。怎么"),
+                "帮我录音，怎么"
+            ),
+            None
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some("帮我录音，怎么退"),
+                "帮我录音，怎么"
+            ),
+            None
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some("帮我录音，怎么退"),
+                "帮我落音，怎么退"
+            ),
+            None
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some("主要是这个露"),
+                "主要是这个录音的指标你需要固化"
+            ),
+            Some("主要是这个录音的指标你需要固化".to_string())
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some("这个浏览被截断"),
+                "这个预览被截断了，需要更准确"
+            ),
+            Some("这个预览被截断了，需要更准确".to_string())
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some("灵敏"),
+                "预览灵敏稳定才算通过"
+            ),
+            Some("预览灵敏稳定才算通过".to_string())
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some("然后你看那个浏览器头好像还是有点奇怪"),
+                "然后你看那个浏览系统好像还是有点奇怪"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn embedded_audio_final_supplement_repairs_observed_early_cjk_rewrite_without_unrelated_takeover(
+    ) {
+        let current = "请把3下午2点客户沟通安排近日历资料你先";
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some(current),
+                "请把周三下午2点的客户沟通安排进日历资料你先发给陈林确认"
+            ),
+            Some("请把周三下午2点的客户沟通安排进日历资料你先发给陈林确认".to_string())
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some(current),
+                "请把明天的采购清单交给财务，然后准备下周发布会材料"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn embedded_audio_final_supplement_repairs_observed_long_same_length_tail_revision() {
+        let current = "晚上回家以后提醒我把洗好的衣服晾起来。再给家里打个电话，问问周日午饭怎么安排，最后别忘了把门禁卡。傍徨外道口袋里";
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some(current),
+                "晚上回家以后提醒我把洗好的衣服晾起来。再给家里打个电话，问问周日午饭怎么安排，最后别忘了把门禁卡。放回外套口袋里。"
+            ),
+            Some("晚上回家以后提醒我把洗好的衣服晾起来。再给家里打个电话，问问周日午饭怎么安排，最后别忘了把门禁卡。放回外套口袋里。".to_string())
+        );
+        assert_eq!(
+            stabilize_embedded_audio_final_supplemental_preview(
+                Some(current),
+                "晚上回家以后提醒我把洗好的衣服晾起来。再给家里打个电话，问问周日午饭怎么安排，最后请把文件寄到另一个地址。"
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn embedded_audio_partial_preview_does_not_shrink_visible_text() {
         assert_eq!(
             stabilize_embedded_audio_partial_preview(
@@ -5028,7 +5785,7 @@ mod tests {
             boosted_chunk_count: 0,
             max_gain: 1.0,
             clipped_samples: 0,
-            asr_preroll_sent: false,
+            streaming_agc: EmbeddedStreamingAgcState::default(),
             device_ai_processing_started: false,
         }
     }
@@ -5900,18 +6657,15 @@ mod tests {
             default_done_message(InsertStatus::PasteSent, false),
             Some("已尝试粘贴".to_string())
         );
-        assert_eq!(
-            default_done_message(InsertStatus::Inserted, true),
-            Some("已插入原文（润色不可用）".to_string())
-        );
+        assert_eq!(default_done_message(InsertStatus::Inserted, true), None);
         assert_eq!(
             default_done_message(InsertStatus::PasteSent, true),
-            Some("已尝试粘贴原文（润色不可用）".to_string())
+            Some("已尝试粘贴原文".to_string())
         );
         let copied_message = if cfg!(target_os = "windows") {
-            "已复制原文（润色不可用），请 Ctrl+V"
+            "已复制原文，请 Ctrl+V"
         } else {
-            "已复制原文（润色不可用），请粘贴"
+            "已复制原文，请粘贴"
         };
         assert_eq!(
             default_done_message(InsertStatus::CopiedFallback, true),
@@ -6031,43 +6785,6 @@ mod tests {
     }
 
     #[test]
-    fn embedded_pcm_trim_removes_long_tail_and_pads_silence() {
-        let mut samples = Vec::new();
-        samples.extend(samples_for_ms(500, 120));
-        samples.extend(samples_for_ms(1_000, 2_600));
-        samples.extend(samples_for_ms(7_500, 140));
-        let pcm = pcm_from_samples(&samples);
-
-        let (trimmed, stats) = trim_embedded_pcm_for_asr(&pcm);
-        let stats = stats.expect("long noisy tail should be trimmed");
-
-        assert_eq!(stats.speech_start_ms, 300);
-        assert_eq!(stats.speech_end_ms, 1_900);
-        assert_eq!(
-            stats.asr_input_pcm_bytes,
-            stats.speech_pcm_bytes + (16_000 * 2 * EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS / 500)
-        );
-        assert_eq!(trimmed.len(), stats.asr_input_pcm_bytes);
-        assert!(trimmed[..16_000].iter().all(|byte| *byte == 0));
-        assert!(trimmed[trimmed.len() - 16_000..]
-            .iter()
-            .all(|byte| *byte == 0));
-    }
-
-    #[test]
-    fn embedded_pcm_trim_leaves_short_audio_unchanged() {
-        let mut samples = Vec::new();
-        samples.extend(samples_for_ms(300, 120));
-        samples.extend(samples_for_ms(900, 2_600));
-        let pcm = pcm_from_samples(&samples);
-
-        let (trimmed, stats) = trim_embedded_pcm_for_asr(&pcm);
-
-        assert!(stats.is_none());
-        assert_eq!(trimmed, pcm);
-    }
-
-    #[test]
     fn volcengine_streaming_keeps_quiet_ble_noise_unmodified() {
         let pcm = pcm_from_samples(&[100, -100, 80, -80]);
 
@@ -6075,6 +6792,38 @@ mod tests {
 
         assert_eq!(prepared, pcm);
         assert_eq!(stats.gain, 1.0);
+    }
+
+    #[test]
+    fn volcengine_streaming_keeps_isolated_spike_noise_unmodified() {
+        let mut samples = vec![0i16; 255];
+        samples.push(320);
+        let pcm = pcm_from_samples(&samples);
+
+        let (prepared, stats) = prepare_embedded_streaming_pcm_for_asr("volcengine", &pcm);
+
+        assert!(stats.rms_before < 45.0, "rms={}", stats.rms_before);
+        assert!(stats.peak_before >= 256);
+        assert_eq!(prepared, pcm);
+        assert_eq!(stats.gain, 1.0);
+    }
+
+    #[test]
+    fn volcengine_streaming_boosts_quiet_speech_peak_chunks() {
+        let mut samples = vec![50i16; 255];
+        samples.push(320);
+        let pcm = pcm_from_samples(&samples);
+
+        let (prepared, stats) = prepare_embedded_streaming_pcm_for_asr("volcengine", &pcm);
+        let (rms_after, peak_after) = embedded_pcm_rms_and_peak(&prepared);
+
+        assert_eq!(prepared.len(), pcm.len());
+        assert!(stats.rms_before >= 45.0, "rms={}", stats.rms_before);
+        assert!(stats.rms_before < 120.0, "rms={}", stats.rms_before);
+        assert!(stats.peak_before >= 256);
+        assert!(stats.gain > 8.0, "gain={}", stats.gain);
+        assert!(rms_after > stats.rms_before, "rms_after={rms_after}");
+        assert!(peak_after > stats.peak_before);
     }
 
     #[test]
@@ -6098,16 +6847,6 @@ mod tests {
 
         assert_eq!(prepared, pcm);
         assert_eq!(stats.gain, 1.0);
-    }
-
-    #[test]
-    fn embedded_asr_preroll_is_frame_aligned() {
-        assert_eq!(EMBEDDED_AUDIO_ASR_PREROLL_MS, 800);
-        assert_eq!(EMBEDDED_AUDIO_ASR_PREROLL_BYTES, 25_600);
-        assert_eq!(
-            EMBEDDED_AUDIO_ASR_PREROLL_BYTES % EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
-            0
-        );
     }
 
     #[test]
@@ -6136,7 +6875,8 @@ fn prepare_embedded_streaming_pcm_for_asr(
     pcm: &[u8],
 ) -> (Vec<u8>, EmbeddedPcmGainStats) {
     if active_asr == "volcengine" {
-        return normalize_embedded_streaming_pcm_for_asr(pcm);
+        let mut agc = EmbeddedStreamingAgcState::default();
+        return normalize_embedded_streaming_pcm_for_asr(pcm, &mut agc);
     }
 
     normalize_embedded_pcm_for_asr(pcm)

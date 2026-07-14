@@ -7,15 +7,16 @@ use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct TranscriptSegment {
-    start_ms: i64,
-    end_ms: Option<i64>,
-    text: String,
+    pub(super) start_ms: i64,
+    pub(super) end_ms: Option<i64>,
+    pub(super) text: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct TranscriptCandidate {
     pub(super) text: String,
     pub(super) timed_segments: Vec<TranscriptSegment>,
+    pub(super) authoritative_cumulative: bool,
 }
 
 pub(super) fn normalized_result(json: &Value) -> Option<&Value> {
@@ -41,6 +42,8 @@ pub(super) fn transcript_text_from_result(result: &Value) -> String {
 
 pub(super) fn transcript_candidate_from_result(result: &Value) -> TranscriptCandidate {
     let result_text = result.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    let has_authoritative_two_pass_correction =
+        result_has_authoritative_two_pass_correction(result);
     let (utterance_text, timed_segments) =
         if let Some(utterances) = result.get("utterances").and_then(|v| v.as_array()) {
             let mut pieces: Vec<&str> = Vec::new();
@@ -58,10 +61,39 @@ pub(super) fn transcript_candidate_from_result(result: &Value) -> TranscriptCand
             (String::new(), Vec::new())
         };
 
+    // A definite two-pass utterance explicitly marks result.text as the
+    // provider's corrected cumulative transcript. Its older utterance list can
+    // be longer because it still contains the superseded streaming branch.
+    let text = if has_authoritative_two_pass_correction && !result_text.trim().is_empty() {
+        result_text.trim().to_string()
+    } else {
+        choose_transcript_text(result_text, &utterance_text)
+    };
+
     TranscriptCandidate {
-        text: choose_transcript_text(result_text, &utterance_text),
+        text,
         timed_segments,
+        authoritative_cumulative: has_authoritative_two_pass_correction,
     }
+}
+
+fn result_has_authoritative_two_pass_correction(result: &Value) -> bool {
+    result
+        .get("utterances")
+        .and_then(|utterances| utterances.as_array())
+        .is_some_and(|utterances| {
+            utterances.iter().any(|utterance| {
+                utterance
+                    .get("definite")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false)
+                    && utterance
+                        .get("additions")
+                        .and_then(|additions| additions.get("source"))
+                        .and_then(|source| source.as_str())
+                        .is_some_and(|source| source == "two_pass")
+            })
+        })
 }
 
 fn transcript_segment_from_utterance(utterance: &Value) -> Option<TranscriptSegment> {
@@ -129,6 +161,9 @@ fn choose_transcript_text(result_text: &str, utterance_text: &str) -> String {
     if utterance_text.is_empty() {
         return result_text.to_string();
     }
+    if result_text_has_short_terminal_suffix_echo(result_text, utterance_text) {
+        return result_text.to_string();
+    }
     if has_duplicate_prefix_before_suffix(result_text, utterance_text) {
         return utterance_text.to_string();
     }
@@ -152,6 +187,34 @@ fn choose_transcript_text(result_text: &str, utterance_text: &str) -> String {
     } else {
         result_text.to_string()
     }
+}
+
+// Volcengine can report the authoritative cumulative result.text alongside an
+// utterance aggregation that still carries a short echo from an older segment.
+// Keep the completed result when that suffix is demonstrably a repeated tail.
+fn result_text_has_short_terminal_suffix_echo(result_text: &str, utterance_text: &str) -> bool {
+    const MIN_SUFFIX_CHARS: usize = 2;
+    const MAX_SUFFIX_CHARS: usize = 6;
+
+    if !result_text
+        .chars()
+        .next_back()
+        .is_some_and(is_sentence_terminal_punctuation)
+    {
+        return false;
+    }
+    let Some(suffix) = utterance_text.strip_prefix(result_text) else {
+        return false;
+    };
+    let suffix = suffix.trim();
+    if suffix.chars().any(|ch| !is_cjk_unified_ideograph(ch)) {
+        return false;
+    }
+    let suffix_len = suffix.chars().count();
+    if !(MIN_SUFFIX_CHARS..=MAX_SUFFIX_CHARS).contains(&suffix_len) {
+        return false;
+    }
+    compact_transcript_for_duplicate_check(result_text).contains(suffix)
 }
 
 fn choose_revision_text(candidate_text: &str, merged_text: &str) -> String {
@@ -706,6 +769,9 @@ pub(super) fn merge_streaming_candidate(
     candidate: TranscriptCandidate,
 ) -> (String, Vec<TranscriptSegment>) {
     let candidate_text = candidate.text.trim().to_string();
+    if candidate.authoritative_cumulative && !candidate_text.is_empty() {
+        return (candidate_text, candidate.timed_segments);
+    }
     if candidate.timed_segments.is_empty() {
         return (
             merge_streaming_transcript(previous_text, &candidate_text),
@@ -874,10 +940,13 @@ fn is_timed_segment_revision_match(
     let one_segment_covers_the_other = incoming_covers_existing || existing_covers_incoming;
     if !transcript_segments_share_revision_origin(&existing.text, &incoming.text)
         && !(one_segment_covers_the_other
-            && transcript_segments_share_short_prefix_revision_origin(
+            && (transcript_segments_share_short_prefix_revision_origin(
                 &existing.text,
                 &incoming.text,
-            ))
+            ) || transcript_segments_share_brief_bounded_revision_origin(
+                &existing.text,
+                &incoming.text,
+            )))
     {
         return false;
     }
@@ -941,6 +1010,26 @@ fn transcript_segments_share_short_prefix_revision_origin(left: &str, right: &st
         && common_prefix_char_count(&left, &right) >= MIN_COMMON_PREFIX_CHARS
 }
 
+// The provider can first emit a brief, wrong streaming branch and then replace
+// that exact time window with a short two-pass correction. Those two strings
+// may share only the opening command and the terminal time word, so the normal
+// long-prefix matcher deliberately cannot recognize them as one segment.
+fn transcript_segments_share_brief_bounded_revision_origin(left: &str, right: &str) -> bool {
+    const MIN_SHORTER_CHARS: usize = 5;
+    const MAX_LONGER_CHARS: usize = 12;
+    const MIN_COMMON_PREFIX_CHARS: usize = 2;
+    const MIN_COMMON_SUFFIX_CHARS: usize = 2;
+
+    let left = compact_transcript_for_duplicate_check(left);
+    let right = compact_transcript_for_duplicate_check(right);
+    let shorter_len = left.chars().count().min(right.chars().count());
+    let longer_len = left.chars().count().max(right.chars().count());
+    shorter_len >= MIN_SHORTER_CHARS
+        && longer_len <= MAX_LONGER_CHARS
+        && common_prefix_char_count(&left, &right) >= MIN_COMMON_PREFIX_CHARS
+        && common_suffix_char_count(&left, &right) >= MIN_COMMON_SUFFIX_CHARS
+}
+
 fn common_suffix_char_count(left: &str, right: &str) -> usize {
     left.chars()
         .rev()
@@ -953,7 +1042,11 @@ fn merge_timed_segment(
     existing: &TranscriptSegment,
     incoming: &TranscriptSegment,
 ) -> TranscriptSegment {
-    let text = choose_timed_segment_revision_text(&existing.text, &incoming.text);
+    let text = if incoming_is_extended_brief_bounded_revision(existing, incoming) {
+        incoming.text.trim().to_string()
+    } else {
+        choose_timed_segment_revision_text(&existing.text, &incoming.text)
+    };
     TranscriptSegment {
         start_ms: existing.start_ms.min(incoming.start_ms),
         end_ms: match (existing.end_ms, incoming.end_ms) {
@@ -964,6 +1057,18 @@ fn merge_timed_segment(
         },
         text,
     }
+}
+
+fn incoming_is_extended_brief_bounded_revision(
+    existing: &TranscriptSegment,
+    incoming: &TranscriptSegment,
+) -> bool {
+    let (Some(existing_end), Some(incoming_end)) = (existing.end_ms, incoming.end_ms) else {
+        return false;
+    };
+    incoming.start_ms <= existing.start_ms
+        && incoming_end > existing_end
+        && transcript_segments_share_brief_bounded_revision_origin(&existing.text, &incoming.text)
 }
 
 fn choose_timed_segment_revision_text(existing: &str, incoming: &str) -> String {
@@ -998,6 +1103,9 @@ fn incoming_revision_likely_degrades_stable_segment(existing: &str, incoming: &s
     }
 
     if incoming_adds_adjacent_duplicate_phrase_seen_once(&existing_compact, &incoming_compact) {
+        return true;
+    }
+    if incoming_rewrites_stable_tail_with_terminal_filler(&existing_compact, &incoming_compact) {
         return true;
     }
 
@@ -1060,6 +1168,62 @@ fn incoming_adds_adjacent_duplicate_phrase_seen_once(
         }
     }
     false
+}
+
+fn incoming_rewrites_stable_tail_with_terminal_filler(
+    existing_compact: &str,
+    incoming_compact: &str,
+) -> bool {
+    const MIN_SHARED_PREFIX_CHARS: usize = 20;
+    const MIN_TAIL_CHARS: usize = 8;
+    const MIN_FULL_CER_WITH_TERMINAL_FILLER: f64 = 0.12;
+    const MIN_TAIL_CER: f64 = 0.45;
+
+    if !transcript_ends_with_terminal_filler_noise(incoming_compact)
+        || transcript_ends_with_terminal_filler_noise(existing_compact)
+    {
+        return false;
+    }
+
+    let common_prefix = common_prefix_char_count(existing_compact, incoming_compact);
+    if common_prefix < MIN_SHARED_PREFIX_CHARS {
+        return false;
+    }
+
+    let existing_tail: String = existing_compact.chars().skip(common_prefix).collect();
+    let incoming_tail: String = incoming_compact.chars().skip(common_prefix).collect();
+    let existing_tail_len = existing_tail.chars().count();
+    let incoming_tail_len = incoming_tail.chars().count();
+    if existing_tail_len < MIN_TAIL_CHARS || incoming_tail_len < MIN_TAIL_CHARS {
+        return false;
+    }
+
+    let full_longer_len = existing_compact
+        .chars()
+        .count()
+        .max(incoming_compact.chars().count());
+    let full_distance = char_edit_distance(existing_compact, incoming_compact);
+    if full_longer_len > 0
+        && (full_distance as f64 / full_longer_len as f64) >= MIN_FULL_CER_WITH_TERMINAL_FILLER
+    {
+        return true;
+    }
+
+    let longer_len = existing_tail_len.max(incoming_tail_len);
+    let distance = char_edit_distance(&existing_tail, &incoming_tail);
+    (distance as f64 / longer_len as f64) >= MIN_TAIL_CER
+}
+
+fn transcript_ends_with_terminal_filler_noise(compact: &str) -> bool {
+    let mut chars = compact.chars().rev();
+    let Some(last) = chars.next() else {
+        return false;
+    };
+    if !matches!(last, '呃' | '啊' | '额') {
+        return false;
+    }
+    let before_last: String = chars.take(4).collect();
+    before_last.chars().any(is_cjk_unified_ideograph)
 }
 
 fn join_timed_segment_text(segments: &[TranscriptSegment]) -> String {
@@ -1129,6 +1293,22 @@ mod tests {
         assert_eq!(
             transcript_text_from_result(&result),
             "蓝牙音频正在发送到火山识别。"
+        );
+    }
+
+    #[test]
+    fn transcript_candidate_keeps_terminal_result_over_repeated_short_utterance_tail() {
+        let result = json!({
+        "text": "帮我录音。怎么退？",
+        "utterances": [
+        { "text": "帮我录音。" },
+        { "text": "怎么退？怎么" }
+        ]
+        });
+
+        assert_eq!(
+            transcript_candidate_from_result(&result).text,
+            "帮我录音。怎么退？"
         );
     }
 
@@ -1404,6 +1584,7 @@ mod tests {
             text: previous_core.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: final_text.into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 720,
@@ -1429,6 +1610,7 @@ mod tests {
             text: previous_text.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: final_text.into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 880,
@@ -1454,6 +1636,7 @@ mod tests {
             text: previous_text.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: final_text.into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 560,
@@ -1479,6 +1662,7 @@ mod tests {
             text: previous_text.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: final_text.into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 840,
@@ -1504,6 +1688,7 @@ mod tests {
             text: previous_text.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: bad_final_text.into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 840,
@@ -1529,10 +1714,37 @@ mod tests {
             text: previous_text.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: bad_final_text.into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 840,
                 end_ms: Some(6090),
+                text: bad_final_text.into(),
+            }],
+        };
+
+        let (merged, segments) =
+            merge_streaming_candidate(previous_text, &previous_segments, candidate);
+
+        assert_eq!(merged, previous_text);
+        assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn merge_streaming_candidate_keeps_stable_partial_over_terminal_filler_final_revision() {
+        let previous_text = "我现在测试一下你这个录音系统好不好用，然后现在好像准确率不上来，为什么好像这个录音器每次，呃，就是做的东西跟你搞的东西不一样";
+        let bad_final_text = "我现在测试一下你这个录音系统好不好用。然后现在好像准确率又上来了，为什么好像这个录音系统每次呃，就是做东西跟你搞的呃，就是堕落呃";
+        let previous_segments = vec![TranscriptSegment {
+            start_ms: 792,
+            end_ms: Some(10_437),
+            text: previous_text.into(),
+        }];
+        let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
+            text: bad_final_text.into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 792,
+                end_ms: Some(10_663),
                 text: bad_final_text.into(),
             }],
         };
@@ -1554,6 +1766,7 @@ mod tests {
             text: previous_tail.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: final_text.into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 720,
@@ -1576,6 +1789,7 @@ mod tests {
             text: "看到稳定的预览内容，同时检查历史记录里是否保存了完整的最终文本。最后".into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
     text: "看到稳定的预览内容，同时检查历史记录里是否保存了完整的最终文本，最后继续执行下一项自动化回归。".into(),
     timed_segments: vec![TranscriptSegment {
     start_ms: 7602,
@@ -1607,6 +1821,7 @@ mod tests {
             text: old_suffix.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: "看到稳定的预览内容，同时检查历史记录里是否保存了完整的最终文本。".into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 6200,
@@ -1633,6 +1848,7 @@ mod tests {
             text: previous_text.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: "我正在复盘上午的调试过程和后续安排。这类场景更接近日常口述、备忘和会议纪要"
                 .into(),
             timed_segments: vec![
@@ -1667,6 +1883,7 @@ mod tests {
             text: "第一句。".into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: "第二句。".into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 1300,
@@ -1692,6 +1909,7 @@ mod tests {
             text: previous_text.into(),
         }];
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: "需要分开判断，测试报告里要记录蓝牙包数和识别准确率".into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 6372,
@@ -1725,6 +1943,14 @@ mod tests {
     }
 
     #[test]
+    fn choose_transcript_text_prefers_terminal_result_over_short_repeated_utterance_tail() {
+        assert_eq!(
+            choose_transcript_text("帮我录音。怎么退？", "帮我录音。怎么退？怎么"),
+            "帮我录音。怎么退？"
+        );
+    }
+
+    #[test]
     fn choose_transcript_text_both_empty() {
         assert_eq!(choose_transcript_text("", ""), "");
     }
@@ -1738,6 +1964,7 @@ mod tests {
     #[test]
     fn merge_streaming_candidate_with_empty_previous() {
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: "第一句话。".into(),
             timed_segments: vec![TranscriptSegment {
                 start_ms: 0,
@@ -1753,6 +1980,7 @@ mod tests {
     #[test]
     fn merge_streaming_candidate_with_empty_candidate_text() {
         let candidate = TranscriptCandidate {
+            authoritative_cumulative: false,
             text: "".into(),
             timed_segments: vec![],
         };

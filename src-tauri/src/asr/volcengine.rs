@@ -27,16 +27,14 @@ const FINAL_TRANSCRIPT_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/s
 const LOW_LATENCY_PREVIEW_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
 /// 100 ms of 16 kHz / 16-bit / mono PCM.
 const TARGET_AUDIO_CHUNK_BYTES: usize = 3_200;
-const TARGET_AUDIO_CHUNK_MS: usize = 100;
 /// 16 kHz · 16-bit · mono = 32 000 bytes/sec → 32 bytes/ms.
 const BYTES_PER_MS: f64 = 32.0;
 const HOTWORD_CAP: usize = 80;
 const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);
+const FINAL_RESULT_STABLE_PARTIAL_GRACE: Duration = Duration::from_millis(700);
+const FINAL_PARTIAL_COVERAGE_SLACK_MS: u64 = 600;
 const WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_millis(1_200);
 const FINAL_FRAME_SEND_BUDGET: Duration = Duration::from_millis(1_800);
-const AUDIO_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(3);
-const FINAL_SILENCE_FRAMES: usize = 8; // 800 ms, using 100 ms TARGET_AUDIO_CHUNK_BYTES frames.
-const FINAL_SILENCE_PADDING_MS: usize = FINAL_SILENCE_FRAMES * TARGET_AUDIO_CHUNK_MS;
 const SECOND_PASS_END_WINDOW_MS: u32 = 500;
 const SECOND_PASS_FORCE_TO_SPEECH_MS: u32 = 1_000;
 
@@ -71,6 +69,13 @@ pub enum VolcengineASRError {
     NoFinalResult,
     #[error("final result timed out")]
     FinalResultTimeout,
+    #[error(
+        "final transcript did not cover sent audio after bounded provider grace (sent_audio_ms={sent_audio_ms}, transcript_end_ms={transcript_end_ms})"
+    )]
+    FinalResultCoverageIncomplete {
+        sent_audio_ms: u64,
+        transcript_end_ms: u64,
+    },
     #[error("decode failed: {0}")]
     DecodeFailed(String),
 }
@@ -79,6 +84,13 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
 type SharedWriter = Arc<AsyncMutex<Option<WsSink>>>;
 type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
+type FinalIntermediateTranscriptCallback = Arc<dyn Fn(FinalIntermediateTranscript) + Send + Sync>;
+
+#[derive(Clone, Debug)]
+pub struct FinalIntermediateTranscript {
+    pub text: String,
+    pub authoritative_two_pass: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VolcengineStreamingRole {
@@ -104,6 +116,10 @@ impl VolcengineStreamingRole {
     fn finish_on_final_frame(self) -> bool {
         matches!(self, Self::FinalTranscript)
     }
+
+    fn emits_partial_for_frame(self, has_final: bool) -> bool {
+        matches!(self, Self::LowLatencyPreview) || has_final
+    }
 }
 
 use super::volcengine_transcript::{
@@ -126,7 +142,6 @@ struct SyncState {
     final_tx: Option<oneshot::Sender<Result<RawTranscript, VolcengineASRError>>>,
     runtime: Option<Handle>,
     start: Option<Instant>,
-    last_audio_enqueue: Option<Instant>,
     finishing: bool,
     /// 最近一次 partial（非 final）的累积 transcript。服务端在 final 帧到达前
     /// 关闭连接 / 网络中断时，作为 fallback 回给上层，避免「用户的话已经识别出来
@@ -138,6 +153,39 @@ struct SyncState {
     /// 火山流式响应会反复发送同一 utterance 起点的修订文本。用时间戳合并这些片段，
     /// 避免把同一段尾巴当作新内容追加，导致胶囊预览和最终插入重复膨胀。
     best_transcript_segments: Vec<TranscriptSegment>,
+    /// 最新服务端响应已处理的音频时长。two-pass 终帧可能只给最后一个 utterance 的
+    /// 词时间戳，但 `audio_info.duration` 仍覆盖整段音频；收尾时应优先采用这项
+    /// 传输级覆盖证据，避免把已返回的完整文本误判为截断。
+    last_server_audio_duration_ms: Option<u64>,
+}
+
+fn final_partial_coverage_gap_from_state(state: &SyncState) -> Option<(u64, u64)> {
+    if !state.finishing || state.best_transcript_text.trim().is_empty() {
+        return None;
+    }
+    let transcript_end_ms = state
+        .best_transcript_segments
+        .iter()
+        .filter_map(|segment| segment.end_ms)
+        .max()
+        .and_then(|end_ms| u64::try_from(end_ms).ok())?;
+    let sent_audio_ms = (state.bytes_sent as f64 / BYTES_PER_MS) as u64;
+    if state
+        .last_server_audio_duration_ms
+        .is_some_and(|duration_ms| {
+            duration_ms.saturating_add(FINAL_PARTIAL_COVERAGE_SLACK_MS) >= sent_audio_ms
+        })
+    {
+        return None;
+    }
+    (transcript_end_ms.saturating_add(FINAL_PARTIAL_COVERAGE_SLACK_MS) < sent_audio_ms)
+        .then_some((sent_audio_ms, transcript_end_ms))
+}
+
+fn server_audio_duration_ms(json: &Value) -> Option<u64> {
+    json.get("audio_info")
+        .and_then(|audio_info| audio_info.get("duration"))
+        .and_then(Value::as_u64)
 }
 
 pub struct VolcengineStreamingASR {
@@ -146,6 +194,7 @@ pub struct VolcengineStreamingASR {
     role: VolcengineStreamingRole,
     state: ParkingMutex<SyncState>,
     partial_callback: ParkingMutex<Option<PartialTranscriptCallback>>,
+    final_intermediate_callback: ParkingMutex<Option<FinalIntermediateTranscriptCallback>>,
     /// Guards the WebSocket write half so concurrent `send` calls serialize.
     /// Stored as Arc so spawned send tasks can hold their own clone — independent
     /// of the lifetime of any particular `&self` borrow.
@@ -194,6 +243,7 @@ impl VolcengineStreamingASR {
             role,
             state: ParkingMutex::new(SyncState::default()),
             partial_callback: ParkingMutex::new(None),
+            final_intermediate_callback: ParkingMutex::new(None),
             writer: Arc::new(AsyncMutex::new(None)),
             final_rx: ParkingMutex::new(None),
             audio_tx: ParkingMutex::new(None),
@@ -213,10 +263,24 @@ impl VolcengineStreamingASR {
         *self.partial_callback.lock() = callback;
     }
 
+    pub fn set_final_intermediate_transcript_callback(
+        &self,
+        callback: Option<FinalIntermediateTranscriptCallback>,
+    ) {
+        *self.final_intermediate_callback.lock() = callback;
+    }
+
     fn emit_partial_transcript(&self, text: &str) {
         let callback = self.partial_callback.lock().clone();
         if let Some(callback) = callback {
             callback(text.to_string());
+        }
+    }
+
+    fn emit_final_intermediate_transcript(&self, update: FinalIntermediateTranscript) {
+        let callback = self.final_intermediate_callback.lock().clone();
+        if let Some(callback) = callback {
+            callback(update);
         }
     }
 
@@ -281,11 +345,11 @@ impl VolcengineStreamingASR {
             st.final_tx = Some(tx);
             st.runtime = Some(Handle::current());
             st.start = Some(Instant::now());
-            st.last_audio_enqueue = Some(Instant::now());
             st.finishing = false;
             st.last_partial_text.clear();
             st.best_transcript_text.clear();
             st.best_transcript_segments.clear();
+            st.last_server_audio_duration_ms = None;
         }
         self.pending_sends.store(0, Ordering::SeqCst);
         *self.final_rx.lock() = Some(rx);
@@ -323,48 +387,6 @@ impl VolcengineStreamingASR {
                 }
             }
         });
-        let keepalive_tx = self.audio_tx.lock().as_ref().cloned();
-        if let Some(keepalive_tx) = keepalive_tx {
-            let weak_for_keepalive = Arc::downgrade(self);
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(AUDIO_KEEPALIVE_INTERVAL).await;
-                    let Some(this) = weak_for_keepalive.upgrade() else {
-                        break;
-                    };
-                    let seq = {
-                        let mut st = this.state.lock();
-                        if !st.is_connected || st.finishing {
-                            break;
-                        }
-                        if st
-                            .last_audio_enqueue
-                            .is_some_and(|last| last.elapsed() < AUDIO_KEEPALIVE_INTERVAL)
-                        {
-                            continue;
-                        }
-                        let seq = st.next_sequence;
-                        st.next_sequence += 1;
-                        st.bytes_sent += TARGET_AUDIO_CHUNK_BYTES;
-                        st.frames_sent += 1;
-                        st.last_audio_enqueue = Some(Instant::now());
-                        seq
-                    };
-                    this.pending_sends.fetch_add(1, Ordering::SeqCst);
-                    if keepalive_tx
-                        .send((seq, vec![0; TARGET_AUDIO_CHUNK_BYTES]))
-                        .is_err()
-                    {
-                        if this.pending_sends.fetch_sub(1, Ordering::SeqCst) == 1 {
-                            this.send_done.notify_waiters();
-                        }
-                        break;
-                    }
-                    log::debug!("[asr] sent silence keepalive frame seq={seq}");
-                }
-            });
-        }
-
         // Send the first frame: full client request with seq=1.
         let payload_json = self.build_first_frame_payload(&connect_id);
         let payload_bytes = serde_json::to_vec(&payload_json)
@@ -466,23 +488,6 @@ impl VolcengineStreamingASR {
             self.send_finish_frame(frame, finish_send_deadline).await?;
         }
 
-        for _ in 0..FINAL_SILENCE_FRAMES {
-            let seq = self.allocate_positive_seq();
-            let frame = frame::build(
-                MessageType::AudioOnlyRequest,
-                Flags::PositiveSequence,
-                Serialization::None,
-                &vec![0; TARGET_AUDIO_CHUNK_BYTES],
-                Some(seq),
-            );
-            {
-                let mut st = self.state.lock();
-                st.bytes_sent += TARGET_AUDIO_CHUNK_BYTES;
-                st.frames_sent += 1;
-            }
-            self.send_finish_frame(frame, finish_send_deadline).await?;
-        }
-
         // Final frame: negativeSequence + negative seq number signals stream end.
         // 末帧用 negativeSequence + 负序号收尾，告诉服务端"流到此结束"。
         let final_seq = {
@@ -506,11 +511,10 @@ impl VolcengineStreamingASR {
         };
         let duration_ms = (total_bytes as f64 / BYTES_PER_MS) as u64;
         log::info!(
-            "[asr] 发送总结：{} audio frames, {} bytes (~{} ms, final_silence_ms={})",
+            "[asr] 发送总结：{} captured-audio frames, {} captured bytes (~{} ms)",
             total_frames,
             total_bytes,
-            duration_ms,
-            FINAL_SILENCE_PADDING_MS
+            duration_ms
         );
         Ok(())
     }
@@ -545,21 +549,99 @@ impl VolcengineStreamingASR {
         timeout: Duration,
     ) -> Result<RawTranscript, VolcengineASRError> {
         let rx = self.final_rx.lock().take();
-        let Some(rx) = rx else {
+        let Some(mut rx) = rx else {
             return Err(VolcengineASRError::NoFinalResult);
         };
-        match tokio::time::timeout(timeout, rx).await {
+        let grace = std::cmp::min(FINAL_RESULT_STABLE_PARTIAL_GRACE, timeout);
+        match tokio::time::timeout(grace, &mut rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(VolcengineASRError::NoFinalResult),
             Err(_) => {
-                log::error!(
-                    "[asr] final result timed out after {} ms",
-                    timeout.as_millis()
-                );
-                self.cancel();
-                Err(VolcengineASRError::FinalResultTimeout)
+                if let Some(transcript) = self.complete_from_stable_partial_after_finish_grace() {
+                    return Ok(transcript);
+                }
+                if let Some((sent_audio_ms, transcript_end_ms)) = self.final_partial_coverage_gap()
+                {
+                    log::warn!(
+                        "[asr] stable final partial ends at {transcript_end_ms} ms but sent audio reaches {sent_audio_ms} ms; waiting up to {} ms for protocol final frame",
+                        timeout.saturating_sub(grace).as_millis()
+                    );
+                }
+                let remaining = timeout.saturating_sub(grace);
+                match tokio::time::timeout(remaining, rx).await {
+                    Ok(Ok(result)) => result,
+                    Ok(Err(_)) => Err(VolcengineASRError::NoFinalResult),
+                    Err(_) => {
+                        if let Some((sent_audio_ms, transcript_end_ms)) =
+                            self.final_partial_coverage_gap()
+                        {
+                            log::error!(
+                                "[asr] final transcript coverage incomplete after full provider timeout: sent_audio_ms={sent_audio_ms} transcript_end_ms={transcript_end_ms}"
+                            );
+                            self.cancel();
+                            return Err(VolcengineASRError::FinalResultCoverageIncomplete {
+                                sent_audio_ms,
+                                transcript_end_ms,
+                            });
+                        }
+                        log::error!(
+                            "[asr] final result timed out after {} ms",
+                            timeout.as_millis()
+                        );
+                        self.cancel();
+                        Err(VolcengineASRError::FinalResultTimeout)
+                    }
+                }
             }
         }
+    }
+
+    fn complete_from_stable_partial_after_finish_grace(&self) -> Option<RawTranscript> {
+        if self.role != VolcengineStreamingRole::FinalTranscript {
+            return None;
+        }
+        let (transcript, runtime) = {
+            let mut st = self.state.lock();
+            if !st.finishing || st.final_tx.is_none() {
+                return None;
+            }
+            if final_partial_coverage_gap_from_state(&st).is_some() {
+                return None;
+            }
+            let text = st.best_transcript_text.trim().to_string();
+            if text.is_empty() {
+                return None;
+            }
+            st.final_tx.take();
+            st.is_connected = false;
+            let duration_ms = st
+                .start
+                .map(|s| s.elapsed().as_millis() as u64)
+                .unwrap_or(0);
+            (RawTranscript { text, duration_ms }, st.runtime.clone())
+        };
+        *self.audio_tx.lock() = None;
+        if let Some(runtime) = runtime {
+            let writer = Arc::clone(&self.writer);
+            runtime.spawn(async move {
+                if let Some(mut w) = writer.lock().await.take() {
+                    let _ = w.close().await;
+                }
+            });
+        }
+        log::warn!(
+            "[asr] final frame delayed beyond {} ms after finish; using stable final partial ({} chars)",
+            FINAL_RESULT_STABLE_PARTIAL_GRACE.as_millis(),
+            transcript.text.chars().count()
+        );
+        Some(transcript)
+    }
+
+    fn final_partial_coverage_gap(&self) -> Option<(u64, u64)> {
+        if self.role != VolcengineStreamingRole::FinalTranscript {
+            return None;
+        }
+        final_partial_coverage_gap_from_state(&self.state.lock())
     }
 
     pub fn cancel(&self) {
@@ -685,6 +767,15 @@ impl VolcengineStreamingASR {
             Ok(v) => v,
             Err(_) => return true,
         };
+        if let Some(duration_ms) = server_audio_duration_ms(&json) {
+            let mut state = self.state.lock();
+            state.last_server_audio_duration_ms = Some(
+                state
+                    .last_server_audio_duration_ms
+                    .unwrap_or_default()
+                    .max(duration_ms),
+            );
+        }
         let Some(result) = normalized_result(&json) else {
             return true;
         };
@@ -695,6 +786,7 @@ impl VolcengineStreamingASR {
         // 后面用户讲的内容全部丢失（实测丢了 9 秒）。
         let has_final = parsed.is_final();
         let candidate = transcript_candidate_from_result(result);
+        let authoritative_two_pass = candidate.authoritative_cumulative;
         if let Some(payload) = payload_for_log {
             let text_is_empty = candidate.text.trim().is_empty();
             if self.role == VolcengineStreamingRole::LowLatencyPreview
@@ -768,10 +860,35 @@ impl VolcengineStreamingASR {
             (merged, changed)
         };
 
+        if self.role == VolcengineStreamingRole::FinalTranscript
+            && !has_final
+            && partial_changed
+            && !full_text.is_empty()
+        {
+            let elapsed_ms = self
+                .state
+                .lock()
+                .start
+                .map(|s| s.elapsed().as_millis() as u64)
+                .unwrap_or(0);
+            log::info!(
+                "[asr] final supplemental partial chars={} elapsed_ms={}",
+                full_text.chars().count(),
+                elapsed_ms
+            );
+            self.emit_final_intermediate_transcript(FinalIntermediateTranscript {
+                text: full_text.clone(),
+                authoritative_two_pass,
+            });
+        }
+
         // 缓存最新的 transcript：服务端在 final 帧前断连时 fallback 用，
         // 同时把稳定预览推给胶囊。final 也要推一次，因为火山 two-pass
         // 经常在 final 才补齐长句前半段；这能让胶囊消失前先显示完整预览。
-        if (partial_changed || has_final) && !full_text.is_empty() {
+        if self.role.emits_partial_for_frame(has_final)
+            && (partial_changed || has_final)
+            && !full_text.is_empty()
+        {
             let elapsed_ms = self
                 .state
                 .lock()
@@ -877,9 +994,6 @@ impl AudioConsumer for VolcengineStreamingASR {
                 st.bytes_sent += chunk.len();
                 st.frames_sent += 1;
                 out.push((seq, chunk));
-            }
-            if !out.is_empty() {
-                st.last_audio_enqueue = Some(Instant::now());
             }
             out
         };
@@ -1073,15 +1187,6 @@ mod tests {
     }
 
     #[test]
-    fn final_silence_padding_covers_second_pass_tail_window() {
-        assert_eq!(TARGET_AUDIO_CHUNK_MS, 100);
-        assert_eq!(FINAL_SILENCE_FRAMES, 8);
-        assert_eq!(FINAL_SILENCE_PADDING_MS, 800);
-        assert!(FINAL_SILENCE_PADDING_MS as u32 >= SECOND_PASS_END_WINDOW_MS);
-        assert!(FINAL_SILENCE_PADDING_MS as u32 <= SECOND_PASS_FORCE_TO_SPEECH_MS);
-    }
-
-    #[test]
     fn low_latency_preview_uses_realtime_endpoint_without_owning_final_result() {
         let asr = VolcengineStreamingASR::new_low_latency_preview(
             VolcengineCredentials {
@@ -1102,6 +1207,14 @@ mod tests {
         assert!(request.get("enable_nonstream").is_none());
         assert!(request.get("end_window_size").is_none());
         assert!(request.get("force_to_speech_time").is_none());
+    }
+
+    #[test]
+    fn final_transcript_intermediate_frames_do_not_drive_visible_preview() {
+        assert!(!VolcengineStreamingRole::FinalTranscript.emits_partial_for_frame(false));
+        assert!(VolcengineStreamingRole::FinalTranscript.emits_partial_for_frame(true));
+        assert!(VolcengineStreamingRole::LowLatencyPreview.emits_partial_for_frame(false));
+        assert!(VolcengineStreamingRole::LowLatencyPreview.emits_partial_for_frame(true));
     }
 
     #[test]
@@ -1152,5 +1265,111 @@ mod tests {
             result,
             Err(VolcengineASRError::FinalResultTimeout)
         ));
+    }
+
+    #[tokio::test]
+    async fn await_final_result_uses_stable_partial_after_finish_grace() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = asr.state.lock();
+            state.final_tx = Some(tx);
+            state.finishing = true;
+            state.start = Some(Instant::now());
+            state.best_transcript_text = "帮我录音。怎么退？".into();
+            state.last_partial_text = state.best_transcript_text.clone();
+        }
+        *asr.final_rx.lock() = Some(rx);
+
+        let result = asr
+            .await_final_result_with_timeout(std::time::Duration::from_millis(10))
+            .await
+            .expect("stable final partial should complete the session");
+
+        assert_eq!(result.text, "帮我录音。怎么退？");
+        assert!(result.duration_ms <= 1_000);
+    }
+
+    #[tokio::test]
+    async fn await_final_result_rejects_uncovered_stable_partial() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = asr.state.lock();
+            state.final_tx = Some(tx);
+            state.finishing = true;
+            state.start = Some(Instant::now());
+            state.bytes_sent = 138_040;
+            state.best_transcript_text = "帮我录音。".into();
+            state.best_transcript_segments = vec![TranscriptSegment {
+                start_ms: 800,
+                end_ms: Some(2_202),
+                text: "帮我录音。".into(),
+            }];
+        }
+        *asr.final_rx.lock() = Some(rx);
+
+        assert_eq!(asr.final_partial_coverage_gap(), Some((4_313, 2_202)));
+        let result = asr
+            .await_final_result_with_timeout(std::time::Duration::from_millis(10))
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(VolcengineASRError::FinalResultCoverageIncomplete {
+                sent_audio_ms: 4_313,
+                transcript_end_ms: 2_202,
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn await_final_result_accepts_full_server_audio_when_word_timing_lags() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = asr.state.lock();
+            state.final_tx = Some(tx);
+            state.finishing = true;
+            state.start = Some(Instant::now());
+            state.bytes_sent = 138_040;
+            state.last_server_audio_duration_ms = Some(4_313);
+            state.best_transcript_text = "帮我录音。怎么退？".into();
+            state.best_transcript_segments = vec![TranscriptSegment {
+                start_ms: 800,
+                end_ms: Some(2_692),
+                text: "帮我录音。".into(),
+            }];
+        }
+        *asr.final_rx.lock() = Some(rx);
+
+        assert_eq!(asr.final_partial_coverage_gap(), None);
+        let result = asr
+            .await_final_result_with_timeout(std::time::Duration::from_millis(10))
+            .await
+            .expect("full server audio coverage should complete the session");
+
+        assert_eq!(result.text, "帮我录音。怎么退？");
     }
 }
