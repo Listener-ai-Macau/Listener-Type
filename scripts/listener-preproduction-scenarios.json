@@ -25,6 +25,15 @@
       "evidence": ".cache/validation/preproduction-human-review-total-20260712-081300-step-14-second-host-20260714-2235/operator-feedback-triage-20260714-2300-owner-deferred.json",
       "next_action": "When a second Windows BLE host is available, reopen only Step 14 with the installed Program Files Type and capture both hosts' pairing outcome plus the old Type log arbitration lines."
     },
+    "recording_response_preliminary_review_authorization": {
+      "status": "active",
+      "recorded_at": "2026-07-14T23:15:00+08:00",
+      "source": "Product-owner direction: 开始15吧.",
+      "requirement": "Run the focused recording-response-and-led-priority review now using the installed Program Files Type. Preserve the accepted recording-chain metrics and collect fresh physical capsule/LED observation, but do not mark computer-switch-product-flow PASS or advance the canonical total-review cursor until its real second-host acceptance is completed.",
+      "related_scenario_id": "recording-response-and-led-priority",
+      "total_review_effect": "This is an owner-authorized preliminary 15/20 review. Its evidence may be carried forward later, while the canonical total-review state remains at Step 14.",
+      "next_action": "Capture before/after Type logs, run two physical start/stop recording cycles, persist the focused operator result and triage any non-empty note."
+    },
     "accepted_human_regression_contract": {
       "status": "accepted",
       "recorded_at": "2026-07-14",
