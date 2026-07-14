@@ -1214,6 +1214,66 @@ function Test-CarryForwardAcceptedRecordSummaryCandidate {
     return $true
 }
 
+function Find-CarryForwardHumanSummary {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$RequiredStepIds,
+        [Parameter(Mandatory = $true)][string[]]$FocusStepIds
+    )
+
+    $roots = @(
+        (Join-Path $repoRoot ".cache\validation"),
+        (Join-Path $repoRoot ".artifacts\v1.0.2-regression")
+    ) | Where-Object { Test-Path -LiteralPath $_ }
+
+    $candidates = foreach ($root in $roots) {
+        Get-ChildItem -LiteralPath $root -Recurse -File -Filter "preproduction-human-review-summary.json" -ErrorAction SilentlyContinue
+    }
+
+    foreach ($candidate in @($candidates | Sort-Object LastWriteTime -Descending)) {
+        try {
+            $summary = Get-Content -Raw -LiteralPath $candidate.FullName | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        if (-not (Test-CarryForwardAcceptedRecordSummaryCandidate -Candidate $candidate -Summary $summary)) {
+            continue
+        }
+
+        $recordsById = @{}
+        foreach ($record in @($summary.records)) {
+            $recordId = ([string](Get-ReviewRecordField -Record $record -Name "id")).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($recordId)) {
+                $recordsById[$recordId] = $record
+            }
+        }
+
+        $usable = $true
+        foreach ($stepId in $RequiredStepIds) {
+            if ($FocusStepIds -contains $stepId) {
+                continue
+            }
+            if (-not $recordsById.ContainsKey($stepId)) {
+                $usable = $false
+                break
+            }
+            $record = $recordsById[$stepId]
+            $wasCarriedForward = [bool](Get-ReviewRecordField -Record $record -Name "carried_forward")
+            if ([string](Get-ReviewRecordField -Record $record -Name "result") -ne "PASS" -or $wasCarriedForward) {
+                $usable = $false
+                break
+            }
+        }
+        if ($usable) {
+            return [pscustomobject]@{
+                path = $candidate.FullName
+                summary = $summary
+            }
+        }
+    }
+
+    return $null
+}
+
 function Get-ExplicitTotalReviewRecordSet {
     param(
         [string]$StatePath = "",
@@ -1487,9 +1547,37 @@ $carryForwardRecordSet = [pscustomobject]@{
     next_step_id = ""
 }
 if ($requestedStepIds.Count -gt 0) {
-    $carryForwardRecordSet = Get-ExplicitTotalReviewRecordSet `
-        -StatePath $TotalReviewStatePath `
-        -RequiredStepIds @($allSteps | ForEach-Object { [string]$_.id })
+    $requiredStepIds = @($allSteps | ForEach-Object { [string]$_.id })
+    if (-not [string]::IsNullOrWhiteSpace($TotalReviewStatePath)) {
+        $carryForwardRecordSet = Get-ExplicitTotalReviewRecordSet `
+            -StatePath $TotalReviewStatePath `
+            -RequiredStepIds $requiredStepIds
+    } else {
+        $carryForwardSummary = Find-CarryForwardHumanSummary `
+            -RequiredStepIds $requiredStepIds `
+            -FocusStepIds @($requestedStepIds)
+        if ($carryForwardSummary) {
+            $records = @{}
+            $sourcesById = @{}
+            foreach ($record in @($carryForwardSummary.summary.records)) {
+                $recordId = ([string](Get-ReviewRecordField -Record $record -Name "id")).Trim()
+                if ($requiredStepIds -contains $recordId -and
+                    $requestedStepIds -notcontains $recordId -and
+                    [string](Get-ReviewRecordField -Record $record -Name "result") -eq "PASS" -and
+                    -not [bool](Get-ReviewRecordField -Record $record -Name "carried_forward")) {
+                    $records[$recordId] = $record
+                    $sourcesById[$recordId] = $carryForwardSummary.path
+                }
+            }
+            $carryForwardRecordSet = [pscustomobject]@{
+                records = $records
+                sources_by_id = $sourcesById
+                blocked_items = @()
+                state_path = ""
+                next_step_id = ""
+            }
+        }
+    }
     if (-not [string]::IsNullOrWhiteSpace($carryForwardRecordSet.next_step_id) -and
         $requestedStepIds -notcontains $carryForwardRecordSet.next_step_id) {
         throw "Current total review state expects '$($carryForwardRecordSet.next_step_id)', but requested '$($requestedStepIds -join ', ')'."

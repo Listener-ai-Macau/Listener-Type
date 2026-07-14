@@ -16,6 +16,14 @@
       "diagnostic_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-diagnostic-20260713/machine-validation-summary.json",
       "previous_machine_evidence": "../Listener-Firmware/.cache/validation/idle-audio-wake-20260713/machine-validation-summary.json"
     },
+    "accepted_human_regression_contract": {
+      "status": "accepted",
+      "recorded_at": "2026-07-14",
+      "source": "Product-owner direction: do not reopen an already human-accepted behavior unless current code touches its risk surface; an accepted behavior is a regression contract.",
+      "requirement": "A focused final review must carry forward only original PASS records with valid evidence and completed non-empty-note triage. It must visibly record every carried-forward source and count. Re-review only the selected changed-risk behavior, and never silently convert a dry run, failure, untriaged note, or already carried record into PASS.",
+      "enforcement": "scripts/windows-listener-preproduction-human-review.ps1 uses explicit total-review state when supplied, otherwise Find-CarryForwardHumanSummary discovers validated original PASS evidence for a focused re-review.",
+      "root_contract_evidence": "../../ai-collaboration-workflow/.cache/v1.0.2-release-gate/20260714-180356/summary.json"
+    },
     "recording_chain_quality_speed_no_regression": {
       "status": "in_progress",
       "recorded_at": "2026-07-14",
