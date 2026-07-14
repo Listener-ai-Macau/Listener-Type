@@ -306,7 +306,10 @@ const asrLatencyGate = readFileSync(
   "utf8",
 );
 for (const token of [
-  "Volcengine preview remains",
+  "const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);",
+  "final transcript coverage incomplete after full provider timeout",
+  "if authoritative_two_pass && current_key != candidate_key",
+  "EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS",
   "LOW_LATENCY_PREVIEW_ENDPOINT",
   "VolcenginePreviewSidecar",
 ]) {
