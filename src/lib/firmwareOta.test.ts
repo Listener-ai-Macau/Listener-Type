@@ -662,7 +662,7 @@ assert.ok(
   'manual Listener OTA v1 refresh must not use stale protocol-name strings',
 );
 
-const commandsSource = readFileSync('src-tauri/src/commands.rs', 'utf8');
+const commandsSource = readFileSync('src-tauri/src/commands.rs', 'utf8').replace(/\r\n?/g, '\n');
 assert.ok(
   commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT'),
   'firmware OTA preflight IPC must keep an outer timeout around Windows BLE snapshot probing',
