@@ -25,6 +25,16 @@
       "evidence": ".cache/validation/preproduction-human-review-total-20260712-081300-step-14-second-host-20260714-2235/operator-feedback-triage-20260714-2300-owner-deferred.json",
       "next_action": "When a second Windows BLE host is available, reopen only Step 14 with the installed Program Files Type and capture both hosts' pairing outcome plus the old Type log arbitration lines."
     },
+    "manual_delete_and_second_host_led_semantics": {
+      "status": "active",
+      "recorded_at": "2026-07-15T11:20:00+08:00",
+      "source": "Product-owner direction: 手动删除蓝牙后是蓝色低亮双闪? 低亮应该代表连上了蓝牙。 Follow-up: 双击可以在别的电脑搞出来弹窗, 但是还是偶发性的; the device is now connected back to this computer.",
+      "requirement": "Dim blue is reserved exclusively for an actual secure Bluetooth connection. A manual Windows delete, recovery advertisement, native pairing window, or reconnect search must use a visibly distinct non-connected cue and must not imply that Bluetooth is connected. EC11 double-click recovery must let a second Windows host complete native pairing reliably; the old Type instance must not race to reclaim the device while that arbitration window is open.",
+      "observed_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/firmware-pairing-arbitration-log-excerpt.log and old-host-pairing-arbitration-log-excerpt.log. The current window shows the old host entered its bounded PairAsync recovery about 2.2 seconds after opening recovery advertising and restored TYPE:READY; it does not prove a second host completed pairing first.",
+      "root_cause_question": "Determine whether the visible dim-blue double-flash is emitted before secure-connection confirmation, and why the old Type recovery timer can reclaim the link before the second host finishes native Windows pairing.",
+      "risk_surface": "Listener Firmware BLE recovery and status-LED state machine; Listener Type EmbeddedBle recovery arbitration. Preserve accepted LED-independence and recording-chain behavior.",
+      "next_action": "Read the live firmware/Type recovery code and aligned logs, make the smallest root-cause correction, then run static/build/log evidence before a focused manual-delete and second-host human review."
+    },
     "recording_response_preliminary_review_authorization": {
       "status": "active",
       "recorded_at": "2026-07-14T23:15:00+08:00",
