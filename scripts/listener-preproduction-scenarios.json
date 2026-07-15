@@ -236,6 +236,40 @@
         },
         "next_action": "Preserve this accepted capture-integrity contract during later recording work. The canonical total review remains blocked by Step 14 second-host hardware; do not claim a release from this focused Step 15 repair."
       },
+      "current_accuracy_sensitivity_regression_20260715": {
+        "status": "active",
+        "recorded_at": "2026-07-15T14:50:00+08:00",
+        "source": "Product-owner direction: 准确率不够, 又是这种间歇性不灵敏的问题, 找找根因修一下。 Follow-up: 继续验收吧。",
+        "requirement": "Reopen the accepted recording-chain contract for this reported regression. Diagnose intermittent sensitivity and transcription-accuracy loss from same-session evidence before changing behavior. Classify the primary cause as microphone conditioning, firmware capture, BLE transport, Type reconstruction, ASR engine selection, provider/network, or post-ASR preview/final insertion. Preserve real PCM, accepted wake/completion limits, and the authoritative-final contract; do not introduce generated audio, phrase substitution, visual masking, or arbitrary delay.",
+        "related_workflow_plan": "listener-1-0-2-recording-chain-acceptance#1.1",
+        "accepted_behavior_risk_surface": [
+          "real-PCM-only EmbeddedBle input",
+          "session-level voice-gated adaptive gain telemetry",
+          "BLE capture continuity and queue/pool integrity",
+          "Volcengine engine identity and provider/network attribution",
+          "capsule preview to authoritative final convergence",
+          "EC11 wake and ordinary single/double/long-press semantics"
+        ],
+        "intermittent_slow_delivery_root_cause": {
+          "status": "machine_repair_ready_pending_human_reacceptance",
+          "observed_session": "119a7004-cbc4-4d08-a3e9-bc0f7c9d4d77",
+          "observed_evidence": "C:\\Users\\Billy\\AppData\\Local\\Listener Type\\Logs\\listener-type.log and ../Listener-Firmware/.cache/validation/recording-intermittent-slow-20260715/physical-slow-repro-20260715-194652.log",
+          "diagnosis": "The Type session received complete PCM with missing_packets=0, but its 5.84 seconds and 390 packets arrived over about 45 seconds. The limiting path was firmware-to-Windows BLE delivery, not final ASR: a low-power connection-parameter request could remain in flight when recording requested active parameters. The active request returned success without retaining a retry intent, allowing 80-120 interval units with latency=9 to remain active during recording.",
+          "repair_contract": "An active recording request now retains an active-connection requirement until low-power idle explicitly supersedes it. A completed low-power update below the active target must schedule a promotion to interval 6 and latency 0; transaction-collision backoff must be honored and retried rather than dropping that requirement. The repair must not delay, fabricate, trim, or mask PCM or move the EC11 press-to-recording control path.",
+          "permanent_regression_guard": {
+            "authorization": "Product-owner direction: 是的, 必须把这个加入防回退.",
+            "machine_contract": "python .\\tools\\verify_ble_audio_transport_model.py must model a pending low-power update followed immediately by a recording active request and require the final state to be active. The source guard must require retained active intent, completed-update re-promotion, collision-aware retry, bounded timeout logging, and explicit promotion confirmation.",
+            "fresh_physical_contract": "A fresh installed Program Files Type recording after CONNECTED_IDLE must retain the firmware serial transcript. It must contain active connection promotion confirmation with target interval 6-6 and latency 0 before recording completion, plus capture-integrity evidence with zero missing packets and zero capture_backpressure_gap_ms. This machine evidence does not replace the next focused Chinese human reacceptance."
+          },
+          "validation": [
+            "python .\\tools\\verify_ble_audio_transport_model.py PASS (11 cases, including pending-low-power-to-active promotion)",
+            "pwsh -NoProfile -File .\\tools\\verify_ble_audio_backpressure_static.ps1 PASS",
+            "pwsh -NoProfile -File .\\tools\\build.ps1 PASS"
+          ]
+        },
+        "preflight_evidence_required": "Read the prior focused physical session and current audio/ASR code, then collect a fresh installed-Program-Files capture that records provider identity, gain statistics, packet continuity, preview/final timelines, and failure attribution. A focused Chinese operator prompt may open only after the machine evidence isolates the candidate cause and the smallest relevant static/build checks pass.",
+        "next_action": "Flash the machine-validated firmware, capture a fresh installed-Program-Files recording from CONNECTED_IDLE, and require active-link promotion plus capture-integrity evidence before one randomized real-speech reacceptance item."
+      },
       "current_preview_quality_feedback": {
         "status": "accepted",
         "recorded_at": "2026-07-14",
