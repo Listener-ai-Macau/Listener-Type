@@ -88,7 +88,10 @@ const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON: &str =
     "EC11 cross-host native pairing arbitration";
 const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESUMED: &str =
     "EC11 native pairing arbitration completed with fresh recovery advertising";
-const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_HOLD: Duration = Duration::from_millis(2200);
+// Listener keeps the random-identity recovery advertisement available for
+// 120 seconds. The old Type host must outlive that window so a native pairing
+// started on another Windows PC cannot be reclaimed by its local PairAsync.
+const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_HOLD: Duration = Duration::from_secs(125);
 const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESCAN: Duration = Duration::from_millis(1200);
 const EMBEDDED_BLE_TYPE_RECOVERY_PAIRING_SETTLE: Duration = Duration::from_millis(2600);
 // Windows can report the freshly paired device as absent while it rebuilds its
