@@ -195,13 +195,37 @@ for (const key of [
   "measured_human_disconnect_to_type_heartbeat_ready_ms",
   "measured_human_recovery_adv_to_notify_ready_ms",
   "max_recovery_trigger_to_notify_ready_ms",
+  "max_recovery_advertisement_to_notify_ready_ms",
   "machine_randomized_sample_count",
   "machine_randomized_observed_max_trigger_to_type_ready_ms",
 ]) {
   requireNumber(ec11Recovery[key], `EC11 Type recovery ${key}`);
 }
-if (ec11Recovery.max_recovery_trigger_to_notify_ready_ms !== 12000) {
-  fail("EC11 Type recovery notify-ready latency ceiling must stay at the strict 12000 ms target");
+const ownerSpeedAlignment = ec11Recovery.owner_speed_alignment;
+if (!ownerSpeedAlignment || !["active", "accepted"].includes(ownerSpeedAlignment.status)) {
+  fail("EC11 Type recovery must retain an active or human-accepted owner decision aligning it with rename recovery");
+}
+if (ownerSpeedAlignment.status === "accepted") {
+  for (const key of ["accepted_at", "human_acceptance_evidence", "machine_acceptance_evidence"]) {
+    if (typeof ownerSpeedAlignment[key] !== "string" || ownerSpeedAlignment[key].trim() === "") {
+      fail(`accepted EC11 owner speed alignment must retain ${key}`);
+    }
+  }
+  for (const key of [
+    "measured_type_notice_to_notify_ready_ms",
+    "measured_recovery_advertisement_to_notify_ready_ms",
+  ]) {
+    requireNumber(ownerSpeedAlignment[key], `accepted EC11 owner speed alignment ${key}`);
+    if (ownerSpeedAlignment[key] > 10000) {
+      fail(`accepted EC11 owner speed alignment ${key} exceeds the 10000 ms rename-recovery target`);
+    }
+  }
+}
+if (ec11Recovery.max_recovery_trigger_to_notify_ready_ms !== 10000) {
+  fail("EC11 Type recovery notify-ready latency ceiling must stay at the strict 10000 ms rename-recovery target");
+}
+if (ec11Recovery.max_recovery_advertisement_to_notify_ready_ms !== 10000) {
+  fail("EC11 recovery-advertisement to notify-ready ceiling must stay at the strict 10000 ms rename-recovery target");
 }
 if (ec11Recovery.machine_randomized_sample_count < 5) {
   fail("EC11 Type recovery machine gate must retain at least five randomized samples");
@@ -289,8 +313,8 @@ for (const token of [
   "Program Files\\Listener Type\\listener-type.exe",
   "check-ec11-type-recovery-randomized.ps1",
   "-Iterations 5",
-  "-MaxTriggerToTypeReadyMs 12000",
-  "<=12000 ms",
+  "-MaxTriggerToTypeReadyMs 10000",
+  "<=10000 ms",
   "firmware pre-reset notice",
   "Type pre-reset notice",
   "not a physical GPIO edge measurement",
@@ -310,7 +334,7 @@ for (const scriptName of [
 ]) {
   const ec11SpeedGate = readFileSync(join(repoRoot, "scripts", scriptName), "utf8");
   for (const token of [
-    "MaxTriggerToTypeReadyMs = 12000",
+    "MaxTriggerToTypeReadyMs = 10000",
     "firmware_generated_ec11_double_after_debounce",
     "physical_gpio_measurement = $false",
   ]) {

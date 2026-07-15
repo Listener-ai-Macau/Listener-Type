@@ -86,8 +86,10 @@ const EMBEDDED_BLE_EC11_HARDWARE_RECOVERY_NOTICE: &str =
     "Listener EC11 hardware recovery notice received before pairing reset";
 const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON: &str =
     "EC11 cross-host native pairing arbitration";
+const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESUMED: &str =
+    "EC11 native pairing arbitration completed with fresh recovery advertising";
 const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_HOLD: Duration = Duration::from_millis(2200);
-const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESCAN: Duration = Duration::from_millis(300);
+const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESCAN: Duration = Duration::from_millis(1200);
 const EMBEDDED_BLE_TYPE_RECOVERY_PAIRING_SETTLE: Duration = Duration::from_millis(2600);
 // Windows can report the freshly paired device as absent while it rebuilds its
 // BLE/HID service graph. Do not mistake that short post-PairAsync interval for
@@ -4342,6 +4344,7 @@ fn start_ec11_native_pairing_handoff_arbitration(
     inner: &Arc<Inner>,
     expected_ble_name: String,
     hold_generation: u64,
+    recovery_error: String,
 ) {
     let inner = Arc::clone(inner);
     async_runtime::spawn(async move {
@@ -4373,10 +4376,28 @@ fn start_ec11_native_pairing_handoff_arbitration(
         .await;
         match probe {
             Ok(probe) if probe.visible => {
-                log::info!(
-                    "[embedded-ble] EC11 native pairing arbitration ended with recovery advertising still visible; resuming bounded local Type recovery target={expected_ble_name:?}"
+                let observed_addresses = probe
+                    .addresses
+                    .iter()
+                    .map(|address| format!("{address:012X}"))
+                    .collect::<Vec<_>>();
+                let resumed_error = format!(
+                    "{recovery_error}; {EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESUMED} addresses={observed_addresses:?}"
                 );
-                refresh_embedded_ble_listener(&inner);
+                log::info!(
+                    "[embedded-ble] EC11 native pairing arbitration ended with recovery advertising still visible; entering bounded local Type recovery target={expected_ble_name:?} addresses={observed_addresses:?}"
+                );
+                record_embedded_ble_listener_last_error(&inner, &resumed_error);
+                let mut resumed_cleanup_at = None;
+                let outcome = maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
+                    &inner,
+                    &resumed_error,
+                    &mut resumed_cleanup_at,
+                )
+                .await;
+                log::info!(
+                    "[embedded-ble] EC11 native pairing arbitration resumed Type recovery outcome={outcome:?} target={expected_ble_name:?} addresses={observed_addresses:?}"
+                );
             }
             Ok(_) => {
                 let hold_generation = hold_embedded_ble_listener_for_pairing_confirmation(
@@ -5378,6 +5399,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             inner,
             expected_ble_name.clone(),
             hold_generation,
+            err.to_string(),
         );
         emit_embedded_ble_recovery_capsule(
             inner,
@@ -5517,25 +5539,69 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     } else {
         Vec::new()
     };
+    let pairing_recovery_addresses = if type_controlled_recovery {
+        recovery_pairing_addresses_for_direct_pairing(err, &recovery_pairing_probe)
+    } else {
+        Vec::new()
+    };
     let pairing = async_runtime::spawn_blocking(move || {
         if type_controlled_recovery {
             let cleanup_names = vec![pairing_expected_name.clone()];
-            let unpair = crate::embedded_ble::unpair_listener_devices_for_known_addresses(
-                &cleanup_names,
-                &observed_recovery_addresses,
-            );
+            let direct_pairing_uses_fresh_recovery_address = !pairing_recovery_addresses.is_empty();
+            let unpair = if direct_pairing_uses_fresh_recovery_address {
+                crate::embedded_ble::unpair_listener_pairing_for_known_addresses(
+                    &cleanup_names,
+                    &observed_recovery_addresses,
+                )
+            } else {
+                crate::embedded_ble::unpair_listener_devices_for_known_addresses(
+                    &cleanup_names,
+                    &observed_recovery_addresses,
+                )
+            };
             log::warn!(
-                "[embedded-ble] background Type controlled-recovery known-address cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={} active_capture={active_capture_type_recovery} stale_native_hid_recovery={stale_native_hid_recovery} addresses={observed_recovery_addresses:?}",
+                "[embedded-ble] background Type controlled-recovery known-address cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={} fresh_direct_pairing={} active_capture={active_capture_type_recovery} stale_native_hid_recovery={stale_native_hid_recovery} cleanup_addresses={observed_recovery_addresses:?} pairing_addresses={pairing_recovery_addresses:?}",
                 unpair.status,
                 unpair.matched_devices,
                 unpair.unpaired_devices,
                 unpair.already_unpaired_devices,
                 unpair.failed_devices,
                 unpair.needs_user_action,
+                direct_pairing_uses_fresh_recovery_address,
+            );
+            let pairing = crate::embedded_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses(
+                Some(pairing_expected_name.as_str()),
+                &pairing_recovery_addresses,
+            );
+            if !direct_pairing_uses_fresh_recovery_address
+                || embedded_ble_pairing_prompt_ready(&pairing)
+            {
+                return pairing;
+            }
+
+            log::warn!(
+                "[embedded-ble] fresh-address direct PairAsync did not complete after pairing-only cleanup; running bounded PnP/cache fallback before one final direct PairAsync status={:?} matched={} prompted={} failed={}",
+                pairing.status,
+                pairing.matched_devices,
+                pairing.prompted_devices,
+                pairing.failed_devices,
+            );
+            let fallback_unpair = crate::embedded_ble::unpair_listener_devices_for_known_addresses(
+                &cleanup_names,
+                &observed_recovery_addresses,
+            );
+            log::warn!(
+                "[embedded-ble] fresh-address direct PairAsync fallback PnP/cache cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
+                fallback_unpair.status,
+                fallback_unpair.matched_devices,
+                fallback_unpair.unpaired_devices,
+                fallback_unpair.already_unpaired_devices,
+                fallback_unpair.failed_devices,
+                fallback_unpair.needs_user_action,
             );
             crate::embedded_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses(
                 Some(pairing_expected_name.as_str()),
-                &observed_recovery_addresses,
+                &pairing_recovery_addresses,
             )
         } else {
             crate::embedded_ble::prompt_listener_pairing_after_type_recovery(Some(
@@ -5666,11 +5732,7 @@ async fn maybe_probe_embedded_ble_recovery_pairing_advertisement(
     if !should_probe {
         return crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe::default();
     }
-    if embedded_ble_hardware_ec11_recovery_notice_observed(err) {
-        log::info!(
-            "[embedded-ble] EC11 hardware recovery notice arrived before pairing reset; scanning recovery advertising before any GATT failure timeout"
-        );
-    } else if recovery_pairing_advertisement_already_observed_during_notify_open(err) {
+    if recovery_pairing_advertisement_already_observed_during_notify_open(err) {
         log::info!(
             "[embedded-ble] notify open already observed Listener recovery advertising; skipping duplicate recovery advertisement scan"
         );
@@ -5682,6 +5744,11 @@ async fn maybe_probe_embedded_ble_recovery_pairing_advertisement(
             has_random_identity: true,
             addresses: listener_recovery_addresses_from_error(err),
         };
+    }
+    if embedded_ble_hardware_ec11_recovery_notice_observed(err) {
+        log::info!(
+            "[embedded-ble] EC11 hardware recovery notice arrived before pairing reset; scanning recovery advertising before any GATT failure timeout"
+        );
     }
 
     let expected_ble_name = inner.prefs.get().device_ble_name;
@@ -5764,6 +5831,7 @@ fn recovery_pairing_advertisement_allows_immediate_stale_cleanup(err: &str) -> b
 fn recovery_pairing_advertisement_already_observed_during_notify_open(err: &str) -> bool {
     err.contains("Listener recovery Swift Pair advertisement visible for notify CCCD address")
         || err.contains("Listener recovery Swift Pair advertisement visible for persisted address")
+        || err.contains(EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESUMED)
         || recovery_pairing_advertisement_already_observed_during_active_capture(err)
 }
 
@@ -5776,6 +5844,7 @@ fn ec11_external_native_pairing_handoff_requires_arbitration(
     probe: &crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe,
 ) -> bool {
     embedded_ble_hardware_ec11_recovery_notice_observed(err)
+        && !err.contains(EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESUMED)
         && probe.visible
         && probe.has_random_identity
 }
@@ -5810,6 +5879,16 @@ fn recovery_pairing_addresses_for_cleanup(
         }
     }
     addresses
+}
+
+fn recovery_pairing_addresses_for_direct_pairing(
+    err: &str,
+    probe: &crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe,
+) -> Vec<u64> {
+    if !probe.addresses.is_empty() {
+        return probe.addresses.clone();
+    }
+    listener_recovery_addresses_from_error(err)
 }
 
 fn recovery_pairing_probe_allows_immediate_stale_cleanup(
@@ -10420,19 +10499,31 @@ mod tests {
 
         assert!(
             body.contains("recovery_pairing_advertisement_already_observed_during_notify_open")
-                && body.contains("let should_query_pairing_preflight = !type_observed_recovery_advertisement"),
+                && body.contains("let should_query_pairing_preflight = !ec11_external_native_pairing_handoff")
+                && body.contains("&& !type_observed_recovery_advertisement"),
             "Type-observed recovery advertising already proves Type owns the current recovery, so it should not repeat the slow manual-pairing preflight"
         );
         assert!(
             body.contains("!pairing_confirmation_hold_active"),
             "Type-observed fast recovery must not steal back connections while a manual/hardware pairing hold is active"
         );
+        let pairing_only_cleanup_index = body
+            .find("unpair_listener_pairing_for_known_addresses")
+            .expect("fresh recovery addresses must take the pairing-only cleanup path");
+        let direct_pairasync_index = body
+            .find("let pairing = crate::embedded_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses")
+            .expect("Type-controlled recovery must PairAsync using the fresh observed address");
+        let fallback_marker_index = body
+            .find("fresh-address direct PairAsync did not complete after pairing-only cleanup")
+            .expect("full stale PnP cleanup must remain an explicit PairAsync-failure fallback");
+        let fallback_cleanup_index = body
+            .find("let fallback_unpair = crate::embedded_ble::unpair_listener_devices_for_known_addresses")
+            .expect("PairAsync failure must retain the bounded full-cleanup fallback");
         assert!(
-            body.contains("background Type controlled-recovery known-address cleanup")
-                && body.contains("unpair_listener_devices_for_known_addresses")
-                && body.contains("prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses")
-                && body.contains("&observed_recovery_addresses"),
-            "Type-controlled recovery should share the rename-style path: clear stale local cache once, then PairAsync through the after-cache no-popup API using the same observed address evidence"
+            pairing_only_cleanup_index < direct_pairasync_index
+                && direct_pairasync_index < fallback_marker_index
+                && fallback_marker_index < fallback_cleanup_index,
+            "fresh recovery addresses must run pairing-only cleanup and direct PairAsync before any PnP/BTHPORT cleanup; the slow path may run only after direct PairAsync fails"
         );
         assert!(
             body.contains("background Type controlled-recovery PairAsync paired; reopening notify immediately for GATT/notify validation"),

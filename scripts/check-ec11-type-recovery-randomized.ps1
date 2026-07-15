@@ -6,7 +6,7 @@ param(
     [ValidateRange(10, 60)]
     [int]$CaptureSeconds = 25,
     [ValidateRange(1, 60000)]
-    [int]$MaxTriggerToTypeReadyMs = 12000,
+    [int]$MaxTriggerToTypeReadyMs = 10000,
     [ValidateRange(0, 15000)]
     [int]$MinPhaseDelayMs = 600,
     [ValidateRange(1, 20000)]

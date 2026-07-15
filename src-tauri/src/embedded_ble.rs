@@ -1113,10 +1113,56 @@ mod windows_ble {
                 )],
             };
         };
-        match unpair_listener_devices_for_known_addresses_inner(extra_names, addresses) {
+        match unpair_listener_devices_for_known_addresses_inner(extra_names, addresses, true) {
             Ok(result) => result,
             Err(err) => {
                 log::warn!("[embedded-ble] fast Listener address unpair unavailable: {err}");
+                crate::embedded_ble::BleDeviceUnpairResult {
+                    status: crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction,
+                    attempted: false,
+                    matched_devices: 0,
+                    unpaired_devices: 0,
+                    already_unpaired_devices: 0,
+                    failed_devices: 0,
+                    needs_user_action: true,
+                    details: vec![err],
+                }
+            }
+        }
+    }
+
+    pub fn unpair_listener_pairing_for_known_addresses(
+        extra_names: &[String],
+        addresses: &[u64],
+    ) -> crate::embedded_ble::BleDeviceUnpairResult {
+        let target_name = extra_names
+            .iter()
+            .find_map(|name| {
+                let trimmed = name.trim();
+                (!trimmed.is_empty()).then_some(trimmed)
+            })
+            .map(ToString::to_string)
+            .unwrap_or_else(|| effective_bluetooth_target_name(None));
+        let Some(_maintenance) =
+            try_begin_listener_pairing_maintenance("unpair-direct", &target_name, Instant::now())
+        else {
+            return crate::embedded_ble::BleDeviceUnpairResult {
+                status: crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean,
+                attempted: false,
+                matched_devices: 0,
+                unpaired_devices: 0,
+                already_unpaired_devices: 0,
+                failed_devices: 0,
+                needs_user_action: false,
+                details: vec![format!(
+                    "Listener pairing/cache maintenance is already running for {target_name}; deferring direct-pair unpair."
+                )],
+            };
+        };
+        match unpair_listener_devices_for_known_addresses_inner(extra_names, addresses, false) {
+            Ok(result) => result,
+            Err(err) => {
+                log::warn!("[embedded-ble] direct-pair Listener address unpair unavailable: {err}");
                 crate::embedded_ble::BleDeviceUnpairResult {
                     status: crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction,
                     attempted: false,
@@ -1299,7 +1345,9 @@ mod windows_ble {
     fn unpair_listener_devices_for_known_addresses_inner(
         extra_names: &[String],
         addresses: &[u64],
+        remove_pnp_and_cache: bool,
     ) -> Result<crate::embedded_ble::BleDeviceUnpairResult, String> {
+        let cleanup_started_at = Instant::now();
         let target_names = listener_target_names(extra_names);
         let mut target_addresses = Vec::new();
         for address in addresses.iter().copied() {
@@ -1314,6 +1362,7 @@ mod windows_ble {
         let mut candidates = Vec::new();
         let mut seen_ids = Vec::new();
         let mut errors = Vec::new();
+        let discovery_started_at = Instant::now();
         match push_address_unpair_candidates(&mut candidates, &mut seen_ids, &target_addresses) {
             Ok(()) => {}
             Err(err) => errors.push(err),
@@ -1331,6 +1380,11 @@ mod windows_ble {
         if !errors.is_empty() {
             return Err(errors.join("; "));
         }
+        log::info!(
+            "[embedded-ble] known-address cleanup phase=discovery elapsed_ms={} candidates={} addresses={target_addresses:?}",
+            discovery_started_at.elapsed().as_millis(),
+            candidates.len(),
+        );
 
         let mut result = crate::embedded_ble::BleDeviceUnpairResult {
             status: crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction,
@@ -1350,6 +1404,7 @@ mod windows_ble {
             );
         }
 
+        let unpair_started_at = Instant::now();
         for candidate in candidates {
             match unpair_listener_candidate(&candidate) {
                 Ok(DeviceUnpairOutcome::Unpaired) => {
@@ -1375,7 +1430,31 @@ mod windows_ble {
                 }
             }
         }
+        log::info!(
+            "[embedded-ble] known-address cleanup phase=unpair elapsed_ms={} removed={} already_clean={} failed={}",
+            unpair_started_at.elapsed().as_millis(),
+            result.unpaired_devices,
+            result.already_unpaired_devices,
+            result.failed_devices,
+        );
 
+        if !remove_pnp_and_cache {
+            result.details.push(
+                "Deferred Windows PnP and BTHPORT stale-node cleanup until direct PairAsync fails."
+                    .to_string(),
+            );
+            log::info!(
+                "[embedded-ble] known-address cleanup phase=pairing_only total_elapsed_ms={} matched={} removed={} already_clean={} failed={}",
+                cleanup_started_at.elapsed().as_millis(),
+                result.matched_devices,
+                result.unpaired_devices,
+                result.already_unpaired_devices,
+                result.failed_devices,
+            );
+            return Ok(finalize_known_address_unpair_result(result));
+        }
+
+        let pnp_started_at = Instant::now();
         match listener_pnp_remove_candidates(&target_addresses, &target_names) {
             Ok(pnp_candidates) => {
                 result.matched_devices = result
@@ -1420,7 +1499,16 @@ mod windows_ble {
                 ));
             }
         }
+        log::info!(
+            "[embedded-ble] known-address cleanup phase=pnp elapsed_ms={} matched={} removed={} already_clean={} failed={}",
+            pnp_started_at.elapsed().as_millis(),
+            result.matched_devices,
+            result.unpaired_devices,
+            result.already_unpaired_devices,
+            result.failed_devices,
+        );
 
+        let cache_started_at = Instant::now();
         match bthport_listener_cache_candidates(&target_addresses, &target_names) {
             Ok(cache_candidates) => {
                 result.matched_devices = result
@@ -1463,7 +1551,22 @@ mod windows_ble {
                 ));
             }
         }
+        log::info!(
+            "[embedded-ble] known-address cleanup phase=bthport_cache elapsed_ms={} total_elapsed_ms={} matched={} removed={} already_clean={} failed={}",
+            cache_started_at.elapsed().as_millis(),
+            cleanup_started_at.elapsed().as_millis(),
+            result.matched_devices,
+            result.unpaired_devices,
+            result.already_unpaired_devices,
+            result.failed_devices,
+        );
 
+        Ok(finalize_known_address_unpair_result(result))
+    }
+
+    fn finalize_known_address_unpair_result(
+        mut result: crate::embedded_ble::BleDeviceUnpairResult,
+    ) -> crate::embedded_ble::BleDeviceUnpairResult {
         if result.matched_devices == 0 {
             result.status = crate::embedded_ble::BleDeviceUnpairStatus::NotFound;
             result.attempted = false;
@@ -1472,7 +1575,7 @@ mod windows_ble {
                 "No local Listener pairing/cache entry remained for the known recovery address."
                     .to_string(),
             );
-            return Ok(result);
+            return result;
         }
 
         result.status = if result.unpaired_devices > 0 && result.failed_devices == 0 {
@@ -1486,7 +1589,7 @@ mod windows_ble {
         };
         result.needs_user_action =
             result.status == crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction;
-        Ok(result)
+        result
     }
 
     #[derive(Clone)]
@@ -13690,6 +13793,43 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
+        fn fresh_recovery_pairing_only_cleanup_defers_pnp_and_bthport_until_direct_pairasync_fails()
+        {
+            let source = include_str!("embedded_ble.rs");
+            let direct_cleanup_start = source
+                .find("pub fn unpair_listener_pairing_for_known_addresses")
+                .expect("pairing-only known-address cleanup helper should exist");
+            let direct_cleanup_end = source[direct_cleanup_start..]
+                .find("fn unpair_listener_devices_inner")
+                .map(|offset| direct_cleanup_start + offset)
+                .expect("pairing-only known-address cleanup helper boundary should exist");
+            let direct_cleanup = &source[direct_cleanup_start..direct_cleanup_end];
+            assert!(
+                direct_cleanup.contains("unpair_listener_devices_for_known_addresses_inner(extra_names, addresses, false)"),
+                "the fresh direct-pair path must not run PnP/BTHPORT cleanup before PairAsync"
+            );
+
+            let cleanup_start = source
+                .find("fn unpair_listener_devices_for_known_addresses_inner")
+                .expect("known-address cleanup helper should exist");
+            let cleanup_end = source[cleanup_start..]
+                .find("fn finalize_known_address_unpair_result")
+                .map(|offset| cleanup_start + offset)
+                .expect("known-address cleanup helper boundary should exist");
+            let cleanup_body = &source[cleanup_start..cleanup_end];
+            let pairing_only_return = cleanup_body
+                .find("Deferred Windows PnP and BTHPORT stale-node cleanup until direct PairAsync fails.")
+                .expect("pairing-only branch should document the deferred slow cleanup");
+            let pnp_cleanup = cleanup_body
+                .find("let pnp_started_at")
+                .expect("full cleanup must retain its PnP fallback");
+            assert!(
+                pairing_only_return < pnp_cleanup,
+                "the pairing-only return must happen before the PnP/BTHPORT fallback branch"
+            );
+        }
+
+        #[test]
         fn cached_aep_pairing_candidate_never_unpairs_existing_link() {
             let source = include_str!("embedded_ble.rs");
             let start = source
@@ -15202,6 +15342,14 @@ pub fn unpair_listener_devices_for_known_addresses(
 }
 
 #[cfg(target_os = "windows")]
+pub fn unpair_listener_pairing_for_known_addresses(
+    extra_names: &[String],
+    addresses: &[u64],
+) -> BleDeviceUnpairResult {
+    windows_ble::unpair_listener_pairing_for_known_addresses(extra_names, addresses)
+}
+
+#[cfg(target_os = "windows")]
 pub fn prompt_listener_pairing(expected_name: Option<&str>) -> BleDevicePairingPromptResult {
     windows_ble::prompt_listener_pairing(expected_name)
 }
@@ -15594,6 +15742,14 @@ pub fn unpair_listener_devices_for_names(_extra_names: &[String]) -> BleDeviceUn
 
 #[cfg(not(target_os = "windows"))]
 pub fn unpair_listener_devices_for_known_addresses(
+    _extra_names: &[String],
+    _addresses: &[u64],
+) -> BleDeviceUnpairResult {
+    unpair_listener_devices()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn unpair_listener_pairing_for_known_addresses(
     _extra_names: &[String],
     _addresses: &[u64],
 ) -> BleDeviceUnpairResult {

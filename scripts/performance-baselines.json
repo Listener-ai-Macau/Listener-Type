@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-14",
+  "updated_at": "2026-07-15",
   "contracts": {
     "device_settings_compact_write": {
       "accepted": true,
@@ -51,6 +51,21 @@
     },
     "ec11_type_repair_recovery": {
       "accepted": true,
+        "owner_speed_alignment": {
+          "status": "accepted",
+          "decided_at": "2026-07-15",
+          "accepted_at": "2026-07-15",
+          "decision": "EC11 Type-controlled double-click recovery must meet the same visible notify-ready speed limit as BLE rename recovery.",
+          "human_acceptance_evidence": ".cache/validation/preproduction-human-review-preliminary-step-15-recording-response-20260714-2317/physical-ec11-double-recovery-after-address-order-20260715-084803.operator-result.json",
+          "machine_acceptance_evidence": ".cache/validation/preproduction-human-review-preliminary-step-15-recording-response-20260714-2317/physical-ec11-double-recovery-after-address-order-20260715-084803.machine-speed.json",
+          "measured_type_notice_to_notify_ready_ms": 9256.0663,
+          "measured_recovery_advertisement_to_notify_ready_ms": 8090.1328,
+          "supersedes": {
+          "field": "max_recovery_trigger_to_notify_ready_ms",
+          "previous_value_ms": 12000,
+          "reason": "Product owner requires the core EC11 recovery path to meet the stricter rename recovery standard."
+        }
+      },
       "human_acceptance_evidence": ".cache/validation/ec11-boundary-20260710-20s/human-ec11-boundary-type-recovery-rootfix.txt",
       "human_acceptance_step_id": "ec11-double-repair-with-type",
       "historical_firmware_double_click_evidence": ".cache/validation/ec11-boundary-20260710-20s/firmware-ec11-double-observed-address.log",
@@ -63,7 +78,8 @@
       "measured_recovery_trigger_to_type_heartbeat_ready_ms": 17530,
       "measured_human_disconnect_to_type_heartbeat_ready_ms": 10664,
       "measured_human_recovery_adv_to_notify_ready_ms": 8984,
-      "max_recovery_trigger_to_notify_ready_ms": 12000,
+      "max_recovery_trigger_to_notify_ready_ms": 10000,
+      "max_recovery_advertisement_to_notify_ready_ms": 10000,
       "machine_randomized_sample_count": 5,
       "machine_randomized_observed_max_trigger_to_type_ready_ms": 9020,
       "machine_speed_gate_requires_all_samples": true,
@@ -74,7 +90,7 @@
       "no_slow_recovery_paths_after_observed_address": true,
       "no_duplicate_advertisement_scan_after_notify_evidence": true,
       "single_click_no_double": true,
-      "validation_command": "cargo test --manifest-path .\\src-tauri\\Cargo.toml type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml type_recovery_promotes_only_trusted_cached_addresses --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_notify_advertisement_evidence_skips_only_the_duplicate_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery --lib; pwsh -NoProfile -File .\\scripts\\check-ec11-type-recovery-randomized.ps1 -Port COM3 -Iterations 5 -MaxTriggerToTypeReadyMs 12000 -OutputJson <artifact>.json. The installed C:\\Program Files\\Listener Type\\listener-type.exe must be running; every randomized generated EC11 double-click sample must reach firmware TYPE:READY <=12000 ms and prove both firmware pre-reset notice send and Type pre-reset notice receipt. This is not a physical GPIO edge measurement. Preserve Type-observed direct PairAsync, no duplicate advertisement scan, no paired link check, GATT reachability, notify enable, Type heartbeat ready, and single-click start/stop without double-click."
+      "validation_command": "cargo test --manifest-path .\\src-tauri\\Cargo.toml type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml type_recovery_promotes_only_trusted_cached_addresses --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_notify_advertisement_evidence_skips_only_the_duplicate_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery --lib; pwsh -NoProfile -File .\\scripts\\check-ec11-type-recovery-randomized.ps1 -Port COM3 -Iterations 5 -MaxTriggerToTypeReadyMs 10000 -OutputJson <artifact>.json. The installed C:\\Program Files\\Listener Type\\listener-type.exe must be running; every randomized generated EC11 double-click sample must reach firmware TYPE:READY <=10000 ms, reach background listener notify ready <=10000 ms from the Type pre-reset notice, and prove both firmware pre-reset notice send and Type pre-reset notice receipt. This is not a physical GPIO edge measurement. Preserve Type-observed direct PairAsync, no duplicate advertisement scan, no paired link check, GATT reachability, notify enable, Type heartbeat ready, and single-click start/stop without double-click."
     },
     "ota_transfer_speed": {
       "accepted": true,
