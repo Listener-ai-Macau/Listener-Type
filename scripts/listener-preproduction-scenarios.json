@@ -119,6 +119,15 @@
         "evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-wireless-20260715/machine-transfer-current-20260715/machine-validation-summary.json"
       }
     },
+    "ota_preupgrade_current_build_refresh": {
+      "status": "active",
+      "recorded_at": "2026-07-15T12:05:00+08:00",
+      "source": "Product-owner direction: 你先把ota预先修一下。",
+      "requirement": "Refresh the machine-only OTA pre-upgrade evidence against the current Listener Firmware and the currently installed Program Files Type. A preflight may not reuse a staged package built from an earlier firmware commit after the device firmware has changed. Build and stage a fresh non-release package, verify its manifest/hash and the connected Listener OTA GATT capability using C:\\Program Files\\Listener Type\\listener-type.exe, and retain machine evidence. Do not open a human OTA prompt and do not replace either Denzic-root release package before all physical release gates pass.",
+      "reason": "The accepted July 15 OTA transfer used a package from firmware commit cbc95969, while the current device firmware is 831b598 and the installed Type candidate has changed. The old result remains historical evidence only and cannot certify the current build.",
+      "scope": "Listener Firmware and Listener Type only; current non-release staging under validation evidence.",
+      "next_action": "Inspect the existing OTA package/preflight implementation, create a fresh staged package from the current firmware build, then run the installed-Type machine preflight and, if its unchanged transfer contract requires it, a short locked machine transfer with post-OTA serial evidence."
+    },
     "ota_final_package_root_path": {
       "status": "deferred_until_release_package_final_check",
       "recorded_at": "2026-07-15T10:39:00+08:00",
