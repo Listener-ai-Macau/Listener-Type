@@ -42,7 +42,7 @@
       "total_review_effect": "Canonical Step 16/20 is machine-accepted and the total-review cursor advances to Step 17 LED independence. This is not represented as a human visual acceptance."
     },
     "ble_platform_explicit_local_reattach_20260715": {
-      "status": "active_root_cause_repair",
+      "status": "generated_machine_pass_physical_ec11_pending",
       "recorded_at": "2026-07-15T23:10:00+08:00",
       "source": "Current Step 17 preflight after the owner returned Listener to this Windows host: COM3 reported ble=connected with low_power_disabled=1 and no Type-ready LED. The installed Program Files Type process was still alive but its log had stopped the background listener after cross-host recovery arbitration.",
       "observed_evidence": [
@@ -89,9 +89,9 @@
         "After explicit local Windows pairing/HID evidence is observed, fresh GATT plus persistent notify/TYPE:READY restoration <=6000ms; this timing starts at the local-evidence observation, never at the earlier 500ms click classifier.",
         "During a cross-host arbitration window, the old Type process must produce no local PairAsync/unpair/reclaim action; its intentionally absent TYPE:READY is an ownership observation, not a latency failure."
       ],
-      "current_machine_finding": "The randomized generated EC11 sample correctly sent and received the pre-reset notice, but the legacy gate incorrectly required old-host TYPE:READY <=10000ms. The sample entered the accepted cross-host arbitration state. Firmware logs show accepted double-click at 2038401ms and recovery advertising at 2038891ms, approximately 490ms, which fails the existing <=250ms device-controlled advertising metric. After arbitration ended with advertising still visible, Type-controlled recovery reached Type heartbeat ready about 6879ms later. This is separate from the no-advertisement passive-local-reattach repair.",
-      "evidence": ".cache/validation/ble-platform-local-reattach-20260715/randomized-ec11-recovery.json and ec11-recovery-sample-01.log",
-      "next_action": "Read the firmware recovery disconnect and async bond-delete sequence, identify why the accepted-click-to-advertising path took about 490ms, make the smallest root-cause repair without shortening the second-host ownership window, then replace the legacy old-host TYPE:READY timing assertion with causal phase metrics and randomized machine evidence."
+      "current_machine_finding": "The generated EC11 sample now passes the device-controlled advertising gate: accepted double-click to termination request 42ms, confirmed disconnect 64ms, and connectable recovery advertising 241ms against the <=250ms target. The root repair preserves the Type pre-reset notice, retains Type GATT until firmware disconnect, wakes the async bond-delete worker before teardown, makes that worker the sole recovery advertising owner, and moves persistent structured diagnostics off the flash-writing critical path. Windows PnP reported listener/HID/GATT services OK and top-level window enumeration showed no pairing dialog. The generated command still is not a real EC11 physical press and therefore cannot close the physical timing gate.",
+      "evidence": ".cache/validation/ble-platform-local-reattach-20260715/machine-ec11-recovery-critical-path-20260715.json; second-post-fast-path-generated-ec11-recovery-com3.log; C:\\Users\\Billy\\AppData\\Local\\Listener Type\\Logs\\listener-type.log",
+      "next_action": "Preserve the <=250ms generated machine gate and collect one real physical EC11 double-click capture before accepting the physical metric. Keep the 500ms single/double boundary, long-press cancellation, cross-host ownership window, and no-reclaim Type behavior unchanged."
     },
     "idle_ble_audio_wake_latency": {
       "target_notify_ready_ms": 50,

@@ -676,6 +676,7 @@ mod windows_ble {
         Duration::from_millis(1500),
     ];
     const ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+    const EC11_HARDWARE_RECOVERY_DISCONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
     const DIAGNOSTIC_PULL_CANDIDATE_DELAY: Duration = Duration::from_millis(350);
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
     const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
@@ -6496,6 +6497,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let mut stop_drain_deadline: Option<Instant> = None;
         let mut link_recovery_deadline: Option<Instant> = None;
         let mut link_recovery_reason: Option<String> = None;
+        let mut ec11_recovery_disconnect_deadline: Option<Instant> = None;
         let mut consecutive_type_heartbeat_failures = 0u32;
         loop {
             cleanup.drain_audio_control_requests(&control_rx);
@@ -6600,14 +6602,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 cleanup.disable_notify();
                 return Err(message);
             }
-            let receive_timeout = [stop_drain_deadline, deadline, link_recovery_deadline]
-                .into_iter()
-                .flatten()
-                .chain(next_type_heartbeat)
-                .map(|deadline| deadline.saturating_duration_since(now))
-                .min()
-                .unwrap_or(RECEIVE_POLL_INTERVAL)
-                .min(RECEIVE_POLL_INTERVAL);
+            if ec11_recovery_disconnect_deadline
+                .is_some_and(|disconnect_deadline| now >= disconnect_deadline)
+            {
+                let message = format!(
+                    "Listener EC11 hardware recovery notice did not receive the expected firmware disconnect within {} ms",
+                    EC11_HARDWARE_RECOVERY_DISCONNECT_TIMEOUT.as_millis()
+                );
+                log::warn!("[embedded-ble] capture #{capture_id}: {message}");
+                cleanup.defer_type_heartbeat_bye_until_processing_done();
+                cleanup.finish(NotifyCccdTeardown::LeaveEnabled);
+                return Err(message);
+            }
+            let receive_timeout = [
+                stop_drain_deadline,
+                deadline,
+                link_recovery_deadline,
+                ec11_recovery_disconnect_deadline,
+            ]
+            .into_iter()
+            .flatten()
+            .chain(next_type_heartbeat)
+            .map(|deadline| deadline.saturating_duration_since(now))
+            .min()
+            .unwrap_or(RECEIVE_POLL_INTERVAL)
+            .min(RECEIVE_POLL_INTERVAL);
             let signal = match rx.recv_timeout(receive_timeout) {
                 Ok(signal) => signal,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -6670,6 +6689,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     notification
                 }
                 BleCaptureSignal::Disconnected(reason) => {
+                    if ec11_recovery_disconnect_deadline.take().is_some() {
+                        log::info!(
+                            "[embedded-ble] capture #{capture_id}: firmware disconnect observed after EC11 recovery notice; releasing the retained GATT session for recovery arbitration"
+                        );
+                        cleanup.defer_type_heartbeat_bye_until_processing_done();
+                        cleanup.finish(NotifyCccdTeardown::LeaveEnabled);
+                        return Err(
+                            "Listener EC11 hardware recovery notice received before pairing reset; Type observed the firmware disconnect and must scan the matching recovery advertisement and run automatic PairAsync recovery".to_string(),
+                        );
+                    }
                     if collector_has_active_recoverable_session(&collector) {
                         if let Some(recovery_error) =
                             active_capture_disconnect_recovery_pairing_error(&reason)
@@ -6708,13 +6737,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             };
             if super::is_ec11_hardware_recovery_notice(&notification) {
                 log::warn!(
-                    "[embedded-ble] capture #{capture_id}: received EC11 hardware recovery notice before pairing reset; handing recovery to Type immediately"
+                    "[embedded-ble] capture #{capture_id}: received EC11 hardware recovery notice; retaining the GATT session until the firmware disconnect completes"
                 );
                 cleanup.defer_type_heartbeat_bye_until_processing_done();
-                cleanup.finish(NotifyCccdTeardown::LeaveEnabled);
-                return Err(
-                    "Listener EC11 hardware recovery notice received before pairing reset; Type must scan the matching recovery advertisement and run automatic PairAsync recovery".to_string(),
-                );
+                ec11_recovery_disconnect_deadline =
+                    Some(Instant::now() + EC11_HARDWARE_RECOVERY_DISCONNECT_TIMEOUT);
+                continue;
             }
             let terminal = super::is_terminal_notification(&notification);
             let local_event = collector.handle_notification(&notification).ok();
