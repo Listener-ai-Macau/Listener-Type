@@ -53,14 +53,16 @@
       "evidence_anchor": "recording_chain_quality_speed_no_regression"
     },
     "capsule_remove_test_expression": {
-      "status": "superseded",
+      "status": "withdrawn_pending_product_identification",
       "recorded_at": "2026-07-15T10:15:00+08:00",
       "source": "Product-owner direction: 现在总是会显示一个很难看的表情，像是测试的感觉，删除它。",
       "clarified_at": "2026-07-15T10:18:00+08:00",
-      "clarification": "The owner supplied a device photograph: the reported expression is on the Companion e-paper display, not in the Listener Type capsule. No Listener UI or recording behavior is in scope for this request.",
+      "clarification": "The owner supplied a device photograph, then explicitly corrected the routing: do not perform Companion work. Listener Firmware and Listener Type contain no e-paper or matching expression renderer, so this request must not be assigned to Listener either without a confirmed product/device identity.",
+      "withdrawn_at": "2026-07-15T10:24:00+08:00",
+      "withdrawn_by": "Product-owner direction: 搞错了, 你不要做companion的东西",
       "related_workflow_plan": "listener-1-0-2-recording-chain-acceptance#1.1",
-      "superseded_by": "Companion docs/companion_product_requirements.md companion test-expression removal requirement",
-      "no_implementation": "No Listener Type rendering or recording code was changed."
+      "prior_routing": "Initially classified as a Companion e-paper expression from the photograph; the owner rejected that scope before any Companion product file was changed.",
+      "no_implementation": "No Listener Type, Listener Firmware, or Companion product code, build, flash, or visual asset was changed."
     },
     "recording_chain_quality_speed_no_regression": {
       "status": "accepted",
