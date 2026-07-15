@@ -3,6 +3,13 @@
   "version": "1.0.2",
   "purpose": "Canonical Listener 1.0.2 preproduction physical acceptance scenarios. Human, bench, regression, and release audit gates must use this file as the scenario source of truth.",
   "pending_operator_steering": {
+    "listener_simple_issue_self_closure_20260715": {
+      "status": "required",
+      "recorded_at": "2026-07-15T22:40:00+08:00",
+      "source": "Product-owner direction: 另外这些简单的问题你可以自己闭环, 不需要人协助.",
+      "requirement": "For Listener-only issues that can be falsified by code inspection, deterministic simulation, installed-Type logs, Windows event/state evidence, or short locked device capture, complete diagnosis, repair, and machine validation without asking the operator to repeat simple input actions. Reserve a canonical operator-prompt for a remaining subjective or externally unobservable user-visible judgment; do not represent a machine-only conclusion as human acceptance.",
+      "current_application": "The missing current-host Swift Pair popup is being self-closed through firmware advertisement/session evidence and installed Program Files Type/Windows state. The operator is not asked to repeat double-clicks while those machine checks can distinguish the cause."
+    },
     "idle_ble_audio_wake_latency": {
       "target_notify_ready_ms": 50,
       "status": "accepted",
@@ -173,6 +180,18 @@
       },
       "root_cause": "Firmware treats a repeated recovery gesture as a new Swift Pair session. That contradicts Microsoft's session rule: Windows shows only one notification per session, and a peripheral using LE privacy must suspend address rotation during the Swift Pair session and cooldown. Restarting the session and changing the address while Windows is deciding whether to notify creates an unstable, host-dependent popup path.",
       "repair_hypothesis": "Make an active physical Swift Pair recovery window idempotent: retain the existing address, start time, advertising phase, and cooldown instead of restarting the session. This removes the protocol violation without reintroducing firmware-side SMP initiation or changing the one-time identity rotation that occurs before the session begins.",
+      "popup_timing_root_contract_20260715": {
+        "source": "Product-owner observation: 可以了, 延迟出现了, 需要的是双击灯效完以后弹这个弹窗.",
+        "observed_windows_evidence": "Microsoft-Windows-PushNotification-Platform/Operational delivered Windows.SystemToast.BthQuickPair at 2026-07-15T22:36:22+08:00; Bluetooth-Policy logged Windows pairing attempt and connection at 22:36:25+08:00. The connected firmware later reported ble=OK.",
+        "root_cause": "The old recovery advertisement selected a randomized 30-50ms interval. Microsoft specifies a consistent 30ms Swift Pair beacon cadence for the quickest discovery. The extra random radio interval is small but avoidable firmware-side discovery jitter; the remaining toast scheduling is Windows-owned and must be measured separately rather than hidden by delaying the LED or the advertisement.",
+        "requirement": "Physical EC11 recovery must begin Swift Pair advertising immediately, at a fixed 30ms interval for the bounded Swift Pair phase. Do not defer advertising until the 2700ms blue three-cycle repair cue ends. The observable notification target is a first Windows.SystemToast.BthQuickPair delivery within 5 seconds of a captured accepted EC11 double-click; evidence must classify a missed deadline as firmware advertisement versus Windows host delivery.",
+        "machine_authorization": "The owner explicitly authorizes Listener to self-close this simple protocol/measurement issue with machine evidence. A durable focused regression gate is allowed after the repair and validation; it must not claim that Windows toast display is firmware-controlled.",
+        "validation": [
+          "Static regression gate proves the Swift Pair advertisement uses exactly 30-30ms while normal advertising retains its existing 30-50ms range.",
+          "Firmware build passes.",
+          "Windows event evidence records BthQuickPair delivery separately from Bluetooth connection/pairing events."
+        ]
+      },
       "machine_validation_before_retest": [
         "Focused source/model verification proves an active physical Swift Pair window cannot execute restart_swift_pair_session or a second native identity rotation.",
         "pwsh -NoProfile -File .\\tools\\build.ps1 PASS.",
