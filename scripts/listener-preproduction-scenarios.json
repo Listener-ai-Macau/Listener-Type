@@ -49,6 +49,52 @@
       "priority": "highest",
       "closure": "The installed Program Files candidate passed the strict 12-session normal/low10 recording baseline, focused human acceptance, and the cross-repo release gate. Future recording work must preserve these accepted metrics and reopen this contract only when it touches the recording, ASR, capsule-preview, BLE-audio, or completion risk surface.",
       "requirement": "Product-owner priority is now the end-to-end recording chain before the remaining release gates: improve the recording path while preserving accuracy, wake speed, completion speed, and a durable no-regression contract so fixes do not repeatedly regress.",
+      "current_physical_accuracy_investigation": {
+        "status": "accepted",
+        "recorded_at": "2026-07-15T09:35:00+08:00",
+        "accepted_at": "2026-07-15T09:37:49+08:00",
+        "source": "Step 15/20 focused physical recording review selected failure. The operator reported an incorrect randomized literal, then added: accuracy is insufficient and sensitivity is intermittently unreliable; find and repair the root cause.",
+        "requirement": "Treat recording accuracy and sensitivity stability as one active end-to-end contract. Attribute every failed physical run to internal recording pipeline, BLE transport, ASR provider, network, preview, or insertion from same-session evidence before changing behavior. Preserve real PCM only; do not add generated silence, phrase substitutions, display masking, or delay-based workarounds.",
+        "incident_evidence": ".cache/validation/preproduction-human-review-step-15-recording-response-20260715/physical-step-15-recording-response-20260715-092114.accuracy-triage.json",
+        "preflight": {
+          "accepted_behaviors_protected": [
+            "EC11 physical idle wake dispatch and single/double/long-press behavior",
+            "real-PCM-only ASR input",
+            "Volcengine authoritative final text and capsule convergence",
+            "accepted preview, wake, and completion timing contracts unless the repair demonstrably touches them"
+          ],
+          "external_sources_checked": [
+            "ESP-IDF I2S RX documentation: i2s_channel_read consumes DMA RX buffers and RX queue-overflow events report overwritten data",
+            "Volcengine streaming ASR product documentation: PCM and real-time streaming are supported; 16 kHz avoids automatic conversion loss"
+          ],
+          "falsifiable_repair_evidence": "After machine validation and a physical randomized recording, the same-session firmware log must show capture_backpressure_gap_ms=0, no pool/queue exhaustion, and continuous real PCM into the installed Program Files Volcengine session before a focused human re-review."
+        },
+        "human_acceptance": {
+          "operator_result": ".cache/validation/preproduction-human-review-step-15-recording-response-20260715/physical-step-15-recording-response-20260715-093658.operator-result.json",
+          "operator_note_triage": ".cache/validation/preproduction-human-review-step-15-recording-response-20260715/physical-step-15-recording-response-20260715-092114.accuracy-triage.json",
+          "installed_type": "C:\\Program Files\\Listener Type\\listener-type.exe",
+          "scope": "Focused physical repair acceptance for intermittent recording sensitivity and accuracy. This accepts the repaired root cause, not an unspoken second scripted literal or any unrelated total-review scenario."
+        },
+        "machine_revalidation": {
+          "firmware_serial_evidence": ".cache/validation/preproduction-human-review-step-15-recording-response-20260715/physical-step-15-recording-response-20260715-093658.log",
+          "capture_integrity_evidence": ".cache/validation/preproduction-human-review-step-15-recording-response-20260715/physical-step-15-recording-response-20260715-093658.capture-integrity.json",
+          "metrics": {
+            "session_1_capture_backpressure_gap_ms": 0,
+            "session_1_elapsed_over_pcm_ms": 150,
+            "session_2_capture_backpressure_gap_ms": 0,
+            "session_2_elapsed_over_pcm_ms": 90,
+            "all_sessions_audio_sent_matches_expected": true,
+            "all_sessions_pool_or_queue_exhaustion": false
+          }
+        },
+        "root_cause_regression_contract": {
+          "status": "accepted",
+          "requirement": "Every future change that can affect microphone capture, BLE audio transport, embedded dictation, or recording completion must retain per-session capture integrity telemetry and run the parser against a fresh real serial capture. A missing integrity line, a nonzero capture_backpressure_gap_ms, an intentional paused frame, transport continuity mismatch, pool/queue exhaustion, or elapsed-to-PCM excess over 300 ms is a recording regression, not a zero-drop PASS.",
+          "validation_command": "python .\\tools\\verify_ble_audio_transport_model.py; pwsh -NoProfile -File .\\tools\\verify_ble_audio_backpressure_static.ps1; python .\\tools\\verify_audio_capture_integrity_log.py --log <fresh-real-COM3-capture.log> --max-gap-ms 0 --max-elapsed-over-pcm-ms 300; pwsh -NoProfile -File .\\tools\\build.ps1",
+          "known_bad_rejection_evidence": ".cache/validation/preproduction-human-review-step-15-recording-response-20260715/physical-step-15-recording-response-20260715-092114.capture-integrity-known-bad.json"
+        },
+        "next_action": "Preserve this accepted capture-integrity contract during later recording work. The canonical total review remains blocked by Step 14 second-host hardware; do not claim a release from this focused Step 15 repair."
+      },
       "current_preview_quality_feedback": {
         "status": "accepted",
         "recorded_at": "2026-07-14",
