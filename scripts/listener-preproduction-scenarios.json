@@ -8,7 +8,18 @@
       "recorded_at": "2026-07-15T22:40:00+08:00",
       "source": "Product-owner direction: 另外这些简单的问题你可以自己闭环, 不需要人协助.",
       "requirement": "For Listener-only issues that can be falsified by code inspection, deterministic simulation, installed-Type logs, Windows event/state evidence, or short locked device capture, complete diagnosis, repair, and machine validation without asking the operator to repeat simple input actions. Reserve a canonical operator-prompt for a remaining subjective or externally unobservable user-visible judgment; do not represent a machine-only conclusion as human acceptance.",
-      "current_application": "The missing current-host Swift Pair popup is being self-closed through firmware advertisement/session evidence and installed Program Files Type/Windows state. The operator is not asked to repeat double-clicks while those machine checks can distinguish the cause."
+      "current_application": "The current-host Swift Pair protocol repair and the BLE-audio-Type-link check were self-closed with firmware advertisement/session evidence, Windows event evidence, and an installed Program Files Type GATT read. The operator is not asked to repeat simple input while those checks can distinguish the cause; a remaining subjective visual judgment still requires its own canonical prompt."
+    },
+    "ble_audio_type_link_machine_acceptance_20260715": {
+      "status": "accepted_by_explicit_owner_machine_authorization",
+      "recorded_at": "2026-07-15T22:50:09+08:00",
+      "source": "Product-owner direction: Listener-only simple issues that logs and machine evidence can close do not need repeated operator action.",
+      "related_scenario_id": "ble-audio-type-link",
+      "requirement": "Windows showing Listener as connected is insufficient. The installed C:\\Program Files\\Listener Type\\listener-type.exe must read the embedded BLE audio status characteristic and confirm connected=true, audio_ready, ble_audio_vka1, and ble_audio_control_v1.",
+      "machine_result": "The installed Type completed the fresh GATT status operation in 784ms and logged connected=true with audio_ready and both required BLE-audio capabilities.",
+      "evidence": ".cache/validation/preproduction-step-16-ble-audio-type-link-20260715/postflash-installed-type-audio-status-machine-evidence.json",
+      "total_review_summary": ".cache/validation/preproduction-human-review-total-20260712-081300-step-16-ble-audio-type-link-20260715-2247/preproduction-machine-acceptance-summary.json",
+      "total_review_effect": "Canonical Step 16/20 is machine-accepted and the total-review cursor advances to Step 17 LED independence. This is not represented as a human visual acceptance."
     },
     "idle_ble_audio_wake_latency": {
       "target_notify_ready_ms": 50,
@@ -185,7 +196,7 @@
         "source": "Product-owner observation: 可以了, 延迟出现了, 需要的是双击灯效完以后弹这个弹窗.",
         "observed_windows_evidence": "Microsoft-Windows-PushNotification-Platform/Operational delivered Windows.SystemToast.BthQuickPair at 2026-07-15T22:36:22+08:00; Bluetooth-Policy logged Windows pairing attempt and connection at 22:36:25+08:00. The connected firmware later reported ble=OK.",
         "root_cause": "The old recovery advertisement selected a randomized 30-50ms interval. Microsoft specifies a consistent 30ms Swift Pair beacon cadence for the quickest discovery. The extra random radio interval is small but avoidable firmware-side discovery jitter; the remaining toast scheduling is Windows-owned and must be measured separately rather than hidden by delaying the LED or the advertisement.",
-        "requirement": "Physical EC11 recovery must begin Swift Pair advertising immediately, at a fixed 30ms interval for the bounded Swift Pair phase. Do not defer advertising until the 2700ms blue three-cycle repair cue ends. The observable notification target is a first Windows.SystemToast.BthQuickPair delivery within 5 seconds of a captured accepted EC11 double-click; evidence must classify a missed deadline as firmware advertisement versus Windows host delivery.",
+        "requirement": "Physical EC11 recovery must begin Swift Pair advertising immediately, at a fixed 30ms interval for the bounded Swift Pair phase. Do not defer advertising until the 2700ms blue three-cycle repair cue ends. The intended visible ordering is the familiar blue double-click cue first, followed by the Windows pairing popup when the host schedules it; the observed current-host retest produced that order. Firmware must not add an artificial advertisement or toast delay to manufacture it. The observable notification target is a first Windows.SystemToast.BthQuickPair delivery within 5 seconds of a captured accepted EC11 double-click; evidence must classify a missed deadline as firmware advertisement versus Windows host delivery.",
         "machine_authorization": "The owner explicitly authorizes Listener to self-close this simple protocol/measurement issue with machine evidence. A durable focused regression gate is allowed after the repair and validation; it must not claim that Windows toast display is firmware-controlled.",
         "validation": [
           "Static regression gate proves the Swift Pair advertisement uses exactly 30-30ms while normal advertising retains its existing 30-50ms range.",
