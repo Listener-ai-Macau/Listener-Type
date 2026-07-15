@@ -46,7 +46,13 @@
           "pwsh -NoProfile -File .\\tools\\build.ps1 PASS"
         ]
       },
-      "next_action": "Build and install a non-release MSI from the Type commit, flash the matching firmware commit, capture the real manual-delete/EC11 recovery transcript, then open one focused Chinese operator review for waiting-versus-connected LED semantics and the actual second-host pairing outcome. Do not replace the Denzic-root release packages."
+      "latest_operator_window": {
+        "status": "incomplete_no_operator_selection",
+        "recorded_at": "2026-07-15T11:40:00+08:00",
+        "evidence": "../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/postfix-operator-window-incomplete-20260715.json",
+        "machine_observation": "The 150-second capture contains only the existing secure-link TYPE:HB heartbeats; it contains no EC11 double-click, recovery-pairing, or second-host pairing event. No operator choice or note was written, so this is neither PASS nor failure evidence."
+      },
+      "next_action": "Keep this one item active. When the operator explicitly starts it again with the second Windows host ready, run a fresh short canonical operator prompt and serial/installed-Type capture for the EC11 double-click, amber waiting cue, native second-host pairing, and old-host non-reclaim outcome. Do not replace the Denzic-root release packages."
     },
     "recording_response_preliminary_review_authorization": {
       "status": "active",
