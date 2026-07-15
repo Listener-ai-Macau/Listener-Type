@@ -157,10 +157,9 @@
         "result": "PASS",
         "firmware_source_commit": "6b5a2f2d28e11fc67f5f763caaed7aeb6591c2e1",
         "firmware_ota_sha256": "CF5588871B5FB71FB41EA62488A885168C837F7B8A7896FF35AB391BFCF34464",
-        "type_source_commit": "74995a6f180338d6f87961da6ab4c06578644d69",
-        "type_msi_sha256": "BC4BA1D103332D4A7CDDBB056410C8FF0B31D8D7D5CE1EC7E17D7515EF9B11EC",
         "installed_type": "C:\\Program Files\\Listener Type\\listener-type.exe",
         "installed_type_sha256": "E9D9CA8151B3CBC0544FFD42867E67376E988E4E5BF3B54EA1B4EC412E47F8BF",
+        "type_candidate_identity": "The exact Type source head, MSI SHA, built payload SHA, and Program Files runtime identity are recorded together in the linked candidate-msi-installed-identity.json. WiX can relink an unchanged payload after a documentation-only commit, so the immutable behavioral identity is the source/input inventory and payload hash; the MSI container SHA is evidence-local rather than copied into this registry.",
         "result_summary": "Firmware build and OTA contract passed; the fresh non-root OTA manifest commit and firmware SHA match the clean Firmware HEAD. Type format and MSI package passed; a short BLE lock installed the current MSI, verified the installed Program Files exe equals the MSI payload, and restarted only that installed executable."
       },
       "evidence": [
