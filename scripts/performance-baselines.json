@@ -64,9 +64,20 @@
           "field": "max_recovery_trigger_to_notify_ready_ms",
           "previous_value_ms": 12000,
           "reason": "Product owner requires the core EC11 recovery path to meet the stricter rename recovery standard."
-        }
-      },
-      "human_acceptance_evidence": ".cache/validation/ec11-boundary-20260710-20s/human-ec11-boundary-type-recovery-rootfix.txt",
+          }
+        },
+        "recovery_led_contract": {
+          "status": "accepted",
+          "decided_at": "2026-07-15",
+          "accepted_at": "2026-07-15",
+          "decision": "After an EC11 double-click recovery has manually restored the Windows BLE link but before Type audio-ready arrives, the visible Bluetooth state must immediately be blue, low-brightness, and double-pulsed. The prior repair cue must not continue as a full-brightness or color-ambiguous double flash after the BLE connection succeeds; normal TYPE:READY rendering remains unchanged.",
+          "trigger": "operator report: after manual recovery the Bluetooth effect was a generic double flash instead of blue low-brightness double flash",
+          "acceptance_requirement": "A focused physical operator review and serial evidence must confirm the blue low-brightness double pulse after manual recovery reaches BLE connected and before TYPE:READY; no release claim may substitute simulated color or brightness evidence.",
+          "human_acceptance_evidence": "../Listener-Firmware/.cache/validation/ec11-recovery-led-20260715/physical-ec11-recovery-led-20260715-091431.operator-result.json",
+          "machine_acceptance_evidence": "../Listener-Firmware/.cache/validation/ec11-recovery-led-20260715/physical-ec11-recovery-led-20260715-091431.machine-acceptance.json",
+          "root_cause_regression_gate": "python .\\tools\\verify_status_led_static.py; the repair cue must survive only reset-disconnected/pairing/reconnecting states and yield immediately on BLE_CONNECTED or BLE_TYPE_READY."
+        },
+        "human_acceptance_evidence": ".cache/validation/ec11-boundary-20260710-20s/human-ec11-boundary-type-recovery-rootfix.txt",
       "human_acceptance_step_id": "ec11-double-repair-with-type",
       "historical_firmware_double_click_evidence": ".cache/validation/ec11-boundary-20260710-20s/firmware-ec11-double-observed-address.log",
       "historical_type_log_evidence": ".cache/validation/ec11-boundary-20260710-20s/type-log-after-human-rootfix-recovery-slice.txt",
