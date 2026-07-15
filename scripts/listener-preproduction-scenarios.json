@@ -71,7 +71,24 @@
       "requirement": "Wireless OTA pre-upgrade is a repeatable machine gate: verify the installed Program Files Type identity, current staged OTA manifest/hash, and the connected Listener OTA GATT capability without asking the operator to judge a preflight screen.",
       "enforcement": "Do not open aiw operator-prompt for OTA pre-upgrade. Retain the machine command logs and structured summary under the matching OTA evidence directory. Human acceptance, when required, begins only with an actual user-visible OTA transfer and its post-upgrade return-to-ready behavior.",
       "related_scenario_id": "ota-wireless-smoke",
-      "machine_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-wireless-20260715/current-staged-package-evidence.json"
+      "machine_preflight_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-wireless-20260715/current-staged-package-evidence.json",
+      "machine_transfer_acceptance": {
+        "status": "accepted",
+        "accepted_at": "2026-07-15T10:58:00+08:00",
+        "authorization": "Product-owner direction: 预升级不应该是人工做的，是机器做的。",
+        "installed_type": "C:\\Program Files\\Listener Type\\listener-type.exe",
+        "package_scope": "current non-release staged package only; the historical Denzic-root OTA ZIP was not used or replaced",
+        "result": "Installed Type transferred 966576 bytes over denzic_ota_v1 in 52458 ms, confirmed version 1.0.2 in 68256 ms, then the device booted ota_1 with pending_verify=0, safe_mode=0, crash_count=0, and restored the Type heartbeat.",
+        "limits": {
+          "max_transfer_ms": 60000,
+          "max_total_ms": 90000,
+          "required_transport": "denzic_ota_v1",
+          "required_version_confirmation": true,
+          "required_post_ota_state": "ota_1 active, pending_verify=0, safe_mode=0, Type heartbeat restored"
+        },
+        "root_cause_regression_command": "node .\\scripts\\check-ota-transfer-speed-log.mjs --log <installed-Type-ota.log> --output-json <ota-speed.json>; validate the fresh bounded firmware serial transcript for ota_1/ota_1, pending_verify=0, safe_mode=0, and TYPE:HB.",
+        "evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-wireless-20260715/machine-transfer-current-20260715/machine-validation-summary.json"
+      }
     },
     "ota_final_package_root_path": {
       "status": "deferred_until_release_package_final_check",
