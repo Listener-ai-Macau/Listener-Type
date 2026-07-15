@@ -251,24 +251,39 @@
           "EC11 wake and ordinary single/double/long-press semantics"
         ],
         "intermittent_slow_delivery_root_cause": {
-          "status": "machine_repair_in_progress",
+          "status": "accepted",
           "observed_session": "d59d917a-43cb-41c9-af71-fdac68ec5836",
           "observed_evidence": "C:\\Users\\Billy\\AppData\\Local\\Listener Type\\Logs\\listener-type.log and ../Listener-Firmware/.cache/validation/recording-active-link-promotion-20260715/slow-session-gap-diagnostic-20260715.log",
           "diagnosis": "The session received its first PCM 146 ms after Type started BLE recording, but packet 50 arrived 3.6 seconds later and the first meaningful ASR partial appeared about 5.18 seconds later. Firmware telemetry shows 1075 audio packets over 81.2 seconds at 6,352 bytes/s and 13 packets/s while the link remained interval 120 (150 ms), latency 9. The prior active-intent retry candidate did not fix this: NimBLE returned BLE_HS_EALREADY (2, an update already in progress), then BLE_GAP_EVENT_CONN_UPDATE status 554 (BLE_ERR_DIFF_TRANS_COLL, different transaction collision), and the promotion timed out while the low-power link remained active. This is firmware-to-Windows BLE delivery, not Volcengine, network, preview, or final-text processing.",
           "repair_contract": "e11r=1 is the explicit Type-controlled fast-recording arm, not merely a post-press fast-path permission. While it is armed, CONNECTED_IDLE may still save board/audio power but must retain or promote the BLE connection to active parameters before any EC11 physical press; it must not issue the 80-120 interval / latency-9 low-power link request. A NimBLE BLE_HS_EALREADY result means the stack owns an existing connection-parameter transaction, so firmware must await BLE_GAP_EVENT_CONN_UPDATE rather than clear a shorter local timer or retry into the transaction. e11r=0 may return an already-idle connection to low-power parameters. The repair must retain the raw EC11 <=50 ms control dispatch, 500 ms single/double boundary, double-click cancellation, long-press cancellation, real PCM, and no preview/final masking.",
           "permanent_regression_guard": {
             "authorization": "Product-owner direction: 是的, 必须把这个加入防回退.",
-            "machine_contract": "python .\\tools\\verify_ble_audio_transport_model.py must model a host-owned pending low-power update followed by an active request, plus an e11r arm before CONNECTED_IDLE. The host-owned update must await its GAP completion event before the active re-promotion; the e11r case must keep the final connection mode active, while e11r=0 permits the low-power request. The source guard must require retained active intent, completed-update re-promotion, collision-aware retry, GAP-event ownership rather than a local confirmation timeout, and explicit e11r low-power exclusion.",
-            "fresh_physical_contract": "A fresh installed Program Files Type recording after CONNECTED_IDLE must retain a firmware serial transcript showing e11r fast recording armed and active link parameters (interval 6-6, latency 0) before the real EC11 press. Its recording summary must not exhibit the known 13 packets/s / 6,352 bytes/s low-power plateau, and capture-integrity evidence must show zero missing packets and zero capture_backpressure_gap_ms. This machine evidence does not replace the next focused Chinese human reacceptance."
+            "machine_contract": "python .\\tools\\verify_ble_audio_transport_model.py must model a host-owned pending low-power update followed by an active request, an e11r arm before CONNECTED_IDLE, and a later host-owned low-power completion after e11r is armed. The firmware must await the GAP completion event, then serialize exactly one active re-promotion; it may not race the host transaction or silently remain in low power. The source guard must require retained active intent, completed-update re-promotion, collision-aware retry, GAP-event ownership rather than a local confirmation timeout, and explicit e11r low-power exclusion.",
+            "fresh_physical_contract": "A fresh installed Program Files Type recording after CONNECTED_IDLE must retain a firmware serial transcript showing e11r fast recording armed and active link parameters (interval 6-6, latency 0) before or at the real EC11 press. The transcript must record press_to_control_ms <=50, and the matching Type session must not exhibit the known 13 packets/s / 6,352 bytes/s plateau, must show zero missing packets, and must classify any provider credential/network fault separately. This machine evidence is paired with focused Chinese human reacceptance."
+          },
+          "human_reacceptance": {
+            "status": "accepted",
+            "accepted_at": "2026-07-15T21:07:47+08:00",
+            "operator_result": "../Listener-Firmware/.cache/validation/recording-fast-arm-20260715/physical-ec11-fast-arm-final-window-operator-result.json",
+            "operator_note_triage": "../Listener-Firmware/.cache/validation/recording-fast-arm-20260715/operator-note-triage-physical-reacceptance.json",
+            "machine_summary": "../Listener-Firmware/.cache/validation/recording-fast-arm-20260715/machine-validation-summary-physical-reacceptance.json",
+            "measured": "Real EC11 press-to-control=0ms against the 50ms target; the recording start log reported active interval 6-6 and latency 0. The matching installed Type session delivered first preview at 424ms and first final supplemental text at 442ms, with 216 packets, 103680 PCM bytes, and zero missing packets.",
+            "scope": "This accepts only the BLE slow-link regression repair and preserves the existing single/double/long-press, preview, real-PCM, and completion contracts."
+          },
+          "separate_external_configuration_observation": {
+            "status": "triaged_not_a_ble_speed_regression",
+            "evidence": "The matching Type session logged HTTP 401 from the optional polish service after authoritative final ASR completed.",
+            "attribution": "The credential error cannot explain the former 150ms/latency-9 BLE plateau or this session's 424ms preview and 442ms final supplemental timing. Treat it as an independently attributable configuration/insertion follow-up if it recurs in user-visible completion."
           },
           "validation": [
             "Previous candidate: python .\\tools\\verify_ble_audio_transport_model.py PASS (11 cases, including pending-low-power-to-active promotion), but real physical evidence still reproduced the slow link and re-opened the repair.",
             "pwsh -NoProfile -File .\\tools\\verify_ble_audio_backpressure_static.ps1 PASS",
-            "pwsh -NoProfile -File .\\tools\\build.ps1 PASS"
+            "pwsh -NoProfile -File .\\tools\\build.ps1 PASS",
+            "2026-07-15 post-human-acceptance: python .\\tools\\verify_ble_audio_transport_model.py PASS (14 cases, including e11r re-promotion after host-owned downgrade); python .\\tools\\verify_ec11_fast_idle_recording_static.py PASS; device settings and BLE audio backpressure static checks PASS; pwsh -NoProfile -File .\\tools\\build.ps1 PASS."
           ]
         },
         "preflight_evidence_required": "Read the prior focused physical session and current audio/ASR code, then collect a fresh installed-Program-Files capture that records provider identity, gain statistics, packet continuity, preview/final timelines, and failure attribution. A focused Chinese operator prompt may open only after the machine evidence isolates the candidate cause and the smallest relevant static/build checks pass.",
-        "next_action": "Flash the machine-validated firmware, capture a fresh installed-Program-Files recording from CONNECTED_IDLE, and require active-link promotion plus capture-integrity evidence before one randomized real-speech reacceptance item."
+        "next_action": "Closed for the BLE slow-link regression: retain the accepted root contract for every recording/BLE change. Keep the canonical total review blocked by its independent Step 14 second-host hardware gate; do not replace Denzic-root release packages yet."
       },
       "current_preview_quality_feedback": {
         "status": "accepted",
