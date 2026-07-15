@@ -161,6 +161,25 @@
       "operator_note_triage": "second-host-live-20260715/native-add-device-retry3-operator-note.txt",
       "next_action": "Closed. Preserve the bounded Swift Pair popup path, 120-second recovery window, secure-bond completion, old-Type passivity, and machine latency limits."
     },
+    "ec11_swift_pair_session_stability_20260715": {
+      "status": "active_root_cause_repair",
+      "recorded_at": "2026-07-15T22:30:00+08:00",
+      "source": "Step 16/20 target-host retest: selected=失败; note=没弹窗弹出来了. Product-owner direction: 需要根治.",
+      "requirement": "A physical EC11 double-click starts exactly one stable Swift Pair session. Until that session and its required cooldown are complete, another physical double-click must not close the recovery window, reset its timing, or rotate the Listener BLE address. The recovery flow must retain the blue legacy cue, 120-second bounded pairing window, 30-50ms Swift Pair advertising, Windows-owned SMP, secure-bond completion, and old-Type passivity.",
+      "observed_evidence": {
+        "serial": ".cache/validation/preproduction-step-16-ble-audio-type-link-20260715/type-link-reassign-com3.log",
+        "windows": "Microsoft-Windows-DeviceSetupManager/Admin and Microsoft-Windows-Bluetooth-Policy/Operational, 2026-07-15 22:20:30-22:23:30",
+        "finding": "The first physical double-click ended the prior bond, generated a random identity, and started profile=swift_pair advertising at 30-50ms. Before its 45-second Swift Pair phase ended, the second physical double-click logged 'restarting session so Windows may show a fresh pairing notification', closed the active window, and rotated the address from 0e:26:c6:a0:77:cd to df:26:25:7a:e5:c3. No fresh incoming connection, encryption, or bond was observed after either advertisement. QuickPair and its policy were enabled on this PC."
+      },
+      "root_cause": "Firmware treats a repeated recovery gesture as a new Swift Pair session. That contradicts Microsoft's session rule: Windows shows only one notification per session, and a peripheral using LE privacy must suspend address rotation during the Swift Pair session and cooldown. Restarting the session and changing the address while Windows is deciding whether to notify creates an unstable, host-dependent popup path.",
+      "repair_hypothesis": "Make an active physical Swift Pair recovery window idempotent: retain the existing address, start time, advertising phase, and cooldown instead of restarting the session. This removes the protocol violation without reintroducing firmware-side SMP initiation or changing the one-time identity rotation that occurs before the session begins.",
+      "machine_validation_before_retest": [
+        "Focused source/model verification proves an active physical Swift Pair window cannot execute restart_swift_pair_session or a second native identity rotation.",
+        "pwsh -NoProfile -File .\\tools\\build.ps1 PASS.",
+        "A short locked COM3 capture proves two EC11 double-clicks within one window preserve one identity and one continuous Swift Pair advertisement session."
+      ],
+      "human_validation_after_machine_evidence": "One canonical Chinese Step 16/20 prompt only after the repair is flashed: one EC11 double-click should produce the Windows popup on the current target host; no repeated click is requested while Windows handles the same session."
+    },
     "recording_response_preliminary_review_authorization": {
       "status": "accepted",
       "recorded_at": "2026-07-14T23:15:00+08:00",
