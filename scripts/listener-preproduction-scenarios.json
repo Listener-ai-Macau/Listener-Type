@@ -144,6 +144,35 @@
       },
       "transfer_scope": "No new transfer was required for this pre-upgrade refresh: the owner designated pre-upgrade as machine preflight, and the OTA transport contract itself was unchanged. The prior bounded machine transfer remains historical evidence only; a fresh transfer and post-OTA state validation are required again for the final release artifact."
     },
+    "release_candidate_machine_preparation": {
+      "status": "accepted",
+      "recorded_at": "2026-07-15T13:45:00+08:00",
+      "accepted_at": "2026-07-15T14:40:48+08:00",
+      "source": "Product-owner direction: 除了人工需要验收的，你都做完了是吧？就是到时候人工就行。如果不是的话，你就帮我补充一下。",
+      "requirement": "Before reopening any human gate, complete every Listener-only machine prerequisite that does not need an operator: rebuild current-source non-root OTA and MSI candidates, verify their source identity and applicable package contracts, confirm the installed Program Files Type identity against the current MSI payload without launching a repository executable, and rerun the preproduction audit. This machine work must not replace the historical Denzic-root final package names or claim physical acceptance.",
+      "scope": "Listener Firmware and Listener Type only; the source registries and the generated non-release candidate artifact directories. No Companion repository or product behavior is in scope.",
+      "related_workflow_plan": "listener-1-0-2-recording-chain-acceptance#1.1 post-acceptance release preparation",
+      "acceptance_authority": "The owner explicitly delegates this bounded preparation to machine validation. The remaining physical/second-host and final human gates retain their normal human acceptance requirements.",
+      "machine_acceptance": {
+        "result": "PASS",
+        "firmware_source_commit": "6b5a2f2d28e11fc67f5f763caaed7aeb6591c2e1",
+        "firmware_ota_sha256": "CF5588871B5FB71FB41EA62488A885168C837F7B8A7896FF35AB391BFCF34464",
+        "type_source_commit": "74995a6f180338d6f87961da6ab4c06578644d69",
+        "type_msi_sha256": "BC4BA1D103332D4A7CDDBB056410C8FF0B31D8D7D5CE1EC7E17D7515EF9B11EC",
+        "installed_type": "C:\\Program Files\\Listener Type\\listener-type.exe",
+        "installed_type_sha256": "E9D9CA8151B3CBC0544FFD42867E67376E988E4E5BF3B54EA1B4EC412E47F8BF",
+        "result_summary": "Firmware build and OTA contract passed; the fresh non-root OTA manifest commit and firmware SHA match the clean Firmware HEAD. Type format and MSI package passed; a short BLE lock installed the current MSI, verified the installed Program Files exe equals the MSI payload, and restarted only that installed executable."
+      },
+      "evidence": [
+        "../Listener-Firmware/.cache/validation/release-candidate-machine-prep-20260715/firmware/candidate-ota-identity.json",
+        "../Listener-Firmware/.cache/validation/release-candidate-machine-prep-20260715/firmware/build.log",
+        "../Listener-Firmware/.cache/validation/release-candidate-machine-prep-20260715/firmware/verify-ble-ota-gatt-contract.log",
+        ".cache/validation/release-candidate-machine-prep-20260715/type/candidate-msi-installed-identity.json",
+        ".cache/validation/release-candidate-machine-prep-20260715/type/windows-package-msvc.log"
+      ],
+      "root_package_disposition": "The historical Denzic-root OTA and MSI were hash-recorded but not replaced. They remain prohibited from release use until all physical gates pass.",
+      "next_action": "Machine-only candidate preparation is closed. Reopen only the pending second-host and remaining physical human gates; after they pass, create the final root packages and run the full Listener release gate."
+    },
     "ota_final_package_root_path": {
       "status": "deferred_until_release_package_final_check",
       "recorded_at": "2026-07-15T10:39:00+08:00",
