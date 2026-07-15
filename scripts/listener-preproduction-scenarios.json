@@ -64,10 +64,19 @@
       "prior_routing": "Initially classified as a Companion e-paper expression from the photograph; the owner rejected that scope before any Companion product file was changed.",
       "no_implementation": "No Listener Type, Listener Firmware, or Companion product code, build, flash, or visual asset was changed."
     },
+    "ota_preupgrade_machine_gate": {
+      "status": "accepted",
+      "recorded_at": "2026-07-15T10:46:00+08:00",
+      "source": "Product-owner direction: 预升级不应该是人工做的，是机器做的。",
+      "requirement": "Wireless OTA pre-upgrade is a repeatable machine gate: verify the installed Program Files Type identity, current staged OTA manifest/hash, and the connected Listener OTA GATT capability without asking the operator to judge a preflight screen.",
+      "enforcement": "Do not open aiw operator-prompt for OTA pre-upgrade. Retain the machine command logs and structured summary under the matching OTA evidence directory. Human acceptance, when required, begins only with an actual user-visible OTA transfer and its post-upgrade return-to-ready behavior.",
+      "related_scenario_id": "ota-wireless-smoke",
+      "machine_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-wireless-20260715/current-staged-package-evidence.json"
+    },
     "ota_final_package_root_path": {
       "status": "deferred_until_release_package_final_check",
       "recorded_at": "2026-07-15T10:39:00+08:00",
-      "source": "Step 18/20 operator review selected 需要修复 with note: 包不是应该放在桌面的根目录嘛，就是 denzic 的根目录。",
+      "source": "Product-owner feedback captured during an incorrectly opened Step 18 pre-upgrade prompt: 包不是应该放在桌面的根目录嘛，就是 denzic 的根目录。 This feedback is retained as a release-package requirement, not an OTA preflight acceptance result.",
       "requirement": "The user-facing final Listener OTA ZIP must be placed at the Denzic root as ListenerFirmware_1.0.2_ota.zip so the installed Type path never requires a user to browse a generated .cache validation directory.",
       "current_constraint": "The product owner previously required that the existing root OTA/MSI packages, which are historical July 12 artifacts, must not be replaced or presented as final release artifacts until every physical gate passes. The current cbc9596 package is therefore an explicitly non-release staging artifact and cannot be copied into the root under the final filename.",
       "triage_disposition": "deferred_by_existing_owner_release_constraint",
@@ -395,7 +404,8 @@
       "id": "ota-wireless-smoke",
       "bench_title": "Wireless OTA smoke",
       "bench_capabilities": ["type_runtime", "windows_ble_automation", "led_optical_capture", "ota_package"],
-      "bench_evidence": ["ota_probe", "ota_log", "led_capture"]
+      "bench_evidence": ["ota_probe", "ota_log", "led_capture"],
+      "product_contract": "OTA pre-upgrade is machine-only: the installed Program Files Type identity, current staged package manifest/hash, and OTA GATT capability must be verified from repeatable logs without an operator prompt. A human review, if needed, is limited to the actual OTA transfer and post-upgrade user-visible return-to-ready behavior."
     },
     {
       "id": "wired-flash-smoke",
