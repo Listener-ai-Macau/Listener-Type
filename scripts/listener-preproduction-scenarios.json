@@ -17,17 +17,22 @@
       "previous_machine_evidence": "../Listener-Firmware/.cache/validation/idle-audio-wake-20260713/machine-validation-summary.json"
     },
     "computer_switch_second_host_deferred": {
-      "status": "deferred_by_product_owner",
+      "status": "accepted",
       "recorded_at": "2026-07-14T23:00:00+08:00",
+      "accepted_at": "2026-07-15T22:10:00+08:00",
       "source": "Step 14/20 operator prompt: selected=通过; non-empty note=这个先跳过, 做下一项.",
       "requirement": "Do not convert this operator-directed deferment into a PASS. The old-Type cross-host pairing arbitration repair has machine validation and an installed Program Files MSI, but the actual second Windows host did not perform the requested pairing action in this review window.",
-      "current_scope": "computer-switch-product-flow remains the active total-review cursor and a release NO-GO until a real second BLE host completes the native pairing path while the old Type instance proves it did not clean the local cache or run PairAsync.",
+      "current_scope": "The original deferral is closed by the focused Step 14 session. A real second Windows host completed the Swift Pair Connect flow and the firmware logged its secure BLE bond while the installed old Type process stayed passive.",
       "evidence": ".cache/validation/preproduction-human-review-total-20260712-081300-step-14-second-host-20260714-2235/operator-feedback-triage-20260714-2300-owner-deferred.json",
-      "next_action": "When a second Windows BLE host is available, reopen only Step 14 with the installed Program Files Type and capture both hosts' pairing outcome plus the old Type log arbitration lines."
+      "completion_evidence": ".cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/swift-pair-popup-retry4-com3.log, swift-pair-popup-retry4-latency-gate.json, swift-pair-popup-retry4-operator-result-and-triage.json, and blue-cue-recall-operator-result.json",
+      "next_action": "Closed. Preserve the second-host Swift Pair, secure-bond, old-Type-passivity, legacy-blue-effect, and device-controlled latency contracts in later BLE changes."
     },
     "manual_delete_and_second_host_led_semantics": {
-      "status": "active",
+      "status": "superseded",
       "recorded_at": "2026-07-15T11:20:00+08:00",
+      "superseded_at": "2026-07-15T21:36:00+08:00",
+      "superseded_by": "ec11_recovery_blue_legacy_effect_20260715",
+      "superseded_reason": "The operator rejected the new amber recovery cue and explicitly directed: 改回蓝色, 用回之前的灯效.",
       "source": "Product-owner direction: 手动删除蓝牙后是蓝色低亮双闪? 低亮应该代表连上了蓝牙。 Follow-up: 双击可以在别的电脑搞出来弹窗, 但是还是偶发性的; the device is now connected back to this computer.",
       "requirement": "Dim blue is reserved exclusively for an actual secure Bluetooth connection. A manual Windows delete, recovery advertisement, native pairing window, or reconnect search must use a visibly distinct non-connected cue and must not imply that Bluetooth is connected. EC11 double-click recovery must let a second Windows host complete native pairing reliably; the old Type instance must not race to reclaim the device while that arbitration window is open.",
       "observed_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/firmware-pairing-arbitration-log-excerpt.log and old-host-pairing-arbitration-log-excerpt.log. The current window shows the old host entered its bounded PairAsync recovery about 2.2 seconds after opening recovery advertising and restored TYPE:READY; it does not prove a second host completed pairing first.",
@@ -53,6 +58,108 @@
         "machine_observation": "The 150-second capture contains only the existing secure-link TYPE:HB heartbeats; it contains no EC11 double-click, recovery-pairing, or second-host pairing event. No operator choice or note was written, so this is neither PASS nor failure evidence."
       },
       "next_action": "Keep this one item active. When the operator explicitly starts it again with the second Windows host ready, run a fresh short canonical operator prompt and serial/installed-Type capture for the EC11 double-click, amber waiting cue, native second-host pairing, and old-host non-reclaim outcome. Do not replace the Denzic-root release packages."
+    },
+    "ec11_recovery_blue_legacy_effect_20260715": {
+      "status": "accepted",
+      "recorded_at": "2026-07-15T21:36:00+08:00",
+      "accepted_at": "2026-07-15T22:10:00+08:00",
+      "source": "Focused Step 14 operator result: selected=失败; note=灯效为啥变成琥珀色了, 别改. Clarified product-owner direction: 改回蓝色, 用回之前的灯效.",
+      "workflow_step": "listener-1-0-2-recording-chain-acceptance/1.1",
+      "requirement": "EC11 double-click recovery pairing, repairing, reconnecting, and the bounded recovery window must restore the pre-831b598 blue base-and-peak double-flash effect. Blue is therefore a recognizable Listener BLE-state family cue, not an exclusive proof of a completed secure bond. The secure connection and Type-ready states retain their existing blue behavior.",
+      "supersedes": "manual_delete_and_second_host_led_semantics",
+      "risk_surface": "Listener Firmware status-LED renderer only. Do not alter EC11 double-click recovery, BLE bond deletion, Windows native pairing, old-Type arbitration, recording behavior, or the established effect timings.",
+      "operator_note_triage": {
+        "evidence": ".cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/second-host-operator-note.txt",
+        "result": "resolved_by_explicit_owner_direction",
+        "resolution": "Restore the pre-831b598 blue recovery animation. This is a visual-contract change and must receive focused re-acceptance after machine validation."
+      },
+      "separate_open_pairing_observation": {
+        "evidence": "../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/second-host-recovery-com3.log",
+        "observation": "After the local bond was deleted, two incoming Windows connections reached encryption-change status=7 and neither produced a secure bonded connection. The second host therefore did not complete pairing in this operator window.",
+        "status": "active_root_cause_investigation"
+      },
+      "required_machine_evidence": [
+        "Focused status-LED static verification proves the original blue renderer is restored for repair, pairing, reconnect, recovery window, low-power attention, and EC11 repair feedback.",
+        "pwsh -NoProfile -File .\\tools\\build.ps1 PASS.",
+        "Short locked COM3 capture shows the EC11 double-click recovery path without changing its recovery/pairing control flow."
+      ],
+      "required_human_evidence": "One canonical Chinese Step 14/20 prompt after the machine checks: operator sees the familiar blue recovery effect and the second Windows host completes native pairing while the old Program Files Type instance does not reclaim the device.",
+      "acceptance_evidence": ".cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/blue-cue-recall-operator-result.json",
+      "next_action": "Closed. Preserve the restored pre-831b598 blue recovery animation; do not replace the Denzic-root release packages until every remaining total-review and release gate passes."
+    },
+    "ec11_second_host_native_pairing_route_20260715": {
+      "status": "superseded",
+      "recorded_at": "2026-07-15T21:50:00+08:00",
+      "superseded_at": "2026-07-15T21:56:00+08:00",
+      "superseded_by": "ec11_second_host_swift_pair_session_20260715",
+      "superseded_reason": "Focused Step 14 operator result: selected=失败; note=双击蓝牙弹不出来. The operator requires the EC11 double-click Bluetooth popup to remain part of the recovery experience.",
+      "source": "Focused Step 14 operator result: selected=失败; note=还是按下弹窗, 但是listner无法连接.",
+      "workflow_step": "listener-1-0-2-recording-chain-acceptance/1.1",
+      "requirement": "A physical EC11 double-click that hands Listener to another Windows host must expose a deterministic standard Windows Add-device pairing route for the entire recovery window. A Swift Pair notification is an optional host convenience, never the only route or acceptance signal. Success requires an actual second-host BLE connection followed by secure bond; the old Program Files Type instance must remain passive and never run PairAsync during the handoff.",
+      "root_cause_evidence": {
+        "serial": "../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/blue-cue-second-host-retry2-com3.log",
+        "observation": "The physical double-click was accepted within the gesture boundary. Firmware opened its 120-second recovery window with a random identity and connectable 30-50ms advertising, but selected profile=swift_pair for 44939ms. The entire 75-second capture contains no BLE connection, encryption, or bond event from the second host.",
+        "old_type": "C:\\Users\\Billy\\AppData\\Local\\Listener Type\\Logs\\listener-type.log contains no new PairAsync/reclaim action during this retry; its earlier cross-host hold remains passive.",
+        "platform_research": "Microsoft Swift Pair documentation: the notification is a convenience affected by host settings/radio support, while Add a device is the complete native Windows pairing path. https://learn.microsoft.com/en-us/windows-hardware/design/component-guidelines/bluetooth-swift-pair and https://learn.microsoft.com/en-us/windows-hardware/design/accessory-guidelines/bluetooth-accessory-guidelines/bluetooth-accessory-guidelines-pairing-bonding-connecting"
+      },
+      "minimal_repair": "For the physical EC11 recovery source only, suppress the recovery Swift Pair vendor advertisement and start normal connectable advertising immediately. Preserve the 120-second recovery window, randomized recovery identity, legacy blue cue, normal first-pairing Swift Pair behavior, Type-controlled silent recovery, and old-Type arbitration.",
+      "required_machine_evidence": [
+        "Focused source validation proves only physical EC11 recovery selects the new non-Swift-Pair handoff path.",
+        "pwsh -NoProfile -File .\\tools\\build.ps1 PASS.",
+        "Locked COM3 capture proves physical double-click selects advertisement profile=normal with suppress_swift_pair=1 while the recovery window remains open."
+      ],
+      "required_human_evidence": "One canonical Chinese Step 14/20 retest after machine validation: second Windows host uses Add a device to pair listener successfully, the restored blue recovery cue is correct, and the old Program Files Type does not reclaim the device.",
+      "operator_note_triage": "second-host-live-20260715/blue-cue-second-host-operator-result-and-triage.json and second-host-live-20260715/blue-cue-second-host-retry2-operator-note.txt",
+      "next_action": "Implement and machine-validate the physical-EC11 native pairing advertisement route before reopening only this focused Step 14 acceptance."
+    },
+    "ec11_second_host_swift_pair_session_20260715": {
+      "status": "accepted",
+      "recorded_at": "2026-07-15T21:56:00+08:00",
+      "accepted_at": "2026-07-15T22:10:00+08:00",
+      "source": "Focused Step 14 operator result: selected=失败; note=双击蓝牙弹不出来.",
+      "workflow_step": "listener-1-0-2-recording-chain-acceptance/1.1",
+      "requirement": "Physical EC11 double-click recovery must retain the familiar Windows Bluetooth/Swift Pair popup as well as the blue recovery cue. The popup must lead to a real second-host BLE connection and secure bond, not merely appear. The old Program Files Type instance must remain passive and never reclaim the device.",
+      "triage": {
+        "evidence": "../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/native-add-device-retry3-com3.log and native-add-device-retry3-operator-note.txt",
+        "observed": "The physical EC11 double-click was accepted each time. The immediately preceding native-route repair correctly produced profile=normal, suppress_swift_pair=1, 30-50ms undirected connectable advertising, and no connection event. Its expected absence of the popup exactly explains the operator note; this is a repair-induced UX regression, not a second-host security failure.",
+        "resolution": "Revert only the physical-EC11 Swift Pair suppression. Preserve the original random-identity recovery, 120-second window, blue cue, old-Type arbitration, and all security/bond code. Then capture one clean single double-click plus the second-host popup Connect action; do not issue further repeated double-clicks while the popup is being acted on."
+      },
+      "pairing_latency_machine_contract_20260715": {
+        "status": "accepted_by_explicit_machine_delegation",
+        "recorded_at": "2026-07-15T22:05:00+08:00",
+        "source": "Product-owner direction: 你测速吧, 不要让我测速, 这个速度应该有门栏. Focused Step 14 operator result: selected=失败; note=点击窗口后正在连接的时间有点长, 优化进3s内?",
+        "scope": "Measure only device-controlled time. Windows popup display and the operator's click time are external to firmware; once Windows has clicked Connect, its BLE connection event is the first firmware-observable boundary.",
+        "requirements": [
+          "Accepted physical EC11 double-click to 30-50ms undirected recovery advertising must be <=250ms.",
+          "Incoming Windows BLE connection to encrypted bonded state must be <=1200ms. This is stricter than the owner-requested <=3s after Connect because the click precedes the incoming connection event."
+        ],
+        "machine_evidence": ".cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/swift-pair-popup-retry4-com3.log",
+        "gate": "python .\\tools\\verify_second_host_pairing_latency.py <locked-com3-log>",
+        "latest_result": "Physical double-click accepted at 192791ms, recovery advertising at 192971ms (180ms), incoming Windows connection at 195591ms, and encrypted bonded state at 196571ms (980ms after connection). The device-controlled post-Connect upper bound therefore passes the 1200ms gate."
+      },
+      "operator_note_triage_20260715_2200": {
+        "status": "resolved_with_machine_evidence",
+        "operator_result": "失败",
+        "note": "点击窗口后正在连接的时间有点长, 优化进3s内?",
+        "evidence": "second-host-live-20260715/swift-pair-popup-retry4-operator-note.txt and ../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/swift-pair-popup-retry4-com3.log",
+        "finding": "The physical second-host session completed a real connection and secure bond. Firmware logged 180ms from accepted double-click to recovery advertising and 980ms from incoming Windows connection to encrypted bonded state. Since Connect must occur before the incoming connection, the observable device-controlled time after Connect is bounded by 980ms, not three seconds.",
+        "root_cause": "The earlier implementation deliberately leaves SMP ownership to Windows during a Swift Pair recovery session. Reintroducing immediate firmware-side security initiation would race Windows PairAsync, a previously recorded root cause of pairing failure; no protocol shortcut is justified by this capture.",
+        "resolution": "Record the stricter machine latency gate above. Keep the Swift Pair protocol flow unchanged; do not trade a proven Windows pairing path for a speculative visual-speed change."
+      },
+      "acceptance_evidence": {
+        "second_host_secure_bond": ".cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/swift-pair-popup-retry4-com3.log",
+        "machine_latency_gate": ".cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/swift-pair-popup-retry4-latency-gate.json",
+        "legacy_blue_operator_pass": "second-host-live-20260715/blue-cue-recall-operator-result.json",
+        "installed_old_type_passivity": ".cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/swift-pair-popup-retry4-old-type-passivity.json"
+      },
+      "required_machine_evidence": [
+        "Focused source validation proves physical EC11 recovery again selects the bounded Swift Pair advertisement rather than suppressing it.",
+        "pwsh -NoProfile -File .\\tools\\build.ps1 PASS.",
+        "Locked COM3 capture proves a single physical EC11 double-click opens profile=swift_pair with a fresh recovery window."
+      ],
+      "required_human_evidence": "One canonical Chinese Step 14/20 retest: after one EC11 double-click, the second Windows host receives the Bluetooth popup and selects Connect once; serial must then show a connection and secure bond while old Type remains passive.",
+      "operator_note_triage": "second-host-live-20260715/native-add-device-retry3-operator-note.txt",
+      "next_action": "Closed. Preserve the bounded Swift Pair popup path, 120-second recovery window, secure-bond completion, old-Type passivity, and machine latency limits."
     },
     "recording_response_preliminary_review_authorization": {
       "status": "accepted",
