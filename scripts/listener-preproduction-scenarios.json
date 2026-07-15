@@ -100,7 +100,7 @@
       "requirement": "Wireless OTA pre-upgrade is a repeatable machine gate: verify the installed Program Files Type identity, current staged OTA manifest/hash, and the connected Listener OTA GATT capability without asking the operator to judge a preflight screen.",
       "enforcement": "Do not open aiw operator-prompt for OTA pre-upgrade. Retain the machine command logs and structured summary under the matching OTA evidence directory. Human acceptance, when required, begins only with an actual user-visible OTA transfer and its post-upgrade return-to-ready behavior.",
       "related_scenario_id": "ota-wireless-smoke",
-      "machine_preflight_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-wireless-20260715/current-staged-package-evidence.json",
+      "machine_preflight_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-preupgrade-current-20260715/current-head-6b5a2f2/machine-validation-summary.json",
       "machine_transfer_acceptance": {
         "status": "accepted",
         "accepted_at": "2026-07-15T10:58:00+08:00",
@@ -120,13 +120,24 @@
       }
     },
     "ota_preupgrade_current_build_refresh": {
-      "status": "active",
+      "status": "accepted",
       "recorded_at": "2026-07-15T12:05:00+08:00",
+      "accepted_at": "2026-07-15T13:29:34+08:00",
       "source": "Product-owner direction: 你先把ota预先修一下。",
       "requirement": "Refresh the machine-only OTA pre-upgrade evidence against the current Listener Firmware and the currently installed Program Files Type. A preflight may not reuse a staged package built from an earlier firmware commit after the device firmware has changed. Build and stage a fresh non-release package, verify its manifest/hash and the connected Listener OTA GATT capability using C:\\Program Files\\Listener Type\\listener-type.exe, and retain machine evidence. Do not open a human OTA prompt and do not replace either Denzic-root release package before all physical release gates pass.",
       "reason": "The accepted July 15 OTA transfer used a package from firmware commit cbc95969, while the current device firmware is 831b598 and the installed Type candidate has changed. The old result remains historical evidence only and cannot certify the current build.",
       "scope": "Listener Firmware and Listener Type only; current non-release staging under validation evidence.",
-      "next_action": "Inspect the existing OTA package/preflight implementation, create a fresh staged package from the current firmware build, then run the installed-Type machine preflight and, if its unchanged transfer contract requires it, a short locked machine transfer with post-OTA serial evidence."
+      "machine_acceptance": {
+        "kind": "explicitly authorized machine pre-upgrade gate",
+        "installed_type": "C:\\Program Files\\Listener Type\\listener-type.exe",
+        "installed_type_sha256": "C87740513E161954E20A702F9DDA9346DA0B977F5F05D9728E313193A51E19F4",
+        "firmware_source_commit": "6b5a2f2d28e11fc67f5f763caaed7aeb6591c2e1",
+        "firmware_sha256": "cf5588871b5fb71fb41ea62488a885168c837f7b8a7896ff35ab391bfcf34464",
+        "result": "Installed Program Files Type preflight passed in a short BLE-A4CB8FF2B510 lock: manifest/hash valid, connected=true, hardware=keyboard-v2-n16r8, denzic_ota_v1 capability present, recording_active=false, and no blockers or errors.",
+        "evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-preupgrade-current-20260715/current-head-6b5a2f2/machine-validation-summary.json",
+        "regression_contract": "For every firmware commit used as a current OTA candidate, regenerate the non-release staging package and require its manifest.firmware.git_commit and SHA to match the source build before invoking the installed-Type preflight. Earlier staged-package or transfer evidence is historical only."
+      },
+      "transfer_scope": "No new transfer was required for this pre-upgrade refresh: the owner designated pre-upgrade as machine preflight, and the OTA transport contract itself was unchanged. The prior bounded machine transfer remains historical evidence only; a fresh transfer and post-OTA state validation are required again for the final release artifact."
     },
     "ota_final_package_root_path": {
       "status": "deferred_until_release_package_final_check",
