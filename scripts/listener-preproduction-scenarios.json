@@ -33,7 +33,20 @@
       "observed_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/firmware-pairing-arbitration-log-excerpt.log and old-host-pairing-arbitration-log-excerpt.log. The current window shows the old host entered its bounded PairAsync recovery about 2.2 seconds after opening recovery advertising and restored TYPE:READY; it does not prove a second host completed pairing first.",
       "root_cause_question": "Determine whether the visible dim-blue double-flash is emitted before secure-connection confirmation, and why the old Type recovery timer can reclaim the link before the second host finishes native Windows pairing.",
       "risk_surface": "Listener Firmware BLE recovery and status-LED state machine; Listener Type EmbeddedBle recovery arbitration. Preserve accepted LED-independence and recording-chain behavior.",
-      "next_action": "Read the live firmware/Type recovery code and aligned logs, make the smallest root-cause correction, then run static/build/log evidence before a focused manual-delete and second-host human review."
+      "implementation": {
+        "firmware_commit": "831b598 fix(led): reserve blue for secure BLE links",
+        "type_commit": "85a3d12 fix(ble): preserve EC11 cross-host pairing window",
+        "behavior": "The firmware renders repairing, pairing, reconnecting, and the recovery window in amber while retaining blue only for secure connected and Type-ready states. The old Type host waits 125 seconds, exceeding the firmware's 120-second recovery window, before its single post-window rescan can consider bounded local recovery.",
+        "machine_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/preflight-root-cause-20260715.json and ../Listener-Firmware/.cache/validation/preproduction-step-14-second-host-20260715/root-cause-repair-static.json",
+        "validation": [
+          "python .\\tools\\verify_status_led_static.py PASS",
+          "pwsh .\\.cache\\validation\\preproduction-step-14-second-host-20260715\\verify-root-cause-repair-static.ps1 PASS",
+          "cargo fmt --check PASS",
+          "cargo test ec11_random_identity_handoff_defers_type_pairasync_to_other_windows_host --lib PASS",
+          "pwsh -NoProfile -File .\\tools\\build.ps1 PASS"
+        ]
+      },
+      "next_action": "Build and install a non-release MSI from the Type commit, flash the matching firmware commit, capture the real manual-delete/EC11 recovery transcript, then open one focused Chinese operator review for waiting-versus-connected LED semantics and the actual second-host pairing outcome. Do not replace the Denzic-root release packages."
     },
     "recording_response_preliminary_review_authorization": {
       "status": "active",
