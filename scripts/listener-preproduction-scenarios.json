@@ -10,6 +10,26 @@
       "requirement": "For Listener-only issues that can be falsified by code inspection, deterministic simulation, installed-Type logs, Windows event/state evidence, or short locked device capture, complete diagnosis, repair, and machine validation without asking the operator to repeat simple input actions. Reserve a canonical operator-prompt for a remaining subjective or externally unobservable user-visible judgment; do not represent a machine-only conclusion as human acceptance.",
       "current_application": "The current-host Swift Pair protocol repair and the BLE-audio-Type-link check were self-closed with firmware advertisement/session evidence, Windows event evidence, and an installed Program Files Type GATT read. The operator is not asked to repeat simple input while those checks can distinguish the cause; a remaining subjective visual judgment still requires its own canonical prompt."
     },
+    "listener_core_capabilities_platform_contract_20260715": {
+      "status": "required",
+      "recorded_at": "2026-07-15T23:05:00+08:00",
+      "source": "Product-owner direction: 这些蓝牙的东西, 需要和录音 ota一样, 提取到platform里面才行. 这三个是最容易修到回退和坏掉的. Follow-up: 另外日志也是, 现在platform暂时就这四个东西好了.",
+      "functional_capabilities": [
+        "Bluetooth lifecycle, recovery arbitration, and embedded-audio GATT readiness",
+        "Real captured-PCM recording, preview/final attribution, and completion",
+        "OTA preflight, transfer, version confirmation, and return-to-ready"
+      ],
+      "cross_cutting_logging_foundation": "Logs are the platform-wide observability foundation, not a sibling of the three functional capabilities. Every Listener feature must emit correlated, structured lifecycle, causal, timing, and failure-attribution records that let Codex trace a user-visible symptom across firmware, installed Type, Windows, and release evidence. This is especially mandatory for embedded debugging; a pile of uncorrelated text logs is not sufficient.",
+      "shared_platform_model": "Firmware and Type must implement one versioned core-platform contract, not two independently evolving feature stacks. The shared contract owns capability names, lifecycle states, commands, read/write results, error taxonomy, correlation identifiers, telemetry fields, timing metrics, and regression evidence. The C firmware and Rust Type are conforming hardware/host adapters; future products consume the same platform contract through small product adapters so an accepted platform repair benefits every adapter.",
+      "compatibility_rule": "A platform change is versioned and validated across both sides of its interface before an adapter consumes it. No product adapter may reinterpret a core state or suppress a platform error locally. A new product may add adapter-specific UI or hardware transport only after proving conformance to the platform contract and its own user-visible acceptance.",
+      "architecture_requirement": "The three functional paths must be expressed as Listener platform capabilities with explicit lifecycle states, ownership boundaries, typed readiness/result contracts, causal telemetry, and focused root-cause regression guards. The cross-cutting log platform supplies correlated firmware, installed-Type, Windows, and machine-evidence records for every Listener capability, not only Bluetooth, recording, or OTA. Listener Type UI and firmware product adapters may invoke the platform contracts, but must not hide protocol state with arbitrary delay, synthetic data, cosmetic UI masking, or unbounded retry.",
+      "regression_requirement": "Each capability's release evidence must name the installed executable/firmware identity, active engine or transport, relevant state transitions, measured timings, and internal versus external failure attribution. Any later change on one side of the firmware-Type boundary reruns only the affected capability contract plus every accepted user-visible behavior in its risk surface. The log platform must preserve enough structured correlation to associate every user-visible failure with the responsible platform transition rather than merely collecting text.",
+      "execution_goal": "Listener core platform: one versioned cross-Firmware/Type contract for BLE, recording, OTA, and all-capability logging observability.",
+      "coordination_plan": "C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\docs\\plans\\listener-core-platform-contract-20260715_plan.md",
+      "first_implementation_plan": "C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\docs\\plans\\listener-type-ble-platform-local-repair-20260715_plan.md",
+      "current_application": "The current Type recovery defect is the first BLE-platform closure: after an explicit Windows re-pair back to this host, the background audio listener must resume only from local Windows pairing/HID evidence. It must never autonomously PairAsync, unpair, or reclaim an external host during cross-host arbitration.",
+      "product_boundary": "Implement and validate the core-platform contract first across Listener Firmware and Listener Type. Design it for all products to reuse through adapters, but do not change another product in this task or migrate an unaccepted Listener implementation; every future adapter requires its own acceptance evidence."
+    },
     "ble_audio_type_link_machine_acceptance_20260715": {
       "status": "accepted_by_explicit_owner_machine_authorization",
       "recorded_at": "2026-07-15T22:50:09+08:00",
@@ -20,6 +40,58 @@
       "evidence": ".cache/validation/preproduction-step-16-ble-audio-type-link-20260715/postflash-installed-type-audio-status-machine-evidence.json",
       "total_review_summary": ".cache/validation/preproduction-human-review-total-20260712-081300-step-16-ble-audio-type-link-20260715-2247/preproduction-machine-acceptance-summary.json",
       "total_review_effect": "Canonical Step 16/20 is machine-accepted and the total-review cursor advances to Step 17 LED independence. This is not represented as a human visual acceptance."
+    },
+    "ble_platform_explicit_local_reattach_20260715": {
+      "status": "active_root_cause_repair",
+      "recorded_at": "2026-07-15T23:10:00+08:00",
+      "source": "Current Step 17 preflight after the owner returned Listener to this Windows host: COM3 reported ble=connected with low_power_disabled=1 and no Type-ready LED. The installed Program Files Type process was still alive but its log had stopped the background listener after cross-host recovery arbitration.",
+      "observed_evidence": [
+        ".cache/validation/preproduction-step-17-led-independent-contract-20260715-2258/current-led-status-com3.log",
+        "C:\\Users\\Billy\\AppData\\Local\\Listener Type\\Logs\\listener-type.log"
+      ],
+      "root_cause": "After EC11 cross-host arbitration sees no recovery advertisement, Type correctly leaves the old host passive, but the canceled background listener has no continuing local reattach observer. A later explicit Windows re-pair to this host can make bounded direct GATT status succeed while the installed long-running Type process never restores its background notify session or TYPE:READY state.",
+      "platform_contract": "The BLE platform enters passive_local_reattach after user-controlled or cross-host recovery leaves this host without an active listener. It observes local Windows pairing/HID evidence only; after that evidence and a fresh bounded embedded-audio GATT read both succeed, it restores the background listener. It must never PairAsync, unpair, advertise-scan reclaim, or reconnect merely because the monitor times out.",
+      "minimal_repair": "Add one explicit passive local-reattach monitor in the Type BLE lifecycle. Guard ordinary listener refresh while this state is active, clear the state only immediately before the proven resume path, and emit correlated logs for passive entry, local pairing proof, fresh GATT result, resume, cancellation, and non-action.",
+      "machine_window_authorization": "Product owner explicitly authorizes Codex to take over and inspect the current computer screen for this Bluetooth repair, including Listener/Windows pairing popup state, screenshots, Windows events, and relevant machine interactions. Do not ask the owner to repeatedly observe a popup that can be classified mechanically. Keep every BLE/serial interaction under a short resource lock and record the conclusion as machine validation, not human acceptance.",
+      "validation_contract": [
+        "Focused Rust source/unit regression proves the monitor requires local Windows pairing/HID evidence before fresh GATT and resume, and contains no PairAsync, UnpairAsync, or recovery-advertisement reclamation path.",
+        "Installed Program Files Type real-device validation under a short BLE/COM3 lock proves background listener ready/TYPE:READY after an explicit local pairing state, while the no-pairing branch remains passive.",
+        "The matching firmware status must distinguish ordinary connected idle from Type-ready so an LED acceptance cannot pass on a direct-GATT-only probe."
+      ],
+      "machine_validation_20260715": {
+        "status": "partial_pass_exact_no_advertisement_branch_pending",
+        "installed_type": "C:\\Program Files\\Listener Type\\listener-type.exe",
+        "installed_type_sha256": "C56EB92B3AA2991C1A4E9F0E5AF928DAB246D79143F6105620A192920EB65FFD",
+        "passed": [
+          "The installed Type restarted with persisted Windows pairing evidence, reached background notify ready in 2560ms, sent Type heartbeat in 2586ms, and made no PairAsync during normal startup.",
+          "Locked COM3 captures before and after recovery report ble=type_ready, low_power_disabled=0, active BLE LED, and accepted TYPE:HB on an encrypted bonded connection.",
+          "The installed UI screenshot is nonblank and reports Listener BLE available; no unexpected pairing popup was present during the steady-state machine inspection."
+        ],
+        "runtime_gap": "The generated EC11 recovery sample observed recovery advertising after cross-host arbitration, so Type correctly used the separate bounded Type-controlled recovery path. This bench has no second Windows host and did not enter the exact no-recovery-advertisement passive_local_reattach branch; do not represent the source-level monitor proof as a full physical PASS for that branch.",
+        "evidence": [
+          ".cache/validation/ble-platform-local-reattach-20260715/installed-type-window.png",
+          ".cache/validation/ble-platform-local-reattach-20260715/installed-type-startup-ready.json",
+          ".cache/validation/ble-platform-local-reattach-20260715/post-install-com3-led-status.log",
+          ".cache/validation/ble-platform-local-reattach-20260715/randomized-ec11-recovery.json",
+          ".cache/validation/ble-platform-local-reattach-20260715/post-randomized-recovery-com3-led-status.log"
+        ]
+      },
+      "total_review_effect": "Step 17 LED independence remains pending until the current Type-ready path is restored and machine evidence proves the observable state is valid."
+    },
+    "ble_recovery_timing_attribution_20260715": {
+      "status": "active_root_cause_repair",
+      "recorded_at": "2026-07-15T23:25:00+08:00",
+      "source": "Product-owner direction: 你测速吧, 不要让我测速, 这个速度应该有门栏. Follow-up: 速度太慢了是啥问题; 现在又出现了, 这个间歇性很慢的问题; 你看一下，下一步就继续跑那个总验收就好了.",
+      "root_requirement": "BLE recovery timing must be measured from causal boundaries that the device or host controls. A cross-host handoff intentionally gives Windows another host a bounded pairing opportunity, so old-host TYPE:READY before that handoff resolves is not a valid speed target and must never be disguised as a timeout failure or a passed reconnect.",
+      "strict_metrics": [
+        "Accepted physical EC11 double-click to connectable recovery advertising <=250ms.",
+        "Incoming Windows connection after Connect to encrypted bonded state <=1200ms.",
+        "After explicit local Windows pairing/HID evidence is observed, fresh GATT plus persistent notify/TYPE:READY restoration <=6000ms; this timing starts at the local-evidence observation, never at the earlier 500ms click classifier.",
+        "During a cross-host arbitration window, the old Type process must produce no local PairAsync/unpair/reclaim action; its intentionally absent TYPE:READY is an ownership observation, not a latency failure."
+      ],
+      "current_machine_finding": "The randomized generated EC11 sample correctly sent and received the pre-reset notice, but the legacy gate incorrectly required old-host TYPE:READY <=10000ms. The sample entered the accepted cross-host arbitration state. Firmware logs show accepted double-click at 2038401ms and recovery advertising at 2038891ms, approximately 490ms, which fails the existing <=250ms device-controlled advertising metric. After arbitration ended with advertising still visible, Type-controlled recovery reached Type heartbeat ready about 6879ms later. This is separate from the no-advertisement passive-local-reattach repair.",
+      "evidence": ".cache/validation/ble-platform-local-reattach-20260715/randomized-ec11-recovery.json and ec11-recovery-sample-01.log",
+      "next_action": "Read the firmware recovery disconnect and async bond-delete sequence, identify why the accepted-click-to-advertising path took about 490ms, make the smallest root-cause repair without shortening the second-host ownership window, then replace the legacy old-host TYPE:READY timing assertion with causal phase metrics and randomized machine evidence."
     },
     "idle_ble_audio_wake_latency": {
       "target_notify_ready_ms": 50,
