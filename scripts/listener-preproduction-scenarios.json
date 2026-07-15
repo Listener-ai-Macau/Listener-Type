@@ -42,6 +42,16 @@
       "enforcement": "scripts/windows-listener-preproduction-human-review.ps1 uses explicit total-review state when supplied, otherwise Find-CarryForwardHumanSummary discovers validated original PASS evidence for a focused re-review.",
       "root_contract_evidence": "../../ai-collaboration-workflow/.cache/v1.0.2-release-gate/20260714-180356/summary.json"
     },
+    "acceptance_is_versioned_revalidation_contract": {
+      "status": "accepted",
+      "recorded_at": "2026-07-15T09:40:00+08:00",
+      "source": "Product-owner direction: 现在验收成功，不代表以后也会验收成功。",
+      "requirement": "A human or machine PASS is evidence only for the recorded build, installed artifact, device state, ASR engine/network attribution, randomized sample coverage, and measured limits. It establishes a regression baseline; it never grants a permanent exemption from future acceptance.",
+      "enforcement": "Before accepting a later change that plausibly affects a carried-forward behavior, identify that behavior's risk surface, rerun its smallest root-cause regression contract, retain fresh versioned evidence, and re-open focused human acceptance when the changed surface is user-visible. Release acceptance must use fresh evidence for the release artifact and may not substitute an earlier PASS.",
+      "recording_application": "For recording, ASR, BLE audio, capsule preview, network attribution, wake, or completion changes, preserve the accepted strict metrics and run the capture-integrity, randomized installed-path, engine-identity, attribution, preview/final convergence, and timing evidence appropriate to the changed surface. A single good utterance is insufficient; grouped repeated samples and their stability spread remain required.",
+      "related_workflow_plan": "listener-1-0-2-recording-chain-acceptance#1.1",
+      "evidence_anchor": "recording_chain_quality_speed_no_regression"
+    },
     "recording_chain_quality_speed_no_regression": {
       "status": "accepted",
       "recorded_at": "2026-07-14",
