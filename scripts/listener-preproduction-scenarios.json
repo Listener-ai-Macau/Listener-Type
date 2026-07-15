@@ -64,6 +64,17 @@
       "prior_routing": "Initially classified as a Companion e-paper expression from the photograph; the owner rejected that scope before any Companion product file was changed.",
       "no_implementation": "No Listener Type, Listener Firmware, or Companion product code, build, flash, or visual asset was changed."
     },
+    "ota_final_package_root_path": {
+      "status": "deferred_until_release_package_final_check",
+      "recorded_at": "2026-07-15T10:39:00+08:00",
+      "source": "Step 18/20 operator review selected 需要修复 with note: 包不是应该放在桌面的根目录嘛，就是 denzic 的根目录。",
+      "requirement": "The user-facing final Listener OTA ZIP must be placed at the Denzic root as ListenerFirmware_1.0.2_ota.zip so the installed Type path never requires a user to browse a generated .cache validation directory.",
+      "current_constraint": "The product owner previously required that the existing root OTA/MSI packages, which are historical July 12 artifacts, must not be replaced or presented as final release artifacts until every physical gate passes. The current cbc9596 package is therefore an explicitly non-release staging artifact and cannot be copied into the root under the final filename.",
+      "triage_disposition": "deferred_by_existing_owner_release_constraint",
+      "related_scenario_ids": ["ota-wireless-smoke", "release-package-final-check"],
+      "evidence": "Listener-Firmware/.cache/validation/preproduction-step-18-ota-wireless-20260715/operator-note-triage-step-18-ota-wireless.json",
+      "next_action": "After the remaining physical gates pass, rebuild the current OTA ZIP and Type MSI, atomically replace the two Denzic-root final package names, rerun installed-Type OTA preflight using the root ZIP, then perform the final release-package check. Do not use the old root ZIP as a stand-in."
+    },
     "recording_chain_quality_speed_no_regression": {
       "status": "accepted",
       "recorded_at": "2026-07-14",
