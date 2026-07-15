@@ -55,13 +55,18 @@
       "next_action": "Keep this one item active. When the operator explicitly starts it again with the second Windows host ready, run a fresh short canonical operator prompt and serial/installed-Type capture for the EC11 double-click, amber waiting cue, native second-host pairing, and old-host non-reclaim outcome. Do not replace the Denzic-root release packages."
     },
     "recording_response_preliminary_review_authorization": {
-      "status": "active",
+      "status": "accepted",
       "recorded_at": "2026-07-14T23:15:00+08:00",
+      "accepted_at": "2026-07-15T09:37:49+08:00",
       "source": "Product-owner direction: 开始15吧.",
       "requirement": "Run the focused recording-response-and-led-priority review now using the installed Program Files Type. Preserve the accepted recording-chain metrics and collect fresh physical capsule/LED observation, but do not mark computer-switch-product-flow PASS or advance the canonical total-review cursor until its real second-host acceptance is completed.",
       "related_scenario_id": "recording-response-and-led-priority",
       "total_review_effect": "This is an owner-authorized preliminary 15/20 review. Its evidence may be carried forward later, while the canonical total-review state remains at Step 14.",
-      "next_action": "Capture before/after Type logs, run two physical start/stop recording cycles, persist the focused operator result and triage any non-empty note."
+      "acceptance_source": "Product-owner direction after the focused recording repair: 行吧，那录音这部算是先过了，你进行下一步验收。",
+      "closure": "The focused physical recording repair is accepted through the same-session real-device capture-integrity evidence, installed Program Files Type result, focused operator result, and non-empty-note triage recorded under recording_chain_quality_speed_no_regression.current_physical_accuracy_investigation. This closes only the preliminary Step 15 review; it does not advance or pass canonical Step 14 computer-switch-product-flow.",
+      "evidence": ".cache/validation/preproduction-human-review-step-15-recording-response-20260715/physical-step-15-recording-response-20260715-093658.operator-result.json and .cache/validation/preproduction-human-review-step-15-recording-response-20260715/physical-step-15-recording-response-20260715-093658.capture-integrity.json",
+      "operator_note_triage": ".cache/validation/preproduction-human-review-step-15-recording-response-20260715/physical-step-15-recording-response-20260715-092114.accuracy-triage.json",
+      "next_action": "Closed. Preserve the accepted recording-chain contracts; the canonical total-review cursor remains blocked at Step 14 until a real second Windows BLE host completes the pairing path."
     },
     "accepted_human_regression_contract": {
       "status": "accepted",
