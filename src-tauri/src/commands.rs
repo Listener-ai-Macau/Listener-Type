@@ -6001,6 +6001,7 @@ pub async fn transfer_firmware_ota_ble(
     if !coord.try_begin_firmware_ota_transfer() {
         return Err("Firmware OTA is already in progress.".to_string());
     }
+    let mut observability = crate::observability::begin_ota_transfer();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_sha256 = expected_sha256.clone();
@@ -6027,6 +6028,10 @@ pub async fn transfer_firmware_ota_ble(
     .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
     .and_then(|result| result);
     let transfer_elapsed_ms = elapsed_ms_u64(transfer_started);
+    match &transfer {
+        Ok(_) => observability.record_transfer_completed(transfer_elapsed_ms),
+        Err(error) => observability.record_transfer_failed(transfer_elapsed_ms, error),
+    }
     let confirm = if transfer.is_ok() {
         confirm_listener_ota_v1_reachable(&version).await
     } else {
@@ -6039,6 +6044,9 @@ pub async fn transfer_firmware_ota_ble(
     };
     coord.end_firmware_ota_transfer();
     coord.refresh_embedded_ble_listener();
+    if transfer.is_ok() {
+        observability.record_reconnect_confirmation(confirm.matched);
+    }
 
     let stats = transfer?;
     let total_elapsed_ms = elapsed_ms_u64(total_started);
