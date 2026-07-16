@@ -35,6 +35,9 @@ const FINAL_RESULT_STABLE_PARTIAL_GRACE: Duration = Duration::from_millis(700);
 const FINAL_PARTIAL_COVERAGE_SLACK_MS: u64 = 600;
 const WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_millis(1_200);
 const FINAL_FRAME_SEND_BUDGET: Duration = Duration::from_millis(1_800);
+const FINAL_AUDIO_DRAIN_MIN_BUDGET: Duration = Duration::from_millis(800);
+const FINAL_AUDIO_DRAIN_MAX_BUDGET: Duration = Duration::from_secs(8);
+const AUDIO_FRAME_DURATION_MS: u64 = 100;
 const SECOND_PASS_END_WINDOW_MS: u32 = 500;
 const SECOND_PASS_FORCE_TO_SPEECH_MS: u32 = 1_000;
 
@@ -51,7 +54,7 @@ impl VolcengineCredentials {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum VolcengineASRError {
     #[error("credentials missing")]
     CredentialsMissing,
@@ -122,6 +125,23 @@ impl VolcengineStreamingRole {
     }
 }
 
+#[derive(Clone, Debug)]
+enum AudioDeliveryReadiness {
+    Opening,
+    Ready,
+    Failed(VolcengineASRError),
+    Cancelled,
+}
+
+impl Default for AudioDeliveryReadiness {
+    fn default() -> Self {
+        // The producer is returned before the async WebSocket opener runs.
+        // Treat that interval as opening so a very short recording can wait
+        // for the real outcome instead of sending a final frame to no writer.
+        Self::Opening
+    }
+}
+
 use super::volcengine_transcript::{
     is_unstable_initial_partial, merge_streaming_candidate, normalize_cjk_final_spacing_and_echoes,
     normalized_result, transcript_candidate_from_result, trim_repeated_short_final_tail,
@@ -143,6 +163,7 @@ struct SyncState {
     runtime: Option<Handle>,
     start: Option<Instant>,
     finishing: bool,
+    audio_delivery_readiness: AudioDeliveryReadiness,
     /// 最近一次 partial（非 final）的累积 transcript。服务端在 final 帧到达前
     /// 关闭连接 / 网络中断时，作为 fallback 回给上层，避免「用户的话已经识别出来
     /// 但没拿到 final」就丢光。
@@ -210,6 +231,7 @@ pub struct VolcengineStreamingASR {
     /// 而把后续 chunk 当成「stream 已结束」之后的多余数据丢弃 → 尾句丢失。
     pending_sends: Arc<AtomicUsize>,
     send_done: Arc<Notify>,
+    audio_delivery_changed: Arc<Notify>,
 }
 
 impl VolcengineStreamingASR {
@@ -249,11 +271,133 @@ impl VolcengineStreamingASR {
             audio_tx: ParkingMutex::new(None),
             pending_sends: Arc::new(AtomicUsize::new(0)),
             send_done: Arc::new(Notify::new()),
+            audio_delivery_changed: Arc::new(Notify::new()),
         }
     }
 
     pub fn is_connected(&self) -> bool {
         self.state.lock().is_connected
+    }
+
+    fn set_audio_delivery_readiness(&self, next: AudioDeliveryReadiness) {
+        let changed = {
+            let mut state = self.state.lock();
+            if matches!(
+                &state.audio_delivery_readiness,
+                AudioDeliveryReadiness::Cancelled
+            ) && !matches!(&next, AudioDeliveryReadiness::Cancelled)
+            {
+                false
+            } else {
+                state.audio_delivery_readiness = next;
+                true
+            }
+        };
+        if changed {
+            self.audio_delivery_changed.notify_waiters();
+        }
+    }
+
+    fn mark_audio_delivery_opening(&self) {
+        self.set_audio_delivery_readiness(AudioDeliveryReadiness::Opening);
+    }
+
+    pub fn mark_audio_delivery_ready(&self) {
+        self.set_audio_delivery_readiness(AudioDeliveryReadiness::Ready);
+    }
+
+    fn mark_audio_delivery_failed(&self, error: VolcengineASRError) {
+        self.set_audio_delivery_readiness(AudioDeliveryReadiness::Failed(error));
+    }
+
+    fn mark_audio_delivery_cancelled(&self) {
+        self.set_audio_delivery_readiness(AudioDeliveryReadiness::Cancelled);
+    }
+
+    async fn await_audio_delivery_ready(
+        &self,
+        timeout: Duration,
+    ) -> Result<(), VolcengineASRError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            // Create the waiter before inspecting state. notify_waiters() then
+            // cannot lose a concurrent bridge-flush or startup-failure wakeup.
+            let notified = self.audio_delivery_changed.notified();
+            match self.state.lock().audio_delivery_readiness.clone() {
+                AudioDeliveryReadiness::Ready => return Ok(()),
+                AudioDeliveryReadiness::Failed(error) => return Err(error),
+                AudioDeliveryReadiness::Cancelled => {
+                    return Err(VolcengineASRError::ConnectionFailed(
+                        "audio delivery startup was cancelled".into(),
+                    ));
+                }
+                AudioDeliveryReadiness::Opening => {}
+            }
+
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(VolcengineASRError::ConnectionFailed(format!(
+                    "audio delivery startup did not reach ready state within {} ms",
+                    timeout.as_millis()
+                )));
+            }
+            tokio::time::timeout(remaining, notified)
+                .await
+                .map_err(|_| {
+                    VolcengineASRError::ConnectionFailed(format!(
+                        "audio delivery startup did not reach ready state within {} ms",
+                        timeout.as_millis()
+                    ))
+                })?;
+        }
+    }
+
+    async fn await_audio_delivery_drained(
+        &self,
+        timeout: Duration,
+    ) -> Result<(), VolcengineASRError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            // Both futures must exist before inspecting state so a concurrent
+            // worker completion or failure cannot be lost between iterations.
+            let delivery_changed = self.audio_delivery_changed.notified();
+            let queue_drained = self.send_done.notified();
+            match self.state.lock().audio_delivery_readiness.clone() {
+                AudioDeliveryReadiness::Failed(error) => return Err(error),
+                AudioDeliveryReadiness::Cancelled => {
+                    return Err(VolcengineASRError::ConnectionFailed(
+                        "audio delivery was cancelled before the final frame".into(),
+                    ));
+                }
+                AudioDeliveryReadiness::Ready if self.pending_sends.load(Ordering::SeqCst) == 0 => {
+                    return Ok(());
+                }
+                AudioDeliveryReadiness::Opening | AudioDeliveryReadiness::Ready => {}
+            }
+
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(VolcengineASRError::ConnectionFailed(format!(
+                    "websocket audio delivery drain did not complete within {} ms (pending_frames={})",
+                    timeout.as_millis(),
+                    self.pending_sends.load(Ordering::SeqCst)
+                )));
+            }
+            tokio::time::timeout(remaining, async {
+                tokio::select! {
+                    _ = delivery_changed => {},
+                    _ = queue_drained => {},
+                }
+            })
+            .await
+            .map_err(|_| {
+                VolcengineASRError::ConnectionFailed(format!(
+                    "websocket audio delivery drain did not complete within {} ms (pending_frames={})",
+                    timeout.as_millis(),
+                    self.pending_sends.load(Ordering::SeqCst)
+                ))
+            })?;
+        }
     }
 
     pub fn set_partial_transcript_callback(
@@ -285,6 +429,15 @@ impl VolcengineStreamingASR {
     }
 
     pub async fn open_session(self: &Arc<Self>) -> Result<(), VolcengineASRError> {
+        self.mark_audio_delivery_opening();
+        let result = self.open_session_inner().await;
+        if let Err(error) = &result {
+            self.mark_audio_delivery_failed(error.clone());
+        }
+        result
+    }
+
+    async fn open_session_inner(self: &Arc<Self>) -> Result<(), VolcengineASRError> {
         if self.credentials.app_id.is_empty()
             || self.credentials.access_token.is_empty()
             || self.credentials.resource_id.is_empty()
@@ -364,6 +517,7 @@ impl VolcengineStreamingASR {
         let writer_for_worker = Arc::clone(&self.writer);
         let pending_for_worker = Arc::clone(&self.pending_sends);
         let notify_for_worker = Arc::clone(&self.send_done);
+        let failed_delivery = Arc::downgrade(self);
         let role_label = self.role.label();
         tokio::spawn(async move {
             while let Some((seq, chunk)) = audio_rx.recv().await {
@@ -374,13 +528,21 @@ impl VolcengineStreamingASR {
                     &chunk,
                     Some(seq),
                 );
-                if let Err(e) = send_binary(&writer_for_worker, frame).await {
+                if let Err(error) = send_binary(&writer_for_worker, frame).await {
                     log::error!(
                         "[asr] {} audio frame seq={} send 失败: {}",
                         role_label,
                         seq,
-                        e
+                        error
                     );
+                    if let Some(asr) = failed_delivery.upgrade() {
+                        asr.mark_audio_delivery_failed(error);
+                        *asr.audio_tx.lock() = None;
+                    }
+                    if pending_for_worker.fetch_sub(1, Ordering::SeqCst) == 1 {
+                        notify_for_worker.notify_waiters();
+                    }
+                    break;
                 }
                 if pending_for_worker.fetch_sub(1, Ordering::SeqCst) == 1 {
                     notify_for_worker.notify_waiters();
@@ -441,23 +603,28 @@ impl VolcengineStreamingASR {
     }
 
     pub async fn send_last_frame(&self) -> Result<(), VolcengineASRError> {
+        let delivery_ready_started = Instant::now();
+        self.await_audio_delivery_ready(FINAL_FRAME_SEND_BUDGET)
+            .await?;
+        log::info!(
+            "[asr] final audio delivery readiness elapsed_ms={}",
+            delivery_ready_started.elapsed().as_millis()
+        );
+        // The negative end frame is only legal after every positive audio
+        // sequence reaches the socket. A fixed short wait can emit the end
+        // out of order and corrupt the provider sequence, so scale the bound
+        // from actual queued 100 ms audio frames instead.
+        let queued_frames = self.pending_sends.load(Ordering::SeqCst);
+        let drain_budget = final_audio_drain_budget(queued_frames);
+        let drain_started = Instant::now();
+        self.await_audio_delivery_drained(drain_budget).await?;
+        log::info!(
+            "[asr] final audio delivery drained queued_frames={} elapsed_ms={} budget_ms={}",
+            queued_frames,
+            drain_started.elapsed().as_millis(),
+            drain_budget.as_millis()
+        );
         self.state.lock().finishing = true;
-        // 等所有 fire-and-forget 发送完成。否则末帧（NegativeSequence）可能比尾部
-        // chunk 先到服务端，被识别为「流已结束」之后再到的 chunk 全部丢弃 = 尾句吞掉。
-        // 给一个 800ms 上限避免极端网络下永远等。
-        let drain_deadline = Instant::now() + std::time::Duration::from_millis(800);
-        while self.pending_sends.load(Ordering::SeqCst) > 0 {
-            let remaining = drain_deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                log::warn!(
-                    "[asr] send_last_frame: pending {} 帧未发送完，超时强制继续",
-                    self.pending_sends.load(Ordering::SeqCst)
-                );
-                break;
-            }
-            // notified() 返回 future，被 timeout 包住 → 等待发送完成或超时
-            let _ = tokio::time::timeout(remaining, self.send_done.notified()).await;
-        }
 
         // Drain leftover audio (if any) into one final positive-sequence frame.
         let finish_send_deadline = Instant::now() + FINAL_FRAME_SEND_BUDGET;
@@ -645,6 +812,7 @@ impl VolcengineStreamingASR {
     }
 
     pub fn cancel(&self) {
+        self.mark_audio_delivery_cancelled();
         let runtime = {
             let mut st = self.state.lock();
             st.is_connected = false;
@@ -947,6 +1115,7 @@ impl VolcengineStreamingASR {
     /// 服务端 close / 网络中断时调用：如果有缓存的 partial 文本，作为 transcript
     /// 兜底返回；否则才报错。配合 `last_partial_text` 实现「至少不丢用户已识别出的话」。
     fn fallback_to_partial_or_error(&self, err: VolcengineASRError) {
+        let delivery_error = err.clone();
         let (partial, duration_ms) = {
             let st = self.state.lock();
             (
@@ -969,6 +1138,7 @@ impl VolcengineStreamingASR {
         } else {
             self.signal_error(err);
         }
+        self.mark_audio_delivery_failed(delivery_error);
         self.state.lock().is_connected = false;
         *self.audio_tx.lock() = None;
     }
@@ -1020,6 +1190,19 @@ impl AudioConsumer for VolcengineStreamingASR {
             }
         }
     }
+}
+
+fn final_audio_drain_budget(pending_frames: usize) -> Duration {
+    let backlog_ms = u64::try_from(pending_frames)
+        .unwrap_or(u64::MAX)
+        .saturating_mul(AUDIO_FRAME_DURATION_MS);
+    std::cmp::min(
+        FINAL_AUDIO_DRAIN_MAX_BUDGET,
+        std::cmp::max(
+            FINAL_AUDIO_DRAIN_MIN_BUDGET,
+            Duration::from_millis(backlog_ms),
+        ),
+    )
 }
 
 async fn send_binary(writer: &SharedWriter, data: Vec<u8>) -> Result<(), VolcengineASRError> {
@@ -1241,6 +1424,109 @@ mod tests {
             err.to_string().contains("writer lock timed out"),
             "unexpected error: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn audio_delivery_readiness_waits_for_bridge_flush() {
+        let asr = Arc::new(VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        ));
+        let ready_asr = Arc::clone(&asr);
+        let ready = tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            ready_asr.mark_audio_delivery_ready();
+        });
+
+        asr.await_audio_delivery_ready(Duration::from_millis(100))
+            .await
+            .expect("bridge readiness should release the final-frame waiter");
+        ready.await.expect("readiness task should finish");
+    }
+
+    #[tokio::test]
+    async fn audio_delivery_readiness_returns_the_real_startup_failure() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.mark_audio_delivery_failed(VolcengineASRError::ConnectionFailed(
+            "TLS handshake rejected".into(),
+        ));
+
+        let error = asr
+            .await_audio_delivery_ready(Duration::from_millis(10))
+            .await
+            .expect_err("a failed opener must not become websocket-not-open");
+        assert!(error.to_string().contains("TLS handshake rejected"));
+    }
+
+    #[test]
+    fn final_audio_drain_budget_scales_with_queued_audio() {
+        assert_eq!(final_audio_drain_budget(0), FINAL_AUDIO_DRAIN_MIN_BUDGET);
+        assert_eq!(final_audio_drain_budget(3), FINAL_AUDIO_DRAIN_MIN_BUDGET);
+        assert_eq!(final_audio_drain_budget(27), Duration::from_millis(2_700));
+        assert_eq!(final_audio_drain_budget(200), FINAL_AUDIO_DRAIN_MAX_BUDGET);
+    }
+
+    #[tokio::test]
+    async fn audio_delivery_drain_returns_the_real_worker_failure() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.mark_audio_delivery_ready();
+        asr.mark_audio_delivery_failed(VolcengineASRError::ConnectionFailed(
+            "websocket send timed out after 1200 ms".into(),
+        ));
+
+        let error = asr
+            .await_audio_delivery_drained(Duration::from_millis(10))
+            .await
+            .expect_err("a failed queued send must stop the final-frame path");
+        assert!(error
+            .to_string()
+            .contains("websocket send timed out after 1200 ms"));
+    }
+
+    #[tokio::test]
+    async fn audio_delivery_drain_waits_for_queued_audio_before_finalization() {
+        let asr = Arc::new(VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        ));
+        asr.mark_audio_delivery_ready();
+        asr.pending_sends.store(1, Ordering::SeqCst);
+
+        let drained_asr = Arc::clone(&asr);
+        let drain = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            assert_eq!(drained_asr.pending_sends.fetch_sub(1, Ordering::SeqCst), 1);
+            drained_asr.send_done.notify_waiters();
+        });
+
+        let started = Instant::now();
+        asr.await_audio_delivery_drained(Duration::from_millis(100))
+            .await
+            .expect("the final frame must wait for the queued audio worker");
+        assert!(started.elapsed() >= Duration::from_millis(10));
+        drain.await.expect("audio worker drain task should finish");
     }
 
     #[tokio::test]

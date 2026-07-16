@@ -32,6 +32,9 @@ pub struct FirmwareOtaTransferStats {
     pub bytes_transferred: usize,
     pub chunks_sent: usize,
     pub transport: &'static str,
+    pub data_write_elapsed_ms: u64,
+    pub control_write_elapsed_ms: u64,
+    pub status_read_elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -768,7 +771,11 @@ mod windows_ble {
     const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 4;
     const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
     const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
-    const LISTENER_OTA_V1_RECONNECT_SETTLE: Duration = Duration::from_millis(500);
+    const LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS: [Duration; 3] = [
+        Duration::from_millis(100),
+        Duration::from_millis(200),
+        Duration::from_millis(400),
+    ];
     const RECORDING_STOP_ACTIVE_CONTROL_TIMEOUT: Duration = Duration::from_millis(700);
     const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
     const BLE_TARGET_ADDRESS_CACHE_WINDOW: Duration = Duration::from_secs(60 * 60);
@@ -7029,6 +7036,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         target: &'a OpenListenerOtaV1Target,
         transfer_id: u64,
         data_write_option: GattWriteOption,
+        data_write_elapsed: Duration,
+        control_write_elapsed: Duration,
+        status_read_elapsed: Duration,
     }
 
     impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
@@ -7042,34 +7052,43 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 denzic_ota_core::OP_ABORT => "Denzic OTA v1 abort",
                 _ => "Denzic OTA v1 control",
             };
-            write_gatt_value_with_timeout(
+            let started_at = Instant::now();
+            let result = write_gatt_value_with_timeout(
                 &self.target.control,
                 packet,
                 GattWriteOption::WriteWithResponse,
                 OTA_WRITE_TIMEOUT,
                 label,
             )
-            .map(|_| ())
+            .map(|_| ());
+            self.control_write_elapsed += started_at.elapsed();
+            result
         }
 
         fn write_data(&mut self, packet: &[u8]) -> Result<(), String> {
-            self.data_write_option = write_listener_ota_v1_value_with_fallback(
+            let started_at = Instant::now();
+            let result = write_listener_ota_v1_value_with_fallback(
                 &self.target.data,
                 packet,
                 self.data_write_option,
                 OTA_WRITE_TIMEOUT,
                 "Denzic OTA v1 data",
-            )?;
+            );
+            self.data_write_elapsed += started_at.elapsed();
+            self.data_write_option = result?;
             Ok(())
         }
 
         fn read_status(&mut self) -> Result<Vec<u8>, String> {
-            read_characteristic_bytes_with_timeout(
+            let started_at = Instant::now();
+            let result = read_characteristic_bytes_with_timeout(
                 &self.target.status,
                 BluetoothCacheMode::Uncached,
                 "Denzic OTA v1 status",
                 LISTENER_OTA_V1_STATUS_READ_TIMEOUT,
-            )
+            );
+            self.status_read_elapsed += started_at.elapsed();
+            result
         }
 
         fn status_retry_wait(&mut self, attempt: u8) {
@@ -7128,6 +7147,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             target,
             transfer_id,
             data_write_option: target.data_write_option,
+            data_write_elapsed: Duration::ZERO,
+            control_write_elapsed: Duration::ZERO,
+            status_read_elapsed: Duration::ZERO,
         };
 
         let started_at = Instant::now();
@@ -7150,19 +7172,25 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             },
         )?;
         log::info!(
-            "[embedded-ble] Denzic OTA v1 #{transfer_id}: transferred {}/{} bytes in {} data writes, {} status reads, {} offset recoveries, active_link_confirmed={}, elapsed_ms={}",
+            "[embedded-ble] Denzic OTA v1 #{transfer_id}: transferred {}/{} bytes in {} data writes, {} status reads, {} offset recoveries, active_link_confirmed={}, elapsed_ms={}, data_write_ms={}, control_write_ms={}, status_read_ms={}",
             report.firmware_bytes,
             firmware_bytes.len(),
             report.data_writes,
             report.status_reads,
             report.recovered_offsets,
             report.active_link_confirmed,
-            started_at.elapsed().as_millis()
+            started_at.elapsed().as_millis(),
+            transport.data_write_elapsed.as_millis(),
+            transport.control_write_elapsed.as_millis(),
+            transport.status_read_elapsed.as_millis()
         );
         Ok(crate::embedded_ble::FirmwareOtaTransferStats {
             bytes_transferred: report.firmware_bytes,
             chunks_sent: report.data_writes as usize,
             transport: denzic_ota_core::PROTOCOL_NAME,
+            data_write_elapsed_ms: transport.data_write_elapsed.as_millis() as u64,
+            control_write_elapsed_ms: transport.control_write_elapsed.as_millis() as u64,
+            status_read_elapsed_ms: transport.status_read_elapsed.as_millis() as u64,
         })
     }
 
@@ -7199,14 +7227,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
         log::info!("[embedded-ble] Listener OTA v1 prepare: acquiring BLE capture guard");
         let transfer_guard = BleCaptureGuard::enter(None)?;
-        log::info!(
-            "[embedded-ble] Listener OTA v1 prepare: waiting {} ms for reconnect handoff",
-            LISTENER_OTA_V1_RECONNECT_SETTLE.as_millis()
-        );
-        std::thread::sleep(LISTENER_OTA_V1_RECONNECT_SETTLE);
         let _fresh_guard = BleFreshGattGuard::enter("Listener OTA v1 prepare")?;
-        log::info!("[embedded-ble] Listener OTA v1 prepare: discovering Listener OTA v1 service");
-        let target = open_listener_ota_v1_target()?;
+        log::info!(
+            "[embedded-ble] Listener OTA v1 prepare: opening Listener OTA v1 service after capture handoff"
+        );
+        let target = open_listener_ota_v1_target_after_active_link_handoff()?;
         let snapshot = listener_ota_v1_gatt_probe_snapshot_from_target(&target);
         log::info!(
             "[embedded-ble] Listener OTA v1 prepare: ready (detail={})",
@@ -7379,6 +7404,127 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 detail: Some(err),
             },
         }
+    }
+
+    pub fn listener_ota_v1_service_reachable_snapshot(
+        timeout: Duration,
+    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        let unavailable = |detail: String| crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+            connected: false,
+            hardware_revision: None,
+            firmware_version: None,
+            capabilities: Vec::new(),
+            battery_percent: None,
+            usb_powered: None,
+            detail: Some(detail),
+        };
+        let _fresh_guard = match BleFreshGattGuard::enter("Listener OTA v1 fast service probe") {
+            Ok(guard) => guard,
+            Err(err) => return unavailable(err),
+        };
+        let deadline = Instant::now() + timeout.max(Duration::from_millis(1));
+        let address = match runtime_bluetooth_target_address() {
+            Some(address) => address,
+            None => {
+                return unavailable(
+                    "Listener OTA v1 fast service probe has no cached Bluetooth address"
+                        .to_string(),
+                );
+            }
+        };
+        let open_timeout = match remaining_ble_timeout(
+            deadline,
+            BLE_DISCOVERY_TIMEOUT,
+            "Listener OTA v1 fast service device open",
+        ) {
+            Ok(timeout) => timeout,
+            Err(err) => return unavailable(err),
+        };
+        let device = match open_ble_device_with_timeout(address, open_timeout) {
+            Ok(device) => device,
+            Err(err) => return unavailable(err),
+        };
+        let mut last_error = None;
+        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+            let discovery_timeout = match remaining_ble_timeout(
+                deadline,
+                BLE_DISCOVERY_TIMEOUT,
+                "Listener OTA v1 fast service discovery",
+            ) {
+                Ok(timeout) => timeout,
+                Err(err) => {
+                    last_error = Some(err);
+                    break;
+                }
+            };
+            let operation = match device
+                .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
+            {
+                Ok(operation) => operation,
+                Err(err) => {
+                    last_error = Some(format!(
+                        "Listener OTA v1 fast {cache_mode:?} service discovery failed: {err}"
+                    ));
+                    continue;
+                }
+            };
+            let services = match wait_async_operation(
+                operation,
+                discovery_timeout,
+                &format!("Listener OTA v1 fast {cache_mode:?} service discovery"),
+            ) {
+                Ok(services) => services,
+                Err(err) => {
+                    last_error = Some(format!(
+                        "Listener OTA v1 fast {cache_mode:?} service discovery wait failed: {err}"
+                    ));
+                    continue;
+                }
+            };
+            let status = match services.Status() {
+                Ok(status) => status,
+                Err(err) => {
+                    last_error = Some(format!(
+                        "Listener OTA v1 fast {cache_mode:?} service status read failed: {err}"
+                    ));
+                    continue;
+                }
+            };
+            let count = match services.Services().and_then(|items| items.Size()) {
+                Ok(count) => count,
+                Err(err) => {
+                    last_error = Some(format!(
+                        "Listener OTA v1 fast {cache_mode:?} service list read failed: {err}"
+                    ));
+                    continue;
+                }
+            };
+            if status == GattCommunicationStatus::Success && count > 0 {
+                let snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+                    connected: true,
+                    hardware_revision: None,
+                    firmware_version: None,
+                    capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],
+                    battery_percent: None,
+                    usb_powered: None,
+                    detail: Some(format!(
+                        "Listener OTA v1 service is reachable at {}; fast confirmation skipped characteristic discovery.",
+                        crate::embedded_ble::format_bluetooth_address(address)
+                    )),
+                };
+                log::info!(
+                    "[embedded-ble] Listener OTA v1 fast service probe connected={} cache_mode={cache_mode:?} address={address:012X}",
+                    snapshot.connected
+                );
+                return snapshot;
+            }
+            last_error = Some(format!(
+                "Listener OTA v1 fast {cache_mode:?} service discovery returned status={status:?} count={count}"
+            ));
+        }
+        unavailable(last_error.unwrap_or_else(|| {
+            "Listener OTA v1 fast service discovery did not find the OTA service".to_string()
+        }))
     }
 
     fn listener_ota_v1_device_snapshot_from_target(
@@ -8215,7 +8361,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         if err.contains("No paired BLE device found in Windows Bluetooth pairing store") {
             return false;
         }
-        err.contains("GattCommunicationStatus(3)")
+        err.contains("GattCommunicationStatus(1)")
+            || err.contains("GattCommunicationStatus(3)")
             || err.contains("Unreachable")
             || err.contains("unreachable")
             || err.contains("HRESULT(0x800706BA)")
@@ -9212,6 +9359,59 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         )
     }
 
+    fn open_listener_ota_v1_target_after_active_link_handoff(
+    ) -> Result<OpenListenerOtaV1Target, String> {
+        let Some(address) = runtime_bluetooth_target_address() else {
+            log::info!(
+                "[embedded-ble] Listener OTA v1 handoff has no verified runtime address; using normal service discovery"
+            );
+            return open_listener_ota_v1_target();
+        };
+
+        let mut direct_error = None;
+        for attempt in 1..=LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS.len() + 1 {
+            match open_listener_ota_v1_target_for_verified_active_handoff(address) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] Listener OTA v1 handoff opened verified address {address:012X} on attempt {attempt}"
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    let Some(delay) = LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS
+                        .get(attempt - 1)
+                        .copied()
+                    else {
+                        direct_error = Some(err);
+                        break;
+                    };
+                    if !is_transient_listener_ota_v1_discovery_error(&err) {
+                        direct_error = Some(err);
+                        break;
+                    }
+                    log::info!(
+                        "[embedded-ble] Listener OTA v1 handoff address {address:012X} not ready on attempt {attempt}: {err}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    direct_error = Some(err);
+                    std::thread::sleep(delay);
+                }
+            }
+        }
+
+        let direct_error = direct_error.unwrap_or_else(|| {
+            "verified Listener address did not expose a writable OTA v1 service".to_string()
+        });
+        log::warn!(
+            "[embedded-ble] Listener OTA v1 handoff direct address path exhausted; falling back to normal service discovery: {direct_error}"
+        );
+        open_listener_ota_v1_target().map_err(|fallback_error| {
+            format!(
+                "Listener OTA v1 handoff direct address path failed: {direct_error}; normal service discovery fallback failed: {fallback_error}"
+            )
+        })
+    }
+
     fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
         let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V1_SERVICE_UUID)
             .map_err(|err| format!("Listener OTA v1 service selector failed: {err}"))?;
@@ -9864,19 +10064,44 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     fn open_listener_ota_v1_target_for_device(
         address: u64,
     ) -> Result<OpenListenerOtaV1Target, String> {
-        let device = open_ble_device(address)?;
-        if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v1 device access").ok()
-        }) {
-            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
-                return Err(format!(
-                    "Listener OTA v1 device access denied status={access:?}"
-                ));
+        open_listener_ota_v1_target_for_device_with_options(address, false)
+    }
+
+    fn open_listener_ota_v1_target_for_verified_active_handoff(
+        address: u64,
+    ) -> Result<OpenListenerOtaV1Target, String> {
+        open_listener_ota_v1_target_for_device_with_options(address, true)
+    }
+
+    fn open_listener_ota_v1_target_for_device_with_options(
+        address: u64,
+        verified_active_handoff: bool,
+    ) -> Result<OpenListenerOtaV1Target, String> {
+        let device = if verified_active_handoff {
+            open_ble_device_by_address(address)?
+        } else {
+            open_ble_device(address)?
+        };
+        if !verified_active_handoff {
+            if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
+                wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v1 device access")
+                    .ok()
+            }) {
+                if access != DeviceAccessStatus::Allowed
+                    && access != DeviceAccessStatus::Unspecified
+                {
+                    return Err(format!(
+                        "Listener OTA v1 device access denied status={access:?}"
+                    ));
+                }
             }
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        // A verified active link makes its device handle and access grant reusable, but
+        // OTA control writes still require fresh GATT characteristic handles.
+        let cache_modes = [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached];
+        for cache_mode in cache_modes {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
@@ -10471,13 +10696,15 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         open_ble_device_with_timeout(address, BLE_DISCOVERY_TIMEOUT)
     }
 
+    fn open_ble_device_by_address(address: u64) -> Result<BluetoothLEDevice, String> {
+        open_ble_device_by_address_with_timeout(address, BLE_DISCOVERY_TIMEOUT)
+    }
+
     fn open_ble_device_with_timeout(
         address: u64,
         timeout: Duration,
     ) -> Result<BluetoothLEDevice, String> {
-        let device = BluetoothLEDevice::FromBluetoothAddressAsync(address)
-            .map_err(|err| format!("BLE device open by address failed: {err}"))
-            .and_then(|op| wait_async_operation(op, timeout, "device open by address"))?;
+        let device = open_ble_device_by_address_with_timeout(address, timeout)?;
 
         let device_id = device
             .DeviceId()
@@ -10500,6 +10727,15 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 Ok(device)
             }
         }
+    }
+
+    fn open_ble_device_by_address_with_timeout(
+        address: u64,
+        timeout: Duration,
+    ) -> Result<BluetoothLEDevice, String> {
+        BluetoothLEDevice::FromBluetoothAddressAsync(address)
+            .map_err(|err| format!("BLE device open by address failed: {err}"))
+            .and_then(|op| wait_async_operation(op, timeout, "device open by address"))
     }
 
     fn open_listener_ota_v1_target_for_service(
@@ -15460,6 +15696,11 @@ pub fn listener_ota_v1_gatt_probe_snapshot(timeout: Duration) -> FirmwareOtaDevi
 }
 
 #[cfg(target_os = "windows")]
+pub fn listener_ota_v1_service_reachable_snapshot(timeout: Duration) -> FirmwareOtaDeviceSnapshot {
+    windows_ble::listener_ota_v1_service_reachable_snapshot(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn pull_firmware_diagnostic_log(timeout: Duration) -> FirmwareDiagnosticLogPull {
     windows_ble::pull_firmware_diagnostic_log(timeout)
 }
@@ -15829,6 +16070,19 @@ pub fn listener_ota_v1_device_snapshot() -> FirmwareOtaDeviceSnapshot {
 
 #[cfg(not(target_os = "windows"))]
 pub fn listener_ota_v1_gatt_probe_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
+    FirmwareOtaDeviceSnapshot {
+        connected: false,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: Vec::new(),
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some("Listener OTA v1 over BLE is only supported on Windows".to_string()),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn listener_ota_v1_service_reachable_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
         hardware_revision: None,
@@ -16254,9 +16508,12 @@ mod tests {
                 && source.contains("b\"TYPE:OTA\\n\"")
                 && source.contains("Listener OTA v1 reconnect handoff")
                 && prepare.contains("request_listener_ota_v1_active_link()")
-                && source.contains("LISTENER_OTA_V1_RECONNECT_SETTLE")
+                && source.contains("LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS")
+                && source.contains("open_listener_ota_v1_target_for_verified_active_handoff")
+                && source.contains("open_ble_device_by_address(address)")
+                && source.contains("[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]")
                 && source.contains("reconnect handoff accepted")
-                && prepare.contains("waiting {} ms for reconnect handoff")
+                && prepare.contains("open_listener_ota_v1_target_after_active_link_handoff")
                 && prepare.find("acquire_ble_ota_process_mutex").unwrap()
                     < prepare
                         .find("request_listener_ota_v1_active_link")
@@ -16286,6 +16543,9 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn notify_target_open_retry_classifies_windows_gatt_transients() {
+        assert!(windows_ble::is_transient_notify_target_open_error(
+            "BLE characteristic discovery returned status=GattCommunicationStatus(1)"
+        ));
         assert!(windows_ble::is_transient_notify_target_open_error(
             "BLE characteristic discovery returned status=GattCommunicationStatus(3)"
         ));

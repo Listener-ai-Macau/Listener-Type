@@ -369,6 +369,11 @@ try {
     if ($VerifyInsertion) {
         $insertionTargetPath = Join-Path $OutDir "embedded-file-smoke-$RunStamp.target.txt"
         $insertionTarget = Start-InsertionTarget -Path $insertionTargetPath
+        # The app captures its insertion target when the command begins.
+        if (-not (Focus-ProcessWindow -Process $insertionTarget.Process)) {
+            throw "Could not focus the insertion target before starting the embedded audio command"
+        }
+        Start-Sleep -Milliseconds 150
     }
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -382,11 +387,6 @@ try {
     $psi.EnvironmentVariables["LISTENER_TYPE_DISABLE_BACKGROUND_BLE"] = "1"
     $psi.EnvironmentVariables["LISTENER_TYPE_FORCE_RAW_OUTPUT"] = "1"
     $process = [System.Diagnostics.Process]::Start($psi)
-
-    if ($VerifyInsertion -and $insertionTarget) {
-        [void](Focus-ProcessWindow -Process $insertionTarget.Process)
-        Start-Sleep -Milliseconds 150
-    }
 
     $doneDeadline = (Get-Date).AddMilliseconds($TimeoutMs + 10000)
     $doneMatch = $null
@@ -412,7 +412,8 @@ try {
 
     Start-Sleep -Milliseconds 200
     $capturedLog += Read-NewLogText -Path $logPath -Offset $logOffset
-    $transcript = Get-LatestAsrTranscriptFromLog -Text $capturedLog
+    $streamTranscript = Get-LatestAsrTranscriptFromLog -Text $capturedLog
+    $transcript = $streamTranscript
     $missingPackets = [int]$doneMatch.Groups[2].Value
     $pcmBytes = [int]$doneMatch.Groups[1].Value
     $verificationErrors = @()
@@ -436,12 +437,18 @@ try {
     }
     if ($VerifyInsertion) {
         $insertedText = Read-InsertionTargetText -Target $insertionTarget
-        $expectedText = if ($historySession -and -not [string]::IsNullOrWhiteSpace([string]$historySession.finalText)) { [string]$historySession.finalText } else { $transcript }
-        if ([string]::IsNullOrWhiteSpace($expectedText)) { $verificationErrors += "no transcript/final text available for insertion verification" }
-        elseif (-not ([string]$insertedText).Contains($expectedText)) { $verificationErrors += "target editor does not contain final text" }
+        $insertionExpectedText = if ($historySession -and -not [string]::IsNullOrWhiteSpace([string]$historySession.finalText)) { [string]$historySession.finalText } else { $transcript }
+        if ([string]::IsNullOrWhiteSpace($insertionExpectedText)) { $verificationErrors += "no transcript/final text available for insertion verification" }
+        elseif (-not ([string]$insertedText).Contains($insertionExpectedText)) { $verificationErrors += "target editor does not contain final text" }
     }
     $expectedTextForAccuracy = if (-not [string]::IsNullOrWhiteSpace($ExpectedText)) { $ExpectedText } else { $Sentence }
-    $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
+    $finalText = if ($historySession -and -not [string]::IsNullOrWhiteSpace([string]$historySession.finalText)) {
+        [string]$historySession.finalText
+    } elseif (-not [string]::IsNullOrWhiteSpace($transcript)) {
+        $transcript
+    } else {
+        ""
+    }
     $accuracyReport = Measure-TranscriptAccuracy -Expected $expectedTextForAccuracy -Transcript $finalText
     $accuracyWarning = $false
     $accuracyWarningMessage = $null
@@ -468,6 +475,7 @@ try {
         expected_text = $expectedTextForAccuracy
         wav_path = $WavPath
         transcript = $transcript
+        stream_transcript = $streamTranscript
         final_text = $finalText
         normalized_expected = $accuracyReport.normalized_expected
         normalized_transcript = $accuracyReport.normalized_transcript

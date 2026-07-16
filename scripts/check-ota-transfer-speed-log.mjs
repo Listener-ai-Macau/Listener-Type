@@ -26,13 +26,28 @@ function takeNumber(name, fallback) {
 }
 
 const logPath = takeArg("--log");
-const maxTransferMs = takeNumber("--max-transfer-ms", 60000);
-const maxTotalMs = takeNumber("--max-total-ms", 90000);
+const acceptanceMinTransferBytesPerMs = takeNumber(
+  "--acceptance-min-transfer-bytes-per-ms",
+  18,
+);
+const acceptanceMaxNonTransferFixedMs = takeNumber(
+  "--acceptance-max-non-transfer-fixed-ms",
+  7000,
+);
 const minBytes = takeNumber("--min-bytes", 900000);
 const outputJson = takeArg("--output-json", null);
 
 if (!logPath) {
   fail("--log requires a value");
+}
+for (const [name, value] of [
+  ["--acceptance-min-transfer-bytes-per-ms", acceptanceMinTransferBytesPerMs],
+  [
+    "--acceptance-max-non-transfer-fixed-ms",
+    acceptanceMaxNonTransferFixedMs,
+  ],
+]) {
+  if (value <= 0) fail(`${name} must be greater than zero`);
 }
 if (outputJson) {
   mkdirSync(dirname(outputJson), { recursive: true });
@@ -40,7 +55,9 @@ if (outputJson) {
 
 const text = readFileSync(logPath, "utf8");
 const pattern =
-  /BLE OTA result transport=(?<transport>\S+) bytes=(?<bytes>\d+) chunks=(?<chunks>\d+) transfer_ms=(?<transferMs>\d+) confirm_ms=(?<confirmMs>\d+) confirm_attempts=(?<confirmAttempts>\d+) confirm_matched=(?<confirmMatched>true|false) total_ms=(?<totalMs>\d+)/g;
+  /BLE OTA result transport=(?<transport>\S+) bytes=(?<bytes>\d+) chunks=(?<chunks>\d+)(?: pretransfer_type_ready=(?<pretransferTypeReady>true|false) pretransfer_type_ready_ms=(?<pretransferTypeReadyMs>\d+))? transfer_ms=(?<transferMs>\d+) confirm_ms=(?<confirmMs>\d+) confirm_attempts=(?<confirmAttempts>\d+) confirm_matched=(?<confirmMatched>true|false) type_ready=(?<typeReady>true|false) type_ready_ms=(?<typeReadyMs>\d+) total_ms=(?<totalMs>\d+)/g;
+const transportPattern =
+  /Denzic OTA v1 #\d+: transferred (?<bytes>\d+)\/(?<totalBytes>\d+) bytes in (?<dataWrites>\d+) data writes, (?<statusReads>\d+) status reads, (?<offsetRecoveries>\d+) offset recoveries, active_link_confirmed=(?<activeLinkConfirmed>true|false), elapsed_ms=(?<protocolMs>\d+)(?:, data_write_ms=(?<dataWriteMs>\d+), control_write_ms=(?<controlWriteMs>\d+), status_read_ms=(?<statusReadMs>\d+))?/g;
 
 const results = [...text.matchAll(pattern)].map((match) => ({
   status: "PASS",
@@ -48,10 +65,14 @@ const results = [...text.matchAll(pattern)].map((match) => ({
   transport: match.groups.transport,
   bytes: Number(match.groups.bytes),
   chunks: Number(match.groups.chunks),
+  pretransferTypeReady: match.groups.pretransferTypeReady === "true",
+  pretransferTypeReadyMs: Number(match.groups.pretransferTypeReadyMs ?? 0),
   transferMs: Number(match.groups.transferMs),
   confirmMs: Number(match.groups.confirmMs),
   confirmAttempts: Number(match.groups.confirmAttempts),
   confirmMatched: match.groups.confirmMatched === "true",
+  typeReady: match.groups.typeReady === "true",
+  typeReadyMs: Number(match.groups.typeReadyMs),
   totalMs: Number(match.groups.totalMs),
 }));
 
@@ -79,10 +100,16 @@ for (const line of text.split(/\r?\n/)) {
       transport: report.transfer.transport,
       bytes: Number(report.transfer.bytesTransferred),
       chunks: Number(report.transfer.chunksSent),
+      pretransferTypeReady: report.transfer.pretransferTypeReady === true,
+      pretransferTypeReadyMs: Number(
+        report.transfer.pretransferTypeReadyElapsedMs ?? 0,
+      ),
       transferMs: Number(report.transfer.transferElapsedMs),
       confirmMs: Number(report.transfer.confirmElapsedMs),
       confirmAttempts: Number(report.transfer.confirmedVersion ? 1 : 0),
       confirmMatched: report.transfer.versionConfirmed === true,
+      typeReady: report.transfer.typeReady === true,
+      typeReadyMs: Number(report.transfer.typeReadyElapsedMs),
       totalMs: Number(report.transfer.totalElapsedMs),
     });
   } catch {
@@ -108,6 +135,50 @@ if (latest.status === "FAIL") {
   }
   fail(`Latest BLE OTA transfer failed: ${(latest.errors ?? []).join("; ")}`);
 }
+const transportResults = [...text.matchAll(transportPattern)].map(match => ({
+  index: match.index ?? 0,
+  bytes: Number(match.groups.bytes),
+  totalBytes: Number(match.groups.totalBytes),
+  dataWrites: Number(match.groups.dataWrites),
+  statusReads: Number(match.groups.statusReads),
+  offsetRecoveries: Number(match.groups.offsetRecoveries),
+  activeLinkConfirmed: match.groups.activeLinkConfirmed === "true",
+  protocolMs: Number(match.groups.protocolMs),
+  dataWriteMs: Number(match.groups.dataWriteMs ?? 0),
+  controlWriteMs: Number(match.groups.controlWriteMs ?? 0),
+  statusReadMs: Number(match.groups.statusReadMs ?? 0),
+}));
+const latestTransport = transportResults
+  .filter(candidate => candidate.index < latest.index && candidate.bytes === latest.bytes)
+  .pop() ?? null;
+const acceptanceMaxTransferMs = Math.ceil(
+  latest.bytes / acceptanceMinTransferBytesPerMs,
+);
+const postTransferRecoveryMs = latest.confirmMs + latest.typeReadyMs;
+const payloadTransferMs = latestTransport?.protocolMs ?? latest.transferMs;
+const transferOrchestrationMs = latestTransport
+  ? Math.max(0, latest.transferMs - latestTransport.protocolMs)
+  : null;
+const nonTransferFixedElapsedMs =
+  latest.totalMs >= payloadTransferMs ? latest.totalMs - payloadTransferMs : null;
+const knownFixedStageMs =
+  latest.pretransferTypeReadyMs +
+  (transferOrchestrationMs ?? 0) +
+  latest.confirmMs +
+  latest.typeReadyMs;
+const packageIntegrityAndCommandBookkeepingMs =
+  nonTransferFixedElapsedMs === null
+    ? null
+    : Math.max(0, nonTransferFixedElapsedMs - knownFixedStageMs);
+const protocolInstrumentedMs = latestTransport
+  ? latestTransport.dataWriteMs +
+    latestTransport.controlWriteMs +
+    latestTransport.statusReadMs
+  : null;
+const protocolSchedulingAndCallbackMs =
+  protocolInstrumentedMs === null
+    ? null
+    : Math.max(0, payloadTransferMs - protocolInstrumentedMs);
 const result = {
   status: "PASS",
   log: logPath,
@@ -115,14 +186,28 @@ const result = {
   transport: latest.transport,
   bytes: latest.bytes,
   chunks: latest.chunks,
+  pretransferTypeReady: latest.pretransferTypeReady,
+  pretransferTypeReadyMs: latest.pretransferTypeReadyMs,
   transferMs: latest.transferMs,
+  payloadTransferMs,
+  transportTrace: latestTransport,
   confirmMs: latest.confirmMs,
   confirmAttempts: latest.confirmAttempts,
   confirmMatched: latest.confirmMatched,
-  totalMs: latest.totalMs,
-  maxTransferMs,
-  maxTotalMs,
+  typeReady: latest.typeReady,
+  typeReadyMs: latest.typeReadyMs,
+  acceptanceMinTransferBytesPerMs,
+  acceptanceMaxTransferMs,
+  transferOrchestrationMs,
+  nonTransferFixedElapsedMs,
+  acceptanceMaxNonTransferFixedMs,
+  packageIntegrityAndCommandBookkeepingMs,
+  protocolInstrumentedMs,
+  protocolSchedulingAndCallbackMs,
+  postTransferRecoveryMs,
   minBytes,
+  observedTransferBytesPerMs:
+    payloadTransferMs > 0 ? latest.bytes / payloadTransferMs : null,
 };
 
 const failures = [];
@@ -132,14 +217,36 @@ if (result.transport !== "denzic_ota_v1") {
 if (result.bytes < minBytes) {
   failures.push(`bytes=${result.bytes}, expected >=${minBytes}`);
 }
-if (result.transferMs > maxTransferMs) {
-  failures.push(`transfer_ms=${result.transferMs}, expected <=${maxTransferMs}`);
+if (payloadTransferMs > acceptanceMaxTransferMs) {
+  failures.push(
+    `payload_transfer_ms=${payloadTransferMs}, expected <=${acceptanceMaxTransferMs} for ${result.bytes} bytes at ${acceptanceMinTransferBytesPerMs} bytes/ms`,
+  );
 }
-if (result.totalMs > maxTotalMs) {
-  failures.push(`total_ms=${result.totalMs}, expected <=${maxTotalMs}`);
+if (latestTransport) {
+  const requiredStatusReads = Math.floor((latest.chunks - 1) / 100) + 2;
+  if (!latestTransport.activeLinkConfirmed) {
+    failures.push("active_link_confirmed=false");
+  }
+  if (latestTransport.statusReads < requiredStatusReads) {
+    failures.push(
+      `status_reads=${latestTransport.statusReads}, expected >=${requiredStatusReads} for the required 100-packet progress cadence`,
+    );
+  }
+}
+if (nonTransferFixedElapsedMs === null) {
+  failures.push(
+    `total_ms=${latest.totalMs} is earlier than ota_protocol_transfer_ms=${payloadTransferMs}`,
+  );
+} else if (nonTransferFixedElapsedMs > acceptanceMaxNonTransferFixedMs) {
+  failures.push(
+    `non_transfer_fixed_elapsed_ms=${nonTransferFixedElapsedMs}, expected <=${acceptanceMaxNonTransferFixedMs} (total ${latest.totalMs} ms - ota_protocol_transfer ${payloadTransferMs} ms)`,
+  );
 }
 if (!result.confirmMatched) {
   failures.push("confirm_matched=false");
+}
+if (!result.typeReady) {
+  failures.push("type_ready=false");
 }
 
 if (failures.length > 0) {
@@ -156,5 +263,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `PASS: Listener OTA v1 transfer ${result.bytes} bytes in ${result.transferMs} ms, total ${result.totalMs} ms`,
+  `PASS: Listener OTA stages: protocol ${result.bytes} bytes in ${payloadTransferMs} ms (${result.observedTransferBytesPerMs.toFixed(3)} kB/s, acceptance >=${result.acceptanceMinTransferBytesPerMs} kB/s); non-transfer fixed ${nonTransferFixedElapsedMs} ms (acceptance <=${result.acceptanceMaxNonTransferFixedMs} ms); pre-transfer Type ready ${result.pretransferTypeReadyMs} ms; transfer orchestration ${transferOrchestrationMs ?? "legacy-unavailable"} ms; version confirmation ${result.confirmMs} ms; Type ready ${result.typeReadyMs} ms.`,
 );

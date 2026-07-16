@@ -424,8 +424,9 @@ if (!embeddedBle.includes("LISTENER_OTA_V1_WINDOW_ENV")) {
   fail("Listener OTA v1 must keep the window override env for controlled bench experiments");
 }
 if (
-  !embeddedBle.includes("LISTENER_OTA_V1_RECONNECT_SETTLE")
-  || !embeddedBle.includes("reconnect handoff accepted")
+  !embeddedBle.includes("LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS")
+  || !embeddedBle.includes("reconnect handoff")
+  || !embeddedBle.includes("open_listener_ota_v1_target_after_active_link_handoff")
   || embeddedBle.includes("continuing with OTA begin fallback")
 ) {
   fail("Listener OTA v1 must complete the low-power reconnect handoff before opening the OTA GATT data path");
@@ -454,14 +455,26 @@ const ota = contracts.ota_transfer_speed;
 if (![true, false].includes(ota.accepted)) {
   fail("OTA speed baseline must keep an explicit accepted boolean");
 }
-for (const key of ["target_max_transfer_ms", "target_max_total_ms", "min_transfer_bytes"]) {
+for (const key of [
+  "acceptance_min_transfer_bytes_per_ms",
+  "acceptance_max_non_transfer_fixed_elapsed_ms",
+  "reference_transfer_bytes",
+  "reference_acceptance_max_transfer_ms",
+  "min_transfer_bytes",
+]) {
   requireNumber(ota[key], `OTA speed ${key}`);
 }
-if (ota.target_max_transfer_ms !== 60000) {
-  fail("OTA speed contract must enforce transfer_ms <=60000");
+if (
+  ota.acceptance_min_transfer_bytes_per_ms !== 18 ||
+  ota.acceptance_max_non_transfer_fixed_elapsed_ms !== 7000
+) {
+  fail("OTA speed contract must retain the >=18 kB/s protocol transfer and <=7 s non-transfer fixed-time acceptance model");
 }
-if (ota.target_max_total_ms > 90000) {
-  fail("OTA speed total ceiling must not drift above 90000 ms");
+if (
+  ota.reference_acceptance_max_transfer_ms !==
+    Math.ceil(ota.reference_transfer_bytes / ota.acceptance_min_transfer_bytes_per_ms)
+) {
+  fail("OTA speed reference transfer budget must be derived from the transfer package size");
 }
 if (ota.min_transfer_bytes < 900000) {
   fail("OTA speed contract must validate a real firmware-sized transfer");
@@ -469,8 +482,8 @@ if (ota.min_transfer_bytes < 900000) {
 for (const token of [
   "check-ota-transfer-speed-log.mjs",
   "check-ota-transfer-speed-log.test.mjs",
-  "--max-transfer-ms 60000",
-  "--max-total-ms 90000",
+  "--acceptance-min-transfer-bytes-per-ms 18",
+  "--acceptance-max-non-transfer-fixed-ms 7000",
   "--min-bytes 900000",
 ]) {
   const haystack = `${ota.validation_command ?? ""}\n${packageJson.scripts?.["check:ota-speed-log-contract"] ?? ""}`;
@@ -483,19 +496,33 @@ if (
   ![
     "pending_human_acceptance_after_fix",
     "pending_low_power_revalidation_after_cross_process_ota_lock",
+    "pending_end_to_end_type_ready_revalidation",
   ].includes(ota.status)
 ) {
   fail("OTA speed baseline may stay unaccepted only while the focused OTA speed fix or its low-power revalidation is pending");
 }
 if (ota.accepted === true) {
-  for (const key of ["measured_transfer_ms", "measured_total_ms", "measured_bytes"]) {
+  for (const key of [
+    "measured_bytes",
+    "measured_ota_protocol_transfer_ms",
+    "measured_non_transfer_fixed_elapsed_ms",
+  ]) {
     requireNumber(ota[key], `OTA speed ${key}`);
   }
-  if (ota.measured_transfer_ms > ota.target_max_transfer_ms) {
-    fail("accepted OTA speed evidence exceeds transfer_ms ceiling");
+  const acceptanceMaxTransferMs = Math.ceil(
+    ota.measured_bytes / ota.acceptance_min_transfer_bytes_per_ms,
+  );
+  if (ota.measured_ota_protocol_transfer_ms > acceptanceMaxTransferMs) {
+    fail("accepted OTA speed evidence exceeds its package-sized transfer stage budget");
   }
-  if (ota.measured_total_ms > ota.target_max_total_ms) {
-    fail("accepted OTA speed evidence exceeds total_ms ceiling");
+  if (
+    ota.measured_non_transfer_fixed_elapsed_ms >
+    ota.acceptance_max_non_transfer_fixed_elapsed_ms
+  ) {
+    fail("accepted OTA speed evidence exceeds its non-transfer fixed-time budget");
+  }
+  if (ota.measured_type_ready !== true) {
+    fail("accepted OTA speed evidence must include restored Type notify readiness");
   }
   if (!ota.evidence?.includes("ota") || !ota.evidence?.endsWith(".json")) {
     fail("accepted OTA speed baseline must cite a machine-readable OTA speed artifact");
@@ -503,5 +530,5 @@ if (ota.accepted === true) {
 }
 
 console.log(
-  "PASS: performance baselines protect accepted settings-write, BLE rename, EC11 Type recovery, recording latency, Type takeover, and the OTA <=60000 ms speed target.",
+  "PASS: performance baselines protect accepted settings-write, BLE rename, EC11 Type recovery, recording latency, Type takeover, package-sized OTA transfer, and <=7 s non-transfer fixed time.",
 );
