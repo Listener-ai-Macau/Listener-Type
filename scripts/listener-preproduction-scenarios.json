@@ -35,7 +35,9 @@
       "coordination_plan": "C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\docs\\plans\\listener-core-platform-contract-20260715_plan.md",
       "first_implementation_plan": "C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\docs\\plans\\listener-type-ble-platform-local-repair-20260715_plan.md",
       "current_application": "The current Type recovery defect is the first BLE-platform closure: after an explicit Windows re-pair back to this host, the background audio listener must resume only from local Windows pairing/HID evidence. It must never autonomously PairAsync, unpair, or reclaim an external host during cross-host arbitration.",
-      "product_boundary": "Implement and validate the core-platform contract first across Listener Firmware and Listener Type. Design it for all products to reuse through adapters, but do not change another product in this task or migrate an unaccepted Listener implementation; every future adapter requires its own acceptance evidence."
+      "product_boundary": "The active product is Listener. Work may cross Listener Firmware and Listener Type, and may use the owner-authorized Denzic-Platform core only for this Listener contract. A screenshot, command, or request with another or unclear product identity is not permission to modify that product: stop at routing and require an explicit product switch. Similar behavior or a reusable contract never authorizes copying or migrating an unaccepted Listener implementation into another product; each future adapter needs its own owner decision and acceptance evidence.",
+      "product_boundary_confirmed_at": "2026-07-16T12:30:00+08:00",
+      "product_boundary_confirmation": "Product-owner confirmation: 保持。 This confirms the fail-closed product routing rule after the Companion e-paper image was correctly excluded from Listener work."
     },
     "ble_audio_type_link_machine_acceptance_20260715": {
       "status": "accepted_by_explicit_owner_machine_authorization",
