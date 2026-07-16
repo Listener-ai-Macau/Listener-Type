@@ -17,6 +17,7 @@ use ferrous_opencc::{config::BuiltinConfig, OpenCC};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{async_runtime, AppHandle, Emitter, Manager};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 #[cfg(target_os = "windows")]
@@ -262,10 +263,17 @@ struct Inner {
         Mutex<Option<(Arc<AtomicBool>, Arc<AtomicBool>)>>,
     /// 当前 Listener BLE 后台订阅已完成 CCCD notify 写入，可以接收设备音频。
     embedded_ble_listener_ready: AtomicBool,
+    /// 后台订阅真正就绪时立即唤醒 OTA / 录音恢复等待者，避免 100ms 轮询把
+    /// 已完成的 TYPE:READY 人为延后到下一次检查。
+    embedded_ble_listener_ready_notification: Notify,
     /// 设备键从 Idle 唤醒音频时，指定下一代后台监听跳过慢速的启动期手动解配预检。
     /// 能收到这枚物理键已证明本机的原生 HID 配对仍在，不能再为重复 PnP 枚举阻塞
     /// 首次录音；代次绑定，避免旧监听循环误消费该唤醒请求。
     embedded_ble_device_key_wake_generation: AtomicU64,
+    /// 已确认 OTA 服务重新出现后，指定下一代后台监听跳过一次重复的 Windows HID
+    /// 枚举。OTA 前的活动连接和确认后的服务探测共同证明本机配对仍可用；若随后的
+    /// GATT 打开失败，常规丢失配对恢复仍会运行。
+    embedded_ble_ota_recovery_generation: AtomicU64,
     /// 启动时必须先把 Type 目标名同步到固件广播名，再允许后台 BLE 监听启动。
     /// 否则前端/托盘的早期 refresh 会用旧 prefs 名字扫一轮，造成第一次连接失败。
     embedded_ble_startup_name_sync_done: AtomicBool,
@@ -591,7 +599,9 @@ impl Coordinator {
                     embedded_ble_listener_cancel: Mutex::new(None),
                     embedded_ble_listener_leave_cccd_enabled_on_cancel: Mutex::new(None),
                     embedded_ble_listener_ready: AtomicBool::new(false),
+                    embedded_ble_listener_ready_notification: Notify::new(),
                     embedded_ble_device_key_wake_generation: AtomicU64::new(0),
+                    embedded_ble_ota_recovery_generation: AtomicU64::new(0),
                     embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                     embedded_ble_listener_last_error: Mutex::new(None),
                     embedded_ble_pairing_hold_until: Mutex::new(None),
@@ -670,7 +680,9 @@ impl Coordinator {
                 embedded_ble_listener_cancel: Mutex::new(None),
                 embedded_ble_listener_leave_cccd_enabled_on_cancel: Mutex::new(None),
                 embedded_ble_listener_ready: AtomicBool::new(false),
+                embedded_ble_listener_ready_notification: Notify::new(),
                 embedded_ble_device_key_wake_generation: AtomicU64::new(0),
+                embedded_ble_ota_recovery_generation: AtomicU64::new(0),
                 embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
                 embedded_ble_pairing_hold_until: Mutex::new(None),
@@ -1654,8 +1666,26 @@ impl Coordinator {
             .store(false, Ordering::SeqCst);
     }
 
+    pub async fn wait_for_embedded_ble_listener_ready_after_firmware_ota(
+        &self,
+        timeout: Duration,
+    ) -> Result<bool, String> {
+        if !embedded_ble_background_listener_expected(&self.inner) {
+            log::info!(
+                "[firmware-ota] post-OTA Listener notify recovery is not required because EmbeddedBle is not the active input source"
+            );
+            return Ok(false);
+        }
+        wait_for_embedded_ble_listener_ready(&self.inner, timeout).await?;
+        Ok(true)
+    }
+
     pub fn refresh_embedded_ble_listener(&self) {
         refresh_embedded_ble_listener(&self.inner);
+    }
+
+    pub fn refresh_embedded_ble_listener_after_firmware_ota(&self) {
+        refresh_embedded_ble_listener_after_firmware_ota(&self.inner);
     }
 
     pub fn sync_device_knob_rotation_action_to_firmware(&self, reason: &'static str) {
@@ -4777,7 +4807,11 @@ fn record_embedded_ble_device_settings_power_status(
 }
 
 fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
-    refresh_embedded_ble_listener_with_options(inner, false);
+    refresh_embedded_ble_listener_with_options(inner, false, false);
+}
+
+fn refresh_embedded_ble_listener_after_firmware_ota(inner: &Arc<Inner>) {
+    refresh_embedded_ble_listener_with_options(inner, false, true);
 }
 
 fn refresh_embedded_ble_listener_for_device_key_wake(inner: &Arc<Inner>) {
@@ -4787,10 +4821,14 @@ fn refresh_embedded_ble_listener_for_device_key_wake(inner: &Arc<Inner>) {
         );
         return;
     }
-    refresh_embedded_ble_listener_with_options(inner, true);
+    refresh_embedded_ble_listener_with_options(inner, true, false);
 }
 
-fn refresh_embedded_ble_listener_with_options(inner: &Arc<Inner>, device_key_idle_wake: bool) {
+fn refresh_embedded_ble_listener_with_options(
+    inner: &Arc<Inner>,
+    device_key_idle_wake: bool,
+    firmware_ota_recovery: bool,
+) {
     if !inner
         .embedded_ble_startup_name_sync_done
         .load(Ordering::SeqCst)
@@ -4834,6 +4872,11 @@ fn refresh_embedded_ble_listener_with_options(inner: &Arc<Inner>, device_key_idl
     if device_key_idle_wake {
         inner
             .embedded_ble_device_key_wake_generation
+            .store(generation, Ordering::SeqCst);
+    }
+    if firmware_ota_recovery {
+        inner
+            .embedded_ble_ota_recovery_generation
             .store(generation, Ordering::SeqCst);
     }
     cancel_embedded_ble_listener_capture(inner, "refresh", false);
@@ -5293,6 +5336,13 @@ fn take_embedded_ble_device_key_wake_preflight_bypass(inner: &Arc<Inner>, genera
         .is_ok()
 }
 
+fn take_embedded_ble_ota_recovery_preflight_bypass(inner: &Arc<Inner>, generation: u64) -> bool {
+    inner
+        .embedded_ble_ota_recovery_generation
+        .compare_exchange(generation, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
 async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u64) {
     log::info!("[embedded-ble] background listener started generation={generation}");
     let mut retry_delay = EMBEDDED_BLE_RETRY_BASE_DELAY;
@@ -5317,6 +5367,10 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
             if take_embedded_ble_device_key_wake_preflight_bypass(&inner, generation) {
                 log::info!(
                     "[embedded-ble] device-key Idle wake bypassed slow manual-delete preflight generation={generation}; physical HID input proves the local pairing remains installed"
+                );
+            } else if take_embedded_ble_ota_recovery_preflight_bypass(&inner, generation) {
+                log::info!(
+                    "[embedded-ble] confirmed firmware OTA recovery bypassed repeated Windows HID pairing preflight generation={generation}; the pre-OTA active link and post-OTA service probe prove this trusted local path"
                 );
             } else if maybe_hold_embedded_ble_startup_without_current_native_pairing(&inner).await {
                 continue;
@@ -6813,7 +6867,8 @@ fn is_embedded_ble_link_loss_error(err: &str) -> bool {
 }
 
 fn is_embedded_ble_transient_reopen_error(err: &str) -> bool {
-    err.contains("GattCommunicationStatus(3)")
+    err.contains("GattCommunicationStatus(1)")
+        || err.contains("GattCommunicationStatus(3)")
         || err.contains("HRESULT(0x800706BA)")
         || err.contains("BLE characteristic discovery returned status")
         || err.contains("BLE service open wait failed")
@@ -6875,7 +6930,8 @@ async fn wait_for_embedded_ble_listener_ready(
         if embedded_ble_listener_capture_ready(inner) {
             return Ok(());
         }
-        if Instant::now() >= deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
             let last_error = inner.embedded_ble_listener_last_error.lock().clone();
             let suffix = last_error
                 .as_deref()
@@ -6886,7 +6942,28 @@ async fn wait_for_embedded_ble_listener_ready(
                 timeout.as_millis()
             ));
         }
-        tokio::time::sleep(EMBEDDED_BLE_PROBE_RECOVERY_POLL).await;
+        // Create the waiter before the second ready check: if CCCD completes in
+        // this narrow interval, either the state check succeeds or Notify keeps
+        // the wake-up permit. This preserves the timeout diagnostic without a
+        // polling-sized delay after the actual TYPE:READY edge.
+        let ready_notification = inner.embedded_ble_listener_ready_notification.notified();
+        if embedded_ble_listener_capture_ready(inner) {
+            return Ok(());
+        }
+        tokio::select! {
+            _ = ready_notification => {}
+            _ = tokio::time::sleep(remaining) => {
+                let last_error = inner.embedded_ble_listener_last_error.lock().clone();
+                let suffix = last_error
+                    .as_deref()
+                    .map(|err| format!("; last error: {err}"))
+                    .unwrap_or_default();
+                return Err(format!(
+                    "Listener BLE notify subscription did not recover within {} ms after foreground probe{suffix}",
+                    timeout.as_millis()
+                ));
+            }
+        }
     }
 }
 
@@ -6916,6 +6993,9 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         inner
             .embedded_ble_listener_ready
             .store(true, Ordering::SeqCst);
+        inner
+            .embedded_ble_listener_ready_notification
+            .notify_waiters();
         clear_embedded_ble_listener_last_error(inner);
         let recovered = record_embedded_ble_notify_ready(inner);
         record_embedded_ble_session_actor_command(
@@ -9380,6 +9460,28 @@ mod tests {
     }
 
     #[test]
+    fn firmware_ota_recovery_preflight_bypass_is_generation_scoped() {
+        let coordinator = Coordinator::new();
+        coordinator
+            .inner
+            .embedded_ble_ota_recovery_generation
+            .store(7, Ordering::SeqCst);
+
+        assert!(!take_embedded_ble_ota_recovery_preflight_bypass(
+            &coordinator.inner,
+            6
+        ));
+        assert!(take_embedded_ble_ota_recovery_preflight_bypass(
+            &coordinator.inner,
+            7
+        ));
+        assert!(!take_embedded_ble_ota_recovery_preflight_bypass(
+            &coordinator.inner,
+            7
+        ));
+    }
+
+    #[test]
     fn device_key_idle_wake_joins_an_active_notify_recovery() {
         let coordinator = Coordinator::new();
         let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
@@ -9438,6 +9540,51 @@ mod tests {
             .is_none());
         assert!(!embedded_ble_listener_capture_active(&coordinator.inner));
         assert!(!embedded_ble_listener_capture_ready(&coordinator.inner));
+    }
+
+    #[tokio::test]
+    async fn firmware_ota_post_ready_wait_requires_notify_subscription_for_embedded_input() {
+        let coordinator = Coordinator::new();
+        force_embedded_ble_input_for_test(&coordinator);
+
+        let err = coordinator
+            .wait_for_embedded_ble_listener_ready_after_firmware_ota(Duration::from_millis(1))
+            .await
+            .expect_err("an OTA may not report Type ready before its notify subscription is ready");
+        assert!(err.contains("notify subscription did not recover"));
+
+        let cancel = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        mark_embedded_ble_listener_ready(&coordinator.inner, &cancel);
+        assert_eq!(
+            coordinator
+                .wait_for_embedded_ble_listener_ready_after_firmware_ota(Duration::from_millis(1))
+                .await
+                .expect("ready notify subscription should complete post-OTA recovery"),
+            true
+        );
+    }
+
+    #[tokio::test]
+    async fn firmware_ota_post_ready_wait_wakes_on_the_notify_ready_edge() {
+        let coordinator = Coordinator::new();
+        force_embedded_ble_input_for_test(&coordinator);
+        let inner = Arc::clone(&coordinator.inner);
+        let wait = tokio::spawn(async move {
+            wait_for_embedded_ble_listener_ready(&inner, Duration::from_secs(1)).await
+        });
+
+        tokio::task::yield_now().await;
+        let cancel = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        mark_embedded_ble_listener_ready(&coordinator.inner, &cancel);
+
+        let result = tokio::time::timeout(Duration::from_millis(50), wait)
+            .await
+            .expect("OTA wait must wake from notify-ready without the 100ms poll delay")
+            .expect("OTA wait task must complete");
+        assert!(
+            result.is_ok(),
+            "OTA wait must accept the notify-ready edge: {result:?}"
+        );
     }
 
     #[test]
@@ -9675,6 +9822,13 @@ mod tests {
 
     #[test]
     fn embedded_ble_background_retry_backs_off_for_transient_reopen_errors() {
+        assert_eq!(
+            next_embedded_ble_background_retry_delay(
+                "listener: BLE characteristic discovery returned status=GattCommunicationStatus(1)",
+                EMBEDDED_BLE_RETRY_BASE_DELAY,
+            ),
+            EMBEDDED_BLE_RETRY_LONG_DELAY
+        );
         assert_eq!(
             next_embedded_ble_background_retry_delay(
                 "listener: BLE characteristic discovery returned status=GattCommunicationStatus(3)",

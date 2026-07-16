@@ -4051,6 +4051,8 @@ pub struct FirmwareOtaBleTransferResult {
     transport: &'static str,
     transfer_elapsed_ms: u64,
     confirm_elapsed_ms: u64,
+    type_ready: bool,
+    type_ready_elapsed_ms: u64,
     total_elapsed_ms: u64,
 }
 
@@ -4064,7 +4066,9 @@ pub struct FirmwareOtaPackagePayload {
 
 const FIRMWARE_OTA_CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 const FIRMWARE_OTA_CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(1800);
+const FIRMWARE_OTA_FAST_SERVICE_CONFIRM_TIMEOUT: Duration = Duration::from_millis(1200);
 const FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
+const FIRMWARE_OTA_POST_READY_TIMEOUT: Duration = Duration::from_secs(8);
 const FIRMWARE_OTA_PACKAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 fn elapsed_ms_u64(started: Instant) -> u64 {
@@ -4134,13 +4138,41 @@ async fn confirm_listener_ota_v1_reachable(expected_version: &str) -> FirmwareOt
 
     loop {
         attempts += 1;
-        let snapshot = tauri::async_runtime::spawn_blocking(|| {
-            crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(
-                FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT,
-            )
-        })
-        .await
-        .ok();
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let fast_timeout = remaining.min(FIRMWARE_OTA_FAST_SERVICE_CONFIRM_TIMEOUT);
+        let fast_snapshot = if fast_timeout.is_zero() {
+            None
+        } else {
+            tauri::async_runtime::spawn_blocking(move || {
+                crate::embedded_ble::listener_ota_v1_service_reachable_snapshot(fast_timeout)
+            })
+            .await
+            .ok()
+        };
+        let snapshot = match fast_snapshot {
+            Some(snapshot)
+                if snapshot.connected
+                    && snapshot.capabilities.iter().any(|item| {
+                        item == crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY
+                    }) =>
+            {
+                Some(snapshot)
+            }
+            Some(snapshot) => {
+                log::info!(
+                    "[firmware-ota] fast OTA service confirmation did not reach the Listener; falling back to complete GATT probe detail={:?}",
+                    snapshot.detail
+                );
+                tauri::async_runtime::spawn_blocking(|| {
+                    crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(
+                        FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT,
+                    )
+                })
+                .await
+                .ok()
+            }
+            None => None,
+        };
         if let Some(snapshot) = snapshot {
             let reachable = snapshot.connected
                 && snapshot
@@ -6043,15 +6075,27 @@ pub async fn transfer_firmware_ota_ble(
         }
     };
     coord.end_firmware_ota_transfer();
-    coord.refresh_embedded_ble_listener();
     if transfer.is_ok() {
         observability.record_reconnect_confirmation(confirm.matched);
     }
 
     let stats = transfer?;
+    if !confirm.matched {
+        coord.refresh_embedded_ble_listener();
+        return Err(format!(
+            "Listener firmware version {} was not confirmed after OTA.",
+            version
+        ));
+    }
+    coord.refresh_embedded_ble_listener_after_firmware_ota();
+    let type_ready_started = Instant::now();
+    let type_ready = coord
+        .wait_for_embedded_ble_listener_ready_after_firmware_ota(FIRMWARE_OTA_POST_READY_TIMEOUT)
+        .await?;
+    let type_ready_elapsed_ms = elapsed_ms_u64(type_ready_started);
     let total_elapsed_ms = elapsed_ms_u64(total_started);
     log::info!(
-        "[firmware-ota] BLE OTA result transport={} bytes={} chunks={} transfer_ms={} confirm_ms={} confirm_attempts={} confirm_matched={} total_ms={}",
+        "[firmware-ota] BLE OTA result transport={} bytes={} chunks={} transfer_ms={} confirm_ms={} confirm_attempts={} confirm_matched={} type_ready={} type_ready_ms={} total_ms={} data_write_ms={} control_write_ms={} status_read_ms={}",
         stats.transport,
         stats.bytes_transferred,
         stats.chunks_sent,
@@ -6059,7 +6103,12 @@ pub async fn transfer_firmware_ota_ble(
         confirm.elapsed_ms,
         confirm.attempts,
         confirm.matched,
-        total_elapsed_ms
+        type_ready,
+        type_ready_elapsed_ms,
+        total_elapsed_ms,
+        stats.data_write_elapsed_ms,
+        stats.control_write_elapsed_ms,
+        stats.status_read_elapsed_ms
     );
     Ok(FirmwareOtaBleTransferResult {
         bytes_transferred: stats.bytes_transferred,
@@ -6068,6 +6117,8 @@ pub async fn transfer_firmware_ota_ble(
         transport: stats.transport,
         transfer_elapsed_ms,
         confirm_elapsed_ms: confirm.elapsed_ms,
+        type_ready,
+        type_ready_elapsed_ms,
         total_elapsed_ms,
     })
 }
@@ -8718,6 +8769,29 @@ mod tests {
             usb_powered: Some(true),
             detail: None,
         }
+    }
+
+    #[test]
+    fn firmware_ota_confirmation_uses_fast_service_probe_before_full_gatt_fallback() {
+        let source = normalized_commands_source();
+        let start = source
+            .find("async fn confirm_listener_ota_v1_reachable")
+            .expect("OTA confirmation helper should exist");
+        let end = source[start..]
+            .find("#[tauri::command]")
+            .map(|offset| start + offset)
+            .expect("OTA confirmation helper should end before the next command");
+        let body = &source[start..end];
+        let fast_probe = body
+            .find("listener_ota_v1_service_reachable_snapshot")
+            .expect("OTA confirmation must first use the service-only reachability probe");
+        let full_probe = body
+            .find("listener_ota_v1_gatt_probe_snapshot")
+            .expect("OTA confirmation must retain the complete GATT fallback");
+        assert!(
+            fast_probe < full_probe,
+            "the fast service-only probe must remain ahead of the complete GATT fallback"
+        );
     }
 
     #[test]

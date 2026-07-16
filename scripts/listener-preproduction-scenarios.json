@@ -26,6 +26,17 @@
       "plan_reference": "C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\docs\\plans\\listener-type-msi-upgrade-integrity-20260716_plan.md",
       "acceptance_evidence": "A bounded packaging/install transcript, the repaired MSI WiX major-upgrade setting, and matching release-versus-Program-Files SHA-256 identities."
     },
+    "listener_background_ui_observation_20260716": {
+      "status": "required",
+      "recorded_at": "2026-07-16T16:15:00+08:00",
+      "source": "Product-owner direction: 我退出了, 你可以在后台看ui吗, 有这种方式? 这样不会影响我电脑的时候, 如果可以的加一下进规则.",
+      "requirement": "Listener machine validation must observe installed UI in the background by default. It must not move the pointer, send keyboard input, steal focus, raise, reposition, resize, minimize, or otherwise disturb an operator's desktop. Prefer a process-scoped, loopback-only, ephemeral app-native UI observation bridge such as authenticated WebView2 CDP or an in-process render/state snapshot; collect installed-Type logs and structured UI state alongside any rendered artifact.",
+      "evidence_rules": "A background observation artifact must identify the installed Program Files executable identity, target process/window, capture mechanism, timestamp, and whether it was passive. A blank, black, stale, wrong-process, or state-mismatched image is explicit NO_GO evidence, not a visual pass. Passive machine observation can validate deterministic UI state, button availability, progress, and error attribution, but cannot stand in for a focused human judgment of subjective appearance, perceived smoothness, sound, or physical behavior.",
+      "interaction_boundary": "Foreground activation, pointer or keyboard injection, window positioning, or a visible prompt is allowed only when the product owner has explicitly authorized a current live acceptance/action boundary or when a canonical aiw operator-prompt requires human-timed interaction. Machine-only preflight, package selection, and diagnostics remain background operations whenever the product path permits it.",
+      "security_boundary": "Any UI inspection endpoint is disabled by default, bound to loopback only, opt-in for one bounded validation run, carries no production secrets in artifacts, and is closed when that run ends. It must never become a persistent remote-control surface.",
+      "plan_reference": "C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\docs\\plans\\listener-platform-accepted-behavior-audit-20260716\\1.1.json",
+      "current_evaluation": "The installed Program Files Type was started hidden for one bounded run with LISTENER_TYPE_WEBVIEW2_ADDITIONAL_BROWSER_ARGS=--remote-debugging-port=9222. Its process-scoped WebView2 target was reachable only at 127.0.0.1, and a read-only DOM snapshot of the main page confirmed ready/complete state, configured ASR, Listener BLE availability, zero dialogs, and control availability. The observer did not move the pointer, send keyboard input, activate/focus/reposition/resize/minimize a window, or read form values. The process was then restarted hidden without the argument; port 9222 was closed. Evidence: Listener-Type\\.cache\\validation\\listener-platform-accepted-behavior-audit-20260716\\ota\\background-ui-observation\\{cdp-targets.json,main-dom-state.json,observation-result.json}. The prior black external frame remains NO_GO diagnostic evidence. This validates passive deterministic state only, not subjective visual quality or continuous observation of an already-running normal process: the present CDP route needs a bounded background restart, so a future app-native restricted state snapshot is required before making it a zero-restart standard."
+    },
     "listener_core_capabilities_platform_contract_20260715": {
       "status": "required",
       "recorded_at": "2026-07-15T23:05:00+08:00",
@@ -47,6 +58,46 @@
       "product_boundary": "The active product is Listener. Work may cross Listener Firmware and Listener Type, and may use the owner-authorized Denzic-Platform core only for this Listener contract. A screenshot, command, or request with another or unclear product identity is not permission to modify that product: stop at routing and require an explicit product switch. Similar behavior or a reusable contract never authorizes copying or migrating an unaccepted Listener implementation into another product; each future adapter needs its own owner decision and acceptance evidence.",
       "product_boundary_confirmed_at": "2026-07-16T12:30:00+08:00",
       "product_boundary_confirmation": "Product-owner confirmation: 保持。 This confirms the fail-closed product routing rule after the Companion e-paper image was correctly excluded from Listener work."
+    },
+    "listener_platform_preserves_accepted_behavior_20260716": {
+      "status": "required",
+      "recorded_at": "2026-07-16T15:15:00+08:00",
+      "source": "Product-owner correction: 这个platform, 不能改以前验收好的功能, 你看看以前的功能是怎么描述的, 你就修成啥样, platform只是移植出来方便下次开发.",
+      "requirement": "Listener Platform is a versioned extraction of accepted product behavior, shared observability, and adapter boundaries. It is not permission to reinterpret, weaken, delay, hide, or replace an accepted user-visible flow. Before any platform repair changes behavior, the implementation must name the accepted scenario contract it preserves, reproduce that contract exactly, and preserve the prior regression evidence; new abstractions are allowed only when they leave the accepted semantics unchanged.",
+      "current_regression": {
+        "status": "active_root_cause_repair",
+        "accepted_baseline": [
+          "random-name-exact-cache-refresh: a changed BLE name and Type-controlled EC11 repair share the silent local cache-refresh/reconnect path, with no Windows user-pairing prompt.",
+          "ec11-double-repair-with-type: when Type is present, physical double-click clears this PC's stale cache then runs bounded automatic Type PairAsync recovery.",
+          "computer-switch-product-flow: if another Windows host completes pairing first, the old Type instance stops and must not loop or reclaim the bond."
+        ],
+        "root_cause": "Commit bd48022 introduced embedded_ble_requires_passive_local_reattach before recovery-advertisement probing. It classifies every EC11 hardware notice as passive, so the existing accepted Type-controlled cleanup/PairAsync path is unreachable and the installed Type waits for manual Windows pairing.",
+        "repair_contract": "Keep the current missing-native-HID/manual-deletion guard passive so stale GATT cannot suppress a Windows pairing surface. Separately, with Type owning the local pre-double-click Listener path, a real EC11 double-click must use the same silent local stale-cache cleanup and bounded PairAsync recovery semantics as rename. A competing host that completes secure pairing first is the only condition that makes this Type stop without retry/reclaim; merely observing EC11 recovery advertising is not that condition.",
+        "required_validation": [
+          "Focused source regression proves the EC11 notice reaches Type-controlled cache cleanup and no-user-prompt PairAsync before any passive wait; the manual-delete/missing-current-pairing path remains passive.",
+          "Installed Program Files Type plus short locked COM3 evidence proves physical EC11 double-click causes one bounded local Type PairAsync recovery, fresh encrypted bond, notify/TYPE:READY, and no Windows user pairing prompt on this host.",
+          "The same evidence classifies a competing-host-first result as passive/no-reclaim rather than retrying PairAsync."
+        ]
+      },
+      "four_capability_acceptance_preservation_audit_20260716": {
+        "status": "active",
+        "source": "Product-owner direction: 是的, 还有ota 日志 蓝牙 录音这四个, 都检查一下.",
+        "execution_order": [
+          "OTA",
+          "Recording",
+          "Bluetooth",
+          "Logs"
+        ],
+        "execution_order_source": "Product-owner correction: 日志最后, 录音第二.",
+        "scope": [
+          "Bluetooth: compare current recovery, rename, local automatic PairAsync, cross-host-first yielding, GATT/notify readiness, and physical EC11 timing against accepted scenario contracts.",
+          "Recording: compare captured-PCM input, fast EC11 dispatch, BLE transport continuity, preview versus authoritative final, completion behavior, and internal-versus-provider attribution against accepted recording contracts.",
+          "OTA: compare machine pre-upgrade, transfer, version confirmation, post-OTA Type-ready recovery, and installed-MSI/root-package boundaries against accepted OTA contracts.",
+          "Logs: compare the shared structured version/correlation, causal lifecycle, timing, and failure-attribution contract across firmware, installed Type, Windows, and evidence; logs must observe the product without delaying, masking, or changing its accepted behavior."
+        ],
+        "method": "For each capability, read the accepted registry description and named machine/human evidence before reading current adapter/platform code. Produce one of PASS_PRESERVED, ACTIVE_ROOT_CAUSE_REPAIR, or explicit NO_GO with direct evidence. Do not change a behavior merely to make the platform uniform; any repair reproduces the accepted behavior word-for-word at the product boundary.",
+        "completion_rule": "The audit closes only after all four capability records have a current comparison artifact and every detected drift has either a focused repair with validation or an explicit owner-approved deferral. It does not replace the separate final Listener release gate or root-package rebuild."
+      }
     },
     "ble_audio_type_link_machine_acceptance_20260715": {
       "status": "accepted_by_explicit_owner_machine_authorization",
@@ -412,21 +463,98 @@
       "related_scenario_id": "ota-wireless-smoke",
       "machine_preflight_evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-preupgrade-current-20260715/current-head-6b5a2f2/machine-validation-summary.json",
       "machine_transfer_acceptance": {
-        "status": "accepted",
+        "status": "historical_baseline_superseded_by_total_duration_gate",
         "accepted_at": "2026-07-15T10:58:00+08:00",
         "authorization": "Product-owner direction: 预升级不应该是人工做的，是机器做的。",
         "installed_type": "C:\\Program Files\\Listener Type\\listener-type.exe",
         "package_scope": "current non-release staged package only; the historical Denzic-root OTA ZIP was not used or replaced",
         "result": "Installed Type transferred 966576 bytes over denzic_ota_v1 in 52458 ms, confirmed version 1.0.2 in 68256 ms, then the device booted ota_1 with pending_verify=0, safe_mode=0, crash_count=0, and restored the Type heartbeat.",
         "limits": {
-          "max_transfer_ms": 60000,
-          "max_total_ms": 90000,
+          "historical_max_transfer_ms": 60000,
+          "historical_max_total_ms": 90000,
           "required_transport": "denzic_ota_v1",
           "required_version_confirmation": true,
-          "required_post_ota_state": "ota_1 active, pending_verify=0, safe_mode=0, Type heartbeat restored"
+          "required_post_ota_state": "the running OTA slot equals the boot target (ota_0 or ota_1), pending_verify=0, state=2, full ready_mask, and Type heartbeat restored"
         },
         "root_cause_regression_command": "node .\\scripts\\check-ota-transfer-speed-log.mjs --log <installed-Type-ota.log> --output-json <ota-speed.json>; validate the fresh bounded firmware serial transcript for ota_1/ota_1, pending_verify=0, safe_mode=0, and TYPE:HB.",
         "evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-wireless-20260715/machine-transfer-current-20260715/machine-validation-summary.json"
+      },
+      "ota_total_duration_gate_20260716": {
+        "status": "active",
+        "recorded_at": "2026-07-16T16:20:00+08:00",
+        "source": "Product-owner correction: 是总时长一分钟左右；传输不超过 60 秒、总时长不超过 90 秒 这个不对，改一下。 Follow-up: 目标时间不要是固定的，应该是根据这个固件包的大小去改变；反正就是现在大概是一分钟就好了。 Follow-up: 下次的时间给分阶段时间，不要总时间；传输加其它两部分，剩余部分优化进 4 秒内。 Follow-up: 传输按当前算法从约 18 kB/s 优化到 20 kB/s。 Follow-up: current 100-packet sync and status read cadence is required for the visible progress bar and offset recovery; do not reduce it to improve throughput.",
+        "requirement": "The OTA transaction must record each causal stage, not an opaque total. The pre-transfer GATT handoff must be <=1500 ms. Payload transport budget scales with actual payload bytes: target ceil(bytes / 20 bytes per ms), with a strict no-regression acceptance ceiling ceil(bytes / 18 bytes per ms). The 100-packet synchronization and status-read cadence is a required visible progress and offset-recovery contract and must not be reduced for throughput. Version confirmation and Type-ready recovery are always reported separately and must together complete in <=4000 ms. The raw command total is trace-only and is not a product gate or human-facing metric. A separately fast payload transfer does not compensate for a slow handoff or post-transfer recovery.",
+        "supersedes": "ota_preupgrade_machine_gate.machine_transfer_acceptance.limits max_transfer_ms=60000 plus max_total_ms=90000",
+        "historical_disposition": "The July 15 68256 ms result is within the current numeric ceiling, but its timer ended at version confirmation before TYPE:READY was measured. It remains trace evidence only and cannot satisfy the current end-to-end gate.",
+        "required_evidence": [
+          "Installed Program Files Type OTA result with denzic_ota_v1, versionConfirmed=true, actual transferred bytes, calculated transfer-stage budgets, and measured confirmation and Type-ready stages.",
+          "Short locked firmware serial transcript proving the running OTA slot equals the boot target, pending_verify=0, state=2, and the full readiness mask.",
+          "Installed Type heartbeat/ready restoration correlated to the same OTA attempt."
+        ],
+        "enforcement": "The reusable OTA timing checker must derive and report the 20 bytes/ms payload target and 18 bytes/ms no-regression ceiling from the actual transferred bytes, derive the pre-transfer handoff separately from the same transaction trace and enforce <=1500 ms, report confirmation and Type-ready durations separately, enforce their combined <=4000 ms recovery budget, and fail any latest complete-transfer result that exceeds any stage. The 100-packet sync/status cadence is preserved as a required progress and recovery behavior. The final root-package release gate inherits this requirement.",
+        "current_machine_no_go_20260716": {
+          "status": "active_root_cause_repair",
+          "installed_type_sha256": "F902E172B90081E43574865E8CB21B3590C0FCDF20F1D4B31E280097F374D7CC",
+          "package": "ota-type-ready-20260712, firmware_ota.bin=962624 bytes, sha256=6aca80067790df9c36ff2f3a2a45448a2d13c6a9cb866d32c75785d23f185ec8",
+          "measured_stages_ms": {
+            "transfer": 54219,
+            "firmware_ota_service_confirmation": 1890,
+            "type_ready": 3335,
+            "confirmation_plus_type_ready": 5225,
+            "raw_total_trace_only": 60721,
+            "data_write": 49110,
+            "control_write": 2144,
+            "status_read": 846
+          },
+          "result": "NO_GO: transfer exceeds the 53480 ms package-scaled 18 bytes/ms ceiling by 739 ms, and confirmation plus Type-ready exceeds the 4000 ms recovery budget by 1225 ms. OTA service confirmation, same-version result, 21 required status reads, and the post-OTA firmware state all succeeded.",
+          "observed_cause": "The transfer action includes 1746 ms beyond the Denzic data-plane elapsed time: capture handoff/release, a fixed 500 ms reconnect settle after the exclusive capture guard has already returned, and OTA service discovery. Firmware audit proves this is not device-side audio startup: audio GATT registers before OTA GATT, and the OTA boot transcript reaches audio_ready before the host attempts the failed audio reopen. After the fast OTA-service probe succeeded, the first trusted audio-notify open returned GattCommunicationStatus(1). Windows defines that status as Unreachable (temporarily no device communication), but Listener Type only classified status 3 as a retryable notify-open condition. The status 1 error therefore escaped the existing short retry loop, entered generic background recovery, waited 2000 ms, and emitted a recovery failure before the unchanged paired address succeeded. This is a host GATT readiness classification defect, not a missing pairing, physical wake, or firmware rollback.",
+          "repair_hypothesis": "Replace the unconditional post-handoff settle with readiness-driven preparation using the already verified current Listener address, falling back to normal service discovery only when necessary. Classify Windows GattCommunicationStatus(1) as the same transient notify-open/reopen condition it semantically is, so the existing bounded retry loop handles it before generic recovery. Preserve the 100-packet status cadence and all generic pairing, capsule, low-power, rename, and root-release behavior.",
+          "cold_start_machine_no_go_20260716": {
+            "status": "NO_GO",
+            "context": "The installed hidden Type was restarted for bounded loopback-only observation, then the OTA command was invoked before its background notify subscription reached TYPE:READY. This is a real cold-start interaction path, not an OTA pass.",
+            "measured_stages_ms": {
+              "transfer": 54992,
+              "firmware_ota_service_confirmation": 1862,
+              "type_ready": 1989,
+              "confirmation_plus_type_ready": 3851,
+              "raw_total_trace_only": 62490,
+              "denzic_transfer": 53039,
+              "data_write": 49932,
+              "control_write": 1995,
+              "status_read": 729
+            },
+            "finding": "The direct handoff opened the verified Listener address on its first attempt, and the post-OTA Status(1) condition recovered through the new 250 ms notify-open retry with no generic 2000 ms backoff. The post-transfer recovery budget passed, but transfer still exceeded the package-scaled 53480 ms ceiling because startup capture cancellation and fresh GATT handoff consumed about 1953 ms before the Denzic transfer began.",
+            "firmware_post_state": "running=ota_1, boot=ota_1, pending_verify=0, ready_mask=0x0000000f, audio_ready, ota_ready, diagnostic_ready",
+            "evidence": [
+              ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-root-cause-retest/post-ota-status.log",
+              "%LOCALAPPDATA%\\Listener Type\\Logs\\listener-type.log lines 2026-07-16T08:58:43Z through 08:59:45Z"
+            ],
+            "next_machine_step": "Run exactly one second staged OTA only after installed Type has recorded TYPE:READY, while preserving the separate cold-start NO_GO for a later readiness-contract repair. Do not declare the warm result to cover cold-start behavior."
+          },
+          "current_machine_stage_pass_20260716": {
+            "status": "machine_pass_pending_cold_start_repair",
+            "installed_type_sha256": "6EE3D1B13FB97373606CA1A727FEF122F47141DD82429A728183AA60F7FF2C1D",
+            "firmware_source_commit": "f7988bd870fd99633e69b76475fcb40aa7ed575b",
+            "package": "current non-release staged firmware_ota.bin=974528 bytes, sha256=d8cbe754a56f907cef44049dabb137e7406f72ba7dc2d76c92b313856468bac1",
+            "measured_stages_ms": {
+              "pretransfer_handoff": 1445,
+              "payload_transport": 53322,
+              "firmware_ota_service_confirmation": 1866,
+              "type_ready": 1874,
+              "confirmation_plus_type_ready": 3740,
+              "raw_total_trace_only": 58728,
+              "status_reads": 21
+            },
+            "result": "PASS for the current warm installed-Type path: all four stage limits pass, 21 required status reads and 22 progress events were observed, and serial proves running=ota_0, boot=ota_0, pending_verify=0, state=2, ready_mask=0x0000000f, audio_ready, ota_ready, and TYPE:HB. Slot parity replaces the invalid historical ota_1-only assertion.",
+            "remaining_scope": "This does not erase cold_start_machine_no_go_20260716. The OTA item remains active until an explicit pre-transfer readiness contract either prevents or independently validates cold invocation."
+          },
+          "evidence": [
+            ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-current/installed-ui-ota-transfer-result.json",
+            ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-current/installed-type-ota-stage.log",
+            ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-current/ota-stage-metric.json",
+            ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-current/post-ota-status.log"
+          ]
+        }
       }
     },
     "ota_preupgrade_current_build_refresh": {

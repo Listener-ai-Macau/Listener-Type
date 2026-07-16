@@ -104,24 +104,28 @@
       "validation_command": "cargo test --manifest-path .\\src-tauri\\Cargo.toml type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml type_recovery_promotes_only_trusted_cached_addresses --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml embedded_ble_notify_advertisement_evidence_skips_only_the_duplicate_scan --lib; cargo test --manifest-path .\\src-tauri\\Cargo.toml ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery --lib; pwsh -NoProfile -File .\\scripts\\check-ec11-type-recovery-randomized.ps1 -Port COM3 -Iterations 5 -MaxTriggerToTypeReadyMs 10000 -OutputJson <artifact>.json. The installed C:\\Program Files\\Listener Type\\listener-type.exe must be running; every randomized generated EC11 double-click sample must reach firmware TYPE:READY <=10000 ms, reach background listener notify ready <=10000 ms from the Type pre-reset notice, and prove both firmware pre-reset notice send and Type pre-reset notice receipt. This is not a physical GPIO edge measurement. Preserve Type-observed direct PairAsync, no duplicate advertisement scan, no paired link check, GATT reachability, notify enable, Type heartbeat ready, and single-click start/stop without double-click."
     },
     "ota_transfer_speed": {
-      "accepted": true,
-      "status": "accepted_machine_ota_speed_after_type_ota_active_hint",
-      "target_max_transfer_ms": 60000,
-      "target_max_total_ms": 90000,
+      "accepted": false,
+      "status": "pending_end_to_end_type_ready_revalidation",
+      "target_transfer_bytes_per_ms": 20,
+      "acceptance_min_transfer_bytes_per_ms": 18,
+      "acceptance_max_post_transfer_recovery_ms": 4000,
+      "reference_transfer_bytes": 962624,
+      "reference_target_transfer_ms": 48132,
+      "reference_acceptance_max_transfer_ms": 53480,
       "min_transfer_bytes": 900000,
       "evidence": ".cache/validation/ota-speed-regression-20260710/low-power-type-ota-active-hint-speed-check.json",
       "type_log_evidence": ".cache/validation/ota-speed-regression-20260710/type-log-after-low-power-ota-type-ota-active-hint.txt",
       "firmware_post_status_evidence": "../Listener-Firmware/.cache/validation/ota-speed-regression-20260710/post-low-power-type-ota-active-hint-serial-status.txt",
-      "measured_transfer_ms": 57672,
-      "measured_total_ms": 75326,
-      "measured_bytes": 960656,
+      "historical_measured_transfer_ms": 57672,
+      "historical_measured_total_ms_to_version_confirmation": 75326,
+      "historical_measured_bytes": 960656,
       "historical_machine_pass_evidence": ".cache/validation/ota-speed-regression-20260710/active-link-speed-check.json",
       "low_power_failed_evidence": ".cache/validation/ota-speed-regression-20260710/low-power-ota-fail-speed-check.json",
       "pre_type_ota_hint_failed_evidence": ".cache/validation/ota-speed-regression-20260710/low-power-deferred-fix-speed-check.json",
-      "root_cause": "low-power OTA was slow because OTA begin active-link recovery happened after the measured transfer path and installed Type background heartbeat could contend for BLE; Type now holds a Windows named OTA mutex, sends TYPE:OTA before the transfer timer, and firmware requests active BLE connection parameters from that command.",
+      "root_cause": "The previous metric ended after the OTA GATT version probe and then only requested background-listener refresh, so it did not include the causal TYPE:READY recovery that makes Listener usable again. Low-power active-link handling remains relevant to transfer speed, but it cannot certify user-visible completion by itself.",
       "failed_regression_evidence": ".cache/validation/preproduction-human-review-ota-wireless-20260710-2208/preproduction-human-review-summary.json",
       "historical_pass_evidence": ".cache/validation/preproduction-human-review-visible-20260707-143954/preproduction-human-review-summary.json",
-      "validation_command": "node scripts/check-ota-transfer-speed-log.mjs --log .cache/validation/ota-speed-regression-20260710/type-log-after-low-power-ota-type-ota-active-hint.txt --output-json .cache/validation/ota-speed-regression-20260710/low-power-type-ota-active-hint-speed-check.json --max-transfer-ms 60000 --max-total-ms 90000 --min-bytes 900000; node scripts/check-ota-transfer-speed-log.test.mjs; npm run check:performance-baselines"
+      "validation_command": "node scripts/check-ota-transfer-speed-log.mjs --log <fresh-installed-Type-ota.log> --output-json <ota-speed.json> --target-transfer-bytes-per-ms 20 --acceptance-min-transfer-bytes-per-ms 18 --acceptance-max-post-transfer-recovery-ms 4000 --min-bytes 900000; node scripts/check-ota-transfer-speed-log.test.mjs; npm run check:performance-baselines"
     }
   }
 }
