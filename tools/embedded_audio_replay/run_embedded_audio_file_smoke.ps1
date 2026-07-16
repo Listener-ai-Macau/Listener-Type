@@ -369,6 +369,11 @@ try {
     if ($VerifyInsertion) {
         $insertionTargetPath = Join-Path $OutDir "embedded-file-smoke-$RunStamp.target.txt"
         $insertionTarget = Start-InsertionTarget -Path $insertionTargetPath
+        # The app captures its insertion target when the command begins.
+        if (-not (Focus-ProcessWindow -Process $insertionTarget.Process)) {
+            throw "Could not focus the insertion target before starting the embedded audio command"
+        }
+        Start-Sleep -Milliseconds 150
     }
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -382,11 +387,6 @@ try {
     $psi.EnvironmentVariables["LISTENER_TYPE_DISABLE_BACKGROUND_BLE"] = "1"
     $psi.EnvironmentVariables["LISTENER_TYPE_FORCE_RAW_OUTPUT"] = "1"
     $process = [System.Diagnostics.Process]::Start($psi)
-
-    if ($VerifyInsertion -and $insertionTarget) {
-        [void](Focus-ProcessWindow -Process $insertionTarget.Process)
-        Start-Sleep -Milliseconds 150
-    }
 
     $doneDeadline = (Get-Date).AddMilliseconds($TimeoutMs + 10000)
     $doneMatch = $null
