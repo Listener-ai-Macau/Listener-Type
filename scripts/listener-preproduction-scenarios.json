@@ -60,8 +60,9 @@
       "total_review_effect": "Canonical Step 16/20 is machine-accepted and the total-review cursor advances to Step 17 LED independence. This is not represented as a human visual acceptance."
     },
     "ble_platform_explicit_local_reattach_20260715": {
-      "status": "machine_accepted_explicit_owner_authorization_physical_ec11_pending",
+      "status": "accepted",
       "recorded_at": "2026-07-15T23:10:00+08:00",
+      "accepted_at": "2026-07-16T14:52:00+08:00",
       "source": "Current Step 17 preflight after the owner returned Listener to this Windows host: COM3 reported ble=connected with low_power_disabled=1 and no Type-ready LED. The installed Program Files Type process was still alive but its log had stopped the background listener after cross-host recovery arbitration.",
       "observed_evidence": [
         ".cache/validation/preproduction-step-17-led-independent-contract-20260715-2258/current-led-status-com3.log",
@@ -114,7 +115,35 @@
         "evidence": ".cache/validation/ble-platform-local-reattach-20260716/installed-native-hid-passive-reattach-machine-evidence.json",
         "acceptance_basis": "The product owner explicitly authorized machine closure for this simple Listener BLE issue; this record is machine acceptance and does not invent a human visual result."
       },
-      "total_review_effect": "The passive local reattach and Type-ready prerequisite for Step 17 is machine-accepted. Keep any remaining visual LED review and the separate physical EC11 press-edge gate independent."
+      "physical_ec11_local_repair_popup_regression_20260716": {
+        "status": "accepted",
+        "recorded_at": "2026-07-16T16:00:00+08:00",
+        "accepted_at": "2026-07-16T14:52:00+08:00",
+        "source": "Focused local re-pair operator result: selected=失败; note=没有弹窗出来让我连接, 删除要删两次才能删的掉. Follow-up diagnostic result: selected=失败; note=双击电脑没有出现弹窗.",
+        "observed_evidence": {
+          "operator": ".cache/validation/listener-core-platform-contract-20260715/local-repair-physical-20260716/operator-prompt-result.txt; ec11-double-recovery-prompt-note.txt",
+          "physical_serial": ".cache/validation/listener-core-platform-contract-20260715/local-repair-physical-20260716/ec11-double-recovery-serial.log",
+          "finding": "A real EC11 double-click was accepted, cleared the bond, and opened one 120-second 30ms Swift Pair recovery advertisement. Immediately afterward, the installed Type background listener reconnected an unauthenticated stale GATT session and sent TYPE:HB/TYPE:READY; firmware correctly rejected Type audio readiness before a secure bond, but the stale host connection suppressed the expected Windows pairing surface. Before the action, Windows exposed a current and a stale Listener identity; both disappeared only after the operator deleted twice."
+        },
+        "root_cause": "The background listener ran its native-HID/manual-pairing preflight only once at startup. A later EC11 recovery link loss, and a later Type restart with no current HID, both fell into generic persisted-GATT retry even when Windows had no current Listener HID and no paired Listener. That stale unbonded GATT path can occupy the recovery window and hide the host pairing experience.",
+        "repair_contract": "Whenever a current native Windows Listener HID is confirmed absent and the current pairing query has zero paired Listener devices, Type must release the persisted GATT path and enter the existing passive local-reattach monitor before any stale retry. It must wait for fresh local pairing plus HID evidence before resuming. This applies both after a link-loss retry and at installed-Type startup. It must not call PairAsync, UnpairAsync, recovery-control GATT, or reclaim an external host from this missing-pairing path. If native HID inspection itself fails, preserve the current path rather than guessing that the pairing is absent.",
+        "required_validation": [
+          "Focused Rust regression covers the missing-current-pairing predicate, link-loss ordering before generic stale cleanup, startup preflight before persisted GATT setup, and the passive monitor's no-PairAsync/no-Unpair/no-recovery-control boundary.",
+          "The same-version MSI upgrade script installs the repaired Program Files executable and records its payload identity.",
+          "A short locked COM3 capture during one real EC11 double-click shows recovery advertising while the installed Type log shows missing-pairing hold instead of stale GATT heartbeat/retry.",
+          "After the repair, inspect the Windows pairing surface under the owner-authorized machine-screen access. Record any BthQuickPair notification separately from the deterministic native Add-device route; do not claim a host-controlled toast without Windows evidence."
+        ],
+        "acceptance_evidence": {
+          "operator": ".cache/validation/listener-core-platform-contract-20260715/local-repair-physical-20260716/retest-ec11-local-pairing-surface-operator-result.txt",
+          "machine": ".cache/validation/listener-core-platform-contract-20260715/local-repair-physical-20260716/retest-ec11-local-pairing-surface.json",
+          "serial": ".cache/validation/listener-core-platform-contract-20260715/local-repair-physical-20260716/retest-ec11-local-pairing-surface-com3.log",
+          "installed_type": ".cache/validation/listener-core-platform-contract-20260715/local-repair-physical-20260716/retest-ec11-local-pairing-surface-type-delta.log",
+          "summary": "Focused Chinese 1/1 operator retest selected=通过 with note=可以了, 为啥之前不行. The real EC11 recovery reached 30ms Swift Pair advertising in 160ms, Windows connected and encrypted/bonded, and installed Type resumed only after new native HID F31447B6B63E plus a fresh GATT check."
+        },
+        "permanent_root_cause_guard": "coordinator::tests::embedded_ble_lost_native_pairing_pauses_before_stale_gatt_retry. It asserts missing native HID/pairing is held before generic stale cleanup, terminates the active retry loop, starts passive local reattach, and contains no PairAsync, UnpairAsync, or recovery-control GATT call. Related passive-local-reattach tests protect fresh-HID-only resume.",
+        "human_retest": "Completed. Any later re-review is required only when a change touches this BLE lifecycle risk surface or new physical evidence shows regression."
+      },
+      "total_review_effect": "The local EC11 pairing-surface regression is now focused-human accepted with installed-Type and locked physical evidence. Keep visual LED review and the separate physical EC11 press-edge gate independent; do not re-open this accepted behavior without a change on its BLE lifecycle risk surface or new regression evidence."
     },
     "ble_recovery_timing_attribution_20260715": {
       "status": "active_root_cause_repair",

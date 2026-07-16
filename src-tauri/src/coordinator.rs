@@ -5318,7 +5318,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 log::info!(
                     "[embedded-ble] device-key Idle wake bypassed slow manual-delete preflight generation={generation}; physical HID input proves the local pairing remains installed"
                 );
-            } else if maybe_hold_embedded_ble_startup_after_manual_windows_unpair(&inner).await {
+            } else if maybe_hold_embedded_ble_startup_without_current_native_pairing(&inner).await {
                 continue;
             }
             // The PnP preflight runs in a blocking task. A device-key wake may have
@@ -5376,6 +5376,12 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 } else {
                     record_embedded_ble_listener_last_error(&inner, &err);
                     record_embedded_ble_recovery_failure(&inner, &err);
+                    if maybe_hold_embedded_ble_after_lost_native_pairing(&inner, &err).await {
+                        log::info!(
+                            "[embedded-ble] background listener stopped after current native Windows pairing disappeared during link recovery"
+                        );
+                        break;
+                    }
                     let stale_cleanup_outcome =
                         maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                             &inner,
@@ -6345,7 +6351,118 @@ async fn hold_embedded_ble_for_manual_windows_unpair(inner: &Arc<Inner>, expecte
     );
 }
 
-async fn maybe_hold_embedded_ble_startup_after_manual_windows_unpair(inner: &Arc<Inner>) -> bool {
+fn embedded_ble_lost_current_native_pairing_should_pause(
+    err: &str,
+    native_hid_addresses: &[u64],
+    pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
+) -> bool {
+    is_embedded_ble_link_loss_error(err)
+        && embedded_ble_current_native_pairing_is_missing(native_hid_addresses, pairing)
+}
+
+fn embedded_ble_current_native_pairing_is_missing(
+    native_hid_addresses: &[u64],
+    pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
+) -> bool {
+    native_hid_addresses.is_empty() && pairing.already_paired_devices == 0
+}
+
+fn hold_embedded_ble_for_missing_native_pairing(inner: &Arc<Inner>, reason: &str) {
+    let expected_ble_name = inner.prefs.get().device_ble_name;
+    let hold_generation = hold_embedded_ble_listener_for_pairing_confirmation(
+        inner,
+        EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON,
+    );
+    log::warn!(
+        "[embedded-ble] current native Windows Listener HID is absent; releasing stale GATT and waiting for explicit local re-pair hold_generation={hold_generation} target={expected_ble_name:?} reason={}",
+        embedded_ble_log_preview(reason),
+    );
+    {
+        let mut wake = inner.embedded_ble_wake_recovery.lock();
+        wake.status = EmbeddedBleWakeRecoveryStatus::NeedsWakeKey;
+        wake.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Cancelled;
+        wake.recent_disconnect_reason = Some(format!(
+            "current native Windows Listener HID disappeared; waiting for explicit local re-pair target={expected_ble_name}"
+        ));
+        wake.user_guidance = format!(
+            "Listener 正在等待 Windows 重新配对 {expected_ble_name}。Type 已释放旧蓝牙连接，不会自动抢回设备。"
+        );
+    }
+    emit_embedded_ble_recovery_capsule(
+        inner,
+        "reconnecting",
+        EmbeddedBleRecoveryCapsuleMessage::WaitingManualPairing,
+        Some(4200),
+    );
+    start_embedded_ble_passive_local_reattach_watch(
+        inner,
+        expected_ble_name,
+        EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON,
+    );
+}
+
+async fn maybe_hold_embedded_ble_after_lost_native_pairing(inner: &Arc<Inner>, err: &str) -> bool {
+    if !is_embedded_ble_link_loss_error(err)
+        || embedded_ble_type_pairasync_startup_guard_active(inner)
+    {
+        return false;
+    }
+    let native_hid_addresses = match async_runtime::spawn_blocking(|| {
+        crate::embedded_ble::native_windows_hid_pairing_addresses()
+    })
+    .await
+    {
+        Ok(Ok(addresses)) => addresses,
+        Ok(Err(query_err)) => {
+            log::debug!(
+                "[embedded-ble] current native Windows HID check unavailable during link recovery: {query_err}"
+            );
+            return false;
+        }
+        Err(query_err) => {
+            log::debug!(
+                "[embedded-ble] current native Windows HID task failed during link recovery: {query_err}"
+            );
+            return false;
+        }
+    };
+    if !native_hid_addresses.is_empty() {
+        return false;
+    }
+
+    let expected_ble_name = inner.prefs.get().device_ble_name;
+    let expected_for_query = expected_ble_name.clone();
+    let pairing = match async_runtime::spawn_blocking(move || {
+        crate::embedded_ble::query_listener_pairing(Some(&expected_for_query))
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(query_err) => {
+            log::debug!(
+                "[embedded-ble] Windows pairing query task failed during link recovery: {query_err}"
+            );
+            return false;
+        }
+    };
+    if !embedded_ble_lost_current_native_pairing_should_pause(err, &native_hid_addresses, &pairing)
+    {
+        return false;
+    }
+
+    log::info!(
+        "[embedded-ble] link recovery found no current native HID or paired Listener status={:?} matched={} already_paired={}; suppressing stale GATT retry",
+        pairing.status,
+        pairing.matched_devices,
+        pairing.already_paired_devices,
+    );
+    hold_embedded_ble_for_missing_native_pairing(inner, err);
+    true
+}
+
+async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
+    inner: &Arc<Inner>,
+) -> bool {
     if embedded_ble_type_pairasync_startup_guard_active(inner) {
         log::info!(
             "[embedded-ble] startup manual-delete pairing preflight deferred while Type PairAsync services rebuild"
@@ -6371,12 +6488,18 @@ async fn maybe_hold_embedded_ble_startup_after_manual_windows_unpair(inner: &Arc
             return false;
         }
         Ok(Ok(_)) => {}
-        Ok(Err(err)) => log::warn!(
-            "[embedded-ble] startup native Windows HID pairing evidence unavailable; checking manual-delete state: {err}"
-        ),
-        Err(err) => log::warn!(
-            "[embedded-ble] startup native Windows HID pairing evidence task failed; checking manual-delete state: {err}"
-        ),
+        Ok(Err(err)) => {
+            log::warn!(
+                "[embedded-ble] startup native Windows HID pairing evidence unavailable; preserving persisted GATT path: {err}"
+            );
+            return false;
+        }
+        Err(err) => {
+            log::warn!(
+                "[embedded-ble] startup native Windows HID pairing evidence task failed; preserving persisted GATT path: {err}"
+            );
+            return false;
+        }
     }
     let expected_for_query = expected_ble_name.clone();
     let query = async_runtime::spawn_blocking(move || {
@@ -6401,13 +6524,16 @@ async fn maybe_hold_embedded_ble_startup_after_manual_windows_unpair(inner: &Arc
         pairing.open_bluetooth_settings,
         started_at.elapsed().as_millis(),
     );
-    if !is_explicit_manual_windows_delete_pairing_state(&pairing) {
+    if !embedded_ble_current_native_pairing_is_missing(&[], &pairing) {
         return false;
     }
     log::warn!(
-        "[embedded-ble] startup manual-delete pairing preflight blocked persisted GATT reopen target={expected_ble_name:?}"
+        "[embedded-ble] startup current native Windows pairing is absent; blocking persisted GATT reopen target={expected_ble_name:?}"
     );
-    hold_embedded_ble_for_manual_windows_unpair(inner, &expected_ble_name).await;
+    hold_embedded_ble_for_missing_native_pairing(
+        inner,
+        "startup found no current native Windows Listener HID or paired device",
+    );
     true
 }
 
@@ -9765,8 +9891,8 @@ mod tests {
 
         let source = include_str!("coordinator.rs");
         let start = source
-            .find("async fn maybe_hold_embedded_ble_startup_after_manual_windows_unpair")
-            .expect("startup manual-delete preflight helper should exist");
+            .find("async fn maybe_hold_embedded_ble_startup_without_current_native_pairing")
+            .expect("startup current-native-pairing preflight helper should exist");
         let end = source[start..]
             .find("fn embedded_ble_background_pairasync_is_authorized")
             .map(|offset| start + offset)
@@ -10212,7 +10338,7 @@ mod tests {
             .find("async fn hold_embedded_ble_for_manual_windows_unpair")
             .expect("manual Windows removal should have one shared hold helper");
         let manual_helper_end = source[manual_helper_start..]
-            .find("async fn maybe_hold_embedded_ble_startup_after_manual_windows_unpair")
+            .find("async fn maybe_hold_embedded_ble_startup_without_current_native_pairing")
             .map(|offset| manual_helper_start + offset)
             .expect("manual Windows hold helper boundary should exist");
         let manual_helper = &source[manual_helper_start..manual_helper_end];
@@ -10316,8 +10442,8 @@ mod tests {
             "manual removal must hold before both direct GATT retry and Type automatic PairAsync recovery"
         );
         let startup_helper_start = source
-            .find("async fn maybe_hold_embedded_ble_startup_after_manual_windows_unpair")
-            .expect("startup must preflight explicit manual Windows removal");
+            .find("async fn maybe_hold_embedded_ble_startup_without_current_native_pairing")
+            .expect("startup must preflight a missing current Windows Listener pairing");
         let startup_helper_end = source[startup_helper_start..]
             .find("fn embedded_ble_background_pairasync_is_authorized")
             .map(|offset| startup_helper_start + offset)
@@ -10325,9 +10451,9 @@ mod tests {
         let startup_helper = &source[startup_helper_start..startup_helper_end];
         assert!(
             startup_helper.contains("query_listener_pairing")
-                && startup_helper.contains("is_explicit_manual_windows_delete_pairing_state")
-                && startup_helper.contains("hold_embedded_ble_for_manual_windows_unpair"),
-            "startup must hold an explicitly manually removed Windows device before persisted GATT can reopen"
+                && startup_helper.contains("embedded_ble_current_native_pairing_is_missing")
+                && startup_helper.contains("hold_embedded_ble_for_missing_native_pairing"),
+            "startup must hold a missing current Windows device before persisted GATT can reopen"
         );
         let native_hid_index = startup_helper
             .find("native_windows_hid_pairing_addresses")
@@ -10357,7 +10483,7 @@ mod tests {
             .expect("background listener loop boundary should exist");
         let listener_loop = &source[listener_loop_start..listener_loop_end];
         assert!(
-            listener_loop.find("maybe_hold_embedded_ble_startup_after_manual_windows_unpair")
+            listener_loop.find("maybe_hold_embedded_ble_startup_without_current_native_pairing")
                 < listener_loop.find("install_embedded_ble_listener_cancel"),
             "startup manual-delete preflight must run before persisted GATT/notify setup"
         );
@@ -10739,6 +10865,85 @@ mod tests {
             passive_branch.contains("break;"),
             "the failed background loop must stop instead of retrying while passive local reattach owns recovery"
         );
+    }
+
+    #[test]
+    fn embedded_ble_lost_native_pairing_pauses_before_stale_gatt_retry() {
+        let missing_pairing = crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::NotFound,
+            attempted: true,
+            matched_devices: 0,
+            prompted_devices: 0,
+            already_paired_devices: 0,
+            failed_devices: 0,
+            open_bluetooth_settings: true,
+            details: Vec::new(),
+        };
+        let link_loss = "BLE device connection status changed to Disconnected; transport_not_ready";
+        assert!(embedded_ble_lost_current_native_pairing_should_pause(
+            link_loss,
+            &[],
+            &missing_pairing,
+        ));
+        assert!(!embedded_ble_lost_current_native_pairing_should_pause(
+            link_loss,
+            &[0xD374D0103F0B],
+            &missing_pairing,
+        ));
+        assert!(!embedded_ble_lost_current_native_pairing_should_pause(
+            "BLE embedded audio capture timed out",
+            &[],
+            &missing_pairing,
+        ));
+
+        let source = include_str!("coordinator.rs");
+        let loop_start = source
+            .find("async fn embedded_ble_background_listener_loop")
+            .expect("background listener loop should exist");
+        let loop_end = source[loop_start..]
+            .find("fn hold_embedded_ble_for_ec11_passive_local_reattach")
+            .map(|offset| loop_start + offset)
+            .expect("background listener loop boundary should exist");
+        let listener_loop = &source[loop_start..loop_end];
+        let lost_pairing_hold = listener_loop
+            .find("maybe_hold_embedded_ble_after_lost_native_pairing")
+            .expect(
+                "link loss must recheck current native Windows pairing before stale GATT retry",
+            );
+        let stale_cleanup = listener_loop
+            .find("maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .expect("background stale cleanup should remain after the missing-pairing guard");
+        assert!(
+            lost_pairing_hold < stale_cleanup,
+            "no-current-HID pause must run before generic pairing cleanup can reopen old GATT"
+        );
+        assert!(
+            listener_loop[lost_pairing_hold..stale_cleanup].contains("break;"),
+            "after current native pairing disappears, the active background loop must stop instead of retrying"
+        );
+
+        let helper_start = source
+            .find("fn hold_embedded_ble_for_missing_native_pairing")
+            .expect("missing-native-pairing hold helper should exist");
+        let helper_end = source[helper_start..]
+            .find("async fn maybe_hold_embedded_ble_after_lost_native_pairing")
+            .map(|offset| helper_start + offset)
+            .expect("lost-native-pairing hold helper boundary should exist");
+        let helper = &source[helper_start..helper_end];
+        assert!(
+            helper.contains("start_embedded_ble_passive_local_reattach_watch"),
+            "the missing-native-pairing path must wait for explicit local HID evidence"
+        );
+        for forbidden in [
+            ".PairAsync(",
+            "UnpairAsync",
+            "send_recording_control_recovery",
+        ] {
+            assert!(
+                !helper.contains(forbidden),
+                "the missing-native-pairing hold must release old GATT rather than reclaim through {forbidden}"
+            );
+        }
     }
 
     #[test]
