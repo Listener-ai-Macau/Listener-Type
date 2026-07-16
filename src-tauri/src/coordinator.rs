@@ -5658,6 +5658,23 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             local_stale_cache_recovery_allows_cleanup,
             usb_ble_name_synced,
         );
+    let mut device_control_recovery =
+        crate::device_control_platform::BackgroundPairingRecovery::begin(
+            type_controlled_recovery,
+            manual_unpair_hold,
+            automatic_cleanup_allowed,
+        );
+    let device_control_decision = device_control_recovery.decision();
+    log::info!(
+        "[embedded-ble] device-control recovery transaction execute={} replayed={} result={:?} error={:?} type_controlled={} manual_unpair={} authorized={}",
+        device_control_decision.execute,
+        device_control_decision.replayed,
+        device_control_decision.result,
+        device_control_decision.error,
+        type_controlled_recovery,
+        manual_unpair_hold,
+        automatic_cleanup_allowed,
+    );
     if noisy_cccd_stale_cache_type_owned_cleanup {
         log::warn!(
             "[embedded-ble] noisy CCCD stale Windows cache evidence allows Type automatic PairAsync recovery even though recovery advertisement scan may have missed err={}",
@@ -5735,6 +5752,14 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             );
             return EmbeddedBleStalePairingCleanupOutcome::RetrySoon;
         }
+        return EmbeddedBleStalePairingCleanupOutcome::Skipped;
+    }
+    if !device_control_recovery.may_execute() {
+        log::error!(
+            "[embedded-ble] device-control rejected an otherwise authorized PairAsync recovery; refusing to bypass the transaction result={:?} error={:?}",
+            device_control_decision.result,
+            device_control_decision.error,
+        );
         return EmbeddedBleStalePairingCleanupOutcome::Skipped;
     }
     if crate::embedded_ble::listener_pairing_maintenance_active() {
@@ -5891,6 +5916,12 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             );
 
             if embedded_ble_pairing_prompt_ready(&pairing) {
+                let terminal = device_control_recovery.complete_pairing();
+                log::info!(
+                    "[embedded-ble] device-control recovery PairAsync terminal result={:?} error={:?}",
+                    terminal.result,
+                    terminal.error,
+                );
                 arm_embedded_ble_type_pairasync_startup_guard(inner);
                 if type_controlled_recovery {
                     log::info!(
@@ -5945,6 +5976,14 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                 return EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation;
             }
 
+            let terminal = device_control_recovery
+                .fail_without_reclaim(denzic_device_control_v1_core::ErrorCategory::Ownership);
+            log::info!(
+                "[embedded-ble] device-control recovery terminal result={:?} error={:?}; holding without reclaim",
+                terminal.result,
+                terminal.error,
+            );
+
             start_embedded_ble_pairing_confirmation_watch(
                 inner,
                 expected_ble_name.clone(),
@@ -5974,6 +6013,13 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation
         }
         Err(err) => {
+            let terminal = device_control_recovery
+                .fail_without_reclaim(denzic_device_control_v1_core::ErrorCategory::Host);
+            log::info!(
+                "[embedded-ble] device-control recovery task terminal result={:?} error={:?}",
+                terminal.result,
+                terminal.error,
+            );
             log::warn!("[embedded-ble] background Type recovery PairAsync task failed: {err}");
             clear_embedded_ble_pairing_confirmation_hold(
                 inner,

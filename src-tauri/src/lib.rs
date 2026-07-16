@@ -23,6 +23,7 @@ mod coordinator_state;
 mod correction;
 pub(crate) use denzic_audio_v1_core as embedded_audio;
 pub(crate) use denzic_observability_v1_core as observability_v1;
+mod device_control_platform;
 mod embedded_ble;
 mod firmware_ota;
 mod github_oauth;
