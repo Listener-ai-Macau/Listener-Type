@@ -17,6 +17,15 @@
       "requirement": "Do not make a Listener change wait for an independent plan reviewer. Before implementation, record the owner decision in this registry and define explicit acceptance, validation, and evidence expectations. Before acceptance, require the implemented diff, reproducible validation evidence, and a real runtime or short locked physical proof whenever the behavior is externally observable; retain a human operator-prompt only for a subjective or otherwise unobservable product judgment.",
       "workflow_application": "Legacy plan_review metadata may remain readable for historical records but is not a claim, auto-assign, waiting-refresh, lint, or validation gate. The active Listener core platform plan is promoted by this recorded owner authorization and remains accountable to run-validation evidence, acceptance-results ledger, installed/runtime logs, and bounded with-lock hardware evidence where applicable."
     },
+    "listener_type_msi_payload_integrity_20260716": {
+      "status": "required",
+      "recorded_at": "2026-07-16T14:00:00+08:00",
+      "source": "Product-owner direction: 每次重装为啥都这么久, 优先解决一下这个问题; 预升级不应该是人工做的，是机器做的.",
+      "requirement": "The Listener Type release path must use the same-version MSI upgrade packaging flow and machine-verify that a newly built 1.0.2 MSI replaces C:\\Program Files\\Listener Type\\listener-type.exe with the exact built payload hash. A raw Tauri MSI that reports installation success while preserving an old Program Files executable is not valid release or pre-upgrade evidence.",
+      "scope": "Listener Type packaging and installed user-facing runtime only. This does not publish or replace the Denzic root release MSI before the remaining physical release gates pass.",
+      "plan_reference": "C:\\Users\\Billy\\Desktop\\Denzic\\ai-collaboration-workflow\\docs\\plans\\listener-type-msi-upgrade-integrity-20260716_plan.md",
+      "acceptance_evidence": "A bounded packaging/install transcript, the repaired MSI WiX major-upgrade setting, and matching release-versus-Program-Files SHA-256 identities."
+    },
     "listener_core_capabilities_platform_contract_20260715": {
       "status": "required",
       "recorded_at": "2026-07-15T23:05:00+08:00",
