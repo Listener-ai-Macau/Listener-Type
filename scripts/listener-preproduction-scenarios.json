@@ -139,6 +139,14 @@
       "requirement": "From the physical EC11 press edge in connected low-power Idle, audio must begin within 50 ms. Preserve the accepted EC11 single/double-click behavior and do not swallow the first action; do not redefine the timer to start only after the existing single-click classification window.",
       "last_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/machine-ec11-idle-wake-20260714-1744.json",
       "acceptance_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/operator-acceptance-ec11-idle-wake-1-of-1.txt",
+      "latest_revalidation_20260716": {
+        "status": "accepted",
+        "evidence": ".cache/validation/listener-core-platform-contract-20260715/installed-platform-correlation-20260716-1405/platform-correlation-machine-evidence.json",
+        "measured_press_to_control_ms": 0,
+        "target_ms": 50,
+        "operator_result": "通过",
+        "contract_preserved": "The real physical EC11 edge entered the direct fast-idle path before single/double-click classification completed. Firmware logged the <=50ms dispatch, then the same BLE session completed through installed Type preview/final events with contract_version=1 correlation evidence."
+      },
       "operator_note_triage": "../Listener-Firmware/.cache/validation/ec11-fast-idle-physical-20260714/operator-note-triage-20260714-1744-ec11-idle-wake-accepted.json",
       "root_contract_evidence": "docs/validation/listener-1-0-2-ec11-idle-wake-20260714.json",
       "diagnostic_machine_evidence": "../Listener-Firmware/.cache/validation/ec11-fast-idle-diagnostic-20260713/machine-validation-summary.json",
