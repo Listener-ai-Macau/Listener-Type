@@ -243,7 +243,24 @@
       ],
       "current_machine_finding": "The generated EC11 sample now passes the device-controlled advertising gate: accepted double-click to termination request 42ms, confirmed disconnect 64ms, and connectable recovery advertising 241ms against the <=250ms target. The root repair preserves the Type pre-reset notice, retains Type GATT until firmware disconnect, wakes the async bond-delete worker before teardown, makes that worker the sole recovery advertising owner, and moves persistent structured diagnostics off the flash-writing critical path. Windows PnP reported listener/HID/GATT services OK and top-level window enumeration showed no pairing dialog. The generated command still is not a real EC11 physical press and therefore cannot close the physical timing gate.",
       "evidence": ".cache/validation/ble-platform-local-reattach-20260715/machine-ec11-recovery-critical-path-20260715.json; second-post-fast-path-generated-ec11-recovery-com3.log; C:\\Users\\Billy\\AppData\\Local\\Listener Type\\Logs\\listener-type.log",
-      "next_action": "Preserve the <=250ms generated machine gate and collect one real physical EC11 double-click capture before accepting the physical metric. Keep the 500ms single/double boundary, long-press cancellation, cross-host ownership window, and no-reclaim Type behavior unchanged."
+      "next_action": "Preserve the <=250ms generated machine gate and collect one real physical EC11 double-click capture before accepting the physical metric. Keep the 500ms single/double boundary, long-press cancellation, cross-host ownership window, and no-reclaim Type behavior unchanged.",
+      "current_audit_followup_20260716": {
+        "status": "required",
+        "source": "Current Platform Bluetooth audit against the product-owner root-cause direction (需要根治) found that the fast EC11 path marked a recovery window before the disconnect worker activated its power blocker and timer.",
+        "requirement": "Activate the existing recovery window's pairing/reconnect blocker and timer before the fast EC11 terminate request returns. Preserve the existing event-owned connection-parameter repair: EALREADY waits for BLE_GAP_EVENT_CONN_UPDATE and central transaction collisions back off rather than using a local confirmation timeout.",
+        "related_workflow_plan": "listener-ble-recovery-window-power-contract-20260716",
+        "validation": "Focused static contract, BLE transport model, firmware build, then a short locked COM3 recovery capture if the code change reaches hardware.",
+        "machine_evidence_20260716": {
+          "result": "PASS_WITH_PHYSICAL_EC11_NO_GO",
+          "firmware_commit": "1d3fc3cc566b424b0bf051448bbe88444f8574e4",
+          "power_guard": "The generated real-device EC11 recovery route logged the pairing/reconnect power blocker before the disconnect, proving that the recovery window is protected before the fast terminate returns.",
+          "generated_recovery_timing": "control dispatch=1ms, terminate request=60ms, disconnect confirmed=76ms, advertising started=221ms, target<=250ms, PASS.",
+          "physical_boundary": "The input was ~KEY:EC11:DOUBLE diagnostic generation through the real firmware route, not a physical EC11 electrical edge. It cannot accept the physical EC11 gate.",
+          "type_cross_host_contract": "Installed Program Files Type retained GATT until disconnect, then entered its accepted passive local Windows reattach mode. It did not scan, unpair, PairAsync, or reclaim while another host may pair. The second-host Windows popup remains BENCH_REVIEW_NO_GO without that host.",
+          "evidence": "Listener-Type/.cache/validation/listener-platform-accepted-behavior-audit-20260716/bluetooth/ec11-recovery-window-power-guard-20260716-2120/machine-recovery-summary.json"
+        },
+        "non_goals": "Do not change Swift Pair, Windows SMP, old-Type passivity, EC11 gesture boundaries, recording, OTA, or Listener LED effects."
+      }
     },
     "idle_ble_audio_wake_latency": {
       "target_notify_ready_ms": 50,
