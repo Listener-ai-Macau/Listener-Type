@@ -1680,6 +1680,20 @@ impl Coordinator {
         Ok(true)
     }
 
+    pub async fn wait_for_embedded_ble_listener_ready_before_firmware_ota(
+        &self,
+        timeout: Duration,
+    ) -> Result<bool, String> {
+        if !embedded_ble_background_listener_expected(&self.inner) {
+            log::info!(
+                "[firmware-ota] pre-transfer Listener notify readiness is not required because EmbeddedBle is not the active input source"
+            );
+            return Ok(false);
+        }
+        wait_for_embedded_ble_listener_ready(&self.inner, timeout).await?;
+        Ok(true)
+    }
+
     pub fn refresh_embedded_ble_listener(&self) {
         refresh_embedded_ble_listener(&self.inner);
     }
@@ -9584,6 +9598,30 @@ mod tests {
         assert!(
             result.is_ok(),
             "OTA wait must accept the notify-ready edge: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn firmware_ota_pretransfer_wait_requires_notify_subscription_for_embedded_input() {
+        let coordinator = Coordinator::new();
+        force_embedded_ble_input_for_test(&coordinator);
+
+        let err = coordinator
+            .wait_for_embedded_ble_listener_ready_before_firmware_ota(Duration::from_millis(1))
+            .await
+            .expect_err(
+                "an OTA may not take over a cold EmbeddedBle listener before notify is ready",
+            );
+        assert!(err.contains("notify subscription did not recover"));
+
+        let cancel = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+        mark_embedded_ble_listener_ready(&coordinator.inner, &cancel);
+        assert_eq!(
+            coordinator
+                .wait_for_embedded_ble_listener_ready_before_firmware_ota(Duration::from_millis(1))
+                .await
+                .expect("ready notify subscription should permit the OTA handoff"),
+            true
         );
     }
 

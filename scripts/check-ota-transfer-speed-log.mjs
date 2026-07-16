@@ -61,7 +61,7 @@ if (outputJson) {
 
 const text = readFileSync(logPath, "utf8");
 const pattern =
-  /BLE OTA result transport=(?<transport>\S+) bytes=(?<bytes>\d+) chunks=(?<chunks>\d+) transfer_ms=(?<transferMs>\d+) confirm_ms=(?<confirmMs>\d+) confirm_attempts=(?<confirmAttempts>\d+) confirm_matched=(?<confirmMatched>true|false) type_ready=(?<typeReady>true|false) type_ready_ms=(?<typeReadyMs>\d+) total_ms=(?<totalMs>\d+)/g;
+  /BLE OTA result transport=(?<transport>\S+) bytes=(?<bytes>\d+) chunks=(?<chunks>\d+)(?: pretransfer_type_ready=(?<pretransferTypeReady>true|false) pretransfer_type_ready_ms=(?<pretransferTypeReadyMs>\d+))? transfer_ms=(?<transferMs>\d+) confirm_ms=(?<confirmMs>\d+) confirm_attempts=(?<confirmAttempts>\d+) confirm_matched=(?<confirmMatched>true|false) type_ready=(?<typeReady>true|false) type_ready_ms=(?<typeReadyMs>\d+) total_ms=(?<totalMs>\d+)/g;
 const transportPattern =
   /Denzic OTA v1 #\d+: transferred (?<bytes>\d+)\/(?<totalBytes>\d+) bytes in (?<dataWrites>\d+) data writes, (?<statusReads>\d+) status reads, (?<offsetRecoveries>\d+) offset recoveries, active_link_confirmed=(?<activeLinkConfirmed>true|false), elapsed_ms=(?<protocolMs>\d+)/g;
 
@@ -71,6 +71,8 @@ const results = [...text.matchAll(pattern)].map((match) => ({
   transport: match.groups.transport,
   bytes: Number(match.groups.bytes),
   chunks: Number(match.groups.chunks),
+  pretransferTypeReady: match.groups.pretransferTypeReady === "true",
+  pretransferTypeReadyMs: Number(match.groups.pretransferTypeReadyMs ?? 0),
   transferMs: Number(match.groups.transferMs),
   confirmMs: Number(match.groups.confirmMs),
   confirmAttempts: Number(match.groups.confirmAttempts),
@@ -164,6 +166,8 @@ const result = {
   transport: latest.transport,
   bytes: latest.bytes,
   chunks: latest.chunks,
+  pretransferTypeReady: latest.pretransferTypeReady,
+  pretransferTypeReadyMs: latest.pretransferTypeReadyMs,
   transferMs: latest.transferMs,
   payloadTransferMs,
   handoffMs,

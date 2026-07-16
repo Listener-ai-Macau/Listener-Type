@@ -4049,6 +4049,8 @@ pub struct FirmwareOtaBleTransferResult {
     chunks_sent: usize,
     confirmed_version: Option<String>,
     transport: &'static str,
+    pretransfer_type_ready: bool,
+    pretransfer_type_ready_elapsed_ms: u64,
     transfer_elapsed_ms: u64,
     confirm_elapsed_ms: u64,
     type_ready: bool,
@@ -4068,6 +4070,7 @@ const FIRMWARE_OTA_CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 const FIRMWARE_OTA_CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(1800);
 const FIRMWARE_OTA_FAST_SERVICE_CONFIRM_TIMEOUT: Duration = Duration::from_millis(1200);
 const FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
+const FIRMWARE_OTA_PRETRANSFER_READY_TIMEOUT: Duration = Duration::from_secs(8);
 const FIRMWARE_OTA_POST_READY_TIMEOUT: Duration = Duration::from_secs(8);
 const FIRMWARE_OTA_PACKAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -6026,6 +6029,18 @@ pub async fn transfer_firmware_ota_ble(
         return Err("firmware_ota.bin SHA256 does not match ota_manifest.json.".to_string());
     }
 
+    let pretransfer_type_ready_started = Instant::now();
+    let pretransfer_type_ready = coord
+        .wait_for_embedded_ble_listener_ready_before_firmware_ota(
+            FIRMWARE_OTA_PRETRANSFER_READY_TIMEOUT,
+        )
+        .await?;
+    let pretransfer_type_ready_elapsed_ms = elapsed_ms_u64(pretransfer_type_ready_started);
+    log::info!(
+        "[firmware-ota] pre-transfer Listener notify ready={} elapsed_ms={}",
+        pretransfer_type_ready,
+        pretransfer_type_ready_elapsed_ms
+    );
     crate::embedded_ble::request_listener_ota_v1_active_link()?;
     log::info!(
         "[firmware-ota] Listener OTA v1 reconnect handoff accepted before pausing the background listener"
@@ -6095,10 +6110,12 @@ pub async fn transfer_firmware_ota_ble(
     let type_ready_elapsed_ms = elapsed_ms_u64(type_ready_started);
     let total_elapsed_ms = elapsed_ms_u64(total_started);
     log::info!(
-        "[firmware-ota] BLE OTA result transport={} bytes={} chunks={} transfer_ms={} confirm_ms={} confirm_attempts={} confirm_matched={} type_ready={} type_ready_ms={} total_ms={} data_write_ms={} control_write_ms={} status_read_ms={}",
+        "[firmware-ota] BLE OTA result transport={} bytes={} chunks={} pretransfer_type_ready={} pretransfer_type_ready_ms={} transfer_ms={} confirm_ms={} confirm_attempts={} confirm_matched={} type_ready={} type_ready_ms={} total_ms={} data_write_ms={} control_write_ms={} status_read_ms={}",
         stats.transport,
         stats.bytes_transferred,
         stats.chunks_sent,
+        pretransfer_type_ready,
+        pretransfer_type_ready_elapsed_ms,
         transfer_elapsed_ms,
         confirm.elapsed_ms,
         confirm.attempts,
@@ -6115,6 +6132,8 @@ pub async fn transfer_firmware_ota_ble(
         chunks_sent: stats.chunks_sent,
         confirmed_version: confirm.confirmed_version,
         transport: stats.transport,
+        pretransfer_type_ready,
+        pretransfer_type_ready_elapsed_ms,
         transfer_elapsed_ms,
         confirm_elapsed_ms: confirm.elapsed_ms,
         type_ready,

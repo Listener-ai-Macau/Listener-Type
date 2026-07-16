@@ -13,6 +13,7 @@ function takeArg(name) {
 const cdpUrl = takeArg("--cdp-url");
 const packagePath = takeArg("--package");
 const outputPath = takeArg("--output-json");
+const coldStart = process.argv.includes("--cold-start");
 
 function writeResult(value) {
   writeFileSync(outputPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -127,7 +128,7 @@ try {
       const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
       let runtimeBeforeStart = null;
       let typeReadyBeforeStart = false;
-      for (let attempt = 0; attempt < 150; attempt += 1) {
+      for (let attempt = 0; !${coldStart} && attempt < 150; attempt += 1) {
         runtimeBeforeStart = await invoke("get_embedded_ble_runtime_status");
         if (runtimeBeforeStart.backgroundListenerReady) {
           typeReadyBeforeStart = true;
@@ -135,8 +136,11 @@ try {
         }
         await pause(100);
       }
-      if (!typeReadyBeforeStart) {
+      if (!${coldStart} && !typeReadyBeforeStart) {
         throw new Error("background Listener Type notify subscription was not ready before OTA");
+      }
+      if (${coldStart}) {
+        runtimeBeforeStart = await invoke("get_embedded_ble_runtime_status");
       }
       const payload = await invoke("load_firmware_ota_package", { path: ${JSON.stringify(packagePath)} });
       const raw = JSON.parse(payload.manifestText);
@@ -160,6 +164,7 @@ try {
       }
       return {
         typeReadyBeforeStart,
+        coldStart: ${coldStart},
         runtimeBeforeStart,
         manifest: {
           schemaVersion: manifest.schemaVersion,

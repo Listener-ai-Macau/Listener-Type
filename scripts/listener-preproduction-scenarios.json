@@ -510,7 +510,7 @@
           "observed_cause": "The transfer action includes 1746 ms beyond the Denzic data-plane elapsed time: capture handoff/release, a fixed 500 ms reconnect settle after the exclusive capture guard has already returned, and OTA service discovery. Firmware audit proves this is not device-side audio startup: audio GATT registers before OTA GATT, and the OTA boot transcript reaches audio_ready before the host attempts the failed audio reopen. After the fast OTA-service probe succeeded, the first trusted audio-notify open returned GattCommunicationStatus(1). Windows defines that status as Unreachable (temporarily no device communication), but Listener Type only classified status 3 as a retryable notify-open condition. The status 1 error therefore escaped the existing short retry loop, entered generic background recovery, waited 2000 ms, and emitted a recovery failure before the unchanged paired address succeeded. This is a host GATT readiness classification defect, not a missing pairing, physical wake, or firmware rollback.",
           "repair_hypothesis": "Replace the unconditional post-handoff settle with readiness-driven preparation using the already verified current Listener address, falling back to normal service discovery only when necessary. Classify Windows GattCommunicationStatus(1) as the same transient notify-open/reopen condition it semantically is, so the existing bounded retry loop handles it before generic recovery. Preserve the 100-packet status cadence and all generic pairing, capsule, low-power, rename, and root-release behavior.",
           "cold_start_machine_no_go_20260716": {
-            "status": "NO_GO",
+            "status": "historical_no_go_resolved",
             "context": "The installed hidden Type was restarted for bounded loopback-only observation, then the OTA command was invoked before its background notify subscription reached TYPE:READY. This is a real cold-start interaction path, not an OTA pass.",
             "measured_stages_ms": {
               "transfer": 54992,
@@ -529,10 +529,10 @@
               ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-root-cause-retest/post-ota-status.log",
               "%LOCALAPPDATA%\\Listener Type\\Logs\\listener-type.log lines 2026-07-16T08:58:43Z through 08:59:45Z"
             ],
-            "next_machine_step": "Run exactly one second staged OTA only after installed Type has recorded TYPE:READY, while preserving the separate cold-start NO_GO for a later readiness-contract repair. Do not declare the warm result to cover cold-start behavior."
+            "next_machine_step": "Resolved by current_machine_cold_start_pass_20260716. Preserve this original NO_GO as root-cause evidence; do not use it as current acceptance evidence."
           },
           "current_machine_stage_pass_20260716": {
-            "status": "machine_pass_pending_cold_start_repair",
+            "status": "machine_pass",
             "installed_type_sha256": "6EE3D1B13FB97373606CA1A727FEF122F47141DD82429A728183AA60F7FF2C1D",
             "firmware_source_commit": "f7988bd870fd99633e69b76475fcb40aa7ed575b",
             "package": "current non-release staged firmware_ota.bin=974528 bytes, sha256=d8cbe754a56f907cef44049dabb137e7406f72ba7dc2d76c92b313856468bac1",
@@ -546,7 +546,29 @@
               "status_reads": 21
             },
             "result": "PASS for the current warm installed-Type path: all four stage limits pass, 21 required status reads and 22 progress events were observed, and serial proves running=ota_0, boot=ota_0, pending_verify=0, state=2, ready_mask=0x0000000f, audio_ready, ota_ready, and TYPE:HB. Slot parity replaces the invalid historical ota_1-only assertion.",
-            "remaining_scope": "This does not erase cold_start_machine_no_go_20260716. The OTA item remains active until an explicit pre-transfer readiness contract either prevents or independently validates cold invocation."
+            "remaining_scope": "The separate cold-start invocation is independently validated below; retain the historical NO_GO only as the regression root-cause record."
+          },
+          "current_machine_cold_start_pass_20260716": {
+            "status": "machine_pass",
+            "installed_type_sha256": "58D42ABE052AB64C70EB93F130CC1CB5777E40A1EECA1F68F1418BF14C8728B6",
+            "firmware_source_commit": "f7988bd870fd99633e69b76475fcb40aa7ed575b",
+            "trigger": "The installed hidden Type entered the OTA command while background_listener_active=false and background_listener_ready=false.",
+            "measured_stages_ms": {
+              "pretransfer_listener_ready": 1937,
+              "pretransfer_handoff": 771,
+              "payload_transport": 53133,
+              "firmware_ota_service_confirmation": 1895,
+              "type_ready": 1879,
+              "confirmation_plus_type_ready": 3774,
+              "raw_total_trace_only": 59928,
+              "status_reads": 21
+            },
+            "result": "PASS: the OTA command waited for the real notify-ready edge before TYPE:OTA, then passed every staged transfer gate with 22 progress events. Serial proves running=ota_1, boot=ota_1, pending_verify=0, state=2, ready_mask=0x0000000f, audio_ready, ota_ready, and TYPE:HB.",
+            "evidence": [
+              ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-cold-ready-contract-retest/installed-ui-ota-transfer-result.json",
+              ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-cold-ready-contract-retest/ota-stage-metric.json",
+              ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-cold-ready-contract-retest/post-ota-status.log"
+            ]
           },
           "evidence": [
             ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-current/installed-ui-ota-transfer-result.json",
