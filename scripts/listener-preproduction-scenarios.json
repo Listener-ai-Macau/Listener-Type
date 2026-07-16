@@ -96,7 +96,24 @@
           "Logs: compare the shared structured version/correlation, causal lifecycle, timing, and failure-attribution contract across firmware, installed Type, Windows, and evidence; logs must observe the product without delaying, masking, or changing its accepted behavior."
         ],
         "method": "For each capability, read the accepted registry description and named machine/human evidence before reading current adapter/platform code. Produce one of PASS_PRESERVED, ACTIVE_ROOT_CAUSE_REPAIR, or explicit NO_GO with direct evidence. Do not change a behavior merely to make the platform uniform; any repair reproduces the accepted behavior word-for-word at the product boundary.",
-        "completion_rule": "The audit closes only after all four capability records have a current comparison artifact and every detected drift has either a focused repair with validation or an explicit owner-approved deferral. It does not replace the separate final Listener release gate or root-package rebuild."
+        "completion_rule": "The audit closes only after all four capability records have a current comparison artifact and every detected drift has either a focused repair with validation or an explicit owner-approved deferral. It does not replace the separate final Listener release gate or root-package rebuild.",
+        "ota_staged_timing_regression_contract_20260716": {
+          "status": "accepted_by_explicit_owner_machine_authorization",
+          "recorded_at": "2026-07-16T17:20:00+08:00",
+          "source": "Product-owner direction: 就这样吧, 要求是18kb/s 然后其它时间<=7是防回退门禁.",
+          "scope": "Listener denzic_ota_v1 only. This contract does not apply to Companion or any other product with a different OTA protocol, package shape, or transport.",
+          "requirement": "For every Listener OTA machine gate, calculate the package-size-scaled OTA protocol transfer rate separately from non-transfer fixed elapsed time. Accept only when protocol transfer rate is at least 18 kB/s and non-transfer fixed elapsed time is at most 7000 ms.",
+          "metric_definition": "ota_protocol_transfer_ms is the denzic_ota_v1 protocol elapsed time. non_transfer_fixed_elapsed_ms equals total_elapsed_ms minus ota_protocol_transfer_ms and includes package integrity/command bookkeeping, pre-transfer Type readiness, transfer orchestration outside the protocol timer, firmware version confirmation, and post-upgrade Type readiness. Data writes, control writes, status reads needed for visible progress, and BLE scheduling inside ota_protocol_transfer_ms remain part of transfer rather than fixed overhead.",
+          "accepted_machine_evidence": ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-cold-ready-contract-retest/ota-stage-metric.json",
+          "current_measurement": {
+            "package_bytes": 974528,
+            "ota_protocol_transfer_ms": 53133,
+            "ota_protocol_transfer_rate_kb_per_s": 18.341294487418367,
+            "non_transfer_fixed_elapsed_ms": 6795,
+            "total_elapsed_ms": 59928
+          },
+          "regression_gate": "scripts/check-ota-transfer-speed-log.mjs must reject a transfer below 18 kB/s or whose non-transfer fixed elapsed exceeds 7000 ms, while preserving the required 100-packet status/progress cadence."
+        }
       }
     },
     "ble_audio_type_link_machine_acceptance_20260715": {
@@ -480,8 +497,11 @@
         "evidence": "../Listener-Firmware/.cache/validation/preproduction-step-18-ota-wireless-20260715/machine-transfer-current-20260715/machine-validation-summary.json"
       },
       "ota_total_duration_gate_20260716": {
-        "status": "active",
+        "status": "superseded",
         "recorded_at": "2026-07-16T16:20:00+08:00",
+        "superseded_at": "2026-07-16T17:20:00+08:00",
+        "superseded_by": "pending_operator_steering.listener_platform_preserves_accepted_behavior_20260716.four_capability_acceptance_preservation_audit_20260716.ota_staged_timing_regression_contract_20260716",
+        "supersession_reason": "Product owner fixed the release regression gate to two independent values: OTA protocol transfer >=18 kB/s and all non-transfer fixed elapsed <=7000 ms.",
         "source": "Product-owner correction: 是总时长一分钟左右；传输不超过 60 秒、总时长不超过 90 秒 这个不对，改一下。 Follow-up: 目标时间不要是固定的，应该是根据这个固件包的大小去改变；反正就是现在大概是一分钟就好了。 Follow-up: 下次的时间给分阶段时间，不要总时间；传输加其它两部分，剩余部分优化进 4 秒内。 Follow-up: 传输按当前算法从约 18 kB/s 优化到 20 kB/s。 Follow-up: current 100-packet sync and status read cadence is required for the visible progress bar and offset recovery; do not reduce it to improve throughput.",
         "requirement": "The OTA transaction must record each causal stage, not an opaque total. The pre-transfer GATT handoff must be <=1500 ms. Payload transport budget scales with actual payload bytes: target ceil(bytes / 20 bytes per ms), with a strict no-regression acceptance ceiling ceil(bytes / 18 bytes per ms). The 100-packet synchronization and status-read cadence is a required visible progress and offset-recovery contract and must not be reduced for throughput. Version confirmation and Type-ready recovery are always reported separately and must together complete in <=4000 ms. The raw command total is trace-only and is not a product gate or human-facing metric. A separately fast payload transfer does not compensate for a slow handoff or post-transfer recovery.",
         "supersedes": "ota_preupgrade_machine_gate.machine_transfer_acceptance.limits max_transfer_ms=60000 plus max_total_ms=90000",

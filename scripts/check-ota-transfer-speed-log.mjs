@@ -26,18 +26,13 @@ function takeNumber(name, fallback) {
 }
 
 const logPath = takeArg("--log");
-const targetTransferBytesPerMs = takeNumber("--target-transfer-bytes-per-ms", 20);
 const acceptanceMinTransferBytesPerMs = takeNumber(
   "--acceptance-min-transfer-bytes-per-ms",
   18,
 );
-const acceptanceMaxPostTransferRecoveryMs = takeNumber(
-  "--acceptance-max-post-transfer-recovery-ms",
-  4000,
-);
-const acceptanceMaxHandoffMs = takeNumber(
-  "--acceptance-max-handoff-ms",
-  1500,
+const acceptanceMaxNonTransferFixedMs = takeNumber(
+  "--acceptance-max-non-transfer-fixed-ms",
+  7000,
 );
 const minBytes = takeNumber("--min-bytes", 900000);
 const outputJson = takeArg("--output-json", null);
@@ -46,11 +41,10 @@ if (!logPath) {
   fail("--log requires a value");
 }
 for (const [name, value] of [
-  ["--target-transfer-bytes-per-ms", targetTransferBytesPerMs],
   ["--acceptance-min-transfer-bytes-per-ms", acceptanceMinTransferBytesPerMs],
   [
-    "--acceptance-max-post-transfer-recovery-ms",
-    acceptanceMaxPostTransferRecoveryMs,
+    "--acceptance-max-non-transfer-fixed-ms",
+    acceptanceMaxNonTransferFixedMs,
   ],
 ]) {
   if (value <= 0) fail(`${name} must be greater than zero`);
@@ -63,7 +57,7 @@ const text = readFileSync(logPath, "utf8");
 const pattern =
   /BLE OTA result transport=(?<transport>\S+) bytes=(?<bytes>\d+) chunks=(?<chunks>\d+)(?: pretransfer_type_ready=(?<pretransferTypeReady>true|false) pretransfer_type_ready_ms=(?<pretransferTypeReadyMs>\d+))? transfer_ms=(?<transferMs>\d+) confirm_ms=(?<confirmMs>\d+) confirm_attempts=(?<confirmAttempts>\d+) confirm_matched=(?<confirmMatched>true|false) type_ready=(?<typeReady>true|false) type_ready_ms=(?<typeReadyMs>\d+) total_ms=(?<totalMs>\d+)/g;
 const transportPattern =
-  /Denzic OTA v1 #\d+: transferred (?<bytes>\d+)\/(?<totalBytes>\d+) bytes in (?<dataWrites>\d+) data writes, (?<statusReads>\d+) status reads, (?<offsetRecoveries>\d+) offset recoveries, active_link_confirmed=(?<activeLinkConfirmed>true|false), elapsed_ms=(?<protocolMs>\d+)/g;
+  /Denzic OTA v1 #\d+: transferred (?<bytes>\d+)\/(?<totalBytes>\d+) bytes in (?<dataWrites>\d+) data writes, (?<statusReads>\d+) status reads, (?<offsetRecoveries>\d+) offset recoveries, active_link_confirmed=(?<activeLinkConfirmed>true|false), elapsed_ms=(?<protocolMs>\d+)(?:, data_write_ms=(?<dataWriteMs>\d+), control_write_ms=(?<controlWriteMs>\d+), status_read_ms=(?<statusReadMs>\d+))?/g;
 
 const results = [...text.matchAll(pattern)].map((match) => ({
   status: "PASS",
@@ -106,6 +100,10 @@ for (const line of text.split(/\r?\n/)) {
       transport: report.transfer.transport,
       bytes: Number(report.transfer.bytesTransferred),
       chunks: Number(report.transfer.chunksSent),
+      pretransferTypeReady: report.transfer.pretransferTypeReady === true,
+      pretransferTypeReadyMs: Number(
+        report.transfer.pretransferTypeReadyElapsedMs ?? 0,
+      ),
       transferMs: Number(report.transfer.transferElapsedMs),
       confirmMs: Number(report.transfer.confirmElapsedMs),
       confirmAttempts: Number(report.transfer.confirmedVersion ? 1 : 0),
@@ -146,19 +144,41 @@ const transportResults = [...text.matchAll(transportPattern)].map(match => ({
   offsetRecoveries: Number(match.groups.offsetRecoveries),
   activeLinkConfirmed: match.groups.activeLinkConfirmed === "true",
   protocolMs: Number(match.groups.protocolMs),
+  dataWriteMs: Number(match.groups.dataWriteMs ?? 0),
+  controlWriteMs: Number(match.groups.controlWriteMs ?? 0),
+  statusReadMs: Number(match.groups.statusReadMs ?? 0),
 }));
 const latestTransport = transportResults
   .filter(candidate => candidate.index < latest.index && candidate.bytes === latest.bytes)
   .pop() ?? null;
-const targetTransferMs = Math.ceil(latest.bytes / targetTransferBytesPerMs);
 const acceptanceMaxTransferMs = Math.ceil(
   latest.bytes / acceptanceMinTransferBytesPerMs,
 );
 const postTransferRecoveryMs = latest.confirmMs + latest.typeReadyMs;
 const payloadTransferMs = latestTransport?.protocolMs ?? latest.transferMs;
-const handoffMs = latestTransport
+const transferOrchestrationMs = latestTransport
   ? Math.max(0, latest.transferMs - latestTransport.protocolMs)
   : null;
+const nonTransferFixedElapsedMs =
+  latest.totalMs >= payloadTransferMs ? latest.totalMs - payloadTransferMs : null;
+const knownFixedStageMs =
+  latest.pretransferTypeReadyMs +
+  (transferOrchestrationMs ?? 0) +
+  latest.confirmMs +
+  latest.typeReadyMs;
+const packageIntegrityAndCommandBookkeepingMs =
+  nonTransferFixedElapsedMs === null
+    ? null
+    : Math.max(0, nonTransferFixedElapsedMs - knownFixedStageMs);
+const protocolInstrumentedMs = latestTransport
+  ? latestTransport.dataWriteMs +
+    latestTransport.controlWriteMs +
+    latestTransport.statusReadMs
+  : null;
+const protocolSchedulingAndCallbackMs =
+  protocolInstrumentedMs === null
+    ? null
+    : Math.max(0, payloadTransferMs - protocolInstrumentedMs);
 const result = {
   status: "PASS",
   log: logPath,
@@ -170,19 +190,21 @@ const result = {
   pretransferTypeReadyMs: latest.pretransferTypeReadyMs,
   transferMs: latest.transferMs,
   payloadTransferMs,
-  handoffMs,
   transportTrace: latestTransport,
   confirmMs: latest.confirmMs,
   confirmAttempts: latest.confirmAttempts,
   confirmMatched: latest.confirmMatched,
   typeReady: latest.typeReady,
   typeReadyMs: latest.typeReadyMs,
-  targetTransferBytesPerMs,
   acceptanceMinTransferBytesPerMs,
-  targetTransferMs,
   acceptanceMaxTransferMs,
+  transferOrchestrationMs,
+  nonTransferFixedElapsedMs,
+  acceptanceMaxNonTransferFixedMs,
+  packageIntegrityAndCommandBookkeepingMs,
+  protocolInstrumentedMs,
+  protocolSchedulingAndCallbackMs,
   postTransferRecoveryMs,
-  acceptanceMaxPostTransferRecoveryMs,
   minBytes,
   observedTransferBytesPerMs:
     payloadTransferMs > 0 ? latest.bytes / payloadTransferMs : null,
@@ -200,11 +222,6 @@ if (payloadTransferMs > acceptanceMaxTransferMs) {
     `payload_transfer_ms=${payloadTransferMs}, expected <=${acceptanceMaxTransferMs} for ${result.bytes} bytes at ${acceptanceMinTransferBytesPerMs} bytes/ms`,
   );
 }
-if (handoffMs !== null && handoffMs > acceptanceMaxHandoffMs) {
-  failures.push(
-    `handoff_ms=${handoffMs}, expected <=${acceptanceMaxHandoffMs} before the payload transfer begins`,
-  );
-}
 if (latestTransport) {
   const requiredStatusReads = Math.floor((latest.chunks - 1) / 100) + 2;
   if (!latestTransport.activeLinkConfirmed) {
@@ -216,9 +233,13 @@ if (latestTransport) {
     );
   }
 }
-if (postTransferRecoveryMs > acceptanceMaxPostTransferRecoveryMs) {
+if (nonTransferFixedElapsedMs === null) {
   failures.push(
-    `post_transfer_recovery_ms=${postTransferRecoveryMs}, expected <=${acceptanceMaxPostTransferRecoveryMs} (confirmation ${result.confirmMs} ms + Type ready ${result.typeReadyMs} ms)`,
+    `total_ms=${latest.totalMs} is earlier than ota_protocol_transfer_ms=${payloadTransferMs}`,
+  );
+} else if (nonTransferFixedElapsedMs > acceptanceMaxNonTransferFixedMs) {
+  failures.push(
+    `non_transfer_fixed_elapsed_ms=${nonTransferFixedElapsedMs}, expected <=${acceptanceMaxNonTransferFixedMs} (total ${latest.totalMs} ms - ota_protocol_transfer ${payloadTransferMs} ms)`,
   );
 }
 if (!result.confirmMatched) {
@@ -242,5 +263,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `PASS: Listener OTA stages: payload ${result.bytes} bytes in ${payloadTransferMs} ms (target ${result.targetTransferMs} ms, acceptance <=${result.acceptanceMaxTransferMs} ms); handoff ${handoffMs ?? "legacy-unavailable"} ms; version confirmation ${result.confirmMs} ms; Type ready ${result.typeReadyMs} ms; post-transfer recovery ${postTransferRecoveryMs} ms (acceptance <=${result.acceptanceMaxPostTransferRecoveryMs} ms).`,
+  `PASS: Listener OTA stages: protocol ${result.bytes} bytes in ${payloadTransferMs} ms (${result.observedTransferBytesPerMs.toFixed(3)} kB/s, acceptance >=${result.acceptanceMinTransferBytesPerMs} kB/s); non-transfer fixed ${nonTransferFixedElapsedMs} ms (acceptance <=${result.acceptanceMaxNonTransferFixedMs} ms); pre-transfer Type ready ${result.pretransferTypeReadyMs} ms; transfer orchestration ${transferOrchestrationMs ?? "legacy-unavailable"} ms; version confirmation ${result.confirmMs} ms; Type ready ${result.typeReadyMs} ms.`,
 );

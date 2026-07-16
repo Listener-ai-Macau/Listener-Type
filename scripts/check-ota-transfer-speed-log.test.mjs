@@ -24,7 +24,7 @@ function transferReport(fields = {}) {
       versionConfirmed: true,
       typeReady: true,
       typeReadyElapsedMs: 820,
-      totalElapsedMs: 63662,
+      totalElapsedMs: 57000,
       ...fields,
     },
     errors: [],
@@ -69,22 +69,22 @@ try {
   assert.equal(historicalSlowConfirmation.status, "FAIL");
   assert.match(
     historicalSlowConfirmation.failures.join("\n"),
-    /post_transfer_recovery_ms=10092/,
+    /non_transfer_fixed_elapsed_ms=11310/,
   );
 
   const passAfterFail = runCase(
     "pass-after-fail",
     [
       lineFor({ status: "FAIL", mode: "transfer", transfer: null, errors: ["old failure"] }),
-      lineFor(transferReport({ transferElapsedMs: 52000, totalElapsedMs: 68256 })),
+      lineFor(transferReport({ transferElapsedMs: 52000, totalElapsedMs: 58000 })),
     ].join("\n"),
     true,
   );
   assert.equal(passAfterFail.status, "PASS");
   assert.equal(passAfterFail.transferMs, 52000);
   assert.equal(passAfterFail.typeReady, true);
-  assert.equal(passAfterFail.targetTransferMs, 48019);
   assert.equal(passAfterFail.acceptanceMaxTransferMs, 53354);
+  assert.equal(passAfterFail.nonTransferFixedElapsedMs, 6000);
 
   const failAfterPass = runCase(
     "fail-after-pass",
@@ -104,7 +104,7 @@ try {
 
   const overTransferStageBudget = runCase(
     "over-transfer-stage-budget",
-    lineFor(transferReport({ transferElapsedMs: 53355, totalElapsedMs: 70024 })),
+    lineFor(transferReport({ transferElapsedMs: 53355, totalElapsedMs: 59000 })),
     false,
   );
   assert.equal(overTransferStageBudget.status, "FAIL");
@@ -119,7 +119,9 @@ try {
     true,
   );
   assert.equal(stagedTransferKeepsHandoffVisible.payloadTransferMs, 53322);
-  assert.equal(stagedTransferKeepsHandoffVisible.handoffMs, 1445);
+  assert.equal(stagedTransferKeepsHandoffVisible.transferOrchestrationMs, 1445);
+  assert.equal(stagedTransferKeepsHandoffVisible.nonTransferFixedElapsedMs, 5406);
+  assert.equal(stagedTransferKeepsHandoffVisible.transportTrace.dataWriteMs, 50028);
   assert.equal(stagedTransferKeepsHandoffVisible.transportTrace.statusReads, 21);
 
   const largerPackageScalesBudget = runCase(
@@ -129,33 +131,29 @@ try {
         bytesTransferred: 1440000,
         chunksSent: 2880,
         transferElapsedMs: 78000,
-        totalElapsedMs: 93000,
+        totalElapsedMs: 85000,
       }),
     ),
     true,
   );
-  assert.equal(largerPackageScalesBudget.targetTransferMs, 72000);
   assert.equal(largerPackageScalesBudget.acceptanceMaxTransferMs, 80000);
 
-  const postTransferRecoveryRegression = runCase(
-    "post-transfer-recovery-regression",
-    lineFor(transferReport({ confirmElapsedMs: 6001, totalElapsedMs: 65000 })),
+  const nonTransferFixedRegression = runCase(
+    "non-transfer-fixed-regression",
+    lineFor(transferReport({ totalElapsedMs: 58001 })),
     false,
   );
   assert.match(
-    postTransferRecoveryRegression.failures.join("\n"),
-    /post_transfer_recovery_ms=6821/,
+    nonTransferFixedRegression.failures.join("\n"),
+    /non_transfer_fixed_elapsed_ms=7001/,
   );
 
-  const typeReadyRecoveryRegression = runCase(
-    "type-ready-recovery-regression",
-    lineFor(transferReport({ typeReadyElapsedMs: 4001, totalElapsedMs: 65000 })),
-    false,
+  const slowTypeReadyWithinAggregateBudget = runCase(
+    "slow-type-ready-within-aggregate-budget",
+    lineFor(transferReport({ typeReadyElapsedMs: 4001, totalElapsedMs: 57000 })),
+    true,
   );
-  assert.match(
-    typeReadyRecoveryRegression.failures.join("\n"),
-    /post_transfer_recovery_ms=7001/,
-  );
+  assert.equal(slowTypeReadyWithinAggregateBudget.nonTransferFixedElapsedMs, 6000);
 
   const missingTypeReady = runCase(
     "missing-type-ready",
@@ -165,7 +163,7 @@ try {
   assert.equal(missingTypeReady.status, "FAIL");
   assert.match(missingTypeReady.failures.join("\n"), /type_ready=false/);
 
-  console.log("PASS: OTA timing parser keeps latest-result semantics and applies package-sized transfer plus a bounded confirmation-and-Type-ready recovery stage.");
+  console.log("PASS: OTA timing parser keeps latest-result semantics and applies the owner-confirmed package-sized transfer-rate plus fixed-time gate.");
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });
 }
