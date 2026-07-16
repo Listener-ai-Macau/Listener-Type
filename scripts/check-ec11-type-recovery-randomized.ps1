@@ -6,7 +6,11 @@ param(
     [ValidateRange(10, 60)]
     [int]$CaptureSeconds = 25,
     [ValidateRange(1, 60000)]
-    [int]$MaxTriggerToTypeReadyMs = 10000,
+    [int]$MaxDoubleClickToAdvertisingAcceptedMs = 250,
+    [ValidateRange(1, 60000)]
+    [int]$MaxConnectionToEncryptionMs = 1200,
+    [ValidateRange(1, 60000)]
+    [int]$MaxFreshPairingToTypeReadyMs = 6000,
     [ValidateRange(0, 15000)]
     [int]$MinPhaseDelayMs = 600,
     [ValidateRange(1, 20000)]
@@ -52,7 +56,7 @@ for ($iteration = 1; $iteration -le $Iterations; $iteration += 1) {
     Start-Sleep -Milliseconds $phaseDelayMs
 
     $samplePath = Join-Path (Split-Path -Parent $OutputJson) ("ec11-recovery-sample-{0:D2}.json" -f $iteration)
-    $lockOutput = & pwsh -NoProfile -File $aiwScript with-lock -Resource $Port -Wait -WaitTimeoutSeconds 120 -Purpose "randomized EC11 Type recovery speed sample $iteration of $Iterations" -Run pwsh -NoProfile -File $singleSampleScript -Port $Port -CaptureSeconds $CaptureSeconds -MaxTriggerToTypeReadyMs $MaxTriggerToTypeReadyMs -OutputJson $samplePath 2>&1
+    $lockOutput = & pwsh -NoProfile -File $aiwScript with-lock -Resource $Port -Wait -WaitTimeoutSeconds 120 -Purpose "randomized EC11 Type recovery speed sample $iteration of $Iterations" -Run pwsh -NoProfile -File $singleSampleScript -Port $Port -CaptureSeconds $CaptureSeconds -MaxDoubleClickToAdvertisingAcceptedMs $MaxDoubleClickToAdvertisingAcceptedMs -MaxConnectionToEncryptionMs $MaxConnectionToEncryptionMs -MaxFreshPairingToTypeReadyMs $MaxFreshPairingToTypeReadyMs -OutputJson $samplePath 2>&1
     $lockExitCode = $LASTEXITCODE
 
     $sample = if (Test-Path -LiteralPath $samplePath) {
@@ -69,7 +73,10 @@ for ($iteration = 1; $iteration -le $Iterations; $iteration += 1) {
         lock_exit_code = $lockExitCode
         sample_path = $samplePath
         status = $sample.status
-        trigger_to_type_ready_ms = $sample.trigger_to_type_ready_ms
+        advertising_command_accepted_ms = $sample.advertising_command_accepted_ms
+        connection_to_encryption_ms = $sample.connection_to_encryption_ms
+        fresh_pairing_to_type_ready_ms = $sample.fresh_pairing_to_type_ready_ms
+        trigger_to_type_ready_ms_informational = $sample.trigger_to_type_ready_ms_informational
         firmware_pre_reset_notice_sent = $sample.firmware_pre_reset_notice_sent
         type_pre_reset_notice_observed = $sample.type_pre_reset_notice_observed
         failure_reasons = @($sample.failure_reasons)
@@ -81,19 +88,23 @@ for ($iteration = 1; $iteration -le $Iterations; $iteration += 1) {
     }
 }
 
-$durations = @($results | Where-Object { $null -ne $_.trigger_to_type_ready_ms } | ForEach-Object { [int]$_.trigger_to_type_ready_ms })
+$advertisingDurations = @($results | Where-Object { $null -ne $_.advertising_command_accepted_ms } | ForEach-Object { [int]$_.advertising_command_accepted_ms })
+$encryptionDurations = @($results | Where-Object { $null -ne $_.connection_to_encryption_ms } | ForEach-Object { [int]$_.connection_to_encryption_ms })
+$typeReadyDurations = @($results | Where-Object { $null -ne $_.fresh_pairing_to_type_ready_ms } | ForEach-Object { [int]$_.fresh_pairing_to_type_ready_ms })
 $summary = [ordered]@{
     status = if (-not $runFailed -and $results.Count -eq $Iterations) { "PASS" } else { "FAIL" }
-    measurement_scope = "randomized-phase machine gate: generated EC11 double-click recovery event to firmware TYPE:READY"
+    measurement_scope = "randomized-phase machine gate: generated EC11 double-click recovery with independent advertising, encryption, and TYPE:READY stages"
     physical_gpio_measurement = $false
     trigger_kind = "firmware_generated_ec11_double_after_debounce"
     iterations_requested = $Iterations
     iterations_completed = $results.Count
-    max_trigger_to_type_ready_ms = $MaxTriggerToTypeReadyMs
-    observed_max_trigger_to_type_ready_ms = if ($durations.Count -gt 0) { ($durations | Measure-Object -Maximum).Maximum } else { $null }
-    observed_min_trigger_to_type_ready_ms = if ($durations.Count -gt 0) { ($durations | Measure-Object -Minimum).Minimum } else { $null }
-    all_samples_require_firmware_pre_reset_notice = $true
-    all_samples_require_type_pre_reset_notice = $true
+    max_double_click_to_advertising_accepted_ms = $MaxDoubleClickToAdvertisingAcceptedMs
+    max_connection_to_encryption_ms = $MaxConnectionToEncryptionMs
+    max_fresh_pairing_to_type_ready_ms = $MaxFreshPairingToTypeReadyMs
+    observed_max_advertising_command_accepted_ms = if ($advertisingDurations.Count -gt 0) { ($advertisingDurations | Measure-Object -Maximum).Maximum } else { $null }
+    observed_max_connection_to_encryption_ms = if ($encryptionDurations.Count -gt 0) { ($encryptionDurations | Measure-Object -Maximum).Maximum } else { $null }
+    observed_max_fresh_pairing_to_type_ready_ms = if ($typeReadyDurations.Count -gt 0) { ($typeReadyDurations | Measure-Object -Maximum).Maximum } else { $null }
+    type_controlled_samples_require_pre_reset_notice = $true
     samples = @($results)
 }
 Write-RunSummary $summary

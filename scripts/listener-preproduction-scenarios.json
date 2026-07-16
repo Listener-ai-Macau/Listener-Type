@@ -193,7 +193,67 @@
         "A comparison artifact maps each accepted contract to current Firmware, Type, and Platform decision points and classifies the current drift.",
         "Focused source and installed Program Files Type checks prove the restored local Type-owned recovery path while preserving manual-delete and cross-host passive branches.",
         "A short aiw with-lock COM3/BLE capture records the actual recovery decision, encrypted bond, notify/TYPE:READY or a classified failure without a stuck recovery capsule."
-      ]
+      ],
+      "machine_closure_local_type_owned_recovery_20260717": {
+        "status": "MACHINE_OPERATOR_ACCEPTED_WITH_SECOND_HOST_NO_GO",
+        "recorded_at": "2026-07-17T00:46:52+08:00",
+        "scope": "Installed Program Files Type on the current Windows host plus current Listener Firmware on COM3. This closes only the Type-owned local EC11 recovery and its three causal speed stages.",
+        "machine_operator": "A bounded firmware-generated EC11 double-click after normal debounce drove the actual installed-Type PairAsync, Windows secure bond, notify subscription, and firmware TYPE:READY path. It is machine evidence, not a physical GPIO press or human acceptance.",
+        "runtime_identity": {
+          "installed_type_exe": "C:\\Program Files\\Listener Type\\listener-type.exe",
+          "installed_type_sha256": "A00A44CFF788DC9A2394956A8C9E896164279C2A8CD1FC0F007C8CC6EA5C04C6",
+          "firmware_port": "COM3"
+        },
+        "causal_stage_gates": {
+          "double_click_to_controller_advertising_acceptance_ms": {
+            "target_ms": 250,
+            "observed_max_ms": 246,
+            "definition": "Accepted generated double-click to a successful return from NimBLE ble_gap_adv_start. Firmware separately retains advertising_started_log_complete_ms so serial diagnostics cannot inflate or disguise the controller stage. ESP-IDF's NimBLE guidance defines a zero return as advertising successfully initiated."
+          },
+          "windows_connection_to_encryption_ms": {
+            "target_ms": 1200,
+            "observed_max_ms": 370,
+            "definition": "The final successful incoming Windows GAP connection to status=0 encryption. Earlier failed connection attempts remain in each capture rather than being silently removed."
+          },
+          "fresh_pairing_evidence_to_type_ready_ms": {
+            "target_ms": 6000,
+            "observed_max_ms": 3760,
+            "definition": "Successful encryption/bond evidence to firmware TYPE:READY on the actual installed Type path. Total double-click-to-ready is informational only and is not used to hide a slow later stage."
+          }
+        },
+        "root_causes_closed": [
+          "Type-controlled recovery clears peer security, CCCD, and resolver records without rotating the local IRK, preserving the proven local identity needed by this host's bounded PairAsync recovery. Native/non-Type recovery retains the existing GAP unpair identity-rotation path.",
+          "The prior timing output sampled after synchronous serial diagnostics. Firmware now records NimBLE advertising-command acceptance before optional diagnostics and retains the later log-complete timestamp for observability.",
+          "The previous verifier matched a Type log phrase that was never emitted. It now checks the actual pre-reset notice and only requires it when firmware marks type_controlled=1."
+        ],
+        "permanent_regression_contract": [
+          "Listener-Firmware/tools/verify_ec11_recovery_critical_path_static.py asserts the Type-controlled peer-record path, the native GAP-unpair path, and the ordering of NimBLE advertising acceptance before recovery diagnostics.",
+          "Listener-Type/scripts/check-ec11-type-recovery-speed.ps1 reports the three stages independently, preserves every failed encryption status, and labels generated input as non-physical.",
+          "Listener-Type/scripts/check-ec11-type-recovery-randomized.ps1 runs independent short-lock random-phase installed-runtime samples."
+        ],
+        "machine_evidence": [
+          ".cache/validation/listener-platform-bluetooth-machine-closure-20260716/post-stage-metrics-single.json",
+          ".cache/validation/listener-platform-bluetooth-machine-closure-20260716/post-stage-metrics-single.log",
+          ".cache/validation/listener-platform-bluetooth-machine-closure-20260716/randomized-stage-metrics-3.json",
+          ".cache/validation/listener-platform-bluetooth-machine-closure-20260716/ec11-recovery-sample-01.json",
+          ".cache/validation/listener-platform-bluetooth-machine-closure-20260716/ec11-recovery-sample-02.json",
+          ".cache/validation/listener-platform-bluetooth-machine-closure-20260716/ec11-recovery-sample-03.json"
+        ],
+        "validation": [
+          "python .\\tools\\verify_ec11_recovery_critical_path_static.py PASS",
+          "pwsh -NoProfile -File .\\tools\\build.ps1 PASS",
+          "cargo fmt --check PASS",
+          "cargo test --lib -q PASS: 782 passed, 0 failed, 8 ignored",
+          "randomized-stage-metrics-3.json PASS: 3 of 3 generated installed-runtime samples"
+        ],
+        "physical_limit": "physical_gpio_measurement=false for every new sample. The historical physical <=250ms evidence remains a protected contract; this machine closure does not claim a new physical EC11 timing result.",
+        "remaining_second_host_no_go": {
+          "status": "BENCH_REVIEW_NO_GO",
+          "missing_capability": "A second independent Windows BLE host or isolated BLE adapter that can complete the other-host secure-pairing path while the current installed Type observes and remains passive.",
+          "why_not_passed": "The current bench can prove Type-owned local recovery but cannot truthfully prove the other-host-first physical ownership result. Source and library tests preserve the no-reclaim branch, but they are not represented as a second-host physical PASS.",
+          "next_evidence": "Run one focused two-host physical EC11 double-click session: capture the second host's Windows pairing/secure-bond evidence, COM3 recovery log, and current Program Files Type log proving no repeated local PairAsync or reclaim."
+        }
+      }
     },
     "listener_platform_preserves_accepted_behavior_20260716": {
       "status": "required",

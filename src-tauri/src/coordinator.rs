@@ -83,17 +83,10 @@ const EMBEDDED_BLE_TYPE_NATIVE_PAIRING_HANDOFF_REASON: &str =
     "Type automatic pairing recovery after stale cleanup";
 const EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON: &str = "manual Windows pairing removal";
 const EMBEDDED_BLE_HARDWARE_RECOVERY_PAIRING_HOLD_REASON: &str = "hardware recovery pairing window";
+const EMBEDDED_BLE_STALE_NATIVE_HID_RECOVERY_WAIT_REASON: &str =
+    "stale native HID recovery advertisement wait";
 const EMBEDDED_BLE_EC11_HARDWARE_RECOVERY_NOTICE: &str =
     "Listener EC11 hardware recovery notice received before pairing reset";
-const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON: &str =
-    "EC11 cross-host native pairing arbitration";
-const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESUMED: &str =
-    "EC11 native pairing arbitration completed with fresh recovery advertising";
-// Listener keeps the random-identity recovery advertisement available for
-// 120 seconds. The old Type host must outlive that window so a native pairing
-// started on another Windows PC cannot be reclaimed by its local PairAsync.
-const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_HOLD: Duration = Duration::from_secs(125);
-const EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESCAN: Duration = Duration::from_millis(1200);
 const EMBEDDED_BLE_TYPE_RECOVERY_PAIRING_SETTLE: Duration = Duration::from_millis(2600);
 // Windows can report the freshly paired device as absent while it rebuilds its
 // BLE/HID service graph. Do not mistake that short post-PairAsync interval for
@@ -3095,6 +3088,72 @@ fn queue_pending_device_key_ble_action(
         gesture.label(),
         previous.is_some()
     );
+    schedule_pending_device_key_ble_action_expiry(inner, action);
+}
+
+fn take_expired_pending_device_key_ble_action(
+    inner: &Arc<Inner>,
+    expected: PendingDeviceKeyBleAction,
+    reason: &'static str,
+) -> Option<PendingDeviceKeyBleAction> {
+    let expired = {
+        let mut slot = inner.device_key_pending_ble_action.lock();
+        if slot.as_ref().is_some_and(|action| {
+            *action == expected && !pending_device_key_ble_action_is_fresh(*action, Instant::now())
+        }) {
+            slot.take()
+        } else {
+            None
+        }
+    };
+    let Some(action) = expired else {
+        return None;
+    };
+    let age_ms = pending_device_key_ble_action_age(action, Instant::now()).as_millis();
+    crate::timeline::mark(
+        "backend.device_key",
+        "ble_recording_control_pending_expired",
+        format!(
+            "kind={} key={} gesture={} reason={reason} age_ms={age_ms}",
+            action.kind.label(),
+            action.key.label(),
+            action.gesture.label()
+        ),
+    );
+    log::warn!(
+        "[device-key] pending BLE recording {} reached its terminal TTL key={} gesture={} reason={reason} age_ms={age_ms}",
+        action.kind.label(),
+        action.key.label(),
+        action.gesture.label()
+    );
+    Some(action)
+}
+
+fn schedule_pending_device_key_ble_action_expiry(
+    inner: &Arc<Inner>,
+    action: PendingDeviceKeyBleAction,
+) {
+    let inner = Arc::clone(inner);
+    async_runtime::spawn(async move {
+        tokio::time::sleep(DEVICE_KEY_BLE_PENDING_ACTION_TTL + Duration::from_millis(1)).await;
+        let Some(expired) =
+            take_expired_pending_device_key_ble_action(&inner, action, "terminal_ttl")
+        else {
+            return;
+        };
+        if expired.kind == PendingDeviceKeyBleActionKind::Start
+            && inner.state.lock().phase == SessionPhase::Idle
+        {
+            let idle_session = emit_device_key_recording_control_capsule(
+                &inner,
+                None,
+                DictationUiState::Error,
+                CapsuleState::Error,
+                "Listener 音频通道未恢复".to_string(),
+            );
+            schedule_capsule_idle(&inner, 6000, idle_session);
+        }
+    });
 }
 
 fn queue_pending_device_key_ble_start(
@@ -4625,106 +4684,6 @@ fn start_embedded_ble_pairing_confirmation_watch(
     });
 }
 
-fn start_ec11_native_pairing_handoff_arbitration(
-    inner: &Arc<Inner>,
-    expected_ble_name: String,
-    hold_generation: u64,
-    recovery_error: String,
-) {
-    let inner = Arc::clone(inner);
-    async_runtime::spawn(async move {
-        tokio::time::sleep(EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_HOLD).await;
-        if inner.shutdown.load(Ordering::SeqCst)
-            || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
-            || inner
-                .embedded_ble_pairing_hold_generation
-                .load(Ordering::SeqCst)
-                != hold_generation
-        {
-            log::info!(
-                "[embedded-ble] EC11 native pairing arbitration superseded hold_generation={hold_generation}"
-            );
-            return;
-        }
-
-        clear_embedded_ble_pairing_confirmation_hold(
-            &inner,
-            "EC11 native pairing arbitration window elapsed",
-        );
-        let expected_for_scan = expected_ble_name.clone();
-        let probe = async_runtime::spawn_blocking(move || {
-            crate::embedded_ble::listener_recovery_pairing_advertisement_probe(
-                Some(&expected_for_scan),
-                EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESCAN,
-            )
-        })
-        .await;
-        match probe {
-            Ok(probe) if probe.visible => {
-                let observed_addresses = probe
-                    .addresses
-                    .iter()
-                    .map(|address| format!("{address:012X}"))
-                    .collect::<Vec<_>>();
-                let resumed_error = format!(
-                    "{recovery_error}; {EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESUMED} addresses={observed_addresses:?}"
-                );
-                log::info!(
-                    "[embedded-ble] EC11 native pairing arbitration ended with recovery advertising still visible; entering bounded local Type recovery target={expected_ble_name:?} addresses={observed_addresses:?}"
-                );
-                record_embedded_ble_listener_last_error(&inner, &resumed_error);
-                let mut resumed_cleanup_at = None;
-                let outcome = maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
-                    &inner,
-                    &resumed_error,
-                    &mut resumed_cleanup_at,
-                )
-                .await;
-                log::info!(
-                    "[embedded-ble] EC11 native pairing arbitration resumed Type recovery outcome={outcome:?} target={expected_ble_name:?} addresses={observed_addresses:?}"
-                );
-            }
-            Ok(_) => {
-                log::info!(
-                    "[embedded-ble] EC11 native pairing arbitration found no recovery advertising after the external-host window; keeping old Type passively attached to explicit local Windows re-pair evidence target={expected_ble_name:?}"
-                );
-                {
-                    let mut wake = inner.embedded_ble_wake_recovery.lock();
-                    wake.status = EmbeddedBleWakeRecoveryStatus::NeedsWakeKey;
-                    wake.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Cancelled;
-                    wake.recent_disconnect_reason = Some(format!(
-                        "EC11 native pairing arbitration ended without recovery advertising; another Windows host may own {expected_ble_name}"
-                    ));
-                    wake.user_guidance = format!(
-                        "另一台 Windows 电脑正在配对 {expected_ble_name}。这台 Type 会保持等待，不会抢回连接。"
-                    );
-                }
-                emit_embedded_ble_recovery_capsule(
-                    &inner,
-                    "reconnecting",
-                    EmbeddedBleRecoveryCapsuleMessage::WaitingWindowsPairing,
-                    Some(4200),
-                );
-                start_embedded_ble_passive_local_reattach_watch(
-                    &inner,
-                    expected_ble_name,
-                    EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON,
-                );
-            }
-            Err(err) => {
-                log::warn!(
-                    "[embedded-ble] EC11 native pairing arbitration rescan failed; keeping old Type passively attached to explicit local Windows re-pair evidence target={expected_ble_name:?}: {err}"
-                );
-                start_embedded_ble_passive_local_reattach_watch(
-                    &inner,
-                    expected_ble_name,
-                    EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON,
-                );
-            }
-        }
-    });
-}
-
 fn startup_ble_name_sync_reason(reason: &'static str) -> bool {
     matches!(
         reason,
@@ -5526,49 +5485,11 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
     log::info!("[embedded-ble] background listener stopped generation={generation}");
 }
 
-fn hold_embedded_ble_for_ec11_passive_local_reattach(inner: &Arc<Inner>, err: &str) {
-    let expected_ble_name = inner.prefs.get().device_ble_name;
-    let hold_generation = hold_embedded_ble_listener_for_pairing_confirmation(
-        inner,
-        EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON,
-    );
-    log::info!(
-        "[embedded-ble] EC11 recovery entered passive local reattach hold_generation={hold_generation} target={expected_ble_name:?}; Type will not scan, unpair, or PairAsync while another host may pair err={}",
-        embedded_ble_log_preview(err),
-    );
-    {
-        let mut wake = inner.embedded_ble_wake_recovery.lock();
-        wake.status = EmbeddedBleWakeRecoveryStatus::NeedsWakeKey;
-        wake.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Cancelled;
-        wake.recent_disconnect_reason = Some(format!(
-            "EC11 recovery is waiting for explicit local Windows pairing/HID evidence target={expected_ble_name}"
-        ));
-        wake.user_guidance = format!(
-            "Listener 已进入重新配对状态。Type 不会自动抢回连接；如需继续使用这台电脑，请在 Windows 蓝牙里手动添加 {expected_ble_name}。"
-        );
-    }
-    emit_embedded_ble_recovery_capsule(
-        inner,
-        "reconnecting",
-        EmbeddedBleRecoveryCapsuleMessage::WaitingWindowsPairing,
-        Some(4200),
-    );
-    start_embedded_ble_passive_local_reattach_watch(
-        inner,
-        expected_ble_name,
-        EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON,
-    );
-}
-
 async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     inner: &Arc<Inner>,
     err: &str,
     last_cleanup_at: &mut Option<Instant>,
 ) -> EmbeddedBleStalePairingCleanupOutcome {
-    if embedded_ble_requires_passive_local_reattach(err) {
-        hold_embedded_ble_for_ec11_passive_local_reattach(inner, err);
-        return EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation;
-    }
     let snapshot = embedded_ble_wake_recovery_snapshot(inner);
     let now = Instant::now();
     let recovery_pairing_probe = maybe_probe_embedded_ble_recovery_pairing_advertisement(
@@ -5587,12 +5508,9 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     let pairing_confirmation_hold_active =
         embedded_ble_pairing_confirmation_hold_remaining(inner, now).is_some();
     let hardware_ec11_recovery_notice = embedded_ble_hardware_ec11_recovery_notice_observed(err);
-    let ec11_external_native_pairing_handoff =
-        ec11_external_native_pairing_handoff_requires_arbitration(err, &recovery_pairing_probe);
     let active_capture_type_recovery =
         recovery_pairing_advertisement_already_observed_during_active_capture(err);
     let type_observed_recovery_advertisement = !pairing_confirmation_hold_active
-        && !ec11_external_native_pairing_handoff
         && (recovery_pairing_advertisement_already_observed_during_notify_open(err)
             || (hardware_ec11_recovery_notice && recovery_pairing_probe.visible));
     let stale_cleanup_candidate = should_attempt_embedded_ble_background_stale_pairing_cleanup(
@@ -5615,8 +5533,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     );
     let recovery_advertisement_allows_cleanup =
         recovery_pairing_advertisement_allows_immediate_stale_cleanup(err);
-    let should_query_pairing_preflight = !ec11_external_native_pairing_handoff
-        && !type_observed_recovery_advertisement
+    let should_query_pairing_preflight = !type_observed_recovery_advertisement
         && (recovery_pairing_window_visible
             || stale_cleanup_candidate
             || visible_recovery_allows_cleanup
@@ -5724,16 +5641,14 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                 type_owned_stale_cache_cleanup,
             )
         });
-    let local_stale_cache_recovery_allows_cleanup = !ec11_external_native_pairing_handoff
-        && recovery_pairing_window_visible
+    let local_stale_cache_recovery_allows_cleanup = recovery_pairing_window_visible
         && pairing_before_cleanup.as_ref().is_some_and(|pairing| {
             !manual_unpair_hold
                 && (pairing.already_paired_devices > 0
                     || pairing.matched_devices > 0
                     || pairing.failed_devices > 0)
         });
-    let automatic_cleanup_allowed = !ec11_external_native_pairing_handoff
-        && !native_windows_hid_pairing_blocks_pairasync
+    let automatic_cleanup_allowed = !native_windows_hid_pairing_blocks_pairasync
         && embedded_ble_background_pairasync_is_authorized(
             manual_unpair_hold,
             type_observed_recovery_advertisement,
@@ -5761,31 +5676,6 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                 embedded_ble_log_preview(err),
             );
         }
-    }
-    if ec11_external_native_pairing_handoff {
-        *last_cleanup_at = Some(now);
-        let hold_generation = hold_embedded_ble_listener_for_pairing_confirmation_for(
-            inner,
-            EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON,
-            EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_HOLD,
-        );
-        log::info!(
-            "[embedded-ble] EC11 random-identity recovery advertising opened cross-host native pairing arbitration; old Type defers local cache cleanup and PairAsync hold_generation={hold_generation} target={expected_ble_name:?} hold_ms={}",
-            EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_HOLD.as_millis()
-        );
-        start_ec11_native_pairing_handoff_arbitration(
-            inner,
-            expected_ble_name.clone(),
-            hold_generation,
-            err.to_string(),
-        );
-        emit_embedded_ble_recovery_capsule(
-            inner,
-            "reconnecting",
-            EmbeddedBleRecoveryCapsuleMessage::WaitingWindowsPairing,
-            Some(4200),
-        );
-        return EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation;
     }
     if recovery_pairing_window_visible
         && !direct_gatt_instability_recovery
@@ -6209,30 +6099,11 @@ fn recovery_pairing_advertisement_allows_immediate_stale_cleanup(err: &str) -> b
 fn recovery_pairing_advertisement_already_observed_during_notify_open(err: &str) -> bool {
     err.contains("Listener recovery Swift Pair advertisement visible for notify CCCD address")
         || err.contains("Listener recovery Swift Pair advertisement visible for persisted address")
-        || err.contains(EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESUMED)
         || recovery_pairing_advertisement_already_observed_during_active_capture(err)
 }
 
 fn embedded_ble_hardware_ec11_recovery_notice_observed(err: &str) -> bool {
     err.contains(EMBEDDED_BLE_EC11_HARDWARE_RECOVERY_NOTICE)
-}
-
-fn embedded_ble_requires_passive_local_reattach(err: &str) -> bool {
-    embedded_ble_hardware_ec11_recovery_notice_observed(err)
-        // The firmware notifies before terminating the old GATT connection, but
-        // Windows can report that disconnect first. The recovery advertisement
-        // error is the equivalent causal evidence and must stay passive too.
-        || recovery_pairing_advertisement_already_observed_during_notify_open(err)
-}
-
-fn ec11_external_native_pairing_handoff_requires_arbitration(
-    err: &str,
-    probe: &crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe,
-) -> bool {
-    embedded_ble_hardware_ec11_recovery_notice_observed(err)
-        && !err.contains(EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_RESUMED)
-        && probe.visible
-        && probe.has_random_identity
 }
 
 fn recovery_pairing_advertisement_already_observed_during_active_capture(err: &str) -> bool {
@@ -6469,6 +6340,141 @@ fn hold_embedded_ble_for_missing_native_pairing(inner: &Arc<Inner>, reason: &str
     );
 }
 
+fn hold_embedded_ble_for_stale_native_hid_recovery(
+    inner: &Arc<Inner>,
+    reason: &str,
+    native_hid_addresses: Vec<u64>,
+    pairing: crate::embedded_ble::BleDevicePairingPromptResult,
+) {
+    let expected_ble_name = inner.prefs.get().device_ble_name;
+    let hold_generation = hold_embedded_ble_listener_for_pairing_confirmation(
+        inner,
+        EMBEDDED_BLE_STALE_NATIVE_HID_RECOVERY_WAIT_REASON,
+    );
+    log::warn!(
+        "[embedded-ble] stale native Windows HID detected; waiting for a real Listener recovery advertisement before bounded local PairAsync hold_generation={hold_generation} target={expected_ble_name:?} reason={}",
+        embedded_ble_log_preview(reason),
+    );
+    {
+        let mut wake = inner.embedded_ble_wake_recovery.lock();
+        wake.status = EmbeddedBleWakeRecoveryStatus::NeedsWakeKey;
+        wake.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Cancelled;
+        wake.recent_disconnect_reason = Some(format!(
+            "stale native Windows HID is waiting for Listener recovery advertising target={expected_ble_name}"
+        ));
+        wake.user_guidance =
+            "Listener 正在等待设备重新进入恢复广播；检测到后会自动恢复本机蓝牙连接。".to_string();
+    }
+    emit_embedded_ble_recovery_capsule(
+        inner,
+        "reconnecting",
+        EmbeddedBleRecoveryCapsuleMessage::WaitingTypePairing,
+        Some(4200),
+    );
+    start_embedded_ble_stale_native_hid_recovery_watch(
+        inner,
+        expected_ble_name,
+        hold_generation,
+        native_hid_addresses,
+        pairing,
+    );
+}
+
+fn start_embedded_ble_stale_native_hid_recovery_watch(
+    inner: &Arc<Inner>,
+    expected_ble_name: String,
+    hold_generation: u64,
+    native_hid_addresses: Vec<u64>,
+    pairing: crate::embedded_ble::BleDevicePairingPromptResult,
+) {
+    let inner = Arc::clone(inner);
+    async_runtime::spawn(async move {
+        log::info!(
+            "[embedded-ble] stale native HID recovery advertisement watch started target={expected_ble_name:?} hold_generation={hold_generation}"
+        );
+        if inner.shutdown.load(Ordering::SeqCst)
+            || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
+            || inner
+                .embedded_ble_pairing_hold_generation
+                .load(Ordering::SeqCst)
+                != hold_generation
+        {
+            return;
+        }
+
+        // Keep one watcher alive for the bounded pairing window. Restarting four-second
+        // scans introduced a blind gap after a physical EC11 double-click, even though the
+        // startup preflight had already proved this PC owns only a stale local HID record.
+        let expected_for_scan = expected_ble_name.clone();
+        let recovery_pairing_probe = async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::listener_recovery_pairing_advertisement_probe(
+                Some(&expected_for_scan),
+                EMBEDDED_BLE_PAIRING_CONFIRMATION_HOLD,
+            )
+        })
+        .await;
+        let Ok(recovery_pairing_probe) = recovery_pairing_probe else {
+            log::warn!(
+                "[embedded-ble] stale native HID recovery advertisement watch task failed; keeping passive ownership"
+            );
+            return;
+        };
+        if !recovery_pairing_probe.visible
+            || inner.shutdown.load(Ordering::SeqCst)
+            || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
+            || inner
+                .embedded_ble_pairing_hold_generation
+                .load(Ordering::SeqCst)
+                != hold_generation
+        {
+            return;
+        }
+        if !startup_stale_native_hid_recovery_is_authorized(
+            &native_hid_addresses,
+            &pairing,
+            &recovery_pairing_probe,
+        ) {
+            log::info!(
+                "[embedded-ble] recovery advertising is visible but cached stale-HID ownership proof is incomplete; preserving passive ownership native_hid_count={} status={:?} matched={} already_paired={} failed={}",
+                native_hid_addresses.len(),
+                pairing.status,
+                pairing.matched_devices,
+                pairing.already_paired_devices,
+                pairing.failed_devices,
+            );
+            return;
+        }
+
+        let observed_addresses = recovery_pairing_probe
+            .addresses
+            .iter()
+            .map(|address| format!("{address:012X}"))
+            .collect::<Vec<_>>();
+        let recovery_error = format!(
+            "Listener recovery Swift Pair advertisement visible for persisted address {} after stale native HID recovery watch; missing pairing must use Type automatic PairAsync recovery before declaring notify ready",
+            observed_addresses.join(",")
+        );
+        log::warn!(
+            "[embedded-ble] stale native HID recovery watch used startup stale-pairing proof and active recovery advertising; starting bounded Type PairAsync recovery recovery_addresses={observed_addresses:?}"
+        );
+        clear_embedded_ble_pairing_confirmation_hold(
+            &inner,
+            "stale native HID recovery advertisement observed",
+        );
+        record_embedded_ble_listener_last_error(&inner, &recovery_error);
+        let mut cleanup_at = None;
+        let outcome = maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
+            &inner,
+            &recovery_error,
+            &mut cleanup_at,
+        )
+        .await;
+        log::info!(
+            "[embedded-ble] stale native HID recovery watch Type recovery outcome={outcome:?}"
+        );
+    });
+}
+
 async fn maybe_hold_embedded_ble_after_lost_native_pairing(inner: &Arc<Inner>, err: &str) -> bool {
     if !is_embedded_ble_link_loss_error(err)
         || embedded_ble_type_pairasync_startup_guard_active(inner)
@@ -6539,23 +6545,12 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
     }
     let expected_ble_name = inner.prefs.get().device_ble_name;
     let started_at = Instant::now();
-    let native_pairing = async_runtime::spawn_blocking(|| {
+    let native_hid_addresses = match async_runtime::spawn_blocking(|| {
         crate::embedded_ble::native_windows_hid_pairing_addresses()
     })
-    .await;
-    match native_pairing {
-        Ok(Ok(addresses)) if !addresses.is_empty() => {
-            let labels = addresses
-                .iter()
-                .map(|address| format!("{address:012X}"))
-                .collect::<Vec<_>>();
-            log::info!(
-                "[embedded-ble] startup native Windows HID pairing evidence allows persisted GATT reopen addresses={labels:?} elapsed_ms={}",
-                started_at.elapsed().as_millis(),
-            );
-            return false;
-        }
-        Ok(Ok(_)) => {}
+    .await
+    {
+        Ok(Ok(addresses)) => addresses,
         Ok(Err(err)) => {
             log::warn!(
                 "[embedded-ble] startup native Windows HID pairing evidence unavailable; preserving persisted GATT path: {err}"
@@ -6568,7 +6563,7 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
             );
             return false;
         }
-    }
+    };
     let expected_for_query = expected_ble_name.clone();
     let query = async_runtime::spawn_blocking(move || {
         crate::embedded_ble::query_listener_pairing(Some(&expected_for_query))
@@ -6592,7 +6587,72 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
         pairing.open_bluetooth_settings,
         started_at.elapsed().as_millis(),
     );
-    if !embedded_ble_current_native_pairing_is_missing(&[], &pairing) {
+    if !native_hid_addresses.is_empty() {
+        let labels = native_hid_addresses
+            .iter()
+            .map(|address| format!("{address:012X}"))
+            .collect::<Vec<_>>();
+        if pairing.already_paired_devices > 0 {
+            log::info!(
+                "[embedded-ble] startup native Windows HID/current pairing evidence allows persisted GATT reopen addresses={labels:?} elapsed_ms={}",
+                started_at.elapsed().as_millis(),
+            );
+            return false;
+        }
+        let expected_for_scan = expected_ble_name.clone();
+        let recovery_pairing_probe = async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::listener_recovery_pairing_advertisement_probe(
+                Some(&expected_for_scan),
+                EMBEDDED_BLE_RECOVERY_PAIRING_ADV_SCAN_TIMEOUT,
+            )
+        })
+        .await
+        .unwrap_or_else(|err| {
+            log::warn!(
+                "[embedded-ble] startup stale-HID recovery advertisement probe task failed: {err}"
+            );
+            crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe::default()
+        });
+        if startup_stale_native_hid_recovery_is_authorized(
+            &native_hid_addresses,
+            &pairing,
+            &recovery_pairing_probe,
+        ) {
+            let observed_addresses = recovery_pairing_probe
+                .addresses
+                .iter()
+                .map(|address| format!("{address:012X}"))
+                .collect::<Vec<_>>();
+            let recovery_error = format!(
+                "Listener recovery Swift Pair advertisement visible for persisted address {} after startup stale native HID pairing; missing pairing must use Type automatic PairAsync recovery before declaring notify ready",
+                observed_addresses.join(",")
+            );
+            log::warn!(
+                "[embedded-ble] startup stale native HID pairing matches active Listener recovery advertising; entering bounded local Type PairAsync recovery native_hid_addresses={labels:?} recovery_addresses={observed_addresses:?}"
+            );
+            record_embedded_ble_listener_last_error(inner, &recovery_error);
+            let mut startup_cleanup_at = None;
+            let outcome = maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
+                inner,
+                &recovery_error,
+                &mut startup_cleanup_at,
+            )
+            .await;
+            log::info!("[embedded-ble] startup stale native HID recovery outcome={outcome:?}");
+            return outcome == EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation;
+        }
+        log::warn!(
+            "[embedded-ble] startup stale native HID has no matching recovery advertisement; preserving user/external ownership native_hid_addresses={labels:?}"
+        );
+        hold_embedded_ble_for_stale_native_hid_recovery(
+            inner,
+            "startup found stale native Windows HID without current Listener recovery advertising",
+            native_hid_addresses,
+            pairing,
+        );
+        return true;
+    }
+    if !embedded_ble_current_native_pairing_is_missing(&native_hid_addresses, &pairing) {
         return false;
     }
     log::warn!(
@@ -6603,6 +6663,20 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
         "startup found no current native Windows Listener HID or paired device",
     );
     true
+}
+
+fn startup_stale_native_hid_recovery_is_authorized(
+    native_hid_addresses: &[u64],
+    pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
+    recovery_pairing_probe: &crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe,
+) -> bool {
+    !native_hid_addresses.is_empty()
+        && recovery_pairing_probe.visible
+        && !native_windows_hid_pairing_blocks_type_pairasync(
+            true,
+            recovery_pairing_probe,
+            Some(pairing),
+        )
 }
 
 fn embedded_ble_background_pairasync_is_authorized(
@@ -9370,6 +9444,50 @@ mod tests {
     }
 
     #[test]
+    fn device_key_ble_terminal_ttl_clears_only_its_own_pending_action() {
+        let coordinator = Coordinator::new();
+        let expired = PendingDeviceKeyBleAction {
+            kind: PendingDeviceKeyBleActionKind::Start,
+            key: DeviceCustomKeyId::Key1,
+            gesture: DeviceCustomKeyGesture::SingleClick,
+            queued_at: Instant::now()
+                - DEVICE_KEY_BLE_PENDING_ACTION_TTL
+                - Duration::from_millis(1),
+        };
+        *coordinator.inner.device_key_pending_ble_action.lock() = Some(expired);
+
+        assert_eq!(
+            take_expired_pending_device_key_ble_action(
+                &coordinator.inner,
+                expired,
+                "test_terminal_ttl",
+            ),
+            Some(expired)
+        );
+        assert!(coordinator
+            .inner
+            .device_key_pending_ble_action
+            .lock()
+            .is_none());
+
+        let replacement = PendingDeviceKeyBleAction {
+            queued_at: Instant::now(),
+            ..expired
+        };
+        *coordinator.inner.device_key_pending_ble_action.lock() = Some(replacement);
+        assert!(take_expired_pending_device_key_ble_action(
+            &coordinator.inner,
+            expired,
+            "test_replacement",
+        )
+        .is_none());
+        assert_eq!(
+            *coordinator.inner.device_key_pending_ble_action.lock(),
+            Some(replacement)
+        );
+    }
+
+    #[test]
     fn device_key_ble_retry_pending_only_for_start_recoverable_errors() {
         assert!(should_keep_device_key_ble_start_pending_after_error(
             DeviceKeyBleRecordingControlDecision::Start,
@@ -10653,17 +10771,26 @@ mod tests {
         let manual_query_index = startup_helper.find("query_listener_pairing").expect(
             "startup manual-delete preflight must still query the weaker Windows BLE pairing view",
         );
+        let current_pairing_index = startup_helper
+            .find("if pairing.already_paired_devices > 0")
+            .expect("a current Windows pairing must remain the fast persisted-GATT path");
+        let recovery_scan_index = startup_helper
+            .find("listener_recovery_pairing_advertisement_probe")
+            .expect("a stale native HID must scan for current recovery advertising");
         assert!(
             native_hid_index < manual_query_index
-                && startup_helper.contains("startup native Windows HID pairing evidence allows persisted GATT reopen"),
-            "a matching Listener BTHLE root plus HID keyboard must take over before a stale GATT pairing view can be mistaken for a manual delete"
+                && manual_query_index < current_pairing_index
+                && current_pairing_index < recovery_scan_index
+                && startup_helper.contains("startup native Windows HID/current pairing evidence allows persisted GATT reopen")
+                && startup_helper.contains("startup_stale_native_hid_recovery_is_authorized")
+                && startup_helper.contains("hold_embedded_ble_for_stale_native_hid_recovery"),
+            "a current Listener pairing must retain the fast persisted-GATT path, while a stale HID must require active recovery advertising before bounded local PairAsync"
         );
         assert!(
             body.contains("native_windows_hid_pairing_addresses")
                 && body.contains("native Windows HID pairing remains installed; retrying direct GATT without pairing cleanup")
                 && body.contains("let manual_unpair_hold = !native_windows_hid_pairing_blocks_pairasync")
-                && body.contains("let automatic_cleanup_allowed = !ec11_external_native_pairing_handoff")
-                && body.contains("&& !native_windows_hid_pairing_blocks_pairasync"),
+                && body.contains("let automatic_cleanup_allowed = !native_windows_hid_pairing_blocks_pairasync"),
             "a native Windows HID pairing must also stay out of the manual-delete hold after a transient GATT failure"
         );
         let listener_loop_start = source
@@ -10975,7 +11102,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_ble_ec11_recovery_enters_passive_local_reattach_before_any_advertisement_probe() {
+    fn embedded_ble_ec11_recovery_enters_type_controlled_pairing_path() {
         let source = include_str!("coordinator.rs");
         let start = source
             .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
@@ -10983,51 +11110,28 @@ mod tests {
         let probe = source[start..]
             .find("let recovery_pairing_probe")
             .map(|offset| start + offset)
-            .expect("BLE recovery advertisement probe should remain after the EC11 branch");
-        let ec11_branch = &source[start..probe];
-        assert!(
-            ec11_branch.contains("embedded_ble_requires_passive_local_reattach(err)")
-                && ec11_branch.contains("hold_embedded_ble_for_ec11_passive_local_reattach")
-                && ec11_branch.contains("EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation"),
-            "an EC11 recovery notification or matching recovery advertisement must enter the passive local-repair state before generic stale-cache recovery"
-        );
-
-        let helper_start = source
-            .find("fn hold_embedded_ble_for_ec11_passive_local_reattach")
-            .expect("EC11 passive-recovery helper should exist");
-        let helper_end = source[helper_start..]
-            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
-            .map(|offset| helper_start + offset)
-            .expect("EC11 passive-recovery helper boundary should exist");
-        let helper = &source[helper_start..helper_end];
-        assert!(
-            helper.contains("start_embedded_ble_passive_local_reattach_watch"),
-            "EC11 recovery must keep a passive observer so a later explicit local re-pair restores Type"
-        );
-        for forbidden in [
-            ".PairAsync(",
-            "unpair_listener",
-            "listener_recovery_pairing_advertisement_probe",
-            "prompt_listener_pairing",
-        ] {
-            assert!(
-                !helper.contains(forbidden),
-                "EC11 passive recovery must not reclaim another host through {forbidden}"
+            .expect(
+                "BLE recovery advertisement probe should precede Type ownership classification",
             );
-        }
-    }
-
-    #[test]
-    fn embedded_ble_recovery_advertisement_fallback_stays_passive_when_notice_is_lost() {
-        assert!(embedded_ble_requires_passive_local_reattach(
-            "Listener EC11 hardware recovery notice received before pairing reset"
-        ));
-        assert!(embedded_ble_requires_passive_local_reattach(
-            "Listener recovery Swift Pair advertisement visible for notify CCCD address C1460007A2B6 after BLE CCCD write async error"
-        ));
-        assert!(!embedded_ble_requires_passive_local_reattach(
-            "BLE device connection status changed to Disconnected; transport_not_ready"
-        ));
+        let type_controlled = source[start..]
+            .find("let type_observed_recovery_advertisement")
+            .map(|offset| start + offset)
+            .expect("EC11 recovery should classify the observed advertisement as Type-controlled");
+        let cleanup_end = source[start..]
+            .find("async fn maybe_probe_embedded_ble_recovery_pairing_advertisement")
+            .map(|offset| start + offset)
+            .expect("background BLE recovery helper boundary should exist");
+        let preflight = &source[start..probe];
+        let cleanup = &source[start..cleanup_end];
+        assert!(
+            !preflight.contains("HoldForConfirmation"),
+            "EC11 recovery evidence must reach advertisement/pairing preflight instead of being blanket-classified as passive"
+        );
+        assert!(
+            probe < type_controlled
+                && !cleanup.contains("ec11_external_native_pairing_handoff_requires_arbitration"),
+            "a random recovery address is not proof of an external owner; Type must retain its bounded local cleanup path"
+        );
     }
 
     #[test]
@@ -11093,7 +11197,7 @@ mod tests {
             .find("async fn embedded_ble_background_listener_loop")
             .expect("background listener loop should exist");
         let loop_end = source[loop_start..]
-            .find("fn hold_embedded_ble_for_ec11_passive_local_reattach")
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
             .map(|offset| loop_start + offset)
             .expect("background listener loop boundary should exist");
         let listener_loop = &source[loop_start..loop_end];
@@ -11351,9 +11455,7 @@ mod tests {
             .find("background stale pairing cleanup preflight Windows pairing")
             .expect("Windows pairing preflight should exist before cleanup");
         let automatic_allowed = body
-            .find(
-                "let automatic_cleanup_allowed = !ec11_external_native_pairing_handoff\n        && !native_windows_hid_pairing_blocks_pairasync",
-            )
+            .find("let automatic_cleanup_allowed = !native_windows_hid_pairing_blocks_pairasync")
             .expect("automatic cleanup decision should exist after Windows pairing preflight");
         let visible_hold = body
             .find("recovery pairing advertisement visible from hardware/user action")
@@ -11371,34 +11473,7 @@ mod tests {
     }
 
     #[test]
-    fn ec11_random_identity_handoff_defers_type_pairasync_to_other_windows_host() {
-        let notice = "Listener EC11 hardware recovery notice received before pairing reset";
-        let random_identity_recovery =
-            crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
-                visible: true,
-                has_random_identity: true,
-                addresses: Vec::new(),
-            };
-        let public_identity_recovery =
-            crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
-                visible: true,
-                has_random_identity: false,
-                addresses: Vec::new(),
-            };
-
-        assert!(ec11_external_native_pairing_handoff_requires_arbitration(
-            notice,
-            &random_identity_recovery
-        ));
-        assert!(!ec11_external_native_pairing_handoff_requires_arbitration(
-            notice,
-            &public_identity_recovery
-        ));
-        assert!(!ec11_external_native_pairing_handoff_requires_arbitration(
-            "No paired BLE device found in Windows Bluetooth pairing store for listener",
-            &random_identity_recovery
-        ));
-
+    fn ec11_random_identity_keeps_type_recovery_bounded_and_non_reclaiming() {
         let source = include_str!("coordinator.rs");
         let start = source
             .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
@@ -11409,15 +11484,14 @@ mod tests {
             .expect("background stale cleanup helper boundary should exist");
         let body = &source[start..end];
         assert!(
-            body.contains("ec11_external_native_pairing_handoff_requires_arbitration(err, &recovery_pairing_probe)")
-                && body.contains("old Type defers local cache cleanup and PairAsync")
-                && body.contains("start_ec11_native_pairing_handoff_arbitration"),
-            "an EC11 random-identity handoff must defer old-Type cleanup and PairAsync before any local pairing path can run"
+            body.contains("hardware_ec11_recovery_notice && recovery_pairing_probe.visible")
+                && body.contains("background Type recovery PairAsync result"),
+            "an EC11 recovery advertisement must take the bounded local Type PairAsync path instead of using address type as an ownership verdict"
         );
         assert!(
-            source.contains("EC11 native pairing arbitration ended with recovery advertising still visible")
-                && source.contains("listener_recovery_pairing_advertisement_probe"),
-            "old Type may only resume its bounded recovery after a fresh post-handoff advertisement scan"
+            source.contains("if another host paired first, this Type instance must stop instead of stealing it back")
+                && source.contains("EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation"),
+            "an unsuccessful local PairAsync must enter bounded confirmation wait, not reclaim or retry another host's bond"
         );
         assert!(
             source.contains("if embedded_ble_hardware_ec11_recovery_notice_observed(err) {\n        return true;"),
@@ -11439,8 +11513,7 @@ mod tests {
 
         assert!(
             body.contains("recovery_pairing_advertisement_already_observed_during_notify_open")
-                && body.contains("let should_query_pairing_preflight = !ec11_external_native_pairing_handoff")
-                && body.contains("&& !type_observed_recovery_advertisement"),
+                && body.contains("let should_query_pairing_preflight = !type_observed_recovery_advertisement"),
             "Type-observed recovery advertising already proves Type owns the current recovery, so it should not repeat the slow manual-pairing preflight"
         );
         assert!(
@@ -11770,6 +11843,103 @@ mod tests {
                 Some(&stale_pairing),
             ),
             "ordinary startup and transient link handling must keep the accepted native-HID takeover path"
+        );
+    }
+
+    #[test]
+    fn startup_stale_native_hid_requires_visible_recovery_before_type_pairasync() {
+        let stale_pairing = crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+            attempted: true,
+            matched_devices: 1,
+            prompted_devices: 0,
+            already_paired_devices: 0,
+            failed_devices: 1,
+            open_bluetooth_settings: true,
+            details: Vec::new(),
+        };
+        let recovery_advertisement =
+            crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
+                visible: true,
+                has_random_identity: true,
+                addresses: vec![0xDCC2_3A61_9576],
+            };
+        assert!(startup_stale_native_hid_recovery_is_authorized(
+            &[0xDCC2_3A61_9576],
+            &stale_pairing,
+            &recovery_advertisement,
+        ));
+        assert!(!startup_stale_native_hid_recovery_is_authorized(
+            &[],
+            &stale_pairing,
+            &recovery_advertisement,
+        ));
+        assert!(!startup_stale_native_hid_recovery_is_authorized(
+            &[0xDCC2_3A61_9576],
+            &stale_pairing,
+            &crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe::default(),
+        ));
+
+        let current_pairing = crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired,
+            attempted: true,
+            matched_devices: 1,
+            prompted_devices: 0,
+            already_paired_devices: 1,
+            failed_devices: 0,
+            open_bluetooth_settings: false,
+            details: Vec::new(),
+        };
+        assert!(!startup_stale_native_hid_recovery_is_authorized(
+            &[0xDCC2_3A61_9576],
+            &current_pairing,
+            &recovery_advertisement,
+        ));
+    }
+
+    #[test]
+    fn stale_native_hid_watch_starts_pairasync_only_after_recovery_advertising() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("fn start_embedded_ble_stale_native_hid_recovery_watch")
+            .expect("stale native HID recovery watch should exist");
+        let end = source[start..]
+            .find("async fn maybe_hold_embedded_ble_after_lost_native_pairing")
+            .map(|offset| start + offset)
+            .expect("stale native HID recovery watch boundary should exist");
+        let watch = &source[start..end];
+        let authorization = watch
+            .find("startup_stale_native_hid_recovery_is_authorized")
+            .expect("watch must require stale local ownership evidence");
+        let clear_hold = watch
+            .find("clear_embedded_ble_pairing_confirmation_hold")
+            .expect("watch must release the passive hold only after recovery evidence");
+        let pairasync = watch
+            .find("maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .expect("watch must use the shared bounded Type PairAsync transaction");
+        assert!(
+            authorization < clear_hold && clear_hold < pairasync,
+            "stale native HID recovery must see local stale-pairing plus active recovery advertising before it clears the passive hold and invokes PairAsync"
+        );
+        assert!(
+            watch.contains("EMBEDDED_BLE_PAIRING_CONFIRMATION_HOLD")
+                && !watch.contains("EMBEDDED_BLE_RECOVERY_PAIRING_ADV_SCAN_TIMEOUT")
+                && !watch.contains("native_windows_hid_pairing_addresses")
+                && !watch.contains("query_listener_pairing"),
+            "the stale-HID watcher must keep one bounded advertisement listener and reuse its startup proof instead of inserting a second slow HID/pairing query after a physical recovery signal"
+        );
+
+        let manual_start = source
+            .find("fn hold_embedded_ble_for_missing_native_pairing")
+            .expect("manual Windows removal hold should exist");
+        let manual_end = source[manual_start..]
+            .find("fn hold_embedded_ble_for_stale_native_hid_recovery")
+            .map(|offset| manual_start + offset)
+            .expect("manual Windows removal hold boundary should exist");
+        assert!(
+            !source[manual_start..manual_end]
+                .contains("start_embedded_ble_stale_native_hid_recovery_watch"),
+            "manual Windows removal must keep its passive local reattach path and never auto-pair from this watcher"
         );
     }
 

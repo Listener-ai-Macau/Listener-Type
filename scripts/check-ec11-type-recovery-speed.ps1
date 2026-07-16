@@ -4,7 +4,11 @@ param(
     [ValidateRange(10, 60)]
     [int]$CaptureSeconds = 25,
     [ValidateRange(1, 60000)]
-    [int]$MaxTriggerToTypeReadyMs = 10000,
+    [int]$MaxDoubleClickToAdvertisingAcceptedMs = 250,
+    [ValidateRange(1, 60000)]
+    [int]$MaxConnectionToEncryptionMs = 1200,
+    [ValidateRange(1, 60000)]
+    [int]$MaxFreshPairingToTypeReadyMs = 6000,
     [string]$OutputJson = ""
 )
 
@@ -77,7 +81,7 @@ for ($index = 0; $index -lt $lines.Count; $index += 1) {
 $typeReadyIndex = -1
 if ($triggerIndex -ge 0) {
     for ($index = $triggerIndex + 1; $index -lt $lines.Count; $index += 1) {
-        if ($lines[$index] -match "TYPE:READY") {
+        if ($lines[$index] -match "type audio ready accepted.*reason=TYPE:READY") {
             $typeReadyIndex = $index
             break
         }
@@ -96,8 +100,52 @@ if ($triggerIndex -ge 0) {
 
 $triggerUptimeMs = if ($triggerIndex -ge 0) { Get-FirmwareUptimeMs $lines[$triggerIndex] } else { $null }
 $typeReadyUptimeMs = if ($typeReadyIndex -ge 0) { Get-FirmwareUptimeMs $lines[$typeReadyIndex] } else { $null }
-$elapsedMs = if ($null -ne $triggerUptimeMs -and $null -ne $typeReadyUptimeMs) {
+$triggerToTypeReadyMs = if ($null -ne $triggerUptimeMs -and $null -ne $typeReadyUptimeMs) {
     $typeReadyUptimeMs - $triggerUptimeMs
+} else {
+    $null
+}
+
+$typeControlledRecovery = $false
+$advertisingCommandAcceptedMs = $null
+$connectionUptimeMs = $null
+$encryptionUptimeMs = $null
+$failedEncryptionStatuses = @()
+if ($triggerIndex -ge 0) {
+    for ($index = $triggerIndex + 1; $index -lt $lines.Count; $index += 1) {
+        $line = $lines[$index]
+        if ($line -match "recovery: pairing window opened type_controlled=1") {
+            $typeControlledRecovery = $true
+        }
+        if ($null -eq $advertisingCommandAcceptedMs -and
+            $line -match "EC11 recovery timing:.*advertising_command_accepted_ms=(?<elapsed>-?\d+)") {
+            $candidate = [long]$Matches.elapsed
+            if ($candidate -ge 0) {
+                $advertisingCommandAcceptedMs = $candidate
+            }
+        }
+        if ($line -match "global GAP listener connection established") {
+            $connectionUptimeMs = Get-FirmwareUptimeMs $line
+            continue
+        }
+        if ($line -match "encryption change event; status=(?<status>\d+)") {
+            $status = [int]$Matches.status
+            if ($status -eq 0 -and $null -ne $connectionUptimeMs) {
+                $encryptionUptimeMs = Get-FirmwareUptimeMs $line
+                break
+            }
+            $failedEncryptionStatuses += $status
+        }
+    }
+}
+
+$connectionToEncryptionMs = if ($null -ne $connectionUptimeMs -and $null -ne $encryptionUptimeMs) {
+    $encryptionUptimeMs - $connectionUptimeMs
+} else {
+    $null
+}
+$freshPairingToTypeReadyMs = if ($null -ne $encryptionUptimeMs -and $null -ne $typeReadyUptimeMs) {
+    $typeReadyUptimeMs - $encryptionUptimeMs
 } else {
     $null
 }
@@ -111,15 +159,19 @@ if (Test-Path -LiteralPath $typeLogPath) {
         $newTypeLog = [System.Text.Encoding]::UTF8.GetString($typeLogBytes, [int]$typeLogLength, [int]($typeLogBytes.Length - $typeLogLength))
     }
 }
-$typeObservedNotice = $newTypeLog.Contains("received EC11 hardware recovery notice before pairing reset")
+$typeObservedNotice = $newTypeLog.Contains("received EC11 hardware recovery notice; retaining the GATT session until the firmware disconnect completes")
 
 $failures = @()
 if ($triggerIndex -lt 0) { $failures += "missing firmware EC11 recovery double-click trigger" }
-if ($noticeIndex -lt 0) { $failures += "missing firmware pre-reset EC11 recovery notice" }
+if ($null -eq $advertisingCommandAcceptedMs) { $failures += "missing firmware advertising-command acceptance timing" }
+elseif ($advertisingCommandAcceptedMs -gt $MaxDoubleClickToAdvertisingAcceptedMs) { $failures += "EC11 double-click to controller advertising acceptance was $advertisingCommandAcceptedMs ms, above $MaxDoubleClickToAdvertisingAcceptedMs ms" }
+if ($null -eq $connectionToEncryptionMs) { $failures += "missing successful Windows connection to encryption timing" }
+elseif ($connectionToEncryptionMs -gt $MaxConnectionToEncryptionMs) { $failures += "Windows connection to encryption was $connectionToEncryptionMs ms, above $MaxConnectionToEncryptionMs ms" }
+if ($null -eq $freshPairingToTypeReadyMs) { $failures += "missing fresh pairing evidence to TYPE:READY timing" }
+elseif ($freshPairingToTypeReadyMs -gt $MaxFreshPairingToTypeReadyMs) { $failures += "fresh pairing evidence to TYPE:READY was $freshPairingToTypeReadyMs ms, above $MaxFreshPairingToTypeReadyMs ms" }
 if ($typeReadyIndex -lt 0) { $failures += "missing firmware TYPE:READY after recovery trigger" }
-if ($null -eq $elapsedMs) { $failures += "missing parseable recovery trigger or TYPE:READY uptime" }
-elseif ($elapsedMs -gt $MaxTriggerToTypeReadyMs) { $failures += "recovery trigger to TYPE:READY was $elapsedMs ms, above $MaxTriggerToTypeReadyMs ms" }
-if (-not $typeObservedNotice) { $failures += "Type did not observe the pre-reset EC11 recovery notice in its new log bytes" }
+if ($typeControlledRecovery -and $noticeIndex -lt 0) { $failures += "missing firmware pre-reset EC11 recovery notice for Type-controlled recovery" }
+if ($typeControlledRecovery -and -not $typeObservedNotice) { $failures += "Type did not observe the pre-reset EC11 recovery notice in its new log bytes" }
 
 $measurement = [ordered]@{
     status = if ($failures.Count -eq 0) { "PASS" } else { "FAIL" }
@@ -131,10 +183,19 @@ $measurement = [ordered]@{
     port = $Port
     capture_path = $capturePath
     type_log_path = $typeLogPath
-    max_trigger_to_type_ready_ms = $MaxTriggerToTypeReadyMs
+    max_double_click_to_advertising_accepted_ms = $MaxDoubleClickToAdvertisingAcceptedMs
+    max_connection_to_encryption_ms = $MaxConnectionToEncryptionMs
+    max_fresh_pairing_to_type_ready_ms = $MaxFreshPairingToTypeReadyMs
     trigger_uptime_ms = $triggerUptimeMs
+    advertising_command_accepted_ms = $advertisingCommandAcceptedMs
+    connection_uptime_ms = $connectionUptimeMs
+    encryption_uptime_ms = $encryptionUptimeMs
     type_ready_uptime_ms = $typeReadyUptimeMs
-    trigger_to_type_ready_ms = $elapsedMs
+    connection_to_encryption_ms = $connectionToEncryptionMs
+    fresh_pairing_to_type_ready_ms = $freshPairingToTypeReadyMs
+    trigger_to_type_ready_ms_informational = $triggerToTypeReadyMs
+    encryption_failure_statuses_before_success = @($failedEncryptionStatuses)
+    type_controlled_recovery = $typeControlledRecovery
     firmware_pre_reset_notice_sent = ($noticeIndex -ge 0)
     type_pre_reset_notice_observed = $typeObservedNotice
     failure_reasons = @($failures)
