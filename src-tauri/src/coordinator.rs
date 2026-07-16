@@ -5873,18 +5873,18 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
             }
 
             log::warn!(
-                "[embedded-ble] fresh-address direct PairAsync did not complete after pairing-only cleanup; running bounded PnP/cache fallback before one final direct PairAsync status={:?} matched={} prompted={} failed={}",
+                "[embedded-ble] fresh-address direct PairAsync did not complete after pairing-only cleanup; clearing only the exact BTHPORT cache before one final direct PairAsync status={:?} matched={} prompted={} failed={}",
                 pairing.status,
                 pairing.matched_devices,
                 pairing.prompted_devices,
                 pairing.failed_devices,
             );
-            let fallback_unpair = crate::embedded_ble::unpair_listener_devices_for_known_addresses(
+            let fallback_unpair = crate::embedded_ble::clear_listener_bthport_cache_for_known_addresses(
                 &cleanup_names,
                 &observed_recovery_addresses,
             );
             log::warn!(
-                "[embedded-ble] fresh-address direct PairAsync fallback PnP/cache cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
+                "[embedded-ble] fresh-address direct PairAsync exact BTHPORT cache cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
                 fallback_unpair.status,
                 fallback_unpair.matched_devices,
                 fallback_unpair.unpaired_devices,
@@ -11574,15 +11574,15 @@ mod tests {
             .expect("Type-controlled recovery must PairAsync using the fresh observed address");
         let fallback_marker_index = body
             .find("fresh-address direct PairAsync did not complete after pairing-only cleanup")
-            .expect("full stale PnP cleanup must remain an explicit PairAsync-failure fallback");
+            .expect("exact cache cleanup must remain an explicit PairAsync-failure fallback");
         let fallback_cleanup_index = body
-            .find("let fallback_unpair = crate::embedded_ble::unpair_listener_devices_for_known_addresses")
-            .expect("PairAsync failure must retain the bounded full-cleanup fallback");
+            .find("let fallback_unpair = crate::embedded_ble::clear_listener_bthport_cache_for_known_addresses")
+            .expect("PairAsync failure must retain the exact-cache fallback");
         assert!(
             pairing_only_cleanup_index < direct_pairasync_index
                 && direct_pairasync_index < fallback_marker_index
                 && fallback_marker_index < fallback_cleanup_index,
-            "fresh recovery addresses must run pairing-only cleanup and direct PairAsync before any PnP/BTHPORT cleanup; the slow path may run only after direct PairAsync fails"
+            "fresh recovery addresses must run pairing-only cleanup and direct PairAsync before only an exact BTHPORT cache retry; full PnP discovery must stay out of the user recovery path"
         );
         assert!(
             body.contains("background Type controlled-recovery PairAsync paired; reopening notify immediately for GATT/notify validation"),
