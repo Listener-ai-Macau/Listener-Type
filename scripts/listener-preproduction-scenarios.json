@@ -337,6 +337,23 @@
       "acceptance_evidence": ".cache/validation/preproduction-step-14-second-host-20260715/second-host-live-20260715/blue-cue-recall-operator-result.json",
       "next_action": "Closed. Preserve the restored pre-831b598 blue recovery animation; do not replace the Denzic-root release packages until every remaining total-review and release gate passes."
     },
+    "listener_low_power_ble_led_contract_20260716": {
+      "status": "accepted",
+      "recorded_at": "2026-07-16",
+      "accepted_at": "2026-07-16T22:15:00+08:00",
+      "source": "Product-owner correction: 低功耗情况下是蓝牙灯是熄灭, 你看看以前这些应该是验收过的, 用回以前的蓝牙灯效就可以, 灯效是listner专属的, 你看看在platform里面能不能做这个选择.",
+      "requirement": "For Listener, CONNECTED_IDLE low-power state must turn the BLE LED fully off, including when Type is ready. Restore the previously accepted Listener-specific low-power effect; do not reinterpret a low-power black LED as a disconnected state. Outside low power, preserve the accepted blue BLE-family effects for secure connection, Type-ready, and EC11 recovery exactly as their individual contracts specify.",
+      "platform_boundary": "The shared platform contract exposes Bluetooth lifecycle and low-power state only. Listener Firmware owns the mapping from those states to its visible LED policy through an explicit Listener adapter/profile; the platform must not impose a cross-product blue, dim, flashing, or brightness semantic.",
+      "risk_surface": "Listener Firmware status-LED renderer and the shared platform-to-adapter LED-policy interface only. Do not change Bluetooth pairing/recovery, Type GATT readiness, recording, OTA, or unrelated product display behavior.",
+      "required_evidence": [
+        "Static verification proves CONNECTED_IDLE low-power forces the Listener BLE output to black even when the Type-ready state is present, while non-low-power Type-ready and accepted recovery effects remain covered.",
+        "Firmware build passes through tools/build.ps1.",
+        "A short locked COM3 capture after the configured low-power delay correlates CONNECTED_IDLE plus Type-ready with BLE RGB 0,0,0 and records settings restoration."
+      ],
+      "implementation": "Firmware commit 6ebd23a removes the low-power ready-window and maps steady CONNECTED and TYPE_READY to black through Listener's status-LED adapter; the shared platform lifecycle state is unchanged.",
+      "machine_evidence": ".cache/validation/listener-platform-accepted-behavior-audit-20260716/bluetooth/low-power-dark-ble-restoration-20260716-2215/acceptance-summary.json",
+      "acceptance_rule": "This corrected an unaccepted candidate LED repair with machine evidence because it restores the owner-confirmed historical Listener effect. Focused human review is not reopened unless a later product-visible change modifies this restored output."
+    },
     "ec11_second_host_native_pairing_route_20260715": {
       "status": "superseded",
       "recorded_at": "2026-07-15T21:50:00+08:00",
