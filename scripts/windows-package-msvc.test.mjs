@@ -122,9 +122,11 @@ assert.match(regressionGate, /-InstallMsi/, "v1.0.2 regression package gate must
 assert.match(regressionGate, /-LaunchInstalledApp/, "v1.0.2 regression package gate must start the installed app after MSI update");
 assert.doesNotMatch(regressionGate, /\$ReleaseExePath = Join-Path \$tauriRoot "target\\x86_64-pc-windows-msvc\\release\\listener-type\.exe"/, "v1.0.2 regression must not default to launching the repo release exe");
 assert.match(releaseCheck, /check:preproduction-operator-notes/, "release:check must reject untriaged operator notes before publishing");
+assert.match(releaseCheck, /check:msi-upgrade-contract/, "release:check must enforce same-version MSI replacement before publishing");
 assert.match(releaseCheck, /check:preproduction-bench-contract/, "release:check must keep the preproduction bench/human workflow contract in the default release gate");
 assert.match(releaseCheck, /check:ota-speed-log-contract/, "release:check must reject stale OTA speed logs that hide a newer failed transfer");
 assert.match(packageJsonText, /"check:release-root-artifacts": "node scripts\/check-release-root-artifacts\.mjs"/, "package.json should expose the final Denzic-root package gate");
+assert.match(packageJsonText, /"check:msi-upgrade-contract": "node scripts\/windows-package-msvc\.test\.mjs"/, "package.json should expose the same-version MSI replacement contract");
 assert.match(releaseRootArtifacts, /ListenerType_\$\{version\}_x64_en-US\.msi/, "release root artifact gate should require the current Type MSI");
 assert.match(releaseRootArtifacts, /ListenerFirmware_\$\{version\}_ota\.zip/, "release root artifact gate should require the current Firmware OTA zip");
 assert.match(releaseRootArtifacts, /portable.*\.zip/i, "release root artifact gate should reject Type portable zips");

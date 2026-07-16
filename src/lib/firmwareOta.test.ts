@@ -630,7 +630,7 @@ assert.ok(
   'selected firmware package summary must be outside the BLE/wired mode-specific panels',
 );
 assert.ok(
-  firmwareOtaPanelSource.includes("dispatch(previousPackage\n        ? { type: 'ready' }"),
+  /dispatch\(previousPackage\s*\n\s*\?\s*\{\s*type:\s*'ready'\s*\}/.test(firmwareOtaPanelSource),
   'failed new firmware selection should restore ready state when an older package is still selected',
 );
 assert.ok(
