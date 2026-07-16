@@ -24,7 +24,8 @@ use super::frame::{self, Flags, MessageType, Serialization};
 use super::{AudioConsumer, DictionaryHotword, RawTranscript};
 
 const FINAL_TRANSCRIPT_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
-const LOW_LATENCY_PREVIEW_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
+const BIDIRECTIONAL_TRANSCRIPT_ENDPOINT: &str =
+    "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
 /// 100 ms of 16 kHz / 16-bit / mono PCM.
 const TARGET_AUDIO_CHUNK_BYTES: usize = 3_200;
 /// 16 kHz · 16-bit · mono = 32 000 bytes/sec → 32 bytes/ms.
@@ -96,32 +97,64 @@ pub struct FinalIntermediateTranscript {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VolcengineStreamingRole {
-    FinalTranscript,
-    LowLatencyPreview,
+pub enum VolcengineSessionEndpoint {
+    OptimizedBidirectional,
+    Bidirectional,
 }
 
-impl VolcengineStreamingRole {
-    fn endpoint(self) -> &'static str {
+impl VolcengineSessionEndpoint {
+    pub fn endpoint(self) -> &'static str {
         match self {
-            Self::FinalTranscript => FINAL_TRANSCRIPT_ENDPOINT,
-            Self::LowLatencyPreview => LOW_LATENCY_PREVIEW_ENDPOINT,
+            Self::OptimizedBidirectional => FINAL_TRANSCRIPT_ENDPOINT,
+            Self::Bidirectional => BIDIRECTIONAL_TRANSCRIPT_ENDPOINT,
         }
     }
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
-            Self::FinalTranscript => "final",
-            Self::LowLatencyPreview => "preview",
+            Self::OptimizedBidirectional => "authoritative_bidirectional",
+            Self::Bidirectional => "authoritative_realtime",
         }
     }
 
-    fn finish_on_final_frame(self) -> bool {
-        matches!(self, Self::FinalTranscript)
+    fn emits_generic_partial_before_final(self) -> bool {
+        matches!(self, Self::Bidirectional)
     }
+}
 
-    fn emits_partial_for_frame(self, has_final: bool) -> bool {
-        matches!(self, Self::LowLatencyPreview) || has_final
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VolcengineResultType {
+    Full,
+    Single,
+}
+
+impl VolcengineResultType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Single => "single",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VolcengineSessionOptions {
+    pub endpoint: VolcengineSessionEndpoint,
+    pub enable_nonstream: bool,
+    pub result_type: VolcengineResultType,
+    pub end_window_size_ms: Option<u32>,
+    pub force_to_speech_time_ms: Option<u32>,
+}
+
+impl Default for VolcengineSessionOptions {
+    fn default() -> Self {
+        Self {
+            endpoint: VolcengineSessionEndpoint::OptimizedBidirectional,
+            enable_nonstream: true,
+            result_type: VolcengineResultType::Full,
+            end_window_size_ms: Some(SECOND_PASS_END_WINDOW_MS),
+            force_to_speech_time_ms: Some(SECOND_PASS_FORCE_TO_SPEECH_MS),
+        }
     }
 }
 
@@ -209,10 +242,49 @@ fn server_audio_duration_ms(json: &Value) -> Option<u64> {
         .and_then(Value::as_u64)
 }
 
+fn provider_response_metadata(
+    json: &Value,
+    result: &Value,
+    has_final_frame: bool,
+    authoritative_two_pass: bool,
+) -> Value {
+    let mut sources = Vec::new();
+    let utterance_count =
+        result
+            .get("utterances")
+            .and_then(Value::as_array)
+            .map_or(0, |utterances| {
+                for utterance in utterances {
+                    let Some(source) = utterance
+                        .get("additions")
+                        .and_then(|additions| additions.get("source"))
+                        .and_then(Value::as_str)
+                    else {
+                        continue;
+                    };
+                    if !sources.iter().any(|existing| *existing == source) {
+                        sources.push(source);
+                    }
+                }
+                utterances.len()
+            });
+    json!({
+        "audio_duration_ms": server_audio_duration_ms(json),
+        "sources": sources,
+        "utterance_count": utterance_count,
+        "has_final_frame": has_final_frame,
+        "authoritative_two_pass": authoritative_two_pass,
+        "result_chars": result
+            .get("text")
+            .and_then(Value::as_str)
+            .map_or(0, |text| text.chars().count()),
+    })
+}
+
 pub struct VolcengineStreamingASR {
     credentials: VolcengineCredentials,
     hotwords: Vec<DictionaryHotword>,
-    role: VolcengineStreamingRole,
+    session_options: VolcengineSessionOptions,
     state: ParkingMutex<SyncState>,
     partial_callback: ParkingMutex<Option<PartialTranscriptCallback>>,
     final_intermediate_callback: ParkingMutex<Option<FinalIntermediateTranscriptCallback>>,
@@ -236,33 +308,18 @@ pub struct VolcengineStreamingASR {
 
 impl VolcengineStreamingASR {
     pub fn new(credentials: VolcengineCredentials, hotwords: Vec<DictionaryHotword>) -> Self {
-        Self::new_with_role(
-            credentials,
-            hotwords,
-            VolcengineStreamingRole::FinalTranscript,
-        )
+        Self::new_with_session_options(credentials, hotwords, VolcengineSessionOptions::default())
     }
 
-    pub fn new_low_latency_preview(
+    pub fn new_with_session_options(
         credentials: VolcengineCredentials,
         hotwords: Vec<DictionaryHotword>,
-    ) -> Self {
-        Self::new_with_role(
-            credentials,
-            hotwords,
-            VolcengineStreamingRole::LowLatencyPreview,
-        )
-    }
-
-    fn new_with_role(
-        credentials: VolcengineCredentials,
-        hotwords: Vec<DictionaryHotword>,
-        role: VolcengineStreamingRole,
+        session_options: VolcengineSessionOptions,
     ) -> Self {
         Self {
             credentials,
             hotwords,
-            role,
+            session_options,
             state: ParkingMutex::new(SyncState::default()),
             partial_callback: ParkingMutex::new(None),
             final_intermediate_callback: ParkingMutex::new(None),
@@ -447,12 +504,18 @@ impl VolcengineStreamingASR {
 
         let connect_id = Uuid::new_v4().to_string();
         log::info!(
-            "[asr] opening Volcengine {} session endpoint={}",
-            self.role.label(),
-            self.role.endpoint()
+            "[asr] opening Volcengine {} session endpoint={} resource_id={} model=bigmodel enable_nonstream={} result_type={} end_window_size={:?} force_to_speech_time={:?}",
+            self.session_options.endpoint.label(),
+            self.session_options.endpoint.endpoint(),
+            self.credentials.resource_id,
+            self.session_options.enable_nonstream,
+            self.session_options.result_type.as_str(),
+            self.session_options.end_window_size_ms,
+            self.session_options.force_to_speech_time_ms,
         );
         let mut request = self
-            .role
+            .session_options
+            .endpoint
             .endpoint()
             .into_client_request()
             .map_err(|e| VolcengineASRError::ConnectionFailed(e.to_string()))?;
@@ -518,7 +581,7 @@ impl VolcengineStreamingASR {
         let pending_for_worker = Arc::clone(&self.pending_sends);
         let notify_for_worker = Arc::clone(&self.send_done);
         let failed_delivery = Arc::downgrade(self);
-        let role_label = self.role.label();
+        let role_label = self.session_options.endpoint.label();
         tokio::spawn(async move {
             while let Some((seq, chunk)) = audio_rx.recv().await {
                 let frame = frame::build(
@@ -764,9 +827,6 @@ impl VolcengineStreamingASR {
     }
 
     fn complete_from_stable_partial_after_finish_grace(&self) -> Option<RawTranscript> {
-        if self.role != VolcengineStreamingRole::FinalTranscript {
-            return None;
-        }
         let (transcript, runtime) = {
             let mut st = self.state.lock();
             if !st.finishing || st.final_tx.is_none() {
@@ -805,9 +865,6 @@ impl VolcengineStreamingASR {
     }
 
     fn final_partial_coverage_gap(&self) -> Option<(u64, u64)> {
-        if self.role != VolcengineStreamingRole::FinalTranscript {
-            return None;
-        }
         final_partial_coverage_gap_from_state(&self.state.lock())
     }
 
@@ -833,43 +890,23 @@ impl VolcengineStreamingASR {
         self.signal_error(VolcengineASRError::NoFinalResult);
     }
 
-    pub fn low_latency_preview_silent_stalled(
-        &self,
-        min_elapsed: Duration,
-        min_audio_frames: usize,
-    ) -> bool {
-        if self.role != VolcengineStreamingRole::LowLatencyPreview {
-            return false;
-        }
-        let st = self.state.lock();
-        st.is_connected
-            && st.partial_updates_seen == 0
-            && st.frames_sent >= min_audio_frames
-            && st.start.is_some_and(|start| start.elapsed() >= min_elapsed)
-    }
-
     // ---- internals ----
 
     fn build_first_frame_payload(&self, connect_id: &str) -> Value {
-        let mut request = match self.role {
-            VolcengineStreamingRole::FinalTranscript => json!({
-                "model_name": "bigmodel",
-                "enable_nonstream": true,
-                "enable_itn": true,
-                "enable_punc": true,
-                "show_utterances": true,
-                "result_type": "full",
-                "end_window_size": SECOND_PASS_END_WINDOW_MS,
-                "force_to_speech_time": SECOND_PASS_FORCE_TO_SPEECH_MS,
-            }),
-            VolcengineStreamingRole::LowLatencyPreview => json!({
-                "model_name": "bigmodel",
-                "enable_itn": true,
-                "enable_punc": true,
-                "show_utterances": true,
-                "result_type": "full",
-            }),
-        };
+        let mut request = json!({
+            "model_name": "bigmodel",
+            "enable_nonstream": self.session_options.enable_nonstream,
+            "enable_itn": true,
+            "enable_punc": true,
+            "show_utterances": true,
+            "result_type": self.session_options.result_type.as_str(),
+        });
+        if let Some(end_window_size_ms) = self.session_options.end_window_size_ms {
+            request["end_window_size"] = Value::from(end_window_size_ms);
+        }
+        if let Some(force_to_speech_time_ms) = self.session_options.force_to_speech_time_ms {
+            request["force_to_speech_time"] = Value::from(force_to_speech_time_ms);
+        }
         if let Some(context) = hotword_context(&self.hotwords) {
             request["context"] = Value::String(context);
             let enabled_count = self.hotwords.iter().filter(|h| h.enabled).count();
@@ -955,19 +992,25 @@ impl VolcengineStreamingASR {
         let has_final = parsed.is_final();
         let candidate = transcript_candidate_from_result(result);
         let authoritative_two_pass = candidate.authoritative_cumulative;
+        log::info!(
+            "[asr] {} server metadata: {}",
+            self.session_options.endpoint.label(),
+            provider_response_metadata(&json, result, has_final, authoritative_two_pass)
+        );
         if let Some(payload) = payload_for_log {
             let text_is_empty = candidate.text.trim().is_empty();
-            if self.role == VolcengineStreamingRole::LowLatencyPreview
-                && text_is_empty
-                && !has_final
-            {
+            if text_is_empty && !has_final {
                 log::debug!(
                     "[asr] {} server JSON(empty): {}",
-                    self.role.label(),
+                    self.session_options.endpoint.label(),
                     payload
                 );
             } else {
-                log::info!("[asr] {} server JSON: {}", self.role.label(), payload);
+                log::info!(
+                    "[asr] {} server JSON: {}",
+                    self.session_options.endpoint.label(),
+                    payload
+                );
             }
         }
         if !has_final {
@@ -1028,11 +1071,7 @@ impl VolcengineStreamingASR {
             (merged, changed)
         };
 
-        if self.role == VolcengineStreamingRole::FinalTranscript
-            && !has_final
-            && partial_changed
-            && !full_text.is_empty()
-        {
+        if !has_final && partial_changed && !full_text.is_empty() {
             let elapsed_ms = self
                 .state
                 .lock()
@@ -1053,7 +1092,11 @@ impl VolcengineStreamingASR {
         // 缓存最新的 transcript：服务端在 final 帧前断连时 fallback 用，
         // 同时把稳定预览推给胶囊。final 也要推一次，因为火山 two-pass
         // 经常在 final 才补齐长句前半段；这能让胶囊消失前先显示完整预览。
-        if self.role.emits_partial_for_frame(has_final)
+        if (has_final
+            || self
+                .session_options
+                .endpoint
+                .emits_generic_partial_before_final())
             && (partial_changed || has_final)
             && !full_text.is_empty()
         {
@@ -1069,7 +1112,7 @@ impl VolcengineStreamingASR {
             }
             log::info!(
                 "[asr] {} partial update chars={} final={} elapsed_ms={}",
-                self.role.label(),
+                self.session_options.endpoint.label(),
                 full_text.chars().count(),
                 has_final,
                 elapsed_ms
@@ -1077,7 +1120,7 @@ impl VolcengineStreamingASR {
             self.emit_partial_transcript(&full_text);
         }
 
-        if has_final && self.role.finish_on_final_frame() {
+        if has_final {
             let duration_ms = self
                 .state
                 .lock()
@@ -1092,8 +1135,6 @@ impl VolcengineStreamingASR {
             self.state.lock().is_connected = false;
             *self.audio_tx.lock() = None;
             return false;
-        } else if has_final {
-            log::debug!("[asr] preview final frame kept alive for continued low-latency preview");
         }
         true
     }
@@ -1347,6 +1388,28 @@ mod tests {
     }
 
     #[test]
+    fn provider_response_metadata_excludes_transcript_text() {
+        let json = json!({
+            "audio_info": { "duration": 1_600 },
+            "result": {
+                "text": "private transcript",
+                "utterances": [{
+                    "additions": { "source": "two_pass" }
+                }]
+            }
+        });
+        let metadata = provider_response_metadata(&json, &json["result"], false, true);
+
+        assert_eq!(metadata["audio_duration_ms"], 1_600);
+        assert_eq!(metadata["sources"], json!(["two_pass"]));
+        assert_eq!(metadata["utterance_count"], 1);
+        assert_eq!(metadata["has_final_frame"], false);
+        assert_eq!(metadata["authoritative_two_pass"], true);
+        assert_eq!(metadata["result_chars"], 18);
+        assert!(!metadata.to_string().contains("private transcript"));
+    }
+
+    #[test]
     fn first_frame_payload_enables_official_second_pass() {
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
@@ -1370,8 +1433,8 @@ mod tests {
     }
 
     #[test]
-    fn low_latency_preview_uses_realtime_endpoint_without_owning_final_result() {
-        let asr = VolcengineStreamingASR::new_low_latency_preview(
+    fn authoritative_bidirectional_session_owns_preview_and_final_result() {
+        let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
                 app_id: "app".into(),
                 access_token: "token".into(),
@@ -1380,24 +1443,54 @@ mod tests {
             Vec::new(),
         );
 
-        assert_eq!(asr.role.endpoint(), LOW_LATENCY_PREVIEW_ENDPOINT);
-        assert!(!asr.role.finish_on_final_frame());
+        assert_eq!(
+            asr.session_options.endpoint.endpoint(),
+            FINAL_TRANSCRIPT_ENDPOINT
+        );
         let payload = asr.build_first_frame_payload("test-connect-id");
         let request = &payload["request"];
         assert_eq!(request["enable_punc"], true);
         assert_eq!(request["result_type"], "full");
         assert_eq!(request["show_utterances"], true);
-        assert!(request.get("enable_nonstream").is_none());
-        assert!(request.get("end_window_size").is_none());
-        assert!(request.get("force_to_speech_time").is_none());
+        assert_eq!(request["enable_nonstream"], true);
+        assert_eq!(request["end_window_size"], SECOND_PASS_END_WINDOW_MS);
+        assert_eq!(
+            request["force_to_speech_time"],
+            SECOND_PASS_FORCE_TO_SPEECH_MS
+        );
     }
 
     #[test]
-    fn final_transcript_intermediate_frames_do_not_drive_visible_preview() {
-        assert!(!VolcengineStreamingRole::FinalTranscript.emits_partial_for_frame(false));
-        assert!(VolcengineStreamingRole::FinalTranscript.emits_partial_for_frame(true));
-        assert!(VolcengineStreamingRole::LowLatencyPreview.emits_partial_for_frame(false));
-        assert!(VolcengineStreamingRole::LowLatencyPreview.emits_partial_for_frame(true));
+    fn bidirectional_validation_mode_uses_one_realtime_session_without_second_pass() {
+        let asr = VolcengineStreamingASR::new_with_session_options(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+            VolcengineSessionOptions {
+                endpoint: VolcengineSessionEndpoint::Bidirectional,
+                enable_nonstream: false,
+                result_type: VolcengineResultType::Full,
+                end_window_size_ms: None,
+                force_to_speech_time_ms: None,
+            },
+        );
+
+        let payload = asr.build_first_frame_payload("test-connect-id");
+        let request = &payload["request"];
+        assert_eq!(
+            asr.session_options.endpoint.endpoint(),
+            BIDIRECTIONAL_TRANSCRIPT_ENDPOINT
+        );
+        assert_eq!(request["enable_nonstream"], false);
+        assert!(request.get("end_window_size").is_none());
+        assert!(request.get("force_to_speech_time").is_none());
+        assert!(VolcengineSessionEndpoint::Bidirectional.emits_generic_partial_before_final());
+        assert!(
+            !VolcengineSessionEndpoint::OptimizedBidirectional.emits_generic_partial_before_final()
+        );
     }
 
     #[test]

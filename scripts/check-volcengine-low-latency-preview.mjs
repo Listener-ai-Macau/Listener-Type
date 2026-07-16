@@ -37,39 +37,76 @@ function section(source, startToken, endToken, scope) {
 
 for (const token of [
   'const FINAL_TRANSCRIPT_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";',
-  'const LOW_LATENCY_PREVIEW_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";',
-  "matches!(self, Self::FinalTranscript)",
-  "has_final && self.role.finish_on_final_frame()",
+  'const BIDIRECTIONAL_TRANSCRIPT_ENDPOINT: &str',
+  '"wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";',
+  'endpoint: VolcengineSessionEndpoint::OptimizedBidirectional,',
+  '"enable_nonstream": self.session_options.enable_nonstream',
+  'request["end_window_size"] = Value::from(end_window_size_ms);',
+  'request["force_to_speech_time"] = Value::from(force_to_speech_time_ms);',
+  "self.emit_final_intermediate_transcript(FinalIntermediateTranscript {",
+  "authoritative_two_pass,",
 ]) {
-  requireIncludes(volcengine, token, "Separate final and preview ASR streams");
+  requireIncludes(volcengine, token, "Authoritative bidirectional ASR session");
 }
 
-const finalPayload = section(
+const defaultSessionOptions = section(
   volcengine,
-  "VolcengineStreamingRole::FinalTranscript => json!({",
-  "VolcengineStreamingRole::LowLatencyPreview => json!({",
-  "Final stream payload",
+  'impl Default for VolcengineSessionOptions',
+  'enum AudioDeliveryReadiness',
+  'Authoritative ASR default session options',
 );
 for (const token of [
-  '"enable_nonstream": true',
-  '"end_window_size": SECOND_PASS_END_WINDOW_MS',
-  '"force_to_speech_time": SECOND_PASS_FORCE_TO_SPEECH_MS',
+  'endpoint: VolcengineSessionEndpoint::OptimizedBidirectional,',
+  'enable_nonstream: true,',
+  'end_window_size_ms: Some(SECOND_PASS_END_WINDOW_MS),',
+  'force_to_speech_time_ms: Some(SECOND_PASS_FORCE_TO_SPEECH_MS),',
 ]) {
-  requireIncludes(finalPayload, token, "Final stream payload");
+  requireIncludes(defaultSessionOptions, token, 'Authoritative ASR default session options');
 }
 
-const previewPayload = section(
-  volcengine,
-  "VolcengineStreamingRole::LowLatencyPreview => json!({",
-  "});",
-  "Preview stream payload",
+for (const token of [
+  "LOW_LATENCY_PREVIEW_ENDPOINT",
+  "LowLatencyPreview",
+  "new_low_latency_preview",
+  "low_latency_preview_silent_stalled",
+]) {
+  requireExcludes(volcengine, token, "Authoritative bidirectional ASR session");
+}
+
+for (const token of [
+  "VolcenginePreviewSidecar",
+  "VolcenginePreviewTeeConsumer",
+  "VolcengineStartupPreviewConsumer",
+  "VOLCENGINE_PREVIEW_",
+  "preview_replay_tail",
+  "set_volcengine_partial_preview_callback",
+]) {
+  requireExcludes(dictation, token, "Live preview routing");
+}
+
+const builder = section(
+  dictation,
+  "fn build_volcengine_asr(",
+  "async fn open_volcengine_asr(",
+  "Authoritative ASR builder",
 );
-for (const token of ['"enable_itn": true', '"enable_punc": true']) {
-  requireIncludes(previewPayload, token, "Preview stream payload");
-}
-for (const token of ["enable_nonstream", "end_window_size", "force_to_speech_time"]) {
-  requireExcludes(previewPayload, token, "Preview stream payload");
-}
+requireIncludes(
+  builder,
+  "set_volcengine_final_supplemental_preview_callback(&asr, inner, session_id);",
+  "Authoritative ASR builder",
+);
+
+const opener = section(
+  dictation,
+  "async fn open_volcengine_asr(",
+  "fn apply_and_publish_dictation_event(",
+  "Authoritative ASR opener",
+);
+requireIncludes(
+  opener,
+  "authoritative bidirectional ASR ready; preview and final share one provider session",
+  "Authoritative ASR opener",
+);
 
 for (const token of [
   "AUDIO_KEEPALIVE_INTERVAL",
@@ -115,20 +152,11 @@ for (const token of [
   requireIncludes(volcengine, token, "Final-result completion");
 }
 requireExcludes(completion, "FINAL_RESULT_UNCOVERED_AUDIO_GRACE", "Final-result completion");
-const fullTimeout = completion.indexOf(
-  "final transcript coverage incomplete after full provider timeout",
-);
-const waitForFinal = completion.indexOf("tokio::time::timeout(remaining, rx)");
-if (fullTimeout < 0 || waitForFinal < 0 || fullTimeout < waitForFinal) {
-  fail("Final-result completion must wait for the protocol final frame before coverage failure");
-}
 
 for (const token of [
   "pub struct FinalIntermediateTranscript",
   "pub authoritative_two_pass: bool",
   "let authoritative_two_pass = candidate.authoritative_cumulative;",
-  "self.emit_final_intermediate_transcript(FinalIntermediateTranscript {",
-  "authoritative_two_pass,",
 ]) {
   requireIncludes(volcengine, token, "Provider-authoritative correction metadata");
 }
@@ -139,21 +167,6 @@ for (const token of [
   "authoritative_cumulative: has_authoritative_two_pass_correction",
 ]) {
   requireIncludes(transcript, token, "Two-pass authority classification");
-}
-
-const startupConsumer = section(
-  dictation,
-  "struct VolcengineStartupPreviewConsumer",
-  "struct VolcenginePreviewSidecar",
-  "Live preview audio fan-out",
-);
-for (const token of [
-  "final_bridge: Arc<DeferredAsrBridge>",
-  "preview_sidecar: Arc<VolcenginePreviewSidecar>",
-  "crate::recorder::AudioConsumer::consume_pcm_chunk(&*self.final_bridge, pcm);",
-  "self.preview_sidecar.consume_pcm_chunk(pcm);",
-]) {
-  requireIncludes(startupConsumer, token, "Live preview audio fan-out");
 }
 
 const finalSupplement = section(
@@ -190,5 +203,5 @@ if (authorityRewrite < 0 || heuristicRewrite < 0 || authorityRewrite > heuristic
 }
 
 console.log(
-  "PASS: provider-authoritative corrections reach the live preview, final ASR waits for protocol completion before reporting uncovered audio, and the recording path contains no fabricated PCM.",
+  "PASS: preview and final use one authoritative bidirectional ASR session; provider-authoritative two-pass corrections reach the live preview without a replaying sidecar.",
 );

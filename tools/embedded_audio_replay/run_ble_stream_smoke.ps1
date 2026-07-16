@@ -290,6 +290,12 @@ function Get-SmokeReportSchema {
             "accuracy_warning_only",
             "accuracy_warning",
             "accuracy_warning_message",
+            "asr_log_source",
+            "provider_response_sources",
+            "maximum_server_audio_duration_ms",
+            "first_preview_event",
+            "first_preview_source",
+            "first_preview_ms",
             "wav_path",
             "tts_rate",
             "tts_gain",
@@ -405,8 +411,30 @@ function Get-AsrTranscriptSummaryFromLog {
     param([string]$Text)
 
     $updates = New-Object System.Collections.Generic.List[string]
+    $providerSources = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+    $maximumServerAudioDurationMs = 0
     $latest = ""
     foreach ($line in ($Text -split "(`r`n|`n)")) {
+        $metadataMarker = "server metadata:"
+        $metadataIndex = $line.IndexOf($metadataMarker)
+        if ($metadataIndex -ge 0) {
+            $metadataText = $line.Substring($metadataIndex + $metadataMarker.Length).Trim()
+            try {
+                $metadata = $metadataText | ConvertFrom-Json
+                $duration = 0
+                if ([int]::TryParse([string]$metadata.audio_duration_ms, [ref]$duration)) {
+                    $maximumServerAudioDurationMs = [Math]::Max($maximumServerAudioDurationMs, $duration)
+                }
+                foreach ($source in @($metadata.sources)) {
+                    $source = [string]$source
+                    if (-not [string]::IsNullOrWhiteSpace($source)) {
+                        [void]$providerSources.Add($source)
+                    }
+                }
+            } catch {
+            }
+            continue
+        }
         $marker = "server JSON:"
         $index = $line.IndexOf($marker)
         if ($index -lt 0) {
@@ -418,6 +446,20 @@ function Get-AsrTranscriptSummaryFromLog {
         }
         try {
             $payload = $jsonText | ConvertFrom-Json
+            if ($payload.audio_info -and $null -ne $payload.audio_info.duration) {
+                $duration = 0
+                if ([int]::TryParse([string]$payload.audio_info.duration, [ref]$duration)) {
+                    $maximumServerAudioDurationMs = [Math]::Max($maximumServerAudioDurationMs, $duration)
+                }
+            }
+            if ($payload.result -and $payload.result.utterances) {
+                foreach ($utterance in @($payload.result.utterances)) {
+                    $source = [string]$utterance.additions.source
+                    if (-not [string]::IsNullOrWhiteSpace($source)) {
+                        [void]$providerSources.Add($source)
+                    }
+                }
+            }
             if ($payload.result -and -not [string]::IsNullOrWhiteSpace([string]$payload.result.text)) {
                 $latest = [string]$payload.result.text
                 if ($updates.Count -eq 0 -or $updates[$updates.Count - 1] -ne $latest) {
@@ -453,6 +495,67 @@ function Get-AsrTranscriptSummaryFromLog {
         partial_preview_count = $partialCount
         last_partial_preview = $lastPartial
         text_updates = @($updates)
+        provider_response_sources = @($providerSources | Sort-Object)
+        maximum_server_audio_duration_ms = $maximumServerAudioDurationMs
+    }
+}
+
+function Get-FirstPreviewSummaryFromLog {
+    param([string]$Text)
+
+    $event = ""
+    $source = ""
+    $latencyMs = $null
+    foreach ($line in ($Text -split "(`r`n|`n)")) {
+        $marker = "[obs-v1]"
+        $index = $line.IndexOf($marker)
+        if ($index -lt 0) {
+            continue
+        }
+        $jsonText = $line.Substring($index + $marker.Length).Trim()
+        if ([string]::IsNullOrWhiteSpace($jsonText)) {
+            continue
+        }
+        try {
+            $payload = $jsonText | ConvertFrom-Json
+            $candidateEvent = [string]$payload.event
+            if ($candidateEvent -notlike "embedded_audio_preview_first_*") {
+                continue
+            }
+            $candidateLatency = 0
+            if (-not [int]::TryParse([string]$payload.timing_value_ms, [ref]$candidateLatency)) {
+                continue
+            }
+            if ($null -eq $latencyMs -or $candidateLatency -lt $latencyMs) {
+                $event = $candidateEvent
+                $source = [string]$payload.source
+                $latencyMs = $candidateLatency
+            }
+        } catch {
+        }
+    }
+    return [ordered]@{
+        event = $event
+        source = $source
+        latency_ms = $latencyMs
+    }
+}
+
+function Select-AsrEvidenceLog {
+    param(
+        [string]$ApplicationLog,
+        [string]$ChildStdoutLog
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ChildStdoutLog) -and $ChildStdoutLog.Contains("server JSON:")) {
+        return [ordered]@{
+            source = "listener_child_stdout"
+            text = $ChildStdoutLog
+        }
+    }
+    return [ordered]@{
+        source = "combined_application_and_child_log"
+        text = $ApplicationLog
     }
 }
 
@@ -2909,19 +3012,24 @@ try {
         Write-SmokeTrace "desktop_action_serial_cleanup_done"
     }
     Start-Sleep -Milliseconds 200
-    $capturedLog += Read-NewLogText -Path $logPath -Offset $logOffset
+    $applicationLog = Read-NewLogText -Path $logPath -Offset $logOffset
+    $capturedLog += $applicationLog
+    $listenerChildStdout = ""
     if (Test-Path $listenerChildStdoutLog) {
+        $listenerChildStdout = Get-Content -Path $listenerChildStdoutLog -Raw -ErrorAction SilentlyContinue
         $capturedLog += "`n"
-        $capturedLog += Get-Content -Path $listenerChildStdoutLog -Raw -ErrorAction SilentlyContinue
+        $capturedLog += $listenerChildStdout
     }
 
     Write-SmokeTrace "parse_transcript_start"
-    $asrSummary = Get-AsrTranscriptSummaryFromLog -Text $capturedLog
+    $asrEvidenceLog = Select-AsrEvidenceLog -ApplicationLog $applicationLog -ChildStdoutLog $listenerChildStdout
+    $asrSummary = Get-AsrTranscriptSummaryFromLog -Text $asrEvidenceLog.text
+    $firstPreviewSummary = Get-FirstPreviewSummaryFromLog -Text $asrEvidenceLog.text
     $transcript = [string]$asrSummary.final_text
     $missingPackets = if ($doneMatch -and $doneMatch.Success) { [int]$doneMatch.Groups[2].Value } else { 0 }
     $pcmBytes = if ($doneMatch -and $doneMatch.Success) { [int]$doneMatch.Groups[1].Value } else { 0 }
     $timeline["transcript_parsed_at_utc"] = Get-SmokeUtcNow
-    Write-SmokeTrace "parse_transcript_done transcript_len=$($transcript.Length) pcm=$pcmBytes missing=$missingPackets"
+    Write-SmokeTrace "parse_transcript_done transcript_len=$($transcript.Length) pcm=$pcmBytes missing=$missingPackets asr_log_source=$($asrEvidenceLog.source) first_preview_ms=$($firstPreviewSummary.latency_ms)"
     $status = if ($missingPackets -gt $MaxMissingPackets) { "WARNING" } else { "PASS" }
     if ($FailOnMissingPackets -and $missingPackets -gt $MaxMissingPackets) {
         $status = "FAIL"
@@ -3159,6 +3267,12 @@ try {
         last_partial_preview = [string]$asrSummary.last_partial_preview
         asr_text_update_count = [int]$asrSummary.asr_text_update_count
         asr_text_updates = @($asrSummary.text_updates)
+        asr_log_source = [string]$asrEvidenceLog.source
+        provider_response_sources = @($asrSummary.provider_response_sources)
+        maximum_server_audio_duration_ms = [int]$asrSummary.maximum_server_audio_duration_ms
+        first_preview_event = [string]$firstPreviewSummary.event
+        first_preview_source = [string]$firstPreviewSummary.source
+        first_preview_ms = $firstPreviewSummary.latency_ms
         normalized_expected = $accuracyReport.normalized_expected
         normalized_transcript = $accuracyReport.normalized_transcript
         cer = $accuracyReport.cer
@@ -3266,6 +3380,7 @@ try {
     }
     $serialReportJson = Convert-SerialReportForJson -Report $serialReport
     $asrSummary = Get-AsrTranscriptSummaryFromLog -Text $capturedLog
+    $firstPreviewSummary = Get-FirstPreviewSummaryFromLog -Text $capturedLog
     $transcript = [string]$asrSummary.final_text
     $finalText = if (-not [string]::IsNullOrWhiteSpace($transcript)) { $transcript } else { "" }
     $accuracyReport = Measure-TranscriptAccuracy -Expected $ExpectedText -Transcript $finalText
@@ -3285,6 +3400,12 @@ try {
         last_partial_preview = [string]$asrSummary.last_partial_preview
         asr_text_update_count = [int]$asrSummary.asr_text_update_count
         asr_text_updates = @($asrSummary.text_updates)
+        asr_log_source = "combined_application_and_child_log"
+        provider_response_sources = @($asrSummary.provider_response_sources)
+        maximum_server_audio_duration_ms = [int]$asrSummary.maximum_server_audio_duration_ms
+        first_preview_event = [string]$firstPreviewSummary.event
+        first_preview_source = [string]$firstPreviewSummary.source
+        first_preview_ms = $firstPreviewSummary.latency_ms
         normalized_expected = $accuracyReport.normalized_expected
         normalized_transcript = $accuracyReport.normalized_transcript
         cer = $accuracyReport.cer

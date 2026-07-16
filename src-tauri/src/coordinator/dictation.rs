@@ -1,9 +1,7 @@
 use std::fs;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-use parking_lot::Mutex as ParkingMutex;
 
 use crate::coordinator_state::{
     apply_dictation_event, request_stop_during_starting_state, DictationEvent, DictationTransition,
@@ -22,24 +20,9 @@ use super::*;
 /// 避免微动开关回弹 / 用户手抖双击造成的空转写报错和 ASR session 抢资源。
 pub(super) const HOTKEY_DEBOUNCE: Duration = Duration::from_millis(250);
 const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
-const VOLCENGINE_PREVIEW_STALL_RESTART_MS: u64 = 2_500;
-const VOLCENGINE_PREVIEW_STALL_MIN_FRAMES: usize = 60;
-const VOLCENGINE_PREVIEW_REPLAY_MS: usize = 1_500;
-const VOLCENGINE_PREVIEW_REPLAY_BYTES: usize = 16_000 * 2 * VOLCENGINE_PREVIEW_REPLAY_MS / 1_000;
-const VOLCENGINE_PREVIEW_RESTART_REPLAY_MS: usize = 3_500;
-const VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES: usize =
-    16_000 * 2 * VOLCENGINE_PREVIEW_RESTART_REPLAY_MS / 1_000;
-const VOLCENGINE_PREVIEW_MAX_RESTARTS: usize = 1;
 const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
-const EMBEDDED_AUDIO_STREAMING_NORMALIZE_SPEECH_RMS: f64 = 120.0;
-const EMBEDDED_AUDIO_STREAMING_NORMALIZE_QUIET_SPEECH_RMS: f64 = 45.0;
-const EMBEDDED_AUDIO_STREAMING_NORMALIZE_QUIET_SPEECH_PEAK: u16 = 256;
-const EMBEDDED_AUDIO_STREAMING_AGC_ENVELOPE_ALPHA: f64 = 0.15;
-const EMBEDDED_AUDIO_STREAMING_AGC_MAX_RISE_PER_VOICED_CHUNK: f64 = 1.06;
-const EMBEDDED_AUDIO_STREAMING_AGC_MAX_FALL_PER_VOICED_CHUNK: f64 = 0.60;
-const EMBEDDED_AUDIO_STREAMING_AGC_PEAK_HEADROOM: f64 = 0.90;
 const EMBEDDED_BLE_PCM_EVENT_TRACE_PACKET_INTERVAL: u16 = 50;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
 const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 750;
@@ -212,258 +195,6 @@ fn log_dictation_asr_engine_selection(session_id: SessionId, active_asr: &str) {
     }
 }
 
-struct VolcengineAsrPair {
-    final_asr: Arc<VolcengineStreamingASR>,
-    preview_sidecar: Arc<VolcenginePreviewSidecar>,
-    target: Arc<dyn crate::asr::AudioConsumer>,
-}
-
-struct VolcenginePreviewTeeConsumer {
-    final_asr: Arc<VolcengineStreamingASR>,
-}
-
-struct VolcengineStartupPreviewConsumer {
-    final_bridge: Arc<DeferredAsrBridge>,
-    preview_sidecar: Arc<VolcenginePreviewSidecar>,
-    _target_guard: Arc<dyn crate::asr::AudioConsumer>,
-}
-
-impl crate::asr::AudioConsumer for VolcenginePreviewTeeConsumer {
-    fn consume_pcm_chunk(&self, pcm: &[u8]) {
-        crate::asr::AudioConsumer::consume_pcm_chunk(&*self.final_asr, pcm);
-    }
-}
-
-impl crate::recorder::AudioConsumer for VolcengineStartupPreviewConsumer {
-    fn consume_pcm_chunk(&self, pcm: &[u8]) {
-        crate::recorder::AudioConsumer::consume_pcm_chunk(&*self.final_bridge, pcm);
-        self.preview_sidecar.consume_pcm_chunk(pcm);
-    }
-}
-
-impl Drop for VolcengineStartupPreviewConsumer {
-    fn drop(&mut self) {
-        self.preview_sidecar.cancel();
-        log::info!("[asr] low-latency preview sidecar cancelled");
-    }
-}
-
-struct VolcenginePreviewSidecar {
-    credentials: VolcengineCredentials,
-    hotwords: Vec<DictionaryHotword>,
-    inner: Arc<Inner>,
-    session_id: SessionId,
-    current: ParkingMutex<Arc<VolcengineStreamingASR>>,
-    recent_pcm: ParkingMutex<Vec<u8>>,
-    initial_open_requested: AtomicBool,
-    restarting: AtomicBool,
-    restart_count: AtomicUsize,
-    cancel_requested: AtomicBool,
-}
-
-impl VolcenginePreviewSidecar {
-    fn new(
-        credentials: VolcengineCredentials,
-        hotwords: Vec<DictionaryHotword>,
-        inner: &Arc<Inner>,
-        session_id: SessionId,
-        initial: Arc<VolcengineStreamingASR>,
-    ) -> Self {
-        Self {
-            credentials,
-            hotwords,
-            inner: Arc::clone(inner),
-            session_id,
-            current: ParkingMutex::new(initial),
-            recent_pcm: ParkingMutex::new(Vec::new()),
-            initial_open_requested: AtomicBool::new(false),
-            restarting: AtomicBool::new(false),
-            restart_count: AtomicUsize::new(0),
-            cancel_requested: AtomicBool::new(false),
-        }
-    }
-
-    fn current_asr(&self) -> Arc<VolcengineStreamingASR> {
-        Arc::clone(&self.current.lock())
-    }
-
-    fn consume_pcm_chunk(self: &Arc<Self>, pcm: &[u8]) {
-        if self.cancel_requested.load(Ordering::SeqCst) {
-            return;
-        }
-        self.remember_recent_pcm(pcm);
-        let preview = self.current_asr();
-        crate::asr::AudioConsumer::consume_pcm_chunk(&*preview, pcm);
-        self.restart_silent_preview_if_needed(preview);
-    }
-
-    fn cancel(&self) {
-        self.cancel_requested.store(true, Ordering::SeqCst);
-        self.current_asr().cancel();
-    }
-
-    fn open_initial_preview_in_background(self: &Arc<Self>) -> bool {
-        if self.cancel_requested.load(Ordering::SeqCst) {
-            return false;
-        }
-        if self.initial_open_requested.swap(true, Ordering::SeqCst) {
-            return false;
-        }
-        if self.restarting.swap(true, Ordering::SeqCst) {
-            return false;
-        }
-
-        let sidecar = Arc::clone(self);
-        let preview = self.current_asr();
-        tauri::async_runtime::spawn(async move {
-            let started = Instant::now();
-            match preview.open_session().await {
-                Ok(()) => {
-                    if sidecar.cancel_requested.load(Ordering::SeqCst) {
-                        preview.cancel();
-                        log::info!(
-                            "[asr] low-latency preview sidecar opened after cancellation; closed immediately elapsed_ms={}",
-                            started.elapsed().as_millis()
-                        );
-                    } else {
-                        let replay = {
-                            let recent = sidecar.recent_pcm.lock();
-                            preview_replay_tail(&recent, VOLCENGINE_PREVIEW_REPLAY_BYTES)
-                        };
-                        if !replay.is_empty() {
-                            crate::asr::AudioConsumer::consume_pcm_chunk(&*preview, &replay);
-                        }
-                        log::info!(
-                            "[asr] low-latency preview sidecar opened asynchronously elapsed_ms={} replay_bytes={} replay_ms={}",
-                            started.elapsed().as_millis(),
-                            replay.len(),
-                            replay.len() / 32
-                        );
-                    }
-                }
-                Err(err) => {
-                    log::warn!(
-                        "[asr] low-latency preview sidecar unavailable; continuing with final ASR only: {err}"
-                    );
-                }
-            }
-            sidecar.restarting.store(false, Ordering::SeqCst);
-        });
-        true
-    }
-
-    fn remember_recent_pcm(&self, pcm: &[u8]) {
-        let mut recent = self.recent_pcm.lock();
-        recent.extend_from_slice(pcm);
-        if recent.len() > VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES {
-            let drop_bytes = recent.len() - VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES;
-            recent.drain(..drop_bytes);
-        }
-    }
-
-    fn restart_silent_preview_if_needed(self: &Arc<Self>, preview: Arc<VolcengineStreamingASR>) {
-        if self.cancel_requested.load(Ordering::SeqCst) {
-            return;
-        }
-        if !preview.low_latency_preview_silent_stalled(
-            Duration::from_millis(VOLCENGINE_PREVIEW_STALL_RESTART_MS),
-            VOLCENGINE_PREVIEW_STALL_MIN_FRAMES,
-        ) {
-            return;
-        }
-        if self.restarting.swap(true, Ordering::SeqCst) {
-            return;
-        }
-
-        let attempt = self.restart_count.fetch_add(1, Ordering::SeqCst) + 1;
-        if attempt > VOLCENGINE_PREVIEW_MAX_RESTARTS {
-            if attempt == VOLCENGINE_PREVIEW_MAX_RESTARTS + 1 {
-                log::warn!(
-                    "[asr] low-latency preview silent watchdog reached restart limit; keeping final ASR path only"
-                );
-            }
-            self.restarting.store(false, Ordering::SeqCst);
-            return;
-        }
-
-        let sidecar = Arc::clone(self);
-        tauri::async_runtime::spawn(async move {
-            sidecar.restart_preview(preview, attempt).await;
-        });
-    }
-
-    async fn restart_preview(
-        self: Arc<Self>,
-        old_preview: Arc<VolcengineStreamingASR>,
-        attempt: usize,
-    ) {
-        log::warn!(
-            "[asr] low-latency preview silent for {} ms after {} audio frames; restarting sidecar attempt={}",
-            VOLCENGINE_PREVIEW_STALL_RESTART_MS,
-            VOLCENGINE_PREVIEW_STALL_MIN_FRAMES,
-            attempt
-        );
-        let replacement = Arc::new(VolcengineStreamingASR::new_low_latency_preview(
-            self.credentials.clone(),
-            self.hotwords.clone(),
-        ));
-        set_volcengine_partial_preview_callback(&replacement, &self.inner, self.session_id);
-        match replacement.open_session().await {
-            Ok(()) => {
-                if self.cancel_requested.load(Ordering::SeqCst) {
-                    replacement.cancel();
-                    log::info!(
-                        "[asr] low-latency preview sidecar restart opened after cancellation; closed immediately attempt={}",
-                        attempt
-                    );
-                    self.restarting.store(false, Ordering::SeqCst);
-                    return;
-                }
-                old_preview.cancel();
-                {
-                    *self.current.lock() = Arc::clone(&replacement);
-                }
-                let replay = {
-                    let recent = self.recent_pcm.lock();
-                    preview_replay_tail(&recent, VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES)
-                };
-                if !replay.is_empty() {
-                    crate::asr::AudioConsumer::consume_pcm_chunk(&*replacement, &replay);
-                }
-                log::info!(
-                    "[asr] low-latency preview sidecar restarted attempt={} replay_bytes={} replay_ms={}",
-                    attempt,
-                    replay.len(),
-                    replay.len() / 32
-                );
-            }
-            Err(err) => {
-                log::warn!(
-                    "[asr] low-latency preview sidecar restart attempt={} failed; keeping existing preview/final ASR: {err}",
-                    attempt
-                );
-            }
-        }
-        self.restarting.store(false, Ordering::SeqCst);
-    }
-}
-
-fn preview_replay_tail(pcm: &[u8], max_bytes: usize) -> Vec<u8> {
-    let start = pcm.len().saturating_sub(max_bytes);
-    pcm[start..].to_vec()
-}
-
-fn set_volcengine_partial_preview_callback(
-    asr: &Arc<VolcengineStreamingASR>,
-    inner: &Arc<Inner>,
-    session_id: SessionId,
-) {
-    let inner_for_partial = Arc::clone(inner);
-    asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
-        update_embedded_audio_partial_preview(&inner_for_partial, session_id, text);
-    })));
-}
-
 fn set_volcengine_final_supplemental_preview_callback(
     asr: &Arc<VolcengineStreamingASR>,
     inner: &Arc<Inner>,
@@ -479,49 +210,24 @@ fn set_volcengine_final_supplemental_preview_callback(
     })));
 }
 
-fn build_volcengine_asr_pair(inner: &Arc<Inner>, session_id: SessionId) -> VolcengineAsrPair {
-    let credentials = read_volc_credentials();
-    let final_hotwords = enabled_hotwords(inner);
-    let final_asr = Arc::new(VolcengineStreamingASR::new(
-        credentials.clone(),
-        final_hotwords.clone(),
+fn build_volcengine_asr(inner: &Arc<Inner>, session_id: SessionId) -> Arc<VolcengineStreamingASR> {
+    let asr = Arc::new(VolcengineStreamingASR::new(
+        read_volc_credentials(),
+        enabled_hotwords(inner),
     ));
-    let preview_asr = Arc::new(VolcengineStreamingASR::new_low_latency_preview(
-        credentials.clone(),
-        final_hotwords.clone(),
-    ));
-    set_volcengine_partial_preview_callback(&final_asr, inner, session_id);
-    set_volcengine_final_supplemental_preview_callback(&final_asr, inner, session_id);
-    set_volcengine_partial_preview_callback(&preview_asr, inner, session_id);
-    let preview_sidecar = Arc::new(VolcenginePreviewSidecar::new(
-        credentials,
-        final_hotwords,
-        inner,
-        session_id,
-        preview_asr,
-    ));
-    let target: Arc<dyn crate::asr::AudioConsumer> = Arc::new(VolcenginePreviewTeeConsumer {
-        final_asr: Arc::clone(&final_asr),
-    });
-    VolcengineAsrPair {
-        final_asr,
-        preview_sidecar,
-        target,
-    }
+    set_volcengine_final_supplemental_preview_callback(&asr, inner, session_id);
+    asr
 }
 
-async fn open_volcengine_asr_pair(
-    pair: &VolcengineAsrPair,
+async fn open_volcengine_asr(
+    asr: &Arc<VolcengineStreamingASR>,
 ) -> Result<(), crate::asr::volcengine::VolcengineASRError> {
     let started = Instant::now();
-    pair.final_asr.open_session().await?;
+    asr.open_session().await?;
     log::info!(
-        "[asr] final ASR ready; low-latency preview sidecar opening asynchronously elapsed_ms={}",
+        "[asr] authoritative bidirectional ASR ready; preview and final share one provider session elapsed_ms={}",
         started.elapsed().as_millis()
     );
-    if !pair.preview_sidecar.open_initial_preview_in_background() {
-        log::warn!("[asr] low-latency preview sidecar was not scheduled");
-    }
     Ok(())
 }
 
@@ -2072,10 +1778,6 @@ struct EmbeddedAudioDictationSession {
     archive_pcm: Option<Vec<u8>>,
     streamed_pcm_bytes: usize,
     normalized_pcm_bytes: usize,
-    boosted_chunk_count: usize,
-    max_gain: f64,
-    clipped_samples: usize,
-    streaming_agc: EmbeddedStreamingAgcState,
     device_ai_processing_started: bool,
 }
 
@@ -2088,7 +1790,7 @@ impl EmbeddedAudioDictationSession {
             return Err("嵌入式音频 PCM chunk 长度不是 16-bit 对齐".to_string());
         }
 
-        let (asr_pcm, gain_stats) = self.prepare_streaming_pcm_for_asr(pcm);
+        let asr_pcm = self.prepare_streaming_pcm_for_asr(pcm);
         if embedded_audio_stop_feedback_latched(inner) {
             if !embedded_audio_streaming_session_accepts_pcm(inner, self.session_id) {
                 log::debug!(
@@ -2119,11 +1821,6 @@ impl EmbeddedAudioDictationSession {
 
         self.streamed_pcm_bytes += pcm.len();
         self.normalized_pcm_bytes += asr_pcm.len();
-        if gain_stats.gain > 1.0 {
-            self.boosted_chunk_count += 1;
-            self.max_gain = self.max_gain.max(gain_stats.gain);
-            self.clipped_samples += gain_stats.clipped_samples;
-        }
 
         for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
             self.consumer.consume_pcm_chunk(chunk);
@@ -2131,12 +1828,14 @@ impl EmbeddedAudioDictationSession {
         Ok(())
     }
 
-    fn prepare_streaming_pcm_for_asr(&mut self, pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
+    fn prepare_streaming_pcm_for_asr(&mut self, pcm: &[u8]) -> Vec<u8> {
         if self.active_asr == "volcengine" {
-            return normalize_embedded_streaming_pcm_for_asr(pcm, &mut self.streaming_agc);
+            // Per-packet gain changes made identical speech sound different
+            // across a session. Volcengine receives device PCM verbatim.
+            return pcm.to_vec();
         }
 
-        normalize_embedded_pcm_for_asr(pcm)
+        normalize_embedded_pcm_for_asr(pcm).0
     }
 }
 
@@ -2861,15 +2560,9 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         start_recorder_and_enter_listening(inner, current_session_id, &active_asr, consumer)
             .await?;
     } else {
-        let volcengine = build_volcengine_asr_pair(inner, current_session_id);
-        let asr = Arc::clone(&volcengine.final_asr);
+        let asr = build_volcengine_asr(inner, current_session_id);
         let bridge = Arc::new(DeferredAsrBridge::new());
-        let consumer: Arc<dyn crate::recorder::AudioConsumer> =
-            Arc::new(VolcengineStartupPreviewConsumer {
-                final_bridge: Arc::clone(&bridge),
-                preview_sidecar: Arc::clone(&volcengine.preview_sidecar),
-                _target_guard: Arc::clone(&volcengine.target),
-            });
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
         store_asr_for_session(
             inner,
             current_session_id,
@@ -2877,7 +2570,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         );
         start_recorder_for_starting(inner, current_session_id, &active_asr, consumer).await?;
 
-        if let Err(e) = open_volcengine_asr_pair(&volcengine).await {
+        if let Err(e) = open_volcengine_asr(&asr).await {
             log::error!("[coord] open ASR session failed: {e}");
             match startup_race_status_for_starting(inner, current_session_id) {
                 StartupRaceStatus::StaleContinuation => {
@@ -2885,14 +2578,12 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                         "[coord] stale ASR open_session error from session {current_session_id} — ignoring"
                     );
                     asr.cancel();
-                    volcengine.preview_sidecar.cancel();
                     discard_startup_resources_for_session(inner, current_session_id);
                     restore_prepared_windows_ime_session(inner, current_session_id);
                     return Ok(());
                 }
                 StartupRaceStatus::CancelRaced => {
                     asr.cancel();
-                    volcengine.preview_sidecar.cancel();
                     discard_startup_resources_for_session(inner, current_session_id);
                     restore_prepared_windows_ime_session(inner, current_session_id);
                     set_phase_idle_if_session_matches(inner, current_session_id);
@@ -2918,7 +2609,6 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
             StartupRaceStatus::CancelRaced => {
                 log::info!("[coord] cancel raced during ASR open_session — aborting begin");
                 asr.cancel();
-                volcengine.preview_sidecar.cancel();
                 discard_startup_resources_for_session(inner, current_session_id);
                 restore_prepared_windows_ime_session(inner, current_session_id);
                 set_phase_idle_if_session_matches(inner, current_session_id);
@@ -2929,15 +2619,14 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
                     "[coord] stale ASR open_session continuation from session {current_session_id} — ignoring"
                 );
                 asr.cancel();
-                volcengine.preview_sidecar.cancel();
                 discard_startup_resources_for_session(inner, current_session_id);
                 restore_prepared_windows_ime_session(inner, current_session_id);
                 return Ok(());
             }
         }
-        let final_target: Arc<dyn crate::asr::AudioConsumer> = volcengine.final_asr.clone();
+        let final_target: Arc<dyn crate::asr::AudioConsumer> = asr.clone();
         let flushed_bytes = bridge.attach(final_target);
-        volcengine.final_asr.mark_audio_delivery_ready();
+        asr.mark_audio_delivery_ready();
         log::info!("[coord] ASR connected; flushed {flushed_bytes} deferred audio bytes");
         finish_starting_session(inner, current_session_id).await;
     }
@@ -3870,19 +3559,13 @@ impl EmbeddedStreamingDictation {
             .audio_archive_active
             .store(archive_active, std::sync::atomic::Ordering::Relaxed);
         log::info!(
-            "[coord] embedded audio streaming AGC summary (boosted_chunks={}, max_gain={:.2}, clipped_samples={}, voiced_chunks={}, quiet_chunks={}, gain_updates={}, first_gain={:.2}, final_gain={:.2})",
-            session.boosted_chunk_count,
-            session.max_gain,
-            session.clipped_samples,
-            session.streaming_agc.voiced_chunks,
-            session.streaming_agc.quiet_chunks,
-            session.streaming_agc.gain_updates,
-            session.streaming_agc.first_gain.unwrap_or(1.0),
-            session.streaming_agc.gain
-        );
-        log::info!(
-            "[coord] embedded audio streaming submitted to dictation pipeline (asr={}, pcm_bytes={}, asr_pcm_bytes={}, archive={})",
+            "[coord] embedded audio streaming submitted to dictation pipeline (asr={}, input_mode={}, pcm_bytes={}, asr_pcm_bytes={}, archive={})",
             session.active_asr,
+            if session.active_asr == "volcengine" {
+                "raw_device_pcm"
+            } else {
+                "normalized_pcm"
+            },
             session.streamed_pcm_bytes,
             session.normalized_pcm_bytes,
             archive_active
@@ -4137,10 +3820,6 @@ async fn begin_embedded_audio_dictation_session(
         archive_pcm,
         streamed_pcm_bytes: 0,
         normalized_pcm_bytes: 0,
-        boosted_chunk_count: 0,
-        max_gain: 1.0,
-        clipped_samples: 0,
-        streaming_agc: EmbeddedStreamingAgcState::default(),
         device_ai_processing_started: false,
     })
 }
@@ -4365,16 +4044,9 @@ async fn build_embedded_audio_asr_consumer(
         return Ok(consumer);
     }
 
-    let volcengine = build_volcengine_asr_pair(inner, session_id);
-    let final_asr = Arc::clone(&volcengine.final_asr);
-    let target_guard = Arc::clone(&volcengine.target);
+    let final_asr = build_volcengine_asr(inner, session_id);
     let bridge = Arc::new(DeferredAsrBridge::new());
-    let consumer: Arc<dyn crate::recorder::AudioConsumer> =
-        Arc::new(VolcengineStartupPreviewConsumer {
-            final_bridge: Arc::clone(&bridge),
-            preview_sidecar: Arc::clone(&volcengine.preview_sidecar),
-            _target_guard: target_guard,
-        });
+    let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
     store_asr_for_session(
         inner,
         session_id,
@@ -4382,7 +4054,7 @@ async fn build_embedded_audio_asr_consumer(
     );
     let inner_for_open = Arc::clone(inner);
     tauri::async_runtime::spawn(async move {
-        match open_volcengine_asr_pair(&volcengine).await {
+        match open_volcengine_asr(&final_asr).await {
             Ok(()) => {
                 let still_current = {
                     let state = inner_for_open.state.lock();
@@ -4391,22 +4063,21 @@ async fn build_embedded_audio_asr_consumer(
                         && state.phase != SessionPhase::Idle
                 };
                 if !still_current {
-                    volcengine.final_asr.cancel();
-                    volcengine.preview_sidecar.cancel();
+                    final_asr.cancel();
                     log::info!(
                         "[coord] embedded Volcengine ASR opened after stale session {session_id} - discarded"
                     );
                     return;
                 }
-                let flushed_bytes = bridge.attach(Arc::clone(&volcengine.target));
-                volcengine.final_asr.mark_audio_delivery_ready();
+                let target: Arc<dyn crate::asr::AudioConsumer> = final_asr.clone();
+                let flushed_bytes = bridge.attach(target);
+                final_asr.mark_audio_delivery_ready();
                 log::info!(
                     "[coord] embedded Volcengine ASR connected; flushed {flushed_bytes} deferred audio bytes"
                 );
             }
             Err(err) => {
-                volcengine.final_asr.cancel();
-                volcengine.preview_sidecar.cancel();
+                final_asr.cancel();
                 let still_current = {
                     let state = inner_for_open.state.lock();
                     state.session_id == session_id
@@ -4489,29 +4160,6 @@ struct EmbeddedPcmGainStats {
     clipped_samples: usize,
 }
 
-#[derive(Debug)]
-struct EmbeddedStreamingAgcState {
-    gain: f64,
-    speech_rms_ema: Option<f64>,
-    voiced_chunks: usize,
-    quiet_chunks: usize,
-    gain_updates: usize,
-    first_gain: Option<f64>,
-}
-
-impl Default for EmbeddedStreamingAgcState {
-    fn default() -> Self {
-        Self {
-            gain: 1.0,
-            speech_rms_ema: None,
-            voiced_chunks: 0,
-            quiet_chunks: 0,
-            gain_updates: 0,
-            first_gain: None,
-        }
-    }
-}
-
 fn normalize_embedded_pcm_for_asr(pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
     let (rms_before, peak_before) = embedded_pcm_rms_and_peak(pcm);
     let stats = EmbeddedPcmGainStats {
@@ -4552,96 +4200,6 @@ fn normalize_embedded_pcm_for_asr_with_stats(
     stats.gain = gain;
     stats.clipped_samples = clipped_samples;
     (normalized, stats)
-}
-
-fn normalize_embedded_streaming_pcm_for_asr(
-    pcm: &[u8],
-    agc: &mut EmbeddedStreamingAgcState,
-) -> (Vec<u8>, EmbeddedPcmGainStats) {
-    let (rms_before, peak_before) = embedded_pcm_rms_and_peak(pcm);
-    let mut stats = EmbeddedPcmGainStats {
-        rms_before,
-        peak_before,
-        gain: 1.0,
-        clipped_samples: 0,
-    };
-
-    if !embedded_streaming_chunk_has_speech_energy(rms_before, peak_before) {
-        agc.quiet_chunks += 1;
-        return (pcm.to_vec(), stats);
-    }
-
-    agc.voiced_chunks += 1;
-    let had_speech_envelope = agc.speech_rms_ema.is_some();
-    let speech_rms = agc
-        .speech_rms_ema
-        .map(|previous| {
-            previous * (1.0 - EMBEDDED_AUDIO_STREAMING_AGC_ENVELOPE_ALPHA)
-                + rms_before * EMBEDDED_AUDIO_STREAMING_AGC_ENVELOPE_ALPHA
-        })
-        .unwrap_or(rms_before);
-    agc.speech_rms_ema = Some(speech_rms);
-
-    let peak_limited_gain = if peak_before == 0 {
-        EMBEDDED_AUDIO_MAX_GAIN
-    } else {
-        (i16::MAX as f64 * EMBEDDED_AUDIO_STREAMING_AGC_PEAK_HEADROOM / peak_before as f64)
-            .min(EMBEDDED_AUDIO_MAX_GAIN)
-    };
-    let desired_gain = (EMBEDDED_AUDIO_TARGET_RMS / speech_rms)
-        .min(peak_limited_gain)
-        .clamp(1.0, EMBEDDED_AUDIO_MAX_GAIN);
-    let gain = if !had_speech_envelope {
-        desired_gain
-    } else if desired_gain > agc.gain {
-        desired_gain.min(agc.gain * EMBEDDED_AUDIO_STREAMING_AGC_MAX_RISE_PER_VOICED_CHUNK)
-    } else {
-        desired_gain.max(agc.gain * EMBEDDED_AUDIO_STREAMING_AGC_MAX_FALL_PER_VOICED_CHUNK)
-    };
-
-    if (gain - agc.gain).abs() > f64::EPSILON {
-        agc.gain_updates += 1;
-    }
-    agc.gain = gain;
-    agc.first_gain.get_or_insert(gain);
-    stats.gain = gain;
-
-    if gain < EMBEDDED_AUDIO_MIN_GAIN {
-        return (pcm.to_vec(), stats);
-    }
-
-    apply_embedded_pcm_gain(pcm, stats)
-}
-
-fn apply_embedded_pcm_gain(
-    pcm: &[u8],
-    mut stats: EmbeddedPcmGainStats,
-) -> (Vec<u8>, EmbeddedPcmGainStats) {
-    let gain = stats.gain;
-    if gain < EMBEDDED_AUDIO_MIN_GAIN {
-        return (pcm.to_vec(), stats);
-    }
-
-    let mut normalized = Vec::with_capacity(pcm.len());
-    let mut clipped_samples = 0usize;
-    for chunk in pcm.chunks_exact(2) {
-        let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
-        let scaled = (sample as f64 * gain).round();
-        let clamped = scaled.clamp(i16::MIN as f64, i16::MAX as f64);
-        if (scaled - clamped).abs() > f64::EPSILON {
-            clipped_samples += 1;
-        }
-        normalized.extend_from_slice(&(clamped as i16).to_le_bytes());
-    }
-
-    stats.clipped_samples = clipped_samples;
-    (normalized, stats)
-}
-
-fn embedded_streaming_chunk_has_speech_energy(rms: f64, peak: u16) -> bool {
-    rms >= EMBEDDED_AUDIO_STREAMING_NORMALIZE_SPEECH_RMS
-        || (rms >= EMBEDDED_AUDIO_STREAMING_NORMALIZE_QUIET_SPEECH_RMS
-            && peak >= EMBEDDED_AUDIO_STREAMING_NORMALIZE_QUIET_SPEECH_PEAK)
 }
 
 fn embedded_pcm_rms_and_peak(pcm: &[u8]) -> (f64, u16) {
@@ -5586,19 +5144,15 @@ mod tests {
         emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
         finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
         install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
-        normalize_embedded_pcm_for_asr, prepare_embedded_streaming_pcm_for_asr,
-        preview_replay_tail, publish_embedded_ble_asr_final,
+        normalize_embedded_pcm_for_asr, publish_embedded_ble_asr_final,
         record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
         request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
         stabilize_embedded_audio_final_supplemental_preview,
         stabilize_embedded_audio_partial_preview, store_embedded_audio_stats,
         streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
-        EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingAgcState,
-        EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
-        DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
-        EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, VOLCENGINE_PREVIEW_REPLAY_BYTES,
-        VOLCENGINE_PREVIEW_REPLAY_MS, VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES,
-        VOLCENGINE_PREVIEW_RESTART_REPLAY_MS, VOLCENGINE_PREVIEW_STALL_RESTART_MS,
+        EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
+        DEVICE_AI_PROCESSING_MAX_VISIBLE_MS, DEVICE_AI_PROCESSING_MIN_VISIBLE_MS,
+        EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV,
     };
     use crate::coordinator::Coordinator;
     use crate::coordinator_state::{new_session_id, SessionPhase};
@@ -5821,10 +5375,6 @@ mod tests {
             archive_pcm: Some(Vec::new()),
             streamed_pcm_bytes: 0,
             normalized_pcm_bytes: 0,
-            boosted_chunk_count: 0,
-            max_gain: 1.0,
-            clipped_samples: 0,
-            streaming_agc: EmbeddedStreamingAgcState::default(),
             device_ai_processing_started: false,
         }
     }
@@ -6824,99 +6374,13 @@ mod tests {
     }
 
     #[test]
-    fn volcengine_streaming_keeps_quiet_ble_noise_unmodified() {
-        let pcm = pcm_from_samples(&[100, -100, 80, -80]);
-
-        let (prepared, stats) = prepare_embedded_streaming_pcm_for_asr("volcengine", &pcm);
-
-        assert_eq!(prepared, pcm);
-        assert_eq!(stats.gain, 1.0);
+    fn volcengine_preview_and_final_share_the_authoritative_session() {
+        let source = include_str!("dictation.rs");
+        assert!(source.contains(
+            "authoritative bidirectional ASR ready; preview and final share one provider session"
+        ));
+        assert!(source.contains("set_volcengine_final_supplemental_preview_callback"));
+        let builder_name = ["build", "_volcengine_asr("].concat();
+        assert_eq!(source.matches(&builder_name).count(), 3);
     }
-
-    #[test]
-    fn volcengine_streaming_keeps_isolated_spike_noise_unmodified() {
-        let mut samples = vec![0i16; 255];
-        samples.push(320);
-        let pcm = pcm_from_samples(&samples);
-
-        let (prepared, stats) = prepare_embedded_streaming_pcm_for_asr("volcengine", &pcm);
-
-        assert!(stats.rms_before < 45.0, "rms={}", stats.rms_before);
-        assert!(stats.peak_before >= 256);
-        assert_eq!(prepared, pcm);
-        assert_eq!(stats.gain, 1.0);
-    }
-
-    #[test]
-    fn volcengine_streaming_boosts_quiet_speech_peak_chunks() {
-        let mut samples = vec![50i16; 255];
-        samples.push(320);
-        let pcm = pcm_from_samples(&samples);
-
-        let (prepared, stats) = prepare_embedded_streaming_pcm_for_asr("volcengine", &pcm);
-        let (rms_after, peak_after) = embedded_pcm_rms_and_peak(&prepared);
-
-        assert_eq!(prepared.len(), pcm.len());
-        assert!(stats.rms_before >= 45.0, "rms={}", stats.rms_before);
-        assert!(stats.rms_before < 120.0, "rms={}", stats.rms_before);
-        assert!(stats.peak_before >= 256);
-        assert!(stats.gain > 8.0, "gain={}", stats.gain);
-        assert!(rms_after > stats.rms_before, "rms_after={rms_after}");
-        assert!(peak_after > stats.peak_before);
-    }
-
-    #[test]
-    fn volcengine_streaming_boosts_low_level_speech_chunks() {
-        let pcm = pcm_from_samples(&vec![800i16; 256]);
-
-        let (prepared, stats) = prepare_embedded_streaming_pcm_for_asr("volcengine", &pcm);
-        let (rms_after, peak_after) = embedded_pcm_rms_and_peak(&prepared);
-
-        assert_eq!(prepared.len(), pcm.len());
-        assert!(stats.gain > 2.0, "gain={}", stats.gain);
-        assert!(rms_after > stats.rms_before, "rms_after={rms_after}");
-        assert!(peak_after > stats.peak_before);
-    }
-
-    #[test]
-    fn volcengine_streaming_leaves_loud_chunks_unchanged() {
-        let pcm = pcm_from_samples(&vec![3_000i16; 256]);
-
-        let (prepared, stats) = prepare_embedded_streaming_pcm_for_asr("volcengine", &pcm);
-
-        assert_eq!(prepared, pcm);
-        assert_eq!(stats.gain, 1.0);
-    }
-
-    #[test]
-    fn volcengine_preview_restart_replay_covers_delayed_first_speech() {
-        assert_eq!(VOLCENGINE_PREVIEW_REPLAY_MS, 1_500);
-        assert_eq!(VOLCENGINE_PREVIEW_REPLAY_BYTES, 48_000);
-        assert_eq!(VOLCENGINE_PREVIEW_RESTART_REPLAY_MS, 3_500);
-        assert_eq!(VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES, 112_000);
-        assert!(VOLCENGINE_PREVIEW_RESTART_REPLAY_MS as u64 > VOLCENGINE_PREVIEW_STALL_RESTART_MS);
-
-        let pcm: Vec<u8> = (0..(VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES + 64))
-            .map(|value| (value % 251) as u8)
-            .collect();
-        let replay = preview_replay_tail(&pcm, VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES);
-
-        assert_eq!(replay.len(), VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES);
-        assert_eq!(
-            replay,
-            pcm[pcm.len() - VOLCENGINE_PREVIEW_RESTART_REPLAY_BYTES..]
-        );
-    }
-}
-
-fn prepare_embedded_streaming_pcm_for_asr(
-    active_asr: &str,
-    pcm: &[u8],
-) -> (Vec<u8>, EmbeddedPcmGainStats) {
-    if active_asr == "volcengine" {
-        let mut agc = EmbeddedStreamingAgcState::default();
-        return normalize_embedded_streaming_pcm_for_asr(pcm, &mut agc);
-    }
-
-    normalize_embedded_pcm_for_asr(pcm)
 }
