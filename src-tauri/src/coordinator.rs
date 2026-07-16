@@ -4227,8 +4227,33 @@ fn start_embedded_ble_passive_local_reattach_watch(
 
     let inner = Arc::clone(inner);
     async_runtime::spawn(async move {
+        let baseline_native_hid_addresses = match async_runtime::spawn_blocking(|| {
+            crate::embedded_ble::native_windows_hid_pairing_addresses()
+        })
+        .await
+        {
+            Ok(Ok(addresses)) => Some(addresses),
+            Ok(Err(err)) => {
+                log::debug!(
+                    "[embedded-ble] passive local Windows reattach baseline HID check unavailable: {err}"
+                );
+                None
+            }
+            Err(err) => {
+                log::debug!(
+                    "[embedded-ble] passive local Windows reattach baseline HID task failed: {err}"
+                );
+                None
+            }
+        };
+        let baseline_labels = baseline_native_hid_addresses
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|address| format!("{address:012X}"))
+            .collect::<Vec<_>>();
         log::info!(
-            "[embedded-ble] passive local Windows reattach monitor started reason={reason} target={expected_ble_name:?}; waiting only for explicit local pairing/HID evidence"
+            "[embedded-ble] passive local Windows reattach monitor started reason={reason} target={expected_ble_name:?}; baseline_native_hid_addresses={baseline_labels:?}; waiting only for explicit local pairing/HID evidence"
         );
         loop {
             if inner.shutdown.load(Ordering::SeqCst)
@@ -4250,72 +4275,93 @@ fn start_embedded_ble_passive_local_reattach_watch(
                 break;
             }
 
-            let expected_for_query = expected_ble_name.clone();
-            let pairing = async_runtime::spawn_blocking(move || {
-                crate::embedded_ble::query_listener_pairing(Some(&expected_for_query))
+            let native_hid_pairing = async_runtime::spawn_blocking(|| {
+                crate::embedded_ble::native_windows_hid_pairing_addresses()
             })
             .await;
-            match pairing {
-                Ok(pairing) => {
-                    let native_hid_pairing = async_runtime::spawn_blocking(|| {
-                        crate::embedded_ble::native_windows_hid_pairing_addresses()
-                    })
-                    .await;
-                    let native_hid_addresses = match native_hid_pairing {
-                        Ok(Ok(addresses)) => addresses,
-                        Ok(Err(err)) => {
-                            log::debug!(
-                                "[embedded-ble] passive local Windows reattach native HID check unavailable: {err}"
-                            );
-                            Vec::new()
-                        }
-                        Err(err) => {
-                            log::debug!(
-                                "[embedded-ble] passive local Windows reattach native HID task failed: {err}"
-                            );
-                            Vec::new()
-                        }
-                    };
-                    if embedded_ble_passive_local_reattach_evidence_ready(
-                        &pairing,
-                        &native_hid_addresses,
-                    ) {
-                        let labels = native_hid_addresses
+            let native_hid_addresses = match native_hid_pairing {
+                Ok(Ok(addresses)) => addresses,
+                Ok(Err(err)) => {
+                    log::debug!(
+                        "[embedded-ble] passive local Windows reattach native HID check unavailable: {err}"
+                    );
+                    Vec::new()
+                }
+                Err(err) => {
+                    log::debug!(
+                        "[embedded-ble] passive local Windows reattach native HID task failed: {err}"
+                    );
+                    Vec::new()
+                }
+            };
+            let fresh_native_hid_evidence =
+                baseline_native_hid_addresses
+                    .as_deref()
+                    .is_some_and(|baseline| {
+                        native_hid_addresses
                             .iter()
-                            .map(|address| format!("{address:012X}"))
-                            .collect::<Vec<_>>();
-                        log::info!(
-                            "[embedded-ble] passive local Windows reattach accepted explicit local pairing evidence status={:?} matched={} already_paired={} native_hid_addresses={labels:?}; rebuilding GATT",
-                            pairing.status,
-                            pairing.matched_devices,
-                            pairing.already_paired_devices
-                        );
-                        if embedded_ble_pairing_recovery_link_reachable(
-                            &inner,
-                            "passive local Windows reattach fresh GATT link check",
-                        )
-                        .await
-                        {
-                            resume_embedded_ble_listener_after_pairing_recovery(
-                                &inner,
-                                "passive local Windows reattach paired and link reachable",
-                                EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
-                            );
-                            break;
-                        }
-                    } else {
+                            .any(|address| !baseline.contains(address))
+                    });
+            let pairing = if fresh_native_hid_evidence {
+                None
+            } else {
+                let expected_for_query = expected_ble_name.clone();
+                match async_runtime::spawn_blocking(move || {
+                    crate::embedded_ble::query_listener_pairing(Some(&expected_for_query))
+                })
+                .await
+                {
+                    Ok(pairing) => Some(pairing),
+                    Err(err) => {
                         log::debug!(
-                            "[embedded-ble] passive local Windows reattach still waiting for current local pairing plus HID evidence; no GATT probe status={:?} matched={} already_paired={} native_hid_count={}",
-                            pairing.status,
-                            pairing.matched_devices,
-                            pairing.already_paired_devices,
-                            native_hid_addresses.len()
+                            "[embedded-ble] passive local Windows reattach pairing poll unavailable: {err}"
                         );
+                        None
                     }
                 }
-                Err(err) => log::debug!(
-                    "[embedded-ble] passive local Windows reattach pairing poll unavailable: {err}"
-                ),
+            };
+            if embedded_ble_passive_local_reattach_evidence_ready(
+                pairing.as_ref(),
+                &native_hid_addresses,
+                baseline_native_hid_addresses.as_deref(),
+            ) {
+                let labels = native_hid_addresses
+                    .iter()
+                    .map(|address| format!("{address:012X}"))
+                    .collect::<Vec<_>>();
+                let evidence = if fresh_native_hid_evidence {
+                    "new native HID address after passive monitor baseline"
+                } else {
+                    "current Windows pairing plus Listener HID"
+                };
+                log::info!(
+                    "[embedded-ble] passive local Windows reattach accepted explicit local pairing evidence={evidence} status={:?} matched={} already_paired={} native_hid_addresses={labels:?}; rebuilding GATT",
+                    pairing.as_ref().map(|value| value.status),
+                    pairing.as_ref().map_or(0, |value| value.matched_devices),
+                    pairing.as_ref().map_or(0, |value| value.already_paired_devices)
+                );
+                if embedded_ble_pairing_recovery_link_reachable(
+                    &inner,
+                    "passive local Windows reattach fresh GATT link check",
+                )
+                .await
+                {
+                    resume_embedded_ble_listener_after_pairing_recovery(
+                        &inner,
+                        "passive local Windows reattach paired and link reachable",
+                        EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
+                    );
+                    break;
+                }
+            } else {
+                log::debug!(
+                    "[embedded-ble] passive local Windows reattach still waiting for current local pairing plus HID evidence; no GATT probe status={:?} matched={} already_paired={} native_hid_count={} baseline_hid_count={}",
+                    pairing.as_ref().map(|value| value.status),
+                    pairing.as_ref().map_or(0, |value| value.matched_devices),
+                    pairing.as_ref().map_or(0, |value| value.already_paired_devices),
+                    native_hid_addresses.len(),
+                    baseline_native_hid_addresses.as_ref().map_or(0, Vec::len)
+                );
             }
 
             tokio::time::sleep(EMBEDDED_BLE_PASSIVE_LOCAL_REATTACH_POLL).await;
@@ -4324,10 +4370,18 @@ fn start_embedded_ble_passive_local_reattach_watch(
 }
 
 fn embedded_ble_passive_local_reattach_evidence_ready(
-    pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
+    pairing: Option<&crate::embedded_ble::BleDevicePairingPromptResult>,
     native_hid_addresses: &[u64],
+    baseline_native_hid_addresses: Option<&[u64]>,
 ) -> bool {
-    pairing.already_paired_devices > 0 && !native_hid_addresses.is_empty()
+    let current_windows_pairing = pairing.is_some_and(|value| value.already_paired_devices > 0)
+        && !native_hid_addresses.is_empty();
+    let fresh_native_hid_after_baseline = baseline_native_hid_addresses.is_some_and(|baseline| {
+        native_hid_addresses
+            .iter()
+            .any(|address| !baseline.contains(address))
+    });
+    current_windows_pairing || fresh_native_hid_after_baseline
 }
 
 fn start_embedded_ble_pairing_confirmation_watch(
@@ -10673,7 +10727,11 @@ mod tests {
             details: Vec::new(),
         };
         assert!(
-            !embedded_ble_passive_local_reattach_evidence_ready(&stale_hid, &[0xC1460007A2B6]),
+            !embedded_ble_passive_local_reattach_evidence_ready(
+                Some(&stale_hid),
+                &[0xC1460007A2B6],
+                Some(&[0xC1460007A2B6])
+            ),
             "a stale HID node without a current Windows pairing must not trigger a GATT reconnect"
         );
 
@@ -10683,15 +10741,40 @@ mod tests {
             ..stale_hid
         };
         assert!(
-            !embedded_ble_passive_local_reattach_evidence_ready(&current_pairing, &[]),
+            !embedded_ble_passive_local_reattach_evidence_ready(
+                Some(&current_pairing),
+                &[],
+                Some(&[0xC1460007A2B6])
+            ),
             "a paired AEP entry must wait for the current Listener HID node before Type reopens GATT"
         );
         assert!(
             embedded_ble_passive_local_reattach_evidence_ready(
-                &current_pairing,
-                &[0xC1460007A2B6]
+                Some(&current_pairing),
+                &[0xC1460007A2B6],
+                Some(&[0xC1460007A2B6])
             ),
             "a current Windows pairing plus Listener HID can authorize the bounded fresh GATT check"
+        );
+        assert!(
+            !embedded_ble_passive_local_reattach_evidence_ready(
+                None,
+                &[0xC1460007A2B6],
+                Some(&[0xC1460007A2B6])
+            ),
+            "the pre-recovery HID address alone must remain insufficient when the pairing query is unavailable"
+        );
+        assert!(
+            !embedded_ble_passive_local_reattach_evidence_ready(None, &[0xF81DF2D18D74], None),
+            "a new-looking HID address without a pre-recovery baseline must not reopen GATT"
+        );
+        assert!(
+            embedded_ble_passive_local_reattach_evidence_ready(
+                None,
+                &[0xF81DF2D18D74],
+                Some(&[0xC1460007A2B6])
+            ),
+            "a newly observed Listener HID address after the passive baseline proves explicit local Windows re-pairing even when the paired-device query times out"
         );
     }
 
@@ -10722,8 +10805,13 @@ mod tests {
             .find("resume_embedded_ble_listener_after_pairing_recovery")
             .expect("a proven local link must restore the persistent notify listener");
         assert!(
-            pairing_query < native_hid && native_hid < pairing_ready && pairing_ready < gatt && gatt < resume,
-            "passive reattach must observe Windows pairing/HID first, then verify GATT, then restart notify"
+            native_hid < pairing_query && pairing_query < pairing_ready && pairing_ready < gatt && gatt < resume,
+            "passive reattach must observe HID and Windows pairing evidence before GATT, then restart notify"
+        );
+        assert!(
+            body.contains("baseline_native_hid_addresses")
+                && body.contains("new native HID address after passive monitor baseline"),
+            "a paired-device enumeration timeout may only be bypassed by a new Listener HID identity relative to the recorded passive baseline"
         );
         for forbidden in [
             "PairAsync",
