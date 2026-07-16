@@ -59,6 +59,141 @@
       "product_boundary_confirmed_at": "2026-07-16T12:30:00+08:00",
       "product_boundary_confirmation": "Product-owner confirmation: 保持。 This confirms the fail-closed product routing rule after the Companion e-paper image was correctly excluded from Listener work."
     },
+    "listener_platform_four_capability_machine_closure_20260716": {
+      "status": "required",
+      "recorded_at": "2026-07-16T23:45:00+08:00",
+      "source": "Product-owner direction: 把 platform 要移植的四个项目按照蓝牙、录音、OTA、日志的顺序全部做完，并且都有实际性的机器验收闭环证据；没有人的就虚拟有人来操作验收，然后人只做最终验收. Follow-up: 日志不只是这四个功能，是 Codex 用来开发 Listener 和其它产品的核心功能，必须要好好看看怎么做好.",
+      "execution_order": [
+        "Bluetooth device connection/control protocol",
+        "Recording",
+        "OTA",
+        "Logging and observability foundation"
+      ],
+      "platform_requirement": "Each item is a versioned cross-product core with small Listener-specific adapters. The implementation must first preserve each named accepted Listener behavior exactly, then prove a transport/product-independent contract that future BLE, Wi-Fi, USB, or serial adapters can consume without reimplementing core lifecycle, attribution, compatibility, or evidence semantics.",
+      "machine_acceptance_requirement": "Each item requires a reproducible end-to-end machine evidence loop through the real installed/runtime product path wherever the available bench permits. When no human is present, a bounded scripted or simulated operator action may drive the relevant input, but its result must be explicitly labeled MACHINE_OPERATOR_ACCEPTED or NO_GO; it must never be recorded as human acceptance. Missing physical capability is an explicit NO_GO with the missing capability and next concrete evidence path, not a synthetic PASS.",
+      "final_human_boundary": "Do not ask the operator to discover intermediate defects. After all four items have current machine evidence and any detected drift is repaired or owner-deferred, open one final focused human acceptance session for residual subjective product judgment.",
+      "logging_platform_role": "Logging is the common development and diagnostics substrate for Listener and future products, not a feature limited to Bluetooth, recording, OTA, or a fourth isolated screen. Define and validate a transport- and product-independent structured event envelope, causal correlation identifiers, state/operation identity, measured stage timings, error taxonomy, privacy/redaction boundary, retention/evidence references, and adapters for firmware, host, Windows, test harnesses, and release evidence. Every future capability must use this substrate to distinguish internal product regressions from external transport, network, provider/model, or operating-system failures.",
+      "research_before_logging_design": "Before changing the logging platform, survey current primary specifications and implementation guidance for distributed trace context, structured event semantics, metrics/log correlation, privacy boundaries, embedded-to-host correlation, and durable evidence retention; record the sources, local gaps, explicit design decision, and adapter conformance strategy beside the machine evidence.",
+      "completion_rule": "Advance only one visible capability at a time in the stated order. For every item: read accepted contracts and real code/logs, identify root cause, implement the smallest compatible core/adapter change, run static/build/simulation/installed-runtime evidence, classify the result, and retain one root-cause regression contract only after explicit owner-authorized machine acceptance or final human acceptance. The final release gate remains separate."
+    },
+    "cross_product_platform_extraction_rule_20260716": {
+      "status": "required",
+      "recorded_at": "2026-07-16T23:15:00+08:00",
+      "source": "Product-owner clarification: 我是指可以跨产品复用的功能, 才有抽取出来的价值.",
+      "requirement": "Extract a Platform capability only when it represents the same product-independent fact, lifecycle, command, compatibility rule, or evidence mechanism that at least two products can consume through small adapters. Each extracted capability requires a versioned protocol, host and embedded contracts where applicable, a compatibility check, and per-product acceptance that preserves each product's existing visible behavior.",
+      "current_four_capability_boundary": {
+        "bluetooth": "Device discovery, connection lifecycle, secure identity/bonding, pairing ownership, capability discovery, settings read/write/readback, device command acknowledgement/cancellation/retry, and device readiness facts are all Bluetooth control-plane concerns for Listener.",
+        "recording": "Audio capture/transport, session integrity, preview/final attribution, provider classification, and completion are the recording capability.",
+        "ota": "Firmware-host compatibility, package provenance/signature/hash, staged transfer, version confirmation, post-upgrade readiness, and upgrade timing are the OTA capability.",
+        "logs": "Structured correlation, causal timings, speed gates, physical capture, machine-validation reports, and evidence retention are the observability/logging capability."
+      },
+      "adapter_only_examples": [
+        "Listener EC11 gesture mapping and GPIO wiring",
+        "Listener LED effects and screen behavior",
+        "Listener recording capsule wording, preview presentation, and Type text interaction",
+        "product-specific ASR provider choice and user workflow"
+      ],
+      "anti_speculation_rule": "There is no fifth Platform capability currently authorized. A behavior used by only one product remains in that product's adapter until a second product has a concrete matching contract that is outside the four current capabilities. Do not create a generic abstraction merely because two implementations look superficially similar, and never change an accepted product behavior to fit a Platform abstraction."
+    },
+    "device_connection_control_protocol_first_priority_20260716": {
+      "status": "first_priority_active",
+      "recorded_at": "2026-07-16T23:30:00+08:00",
+      "source": "Product-owner direction: 设备连接/控制协议是最重要的，需要做好，设为第一优先级.",
+      "platform_role": "This is the Bluetooth capability inside the current four-capability Platform scope, not a fifth capability. It is the transport-neutral contract future products consume through BLE, USB, Wi-Fi, or serial adapters.",
+      "protocol_facts": [
+        "discovery and connection lifecycle",
+        "security identity, bonding, local ownership, manual removal, and cross-host handoff",
+        "capability discovery, settings write/readback, compatibility, and rejection reasons",
+        "device command identity, acknowledgement, idempotence, cancellation, bounded retry, timeout, and result attribution",
+        "typed readiness states, causal timing boundaries, and structured errors"
+      ],
+      "listener_first_adapter_requirement": "Repair the current Listener BLE adapter by restoring the accepted Type-owned local EC11 recovery, manual-delete passivity, cross-host-first no-reclaim behavior, settings/command control path, and accepted recovery speed gates. The protocol extraction may only name and preserve these facts; it must not change Listener LED policy, EC11 gesture meaning, recovery popup behavior, or any other already accepted product behavior.",
+      "acceptance_priority": "For the current Listener repair, the historical accepted Bluetooth speed gates and real installed-Type/COM3 evidence take precedence over cosmetic UI changes or speculative cross-product expansion. No other product is modified until Listener evidence proves the adapter conforms.",
+      "research_before_modification": "Before changing the Platform protocol or any Listener adapter, complete a primary-source standards and industry-practice survey covering transport-independent connection lifecycle, security/bond ownership, state synchronization, settings/property readback, command acknowledgement/idempotence/cancellation, timeout/error taxonomy, correlation, and adapter conformance. Persist the resulting design decision and source links beside the Bluetooth audit evidence. The implementation must explicitly distinguish standards-derived semantics from Listener-specific accepted behavior."
+    },
+    "listener_platform_bluetooth_restore_accepted_contract_20260716": {
+      "status": "active_root_cause_repair",
+      "recorded_at": "2026-07-16T22:36:00+08:00",
+      "source": "Product-owner report during focused Listener recording acceptance: 连不上蓝牙失败. Follow-up: Platform 里面所有蓝牙的东西修成以前 Listener 验收过的样子; the visible capsule remains stuck at Listener 恢复后自动录音.",
+      "product_boundary": "Listener only. Do not modify Companion or use Platform extraction to reinterpret an accepted Listener Bluetooth behavior.",
+      "accepted_contracts_to_restore": [
+        "ec11-double-repair-with-type: with Type present, physical EC11 double-click clears this PC's stale cache and runs bounded automatic local Type PairAsync recovery without asking the user to pair in Windows.",
+        "random-name-exact-cache-refresh and restore-default-listener: changed-name recovery uses the same silent local cache-refresh and reconnect semantics, with no Windows user-pairing prompt on this host.",
+        "manual-windows-delete-no-type-autopair and passive_local_reattach: confirmed missing local pairing/HID remains passive and never reclaims, PairAsyncs, unpairs, scans, or steals a competing host.",
+        "computer-switch-product-flow: another host completing secure pairing first is the only cross-host result that makes this Type stop waiting without retry or reclaim.",
+        "type-takeover-no-forced-repair and BLE audio Type link: after valid local pairing or normal startup, installed Type restores background notify and TYPE:READY without a forced repair."
+      ],
+      "current_operator_observation": {
+        "result": "FAIL",
+        "bluetooth_connection": "Unable to connect during the focused installed-Type recording attempt.",
+        "visible_surface": "The capsule displays Listener 恢复后自动录音 with a spinning recovery state that does not complete.",
+        "conversation_screenshot": "User-provided screenshot in the 2026-07-16 acceptance conversation.",
+        "serial_evidence": ".cache/validation/listener-platform-recording-preservation-audit-20260716/recording/human-random-long-installed-20260716-223504/physical-recording-serial.log",
+        "serial_facts": [
+          "The first physical EC11 single-click woke DISCONNECTED_IDLE with ble=OFF and its fallback HID delivery returned ESP_ERR_TIMEOUT.",
+          "The later physical double-click opened a native recovery window with type_controlled=0, type_link_ready_before_recovery=0, and type_request=0 before Windows eventually established an encrypted bond."
+        ]
+      },
+      "repair_requirement": "First compare the current Platform adapter and installed Type recovery decision against every named accepted contract. Restore the prior product boundary exactly: Type-owned local EC11 recovery must reach the accepted silent bounded cache-cleanup and PairAsync path; manual-delete and cross-host-first paths remain passive. The recovery capsule may only describe a real bounded in-progress recovery and must leave that state on success or classified failure; it must not indefinitely mask a failed connection as automatic recording recovery.",
+      "staged_speed_regression_gates_20260716": {
+        "source": "Product-owner direction: 重点是那些速度指标门禁.",
+        "rule": "Bluetooth recovery is accepted only by causal, separately reported stage timings. A fast earlier stage never compensates for a slow later stage, and no total time begins before the relevant owner-controlled boundary.",
+        "historical_accepted_results": [
+          {
+            "id": "ec11_double_to_recovery_advertising",
+            "accepted_physical_results_ms": [160, 180],
+            "preserved_gate_ms": 250,
+            "evidence": "physical_ec11_local_repair_popup_regression_20260716.acceptance_evidence.summary and ec11_second_host_swift_pair_session_20260715.pairing_latency_machine_contract_20260715.latest_result"
+          },
+          {
+            "id": "windows_incoming_to_secure_bond",
+            "accepted_physical_result_ms": 980,
+            "preserved_gate_ms": 1200,
+            "evidence": "ec11_second_host_swift_pair_session_20260715.pairing_latency_machine_contract_20260715.latest_result"
+          },
+          {
+            "id": "local_pairing_evidence_to_type_ready",
+            "accepted_local_evidence_result_ms": 394,
+            "accepted_cold_start_reference_ms": 2141,
+            "preserved_gate_ms": 6000,
+            "evidence": "ble-platform-local-reattach-20260716.strict_machine_results"
+          }
+        ],
+        "gates": [
+          {
+            "id": "ec11_double_to_recovery_advertising",
+            "start": "physical EC11 double-click accepted",
+            "end": "connectable recovery advertising started",
+            "target_ms": 250,
+            "owner": "Firmware",
+            "current_capture": "130 ms (4358921 to 4359051), but this capture is not a full recovery pass."
+          },
+          {
+            "id": "windows_incoming_to_secure_bond",
+            "start": "first incoming Windows GAP connection during the recovery window",
+            "end": "encrypted=1 and bonded=1",
+            "target_ms": 1200,
+            "owner": "Firmware plus Windows pairing",
+            "current_capture": "1320 ms from the first global connection event at 4382101 to encrypted/bonded at 4383431; it is 120 ms over target and is NO_GO, not rounded to a pass. Time before the user/Windows initiates the incoming connection is reported separately and is not a product-speed gate."
+          },
+          {
+            "id": "local_pairing_evidence_to_type_ready",
+            "start": "fresh local Windows pairing plus HID evidence observed",
+            "end": "fresh GATT validation, persistent notify subscription, and TYPE:READY",
+            "target_ms": 6000,
+            "owner": "Installed Program Files Type",
+            "current_capture": "No TYPE:READY occurred after the local recovery in this capture, so this stage is NO_GO."
+          }
+        ],
+        "pending_recording_recovery_terminal_contract": "This is not represented as a historical Bluetooth speed gate. It is the current root-cause repair requirement: once a pending device-key recording action reaches its existing 15-second TTL, it must either dispatch after real ready or clear with a classified failure and remove the recovery capsule; it may never remain visible indefinitely.",
+        "cross_host_exception": "When another host wins secure pairing, this Type must remain passive/no-reclaim. It is an ownership result, not a local TYPE:READY latency failure."
+      },
+      "required_evidence_before_human_rereview": [
+        "A comparison artifact maps each accepted contract to current Firmware, Type, and Platform decision points and classifies the current drift.",
+        "Focused source and installed Program Files Type checks prove the restored local Type-owned recovery path while preserving manual-delete and cross-host passive branches.",
+        "A short aiw with-lock COM3/BLE capture records the actual recovery decision, encrypted bond, notify/TYPE:READY or a classified failure without a stuck recovery capsule."
+      ]
+    },
     "listener_platform_preserves_accepted_behavior_20260716": {
       "status": "required",
       "recorded_at": "2026-07-16T15:15:00+08:00",
@@ -81,14 +216,14 @@
       },
       "four_capability_acceptance_preservation_audit_20260716": {
         "status": "active",
-        "source": "Product-owner direction: 是的, 还有ota 日志 蓝牙 录音这四个, 都检查一下.",
+        "source": "Superseded execution order by listener_platform_four_capability_machine_closure_20260716.",
         "execution_order": [
-          "OTA",
-          "Recording",
           "Bluetooth",
+          "Recording",
+          "OTA",
           "Logs"
         ],
-        "execution_order_source": "Product-owner correction: 日志最后, 录音第二.",
+        "execution_order_source": "Product-owner direction: platform four-item closure order is Bluetooth, Recording, OTA, Logs; Logs is the cross-product development observability foundation.",
         "scope": [
           "Bluetooth: compare current recovery, rename, local automatic PairAsync, cross-host-first yielding, GATT/notify readiness, and physical EC11 timing against accepted scenario contracts.",
           "Recording: compare captured-PCM input, fast EC11 dispatch, BLE transport continuity, preview versus authoritative final, completion behavior, and internal-versus-provider attribution against accepted recording contracts.",
