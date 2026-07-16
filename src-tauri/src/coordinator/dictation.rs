@@ -651,7 +651,7 @@ fn publish_embedded_ble_asr_final(
     message: Option<String>,
 ) -> bool {
     let detail = format!("transcript_empty={transcript_empty}");
-    if embedded_ble_actor_context_active(inner) {
+    let published = if embedded_ble_actor_context_active(inner) {
         apply_embedded_ble_session_actor_dictation_event(
             inner,
             EmbeddedBleSessionActorCommand::AsrFinal,
@@ -676,7 +676,11 @@ fn publish_embedded_ble_asr_final(
             message,
             None,
         )
+    };
+    if published {
+        crate::observability::record_embedded_audio_final(session_id);
     }
+    published
 }
 
 fn finish_dictation_pipeline_error(
@@ -684,6 +688,7 @@ fn finish_dictation_pipeline_error(
     session_id: SessionId,
     message: String,
 ) -> bool {
+    let observability_message = message.clone();
     set_device_ai_processing_warning_async(
         inner,
         "dictation_pipeline_error",
@@ -696,6 +701,7 @@ fn finish_dictation_pipeline_error(
     }
     restore_prepared_windows_ime_session(inner, session_id);
     schedule_actionable_error_capsule_idle(inner, session_id);
+    crate::observability::record_embedded_audio_failure(session_id, &observability_message);
     true
 }
 
@@ -720,6 +726,7 @@ fn finish_dictation_timeout(inner: &Arc<Inner>, session_id: SessionId, message: 
     }
     restore_prepared_windows_ime_session(inner, session_id);
     schedule_actionable_error_capsule_idle(inner, session_id);
+    crate::observability::record_embedded_audio_timeout(session_id);
     true
 }
 
@@ -1275,7 +1282,18 @@ fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: Session
                 return false;
             };
             *slot = Some(stabilized_preview.clone());
-            emit_embedded_audio_partial_preview_if_active(inner, session_id, stabilized_preview)
+            let emitted = emit_embedded_audio_partial_preview_if_active(
+                inner,
+                session_id,
+                stabilized_preview,
+            );
+            if emitted {
+                crate::observability::record_embedded_audio_first_preview(
+                    session_id,
+                    crate::observability::PreviewSource::Sidecar,
+                );
+            }
+            emitted
         },
     );
 }
@@ -1311,7 +1329,18 @@ fn update_embedded_audio_partial_preview_from_final_supplement(
                 return false;
             };
             *slot = Some(stabilized_preview.clone());
-            emit_embedded_audio_partial_preview_if_active(inner, session_id, stabilized_preview)
+            let emitted = emit_embedded_audio_partial_preview_if_active(
+                inner,
+                session_id,
+                stabilized_preview,
+            );
+            if emitted {
+                crate::observability::record_embedded_audio_first_preview(
+                    session_id,
+                    crate::observability::PreviewSource::FinalSupplement,
+                );
+            }
+            emitted
         },
     );
 }
@@ -3685,6 +3714,7 @@ impl EmbeddedStreamingDictation {
                         .session
                         .as_mut()
                         .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
+                    crate::observability::record_embedded_audio_first_packet(session.session_id);
                     session.consume_streaming_pcm(inner, &chunk.pcm)?;
                 } else {
                     log::info!(
@@ -3712,6 +3742,9 @@ impl EmbeddedStreamingDictation {
                 session_id,
                 expected_packet_count,
             } => {
+                if let Some(session) = self.session.as_ref() {
+                    crate::observability::record_embedded_audio_stop(session.session_id);
+                }
                 self.pending_stop_expected_packet_count = Some(expected_packet_count);
                 self.show_transcribing_after_stop(inner);
                 if self.collector.inner().has_successful_complete_session() {
@@ -3773,6 +3806,7 @@ impl EmbeddedStreamingDictation {
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
             return Err("嵌入式音频听写会话已被取消".to_string());
         }
+        crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         log::info!(
             "[coord] embedded audio streaming dictation started (embedded_session_id={embedded_session_id}, coordinator_session_id={}, asr={})",
             session.session_id,
@@ -3946,6 +3980,7 @@ impl EmbeddedStreamingDictation {
         set_device_ai_processing_async(inner, false, "embedded_stream_abort");
         let event_session_id = self.session.as_ref().map(|session| session.session_id);
         if let Some(session) = self.session.take() {
+            crate::observability::record_embedded_audio_failure(session.session_id, message);
             cancel_asr_for_session(inner, session.session_id);
             restore_prepared_windows_ime_session(inner, session.session_id);
             publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
