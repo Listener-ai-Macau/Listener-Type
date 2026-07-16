@@ -113,7 +113,7 @@
       "research_before_modification": "Before changing the Platform protocol or any Listener adapter, complete a primary-source standards and industry-practice survey covering transport-independent connection lifecycle, security/bond ownership, state synchronization, settings/property readback, command acknowledgement/idempotence/cancellation, timeout/error taxonomy, correlation, and adapter conformance. Persist the resulting design decision and source links beside the Bluetooth audit evidence. The implementation must explicitly distinguish standards-derived semantics from Listener-specific accepted behavior."
     },
     "listener_platform_bluetooth_restore_accepted_contract_20260716": {
-      "status": "active_root_cause_repair",
+      "status": "machine_closed_local_recovery_second_host_bench_no_go",
       "recorded_at": "2026-07-16T22:36:00+08:00",
       "source": "Product-owner report during focused Listener recording acceptance: 连不上蓝牙失败. Follow-up: Platform 里面所有蓝牙的东西修成以前 Listener 验收过的样子; the visible capsule remains stuck at Listener 恢复后自动录音.",
       "product_boundary": "Listener only. Do not modify Companion or use Platform extraction to reinterpret an accepted Listener Bluetooth behavior.",
@@ -253,6 +253,54 @@
           "why_not_passed": "The current bench can prove Type-owned local recovery but cannot truthfully prove the other-host-first physical ownership result. Source and library tests preserve the no-reclaim branch, but they are not represented as a second-host physical PASS.",
           "next_evidence": "Run one focused two-host physical EC11 double-click session: capture the second host's Windows pairing/secure-bond evidence, COM3 recovery log, and current Program Files Type log proving no repeated local PairAsync or reclaim."
         }
+      },
+      "machine_revalidation_pairasync_failed19_root_cause_20260717": {
+        "status": "MACHINE_OPERATOR_ACCEPTED_WITH_SECOND_HOST_NO_GO",
+        "recorded_at": "2026-07-17T01:54:53+08:00",
+        "scope": "Revalidation of the installed Program Files Type local EC11 recovery after a real Windows PairAsync Failed(19) / controller HCI status=7 slow-path diagnosis. This closes the local machine regression only; it is not a physical GPIO press, human acceptance, or second-host ownership pass.",
+        "root_cause_and_repair": "The failing installed run fell from an exact observed recovery-address PairAsync failure into slow all-system AEP discovery and broad same-name/service PnP cleanup, taking about 38 seconds. Type now skips that slow discovery for an exact recovery address and allows only one exact-address BTHPORT cache cleanup before the final direct PairAsync. Firmware keeps the Device Connection/Control transaction open across retryable security failures, classifies HCI status=7 as resource, and completes it only after firmware receives TYPE:READY.",
+        "runtime_identity": {
+          "installed_type_exe": "C:\\Program Files\\Listener Type\\listener-type.exe",
+          "installed_type_sha256": "77FECB00B2934FE456DC8B769164C30A2883190866E956B86611B009A277A1F2",
+          "type_source_commit": "de8b516b48d29f8dad8da23986c7973ee782e7c4",
+          "firmware_source_commit": "a50af7cfc600bebdad0dd73fb5cf11ff7c50a68f",
+          "firmware_image_sha256": "C8BD91BCA25A7C2DF119B691C4C471BAEA745581AAA06F14C800B83E6F114174",
+          "firmware_port": "COM3"
+        },
+        "causal_stage_gates": {
+          "double_click_to_advertising_command_accepted_ms": {
+            "target_ms": 250,
+            "observed_max_ms": 244
+          },
+          "windows_connection_to_encryption_ms": {
+            "target_ms": 1200,
+            "observed_max_ms": 940
+          },
+          "fresh_pairing_evidence_to_type_ready_ms": {
+            "target_ms": 6000,
+            "observed_max_ms": 3460
+          }
+        },
+        "retryable_failure_evidence": "Samples 02 and 03 logged HCI encryption status=7, then device-control recovery security attempt retryable error=RESOURCE, a later encrypted connection, and a terminal success only after TYPE:READY. The failure is retained in serial evidence rather than removed from the passing samples.",
+        "machine_evidence": [
+          ".cache/validation/device-control-root-cause-20260717/bluetooth-randomized-machine.json",
+          ".cache/validation/device-control-root-cause-20260717/ec11-recovery-sample-01.json",
+          ".cache/validation/device-control-root-cause-20260717/ec11-recovery-sample-02.json",
+          ".cache/validation/device-control-root-cause-20260717/ec11-recovery-sample-03.json"
+        ],
+        "permanent_root_cause_guard": "python .\\scripts\\verify_device_control_recovery_root_cause.py PASS. The guard requires the exact-address Type path to skip slow AEP/PnP expansion and verifies Firmware does not complete recovery at advertising acceptance, classifies HCI memory capacity as retryable resource failure, and completes only at TYPE:READY.",
+        "validation": [
+          "python .\\scripts\\verify_device_control_recovery_root_cause.py PASS",
+          "python .\\tools\\verify_ec11_recovery_critical_path_static.py PASS",
+          "python .\\tools\\verify_ec11_fast_idle_recording_static.py PASS",
+          "pwsh -NoProfile -File .\\tools\\build.ps1 PASS",
+          "cargo fmt --check PASS",
+          "cargo test fresh_recovery_pairing_only_cleanup_keeps_slow_discovery_out_of_the_recovery_budget --lib PASS",
+          "cargo test embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path --lib PASS",
+          "cargo test pnp_cleanup_match_uses_service_signature_without_name_fallback --lib PASS",
+          "check-ec11-type-recovery-randomized.ps1 PASS: 3 of 3 generated installed-runtime samples"
+        ],
+        "physical_and_second_host_limits": "physical_gpio_measurement=false for all three samples, so this record does not claim a new real EC11 electrical-edge timing pass. The independent other-host-first ownership test remains BENCH_REVIEW_NO_GO and is not changed by this local recovery acceptance."
       }
     },
     "listener_platform_preserves_accepted_behavior_20260716": {
