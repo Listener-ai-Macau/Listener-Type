@@ -10,6 +10,13 @@
       "requirement": "For Listener-only issues that can be falsified by code inspection, deterministic simulation, installed-Type logs, Windows event/state evidence, or short locked device capture, complete diagnosis, repair, and machine validation without asking the operator to repeat simple input actions. Reserve a canonical operator-prompt for a remaining subjective or externally unobservable user-visible judgment; do not represent a machine-only conclusion as human acceptance.",
       "current_application": "The current-host Swift Pair protocol repair and the BLE-audio-Type-link check were self-closed with firmware advertisement/session evidence, Windows event evidence, and an installed Program Files Type GATT read. The operator is not asked to repeat simple input while those checks can distinguish the cause; a remaining subjective visual judgment still requires its own canonical prompt."
     },
+    "workflow_evidence_closure_without_independent_plan_review_20260716": {
+      "status": "required",
+      "recorded_at": "2026-07-16T12:10:00+08:00",
+      "source": "Product-owner direction: 独立审查者审查机制已经移除；新的东西要形成闭环，以物理或真实证据取代没有新事实的审查等待。",
+      "requirement": "Do not make a Listener change wait for an independent plan reviewer. Before implementation, record the owner decision in this registry and define explicit acceptance, validation, and evidence expectations. Before acceptance, require the implemented diff, reproducible validation evidence, and a real runtime or short locked physical proof whenever the behavior is externally observable; retain a human operator-prompt only for a subjective or otherwise unobservable product judgment.",
+      "workflow_application": "Legacy plan_review metadata may remain readable for historical records but is not a claim, auto-assign, waiting-refresh, lint, or validation gate. The active Listener core platform plan is promoted by this recorded owner authorization and remains accountable to run-validation evidence, acceptance-results ledger, installed/runtime logs, and bounded with-lock hardware evidence where applicable."
+    },
     "listener_core_capabilities_platform_contract_20260715": {
       "status": "required",
       "recorded_at": "2026-07-15T23:05:00+08:00",
