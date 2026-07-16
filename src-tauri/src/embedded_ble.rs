@@ -783,6 +783,7 @@ mod windows_ble {
         Mutex<Option<RuntimeBluetoothTargetAddress>>,
     > = OnceLock::new();
     static NATIVE_WINDOWS_HID_PAIRING_VISIBLE: AtomicBool = AtomicBool::new(false);
+    static NATIVE_WINDOWS_HID_PAIRING_ADDRESSES: OnceLock<Mutex<Vec<u64>>> = OnceLock::new();
     static LAST_PAIRING_PROMPT: OnceLock<Mutex<Option<PairingPromptThrottleState>>> =
         OnceLock::new();
     static LISTENER_PAIRING_MAINTENANCE_TOKEN: AtomicUsize = AtomicUsize::new(1);
@@ -2119,11 +2120,25 @@ mod windows_ble {
         let entries = powershell_listener_pnp_entries()?;
         let addresses = native_windows_hid_pairing_addresses_from_entries(&entries);
         NATIVE_WINDOWS_HID_PAIRING_VISIBLE.store(!addresses.is_empty(), Ordering::SeqCst);
+        if let Ok(mut snapshot) = NATIVE_WINDOWS_HID_PAIRING_ADDRESSES
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+        {
+            *snapshot = addresses.clone();
+        }
         Ok(addresses)
     }
 
     fn native_windows_hid_pairing_visible_for_startup() -> bool {
         NATIVE_WINDOWS_HID_PAIRING_VISIBLE.load(Ordering::SeqCst)
+    }
+
+    fn native_windows_hid_pairing_addresses_for_startup() -> Vec<u64> {
+        NATIVE_WINDOWS_HID_PAIRING_ADDRESSES
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .map(|snapshot| snapshot.clone())
+            .unwrap_or_default()
     }
 
     pub(super) fn native_windows_hid_pairing_addresses_from_entries(
@@ -7657,58 +7672,95 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         }
 
-        let native_windows_hid_pairing =
-            recent_pairing.is_none() && native_windows_hid_pairing_visible_for_startup();
+        let native_windows_hid_addresses =
+            if recent_pairing.is_none() && native_windows_hid_pairing_visible_for_startup() {
+                native_windows_hid_pairing_addresses_for_startup()
+            } else {
+                Vec::new()
+            };
+        let native_windows_hid_pairing = !native_windows_hid_addresses.is_empty();
         if recent_pairing.is_none() {
             let gatt_ready_timeout = if native_windows_hid_pairing {
                 STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT
             } else {
                 STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT
             };
-            // An Idle wake happens in the same Type process that most recently had
-            // a working notify subscription. Prefer that verified in-memory address
-            // over an older on-disk address, which may belong to the pre-recovery
-            // BLE identity and otherwise burns the entire cached-service timeout.
-            let runtime_address = runtime_bluetooth_target_address();
-            if let Some(address) = runtime_address {
-                match open_notify_target_for_startup_cached_address(address, gatt_ready_timeout) {
+            let mut native_windows_hid_error = None;
+            for address in &native_windows_hid_addresses {
+                match open_notify_target_for_current_native_windows_hid(*address) {
                     Ok(target) => {
                         remember_runtime_bluetooth_target_address_for_current(
-                            address,
-                            "runtime startup audio notify",
+                            *address,
+                            "native Windows HID startup audio notify",
                         );
                         log::info!(
-                            "[embedded-ble] selected runtime startup audio notify address={address:012X}"
+                            "[embedded-ble] selected native Windows HID startup audio notify address={address:012X}"
                         );
                         return Ok(target);
                     }
                     Err(err) => {
+                        native_windows_hid_error = Some(err.clone());
                         log::info!(
-                            "[embedded-ble] runtime startup audio notify address={address:012X} not ready: {}",
+                            "[embedded-ble] native Windows HID startup audio notify address={address:012X} not ready: {}",
                             err.chars().take(240).collect::<String>()
                         );
                     }
                 }
             }
-            if let Some(address) = persisted_successful_notify_target_address_for_current()
-                .filter(|address| Some(*address) != runtime_address)
-            {
-                match open_notify_target_for_startup_cached_address(address, gatt_ready_timeout) {
-                    Ok(target) => {
-                        remember_runtime_bluetooth_target_address_for_current(
-                            address,
-                            "persisted startup audio notify",
-                        );
-                        log::info!(
-                            "[embedded-ble] selected persisted startup audio notify address={address:012X}"
-                        );
-                        return Ok(target);
+            if native_windows_hid_pairing {
+                return Err(native_windows_hid_error.unwrap_or_else(|| {
+                    "No current native Windows HID address was available for audio notify recovery"
+                        .to_string()
+                }));
+            }
+            // An Idle wake happens in the same Type process that most recently had
+            // a working notify subscription. Prefer that verified in-memory address
+            // over an older on-disk address, which may belong to the pre-recovery
+            // BLE identity and otherwise burns the entire cached-service timeout.
+            if native_windows_hid_addresses.is_empty() {
+                let runtime_address = runtime_bluetooth_target_address();
+                if let Some(address) = runtime_address {
+                    match open_notify_target_for_startup_cached_address(address, gatt_ready_timeout)
+                    {
+                        Ok(target) => {
+                            remember_runtime_bluetooth_target_address_for_current(
+                                address,
+                                "runtime startup audio notify",
+                            );
+                            log::info!(
+                                "[embedded-ble] selected runtime startup audio notify address={address:012X}"
+                            );
+                            return Ok(target);
+                        }
+                        Err(err) => {
+                            log::info!(
+                                "[embedded-ble] runtime startup audio notify address={address:012X} not ready: {}",
+                                err.chars().take(240).collect::<String>()
+                            );
+                        }
                     }
-                    Err(err) => {
-                        log::info!(
-                            "[embedded-ble] persisted startup audio notify address={address:012X} not ready: {}",
-                            err.chars().take(240).collect::<String>()
-                        );
+                }
+                if let Some(address) = persisted_successful_notify_target_address_for_current()
+                    .filter(|address| Some(*address) != runtime_address)
+                {
+                    match open_notify_target_for_startup_cached_address(address, gatt_ready_timeout)
+                    {
+                        Ok(target) => {
+                            remember_runtime_bluetooth_target_address_for_current(
+                                address,
+                                "persisted startup audio notify",
+                            );
+                            log::info!(
+                                "[embedded-ble] selected persisted startup audio notify address={address:012X}"
+                            );
+                            return Ok(target);
+                        }
+                        Err(err) => {
+                            log::info!(
+                                "[embedded-ble] persisted startup audio notify address={address:012X} not ready: {}",
+                                err.chars().take(240).collect::<String>()
+                            );
+                        }
                     }
                 }
             }
@@ -7751,6 +7803,17 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     }
                 };
                 let address = parse_bluetooth_address_from_device_id(&id.to_string_lossy());
+                if native_windows_hid_pairing
+                    && !matches!(
+                        address,
+                        Some(address) if native_windows_hid_addresses.contains(&address)
+                    )
+                {
+                    log::debug!(
+                        "[embedded-ble] skipping stale service-selector address={address:?}; it is outside the current native Windows HID identity set"
+                    );
+                    continue;
+                }
                 if !ble_candidate_allowed("audio notify", index, &name, address) {
                     continue;
                 }
@@ -8002,6 +8065,18 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let _fresh_guard = BleFreshGattGuard::enter("embedded audio status")?;
         let deadline = Instant::now() + timeout.max(Duration::from_millis(250));
         let target = open_embedded_audio_status_target(timeout)?;
+        Ok(read_embedded_audio_status_from_target_bounded(
+            &target, deadline,
+        ))
+    }
+
+    pub fn read_embedded_audio_status_for_device(
+        address: u64,
+        timeout: Duration,
+    ) -> Result<crate::embedded_ble::EmbeddedAudioBleStatus, String> {
+        let _fresh_guard = BleFreshGattGuard::enter("embedded audio status for paired device")?;
+        let deadline = Instant::now() + timeout.max(Duration::from_millis(250));
+        let target = open_embedded_audio_status_target_for_device(address, deadline)?;
         Ok(read_embedded_audio_status_from_target_bounded(
             &target, deadline,
         ))
@@ -10194,7 +10269,23 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }))
     }
 
+    fn open_notify_target_for_current_native_windows_hid(
+        address: u64,
+    ) -> Result<OpenNotifyTarget, String> {
+        open_notify_target_for_device_with_cache_modes(address, &[BluetoothCacheMode::Uncached])
+    }
+
     fn open_notify_target_for_device(address: u64) -> Result<OpenNotifyTarget, String> {
+        open_notify_target_for_device_with_cache_modes(
+            address,
+            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached],
+        )
+    }
+
+    fn open_notify_target_for_device_with_cache_modes(
+        address: u64,
+        cache_modes: &[BluetoothCacheMode],
+    ) -> Result<OpenNotifyTarget, String> {
         let device = open_ble_device(address)?;
         if let Some(access) = device
             .RequestAccessAsync()
@@ -10207,7 +10298,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        for &cache_mode in cache_modes {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, cache_mode)
                 .map_err(|err| format!("BLE {cache_mode:?} service discovery failed: {err}"))
@@ -14453,6 +14544,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             let runtime_index = notify_body
                 .find("runtime_bluetooth_target_address()")
                 .expect("same-process verified address fast path should exist");
+            let native_hid_index = notify_body
+                .find("native_windows_hid_pairing_addresses_for_startup")
+                .expect("a current native HID address must be available before stale caches");
             let persisted_index = notify_body
                 .find("persisted_successful_notify_target_address_for_current")
                 .expect("startup persisted address fast path should exist");
@@ -14461,12 +14555,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .expect("service selector fallback should remain");
 
             assert!(
-                recent_index < runtime_index
+                recent_index < native_hid_index
+                    && native_hid_index < runtime_index
                     && runtime_index < persisted_index
                     && persisted_index < service_selector_index,
-                "recent-pairing recovery stays first; an Idle wake must prefer the verified same-process address before an older persisted address and then fall back to service discovery"
+                "recent-pairing recovery stays first; a current native HID identity must win over runtime and persisted cache addresses before service discovery"
             );
             assert!(notify_body.contains("if recent_pairing.is_none()"));
+            assert!(notify_body.contains("if native_windows_hid_addresses.is_empty()"));
             assert!(source.contains(
                 "const STARTUP_NOTIFY_FAST_PATH_TIMEOUT: Duration = Duration::from_millis(2500)"
             ));
@@ -14481,7 +14577,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
-        fn native_windows_hid_takeover_uses_system_service_selector_without_advertisement_wait() {
+        fn native_windows_hid_takeover_stays_on_current_identity_without_advertisement_wait() {
             let source = include_str!("embedded_ble.rs");
             let notify_start = source
                 .find("fn open_notify_target()")
@@ -14500,11 +14596,25 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
             assert!(
                 native_pairing_index < service_selector_index,
-                "native Windows HID takeover must retain the system service selector fallback"
+                "native Windows HID recovery must be considered before the general system service selector"
             );
             assert!(notify_body.contains(
                 "selected native Windows HID startup audio notify address={address:012X}"
             ));
+            assert!(
+                notify_body.contains("for address in &native_windows_hid_addresses")
+                    && notify_body.contains("open_notify_target_for_current_native_windows_hid(*address)")
+                    && notify_body.contains("if native_windows_hid_pairing {\n                return Err"),
+                "a fresh native HID identity must use only its own uncached direct-device path; a transient must retry that identity instead of falling through to stale system-service entries"
+            );
+            assert!(source.contains(
+                "open_notify_target_for_device_with_cache_modes(address, &[BluetoothCacheMode::Uncached])"
+            ));
+            assert!(
+                notify_body.contains("skipping stale service-selector address")
+                    && notify_body.contains("native_windows_hid_addresses.contains(&address)"),
+                "after a fresh native HID identity is known, service-selector fallback must not retry a stale Windows BLE identity before retrying the current device"
+            );
             let legacy_advertisement_helper = format!(
                 "{}{}",
                 "open_notify_target_from_native_windows_hid_", "advertisement"
@@ -15057,6 +15167,14 @@ pub fn probe_notify_subscription(timeout: Duration) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 pub fn read_embedded_audio_status(timeout: Duration) -> Result<EmbeddedAudioBleStatus, String> {
     windows_ble::read_embedded_audio_status(timeout)
+}
+
+#[cfg(target_os = "windows")]
+pub fn read_embedded_audio_status_for_device(
+    address: u64,
+    timeout: Duration,
+) -> Result<EmbeddedAudioBleStatus, String> {
+    windows_ble::read_embedded_audio_status_for_device(address, timeout)
 }
 
 #[cfg(target_os = "windows")]

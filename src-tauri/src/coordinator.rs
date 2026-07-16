@@ -4158,6 +4158,21 @@ async fn embedded_ble_pairing_recovery_link_reachable(
         inner,
         reason,
         EMBEDDED_BLE_PAIRING_GATT_REBUILD_TIMEOUT,
+        None,
+    )
+    .await
+}
+
+async fn embedded_ble_pairing_recovery_link_reachable_for_device(
+    inner: &Arc<Inner>,
+    reason: &'static str,
+    address: u64,
+) -> bool {
+    embedded_ble_pairing_recovery_link_reachable_with_timeout(
+        inner,
+        reason,
+        EMBEDDED_BLE_PAIRING_GATT_REBUILD_TIMEOUT,
+        Some(address),
     )
     .await
 }
@@ -4166,14 +4181,18 @@ async fn embedded_ble_pairing_recovery_link_reachable_with_timeout(
     inner: &Arc<Inner>,
     reason: &'static str,
     timeout: Duration,
+    preferred_address: Option<u64>,
 ) -> bool {
     if inner.shutdown.load(Ordering::SeqCst)
         || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
     {
         return false;
     }
-    let result = async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::read_embedded_audio_status(timeout)
+    let result = async_runtime::spawn_blocking(move || match preferred_address {
+        Some(address) => {
+            crate::embedded_ble::read_embedded_audio_status_for_device(address, timeout)
+        }
+        None => crate::embedded_ble::read_embedded_audio_status(timeout),
     })
     .await;
     match result {
@@ -4294,14 +4313,16 @@ fn start_embedded_ble_passive_local_reattach_watch(
                     Vec::new()
                 }
             };
-            let fresh_native_hid_evidence =
+            let fresh_native_hid_address =
                 baseline_native_hid_addresses
                     .as_deref()
-                    .is_some_and(|baseline| {
+                    .and_then(|baseline| {
                         native_hid_addresses
                             .iter()
-                            .any(|address| !baseline.contains(address))
+                            .copied()
+                            .find(|address| !baseline.contains(address))
                     });
+            let fresh_native_hid_evidence = fresh_native_hid_address.is_some();
             let pairing = if fresh_native_hid_evidence {
                 None
             } else {
@@ -4340,12 +4361,24 @@ fn start_embedded_ble_passive_local_reattach_watch(
                     pairing.as_ref().map_or(0, |value| value.matched_devices),
                     pairing.as_ref().map_or(0, |value| value.already_paired_devices)
                 );
-                if embedded_ble_pairing_recovery_link_reachable(
-                    &inner,
-                    "passive local Windows reattach fresh GATT link check",
-                )
-                .await
-                {
+                let link_reachable = match fresh_native_hid_address {
+                    Some(address) => {
+                        embedded_ble_pairing_recovery_link_reachable_for_device(
+                            &inner,
+                            "passive local Windows reattach fresh GATT link check",
+                            address,
+                        )
+                        .await
+                    }
+                    None => {
+                        embedded_ble_pairing_recovery_link_reachable(
+                            &inner,
+                            "passive local Windows reattach fresh GATT link check",
+                        )
+                        .await
+                    }
+                };
+                if link_reachable {
                     resume_embedded_ble_listener_after_pairing_recovery(
                         &inner,
                         "passive local Windows reattach paired and link reachable",
@@ -9386,28 +9419,22 @@ mod tests {
         assert!(!embedded_ble_pairing_prompt_ready(&pairing));
     }
 
-    #[tokio::test]
-    async fn embedded_ble_foreground_probe_refreshes_ready_background_capture() {
+    #[test]
+    fn embedded_ble_foreground_probe_routes_ready_background_capture_to_refresh() {
         let coordinator = Coordinator::new();
         open_startup_ble_name_sync_gate_for_test(&coordinator);
         let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
         mark_embedded_ble_listener_ready(&coordinator.inner, &active);
-        record_embedded_ble_listener_last_error(
-            &coordinator.inner,
-            "BLE CCCD write async error: Some(HRESULT(0x800706BA))",
+
+        assert_eq!(
+            embedded_ble_foreground_probe_mode(&coordinator.inner),
+            EmbeddedBleForegroundProbeMode::RefreshBackgroundListener
         );
 
-        let _ = coordinator
-            .probe_embedded_audio_ble_subscription(Some(1_000))
-            .await;
-
+        // Full-library tests must not enqueue real Windows GATT work. Locked
+        // installed-MSI machine evidence owns the actual refresh verification.
+        cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup", false);
         assert!(active.load(Ordering::SeqCst));
-        assert!(!coordinator
-            .inner
-            .embedded_ble_listener_cancel
-            .lock()
-            .as_ref()
-            .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)));
     }
 
     #[tokio::test]
@@ -10812,6 +10839,18 @@ mod tests {
             body.contains("baseline_native_hid_addresses")
                 && body.contains("new native HID address after passive monitor baseline"),
             "a paired-device enumeration timeout may only be bypassed by a new Listener HID identity relative to the recorded passive baseline"
+        );
+        let fresh_hid_address = body
+            .find("fresh_native_hid_address")
+            .expect("passive monitor must retain the exact new HID address");
+        let direct_gatt = body
+            .find("embedded_ble_pairing_recovery_link_reachable_for_device")
+            .expect(
+                "a fresh HID identity must select direct GATT instead of the stale selector cache",
+            );
+        assert!(
+            fresh_hid_address < direct_gatt,
+            "passive reattach must use the newly observed HID address as its first GATT target"
         );
         for forbidden in [
             "PairAsync",

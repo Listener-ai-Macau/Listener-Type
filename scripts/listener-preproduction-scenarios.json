@@ -42,7 +42,7 @@
       "total_review_effect": "Canonical Step 16/20 is machine-accepted and the total-review cursor advances to Step 17 LED independence. This is not represented as a human visual acceptance."
     },
     "ble_platform_explicit_local_reattach_20260715": {
-      "status": "generated_machine_pass_physical_ec11_pending",
+      "status": "machine_accepted_explicit_owner_authorization_physical_ec11_pending",
       "recorded_at": "2026-07-15T23:10:00+08:00",
       "source": "Current Step 17 preflight after the owner returned Listener to this Windows host: COM3 reported ble=connected with low_power_disabled=1 and no Type-ready LED. The installed Program Files Type process was still alive but its log had stopped the background listener after cross-host recovery arbitration.",
       "observed_evidence": [
@@ -76,7 +76,27 @@
           ".cache/validation/ble-platform-local-reattach-20260715/post-randomized-recovery-com3-led-status.log"
         ]
       },
-      "total_review_effect": "Step 17 LED independence remains pending until the current Type-ready path is restored and machine evidence proves the observable state is valid."
+      "machine_validation_20260716": {
+        "status": "machine_accepted_explicit_owner_authorization",
+        "root_causes": [
+          "Firmware direct bond-store deletion bypassed NimBLE local-IRK rotation, allowing Windows to reject a native re-pair with BTHUSB Event 35 when the old IRK remained retained.",
+          "With no local bonds, firmware had to stop advertising, reset and apply the local IRK, then rotate random identity before native recovery advertising.",
+          "Type recognized the fresh Windows HID identity but generic selectors could still choose the old Windows service identity. The current native HID identity now owns direct uncached recovery and transient retries never fall through to stale selector entries.",
+          "A library test started a real BLE background listener and left queued Windows GATT work. The test now verifies deterministic state routing; real GATT is limited to short locked installed-MSI evidence."
+        ],
+        "installed_type": "C:\\Program Files\\Listener Type\\listener-type.exe",
+        "installed_type_sha256": "AFD5986732717AA18FAA70FEA04E6F3C91BFC652A71A4D7D0F6C92A021A57678",
+        "installed_msi_sha256": "FF7A75A3EE448525D707F9F0F2A1CEE730E260C05F15A82918C8E0C22EF0797E",
+        "strict_machine_results": [
+          "Windows completed native listener pairing to fresh HID D374D0103F0B; PnP root, HID devices, and embedded BLE services all reported OK, and the post-pairing BTHUSB Event 35 snapshot count was 0.",
+          "The final installed Type startup observed D374D0103F0B, reached notify ready and sent Type heartbeat in 2141 ms from process start and 394 ms from HID-evidence observation, within the <=6000 ms Type-ready reattach target.",
+          "Locked COM3 capture confirmed ble_connected=1 and firmware accepted Type heartbeat on the encrypted bonded connection.",
+          "cargo test --lib --no-fail-fast completed 765 passed, 0 failed, 8 ignored and emitted zero real-GATT activity markers."
+        ],
+        "evidence": ".cache/validation/ble-platform-local-reattach-20260716/installed-native-hid-passive-reattach-machine-evidence.json",
+        "acceptance_basis": "The product owner explicitly authorized machine closure for this simple Listener BLE issue; this record is machine acceptance and does not invent a human visual result."
+      },
+      "total_review_effect": "The passive local reattach and Type-ready prerequisite for Step 17 is machine-accepted. Keep any remaining visual LED review and the separate physical EC11 press-edge gate independent."
     },
     "ble_recovery_timing_attribution_20260715": {
       "status": "active_root_cause_repair",
