@@ -2937,6 +2937,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         }
         let final_target: Arc<dyn crate::asr::AudioConsumer> = volcengine.final_asr.clone();
         let flushed_bytes = bridge.attach(final_target);
+        volcengine.final_asr.mark_audio_delivery_ready();
         log::info!("[coord] ASR connected; flushed {flushed_bytes} deferred audio bytes");
         finish_starting_session(inner, current_session_id).await;
     }
@@ -4398,6 +4399,7 @@ async fn build_embedded_audio_asr_consumer(
                     return;
                 }
                 let flushed_bytes = bridge.attach(Arc::clone(&volcengine.target));
+                volcengine.final_asr.mark_audio_delivery_ready();
                 log::info!(
                     "[coord] embedded Volcengine ASR connected; flushed {flushed_bytes} deferred audio bytes"
                 );

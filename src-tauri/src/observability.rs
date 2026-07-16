@@ -119,7 +119,12 @@ fn emit(event: &'static str, envelope: EventEnvelope) {
 
 fn classify_error(message: &str) -> ErrorCategory {
     let normalized = message.to_ascii_lowercase();
-    if [
+    if ["audio delivery startup", "audio delivery readiness"]
+        .iter()
+        .any(|needle| normalized.contains(needle))
+    {
+        ErrorCategory::Host
+    } else if [
         "api key",
         "credential",
         "unauthorized",
@@ -581,6 +586,10 @@ mod tests {
         assert_eq!(
             classify_error("Volcengine ASR HTTP 401 unauthorized"),
             ErrorCategory::Provider
+        );
+        assert_eq!(
+            classify_error("audio delivery startup did not reach ready state within 1800 ms"),
+            ErrorCategory::Host
         );
         assert_eq!(
             source_for_error(ErrorCategory::Provider),
