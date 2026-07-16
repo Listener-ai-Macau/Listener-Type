@@ -4276,7 +4276,10 @@ fn start_embedded_ble_passive_local_reattach_watch(
                             Vec::new()
                         }
                     };
-                    if embedded_ble_pairing_confirmation_ready(&pairing, &native_hid_addresses) {
+                    if embedded_ble_passive_local_reattach_evidence_ready(
+                        &pairing,
+                        &native_hid_addresses,
+                    ) {
                         let labels = native_hid_addresses
                             .iter()
                             .map(|address| format!("{address:012X}"))
@@ -4302,7 +4305,7 @@ fn start_embedded_ble_passive_local_reattach_watch(
                         }
                     } else {
                         log::debug!(
-                            "[embedded-ble] passive local Windows reattach still waiting for explicit local pairing evidence status={:?} matched={} already_paired={} native_hid_count={}",
+                            "[embedded-ble] passive local Windows reattach still waiting for current local pairing plus HID evidence; no GATT probe status={:?} matched={} already_paired={} native_hid_count={}",
                             pairing.status,
                             pairing.matched_devices,
                             pairing.already_paired_devices,
@@ -4318,6 +4321,13 @@ fn start_embedded_ble_passive_local_reattach_watch(
             tokio::time::sleep(EMBEDDED_BLE_PASSIVE_LOCAL_REATTACH_POLL).await;
         }
     });
+}
+
+fn embedded_ble_passive_local_reattach_evidence_ready(
+    pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
+    native_hid_addresses: &[u64],
+) -> bool {
+    pairing.already_paired_devices > 0 && !native_hid_addresses.is_empty()
 }
 
 fn start_embedded_ble_pairing_confirmation_watch(
@@ -5286,6 +5296,15 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                             &mut last_stale_cleanup_at,
                         )
                         .await;
+                    if inner
+                        .embedded_ble_passive_local_reattach_active
+                        .load(Ordering::SeqCst)
+                    {
+                        log::info!(
+                            "[embedded-ble] background listener stopped while passive local Windows reattach monitor owns recovery"
+                        );
+                        break;
+                    }
                     if stale_cleanup_outcome == EmbeddedBleStalePairingCleanupOutcome::Skipped
                         && should_emit_embedded_ble_background_recovery_capsule(&inner, &err)
                     {
@@ -5346,11 +5365,49 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
     log::info!("[embedded-ble] background listener stopped generation={generation}");
 }
 
+fn hold_embedded_ble_for_ec11_passive_local_reattach(inner: &Arc<Inner>, err: &str) {
+    let expected_ble_name = inner.prefs.get().device_ble_name;
+    let hold_generation = hold_embedded_ble_listener_for_pairing_confirmation(
+        inner,
+        EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON,
+    );
+    log::info!(
+        "[embedded-ble] EC11 recovery entered passive local reattach hold_generation={hold_generation} target={expected_ble_name:?}; Type will not scan, unpair, or PairAsync while another host may pair err={}",
+        embedded_ble_log_preview(err),
+    );
+    {
+        let mut wake = inner.embedded_ble_wake_recovery.lock();
+        wake.status = EmbeddedBleWakeRecoveryStatus::NeedsWakeKey;
+        wake.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Cancelled;
+        wake.recent_disconnect_reason = Some(format!(
+            "EC11 recovery is waiting for explicit local Windows pairing/HID evidence target={expected_ble_name}"
+        ));
+        wake.user_guidance = format!(
+            "Listener 已进入重新配对状态。Type 不会自动抢回连接；如需继续使用这台电脑，请在 Windows 蓝牙里手动添加 {expected_ble_name}。"
+        );
+    }
+    emit_embedded_ble_recovery_capsule(
+        inner,
+        "reconnecting",
+        EmbeddedBleRecoveryCapsuleMessage::WaitingWindowsPairing,
+        Some(4200),
+    );
+    start_embedded_ble_passive_local_reattach_watch(
+        inner,
+        expected_ble_name,
+        EMBEDDED_BLE_EC11_NATIVE_PAIRING_ARBITRATION_REASON,
+    );
+}
+
 async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     inner: &Arc<Inner>,
     err: &str,
     last_cleanup_at: &mut Option<Instant>,
 ) -> EmbeddedBleStalePairingCleanupOutcome {
+    if embedded_ble_requires_passive_local_reattach(err) {
+        hold_embedded_ble_for_ec11_passive_local_reattach(inner, err);
+        return EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation;
+    }
     let snapshot = embedded_ble_wake_recovery_snapshot(inner);
     let now = Instant::now();
     let recovery_pairing_probe = maybe_probe_embedded_ble_recovery_pairing_advertisement(
@@ -5997,6 +6054,14 @@ fn recovery_pairing_advertisement_already_observed_during_notify_open(err: &str)
 
 fn embedded_ble_hardware_ec11_recovery_notice_observed(err: &str) -> bool {
     err.contains(EMBEDDED_BLE_EC11_HARDWARE_RECOVERY_NOTICE)
+}
+
+fn embedded_ble_requires_passive_local_reattach(err: &str) -> bool {
+    embedded_ble_hardware_ec11_recovery_notice_observed(err)
+        // The firmware notifies before terminating the old GATT connection, but
+        // Windows can report that disconnect first. The recovery advertisement
+        // error is the equivalent causal evidence and must stay passive too.
+        || recovery_pairing_advertisement_already_observed_during_notify_open(err)
 }
 
 fn ec11_external_native_pairing_handoff_requires_arbitration(
@@ -10198,7 +10263,8 @@ mod tests {
             body.contains("native_windows_hid_pairing_addresses")
                 && body.contains("native Windows HID pairing remains installed; retrying direct GATT without pairing cleanup")
                 && body.contains("let manual_unpair_hold = !native_windows_hid_pairing_blocks_pairasync")
-                && body.contains("let automatic_cleanup_allowed = !native_windows_hid_pairing_blocks_pairasync"),
+                && body.contains("let automatic_cleanup_allowed = !ec11_external_native_pairing_handoff")
+                && body.contains("&& !native_windows_hid_pairing_blocks_pairasync"),
             "a native Windows HID pairing must also stay out of the manual-delete hold after a transient GATT failure"
         );
         let listener_loop_start = source
@@ -10510,6 +10576,126 @@ mod tests {
     }
 
     #[test]
+    fn embedded_ble_ec11_recovery_enters_passive_local_reattach_before_any_advertisement_probe() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .expect("background BLE recovery helper should exist");
+        let probe = source[start..]
+            .find("let recovery_pairing_probe")
+            .map(|offset| start + offset)
+            .expect("BLE recovery advertisement probe should remain after the EC11 branch");
+        let ec11_branch = &source[start..probe];
+        assert!(
+            ec11_branch.contains("embedded_ble_requires_passive_local_reattach(err)")
+                && ec11_branch.contains("hold_embedded_ble_for_ec11_passive_local_reattach")
+                && ec11_branch.contains("EmbeddedBleStalePairingCleanupOutcome::HoldForConfirmation"),
+            "an EC11 recovery notification or matching recovery advertisement must enter the passive local-repair state before generic stale-cache recovery"
+        );
+
+        let helper_start = source
+            .find("fn hold_embedded_ble_for_ec11_passive_local_reattach")
+            .expect("EC11 passive-recovery helper should exist");
+        let helper_end = source[helper_start..]
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .map(|offset| helper_start + offset)
+            .expect("EC11 passive-recovery helper boundary should exist");
+        let helper = &source[helper_start..helper_end];
+        assert!(
+            helper.contains("start_embedded_ble_passive_local_reattach_watch"),
+            "EC11 recovery must keep a passive observer so a later explicit local re-pair restores Type"
+        );
+        for forbidden in [
+            ".PairAsync(",
+            "unpair_listener",
+            "listener_recovery_pairing_advertisement_probe",
+            "prompt_listener_pairing",
+        ] {
+            assert!(
+                !helper.contains(forbidden),
+                "EC11 passive recovery must not reclaim another host through {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_ble_recovery_advertisement_fallback_stays_passive_when_notice_is_lost() {
+        assert!(embedded_ble_requires_passive_local_reattach(
+            "Listener EC11 hardware recovery notice received before pairing reset"
+        ));
+        assert!(embedded_ble_requires_passive_local_reattach(
+            "Listener recovery Swift Pair advertisement visible for notify CCCD address C1460007A2B6 after BLE CCCD write async error"
+        ));
+        assert!(!embedded_ble_requires_passive_local_reattach(
+            "BLE device connection status changed to Disconnected; transport_not_ready"
+        ));
+    }
+
+    #[test]
+    fn embedded_ble_passive_local_reattach_stops_the_failed_background_retry_loop() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn embedded_ble_background_listener_loop")
+            .expect("background listener loop should exist");
+        let end = source[start..]
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .map(|offset| start + offset)
+            .expect("background listener loop boundary should exist");
+        let body = &source[start..end];
+        let recovery = body
+            .find("maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .expect("background listener must classify recovery failures");
+        let passive = body[recovery..]
+            .find("embedded_ble_passive_local_reattach_active")
+            .map(|offset| recovery + offset)
+            .expect("background loop must observe passive local reattach ownership");
+        let retry = body[passive..]
+            .find("background listen retrying in")
+            .map(|offset| passive + offset)
+            .expect("background retry log should remain after the passive branch");
+        let passive_branch = &body[passive..retry];
+        assert!(
+            passive_branch.contains("break;"),
+            "the failed background loop must stop instead of retrying while passive local reattach owns recovery"
+        );
+    }
+
+    #[test]
+    fn embedded_ble_passive_local_reattach_requires_current_pairing_and_hid() {
+        let stale_hid = crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+            attempted: true,
+            matched_devices: 2,
+            prompted_devices: 0,
+            already_paired_devices: 0,
+            failed_devices: 2,
+            open_bluetooth_settings: true,
+            details: Vec::new(),
+        };
+        assert!(
+            !embedded_ble_passive_local_reattach_evidence_ready(&stale_hid, &[0xC1460007A2B6]),
+            "a stale HID node without a current Windows pairing must not trigger a GATT reconnect"
+        );
+
+        let current_pairing = crate::embedded_ble::BleDevicePairingPromptResult {
+            status: crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired,
+            already_paired_devices: 1,
+            ..stale_hid
+        };
+        assert!(
+            !embedded_ble_passive_local_reattach_evidence_ready(&current_pairing, &[]),
+            "a paired AEP entry must wait for the current Listener HID node before Type reopens GATT"
+        );
+        assert!(
+            embedded_ble_passive_local_reattach_evidence_ready(
+                &current_pairing,
+                &[0xC1460007A2B6]
+            ),
+            "a current Windows pairing plus Listener HID can authorize the bounded fresh GATT check"
+        );
+    }
+
+    #[test]
     fn embedded_ble_passive_local_reattach_requires_windows_evidence_before_gatt_resume() {
         let source = include_str!("coordinator.rs");
         let start = source
@@ -10527,8 +10713,8 @@ mod tests {
             .find("native_windows_hid_pairing_addresses")
             .expect("passive monitor must read local Windows HID pairing evidence");
         let pairing_ready = body
-            .find("embedded_ble_pairing_confirmation_ready")
-            .expect("passive monitor must require completed local pairing evidence");
+            .find("embedded_ble_passive_local_reattach_evidence_ready")
+            .expect("passive monitor must require current local pairing plus HID evidence");
         let gatt = body
             .find("embedded_ble_pairing_recovery_link_reachable")
             .expect("passive monitor must perform a fresh bounded GATT check after pairing");
