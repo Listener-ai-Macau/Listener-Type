@@ -2246,6 +2246,41 @@ mod windows_ble {
         Ok(addresses)
     }
 
+    pub fn native_windows_hid_pairing_active_connection(
+        addresses: &[u64],
+    ) -> Result<Option<u64>, String> {
+        let mut probe_errors = Vec::new();
+        for address in addresses {
+            let address_text = crate::embedded_ble::format_bluetooth_address(*address);
+            match open_ble_device_by_address_with_timeout(*address, Duration::from_millis(750)) {
+                Ok(device) => {
+                    let status = device.ConnectionStatus();
+                    let _ = device.Close();
+                    match status {
+                        Ok(BluetoothConnectionStatus::Connected) => return Ok(Some(*address)),
+                        Ok(BluetoothConnectionStatus::Disconnected) => {}
+                        Ok(other) => probe_errors.push(format!(
+                            "{address_text}: unexpected connection status {other:?}"
+                        )),
+                        Err(err) => probe_errors.push(format!(
+                            "{address_text}: connection status read failed: {err}"
+                        )),
+                    }
+                }
+                Err(err) => {
+                    probe_errors.push(format!("{address_text}: BLE device open failed: {err}"))
+                }
+            }
+        }
+        if !addresses.is_empty() && probe_errors.len() == addresses.len() {
+            return Err(format!(
+                "native Windows HID active-connection probe failed for every address: {}",
+                probe_errors.join("; ")
+            ));
+        }
+        Ok(None)
+    }
+
     fn native_windows_hid_pairing_visible_for_startup() -> bool {
         NATIVE_WINDOWS_HID_PAIRING_VISIBLE.load(Ordering::SeqCst)
     }
@@ -15949,6 +15984,13 @@ pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn native_windows_hid_pairing_active_connection(
+    addresses: &[u64],
+) -> Result<Option<u64>, String> {
+    windows_ble::native_windows_hid_pairing_active_connection(addresses)
+}
+
+#[cfg(target_os = "windows")]
 pub fn listener_pairing_maintenance_active() -> bool {
     windows_ble::listener_pairing_maintenance_active()
 }
@@ -16397,6 +16439,13 @@ pub fn query_listener_pairing(_expected_name: Option<&str>) -> BleDevicePairingP
 #[cfg(not(target_os = "windows"))]
 pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
     Ok(Vec::new())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn native_windows_hid_pairing_active_connection(
+    _addresses: &[u64],
+) -> Result<Option<u64>, String> {
+    Ok(None)
 }
 
 #[cfg(not(target_os = "windows"))]

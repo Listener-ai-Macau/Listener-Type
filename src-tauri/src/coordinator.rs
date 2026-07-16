@@ -6610,6 +6610,28 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
             return false;
         }
     };
+    if !native_hid_addresses.is_empty() {
+        let active_addresses = native_hid_addresses.clone();
+        match async_runtime::spawn_blocking(move || {
+            crate::embedded_ble::native_windows_hid_pairing_active_connection(&active_addresses)
+        })
+        .await
+        {
+            Ok(Ok(Some(address))) => {
+                log::info!(
+                    "[embedded-ble] startup native Windows HID active connection allows persisted GATT reopen address={address:012X}; ignoring incomplete paired-device enumeration"
+                );
+                return false;
+            }
+            Ok(Ok(None)) => {}
+            Ok(Err(err)) => log::warn!(
+                "[embedded-ble] startup native Windows HID active-connection probe unavailable; keeping manual-delete preflight: {err}"
+            ),
+            Err(err) => log::warn!(
+                "[embedded-ble] startup native Windows HID active-connection probe task failed; keeping manual-delete preflight: {err}"
+            ),
+        }
+    }
     let expected_for_query = expected_ble_name.clone();
     let query = async_runtime::spawn_blocking(move || {
         crate::embedded_ble::query_listener_pairing(Some(&expected_for_query))
@@ -10258,6 +10280,37 @@ mod tests {
             body.find("embedded_ble_type_pairasync_startup_guard_active")
                 < body.find("native_windows_hid_pairing_addresses"),
             "a successful Type PairAsync must suppress startup manual-delete classification until Windows finishes rebuilding services"
+        );
+    }
+
+    #[test]
+    fn startup_active_native_connection_bypasses_incomplete_pairing_enumeration() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("async fn maybe_hold_embedded_ble_startup_without_current_native_pairing")
+            .expect("startup current-native-pairing preflight helper should exist");
+        let end = source[start..]
+            .find("fn embedded_ble_background_pairasync_is_authorized")
+            .map(|offset| start + offset)
+            .expect("startup manual-delete preflight boundary should exist");
+        let body = &source[start..end];
+        let native_hid_index = body
+            .find("native_windows_hid_pairing_addresses")
+            .expect("startup must collect native Windows HID evidence");
+        let active_connection_index = body
+            .find("native_windows_hid_pairing_active_connection")
+            .expect(
+                "startup must distinguish an active local HID connection from stale pairing rows",
+            );
+        let pairing_query_index = body.find("query_listener_pairing").expect(
+            "startup must still use the paired-device query when no local connection is active",
+        );
+        assert!(
+            native_hid_index < active_connection_index
+                && active_connection_index < pairing_query_index
+                && body.contains("startup native Windows HID active connection allows persisted GATT reopen")
+                && body.contains("ignoring incomplete paired-device enumeration"),
+            "an active local Windows BLE connection must bypass only the false manual-unpair classification before the slower paired-device query"
         );
     }
 

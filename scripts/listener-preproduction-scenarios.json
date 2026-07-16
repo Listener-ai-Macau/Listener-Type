@@ -301,6 +301,42 @@
           "check-ec11-type-recovery-randomized.ps1 PASS: 3 of 3 generated installed-runtime samples"
         ],
         "physical_and_second_host_limits": "physical_gpio_measurement=false for all three samples, so this record does not claim a new real EC11 electrical-edge timing pass. The independent other-host-first ownership test remains BENCH_REVIEW_NO_GO and is not changed by this local recovery acceptance."
+      },
+      "machine_revalidation_same_name_stale_pnp_active_native_connection_20260717": {
+        "status": "MACHINE_OPERATOR_ACCEPTED_WITH_SECOND_HOST_NO_GO",
+        "recorded_at": "2026-07-17T02:22:08+08:00",
+        "scope": "Current Listener Firmware on COM3 and a freshly MSI-installed Program Files Listener Type on this Windows host. This is a local active-connection startup repair, not a physical EC11 edge measurement, human acceptance, or second-host ownership pass.",
+        "root_cause_and_repair": "Windows retained several same-name Listener PnP rows after random-identity recovery. The firmware test helper selected the first row, including a CM_PROB_WILL_BE_REMOVED stale identity, while the actual active link was D4C64DB80970. Separately, Type treated an incomplete paired-device enumeration as manual deletion and held the persisted GATT reopen for 180 seconds despite that verified local HID link. The helper now filters to present/OK rows and prefers a read-only BluetoothLEDevice Connected probe. Type now performs the same read-only active-connection probe before the weak paired-device enumeration; only a verified local connected address bypasses the hold. Missing pairing, probe errors, and other-host ownership keep the existing passive behavior.",
+        "runtime_identity": {
+          "installed_type_exe": "C:\\Program Files\\Listener Type\\listener-type.exe",
+          "installed_type_sha256": "7C019D786F088D078C5D7ABE743005A30875211A748B399C045D8B7330770997",
+          "installed_type_version": "1.0.2",
+          "firmware_port": "COM3",
+          "verified_active_address": "D4C64DB80970"
+        },
+        "machine_facts": [
+          "The installed Type log records the active local Windows HID address, then background listener notify ready and Type heartbeat ready; no manual-delete hold is taken for that connected address.",
+          "The real firmware serial capture accepts the resulting Type heartbeat on the existing secure session.",
+          "The repair does not pair, unpair, delete a device, scan broadly, or reclaim another host in the startup fast path; it only reads local connection status before retaining the existing passive fallback."
+        ],
+        "machine_evidence": [
+          ".cache/validation/recording-platform-current-20260717/type-msi-active-native-connection/{Tauri_Windows_MSI_build.log,msi-install-20260717-022113.log}",
+          ".cache/validation/recording-platform-current-20260717/background-preflight-normal-after-active-connection-repair/{background-rounds-20260717-022146.listener.log,background-rounds-20260717-022146.serial.log}",
+          ".cache/validation/recording-platform-current-20260717/preflight-normal-after-selector-repair/ble-stream-smoke-20260717-021109.trace.log"
+        ],
+        "permanent_root_cause_guard": [
+          "Listener-Firmware/tools/verify_ble_hid_connection_selector_static.ps1 parses the selector and requires healthy PnP filtering, an active Connected probe before fallback, and deterministic fallback only after that probe.",
+          "coordinator::tests::startup_active_native_connection_bypasses_incomplete_pairing_enumeration requires the active local HID check before the weaker paired-device query.",
+          "Existing tests type_pairasync_recovery_defers_startup_manual_delete_preflight, embedded_ble_background_stale_cleanup_respects_manual_windows_unpair, and ec11_random_identity_keeps_type_recovery_bounded_and_non_reclaiming retain manual-delete, stale-cleanup, and no-reclaim boundaries."
+        ],
+        "validation": [
+          "pwsh -NoProfile -File .\\tools\\verify_ble_hid_connection_selector_static.ps1 PASS",
+          "pwsh -NoProfile -File .\\tools\\verify_device_settings_static.ps1 PASS",
+          "cargo fmt --check PASS",
+          "four focused Type library recovery tests PASS",
+          "fresh MSI installation and Program Files executable hash verification PASS"
+        ],
+        "physical_and_second_host_limits": "This evidence proves the current host's active-connection startup path only. It does not revise the historical physical EC11 timing result and does not turn the independent other-host-first ownership requirement into a pass. That capability remains BENCH_REVIEW_NO_GO."
       }
     },
     "listener_platform_preserves_accepted_behavior_20260716": {
