@@ -113,6 +113,23 @@
             "total_elapsed_ms": 59928
           },
           "regression_gate": "scripts/check-ota-transfer-speed-log.mjs must reject a transfer below 18 kB/s or whose non-transfer fixed elapsed exceeds 7000 ms, while preserving the required 100-packet status/progress cadence."
+        },
+        "recording_opening_retention_runtime_regression_20260716": {
+          "status": "accepted",
+          "recorded_at": "2026-07-16T19:43:01+08:00",
+          "source": "Operator failure: 开头看着不太对. Follow-up: 老问题了这个是, 没修好. Focused reacceptance selected=通过 with note=这个是什么意思? 我感觉还行.",
+          "requirement": "For a real physical EC11 press from CONNECTED_IDLE with Type dictation source EmbeddedBle and e11r=1, firmware must dispatch recording control within 50 ms without moving the timer behind the 500 ms single/double-click boundary. Captured PCM must remain continuous under BLE transport pressure, and final text must retain the user-spoken opening phrase. Preserve single-click fallback suppression, double-click reconfiguration cancellation, and long-press shutdown cancellation.",
+          "root_cause": "The device was executing a stale firmware image whose capture task paused at pool=16/264 (6 percent pressure), creating a sampled-audio gap before the BLE stream. That runtime also lacked the ec11_fast_recording settings field, even though the current source already contained the root repair.",
+          "repair_and_runtime_proof": "Current firmware was built through tools/build.ps1 and flashed to COM3. Post-flash settings reported ec11_fast_recording=1 and Type readiness. In a real CONNECTED_IDLE session, firmware logged EC11 fast Idle recording dispatch with press_to_control_ms=0 against target_ms=50; capture integrity logged zero backpressure gap and zero pause frames; transport sent 164/164 packets with no failures. The matching installed Program Files Type session finalized '开头保留测试。' with 164/164 packets and zero missing. A separate real randomized long session retained '今晚8:20，请' with 906/906 packets and zero missing.",
+          "accepted_machine_evidence": ".cache/validation/listener-platform-accepted-behavior-audit-20260716/recording/human-random-long-physical-20260716-1908/pre-fast-path-power-status.log; connected-idle-fast-path-physical.log; final-operator-note-triage.json",
+          "accepted_operator_evidence": ".cache/validation/listener-platform-accepted-behavior-audit-20260716/recording/human-random-long-physical-20260716-1908/final-operator-result.json",
+          "permanent_regression_gates": [
+            "pwsh -NoProfile -File .\\tools\\verify_ble_audio_backpressure_static.ps1",
+            "python .\\tools\\verify_ec11_fast_idle_recording_static.py",
+            "python .\\tools\\verify_ble_audio_transport_model.py",
+            "cargo test settings_save_syncs_ec11_fast_recording_only_for_dictation --lib (Listener-Type/src-tauri)"
+          ],
+          "validation": "All listed gates passed after human acceptance; pwsh -NoProfile -File .\\tools\\build.ps1 also passed. Do not re-open this accepted behavior unless a change touches EC11 input, power/connection promotion, firmware PCM capture/transport, Type EmbeddedBle control/finalization, or fresh physical evidence shows regression."
         }
       }
     },
