@@ -119,9 +119,14 @@ fn emit(event: &'static str, envelope: EventEnvelope) {
 
 fn classify_error(message: &str) -> ErrorCategory {
     let normalized = message.to_ascii_lowercase();
-    if ["audio delivery startup", "audio delivery readiness"]
-        .iter()
-        .any(|needle| normalized.contains(needle))
+    if [
+        "audio delivery startup",
+        "audio delivery readiness",
+        "autoassignedsequence",
+        "sequence in request",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
     {
         ErrorCategory::Host
     } else if [
@@ -148,6 +153,7 @@ fn classify_error(message: &str) -> ErrorCategory {
         "dns",
         "socket",
         "websocket",
+        "audio delivery drain",
         "proxy",
         "connection refused",
         "connection reset",
@@ -584,11 +590,19 @@ mod tests {
             ErrorCategory::Network
         );
         assert_eq!(
+            classify_error("websocket audio delivery drain did not complete within 2700 ms"),
+            ErrorCategory::Network
+        );
+        assert_eq!(
             classify_error("Volcengine ASR HTTP 401 unauthorized"),
             ErrorCategory::Provider
         );
         assert_eq!(
             classify_error("audio delivery startup did not reach ready state within 1800 ms"),
+            ErrorCategory::Host
+        );
+        assert_eq!(
+            classify_error("autoAssignedSequence (26) mismatch sequence in request (27)"),
             ErrorCategory::Host
         );
         assert_eq!(
