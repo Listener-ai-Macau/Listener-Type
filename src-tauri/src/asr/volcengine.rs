@@ -1502,6 +1502,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn audio_delivery_drain_waits_for_queued_audio_before_finalization() {
+        let asr = Arc::new(VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        ));
+        asr.mark_audio_delivery_ready();
+        asr.pending_sends.store(1, Ordering::SeqCst);
+
+        let drained_asr = Arc::clone(&asr);
+        let drain = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            assert_eq!(drained_asr.pending_sends.fetch_sub(1, Ordering::SeqCst), 1);
+            drained_asr.send_done.notify_waiters();
+        });
+
+        let started = Instant::now();
+        asr.await_audio_delivery_drained(Duration::from_millis(100))
+            .await
+            .expect("the final frame must wait for the queued audio worker");
+        assert!(started.elapsed() >= Duration::from_millis(10));
+        drain.await.expect("audio worker drain task should finish");
+    }
+
+    #[tokio::test]
     async fn await_final_result_returns_error_when_final_frame_never_arrives() {
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
