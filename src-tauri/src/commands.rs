@@ -6041,14 +6041,20 @@ pub async fn transfer_firmware_ota_ble(
         pretransfer_type_ready,
         pretransfer_type_ready_elapsed_ms
     );
-    crate::embedded_ble::request_listener_ota_v1_active_link()?;
-    log::info!(
-        "[firmware-ota] Listener OTA v1 reconnect handoff accepted before pausing the background listener"
-    );
     if !coord.try_begin_firmware_ota_transfer() {
         return Err("Firmware OTA is already in progress.".to_string());
     }
     let mut observability = crate::observability::begin_ota_transfer();
+    if let Err(error) = crate::embedded_ble::request_listener_ota_v1_active_link(Some(
+        observability.correlation_id(),
+    )) {
+        observability.record_control_handoff_failed(&error);
+        coord.end_firmware_ota_transfer();
+        return Err(error);
+    }
+    log::info!(
+        "[firmware-ota] Listener OTA v1 reconnect handoff accepted before pausing the background listener"
+    );
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_sha256 = expected_sha256.clone();

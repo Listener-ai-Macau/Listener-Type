@@ -408,6 +408,10 @@ pub(crate) struct OtaObservation {
 }
 
 impl OtaObservation {
+    pub(crate) fn correlation_id(&self) -> u64 {
+        self.correlation_id
+    }
+
     fn next_event(
         &mut self,
         now: Instant,
@@ -453,6 +457,19 @@ impl OtaObservation {
             u32::try_from(transfer_elapsed_ms).unwrap_or(u32::MAX),
         );
         emit("ota_gatt_transfer_failed", event);
+    }
+
+    pub(crate) fn record_control_handoff_failed(&mut self, message: &str) {
+        let error = classify_error(message);
+        let event = self.next_event(
+            Instant::now(),
+            source_for_error(error),
+            CommandResult::Failed,
+            error,
+            TimingMetric::None,
+            0,
+        );
+        emit("ota_control_handoff_failed", event);
     }
 
     pub(crate) fn record_reconnect_confirmation(&mut self, matched: bool) {

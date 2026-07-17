@@ -7429,7 +7429,22 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         })
     }
 
-    pub(super) fn request_listener_ota_v1_active_link() -> Result<(), String> {
+    pub(super) fn request_listener_ota_v1_active_link(
+        observability_correlation_id: Option<u64>,
+    ) -> Result<(), String> {
+        if let Some(correlation_id) = observability_correlation_id {
+            let context = format!("TYPE:OBS:OTA:{correlation_id:016X}\n");
+            if let Err(error) = send_recording_control_command(
+                context.as_bytes(),
+                Duration::from_millis(300),
+                "Listener OTA observability context handoff",
+                ActiveControlTransientFallback::ReturnError,
+            ) {
+                log::info!(
+                    "[embedded-ble] Listener OTA observability context handoff unavailable; continuing with compatible OTA handoff: {error}"
+                );
+            }
+        }
         send_recording_control_command(
             b"TYPE:OTA\n",
             Duration::from_secs(3),
@@ -7470,7 +7485,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     ) -> Result<PreparedListenerOtaV1Transfer, String> {
         let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v1")?;
         if send_active_link_hint {
-            request_listener_ota_v1_active_link()?;
+            request_listener_ota_v1_active_link(None)?;
             log::info!("[embedded-ble] Listener OTA v1 reconnect handoff accepted");
         } else {
             log::info!(
@@ -15918,12 +15933,16 @@ pub fn transfer_stm32wb_st_ota(
 }
 
 #[cfg(target_os = "windows")]
-pub fn request_listener_ota_v1_active_link() -> Result<(), String> {
-    windows_ble::request_listener_ota_v1_active_link()
+pub fn request_listener_ota_v1_active_link(
+    observability_correlation_id: Option<u64>,
+) -> Result<(), String> {
+    windows_ble::request_listener_ota_v1_active_link(observability_correlation_id)
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn request_listener_ota_v1_active_link() -> Result<(), String> {
+pub fn request_listener_ota_v1_active_link(
+    _observability_correlation_id: Option<u64>,
+) -> Result<(), String> {
     Ok(())
 }
 
@@ -16980,7 +16999,7 @@ mod tests {
             prepare.contains("_ota_process_guard: ota_process_guard")
                 && source.contains("b\"TYPE:OTA\\n\"")
                 && source.contains("Listener OTA v1 reconnect handoff")
-                && prepare.contains("request_listener_ota_v1_active_link()")
+                && prepare.contains("request_listener_ota_v1_active_link(None)")
                 && source.contains("LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS")
                 && source.contains("open_listener_ota_v1_target_for_verified_active_handoff")
                 && source.contains("open_ble_device_by_address(address)")
@@ -17008,8 +17027,10 @@ mod tests {
         let handoff = &source[handoff_start..handoff_end];
         assert!(
             handoff.contains("send_recording_control_command(")
+                && handoff.contains("TYPE:OBS:OTA:{correlation_id:016X}")
+                && handoff.contains("Duration::from_millis(300)")
                 && handoff.contains("ActiveControlTransientFallback::ReturnError"),
-            "headless OTA must use fresh GATT only when no active capture exists and must never race a failing active capture"
+            "OTA must use a bounded optional observability context handoff before the compatible active-link command"
         );
     }
 
