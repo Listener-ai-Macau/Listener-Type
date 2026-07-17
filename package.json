@@ -22,6 +22,7 @@
     "check:embedded-ble-processing-led": "node scripts/check-embedded-ble-processing-led.mjs",
     "check:asr-latency": "node scripts/check-volcengine-low-latency-preview.mjs",
     "check:recording-latency": "node scripts/check-recording-low-latency-regression.mjs",
+    "check:recording-consumption-evidence": "node --test scripts/check-recording-consumption-evidence.test.mjs scripts/check-recording-consumption-runner.test.mjs",
     "check:ota-speed-log": "node scripts/check-ota-transfer-speed-log.mjs",
     "check:ota-speed-log-contract": "node scripts/check-ota-transfer-speed-log.test.mjs",
     "check:performance-baselines": "node scripts/check-performance-baselines.mjs",
