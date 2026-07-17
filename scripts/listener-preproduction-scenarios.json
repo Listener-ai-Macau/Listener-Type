@@ -10,6 +10,17 @@
       "requirement": "For Listener-only issues that can be falsified by code inspection, deterministic simulation, installed-Type logs, Windows event/state evidence, or short locked device capture, complete diagnosis, repair, and machine validation without asking the operator to repeat simple input actions. Reserve a canonical operator-prompt for a remaining subjective or externally unobservable user-visible judgment; do not represent a machine-only conclusion as human acceptance.",
       "current_application": "The current-host Swift Pair protocol repair and the BLE-audio-Type-link check were self-closed with firmware advertisement/session evidence, Windows event evidence, and an installed Program Files Type GATT read. The operator is not asked to repeat simple input while those checks can distinguish the cause; a remaining subjective visual judgment still requires its own canonical prompt."
     },
+    "listener_physical_gate_guided_prompt_20260717": {
+      "status": "required",
+      "recorded_at": "2026-07-17T20:45:00+08:00",
+      "source": "Product-owner direction: 那你开弹窗出来跟我协助验收吧.",
+      "requirement": "For the remaining real-physical Listener EC11 gates, use a canonical Chinese operator-prompt as a guided input window after machine preconditions are proven. The prompt must identify N/total, state the exact physical action, and make clear that its response records action completion rather than asserting a machine result. Save the structured prompt choice and every note beside the matching raw serial capture; triage every non-empty note before advancing.",
+      "sequence": [
+        "1/2: after installed Type and CONNECTED_IDLE are confirmed, guide one real EC11 double-click while a command-free short capture records the Bluetooth recovery path.",
+        "2/2: after the required Type setting/readback and CONNECTED_IDLE are confirmed, guide one real EC11 single-click while a command-free short capture records edge-to-recording-control dispatch."
+      ],
+      "non_substitution": "Neither prompt selection nor a serial ~KEY injection may replace the required raw physical firmware event and timing evidence."
+    },
     "workflow_evidence_closure_without_independent_plan_review_20260716": {
       "status": "required",
       "recorded_at": "2026-07-16T12:10:00+08:00",
