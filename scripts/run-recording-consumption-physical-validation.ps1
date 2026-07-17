@@ -98,6 +98,43 @@ function Test-BleGapActiveLinkEvidence {
     )
 
     $text = Get-Content -Raw -LiteralPath $Path
+    $statusLine = [regex]::Match($text, "~BLE:STATUS\s+(.*)")
+    if ($statusLine.Success) {
+        $fields = @{}
+        foreach ($match in [regex]::Matches($statusLine.Groups[1].Value, "([A-Za-z0-9_]+)=([^\s]+)")) {
+            $fields[$match.Groups[1].Value] = $match.Groups[2].Value
+        }
+        $interval = if ($fields.ContainsKey("interval_units")) { [int]$fields["interval_units"] } else { $null }
+        $latency = if ($fields.ContainsKey("latency")) { [int]$fields["latency"] } else { $null }
+        $activeApplied = $fields.ContainsKey("active_applied") -and [int]$fields["active_applied"] -eq 1
+        $descriptorValid = $fields.ContainsKey("descriptor_valid") -and [int]$fields["descriptor_valid"] -eq 1
+        $connected = $fields.ContainsKey("connected") -and [int]$fields["connected"] -eq 1
+        if ($connected -and $descriptorValid -and $activeApplied -and $interval -eq 6 -and $latency -eq 0) {
+            return [pscustomobject]@{
+                active = $true
+                reason = "BLE:STATUS reports active_applied=1 interval_units=6 latency=0"
+                event_count = 0
+                latest_t_ms = $null
+                latest_interval = $interval
+                latest_latency = $latency
+                low_power_requests_after_active = 0
+                status_line = $statusLine.Value
+                e11r = if ($fields.ContainsKey("e11r")) { [int]$fields["e11r"] } else { $null }
+            }
+        }
+        return [pscustomobject]@{
+            active = $false
+            reason = "BLE:STATUS did not prove active current connection params"
+            event_count = 0
+            latest_t_ms = $null
+            latest_interval = $interval
+            latest_latency = $latency
+            low_power_requests_after_active = 0
+            status_line = $statusLine.Value
+            e11r = if ($fields.ContainsKey("e11r")) { [int]$fields["e11r"] } else { $null }
+        }
+    }
+
     $events = [System.Collections.Generic.List[object]]::new()
     foreach ($line in ($text -split "`r?`n")) {
         $trimmed = $line.Trim()
@@ -257,7 +294,7 @@ try {
     }
     $preflightTypeHeartbeat = $true
 
-    pwsh -NoProfile -File $sendSerial -Port $Port -Command "~DIAGLOG:LAST:128:ble_gap" -CommandReadMs 2500 -OutputPath $bleGapLog
+    pwsh -NoProfile -File $sendSerial -Port $Port -Command "~BLE:STATUS" -CommandReadMs 1800 -OutputPath $bleGapLog
     $preflightBleLinkEvidence = Test-BleGapActiveLinkEvidence -Path $bleGapLog
     if (-not $preflightBleLinkEvidence.active) {
         throw "Preflight failed: active BLE link params interval 6-6 latency 0 were not proven ($($preflightBleLinkEvidence.reason))"

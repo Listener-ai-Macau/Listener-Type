@@ -37,7 +37,14 @@ function makeFixture(options = {}) {
     `I (51200) ble_audio_stream: audio session transport summary: session=${session} reason=stop elapsed_ms=${elapsedMs} expected_packet_count=${packets} notify_sent=${packets + 4} notify_failed=0 notify_retries=11 msys_waits=3 retry_mbuf=10 retry_enomem=1 retry_tx_timeout=0 retry_tx_status=0 retry_other=0 audio_sent=${packets} audio_pcm_bytes=${pcmBytes} audio_bytes_per_s=31878 audio_packets_per_s=66 audio_failed=0 queue_jobs_purged=0 pool_high_water=8 pool_capacity=264 pool_high_water_pct=3 pool_alloc_failed=0 queue_full=0 replay_retained_high_water=48 replay_stored=${packets} replay_replaced=0 replay_removed=0 replay_resent=0 replay_resend_failed=0 replay_skip_current=0 replay_pending=48 last_drop_reason=none last_error=0`,
     "serial_closed",
   ].join("\n");
-  const bleGap = options.textOnlyBleActive === true
+  const bleGap = options.statusBleActive === true
+    ? [
+        "serial_opened port=COM3 baud=115200 dtr=0 rts=0 no_reset=1",
+        "> ~BLE:STATUS",
+        "~BLE:STATUS connected=1 secure=1 conn_handle=1 descriptor_valid=1 descriptor_rc=0 interval_units=6 interval_ms_x100=750 latency=0 supervision_timeout_units=800 supervision_timeout_ms=8000 active_required=1 active_applied=1 e11r=1 last_conn_param_mode=0",
+        "serial_closed",
+      ].join("\n")
+    : options.textOnlyBleActive === true
     ? [
         "serial_opened port=COM3 baud=115200 dtr=0 rts=0 no_reset=1",
         "> ~DIAGLOG:LAST:128:ble_gap",
@@ -150,6 +157,15 @@ test("accepts human-readable active BLE link preflight when diag JSON is unavail
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(report.status, "PASS");
   assert.equal(report.ble_gap.activeTextEvidence.intervalUnits, 6);
+});
+
+test("accepts passive BLE:STATUS active link preflight", () => {
+  const result = runChecker(makeFixture({ statusBleActive: true }));
+  const report = parseReport(result);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(report.status, "PASS");
+  assert.equal(report.ble_gap.statusEvidence.activeApplied, true);
+  assert.equal(report.ble_gap.statusEvidence.e11r, true);
 });
 
 test("rejects a session without an embedded_audio_final event", () => {

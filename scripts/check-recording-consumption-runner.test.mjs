@@ -40,7 +40,7 @@ test("formal serial capture does not pass CommandReadMs", () => {
 test("preflight may use CommandReadMs only for explicit status queries", () => {
   assert.match(source, /-Command "~DEVICE:STATUS" -CommandReadMs 1800 -OutputPath \$statusLog/);
   assert.match(source, /-Command "~POWER:STATUS" -CommandReadMs 2500 -OutputPath \$powerLog/);
-  assert.match(source, /-Command "~DIAGLOG:LAST:128:ble_gap" -CommandReadMs 2500 -OutputPath \$bleGapLog/);
+  assert.match(source, /-Command "~BLE:STATUS" -CommandReadMs 1800 -OutputPath \$bleGapLog/);
   assert.match(source, /state=CONNECTED_IDLE/);
   assert.match(source, /-CaptureSeconds 12 -OutputPath \$readyLog/);
   assert.match(source, /TYPE:HB evidence was not present/);
@@ -60,7 +60,7 @@ test("runner result records structured preflight facts separately from formal PA
 });
 
 test("formal runner restores connected idle after BLE link evidence before prompting", () => {
-  const bleEvidenceIndex = source.indexOf("~DIAGLOG:LAST:128:ble_gap");
+  const bleEvidenceIndex = source.indexOf("~BLE:STATUS");
   const restoreIndex = source.indexOf("state=CONNECTED_IDLE was not restored after BLE link evidence");
   const promptIndex = source.indexOf("$promptArgs = @(");
   assert.ok(bleEvidenceIndex > 0, "missing BLE link evidence query");

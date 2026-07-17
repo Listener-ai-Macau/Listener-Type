@@ -297,12 +297,16 @@ const bleGapFacts = args.bleGapLog ? parseBleGapLog(readText(args.bleGapLog)) : 
 
 if (!args.bleGapLog) {
   errors.push("missing --ble-gap-log evidence for active BLE link params before the EC11 press");
-} else if (!bleGapFacts?.latestConnectionParams && !bleGapFacts?.activeTextEvidence) {
-  errors.push("BLE gap log has no actual gap_conn_param event or active conn_desc text evidence");
+} else if (!bleGapFacts?.latestConnectionParams && !bleGapFacts?.activeTextEvidence && !bleGapFacts?.statusEvidence) {
+  errors.push("BLE evidence log has no current BLE:STATUS, actual gap_conn_param event, or active conn_desc text evidence");
 } else if (!bleGapFacts.activeLinkParams) {
   const latest = bleGapFacts.latestConnectionParams;
   if (bleGapFacts.lowPowerRequestsAfterActive.length > 0) {
     errors.push("BLE gap log contains a low-power connection-parameter request after active-link evidence");
+  } else if (bleGapFacts.statusEvidence) {
+    errors.push(
+      `BLE:STATUS active_applied=${bleGapFacts.statusEvidence.activeApplied ? 1 : 0} interval=${bleGapFacts.statusEvidence.intervalUnits ?? "missing"} latency=${bleGapFacts.statusEvidence.latency ?? "missing"} did not prove active interval=6 latency=0`,
+    );
   } else {
     errors.push(
       `BLE latest actual connection params interval=${latest?.intervalUnits ?? "missing"} latency=${latest?.latency ?? "missing"} are not active interval=6 latency=0`,
@@ -473,8 +477,29 @@ function parseBleGapLog(text) {
   const events = [];
   let parseErrors = 0;
   let activeTextEvidence = null;
+  let statusEvidence = null;
   for (const [lineIndex, line] of text.split(/\r?\n/).entries()) {
     const trimmed = line.trim();
+    const statusMatch = /~BLE:STATUS\s+(.*)/.exec(trimmed);
+    if (statusMatch) {
+      const fields = {};
+      for (const match of statusMatch[1].matchAll(/([A-Za-z0-9_]+)=([^\s]+)/g)) {
+        fields[match[1]] = match[2];
+      }
+      statusEvidence = {
+        line: lineIndex + 1,
+        connected: fields.connected === "1",
+        secure: fields.secure === "1",
+        descriptorValid: fields.descriptor_valid === "1",
+        activeApplied: fields.active_applied === "1",
+        e11r: fields.e11r === undefined ? null : fields.e11r === "1",
+        connHandle: toInt(fields.conn_handle),
+        intervalUnits: toInt(fields.interval_units),
+        latency: toInt(fields.latency),
+        supervisionTimeout: toInt(fields.supervision_timeout_units),
+        text: trimmed,
+      };
+    }
     const activeText = /active connection parameters already active: conn=(\d+) preferred_itvl=6-6 latency=0/.exec(
       trimmed,
     );
@@ -529,6 +554,13 @@ function parseBleGapLog(text) {
     ? requests.filter((request) => request.order > latestConnectionParams.order && request.mode === 2)
     : [];
   const activeFromText = latestConnectionParams === null && activeTextEvidence !== null;
+  const activeFromStatus =
+    statusEvidence !== null &&
+    statusEvidence.connected &&
+    statusEvidence.descriptorValid &&
+    statusEvidence.activeApplied &&
+    statusEvidence.intervalUnits === 6 &&
+    statusEvidence.latency === 0;
 
   return {
     eventCount: events.length,
@@ -536,8 +568,9 @@ function parseBleGapLog(text) {
     connectionParamEventCount: connectionParams.length,
     requestEventCount: requests.length,
     latestConnectionParams,
+    statusEvidence,
     activeTextEvidence,
-    activeLinkParams: activeFromText || (latestIsActive && lowPowerRequestsAfterActive.length === 0),
+    activeLinkParams: activeFromStatus || activeFromText || (latestIsActive && lowPowerRequestsAfterActive.length === 0),
     lowPowerRequestsAfterActive,
     recentConnectionParams: connectionParams.slice(-5),
     recentRequests: requests.slice(-5),
