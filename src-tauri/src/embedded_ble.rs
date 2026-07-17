@@ -14525,8 +14525,21 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     && prompt_body.contains("type_recovery_command_confirmed,"),
                 "Type-confirmed recovery should enable the bounded one-shot PairAsync retry"
             );
+            let fallback_start = prompt_body
+                .find("fallback_candidates,")
+                .expect("slow AEP fallback invocation should exist");
+            let fallback_end = prompt_body[fallback_start..]
+                .find(");")
+                .map(|offset| fallback_start + offset)
+                .expect("slow AEP fallback invocation should close");
+            let fallback_args: String = prompt_body[fallback_start..fallback_end]
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect();
             assert!(
-                prompt_body.contains("allow_adapter_restart,\n                        false,"),
+                fallback_args.contains(
+                    "fallback_candidates,&target_name,false,true,allow_adapter_restart,false,"
+                ),
                 "slow AEP fallback should not recursively enable the direct PairAsync retry"
             );
 
