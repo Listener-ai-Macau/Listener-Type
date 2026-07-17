@@ -563,6 +563,14 @@
         "result": "A 45-second short locked COM3 capture began from installed Program Files Type plus CONNECTED_IDLE, encrypted BLE, and Type heartbeat. It captured only heartbeat traffic and no physical EC11/recovery event. No behavior failure is inferred and no physical timing claim is made.",
         "next_action": "Open a fresh short locked capture while the operator performs one real EC11 double-click."
       },
+      "physical_capture_attempt_20260717_second": {
+        "status": "no_go_no_physical_input",
+        "preflight": "Listener-Type/.artifacts/bluetooth-machine-20260717/physical-ec11-double-recovery-preflight-20260717-2000.log",
+        "raw_capture": "Listener-Type/.artifacts/bluetooth-machine-20260717/physical-ec11-double-recovery-20260717-2000.log",
+        "result": "A second command-free 45-second short locked COM3 capture began from installed Program Files Type and CONNECTED_IDLE with encrypted BLE. It captured six Type heartbeats and zero physical-edge, EC11 double-click, recovery-timing, advertising-acceptance, or TYPE:READY events. No behavior failure is inferred and no physical timing claim is made.",
+        "machine_evidence": "Listener-Type/.artifacts/bluetooth-machine-20260717/physical-ec11-double-recovery-20260717-2000-no-input.json",
+        "next_action": "Open a fresh short locked capture while the operator performs one real EC11 double-click."
+      },
       "next_action": "Preserve the <=250ms generated machine gate and collect one real physical EC11 double-click capture before accepting the physical metric. Keep the 500ms single/double boundary, long-press cancellation, cross-host ownership window, and no-reclaim Type behavior unchanged.",
       "current_audit_followup_20260716": {
         "status": "required",
