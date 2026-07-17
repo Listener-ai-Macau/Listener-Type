@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -8,13 +7,12 @@ use serde::Serialize;
 
 use crate::coordinator_state::SessionId;
 use crate::observability_v1::{
-    BleLifecycleState, Capability, CommandResult, ErrorCategory, EventEnvelope, EventSource,
-    TimingMetric,
+    new_host_correlation_id, BleLifecycleState, Capability, CommandResult, ErrorCategory,
+    EventEnvelope, EventSource, TimingMetric,
 };
 
 const FIRMWARE_CORRELATION_PREFIX: u64 = 0x4c53_544e_0000_0000;
 const CORRELATION_OPERATION_MASK: u64 = 0x0fff_ffff;
-static NEXT_OTA_OPERATION_KEY: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Default)]
 struct SourceSequences {
@@ -495,9 +493,8 @@ impl OtaObservation {
 
 pub(crate) fn begin_ota_transfer() -> OtaObservation {
     let now = Instant::now();
-    let operation_key = NEXT_OTA_OPERATION_KEY.fetch_add(1, Ordering::Relaxed);
     let mut observation = OtaObservation {
-        correlation_id: correlation_for_firmware_operation(Capability::Ota, operation_key),
+        correlation_id: new_host_correlation_id(),
         started_at: now,
         sequences: SourceSequences::default(),
     };
@@ -675,12 +672,12 @@ mod tests {
     }
 
     #[test]
-    fn ota_transfer_uses_its_own_nonzero_correlation() {
-        let correlation = correlation_for_firmware_operation(Capability::Ota, 1);
-        assert_ne!(correlation, 0);
-        assert_ne!(
-            correlation,
-            correlation_for_firmware_operation(Capability::Audio, 1)
-        );
+    fn ota_transfers_use_distinct_nonzero_host_correlations() {
+        let first = begin_ota_transfer().correlation_id();
+        let second = begin_ota_transfer().correlation_id();
+
+        assert_ne!(first, 0);
+        assert_ne!(second, 0);
+        assert_ne!(first, second);
     }
 }
