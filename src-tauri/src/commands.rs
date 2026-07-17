@@ -8786,6 +8786,30 @@ mod tests {
         include_str!("commands.rs").replace("\r\n", "\n")
     }
 
+    #[test]
+    fn ota_observability_handoff_precedes_background_listener_pause() {
+        let source = normalized_commands_source();
+        let transfer_start = source
+            .find("pub async fn transfer_firmware_ota_ble")
+            .expect("firmware OTA command should exist");
+        let transfer_end = source[transfer_start..]
+            .find("Ok(FirmwareOtaBleTransferResult")
+            .map(|offset| transfer_start + offset)
+            .expect("firmware OTA command should return its result");
+        let transfer = &source[transfer_start..transfer_end];
+        let handoff = transfer
+            .find("request_listener_ota_v1_active_link(Some(")
+            .expect("OTA should hand off its observability context on the active link");
+        let pause = transfer
+            .find("coord.pause_embedded_ble_listener_for_ota()")
+            .expect("OTA should pause the listener before opening its GATT transfer");
+
+        assert!(
+            handoff < pause,
+            "OTA observability context must reach Firmware before the active listener is paused"
+        );
+    }
+
     fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
         FirmwareOtaDeviceSnapshot {
             connected: true,
