@@ -1633,16 +1633,10 @@ impl Coordinator {
     }
 
     pub fn try_begin_firmware_ota_transfer(&self) -> bool {
-        if self
-            .inner
+        self.inner
             .embedded_ble_ota_active
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return false;
-        }
-        pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
-        true
+            .is_ok()
     }
 
     pub fn begin_firmware_ota_transfer(&self) {

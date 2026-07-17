@@ -6055,6 +6055,7 @@ pub async fn transfer_firmware_ota_ble(
     log::info!(
         "[firmware-ota] Listener OTA v1 reconnect handoff accepted before pausing the background listener"
     );
+    coord.pause_embedded_ble_listener_for_ota();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_sha256 = expected_sha256.clone();
