@@ -5,6 +5,7 @@ param(
     [int]$PromptTimeoutSeconds = 150,
     [int]$CaptureWaitAfterPromptSeconds = 45,
     [int]$CaptureGraceSeconds = 20,
+    [int]$ConnectedIdleWaitSeconds = 240,
     [string]$OutputRoot = "",
     [switch]$PreflightOnly,
     [switch]$DryRun
@@ -53,6 +54,7 @@ $promptResult = Join-Path $artifactDir "$base.operator-prompt.stdout.json"
 $statusLog = Join-Path $artifactDir "$base.preflight-device-status.log"
 $powerLog = Join-Path $artifactDir "$base.preflight-power-status.log"
 $readyLog = Join-Path $artifactDir "$base.preflight-ready.log"
+$bleGapLog = Join-Path $artifactDir "$base.preflight-ble-gap.log"
 $machineCheck = Join-Path $artifactDir "$base.machine-check.json"
 $runnerResult = Join-Path $artifactDir "$base.runner-result.json"
 
@@ -67,6 +69,7 @@ $plan = [ordered]@{
     capture_seconds = $CaptureSeconds
     prompt_timeout_seconds = $PromptTimeoutSeconds
     capture_grace_seconds = $CaptureGraceSeconds
+    connected_idle_wait_seconds = $ConnectedIdleWaitSeconds
     preflight_only = [bool]$PreflightOnly.IsPresent
     formal_capture_uses_command_read_ms = $false
     serial_log = $serialLog
@@ -78,12 +81,106 @@ $plan = [ordered]@{
         ec11_fast_recording = "runtime"
         connected_idle = "runtime"
         type_heartbeat = "runtime"
+        active_ble_link_params = "runtime"
     }
+    preflight_ble_gap_log = $bleGapLog
 }
 
 if ($DryRun.IsPresent) {
     $plan | ConvertTo-Json -Depth 6
     exit 0
+}
+
+function Test-BleGapActiveLinkEvidence {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $text = Get-Content -Raw -LiteralPath $Path
+    $events = [System.Collections.Generic.List[object]]::new()
+    foreach ($line in ($text -split "`r?`n")) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed.StartsWith("{")) {
+            continue
+        }
+        try {
+            $event = $trimmed | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        if ([string]$event.src -eq "ble_gap") {
+            $events.Add($event) | Out-Null
+        }
+    }
+
+    $latestConn = $null
+    $latestConnIndex = -1
+    for ($index = 0; $index -lt $events.Count; $index++) {
+        $event = $events[$index]
+        if ([int]$event.evt -eq 7) {
+            $latestConn = $event
+            $latestConnIndex = $index
+        }
+    }
+
+    if ($null -eq $latestConn) {
+        $activeText = [regex]::Match(
+            $text,
+            "active connection parameters already active: conn=(\d+) preferred_itvl=6-6 latency=0")
+        if ($activeText.Success) {
+            return [pscustomobject]@{
+                active = $true
+                reason = "human-readable conn_desc line reports active preferred_itvl=6-6 latency=0"
+                event_count = $events.Count
+                latest_t_ms = $null
+                latest_interval = 6
+                latest_latency = 0
+                low_power_requests_after_active = 0
+                text_line = $activeText.Value
+            }
+        }
+        return [pscustomobject]@{
+            active = $false
+            reason = "no ble_gap gap_conn_param event was captured"
+            event_count = $events.Count
+            latest_t_ms = $null
+            latest_interval = $null
+            latest_latency = $null
+            low_power_requests_after_active = 0
+        }
+    }
+
+    $latestInterval = [int]$latestConn.a1
+    $latestLatency = [int]$latestConn.a2
+    $lowPowerRequestsAfterActive = 0
+    if ($latestInterval -eq 6 -and $latestLatency -eq 0) {
+        for ($index = $latestConnIndex + 1; $index -lt $events.Count; $index++) {
+            $event = $events[$index]
+            if ([int]$event.evt -eq 8 -and [int]$event.a1 -eq 2) {
+                $lowPowerRequestsAfterActive++
+            }
+        }
+    }
+
+    $active = $latestInterval -eq 6 -and $latestLatency -eq 0 -and $lowPowerRequestsAfterActive -eq 0
+    $reason = if ($active) {
+        "latest ble_gap gap_conn_param is active"
+    } elseif ($lowPowerRequestsAfterActive -gt 0) {
+        "low-power connection-parameter request appeared after active evidence"
+    } else {
+        "latest ble_gap gap_conn_param interval=$latestInterval latency=$latestLatency"
+    }
+
+    return [pscustomobject]@{
+        active = $active
+        reason = $reason
+        event_count = $events.Count
+        latest_t_ms = [int]$latestConn.t
+        latest_interval = $latestInterval
+        latest_latency = $latestLatency
+        low_power_requests_after_active = $lowPowerRequestsAfterActive
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
@@ -106,6 +203,10 @@ $preflightInstalledType = $true
 $preflightEc11FastRecording = $false
 $preflightConnectedIdle = $false
 $preflightTypeHeartbeat = $false
+$preflightActiveBleLink = $false
+$preflightBleLinkEvidence = $null
+$connectedIdleObservedAfterSeconds = $null
+$connectedIdleReconfirmedAfterBleEvidenceSeconds = $null
 
 $mutex = New-Object System.Threading.Mutex($false, "Global\Listener_COM3")
 $hasMutex = $false
@@ -130,12 +231,24 @@ try {
     }
     $preflightEc11FastRecording = $true
 
-    pwsh -NoProfile -File $sendSerial -Port $Port -Command "~POWER:STATUS" -CommandReadMs 2500 -OutputPath $powerLog
-    $powerText = Get-Content -Raw -LiteralPath $powerLog
-    if ($powerText -notmatch "state=CONNECTED_IDLE") {
-        throw "Preflight failed: state=CONNECTED_IDLE was not found in power status"
+    $idleWaitStarted = Get-Date
+    $idleDeadline = $idleWaitStarted.AddSeconds($ConnectedIdleWaitSeconds)
+    do {
+        pwsh -NoProfile -File $sendSerial -Port $Port -Command "~POWER:STATUS" -CommandReadMs 2500 -OutputPath $powerLog
+        $powerText = Get-Content -Raw -LiteralPath $powerLog
+        if ($powerText -match "state=CONNECTED_IDLE") {
+            $connectedIdleObservedAfterSeconds = [int][Math]::Round(((Get-Date) - $idleWaitStarted).TotalSeconds)
+            $preflightConnectedIdle = $true
+            break
+        }
+        if ((Get-Date) -ge $idleDeadline) {
+            break
+        }
+        Start-Sleep -Seconds 10
+    } while ($true)
+    if (-not $preflightConnectedIdle) {
+        throw "Preflight failed: state=CONNECTED_IDLE was not found in power status within $ConnectedIdleWaitSeconds seconds"
     }
-    $preflightConnectedIdle = $true
 
     pwsh -NoProfile -File $sendSerial -Port $Port -CaptureSeconds 12 -OutputPath $readyLog
     $readyText = Get-Content -Raw -LiteralPath $readyLog
@@ -143,6 +256,35 @@ try {
         throw "Preflight failed: TYPE:HB evidence was not present"
     }
     $preflightTypeHeartbeat = $true
+
+    pwsh -NoProfile -File $sendSerial -Port $Port -Command "~DIAGLOG:LAST:128:ble_gap" -CommandReadMs 2500 -OutputPath $bleGapLog
+    $preflightBleLinkEvidence = Test-BleGapActiveLinkEvidence -Path $bleGapLog
+    if (-not $preflightBleLinkEvidence.active) {
+        throw "Preflight failed: active BLE link params interval 6-6 latency 0 were not proven ($($preflightBleLinkEvidence.reason))"
+    }
+    $preflightActiveBleLink = $true
+
+    if (-not $PreflightOnly.IsPresent) {
+        $preflightConnectedIdle = $false
+        $idleReconfirmStarted = Get-Date
+        $idleReconfirmDeadline = $idleReconfirmStarted.AddSeconds($ConnectedIdleWaitSeconds)
+        do {
+            pwsh -NoProfile -File $sendSerial -Port $Port -Command "~POWER:STATUS" -CommandReadMs 2500 -OutputPath $powerLog
+            $powerText = Get-Content -Raw -LiteralPath $powerLog
+            if ($powerText -match "state=CONNECTED_IDLE") {
+                $connectedIdleReconfirmedAfterBleEvidenceSeconds = [int][Math]::Round(((Get-Date) - $idleReconfirmStarted).TotalSeconds)
+                $preflightConnectedIdle = $true
+                break
+            }
+            if ((Get-Date) -ge $idleReconfirmDeadline) {
+                break
+            }
+            Start-Sleep -Seconds 10
+        } while ($true)
+        if (-not $preflightConnectedIdle) {
+            throw "Preflight failed: state=CONNECTED_IDLE was not restored after BLE link evidence within $ConnectedIdleWaitSeconds seconds"
+        }
+    }
 
     if ($PreflightOnly.IsPresent) {
         $runStatus = "PREFLIGHT_PASS"
@@ -214,6 +356,7 @@ try {
         & node $checker `
             --serial-log $serialLog `
             --prompt-json $promptResult `
+            --ble-gap-log $bleGapLog `
             --type-log $typeLog `
             --capsule-log $capsuleLog `
             --capture-start-iso $captureStartIso `
@@ -240,15 +383,20 @@ $result = [ordered]@{
     installed_type_pid = $typeProcess.ProcessId
     installed_type_path = $typeProcess.ExecutablePath
     preflight = [ordered]@{
-        status = if ($preflightInstalledType -and $preflightEc11FastRecording -and $preflightConnectedIdle -and $preflightTypeHeartbeat) { "PASS" } else { "NO_GO" }
+        status = if ($preflightInstalledType -and $preflightEc11FastRecording -and $preflightConnectedIdle -and $preflightTypeHeartbeat -and $preflightActiveBleLink) { "PASS" } else { "NO_GO" }
         installed_type = $preflightInstalledType
         ec11_fast_recording = $preflightEc11FastRecording
         connected_idle = $preflightConnectedIdle
+        connected_idle_observed_after_seconds = $connectedIdleObservedAfterSeconds
+        connected_idle_reconfirmed_after_ble_evidence_seconds = $connectedIdleReconfirmedAfterBleEvidenceSeconds
         type_heartbeat = $preflightTypeHeartbeat
+        active_ble_link_params = $preflightActiveBleLink
+        ble_link_evidence = $preflightBleLinkEvidence
     }
     preflight_status_log = $statusLog
     preflight_power_log = $powerLog
     preflight_ready_log = $readyLog
+    preflight_ble_gap_log = $bleGapLog
     capture_start_iso = $captureStartIso
     capture_end_iso = $captureEndIso
     serial_log = $serialLog

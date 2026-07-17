@@ -40,6 +40,7 @@ test("formal serial capture does not pass CommandReadMs", () => {
 test("preflight may use CommandReadMs only for explicit status queries", () => {
   assert.match(source, /-Command "~DEVICE:STATUS" -CommandReadMs 1800 -OutputPath \$statusLog/);
   assert.match(source, /-Command "~POWER:STATUS" -CommandReadMs 2500 -OutputPath \$powerLog/);
+  assert.match(source, /-Command "~DIAGLOG:LAST:128:ble_gap" -CommandReadMs 2500 -OutputPath \$bleGapLog/);
   assert.match(source, /state=CONNECTED_IDLE/);
   assert.match(source, /-CaptureSeconds 12 -OutputPath \$readyLog/);
   assert.match(source, /TYPE:HB evidence was not present/);
@@ -50,8 +51,21 @@ test("runner result records structured preflight facts separately from formal PA
   assert.match(source, /preflight = \[ordered\]@\{/);
   assert.match(source, /ec11_fast_recording = \$preflightEc11FastRecording/);
   assert.match(source, /connected_idle = \$preflightConnectedIdle/);
+  assert.match(source, /connected_idle_reconfirmed_after_ble_evidence_seconds = \$connectedIdleReconfirmedAfterBleEvidenceSeconds/);
   assert.match(source, /type_heartbeat = \$preflightTypeHeartbeat/);
-  assert.match(source, /status = if \(\$preflightInstalledType -and \$preflightEc11FastRecording -and \$preflightConnectedIdle -and \$preflightTypeHeartbeat\) \{ "PASS" \} else \{ "NO_GO" \}/);
+  assert.match(source, /active_ble_link_params = \$preflightActiveBleLink/);
+  assert.match(source, /ble_link_evidence = \$preflightBleLinkEvidence/);
+  assert.match(source, /status = if \(\$preflightInstalledType -and \$preflightEc11FastRecording -and \$preflightConnectedIdle -and \$preflightTypeHeartbeat -and \$preflightActiveBleLink\) \{ "PASS" \} else \{ "NO_GO" \}/);
+  assert.match(source, /preflight_ble_gap_log = \$bleGapLog/);
+});
+
+test("formal runner restores connected idle after BLE link evidence before prompting", () => {
+  const bleEvidenceIndex = source.indexOf("~DIAGLOG:LAST:128:ble_gap");
+  const restoreIndex = source.indexOf("state=CONNECTED_IDLE was not restored after BLE link evidence");
+  const promptIndex = source.indexOf("$promptArgs = @(");
+  assert.ok(bleEvidenceIndex > 0, "missing BLE link evidence query");
+  assert.ok(restoreIndex > bleEvidenceIndex, "formal preflight must restore idle after BLE evidence");
+  assert.ok(promptIndex > restoreIndex, "operator prompt must appear after idle restoration");
 });
 
 test("preflight-only mode exits before formal human capture", () => {
@@ -84,6 +98,7 @@ test("runner invokes the recording-consumption machine checker", () => {
   assert.match(source, /check-recording-consumption-evidence\.mjs/);
   assert.match(source, /--serial-log \$serialLog/);
   assert.match(source, /--prompt-json \$promptResult/);
+  assert.match(source, /--ble-gap-log \$bleGapLog/);
   assert.match(source, /--capture-start-iso \$captureStartIso/);
   assert.match(source, /--capture-end-iso \$captureEndIso/);
 });

@@ -293,6 +293,22 @@ function analyzeTransport(summary) {
 
 const typeFacts = args.typeLog ? parseTypeLog(readText(args.typeLog), transport?.session, captureWindow) : null;
 const capsuleFacts = args.capsuleLog ? parseCapsuleLog(readText(args.capsuleLog), captureWindow) : null;
+const bleGapFacts = args.bleGapLog ? parseBleGapLog(readText(args.bleGapLog)) : null;
+
+if (!args.bleGapLog) {
+  errors.push("missing --ble-gap-log evidence for active BLE link params before the EC11 press");
+} else if (!bleGapFacts?.latestConnectionParams && !bleGapFacts?.activeTextEvidence) {
+  errors.push("BLE gap log has no actual gap_conn_param event or active conn_desc text evidence");
+} else if (!bleGapFacts.activeLinkParams) {
+  const latest = bleGapFacts.latestConnectionParams;
+  if (bleGapFacts.lowPowerRequestsAfterActive.length > 0) {
+    errors.push("BLE gap log contains a low-power connection-parameter request after active-link evidence");
+  } else {
+    errors.push(
+      `BLE latest actual connection params interval=${latest?.intervalUnits ?? "missing"} latency=${latest?.latency ?? "missing"} are not active interval=6 latency=0`,
+    );
+  }
+}
 
 if (!args.typeLog) {
   errors.push("missing --type-log evidence for Type packets and missing_packets");
@@ -453,10 +469,86 @@ function parseCapsuleLog(text, window) {
   };
 }
 
+function parseBleGapLog(text) {
+  const events = [];
+  let parseErrors = 0;
+  let activeTextEvidence = null;
+  for (const [lineIndex, line] of text.split(/\r?\n/).entries()) {
+    const trimmed = line.trim();
+    const activeText = /active connection parameters already active: conn=(\d+) preferred_itvl=6-6 latency=0/.exec(
+      trimmed,
+    );
+    if (activeText) {
+      activeTextEvidence = {
+        line: lineIndex + 1,
+        connHandle: Number.parseInt(activeText[1], 10),
+        intervalUnits: 6,
+        latency: 0,
+        text: trimmed,
+      };
+    }
+    if (!trimmed.startsWith("{")) {
+      continue;
+    }
+    try {
+      const event = JSON.parse(trimmed);
+      if (event.src === "ble_gap") {
+        events.push({ ...event, line: lineIndex + 1, order: events.length });
+      }
+    } catch {
+      parseErrors += 1;
+    }
+  }
+
+  const connectionParams = events
+    .filter((event) => toInt(event.evt) === 7)
+    .map((event) => ({
+      line: event.line,
+      order: event.order,
+      tMs: toInt(event.t),
+      intervalUnits: toInt(event.a1),
+      latency: toInt(event.a2),
+      supervisionTimeout: toInt(event.a3),
+      connHandle: toInt(event.a4),
+    }));
+  const requests = events
+    .filter((event) => toInt(event.evt) === 8)
+    .map((event) => ({
+      line: event.line,
+      order: event.order,
+      tMs: toInt(event.t),
+      mode: toInt(event.a1),
+      result: toInt(event.a2),
+      connHandle: toInt(event.a3),
+      latency: toInt(event.a4),
+    }));
+  const latestConnectionParams = connectionParams.at(-1) ?? null;
+  const latestIsActive =
+    latestConnectionParams?.intervalUnits === 6 && latestConnectionParams?.latency === 0;
+  const lowPowerRequestsAfterActive = latestIsActive
+    ? requests.filter((request) => request.order > latestConnectionParams.order && request.mode === 2)
+    : [];
+  const activeFromText = latestConnectionParams === null && activeTextEvidence !== null;
+
+  return {
+    eventCount: events.length,
+    parseErrors,
+    connectionParamEventCount: connectionParams.length,
+    requestEventCount: requests.length,
+    latestConnectionParams,
+    activeTextEvidence,
+    activeLinkParams: activeFromText || (latestIsActive && lowPowerRequestsAfterActive.length === 0),
+    lowPowerRequestsAfterActive,
+    recentConnectionParams: connectionParams.slice(-5),
+    recentRequests: requests.slice(-5),
+  };
+}
+
 const report = {
   status: errors.length === 0 ? "PASS" : "NO_GO",
   serial_log: args.serialLog,
   prompt_json: args.promptJson,
+  ble_gap_log: args.bleGapLog ?? null,
   type_log: args.typeLog ?? null,
   capsule_log: args.capsuleLog ?? null,
   thresholds: {
@@ -486,6 +578,7 @@ const report = {
     : null,
   dispatches,
   active_stop_events: activeStops,
+  ble_gap: bleGapFacts,
   transport,
   type: typeFacts,
   capsule: capsuleFacts,

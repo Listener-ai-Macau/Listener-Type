@@ -37,6 +37,25 @@ function makeFixture(options = {}) {
     `I (51200) ble_audio_stream: audio session transport summary: session=${session} reason=stop elapsed_ms=${elapsedMs} expected_packet_count=${packets} notify_sent=${packets + 4} notify_failed=0 notify_retries=11 msys_waits=3 retry_mbuf=10 retry_enomem=1 retry_tx_timeout=0 retry_tx_status=0 retry_other=0 audio_sent=${packets} audio_pcm_bytes=${pcmBytes} audio_bytes_per_s=31878 audio_packets_per_s=66 audio_failed=0 queue_jobs_purged=0 pool_high_water=8 pool_capacity=264 pool_high_water_pct=3 pool_alloc_failed=0 queue_full=0 replay_retained_high_water=48 replay_stored=${packets} replay_replaced=0 replay_removed=0 replay_resent=0 replay_resend_failed=0 replay_skip_current=0 replay_pending=48 last_drop_reason=none last_error=0`,
     "serial_closed",
   ].join("\n");
+  const bleGap = options.textOnlyBleActive === true
+    ? [
+        "serial_opened port=COM3 baud=115200 dtr=0 rts=0 no_reset=1",
+        "> ~DIAGLOG:LAST:128:ble_gap",
+        "I (1419267) ESP_HID_GAP: active connection parameters already active: conn=1 preferred_itvl=6-6 latency=0 timeout=800 mode=1",
+        "serial_closed",
+      ].join("\n")
+    : options.lowPowerBleAfterActive === true
+      ? [
+          '{"t":900,"src":"ble_gap","evt":7,"sev":"INFO","a1":80,"a2":9,"a3":600,"a4":1}',
+          '{"t":950,"src":"ble_gap","evt":8,"sev":"INFO","a1":1,"a2":0,"a3":1,"a4":0}',
+          '{"t":980,"src":"ble_gap","evt":7,"sev":"INFO","a1":6,"a2":0,"a3":800,"a4":1}',
+          '{"t":990,"src":"ble_gap","evt":8,"sev":"INFO","a1":2,"a2":0,"a3":1,"a4":9}',
+        ].join("\n")
+      : [
+          '{"t":900,"src":"ble_gap","evt":7,"sev":"INFO","a1":80,"a2":9,"a3":600,"a4":1}',
+          '{"t":950,"src":"ble_gap","evt":8,"sev":"INFO","a1":1,"a2":0,"a3":1,"a4":0}',
+          '{"t":980,"src":"ble_gap","evt":7,"sev":"INFO","a1":6,"a2":0,"a3":800,"a4":1}',
+        ].join("\n");
   const finalLine =
     options.omitFinal === true
       ? ""
@@ -66,11 +85,13 @@ function makeFixture(options = {}) {
   const paths = {
     serial: join(dir, "serial.log"),
     prompt: join(dir, "prompt.json"),
+    bleGap: join(dir, "ble-gap.log"),
     type: join(dir, "type.log"),
     capsule: join(dir, "capsule.log"),
   };
   writeFileSync(paths.serial, `${serial}\n`, "utf8");
   writeFileSync(paths.prompt, `${JSON.stringify(prompt)}\n`, "utf8");
+  writeFileSync(paths.bleGap, `${bleGap}\n`, "utf8");
   writeFileSync(paths.type, `${type}\n`, "utf8");
   writeFileSync(paths.capsule, `${capsule}\n`, "utf8");
   return { dir, paths, start, end };
@@ -85,6 +106,8 @@ function runChecker(fixture) {
       fixture.paths.serial,
       "--prompt-json",
       fixture.paths.prompt,
+      "--ble-gap-log",
+      fixture.paths.bleGap,
       "--type-log",
       fixture.paths.type,
       "--capsule-log",
@@ -110,6 +133,23 @@ test("accepts a correlated 45-60 second recording-consumption fixture", () => {
   assert.equal(report.status, "PASS");
   assert.equal(report.transport.effectiveConsumptionBps >= 32000, true);
   assert.equal(report.type.sawFinal, true);
+  assert.equal(report.ble_gap.activeLinkParams, true);
+});
+
+test("rejects a low-power BLE request after active-link evidence", () => {
+  const result = runChecker(makeFixture({ lowPowerBleAfterActive: true }));
+  const report = parseReport(result);
+  assert.equal(result.status, 1);
+  assert.equal(report.status, "NO_GO");
+  assert.match(report.errors.join("\n"), /low-power connection-parameter request/);
+});
+
+test("accepts human-readable active BLE link preflight when diag JSON is unavailable", () => {
+  const result = runChecker(makeFixture({ textOnlyBleActive: true }));
+  const report = parseReport(result);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(report.status, "PASS");
+  assert.equal(report.ble_gap.activeTextEvidence.intervalUnits, 6);
 });
 
 test("rejects a session without an embedded_audio_final event", () => {
