@@ -6,7 +6,7 @@
 
 - 验证 `VKA1 session_start -> audio_data... -> session_stop` 解析和重组。
 - 验证缺包补静音、`cancel`、`error`、session stats。
-- 用 Windows 本机 TTS 生成 seeded 随机中文人声 WAV，减少每轮人工说话。
+- 用 Windows 本机 TTS 生成留档的随机中文长文本 WAV，减少每轮人工说话。
 - 为后续 `Listener-Type` BLE host adapter 和 ASR 接入提供 fixture。
 
 ## 运行 replay
@@ -77,7 +77,7 @@ pwsh -NoProfile -File tools\embedded_audio_replay\run_ble_stream_smoke.ps1 `
 2. 调用固件仓库的 `ensure_ble_hid_connection.ps1` 预热 BLE。
 3. 以隐藏主窗口模式启动 `listener-type --submit-embedded-audio-ble-stream 45000`，避免测试时把主界面弹到前台。
 4. 提前打开串口日志监听，等到 Listener-Type 日志出现 `ValueChanged handler registered`，并记录固件侧 notify/transport 状态。
-5. 播放第一遍随机中文 TTS 作为预热。
+5. 播放第一遍随机中文长文本 TTS 作为预热；默认随机语料覆盖自然任务、时间、数字、停顿和不同主题，单条按正常语速约十五秒或更长，报告保留本次抽中的原文。
 6. 在第二遍播放前向串口 helper 发信号。产品验收用 `generated-key3` 发送 `~KEY:KEY3:SINGLE` 生成真实自定义录音键按下/释放时序；EC11 单击是开机后的自定义动作键，底层 fallback 固定为 `Shift+F13`，不再作为录音触发，也不使用 F25；`serial-toggle` 仅保留为底层 `~VREC:TOGGLE` 诊断。
 7. 若第二遍播放后 20 秒内没有看到 `embedded audio streaming dictation started`，直接失败并输出 Listener-Type 日志和固件串口日志路径，避免长时间空等。
 8. 开启 `-VerifyHistory` 时，脚本会检查 `history.json` 中本次记录带有 `embeddedAudioStats`；需要自动打开临时 Notepad 做光标落字检查时再加 `-VerifyInsertion`，人工观察当前光标时不需要。
@@ -112,7 +112,7 @@ Required fields are stable across PASS, WARNING, and FAIL reports:
 
 Optional fields are present when the corresponding subsystem participates: `history_session.embeddedAudioStats`, `history_session.insertStatus`, `serial_report`, `serial_log_path`, `insertion_target_path`, `expected_stream_failure`, and `error`.
 
-Diagnostic fields support quality gates and debugging: `normalized_expected`, `normalized_transcript`, `cer`, `accuracy`, `accuracy_threshold`, `accuracy_warning_only`, `accuracy_warning`, `accuracy_warning_message`, `wav_path`, `tts_rate`, `tts_gain`, `random_sentence_count`, `pcm_bytes`, `missing_packets`, and `verification_errors`. Non-warning profiles fail the smoke when `accuracy` falls below `accuracy_threshold`; warning-only profiles report `WARNING`.
+Diagnostic fields support quality gates and debugging: `normalized_expected`, `normalized_transcript`, `cer`, `accuracy`, `accuracy_threshold`, `accuracy_warning_only`, `accuracy_warning`, `accuracy_warning_message`, `source_capture_coupling`, `wav_path`, `tts_rate`, `tts_gain`, `random_sentence_count`, `pcm_bytes`, `missing_packets`, and `verification_errors`. `source_capture_coupling` is a non-gating comparison between the test WAV and the retained device PCM archive; it records a 100 ms energy-envelope correlation and alignment only to distinguish a missing acoustic source from a recording or provider regression. Non-warning profiles fail the smoke when `accuracy` falls below `accuracy_threshold`; warning-only profiles report `WARNING`.
 
 ## 生成随机 TTS fixture
 

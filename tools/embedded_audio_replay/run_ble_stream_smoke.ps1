@@ -143,6 +143,15 @@ internal interface IMMDevice
 {
     [PreserveSig]
     int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, out IAudioEndpointVolume ppInterface);
+
+    [PreserveSig]
+    int OpenPropertyStore(int stgmAccess, IntPtr ppProperties);
+
+    [PreserveSig]
+    int GetId([MarshalAs(UnmanagedType.LPWStr)] out string ppstrId);
+
+    [PreserveSig]
+    int GetState(out int pdwState);
 }
 
 [ComImport]
@@ -169,8 +178,9 @@ public sealed class SmokeAudioEndpoint
 {
     public float Volume;
     public bool Muted;
+    public string EndpointId;
 
-    private static IAudioEndpointVolume GetEndpoint()
+    private static IMMDevice GetDevice()
     {
         var enumerator = (IMMDeviceEnumerator)(new MMDeviceEnumerator());
         IMMDevice device;
@@ -179,10 +189,14 @@ public sealed class SmokeAudioEndpoint
         {
             Marshal.ThrowExceptionForHR(hr);
         }
+        return device;
+    }
 
+    private static IAudioEndpointVolume GetEndpoint(IMMDevice device)
+    {
         Guid iid = typeof(IAudioEndpointVolume).GUID;
         IAudioEndpointVolume endpoint;
-        hr = device.Activate(ref iid, 23, IntPtr.Zero, out endpoint);
+        int hr = device.Activate(ref iid, 23, IntPtr.Zero, out endpoint);
         if (hr != 0)
         {
             Marshal.ThrowExceptionForHR(hr);
@@ -190,14 +204,26 @@ public sealed class SmokeAudioEndpoint
         return endpoint;
     }
 
+    private static IAudioEndpointVolume GetEndpoint()
+    {
+        return GetEndpoint(GetDevice());
+    }
+
     public static SmokeAudioEndpoint Snapshot()
     {
-        var endpoint = GetEndpoint();
+        var device = GetDevice();
+        var endpoint = GetEndpoint(device);
         float volume;
         bool muted;
+        string endpointId;
         endpoint.GetMasterVolumeLevelScalar(out volume);
         endpoint.GetMute(out muted);
-        return new SmokeAudioEndpoint { Volume = volume, Muted = muted };
+        int hr = device.GetId(out endpointId);
+        if (hr != 0)
+        {
+            Marshal.ThrowExceptionForHR(hr);
+        }
+        return new SmokeAudioEndpoint { Volume = volume, Muted = muted, EndpointId = endpointId };
     }
 
     public static void Set(float volume, bool muted)
@@ -209,6 +235,22 @@ public sealed class SmokeAudioEndpoint
     }
 }
 '@
+}
+
+function Get-SmokeOpaqueFingerprint {
+    param([AllowEmptyString()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $null
+    }
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+        return [System.Convert]::ToHexString($sha256.ComputeHash($bytes)).Substring(0, 16).ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
 }
 
 function Set-SmokePlaybackVolume {
@@ -224,7 +266,8 @@ function Set-SmokePlaybackVolume {
         $snapshot = [SmokeAudioEndpoint]::Snapshot()
         $target = [Math]::Max(0.01, [Math]::Min(1.0, [double]$Percent / 100.0))
         [SmokeAudioEndpoint]::Set([single]$target, $false)
-        Write-SmokeTrace ("playback_volume_set target={0} previous={1:0.###} muted={2}" -f $Percent, [double]$snapshot.Volume, [bool]$snapshot.Muted)
+        $endpointFingerprint = Get-SmokeOpaqueFingerprint -Value $snapshot.EndpointId
+        Write-SmokeTrace ("playback_volume_set target={0} previous={1:0.###} muted={2} endpoint_fingerprint={3}" -f $Percent, [double]$snapshot.Volume, [bool]$snapshot.Muted, $endpointFingerprint)
         return $snapshot
     } catch {
         Write-Warning "Failed to set playback volume before smoke audio: $($_.Exception.Message)"
@@ -296,6 +339,7 @@ function Get-SmokeReportSchema {
             "first_preview_event",
             "first_preview_source",
             "first_preview_ms",
+            "source_capture_coupling",
             "wav_path",
             "tts_rate",
             "tts_gain",
@@ -890,6 +934,160 @@ function Write-ForegroundTrace {
         return
     }
     Write-SmokeTrace "$Label foreground_pid=$($Snapshot.ProcessId) foreground_visible=$($Snapshot.Visible) foreground_title=$($Snapshot.Title)"
+}
+
+function Get-WavPcm16Envelope {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$FrameMilliseconds = 100
+    )
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 12 -or
+        [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne "RIFF" -or
+        [System.Text.Encoding]::ASCII.GetString($bytes, 8, 4) -ne "WAVE") {
+        throw "unsupported WAV container"
+    }
+
+    $position = 12
+    $format = $null
+    $dataOffset = $null
+    $dataSize = $null
+    while ($position + 8 -le $bytes.Length) {
+        $chunkId = [System.Text.Encoding]::ASCII.GetString($bytes, $position, 4)
+        $chunkSize = [System.BitConverter]::ToInt32($bytes, $position + 4)
+        $nextPosition = $position + 8 + $chunkSize
+        if (($chunkSize % 2) -ne 0) {
+            $nextPosition += 1
+        }
+        if ($chunkSize -lt 0 -or $nextPosition -gt $bytes.Length) {
+            throw "invalid WAV chunk"
+        }
+
+        if ($chunkId -eq "fmt " -and $chunkSize -ge 16) {
+            $format = [ordered]@{
+                audio_format = [System.BitConverter]::ToInt16($bytes, $position + 8)
+                channels = [System.BitConverter]::ToInt16($bytes, $position + 10)
+                sample_rate = [System.BitConverter]::ToInt32($bytes, $position + 12)
+                bits_per_sample = [System.BitConverter]::ToInt16($bytes, $position + 22)
+            }
+        } elseif ($chunkId -eq "data") {
+            $dataOffset = $position + 8
+            $dataSize = $chunkSize
+            break
+        }
+        $position = $nextPosition
+    }
+
+    if ($null -eq $format -or $null -eq $dataOffset -or
+        $format.audio_format -ne 1 -or $format.bits_per_sample -ne 16 -or
+        $format.channels -lt 1 -or $format.sample_rate -lt 1) {
+        throw "WAV must be PCM16 with at least one channel"
+    }
+
+    $samplesPerFrame = [int][Math]::Max(1, [Math]::Round($format.sample_rate * $FrameMilliseconds / 1000.0))
+    $bytesPerSampleFrame = 2 * $format.channels
+    $frameBytes = $samplesPerFrame * $bytesPerSampleFrame
+    $end = $dataOffset + $dataSize
+    $values = [System.Collections.Generic.List[double]]::new()
+
+    for ($frameStart = $dataOffset; $frameStart -lt $end; $frameStart += $frameBytes) {
+        $frameEnd = [Math]::Min($end, $frameStart + $frameBytes)
+        $sum = 0.0
+        $count = 0
+        for ($sampleOffset = $frameStart; $sampleOffset + 1 -lt $frameEnd; $sampleOffset += $bytesPerSampleFrame) {
+            $sum += [Math]::Abs([int][System.BitConverter]::ToInt16($bytes, $sampleOffset))
+            $count += 1
+        }
+        if ($count -gt 0) {
+            $values.Add($sum / $count)
+        }
+    }
+
+    return [ordered]@{
+        sample_rate = $format.sample_rate
+        channels = $format.channels
+        frame_ms = $FrameMilliseconds
+        values = [double[]]$values.ToArray()
+    }
+}
+
+function Get-PearsonCorrelation {
+    param(
+        [Parameter(Mandatory = $true)][double[]]$Left,
+        [Parameter(Mandatory = $true)][double[]]$Right
+    )
+
+    if ($Left.Length -lt 8 -or $Left.Length -ne $Right.Length) {
+        return $null
+    }
+    $leftMean = ($Left | Measure-Object -Average).Average
+    $rightMean = ($Right | Measure-Object -Average).Average
+    $numerator = 0.0
+    $leftVariance = 0.0
+    $rightVariance = 0.0
+    for ($index = 0; $index -lt $Left.Length; $index++) {
+        $leftDelta = $Left[$index] - $leftMean
+        $rightDelta = $Right[$index] - $rightMean
+        $numerator += $leftDelta * $rightDelta
+        $leftVariance += $leftDelta * $leftDelta
+        $rightVariance += $rightDelta * $rightDelta
+    }
+    if ($leftVariance -le 0 -or $rightVariance -le 0) {
+        return $null
+    }
+    return $numerator / [Math]::Sqrt($leftVariance * $rightVariance)
+}
+
+function Measure-SourceCaptureCoupling {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [string]$CapturePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CapturePath) -or -not (Test-Path -LiteralPath $CapturePath)) {
+        return [ordered]@{ status = "unavailable"; reason = "recording_archive_missing" }
+    }
+
+    try {
+        $source = Get-WavPcm16Envelope -Path $SourcePath
+        $capture = Get-WavPcm16Envelope -Path $CapturePath
+        $bestCorrelation = -2.0
+        $bestLagFrames = 0
+        $bestOverlapFrames = 0
+        for ($lagFrames = -30; $lagFrames -le 30; $lagFrames++) {
+            $left = [System.Collections.Generic.List[double]]::new()
+            $right = [System.Collections.Generic.List[double]]::new()
+            for ($index = 0; $index -lt $source.values.Length; $index++) {
+                $captureIndex = $index + $lagFrames
+                if ($captureIndex -ge 0 -and $captureIndex -lt $capture.values.Length) {
+                    $left.Add($source.values[$index])
+                    $right.Add($capture.values[$captureIndex])
+                }
+            }
+            $correlation = Get-PearsonCorrelation -Left ([double[]]$left.ToArray()) -Right ([double[]]$right.ToArray())
+            if ($null -ne $correlation -and $correlation -gt $bestCorrelation) {
+                $bestCorrelation = $correlation
+                $bestLagFrames = $lagFrames
+                $bestOverlapFrames = $left.Count
+            }
+        }
+
+        if ($bestCorrelation -le -2.0) {
+            return [ordered]@{ status = "unavailable"; reason = "insufficient_pcm_envelope" }
+        }
+        return [ordered]@{
+            status = "available"
+            method = "pcm16_mean_abs_envelope_100ms_max_pearson_lag_3s"
+            max_envelope_correlation = [Math]::Round($bestCorrelation, 4)
+            best_lag_ms = $bestLagFrames * 100
+            overlap_frames = $bestOverlapFrames
+            source_frames = $source.values.Length
+            capture_frames = $capture.values.Length
+        }
+    } catch {
+        return [ordered]@{ status = "unavailable"; reason = "analysis_error"; detail = $_.Exception.Message }
+    }
 }
 
 function Get-ProcessWindowHandleByTitle {
@@ -2356,13 +2554,14 @@ function New-RandomSentence {
     param([int]$Count = 1)
 
     $sentences = @(
-        "火山识别和蓝牙传输正在接受测试。",
-        "蓝牙音频正在发送到火山识别，请检查文本结果。",
-        "蓝牙手动按键测试成功。",
-        "请把这句话写到当前光标位置。",
-        "减少人工参与测试正在进行。",
-        "这次测试会检查识别结果和光标输出。",
-        "蓝牙数据传输完成后会插入文字。"
+        "今天下午三点半，请提醒我检查蓝牙音频、数据传输和最终转写；如果网络连接暂时不稳定，就先保存已经说完的内容，等连接恢复后再继续提交，不要遗漏前半段的待办事项。",
+        "请把这段会议记录整理成三个重点：先确认设备已经连接并且录音开始，再核对传输过程中没有丢包，最后比较预览文本和最终文本是否表达了同一个完整意思。",
+        "下周一上午十点，我们需要和设计、硬件及测试同事一起复盘这次体验；请记录连接等待时间、首段预览速度和结束后的文字结果，并把异常原因按网络、设备或服务分别说明。",
+        "我想在出门前写下一条完整的提醒：先带上充电线和耳机，再检查日历里的客户电话；如果会议改到明天下午，请把新的时间、地点和需要准备的资料一并更新到任务列表。",
+        "这是一段用于验证连续说话体验的自然记录，里面会包含停顿、数字和不同的话题；请确认预览不会突然卡住或跳到无关文字，结束后得到的完整内容也不要丢失开头和结尾。",
+        "请把下面的项目状态写入当前光标位置：蓝牙连接已经恢复，固件版本确认完成，上传速度保持在预期范围内；接下来需要观察真实用户在安静和轻声说话时是否都能稳定得到完整转写。",
+        "今天的工作顺序是先完成设备配对和权限检查，然后测试一段大约二十秒的自然中文语音，最后在提交前确认预览已经逐步收敛到最终文本；任何失败都要保留时间点和可追溯原因。",
+        "请记下这段旅行安排：周五傍晚六点到车站集合，七点二十出发，预计九点半抵达；到达后先确认酒店预订，再把第二天上午的路线、联系人和备用方案发给所有同行的人。"
     )
     if ($Count -le 1) {
         return Get-Random -InputObject $sentences
@@ -2688,6 +2887,7 @@ $insertedText = $null
 $historySession = $null
 $historyLookupSkipped = $false
 $recordingArchivePath = $null
+$sourceCaptureCoupling = $null
 $recordPlaybackDurationMs = $null
 $recordPlaybackStarted = $false
 $smokeStartedAt = Get-Date
@@ -2714,6 +2914,7 @@ $usesDesktopConfirm = $TriggerMode -eq "desktop-confirm"
 $usesDesktopAction = $usesDesktopCancel -or $usesDesktopConfirm
 $expectedStreamFailure = $null
 $playbackVolumeSnapshot = $null
+$playbackEndpointFingerprint = $null
 try {
     if ($VerifyInsertion) {
         $insertionTargetPath = Join-Path $OutDir "ble-stream-smoke-$RunStamp.target.txt"
@@ -2832,6 +3033,9 @@ try {
     $player = [System.Media.SoundPlayer]::new($WavPath)
     $player.Load()
     $playbackVolumeSnapshot = Set-SmokePlaybackVolume -Percent $PlaybackVolumePercent
+    if ($null -ne $playbackVolumeSnapshot) {
+        $playbackEndpointFingerprint = Get-SmokeOpaqueFingerprint -Value $playbackVolumeSnapshot.EndpointId
+    }
 
     for ($index = 1; $index -le $PlaybackCount; $index++) {
         if ($index -eq $RecordPlaybackIndex) {
@@ -3139,6 +3343,10 @@ try {
             $verificationErrors += "Listener-Type did not log BLE capture stop after dictation cancel"
         }
     }
+    if (-not $SilentAudio) {
+        $sourceCaptureCoupling = Measure-SourceCaptureCoupling -SourcePath $WavPath -CapturePath $recordingArchivePath
+        Write-SmokeTrace "source_capture_coupling status=$($sourceCaptureCoupling.status) correlation=$($sourceCaptureCoupling.max_envelope_correlation)"
+    }
     if ($usesDesktopConfirm) {
         if (-not $desktopCancelReport -or -not [bool]$desktopCancelReport.clicked) {
             $verificationErrors += "desktop capsule confirm click was not executed"
@@ -3273,6 +3481,7 @@ try {
         first_preview_event = [string]$firstPreviewSummary.event
         first_preview_source = [string]$firstPreviewSummary.source
         first_preview_ms = $firstPreviewSummary.latency_ms
+        source_capture_coupling = $sourceCaptureCoupling
         normalized_expected = $accuracyReport.normalized_expected
         normalized_transcript = $accuracyReport.normalized_transcript
         cer = $accuracyReport.cer
@@ -3301,6 +3510,7 @@ try {
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
         manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
         playback_volume_percent = $PlaybackVolumePercent
+        playback_endpoint_fingerprint = $playbackEndpointFingerprint
         keep_playback_volume = [bool]$KeepPlaybackVolume
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReportJson
@@ -3378,6 +3588,10 @@ try {
     } else {
         Write-SmokeTrace "recording_archive_lookup_skipped reason=no_record_playback"
     }
+    if (-not $SilentAudio) {
+        $sourceCaptureCoupling = Measure-SourceCaptureCoupling -SourcePath $WavPath -CapturePath $recordingArchivePath
+        Write-SmokeTrace "source_capture_coupling status=$($sourceCaptureCoupling.status) correlation=$($sourceCaptureCoupling.max_envelope_correlation)"
+    }
     $serialReportJson = Convert-SerialReportForJson -Report $serialReport
     $asrSummary = Get-AsrTranscriptSummaryFromLog -Text $capturedLog
     $firstPreviewSummary = Get-FirstPreviewSummaryFromLog -Text $capturedLog
@@ -3406,6 +3620,7 @@ try {
         first_preview_event = [string]$firstPreviewSummary.event
         first_preview_source = [string]$firstPreviewSummary.source
         first_preview_ms = $firstPreviewSummary.latency_ms
+        source_capture_coupling = $sourceCaptureCoupling
         normalized_expected = $accuracyReport.normalized_expected
         normalized_transcript = $accuracyReport.normalized_transcript
         cer = $accuracyReport.cer
@@ -3430,6 +3645,7 @@ try {
         no_notification_timeout_seconds = $NoNotificationTimeoutSeconds
         manual_trigger_ready_delay_ms = $ManualTriggerReadyDelayMs
         playback_volume_percent = $PlaybackVolumePercent
+        playback_endpoint_fingerprint = $playbackEndpointFingerprint
         keep_playback_volume = [bool]$KeepPlaybackVolume
         serial_log_path = if ($serialReport) { $serialReport.serial_log_path } else { $serialLogPath }
         serial_report = $serialReportJson
