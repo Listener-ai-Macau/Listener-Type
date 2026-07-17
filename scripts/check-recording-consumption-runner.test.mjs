@@ -46,6 +46,14 @@ test("preflight may use CommandReadMs only for explicit status queries", () => {
   assert.doesNotMatch(source, /TYPE:HB and connected_idle evidence were not both present/);
 });
 
+test("runner result records structured preflight facts separately from formal PASS", () => {
+  assert.match(source, /preflight = \[ordered\]@\{/);
+  assert.match(source, /ec11_fast_recording = \$preflightEc11FastRecording/);
+  assert.match(source, /connected_idle = \$preflightConnectedIdle/);
+  assert.match(source, /type_heartbeat = \$preflightTypeHeartbeat/);
+  assert.match(source, /status = if \(\$preflightInstalledType -and \$preflightEc11FastRecording -and \$preflightConnectedIdle -and \$preflightTypeHeartbeat\) \{ "PASS" \} else \{ "NO_GO" \}/);
+});
+
 test("operator prompt is the canonical Chinese action gate", () => {
   assert.match(source, /"operator-prompt"/);
   assert.match(source, /"-ReviewStyle"/);

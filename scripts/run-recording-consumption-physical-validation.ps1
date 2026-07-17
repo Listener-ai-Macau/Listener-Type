@@ -71,6 +71,12 @@ $plan = [ordered]@{
     prompt_result = $promptResult
     machine_check = $machineCheck
     preflight_power_log = $powerLog
+    preflight = [ordered]@{
+        installed_type_path = $installedType
+        ec11_fast_recording = "runtime"
+        connected_idle = "runtime"
+        type_heartbeat = "runtime"
+    }
 }
 
 if ($DryRun.IsPresent) {
@@ -94,6 +100,11 @@ if ($null -eq $typeProcess) {
     throw "Installed Listener Type process is not running from $installedType"
 }
 
+$preflightInstalledType = $true
+$preflightEc11FastRecording = $false
+$preflightConnectedIdle = $false
+$preflightTypeHeartbeat = $false
+
 $mutex = New-Object System.Threading.Mutex($false, "Global\Listener_COM3")
 $hasMutex = $false
 $captureProcess = $null
@@ -115,18 +126,21 @@ try {
     if ($statusText -notmatch "ec11_fast_recording=1") {
         throw "Preflight failed: ec11_fast_recording=1 was not found in device status"
     }
+    $preflightEc11FastRecording = $true
 
     pwsh -NoProfile -File $sendSerial -Port $Port -Command "~POWER:STATUS" -CommandReadMs 2500 -OutputPath $powerLog
     $powerText = Get-Content -Raw -LiteralPath $powerLog
     if ($powerText -notmatch "state=CONNECTED_IDLE") {
         throw "Preflight failed: state=CONNECTED_IDLE was not found in power status"
     }
+    $preflightConnectedIdle = $true
 
     pwsh -NoProfile -File $sendSerial -Port $Port -CaptureSeconds 12 -OutputPath $readyLog
     $readyText = Get-Content -Raw -LiteralPath $readyLog
     if ($readyText -notmatch "TYPE:HB") {
         throw "Preflight failed: TYPE:HB evidence was not present"
     }
+    $preflightTypeHeartbeat = $true
 
     $captureStartTimeUtc = (Get-Date).ToUniversalTime()
     $captureStartIso = $captureStartTimeUtc.ToString("o")
@@ -218,6 +232,13 @@ $result = [ordered]@{
     artifact_dir = $artifactDir
     installed_type_pid = $typeProcess.ProcessId
     installed_type_path = $typeProcess.ExecutablePath
+    preflight = [ordered]@{
+        status = if ($preflightInstalledType -and $preflightEc11FastRecording -and $preflightConnectedIdle -and $preflightTypeHeartbeat) { "PASS" } else { "NO_GO" }
+        installed_type = $preflightInstalledType
+        ec11_fast_recording = $preflightEc11FastRecording
+        connected_idle = $preflightConnectedIdle
+        type_heartbeat = $preflightTypeHeartbeat
+    }
     preflight_status_log = $statusLog
     preflight_power_log = $powerLog
     preflight_ready_log = $readyLog
