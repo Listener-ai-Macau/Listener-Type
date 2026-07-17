@@ -334,9 +334,13 @@ for (const scriptName of [
 ]) {
   const ec11SpeedGate = readFileSync(join(repoRoot, "scripts", scriptName), "utf8");
   for (const token of [
+    "MaxDoubleClickToAdvertisingAcceptedMs = 250",
+    "MaxConnectionToEncryptionMs = 1200",
+    "MaxFreshPairingToTypeReadyMs = 6000",
     "MaxTriggerToTypeReadyMs = 10000",
     "firmware_generated_ec11_double_after_debounce",
     "physical_gpio_measurement = $false",
+    "pre_authorization_ack_before_double_click",
   ]) {
     if (!ec11SpeedGate.includes(token)) {
       fail("EC11 Type recovery speed gate " + scriptName + " must keep token: " + token);
@@ -348,9 +352,12 @@ const ec11SingleSampleGate = readFileSync(
   "utf8",
 );
 for (const token of [
-  "type recovery notice sent before EC11 pairing reset",
-  "received EC11 hardware recovery notice before pairing reset",
-  "TYPE:READY",
+    "type recovery notice sent before EC11 pairing reset",
+    "received EC11 hardware recovery notice; retaining the GATT session until the firmware disconnect completes",
+    "type recovery pre-authorization requested during EC11 double-click window",
+    "received EC11 recovery pre-authorization during the double-click window",
+    "pre_authorization_ack_before_double_click",
+    "TYPE:READY",
   "The installed Program Files Listener Type process is not running",
 ]) {
   if (!ec11SingleSampleGate.includes(token)) {
@@ -396,7 +403,9 @@ const asrLatencyGate = readFileSync(
 for (const token of [
   "const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);",
   "final transcript coverage incomplete after full provider timeout",
-  "if authoritative_two_pass && current_key != candidate_key",
+  "provider_preview_change(slot.as_deref(), &preview)",
+  "current.is_some_and(|value| value.trim() == candidate)",
+  "Provider preview replacement must not reintroduce heuristic text suppression",
   "EMBEDDED_AUDIO_TRIM_PAD_SILENCE_MS",
   "LOW_LATENCY_PREVIEW_ENDPOINT",
   "VolcenginePreviewSidecar",

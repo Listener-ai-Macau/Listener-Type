@@ -11,6 +11,10 @@ param(
     [int]$MaxConnectionToEncryptionMs = 1200,
     [ValidateRange(1, 60000)]
     [int]$MaxFreshPairingToTypeReadyMs = 6000,
+    [ValidateRange(1, 60000)]
+    [int]$MaxTriggerToTypeReadyMs = 10000,
+    [ValidateRange(1, 60000)]
+    [int]$MaxTypeRecoveryAckMs = 80,
     [ValidateRange(0, 15000)]
     [int]$MinPhaseDelayMs = 600,
     [ValidateRange(1, 20000)]
@@ -54,7 +58,7 @@ for ($iteration = 1; $iteration -le $Iterations; $iteration += 1) {
         if (-not $lockAcquired) {
             throw "Timed out waiting for Global\Listener_$Port"
         }
-        $lockOutput = & pwsh -NoProfile -File $singleSampleScript -Port $Port -CaptureSeconds $CaptureSeconds -MaxDoubleClickToAdvertisingAcceptedMs $MaxDoubleClickToAdvertisingAcceptedMs -MaxConnectionToEncryptionMs $MaxConnectionToEncryptionMs -MaxFreshPairingToTypeReadyMs $MaxFreshPairingToTypeReadyMs -OutputJson $samplePath 2>&1
+        $lockOutput = & pwsh -NoProfile -File $singleSampleScript -Port $Port -CaptureSeconds $CaptureSeconds -MaxDoubleClickToAdvertisingAcceptedMs $MaxDoubleClickToAdvertisingAcceptedMs -MaxConnectionToEncryptionMs $MaxConnectionToEncryptionMs -MaxFreshPairingToTypeReadyMs $MaxFreshPairingToTypeReadyMs -MaxTriggerToTypeReadyMs $MaxTriggerToTypeReadyMs -MaxTypeRecoveryAckMs $MaxTypeRecoveryAckMs -OutputJson $samplePath 2>&1
         $lockExitCode = $LASTEXITCODE
     } finally {
         if ($lockAcquired) {
@@ -80,13 +84,21 @@ for ($iteration = 1; $iteration -le $Iterations; $iteration += 1) {
         advertising_command_accepted_ms = $sample.advertising_command_accepted_ms
         connection_to_encryption_ms = $sample.connection_to_encryption_ms
         fresh_pairing_to_type_ready_ms = $sample.fresh_pairing_to_type_ready_ms
+        trigger_to_type_ready_ms = $sample.trigger_to_type_ready_ms
         trigger_to_type_ready_ms_informational = $sample.trigger_to_type_ready_ms_informational
         firmware_pre_reset_notice_sent = $sample.firmware_pre_reset_notice_sent
+        firmware_pre_reset_ack_received = $sample.firmware_pre_reset_ack_received
         type_pre_reset_notice_observed = $sample.type_pre_reset_notice_observed
+        type_pre_reset_acknowledgement_queued = $sample.type_pre_reset_acknowledgement_queued
+        type_recovery_notice_to_ack_ms = $sample.type_recovery_notice_to_ack_ms
+        pre_authorization_ack_before_double_click = $sample.pre_authorization_ack_before_double_click
+        pre_authorization_consumed_before_pairing_reset = $sample.pre_authorization_consumed_before_pairing_reset
         failure_reasons = @($sample.failure_reasons)
     }
 
-    if ($lockExitCode -ne 0 -or $sample.status -ne "PASS") {
+    if ($lockExitCode -ne 0 -or $sample.status -ne "PASS" -or
+        $sample.pre_authorization_ack_before_double_click -ne $true -or
+        $sample.pre_authorization_consumed_before_pairing_reset -ne $true) {
         $runFailed = $true
         break
     }
@@ -95,6 +107,7 @@ for ($iteration = 1; $iteration -le $Iterations; $iteration += 1) {
 $advertisingDurations = @($results | Where-Object { $null -ne $_.advertising_command_accepted_ms } | ForEach-Object { [int]$_.advertising_command_accepted_ms })
 $encryptionDurations = @($results | Where-Object { $null -ne $_.connection_to_encryption_ms } | ForEach-Object { [int]$_.connection_to_encryption_ms })
 $typeReadyDurations = @($results | Where-Object { $null -ne $_.fresh_pairing_to_type_ready_ms } | ForEach-Object { [int]$_.fresh_pairing_to_type_ready_ms })
+$totalDurations = @($results | Where-Object { $null -ne $_.trigger_to_type_ready_ms } | ForEach-Object { [int]$_.trigger_to_type_ready_ms })
 $summary = [ordered]@{
     status = if (-not $runFailed -and $results.Count -eq $Iterations) { "PASS" } else { "FAIL" }
     measurement_scope = "randomized-phase machine gate: generated EC11 double-click recovery with independent advertising, encryption, and TYPE:READY stages"
@@ -105,10 +118,19 @@ $summary = [ordered]@{
     max_double_click_to_advertising_accepted_ms = $MaxDoubleClickToAdvertisingAcceptedMs
     max_connection_to_encryption_ms = $MaxConnectionToEncryptionMs
     max_fresh_pairing_to_type_ready_ms = $MaxFreshPairingToTypeReadyMs
+    max_trigger_to_type_ready_ms = $MaxTriggerToTypeReadyMs
+    max_type_recovery_ack_ms = $MaxTypeRecoveryAckMs
     observed_max_advertising_command_accepted_ms = if ($advertisingDurations.Count -gt 0) { ($advertisingDurations | Measure-Object -Maximum).Maximum } else { $null }
     observed_max_connection_to_encryption_ms = if ($encryptionDurations.Count -gt 0) { ($encryptionDurations | Measure-Object -Maximum).Maximum } else { $null }
     observed_max_fresh_pairing_to_type_ready_ms = if ($typeReadyDurations.Count -gt 0) { ($typeReadyDurations | Measure-Object -Maximum).Maximum } else { $null }
+    observed_max_trigger_to_type_ready_ms = if ($totalDurations.Count -gt 0) { ($totalDurations | Measure-Object -Maximum).Maximum } else { $null }
     type_controlled_samples_require_pre_reset_notice = $true
+    type_controlled_samples_require_pre_authorization_before_double_click =
+        $results.Count -eq $Iterations -and
+        @($results | Where-Object { $_.pre_authorization_ack_before_double_click -ne $true }).Count -eq 0
+    type_controlled_samples_require_pre_authorization_consumed_before_pairing_reset =
+        $results.Count -eq $Iterations -and
+        @($results | Where-Object { $_.pre_authorization_consumed_before_pairing_reset -ne $true }).Count -eq 0
     samples = @($results)
 }
 Write-RunSummary $summary

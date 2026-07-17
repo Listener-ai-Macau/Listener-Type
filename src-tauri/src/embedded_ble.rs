@@ -527,6 +527,13 @@ fn crc32(bytes: &[u8]) -> u32 {
 }
 
 const EC11_HARDWARE_RECOVERY_NOTICE: &[u8] = b"listener-ec11-recovery-v1";
+const EC11_HARDWARE_RECOVERY_ACK: &[u8] = b"TYPE:EC11:RECOVERY:ACK\n";
+const EC11_HARDWARE_RECOVERY_PREPARE_NOTICE: &[u8] = b"listener-ec11-recovery-prepare-v1";
+const EC11_HARDWARE_RECOVERY_PREPARE_ACK: &[u8] = b"TYPE:EC11:RECOVERY:PREPARE:ACK\n";
+
+fn is_ec11_hardware_recovery_prepare_notice(notification: &[u8]) -> bool {
+    notification == EC11_HARDWARE_RECOVERY_PREPARE_NOTICE
+}
 
 fn is_ec11_hardware_recovery_notice(notification: &[u8]) -> bool {
     notification == EC11_HARDWARE_RECOVERY_NOTICE
@@ -679,6 +686,8 @@ mod windows_ble {
         Duration::from_millis(1500),
     ];
     const ACTIVE_CAPTURE_LINK_RECOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+    const EC11_HARDWARE_RECOVERY_ACK_WRITE_TIMEOUT: Duration = Duration::from_millis(16);
+    const EC11_HARDWARE_RECOVERY_PREPARE_TIMEOUT: Duration = Duration::from_millis(1500);
     const EC11_HARDWARE_RECOVERY_DISCONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
     const DIAGNOSTIC_PULL_CANDIDATE_DELAY: Duration = Duration::from_millis(350);
     const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -6696,6 +6705,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let mut stop_drain_deadline: Option<Instant> = None;
         let mut link_recovery_deadline: Option<Instant> = None;
         let mut link_recovery_reason: Option<String> = None;
+        let mut ec11_recovery_prepare_disconnect_deadline: Option<Instant> = None;
         let mut ec11_recovery_disconnect_deadline: Option<Instant> = None;
         let mut consecutive_type_heartbeat_failures = 0u32;
         loop {
@@ -6801,6 +6811,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 cleanup.disable_notify();
                 return Err(message);
             }
+            if ec11_recovery_prepare_disconnect_deadline
+                .is_some_and(|prepare_deadline| now >= prepare_deadline)
+            {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: EC11 recovery pre-authorization expired without a firmware disconnect"
+                );
+                ec11_recovery_prepare_disconnect_deadline = None;
+            }
             if ec11_recovery_disconnect_deadline
                 .is_some_and(|disconnect_deadline| now >= disconnect_deadline)
             {
@@ -6817,6 +6835,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 stop_drain_deadline,
                 deadline,
                 link_recovery_deadline,
+                ec11_recovery_prepare_disconnect_deadline,
                 ec11_recovery_disconnect_deadline,
             ]
             .into_iter()
@@ -6898,6 +6917,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                             "Listener EC11 hardware recovery notice received before pairing reset; Type observed the firmware disconnect and must scan the matching recovery advertisement and run automatic PairAsync recovery".to_string(),
                         );
                     }
+                    if ec11_recovery_prepare_disconnect_deadline.take().is_some() {
+                        log::info!(
+                            "[embedded-ble] capture #{capture_id}: firmware disconnect observed during EC11 pre-authorized double-click window; recovery remains gated on matching advertising"
+                        );
+                        cleanup.defer_type_heartbeat_bye_until_processing_done();
+                        cleanup.finish(NotifyCccdTeardown::LeaveEnabled);
+                        return Err(
+                            "Listener EC11 hardware recovery notice received before pairing reset via pre-authorization; Type must scan the matching recovery advertisement before automatic PairAsync recovery".to_string(),
+                        );
+                    }
                     if collector_has_active_recoverable_session(&collector) {
                         if let Some(recovery_error) =
                             active_capture_disconnect_recovery_pairing_error(&reason)
@@ -6934,9 +6963,35 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     return Err(reason);
                 }
             };
+            if super::is_ec11_hardware_recovery_prepare_notice(&notification) {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: received EC11 recovery pre-authorization during the double-click window"
+                );
+                if let Err(err) = cleanup.write_ec11_recovery_prepare_acknowledgement() {
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: EC11 recovery pre-authorization acknowledgement was not queued: {err}"
+                    );
+                    continue;
+                }
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: EC11 recovery pre-authorization acknowledgement queued via active GATT control"
+                );
+                ec11_recovery_prepare_disconnect_deadline =
+                    Some(Instant::now() + EC11_HARDWARE_RECOVERY_PREPARE_TIMEOUT);
+                continue;
+            }
             if super::is_ec11_hardware_recovery_notice(&notification) {
                 log::warn!(
                     "[embedded-ble] capture #{capture_id}: received EC11 hardware recovery notice; retaining the GATT session until the firmware disconnect completes"
+                );
+                if let Err(err) = cleanup.write_ec11_recovery_acknowledgement() {
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: EC11 recovery notice acknowledgement was not queued; retaining the existing GATT session without PairAsync authorization: {err}"
+                    );
+                    continue;
+                }
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: EC11 recovery acknowledgement queued via active GATT control"
                 );
                 cleanup.defer_type_heartbeat_bye_until_processing_done();
                 ec11_recovery_disconnect_deadline =
@@ -13256,6 +13311,30 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             }
         }
 
+        fn write_ec11_recovery_acknowledgement(&self) -> Result<(), String> {
+            let Some(control) = self.target.control.as_ref() else {
+                return Err("audio control unavailable".to_string());
+            };
+            write_audio_control_value_with_timeout(
+                control,
+                super::EC11_HARDWARE_RECOVERY_ACK,
+                EC11_HARDWARE_RECOVERY_ACK_WRITE_TIMEOUT,
+                "EC11 recovery acknowledgement",
+            )
+        }
+
+        fn write_ec11_recovery_prepare_acknowledgement(&self) -> Result<(), String> {
+            let Some(control) = self.target.control.as_ref() else {
+                return Err("audio control unavailable".to_string());
+            };
+            write_audio_control_value_with_timeout(
+                control,
+                super::EC11_HARDWARE_RECOVERY_PREPARE_ACK,
+                EC11_HARDWARE_RECOVERY_ACK_WRITE_TIMEOUT,
+                "EC11 recovery pre-authorization acknowledgement",
+            )
+        }
+
         fn disable_notify(&mut self) {
             self.finish(NotifyCccdTeardown::Disable);
         }
@@ -13486,7 +13565,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     fn audio_control_write_policy(bytes: &[u8]) -> AudioControlWritePolicy {
-        if bytes == b"VREC:TOGGLE\n" || bytes == b"VREC:STOP\n" {
+        if bytes == b"VREC:TOGGLE\n"
+            || bytes == b"VREC:STOP\n"
+            || bytes == super::EC11_HARDWARE_RECOVERY_ACK
+            || bytes == super::EC11_HARDWARE_RECOVERY_PREPARE_ACK
+        {
             AudioControlWritePolicy::LowLatency
         } else {
             AudioControlWritePolicy::Reliable
@@ -16603,10 +16686,99 @@ mod tests {
 
     #[test]
     fn ec11_hardware_recovery_notice_is_not_audio_terminal() {
+        assert!(is_ec11_hardware_recovery_prepare_notice(
+            b"listener-ec11-recovery-prepare-v1"
+        ));
         assert!(is_ec11_hardware_recovery_notice(
             b"listener-ec11-recovery-v1"
         ));
+        assert_eq!(EC11_HARDWARE_RECOVERY_ACK, b"TYPE:EC11:RECOVERY:ACK\n");
+        assert_eq!(
+            EC11_HARDWARE_RECOVERY_PREPARE_ACK,
+            b"TYPE:EC11:RECOVERY:PREPARE:ACK\n"
+        );
+        assert!(!is_terminal_notification(
+            b"listener-ec11-recovery-prepare-v1"
+        ));
         assert!(!is_terminal_notification(b"listener-ec11-recovery-v1"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn ec11_recovery_pre_authorization_is_reversible_until_the_firmware_disconnects() {
+        let source = include_str!("embedded_ble.rs");
+        let prepare_start = source
+            .find("if super::is_ec11_hardware_recovery_prepare_notice(&notification) {")
+            .expect("EC11 recovery pre-authorization branch should exist");
+        let final_notice_start = source[prepare_start..]
+            .find("if super::is_ec11_hardware_recovery_notice(&notification) {")
+            .map(|offset| prepare_start + offset)
+            .expect("final EC11 recovery branch should follow pre-authorization");
+        let prepare = &source[prepare_start..final_notice_start];
+        assert!(
+            prepare.contains("write_ec11_recovery_prepare_acknowledgement()")
+                && prepare.contains("EC11_HARDWARE_RECOVERY_PREPARE_TIMEOUT"),
+            "the first click must only establish a bounded active-GATT pre-authorization"
+        );
+        assert!(
+            source
+                .contains("EC11 recovery pre-authorization expired without a firmware disconnect"),
+            "a single click or long press must let the pre-authorization expire silently"
+        );
+        assert!(
+            source.contains("firmware disconnect observed during EC11 pre-authorized double-click window"),
+            "only the subsequent firmware disconnect may enter the existing recovery advertising arbitration"
+        );
+        assert!(
+            source.contains("|| bytes == super::EC11_HARDWARE_RECOVERY_PREPARE_ACK"),
+            "the pre-authorization acknowledgement must keep the low-latency active-control write policy"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn ec11_hardware_recovery_notice_requires_active_gatt_ack_before_pairasync_authorization() {
+        let source = include_str!("embedded_ble.rs");
+        let notice_start = source
+            .find("if super::is_ec11_hardware_recovery_notice(&notification) {")
+            .expect("EC11 recovery notice branch should exist");
+        let notice_end = source[notice_start..]
+            .find("let terminal = super::is_terminal_notification")
+            .map(|offset| notice_start + offset)
+            .expect("EC11 recovery notice branch boundary should exist");
+        let notice = &source[notice_start..notice_end];
+        let ack_index = notice
+            .find("cleanup.write_ec11_recovery_acknowledgement()")
+            .expect("EC11 recovery must acknowledge the current active GATT session");
+        let deadline_index = notice
+            .find("ec11_recovery_disconnect_deadline")
+            .expect("only an acknowledged notice may authorize PairAsync after disconnect");
+        assert!(
+            ack_index < deadline_index,
+            "EC11 recovery must write its active-session acknowledgement before allowing the disconnect-driven PairAsync path"
+        );
+        assert!(
+            notice.contains("EC11 recovery acknowledgement queued via active GATT control"),
+            "EC11 recovery acknowledgement must leave installed-Type log evidence before PairAsync authorization"
+        );
+
+        let ack_start = source
+            .find("fn write_ec11_recovery_acknowledgement(&self)")
+            .expect("EC11 acknowledgement helper should exist");
+        let ack_end = source[ack_start..]
+            .find("fn disable_notify(&mut self)")
+            .map(|offset| ack_start + offset)
+            .expect("EC11 acknowledgement helper boundary should exist");
+        let ack = &source[ack_start..ack_end];
+        assert!(
+            ack.contains("super::EC11_HARDWARE_RECOVERY_ACK")
+                && ack.contains("EC11_HARDWARE_RECOVERY_ACK_WRITE_TIMEOUT"),
+            "EC11 acknowledgement must be an explicit bounded active-GATT control write"
+        );
+        assert!(
+            source.contains("|| bytes == super::EC11_HARDWARE_RECOVERY_ACK"),
+            "EC11 acknowledgement must keep the low-latency active-control write policy"
+        );
     }
 
     #[cfg(target_os = "windows")]

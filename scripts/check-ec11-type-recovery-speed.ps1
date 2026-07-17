@@ -9,6 +9,10 @@ param(
     [int]$MaxConnectionToEncryptionMs = 1200,
     [ValidateRange(1, 60000)]
     [int]$MaxFreshPairingToTypeReadyMs = 6000,
+    [ValidateRange(1, 60000)]
+    [int]$MaxTriggerToTypeReadyMs = 10000,
+    [ValidateRange(1, 60000)]
+    [int]$MaxTypeRecoveryAckMs = 80,
     [string]$OutputJson = ""
 )
 
@@ -98,8 +102,57 @@ if ($triggerIndex -ge 0) {
     }
 }
 
+$prepareIndex = -1
+for ($index = 0; $index -lt $lines.Count; $index += 1) {
+    if ($lines[$index] -match "type recovery pre-authorization requested during EC11 double-click window") {
+        $prepareIndex = $index
+        break
+    }
+}
+
+$prepareAckIndex = -1
+if ($prepareIndex -ge 0) {
+    for ($index = $prepareIndex + 1; $index -lt $lines.Count; $index += 1) {
+        if ($lines[$index] -match "type recovery pre-authorization received: conn=") {
+            $prepareAckIndex = $index
+            break
+        }
+    }
+}
+
+$prepareConsumedIndex = -1
+if ($triggerIndex -ge 0) {
+    for ($index = $triggerIndex + 1; $index -lt $lines.Count; $index += 1) {
+        if ($lines[$index] -match "type recovery pre-authorization consumed before EC11 pairing reset") {
+            $prepareConsumedIndex = $index
+            break
+        }
+    }
+}
+
+$ackIndex = -1
+if ($triggerIndex -ge 0) {
+    for ($index = $triggerIndex + 1; $index -lt $lines.Count; $index += 1) {
+        if ($lines[$index] -match "type recovery acknowledgement received: conn=") {
+            $ackIndex = $index
+            break
+        }
+    }
+}
+
 $triggerUptimeMs = if ($triggerIndex -ge 0) { Get-FirmwareUptimeMs $lines[$triggerIndex] } else { $null }
+$prepareUptimeMs = if ($prepareIndex -ge 0) { Get-FirmwareUptimeMs $lines[$prepareIndex] } else { $null }
+$prepareAckUptimeMs = if ($prepareAckIndex -ge 0) { Get-FirmwareUptimeMs $lines[$prepareAckIndex] } else { $null }
+$noticeUptimeMs = if ($noticeIndex -ge 0) { Get-FirmwareUptimeMs $lines[$noticeIndex] } else { $null }
+$ackUptimeMs = if ($ackIndex -ge 0) { Get-FirmwareUptimeMs $lines[$ackIndex] } else { $null }
 $typeReadyUptimeMs = if ($typeReadyIndex -ge 0) { Get-FirmwareUptimeMs $lines[$typeReadyIndex] } else { $null }
+$noticeToAckMs = if ($null -ne $prepareUptimeMs -and $null -ne $prepareAckUptimeMs) {
+    $prepareAckUptimeMs - $prepareUptimeMs
+} elseif ($null -ne $noticeUptimeMs -and $null -ne $ackUptimeMs) {
+    $ackUptimeMs - $noticeUptimeMs
+} else {
+    $null
+}
 $triggerToTypeReadyMs = if ($null -ne $triggerUptimeMs -and $null -ne $typeReadyUptimeMs) {
     $typeReadyUptimeMs - $triggerUptimeMs
 } else {
@@ -160,6 +213,12 @@ if (Test-Path -LiteralPath $typeLogPath) {
     }
 }
 $typeObservedNotice = $newTypeLog.Contains("received EC11 hardware recovery notice; retaining the GATT session until the firmware disconnect completes")
+$typeObservedAcknowledgement = $newTypeLog.Contains("EC11 recovery acknowledgement queued via active GATT control")
+$typeObservedPrepare = $newTypeLog.Contains("received EC11 recovery pre-authorization during the double-click window")
+$typeObservedPrepareAcknowledgement = $newTypeLog.Contains("EC11 recovery pre-authorization acknowledgement queued via active GATT control")
+$typeObservedPreparedDisconnect = $newTypeLog.Contains("firmware disconnect observed during EC11 pre-authorized double-click window")
+$usesPreAuthorization = $prepareIndex -ge 0 -and $prepareAckIndex -ge 0 -and $prepareConsumedIndex -ge 0
+$usesLegacyAuthorization = $noticeIndex -ge 0 -and $ackIndex -ge 0
 
 $failures = @()
 if ($triggerIndex -lt 0) { $failures += "missing firmware EC11 recovery double-click trigger" }
@@ -170,8 +229,28 @@ elseif ($connectionToEncryptionMs -gt $MaxConnectionToEncryptionMs) { $failures 
 if ($null -eq $freshPairingToTypeReadyMs) { $failures += "missing fresh pairing evidence to TYPE:READY timing" }
 elseif ($freshPairingToTypeReadyMs -gt $MaxFreshPairingToTypeReadyMs) { $failures += "fresh pairing evidence to TYPE:READY was $freshPairingToTypeReadyMs ms, above $MaxFreshPairingToTypeReadyMs ms" }
 if ($typeReadyIndex -lt 0) { $failures += "missing firmware TYPE:READY after recovery trigger" }
-if ($typeControlledRecovery -and $noticeIndex -lt 0) { $failures += "missing firmware pre-reset EC11 recovery notice for Type-controlled recovery" }
-if ($typeControlledRecovery -and -not $typeObservedNotice) { $failures += "Type did not observe the pre-reset EC11 recovery notice in its new log bytes" }
+if ($null -eq $triggerToTypeReadyMs) { $failures += "missing parseable recovery trigger to TYPE:READY timing" }
+elseif ($triggerToTypeReadyMs -gt $MaxTriggerToTypeReadyMs) { $failures += "recovery trigger to TYPE:READY was $triggerToTypeReadyMs ms, above $MaxTriggerToTypeReadyMs ms" }
+if ($typeControlledRecovery -and -not $usesPreAuthorization -and -not $usesLegacyAuthorization) { $failures += "missing a complete Type recovery authorization handshake" }
+if ($typeControlledRecovery -and $usesPreAuthorization -and -not $typeObservedPrepare) { $failures += "Type did not observe the EC11 recovery pre-authorization in its new log bytes" }
+if ($typeControlledRecovery -and $usesPreAuthorization -and -not $typeObservedPrepareAcknowledgement) { $failures += "Type did not log that it queued the pre-authorization acknowledgement" }
+if ($typeControlledRecovery -and $usesPreAuthorization -and -not $typeObservedPreparedDisconnect) { $failures += "Type did not log the firmware disconnect during the pre-authorized recovery window" }
+if ($typeControlledRecovery -and $usesLegacyAuthorization -and -not $typeObservedNotice) { $failures += "Type did not observe the legacy pre-reset EC11 recovery notice in its new log bytes" }
+if ($typeControlledRecovery -and $usesLegacyAuthorization -and -not $typeObservedAcknowledgement) { $failures += "Type did not log that it queued the legacy active-GATT recovery acknowledgement" }
+$preAuthorizationAckBeforeDoubleClick =
+    $usesPreAuthorization -and
+    $null -ne $prepareAckUptimeMs -and
+    $null -ne $triggerUptimeMs -and
+    $prepareAckUptimeMs -lt $triggerUptimeMs
+if ($typeControlledRecovery -and $usesPreAuthorization -and -not $preAuthorizationAckBeforeDoubleClick) {
+    $failures += "EC11 recovery pre-authorization acknowledgement did not arrive before the double-click was accepted"
+}
+if ($typeControlledRecovery -and $usesLegacyAuthorization -and $null -eq $noticeToAckMs) {
+    $failures += "missing parseable legacy Type recovery notice-to-ack timing"
+}
+elseif ($typeControlledRecovery -and $usesLegacyAuthorization -and $noticeToAckMs -gt $MaxTypeRecoveryAckMs) {
+    $failures += "legacy Type recovery notice-to-ack was $noticeToAckMs ms, above $MaxTypeRecoveryAckMs ms"
+}
 
 $measurement = [ordered]@{
     status = if ($failures.Count -eq 0) { "PASS" } else { "FAIL" }
@@ -186,18 +265,31 @@ $measurement = [ordered]@{
     max_double_click_to_advertising_accepted_ms = $MaxDoubleClickToAdvertisingAcceptedMs
     max_connection_to_encryption_ms = $MaxConnectionToEncryptionMs
     max_fresh_pairing_to_type_ready_ms = $MaxFreshPairingToTypeReadyMs
+    max_trigger_to_type_ready_ms = $MaxTriggerToTypeReadyMs
+    max_type_recovery_ack_ms = $MaxTypeRecoveryAckMs
     trigger_uptime_ms = $triggerUptimeMs
+    pre_authorization_uptime_ms = $prepareUptimeMs
+    pre_authorization_acknowledgement_uptime_ms = $prepareAckUptimeMs
+    notice_uptime_ms = $noticeUptimeMs
+    acknowledgement_uptime_ms = $ackUptimeMs
     advertising_command_accepted_ms = $advertisingCommandAcceptedMs
     connection_uptime_ms = $connectionUptimeMs
     encryption_uptime_ms = $encryptionUptimeMs
     type_ready_uptime_ms = $typeReadyUptimeMs
     connection_to_encryption_ms = $connectionToEncryptionMs
     fresh_pairing_to_type_ready_ms = $freshPairingToTypeReadyMs
+    trigger_to_type_ready_ms = $triggerToTypeReadyMs
     trigger_to_type_ready_ms_informational = $triggerToTypeReadyMs
+    type_recovery_notice_to_ack_ms = $noticeToAckMs
+    recovery_authorization_mode = if ($usesPreAuthorization) { "pre_authorized_double_click_window" } elseif ($usesLegacyAuthorization) { "legacy_post_double_click" } else { "missing" }
+    pre_authorization_ack_before_double_click = $preAuthorizationAckBeforeDoubleClick
     encryption_failure_statuses_before_success = @($failedEncryptionStatuses)
     type_controlled_recovery = $typeControlledRecovery
-    firmware_pre_reset_notice_sent = ($noticeIndex -ge 0)
-    type_pre_reset_notice_observed = $typeObservedNotice
+    firmware_pre_reset_notice_sent = $usesPreAuthorization -or ($noticeIndex -ge 0)
+    firmware_pre_reset_ack_received = $usesPreAuthorization -or ($ackIndex -ge 0)
+    type_pre_reset_notice_observed = $typeObservedPrepare -or $typeObservedNotice
+    type_pre_reset_acknowledgement_queued = $typeObservedPrepareAcknowledgement -or $typeObservedAcknowledgement
+    pre_authorization_consumed_before_pairing_reset = ($prepareConsumedIndex -ge 0)
     failure_reasons = @($failures)
 }
 Write-Measurement $measurement
