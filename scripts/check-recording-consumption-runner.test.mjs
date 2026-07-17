@@ -37,9 +37,13 @@ test("formal serial capture does not pass CommandReadMs", () => {
   assert.doesNotMatch(formalCapture, /-CommandReadMs/);
 });
 
-test("preflight may use CommandReadMs only for device status", () => {
+test("preflight may use CommandReadMs only for explicit status queries", () => {
   assert.match(source, /-Command "~DEVICE:STATUS" -CommandReadMs 1800 -OutputPath \$statusLog/);
+  assert.match(source, /-Command "~POWER:STATUS" -CommandReadMs 2500 -OutputPath \$powerLog/);
+  assert.match(source, /state=CONNECTED_IDLE/);
   assert.match(source, /-CaptureSeconds 12 -OutputPath \$readyLog/);
+  assert.match(source, /TYPE:HB evidence was not present/);
+  assert.doesNotMatch(source, /TYPE:HB and connected_idle evidence were not both present/);
 });
 
 test("operator prompt is the canonical Chinese action gate", () => {

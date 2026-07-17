@@ -50,6 +50,7 @@ $captureStderr = Join-Path $artifactDir "$base.capture.stderr.log"
 $promptNote = Join-Path $artifactDir "$base.operator-note.txt"
 $promptResult = Join-Path $artifactDir "$base.operator-prompt.stdout.json"
 $statusLog = Join-Path $artifactDir "$base.preflight-device-status.log"
+$powerLog = Join-Path $artifactDir "$base.preflight-power-status.log"
 $readyLog = Join-Path $artifactDir "$base.preflight-ready.log"
 $machineCheck = Join-Path $artifactDir "$base.machine-check.json"
 $runnerResult = Join-Path $artifactDir "$base.runner-result.json"
@@ -69,6 +70,7 @@ $plan = [ordered]@{
     serial_log = $serialLog
     prompt_result = $promptResult
     machine_check = $machineCheck
+    preflight_power_log = $powerLog
 }
 
 if ($DryRun.IsPresent) {
@@ -114,10 +116,16 @@ try {
         throw "Preflight failed: ec11_fast_recording=1 was not found in device status"
     }
 
+    pwsh -NoProfile -File $sendSerial -Port $Port -Command "~POWER:STATUS" -CommandReadMs 2500 -OutputPath $powerLog
+    $powerText = Get-Content -Raw -LiteralPath $powerLog
+    if ($powerText -notmatch "state=CONNECTED_IDLE") {
+        throw "Preflight failed: state=CONNECTED_IDLE was not found in power status"
+    }
+
     pwsh -NoProfile -File $sendSerial -Port $Port -CaptureSeconds 12 -OutputPath $readyLog
     $readyText = Get-Content -Raw -LiteralPath $readyLog
-    if ($readyText -notmatch "TYPE:HB" -or $readyText -notmatch "connected_idle") {
-        throw "Preflight failed: TYPE:HB and connected_idle evidence were not both present"
+    if ($readyText -notmatch "TYPE:HB") {
+        throw "Preflight failed: TYPE:HB evidence was not present"
     }
 
     $captureStartTimeUtc = (Get-Date).ToUniversalTime()
@@ -211,6 +219,7 @@ $result = [ordered]@{
     installed_type_pid = $typeProcess.ProcessId
     installed_type_path = $typeProcess.ExecutablePath
     preflight_status_log = $statusLog
+    preflight_power_log = $powerLog
     preflight_ready_log = $readyLog
     capture_start_iso = $captureStartIso
     capture_end_iso = $captureEndIso
