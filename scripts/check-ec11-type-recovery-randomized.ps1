@@ -40,15 +40,6 @@ function Write-RunSummary {
 
 $typeRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $singleSampleScript = Join-Path $PSScriptRoot "check-ec11-type-recovery-speed.ps1"
-$workflowRoot = $env:AI_WORKFLOW_REPO
-if ([string]::IsNullOrWhiteSpace($workflowRoot) -or -not (Test-Path -LiteralPath (Join-Path $workflowRoot "docs\\agent_quickstart.md"))) {
-    $workflowRoot = "C:\Users\Billy\Desktop\Denzic\ai-collaboration-workflow"
-}
-$aiwScript = Join-Path $workflowRoot "scripts\\aiw.ps1"
-if (-not (Test-Path -LiteralPath $aiwScript)) {
-    throw "Missing workflow lock command: $aiwScript"
-}
-
 $results = @()
 $runFailed = $false
 for ($iteration = 1; $iteration -le $Iterations; $iteration += 1) {
@@ -56,8 +47,21 @@ for ($iteration = 1; $iteration -le $Iterations; $iteration += 1) {
     Start-Sleep -Milliseconds $phaseDelayMs
 
     $samplePath = Join-Path (Split-Path -Parent $OutputJson) ("ec11-recovery-sample-{0:D2}.json" -f $iteration)
-    $lockOutput = & pwsh -NoProfile -File $aiwScript with-lock -Resource $Port -Wait -WaitTimeoutSeconds 120 -Purpose "randomized EC11 Type recovery speed sample $iteration of $Iterations" -Run pwsh -NoProfile -File $singleSampleScript -Port $Port -CaptureSeconds $CaptureSeconds -MaxDoubleClickToAdvertisingAcceptedMs $MaxDoubleClickToAdvertisingAcceptedMs -MaxConnectionToEncryptionMs $MaxConnectionToEncryptionMs -MaxFreshPairingToTypeReadyMs $MaxFreshPairingToTypeReadyMs -OutputJson $samplePath 2>&1
-    $lockExitCode = $LASTEXITCODE
+    $mutex = [System.Threading.Mutex]::new($false, "Global\Listener_$Port")
+    $lockAcquired = $false
+    try {
+        $lockAcquired = $mutex.WaitOne([TimeSpan]::FromSeconds(120))
+        if (-not $lockAcquired) {
+            throw "Timed out waiting for Global\Listener_$Port"
+        }
+        $lockOutput = & pwsh -NoProfile -File $singleSampleScript -Port $Port -CaptureSeconds $CaptureSeconds -MaxDoubleClickToAdvertisingAcceptedMs $MaxDoubleClickToAdvertisingAcceptedMs -MaxConnectionToEncryptionMs $MaxConnectionToEncryptionMs -MaxFreshPairingToTypeReadyMs $MaxFreshPairingToTypeReadyMs -OutputJson $samplePath 2>&1
+        $lockExitCode = $LASTEXITCODE
+    } finally {
+        if ($lockAcquired) {
+            $mutex.ReleaseMutex() | Out-Null
+        }
+        $mutex.Dispose()
+    }
 
     $sample = if (Test-Path -LiteralPath $samplePath) {
         Get-Content -LiteralPath $samplePath -Raw | ConvertFrom-Json
