@@ -6102,6 +6102,7 @@ pub async fn transfer_firmware_ota_ble(
             version
         ));
     }
+    crate::embedded_ble::request_listener_ota_post_confirm_notify_fast_retry();
     coord.refresh_embedded_ble_listener_after_firmware_ota();
     let type_ready_started = Instant::now();
     let type_ready = coord

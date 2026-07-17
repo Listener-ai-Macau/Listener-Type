@@ -679,6 +679,8 @@ mod windows_ble {
         Duration::from_millis(5000),
         Duration::from_millis(8000),
     ];
+    const NOTIFY_TARGET_OPEN_OTA_POST_CONFIRM_RETRY_DELAYS: [Duration; 2] =
+        [Duration::from_millis(250), Duration::from_millis(500)];
     const AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS: [Duration; 4] = [
         Duration::from_millis(150),
         Duration::from_millis(350),
@@ -799,6 +801,7 @@ mod windows_ble {
         Mutex<Option<RuntimeBluetoothTargetAddress>>,
     > = OnceLock::new();
     static NATIVE_WINDOWS_HID_PAIRING_VISIBLE: AtomicBool = AtomicBool::new(false);
+    static OTA_POST_CONFIRM_NOTIFY_TARGET_ADDRESS: OnceLock<Mutex<Option<u64>>> = OnceLock::new();
     static NATIVE_WINDOWS_HID_PAIRING_ADDRESSES: OnceLock<Mutex<Vec<u64>>> = OnceLock::new();
     static LAST_PAIRING_PROMPT: OnceLock<Mutex<Option<PairingPromptThrottleState>>> =
         OnceLock::new();
@@ -7435,6 +7438,23 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         )
     }
 
+    pub(super) fn request_listener_ota_post_confirm_notify_fast_retry() {
+        let Some(address) = runtime_bluetooth_target_address() else {
+            log::warn!(
+                "[embedded-ble] OTA post-confirm notify reopen has no verified current address; using normal recovery"
+            );
+            return;
+        };
+        let Ok(mut slot) = OTA_POST_CONFIRM_NOTIFY_TARGET_ADDRESS
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+        else {
+            log::warn!("[embedded-ble] OTA post-confirm notify target slot is poisoned");
+            return;
+        };
+        *slot = Some(address);
+    }
+
     pub(super) fn prepare_listener_ota_v1_transfer() -> Result<PreparedListenerOtaV1Transfer, String>
     {
         prepare_listener_ota_v1_transfer_impl(true)
@@ -8280,12 +8300,23 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     }
 
     fn open_notify_target_with_retry(capture_id: u64) -> Result<OpenNotifyTarget, String> {
+        let ota_post_confirm_address = take_listener_ota_post_confirm_notify_target_address();
+        let retry_delays = notify_target_open_retry_delays(ota_post_confirm_address.is_some());
+        if let Some(address) = ota_post_confirm_address {
+            log::info!(
+                "[embedded-ble] capture #{capture_id}: using verified post-confirm OTA notify target address={address:012X}"
+            );
+        }
         let mut last_error = None;
-        for attempt in 1..=NOTIFY_TARGET_OPEN_RETRY_DELAYS.len() + 1 {
+        for attempt in 1..=retry_delays.len() + 1 {
             if notify_capture_cancel_requested() {
                 return Err(notify_capture_cancelled_error("notify target open"));
             }
-            match open_notify_target() {
+            let opened = match ota_post_confirm_address {
+                Some(address) => open_notify_target_for_current_native_windows_hid(address),
+                None => open_notify_target(),
+            };
+            match opened {
                 Ok(target) => {
                     if attempt > 1 {
                         log::info!(
@@ -8298,12 +8329,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     if notify_capture_cancel_requested() {
                         return Err(err);
                     }
-                    if attempt > NOTIFY_TARGET_OPEN_RETRY_DELAYS.len()
-                        || !is_transient_notify_target_open_error(&err)
+                    if attempt > retry_delays.len() || !is_transient_notify_target_open_error(&err)
                     {
                         return Err(err);
                     }
-                    let delay = NOTIFY_TARGET_OPEN_RETRY_DELAYS[attempt - 1];
+                    let delay = retry_delays[attempt - 1];
                     log::warn!(
                         "[embedded-ble] capture #{capture_id}: notify target open attempt {attempt} failed: {err}; retrying in {} ms",
                         delay.as_millis()
@@ -8316,6 +8346,22 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Err(last_error.unwrap_or_else(|| {
             "No subscribable embedded audio BLE notify characteristic found".to_string()
         }))
+    }
+
+    fn notify_target_open_retry_delays(ota_post_confirm: bool) -> &'static [Duration] {
+        if ota_post_confirm {
+            &NOTIFY_TARGET_OPEN_OTA_POST_CONFIRM_RETRY_DELAYS
+        } else {
+            &NOTIFY_TARGET_OPEN_RETRY_DELAYS
+        }
+    }
+
+    fn take_listener_ota_post_confirm_notify_target_address() -> Option<u64> {
+        OTA_POST_CONFIRM_NOTIFY_TARGET_ADDRESS
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .ok()?
+            .take()
     }
 
     fn read_embedded_audio_status_from_service(
@@ -14910,6 +14956,34 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         #[test]
+        fn post_confirm_ota_notify_reopen_uses_bounded_retry_profile() {
+            assert_eq!(
+                notify_target_open_retry_delays(true),
+                &[Duration::from_millis(250), Duration::from_millis(500)]
+            );
+            assert_eq!(notify_target_open_retry_delays(false).len(), 7);
+        }
+
+        #[test]
+        fn post_confirm_ota_notify_reopen_uses_only_the_verified_current_address() {
+            let source = include_str!("embedded_ble.rs");
+            let retry_start = source
+                .find("fn open_notify_target_with_retry")
+                .expect("notify retry helper should exist");
+            let retry_end = source[retry_start..]
+                .find("fn notify_target_open_retry_delays")
+                .map(|offset| retry_start + offset)
+                .expect("notify retry helper boundary should exist");
+            let retry_body = &source[retry_start..retry_end];
+
+            assert!(retry_body.contains("take_listener_ota_post_confirm_notify_target_address()"));
+            assert!(retry_body.contains(
+                "Some(address) => open_notify_target_for_current_native_windows_hid(address)"
+            ));
+            assert!(retry_body.contains("None => open_notify_target()"));
+        }
+
+        #[test]
         fn persisted_notify_fast_path_validates_gatt_before_recovery_advertising() {
             let source = include_str!("embedded_ble.rs");
             let open_start = source
@@ -15852,6 +15926,14 @@ pub fn request_listener_ota_v1_active_link() -> Result<(), String> {
 pub fn request_listener_ota_v1_active_link() -> Result<(), String> {
     Ok(())
 }
+
+#[cfg(target_os = "windows")]
+pub fn request_listener_ota_post_confirm_notify_fast_retry() {
+    windows_ble::request_listener_ota_post_confirm_notify_fast_retry()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn request_listener_ota_post_confirm_notify_fast_retry() {}
 
 #[cfg(target_os = "windows")]
 pub fn transfer_listener_ota_v1(

@@ -922,6 +922,41 @@
               ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-cold-ready-contract-retest/post-ota-status.log"
             ]
           },
+          "current_machine_verified_target_pass_20260717": {
+            "status": "machine_pass_pending_final_human_acceptance",
+            "authorization": "Product-owner direction: 现在机器闭环验收; 先做. The owner also directed that no human acceptance popup be opened during this phase.",
+            "installed_type": "C:\\Program Files\\Listener Type\\listener-type.exe",
+            "installed_type_sha256": "61AD93B082EF8C5A4F43F48235123BEC3A2A95556AEACDE364A2B8838E401529",
+            "package": "current non-release staged listener-ota-1.0.2-20260717-155617 firmware_ota.bin=1360064 bytes, sha256=351b996e636bd4bbeb8ee6500d9a2d8697bc678fb01284acf8fd0b1d2de0424e",
+            "root_cause": "After version confirmation, the background notify reopen entered the normal Windows native-HID startup enumeration. That path probed the current verified Listener address and then two stale historical HID addresses, so each retry exceeded the post-OTA Type-ready window even though the OTA service confirmation was already successful.",
+            "minimal_root_repair": "The post-confirm handoff now captures the current in-memory verified Listener address once. Its bounded 250 ms and 500 ms retries reopen only that address through the uncached native-HID GATT path; all normal startup, pairing, ownership, and non-OTA recovery enumeration remains unchanged.",
+            "measured_stages_ms": {
+              "pretransfer_listener_ready": 0,
+              "ota_protocol_transfer": 73919,
+              "ota_protocol_transfer_rate_kb_per_s": 18.399383108537723,
+              "package_scaled_transfer_ceiling": 75560,
+              "transfer_orchestration": 781,
+              "package_integrity_and_command_bookkeeping": 174,
+              "firmware_ota_service_confirmation": 1911,
+              "type_ready": 2287,
+              "post_transfer_recovery": 4198,
+              "non_transfer_fixed_elapsed": 5153,
+              "non_transfer_fixed_ceiling": 7000,
+              "raw_total_trace_only": 79072,
+              "status_reads": 29,
+              "offset_recoveries": 0
+            },
+            "result": "PASS: the installed Program Files Type completed a real 1360064-byte denzic_ota_v1 BLE transfer, confirmed firmware 1.0.2 on the first probe, then logged the verified post-confirm target E0ED8490870D and restored Type notify/heartbeat. The package-size-scaled transfer and non-transfer fixed-time gates both pass. A short locked COM3 capture then proved running=ota_0, boot=ota_0, pending_verify=0, state=2, ready_mask=0x0000000f, audio_ready, ota_ready, diagnostic_ready, and TYPE:HB.",
+            "evidence": [
+              ".artifacts/ota-machine-20260717-155617/ota-cdp-transfer-post-fix-verified-target.json",
+              ".artifacts/ota-machine-20260717-155617/listener-type-after-ota-post-fix-verified-target.log",
+              ".artifacts/ota-machine-20260717-155617/ota-stage-metric-post-fix-verified-target.json",
+              ".artifacts/ota-machine-20260717-155617/post-ota-firmware-status-verified-target.log",
+              ".artifacts/ota-machine-20260717-155617/msi-install-verified-target.log"
+            ],
+            "root_cause_regression_guard": "cargo test post_confirm_ota_notify_reopen --lib and npm run check:ota-speed-log-contract must pass. The post-confirm path must keep the verified-address-only operation and the bounded retry profile; ordinary non-OTA notify recovery must continue through open_notify_target().",
+            "human_boundary": "This is machine evidence only. No operator prompt or foreground UI was opened; final Listener human acceptance remains a later separate boundary."
+          },
           "evidence": [
             ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-current/installed-ui-ota-transfer-result.json",
             ".cache/validation/listener-platform-accepted-behavior-audit-20260716/ota/machine-transfer-current/installed-type-ota-stage.log",
