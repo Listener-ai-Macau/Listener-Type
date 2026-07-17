@@ -6,6 +6,7 @@ param(
     [int]$CaptureWaitAfterPromptSeconds = 45,
     [int]$CaptureGraceSeconds = 20,
     [string]$OutputRoot = "",
+    [switch]$PreflightOnly,
     [switch]$DryRun
 )
 
@@ -66,6 +67,7 @@ $plan = [ordered]@{
     capture_seconds = $CaptureSeconds
     prompt_timeout_seconds = $PromptTimeoutSeconds
     capture_grace_seconds = $CaptureGraceSeconds
+    preflight_only = [bool]$PreflightOnly.IsPresent
     formal_capture_uses_command_read_ms = $false
     serial_log = $serialLog
     prompt_result = $promptResult
@@ -142,80 +144,84 @@ try {
     }
     $preflightTypeHeartbeat = $true
 
-    $captureStartTimeUtc = (Get-Date).ToUniversalTime()
-    $captureStartIso = $captureStartTimeUtc.ToString("o")
-    $captureProcess = Start-Process -FilePath "pwsh" -ArgumentList @(
-        "-NoProfile",
-        "-File",
-        $sendSerial,
-        "-Port",
-        $Port,
-        "-CaptureSeconds",
-        ([string]$CaptureSeconds),
-        "-OutputPath",
-        $serialLog
-    ) -WorkingDirectory $firmwareRoot -RedirectStandardOutput $captureStdout -RedirectStandardError $captureStderr -PassThru -WindowStyle Hidden
+    if ($PreflightOnly.IsPresent) {
+        $runStatus = "PREFLIGHT_PASS"
+    } else {
+        $captureStartTimeUtc = (Get-Date).ToUniversalTime()
+        $captureStartIso = $captureStartTimeUtc.ToString("o")
+        $captureProcess = Start-Process -FilePath "pwsh" -ArgumentList @(
+            "-NoProfile",
+            "-File",
+            $sendSerial,
+            "-Port",
+            $Port,
+            "-CaptureSeconds",
+            ([string]$CaptureSeconds),
+            "-OutputPath",
+            $serialLog
+        ) -WorkingDirectory $firmwareRoot -RedirectStandardOutput $captureStdout -RedirectStandardError $captureStderr -PassThru -WindowStyle Hidden
 
-    Start-Sleep -Milliseconds 800
-    $promptArgs = @(
-        "-NoProfile",
-        "-File",
-        $aiw,
-        "operator-prompt",
-        "-ReviewStyle",
-        "-Input",
-        "-Json",
-        "-Title",
-        "Listener 录音长语音验证",
-        "-ProgressText",
-        "1/1",
-        "-ScopeText",
-        "录音平台消费速度；窗口只记录动作完成，不代表机器 PASS",
-        "-Message",
-        "请现在操作 Listener 实物：1. 单按设备录音键开始录音；2. 按下方原文自然朗读 45-60 秒；3. 读完后再单按录音键停止；4. 等 Type 胶囊完成或显示结果后点击【已完成】。如果没有开始、断连、无法停止、文字为空，或你没来得及操作，请点【失败/中止】并写备注。",
-        "-ExpectedText",
-        "机器 PASS 需要串口和 Type 日志同时证明：真实物理 EC11 按键，45-60 秒真实语音，missing_packets=0，audio_sent 等于 expected_packet_count，queue/pool/audio failure 为 0，pool_high_water_pct <=20，mbuf/ENOMEM retry 各 <=1% audio_sent，且 ASR final 非空。",
-        "-SpokenText",
-        $spokenText,
-        "-Buttons",
-        "已完成,失败,中止",
-        "-OutputPath",
-        $promptNote,
-        "-Width",
-        "780",
-        "-Height",
-        "720",
-        "-TimeoutSeconds",
-        ([string]$PromptTimeoutSeconds)
-    )
-    $promptJson = & pwsh @promptArgs
-    $promptJson | Set-Content -LiteralPath $promptResult -Encoding UTF8
+        Start-Sleep -Milliseconds 800
+        $promptArgs = @(
+            "-NoProfile",
+            "-File",
+            $aiw,
+            "operator-prompt",
+            "-ReviewStyle",
+            "-Input",
+            "-Json",
+            "-Title",
+            "Listener 录音长语音验证",
+            "-ProgressText",
+            "1/1",
+            "-ScopeText",
+            "录音平台消费速度；窗口只记录动作完成，不代表机器 PASS",
+            "-Message",
+            "请现在操作 Listener 实物：1. 单按设备录音键开始录音；2. 按下方原文自然朗读 45-60 秒；3. 读完后再单按录音键停止；4. 等 Type 胶囊完成或显示结果后点击【已完成】。如果没有开始、断连、无法停止、文字为空，或你没来得及操作，请点【失败/中止】并写备注。",
+            "-ExpectedText",
+            "机器 PASS 需要串口和 Type 日志同时证明：真实物理 EC11 按键，45-60 秒真实语音，missing_packets=0，audio_sent 等于 expected_packet_count，queue/pool/audio failure 为 0，pool_high_water_pct <=20，mbuf/ENOMEM retry 各 <=1% audio_sent，且 ASR final 非空。",
+            "-SpokenText",
+            $spokenText,
+            "-Buttons",
+            "已完成,失败,中止",
+            "-OutputPath",
+            $promptNote,
+            "-Width",
+            "780",
+            "-Height",
+            "720",
+            "-TimeoutSeconds",
+            ([string]$PromptTimeoutSeconds)
+        )
+        $promptJson = & pwsh @promptArgs
+        $promptJson | Set-Content -LiteralPath $promptResult -Encoding UTF8
 
-    $captureDeadlineUtc = $captureStartTimeUtc.AddSeconds($CaptureSeconds + $CaptureGraceSeconds)
-    $minimumPostPromptWaitMs = [Math]::Max(1, $CaptureWaitAfterPromptSeconds) * 1000
-    $remainingCaptureMs = [int][Math]::Max(
-        1,
-        ($captureDeadlineUtc - (Get-Date).ToUniversalTime()).TotalMilliseconds)
-    $waitAfterPromptMs = [Math]::Max($minimumPostPromptWaitMs, $remainingCaptureMs)
-    if ($captureProcess -and -not $captureProcess.HasExited) {
-        [void]$captureProcess.WaitForExit($waitAfterPromptMs)
+        $captureDeadlineUtc = $captureStartTimeUtc.AddSeconds($CaptureSeconds + $CaptureGraceSeconds)
+        $minimumPostPromptWaitMs = [Math]::Max(1, $CaptureWaitAfterPromptSeconds) * 1000
+        $remainingCaptureMs = [int][Math]::Max(
+            1,
+            ($captureDeadlineUtc - (Get-Date).ToUniversalTime()).TotalMilliseconds)
+        $waitAfterPromptMs = [Math]::Max($minimumPostPromptWaitMs, $remainingCaptureMs)
+        if ($captureProcess -and -not $captureProcess.HasExited) {
+            [void]$captureProcess.WaitForExit($waitAfterPromptMs)
+        }
+        if ($captureProcess -and -not $captureProcess.HasExited) {
+            Stop-Process -Id $captureProcess.Id -Force
+            throw "serial capture did not exit before timeout"
+        }
+        $captureEndIso = (Get-Date).ToUniversalTime().ToString("o")
+
+        & node $checker `
+            --serial-log $serialLog `
+            --prompt-json $promptResult `
+            --type-log $typeLog `
+            --capsule-log $capsuleLog `
+            --capture-start-iso $captureStartIso `
+            --capture-end-iso $captureEndIso `
+            --output-json $machineCheck
+        $checkerExit = $LASTEXITCODE
+        $runStatus = if ($checkerExit -eq 0) { "PASS" } else { "NO_GO" }
     }
-    if ($captureProcess -and -not $captureProcess.HasExited) {
-        Stop-Process -Id $captureProcess.Id -Force
-        throw "serial capture did not exit before timeout"
-    }
-    $captureEndIso = (Get-Date).ToUniversalTime().ToString("o")
-
-    & node $checker `
-        --serial-log $serialLog `
-        --prompt-json $promptResult `
-        --type-log $typeLog `
-        --capsule-log $capsuleLog `
-        --capture-start-iso $captureStartIso `
-        --capture-end-iso $captureEndIso `
-        --output-json $machineCheck
-    $checkerExit = $LASTEXITCODE
-    $runStatus = if ($checkerExit -eq 0) { "PASS" } else { "NO_GO" }
 } catch {
     $errorText = $_.Exception.Message
     $runStatus = "NO_GO"
@@ -228,6 +234,7 @@ try {
 
 $result = [ordered]@{
     status = $runStatus
+    mode = if ($PreflightOnly.IsPresent) { "preflight_only" } else { "physical_recording" }
     error = $errorText
     artifact_dir = $artifactDir
     installed_type_pid = $typeProcess.ProcessId
@@ -252,4 +259,4 @@ $result = [ordered]@{
 }
 $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $runnerResult -Encoding UTF8
 Get-Content -Raw -LiteralPath $runnerResult
-exit $(if ($runStatus -eq "PASS") { 0 } else { 1 })
+exit $(if ($runStatus -eq "PASS" -or $runStatus -eq "PREFLIGHT_PASS") { 0 } else { 1 })

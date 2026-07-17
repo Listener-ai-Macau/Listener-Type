@@ -54,6 +54,18 @@ test("runner result records structured preflight facts separately from formal PA
   assert.match(source, /status = if \(\$preflightInstalledType -and \$preflightEc11FastRecording -and \$preflightConnectedIdle -and \$preflightTypeHeartbeat\) \{ "PASS" \} else \{ "NO_GO" \}/);
 });
 
+test("preflight-only mode exits before formal human capture", () => {
+  assert.match(source, /\[switch\]\$PreflightOnly/);
+  assert.match(source, /preflight_only = \[bool\]\$PreflightOnly\.IsPresent/);
+  assert.match(source, /\$runStatus = "PREFLIGHT_PASS"/);
+  const preflightIndex = source.indexOf("if ($PreflightOnly.IsPresent)");
+  const promptIndex = source.indexOf("$promptArgs = @(");
+  assert.ok(preflightIndex > 0, "missing PreflightOnly branch");
+  assert.ok(promptIndex > preflightIndex, "PreflightOnly branch must appear before operator prompt");
+  assert.match(source, /mode = if \(\$PreflightOnly\.IsPresent\) \{ "preflight_only" \} else \{ "physical_recording" \}/);
+  assert.match(source, /runStatus -eq "PASS" -or \$runStatus -eq "PREFLIGHT_PASS"/);
+});
+
 test("operator prompt is the canonical Chinese action gate", () => {
   assert.match(source, /"operator-prompt"/);
   assert.match(source, /"-ReviewStyle"/);
