@@ -151,9 +151,21 @@ def main() -> int:
     ):
         require_fragment(firmware_gap, "Firmware device control", fragment, failures)
 
+    warmup_advertising_acceptance = function_slice(
+        firmware_gap,
+        "static esp_err_t ble_hid_gap_start_type_recovery_warmup_advertising(void)",
+        "esp_err_t esp_hid_ble_gap_adv_start(void)",
+        "Firmware warm-up advertising acceptance",
+        failures,
+    )
+    if "ble_hid_gap_platform_device_control_complete_recovery" in warmup_advertising_acceptance:
+        failures.append(
+            "Firmware warm-up advertising acceptance: starting advertising must not complete recovery"
+        )
+
     advertising_acceptance = function_slice(
         firmware_gap,
-        "ble_hid_gap_log_ec11_recovery_timing(\"advertising_command_accepted\", false);",
+        "/* A zero return is NimBLE's successful advertising-start acceptance.",
         "s_last_adv_was_directed = false;",
         "Firmware advertising acceptance",
         failures,
