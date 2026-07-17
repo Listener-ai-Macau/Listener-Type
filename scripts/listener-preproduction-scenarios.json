@@ -554,6 +554,13 @@
       ],
       "current_machine_finding": "The generated EC11 sample now passes the device-controlled advertising gate: accepted double-click to termination request 42ms, confirmed disconnect 64ms, and connectable recovery advertising 241ms against the <=250ms target. The root repair preserves the Type pre-reset notice, retains Type GATT until firmware disconnect, wakes the async bond-delete worker before teardown, makes that worker the sole recovery advertising owner, and moves persistent structured diagnostics off the flash-writing critical path. Windows PnP reported listener/HID/GATT services OK and top-level window enumeration showed no pairing dialog. The generated command still is not a real EC11 physical press and therefore cannot close the physical timing gate.",
       "evidence": ".cache/validation/ble-platform-local-reattach-20260715/machine-ec11-recovery-critical-path-20260715.json; second-post-fast-path-generated-ec11-recovery-com3.log; C:\\Users\\Billy\\AppData\\Local\\Listener Type\\Logs\\listener-type.log",
+      "physical_capture_attempt_20260717": {
+        "status": "no_go_no_physical_input",
+        "preflight": "Listener-Type/.artifacts/bluetooth-machine-20260717/preflight.json",
+        "raw_capture": "Listener-Type/.artifacts/bluetooth-machine-20260717/physical-ec11-double-recovery-raw.log",
+        "result": "A 45-second short locked COM3 capture began from installed Program Files Type plus CONNECTED_IDLE, encrypted BLE, and Type heartbeat. It captured only heartbeat traffic and no physical EC11/recovery event. No behavior failure is inferred and no physical timing claim is made.",
+        "next_action": "Open a fresh short locked capture while the operator performs one real EC11 double-click."
+      },
       "next_action": "Preserve the <=250ms generated machine gate and collect one real physical EC11 double-click capture before accepting the physical metric. Keep the 500ms single/double boundary, long-press cancellation, cross-host ownership window, and no-reclaim Type behavior unchanged.",
       "current_audit_followup_20260716": {
         "status": "required",
