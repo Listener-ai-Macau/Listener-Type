@@ -410,6 +410,37 @@
             "cargo test settings_save_syncs_ec11_fast_recording_only_for_dictation --lib (Listener-Type/src-tauri)"
           ],
           "validation": "All listed gates passed after human acceptance; pwsh -NoProfile -File .\\tools\\build.ps1 also passed. Do not re-open this accepted behavior unless a change touches EC11 input, power/connection promotion, firmware PCM capture/transport, Type EmbeddedBle control/finalization, or fresh physical evidence shows regression."
+        },
+        "logging_observability_machine_assessment_20260717": {
+          "status": "machine_operator_accepted",
+          "authorization": "Product-owner direction: 现在机器闭环验收; 先做. The owner also directed that no human acceptance popup be opened during this phase.",
+          "requirement": "One user-visible operation must retain one opaque correlation identifier across Firmware, installed Program Files Type, Windows/transport adapters, and retained machine evidence. The structured event envelope must distinguish internal platform failures from external transport, network, provider/model, or OS failures without collecting user transcript content.",
+          "research": [
+            "https://opentelemetry.io/docs/specs/otel/logs/data-model/",
+            "https://opentelemetry.io/docs/specs/semconv/general/events/",
+            "https://www.w3.org/TR/trace-context/",
+            "https://opentelemetry.io/docs/security/handling-sensitive-data/"
+          ],
+          "machine_result": "MACHINE_OPERATOR_ACCEPTED: the installed Program Files Type commit c57c162 completed a real 977936-byte OTA through Firmware b1bf73a. Its Type correlation_id=16697878004171973006 exactly matches the Firmware persisted DIAG_OTA_CORRELATION event (a1=3887777683, a2=1568317838), and differs from the preceding restarted-Type first-operation ID 5499832264738996225. OTA transfer=53480ms, confirmation=1888ms, Type-ready=1808ms; OTA STATUS then reported active=0, pending_verify=0, state=2, and all readiness bits.",
+          "source_repair_status": "PHYSICALLY_VALIDATED: Firmware b1bf73a parses TYPE:OBS:OTA:<16hex>, persists DIAG_OTA_CORRELATION before OTA begin, and carries it across reboot. Type ba5785c moves the handoff ahead of background-listener pause. Platform 0539cac creates non-zero, restart-distinct opaque host correlations; Type c57c162 uses it for OTA. The first physical attempt exposed the pause-before-handoff root cause; the second proved propagation; the final fresh-Type run proved both propagation and restart distinction.",
+          "retention_result": "PASS: a 25-second locked ~DIAGLOG:LAST:32:ota capture retained the current correlation event plus begin, verify, set-boot, reboot, and post-verify events after persistent-flash scanning. No transcript content is recorded.",
+          "static_result": "PASS: Platform host/embedded verification, Type handoff-order and distinct-correlation tests, Firmware observability static verifier, and Firmware build all pass after machine acceptance.",
+          "evidence": [
+            ".artifacts/observability-machine-20260717/machine-observability-assessment-20260717.json",
+            ".artifacts/ota-machine-20260717-155617/listener-type-after-ota-post-fix-verified-target.log",
+            ".artifacts/observability-machine-20260717/firmware-platform-last-after-ota.log",
+            ".artifacts/observability-machine-20260717/firmware-ota-raw-after-ota-complete.log",
+            ".artifacts/observability-machine-20260717/physical-5120-b1bf/machine-observability-assessment-c57c162.json",
+            ".artifacts/observability-machine-20260717/physical-5120-b1bf/ota-cdp-transfer-c57c162-b1bf73a.json",
+            ".artifacts/observability-machine-20260717/physical-5120-b1bf/firmware-ota-raw-correlation-c57c162-b1bf73a.log",
+            ".artifacts/observability-machine-20260717/physical-5120-b1bf/automation-cleanup-c57c162.json"
+          ],
+          "permanent_regression_contract": [
+            "Listener-Type commands::tests::ota_observability_handoff_precedes_background_listener_pause preserves the control-order root cause fix.",
+            "Denzic-Platform observability host test requires distinct non-zero host-created correlations.",
+            "Listener-Firmware tools/verify_listener_platform_observability_static.py requires the 16-hex adapter, persistent DIAG_OTA_CORRELATION, and correlation-before-begin ordering."
+          ],
+          "human_boundary": "Not opened. This is a machine acceptance under explicit owner authorization; final subjective Listener acceptance remains a later separate session."
         }
       }
     },
