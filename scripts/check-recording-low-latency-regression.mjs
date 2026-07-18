@@ -217,6 +217,17 @@ requireExcludes(
   "0.0",
   "ASR partial preview must not reset the recording capsule audio level to zero",
 );
+const pcmCapsuleEmit = section(
+  dictation,
+  "fn emit_embedded_audio_pcm_capsule_if_active",
+  "fn emit_embedded_audio_transcribing_if_active",
+  "embedded audio PCM capsule emit",
+);
+requireExcludes(
+  pcmCapsuleEmit,
+  "current_embedded_audio_partial_preview",
+  "PCM level ticks must not retransmit the complete preview text",
+);
 requireIncludes(
   dictation,
   "remember_embedded_audio_capsule_level(inner, level)",

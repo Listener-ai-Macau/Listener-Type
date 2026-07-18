@@ -1555,7 +1555,6 @@ fn emit_embedded_audio_pcm_capsule_if_active(
     session_id: SessionId,
     capsule_state: CapsuleState,
     level: f32,
-    message: Option<String>,
 ) -> bool {
     let after_stop = match capsule_state {
         CapsuleState::Recording => false,
@@ -1576,7 +1575,7 @@ fn emit_embedded_audio_pcm_capsule_if_active(
                 after_stop,
             },
             level,
-            message,
+            None,
             None,
         )
     } else {
@@ -1587,7 +1586,7 @@ fn emit_embedded_audio_pcm_capsule_if_active(
                 after_stop,
             },
             level,
-            message,
+            None,
             None,
         )
     }
@@ -1805,7 +1804,6 @@ impl EmbeddedAudioDictationSession {
                 self.session_id,
                 CapsuleState::Recording,
                 embedded_pcm_peak_level(&asr_pcm),
-                current_embedded_audio_partial_preview(inner),
             ) {
                 log::debug!(
                     "[coord] embedded audio streaming PCM ignored for inactive dictation session ({})",

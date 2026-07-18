@@ -13009,6 +13009,39 @@ mod tests {
     }
 
     #[test]
+    fn capsule_recording_level_ticks_continue_after_preview_payload() {
+        let mut throttle = CapsuleUiThrottleState::default();
+        let start = Instant::now();
+        let preview = CapsuleFrontendRequest {
+            session_id: Some("session-1".to_string()),
+            state: CapsuleState::Recording,
+            visible: true,
+            translation: false,
+            show_capsule: true,
+            message: Some("preview".to_string()),
+            inserted_chars: None,
+        };
+        let level_tick = CapsuleFrontendRequest {
+            message: None,
+            ..preview.clone()
+        };
+
+        assert!(throttle.should_emit_frontend(preview, start));
+        assert!(throttle.should_emit_frontend(
+            level_tick.clone(),
+            start + Duration::from_millis(10),
+        ));
+        assert!(!throttle.should_emit_frontend(
+            level_tick.clone(),
+            start + Duration::from_millis(40),
+        ));
+        assert!(throttle.should_emit_frontend(
+            level_tick,
+            start + Duration::from_millis(60),
+        ));
+    }
+
+    #[test]
     fn capsule_frontend_state_transition_bypasses_throttle() {
         let mut throttle = CapsuleUiThrottleState::default();
         let start = Instant::now();
