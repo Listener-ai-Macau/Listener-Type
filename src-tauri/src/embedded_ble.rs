@@ -727,6 +727,8 @@ mod windows_ble {
         windows::core::w!("Local\\Denzic.Listener.Type.PairingMaintenance");
     const BLE_OTA_OPERATION_MUTEX_NAME: PCWSTR =
         windows::core::w!("Local\\Denzic.Listener.Type.BleOtaOperation");
+    const BLE_OTA_PREPARATION_MUTEX_NAME: PCWSTR =
+        windows::core::w!("Local\\Denzic.Listener.Type.BleOtaPreparation");
     const BACKGROUND_LISTENER_DEFERRED_FOR_OTA: &str =
         "embedded_ble_background_listener_deferred_for_ota";
     const BLE_RECENT_PAIRING_FAST_GATT_WINDOW: Duration = Duration::from_secs(45);
@@ -1818,6 +1820,28 @@ mod windows_ble {
         }
     }
 
+    struct BleOtaPreparationGuard {
+        handle: HANDLE,
+        owner: &'static str,
+    }
+
+    impl Drop for BleOtaPreparationGuard {
+        fn drop(&mut self) {
+            if let Err(err) = unsafe { ReleaseMutex(self.handle) } {
+                log::warn!(
+                    "[embedded-ble] release BLE OTA preparation mutex failed owner={}: {err}",
+                    self.owner
+                );
+            }
+            if let Err(err) = unsafe { CloseHandle(self.handle) } {
+                log::warn!(
+                    "[embedded-ble] close BLE OTA preparation mutex failed owner={}: {err}",
+                    self.owner
+                );
+            }
+        }
+    }
+
     struct PairingMaintenanceGuard {
         owner: &'static str,
         target_name: String,
@@ -1977,6 +2001,42 @@ mod windows_ble {
     fn acquire_ble_ota_process_mutex(owner: &'static str) -> Result<BleOtaProcessGuard, String> {
         try_acquire_ble_ota_process_mutex(owner).ok_or_else(|| {
             format!("BLE OTA is already active in another Listener Type process ({owner}).")
+        })
+    }
+
+    fn try_acquire_ble_ota_preparation_mutex(
+        owner: &'static str,
+    ) -> Option<BleOtaPreparationGuard> {
+        let handle = unsafe { CreateMutexW(None, false, BLE_OTA_PREPARATION_MUTEX_NAME) }
+            .map_err(|err| {
+                log::warn!(
+                    "[embedded-ble] create BLE OTA preparation mutex failed owner={owner}: {err}"
+                );
+                err
+            })
+            .ok()?;
+        let wait = unsafe { WaitForSingleObject(handle, 0) };
+        if wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED {
+            return Some(BleOtaPreparationGuard { handle, owner });
+        }
+        if wait != WAIT_TIMEOUT {
+            log::warn!(
+                "[embedded-ble] BLE OTA preparation mutex wait returned {wait:?} owner={owner}"
+            );
+        }
+        if let Err(err) = unsafe { CloseHandle(handle) } {
+            log::warn!(
+                "[embedded-ble] close deferred BLE OTA preparation mutex failed owner={owner}: {err}"
+            );
+        }
+        None
+    }
+
+    fn acquire_ble_ota_preparation_mutex(
+        owner: &'static str,
+    ) -> Result<BleOtaPreparationGuard, String> {
+        try_acquire_ble_ota_preparation_mutex(owner).ok_or_else(|| {
+            format!("BLE OTA preparation is already active in another Listener Type process ({owner}).")
         })
     }
 
@@ -7305,11 +7365,19 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         session: Option<GattSession>,
     }
 
+    enum PreparedListenerOtaV1TransferOwnership {
+        Exclusive {
+            transfer_guard: BleCaptureGuard,
+            _ota_process_guard: BleOtaProcessGuard,
+        },
+        Staged,
+    }
+
     pub(super) struct PreparedListenerOtaV1Transfer {
         target: OpenListenerOtaV1Target,
         snapshot: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
-        transfer_guard: BleCaptureGuard,
-        _ota_process_guard: BleOtaProcessGuard,
+        _preparation_guard: BleOtaPreparationGuard,
+        ownership: PreparedListenerOtaV1TransferOwnership,
     }
 
     impl PreparedListenerOtaV1Transfer {
@@ -7324,9 +7392,26 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             manifest_chunk_bytes: usize,
             on_progress: Option<&dyn Fn(usize, usize)>,
         ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
+            let Self {
+                target,
+                snapshot: _,
+                _preparation_guard,
+                ownership,
+            } = self;
+            let (transfer_guard, _ota_process_guard) = match ownership {
+                PreparedListenerOtaV1TransferOwnership::Exclusive {
+                    transfer_guard,
+                    _ota_process_guard,
+                } => (transfer_guard, _ota_process_guard),
+                PreparedListenerOtaV1TransferOwnership::Staged => {
+                    let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v1")?;
+                    let transfer_guard = BleCaptureGuard::enter(None)?;
+                    (transfer_guard, ota_process_guard)
+                }
+            };
             transfer_denzic_ota_v1_to_target(
-                &self.target,
-                self.transfer_guard.session_id(),
+                &target,
+                transfer_guard.session_id(),
                 firmware_bytes,
                 manifest_chunk_bytes,
                 on_progress,
@@ -7539,18 +7624,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
     pub(super) fn prepare_listener_ota_v1_transfer() -> Result<PreparedListenerOtaV1Transfer, String>
     {
-        prepare_listener_ota_v1_transfer_impl(true)
+        prepare_listener_ota_v1_transfer_impl(true, true, None)
     }
 
-    fn prepare_listener_ota_v1_transfer_after_active_link_hint(
+    pub(super) fn prepare_listener_ota_v1_transfer_after_active_link_hint(
     ) -> Result<PreparedListenerOtaV1Transfer, String> {
-        prepare_listener_ota_v1_transfer_impl(false)
+        prepare_listener_ota_v1_transfer_impl(false, true, None)
+    }
+
+    fn prepare_listener_ota_v1_transfer_staged_after_active_link_hint(
+        target_prepare_timeout: Duration,
+    ) -> Result<PreparedListenerOtaV1Transfer, String> {
+        prepare_listener_ota_v1_transfer_impl(false, false, Some(target_prepare_timeout))
     }
 
     fn prepare_listener_ota_v1_transfer_impl(
         send_active_link_hint: bool,
+        exclusive_transfer: bool,
+        target_prepare_timeout: Option<Duration>,
     ) -> Result<PreparedListenerOtaV1Transfer, String> {
-        let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v1")?;
+        let preparation_guard = acquire_ble_ota_preparation_mutex("listener_ota_v1_prepare")?;
+        let ota_process_guard = if exclusive_transfer {
+            Some(acquire_ble_ota_process_mutex("listener_ota_v1")?)
+        } else {
+            None
+        };
         if send_active_link_hint {
             request_listener_ota_v1_active_link(None)?;
             log::info!("[embedded-ble] Listener OTA v1 reconnect handoff accepted");
@@ -7559,13 +7657,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 "[embedded-ble] Listener OTA v1 prepare: reusing reconnect handoff sent before background pause"
             );
         }
-        log::info!("[embedded-ble] Listener OTA v1 prepare: acquiring BLE capture guard");
-        let transfer_guard = BleCaptureGuard::enter(None)?;
+        let transfer_guard = if exclusive_transfer {
+            Some(BleCaptureGuard::enter(None)?)
+        } else {
+            None
+        };
         let _fresh_guard = BleFreshGattGuard::enter("Listener OTA v1 prepare")?;
+        let handoff_phase = if exclusive_transfer {
+            "after capture handoff"
+        } else {
+            "before listener pause"
+        };
         log::info!(
-            "[embedded-ble] Listener OTA v1 prepare: opening Listener OTA v1 service after capture handoff"
+            "[embedded-ble] Listener OTA v1 prepare: opening Listener OTA v1 service {handoff_phase}"
         );
-        let target = open_listener_ota_v1_target_after_active_link_handoff()?;
+        let target = if let Some(timeout) = target_prepare_timeout {
+            open_listener_ota_v1_target_after_active_link_handoff_with_deadline(
+                Instant::now() + timeout.max(Duration::from_millis(1)),
+            )?
+        } else if send_active_link_hint {
+            open_listener_ota_v1_target_after_active_link_handoff()?
+        } else {
+            open_listener_ota_v1_target_after_active_link_handoff_with_deadline(
+                Instant::now() + Duration::from_secs(8),
+            )?
+        };
         let snapshot = listener_ota_v1_gatt_probe_snapshot_from_target(&target);
         log::info!(
             "[embedded-ble] Listener OTA v1 prepare: ready (detail={})",
@@ -7574,8 +7690,17 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Ok(PreparedListenerOtaV1Transfer {
             target,
             snapshot,
-            transfer_guard,
-            _ota_process_guard: ota_process_guard,
+            _preparation_guard: preparation_guard,
+            ownership: match (transfer_guard, ota_process_guard) {
+                (Some(transfer_guard), Some(ota_process_guard)) => {
+                    PreparedListenerOtaV1TransferOwnership::Exclusive {
+                        transfer_guard,
+                        _ota_process_guard: ota_process_guard,
+                    }
+                }
+                (None, None) => PreparedListenerOtaV1TransferOwnership::Staged,
+                _ => unreachable!("Listener OTA transfer ownership must stay paired"),
+            },
         })
     }
 
@@ -7620,6 +7745,46 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let prepared = prepare_listener_ota_v1_transfer_after_active_link_hint()?;
+        prepared.transfer(
+            firmware_sha256,
+            firmware_bytes,
+            manifest_chunk_bytes,
+            on_progress,
+        )
+    }
+
+    pub fn transfer_listener_ota_v1_after_active_link_hint_staged(
+        target_ready: mpsc::SyncSender<Result<(), String>>,
+        start_transfer: mpsc::Receiver<()>,
+        target_prepare_timeout: Duration,
+        firmware_sha256: &str,
+        firmware_bytes: &[u8],
+        manifest_chunk_bytes: usize,
+        on_progress: Option<&dyn Fn(usize, usize)>,
+    ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
+        if firmware_bytes.is_empty() {
+            return Err("firmware_ota.bin is empty.".to_string());
+        }
+
+        let prepared = match prepare_listener_ota_v1_transfer_staged_after_active_link_hint(
+            target_prepare_timeout,
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let _ = target_ready.send(Err(error.clone()));
+                return Err(error);
+            }
+        };
+        if target_ready.send(Ok(())).is_err() {
+            return Err(
+                "Listener OTA v1 target staging was canceled before listener pause.".to_string(),
+            );
+        }
+        start_transfer
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| {
+                "Listener OTA v1 target staging timed out before transfer start.".to_string()
+            })?;
         prepared.transfer(
             firmware_sha256,
             firmware_bytes,
@@ -7752,11 +7917,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             usb_powered: None,
             detail: Some(detail),
         };
-        let _ota_process_guard = match acquire_ble_ota_process_mutex("listener_ota_v1_preflight") {
-            Ok(guard) => guard,
-            Err(err) => return unavailable(err),
-        };
-        let _capture_guard = match BleCaptureGuard::enter(None) {
+        let _preparation_guard = match acquire_ble_ota_preparation_mutex("listener_ota_v1_preflight") {
             Ok(guard) => guard,
             Err(err) => return unavailable(err),
         };
@@ -16546,6 +16707,27 @@ pub fn transfer_listener_ota_v1_after_active_link_hint(
 }
 
 #[cfg(target_os = "windows")]
+pub fn transfer_listener_ota_v1_after_active_link_hint_staged(
+    target_ready: std::sync::mpsc::SyncSender<Result<(), String>>,
+    start_transfer: std::sync::mpsc::Receiver<()>,
+    target_prepare_timeout: std::time::Duration,
+    firmware_sha256: &str,
+    firmware_bytes: &[u8],
+    manifest_chunk_bytes: usize,
+    on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Result<FirmwareOtaTransferStats, String> {
+    windows_ble::transfer_listener_ota_v1_after_active_link_hint_staged(
+        target_ready,
+        start_transfer,
+        target_prepare_timeout,
+        firmware_sha256,
+        firmware_bytes,
+        manifest_chunk_bytes,
+        on_progress,
+    )
+}
+
+#[cfg(target_os = "windows")]
 pub struct Stm32wbStOtaPreparedTransfer;
 
 #[cfg(target_os = "windows")]
@@ -16970,6 +17152,19 @@ pub fn transfer_listener_ota_v1(
 
 #[cfg(not(target_os = "windows"))]
 pub fn transfer_listener_ota_v1_after_active_link_hint(
+    _firmware_sha256: &str,
+    _firmware_bytes: &[u8],
+    _manifest_chunk_bytes: usize,
+    _on_progress: Option<&dyn Fn(usize, usize)>,
+) -> Result<FirmwareOtaTransferStats, String> {
+    Err("Listener OTA v1 over BLE is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn transfer_listener_ota_v1_after_active_link_hint_staged(
+    _target_ready: std::sync::mpsc::SyncSender<Result<(), String>>,
+    _start_transfer: std::sync::mpsc::Receiver<()>,
+    _target_prepare_timeout: std::time::Duration,
     _firmware_sha256: &str,
     _firmware_bytes: &[u8],
     _manifest_chunk_bytes: usize,
@@ -17584,7 +17779,10 @@ mod tests {
             .expect("Listener OTA v1 prepare helper boundary should exist");
         let prepare = &source[prepare_start..prepare_end];
         assert!(
-            prepare.contains("_ota_process_guard: ota_process_guard")
+            source.contains("BLE_OTA_PREPARATION_MUTEX_NAME")
+                && source.contains("Local\\\\Denzic.Listener.Type.BleOtaPreparation")
+                && prepare.contains("acquire_ble_ota_preparation_mutex(\"listener_ota_v1_prepare\")")
+                && prepare.contains("PreparedListenerOtaV1TransferOwnership::Exclusive")
                 && source.contains("b\"TYPE:OTA\\n\"")
                 && source.contains("Listener OTA v1 reconnect handoff")
                 && prepare.contains("request_listener_ota_v1_active_link(None)")
@@ -17602,7 +17800,62 @@ mod tests {
                     .find("request_listener_ota_v1_active_link")
                     .unwrap()
                     < prepare.find("BleCaptureGuard::enter").unwrap(),
-            "Listener OTA v1 must acquire the cross-process OTA lock, send TYPE:OTA, then open BLE GATT"
+            "direct Listener OTA must reserve preparation, acquire the cross-process transfer lock, send TYPE:OTA, then own capture before opening BLE GATT"
+        );
+
+        let staged_prepare_start = source
+            .find("fn prepare_listener_ota_v1_transfer_staged_after_active_link_hint")
+            .expect("staged Listener OTA prepare helper should exist");
+        let staged_prepare_end = source[staged_prepare_start..]
+            .find("fn prepare_listener_ota_v1_transfer_impl")
+            .map(|offset| staged_prepare_start + offset)
+            .expect("staged Listener OTA prepare helper boundary should exist");
+        let staged_prepare = &source[staged_prepare_start..staged_prepare_end];
+        assert!(
+            staged_prepare.contains("prepare_listener_ota_v1_transfer_impl(false, false, Some(target_prepare_timeout))"),
+            "staged Listener OTA must leave both transfer exclusivity gates untouched while opening its target inside the caller's bounded deadline"
+        );
+
+        let staged_transfer_start = source
+            .find("pub fn transfer_listener_ota_v1_after_active_link_hint_staged")
+            .expect("staged Listener OTA transfer helper should exist");
+        let staged_transfer_end = source[staged_transfer_start..]
+            .find("fn listener_ota_v1_window_chunks")
+            .map(|offset| staged_transfer_start + offset)
+            .expect("staged Listener OTA transfer helper boundary should exist");
+        let staged_transfer = &source[staged_transfer_start..staged_transfer_end];
+        let target_ready = staged_transfer
+            .find("target_ready.send(Ok(()))")
+            .expect("staged Listener OTA must report target readiness");
+        let start_signal = staged_transfer
+            .find("start_transfer\n            .recv_timeout")
+            .expect("staged Listener OTA must wait for the coordinator pause signal");
+        let transfer = staged_transfer
+            .find("prepared.transfer(")
+            .expect("staged Listener OTA must transfer only after the pause signal");
+        assert!(target_ready < start_signal && start_signal < transfer);
+
+        let prepared_transfer_start = source
+            .find("impl PreparedListenerOtaV1Transfer")
+            .expect("prepared Listener OTA transfer implementation should exist");
+        let prepared_transfer_end = source[prepared_transfer_start..]
+            .find("struct ListenerOtaV1Transport")
+            .map(|offset| prepared_transfer_start + offset)
+            .expect("prepared Listener OTA transfer implementation boundary should exist");
+        let prepared_transfer = &source[prepared_transfer_start..prepared_transfer_end];
+        let staged_ownership = prepared_transfer
+            .find("PreparedListenerOtaV1TransferOwnership::Staged")
+            .expect("staged Listener OTA ownership branch should exist");
+        let ota_lock = prepared_transfer[staged_ownership..]
+            .find("acquire_ble_ota_process_mutex(\"listener_ota_v1\")")
+            .map(|offset| staged_ownership + offset)
+            .expect("staged Listener OTA must acquire the actual OTA mutex after pause");
+        let capture = prepared_transfer[ota_lock..]
+            .find("BleCaptureGuard::enter(None)")
+            .map(|offset| ota_lock + offset)
+            .expect("staged Listener OTA must acquire the capture gate after the OTA mutex");
+        assert!(ota_lock < capture,
+            "staged Listener OTA must take the actual OTA mutex and capture gate only in its post-pause transfer branch"
         );
 
         let ota_handoff_start = source
@@ -17687,11 +17940,12 @@ mod tests {
             .expect("OTA handoff preflight helper boundary should exist");
         let probe = &source[probe_start..probe_end];
         assert!(
-            probe.contains("acquire_ble_ota_process_mutex(\"listener_ota_v1_preflight\")")
-                && probe.contains("BleCaptureGuard::enter(None)")
+            probe.contains("acquire_ble_ota_preparation_mutex(\"listener_ota_v1_preflight\")")
+                && !probe.contains("acquire_ble_ota_process_mutex")
+                && !probe.contains("BleCaptureGuard::enter")
                 && probe.contains("BleFreshGattGuard::enter(\"Listener OTA v1 handoff preflight\")")
                 && probe.contains("open_listener_ota_v1_target_after_active_link_handoff_with_deadline"),
-            "OTA preflight must take exclusive ownership and use the bounded active-link GATT path"
+            "OTA preflight must reserve preparation without interrupting notify capture and use the bounded active-link GATT path"
         );
 
         let target_start = source

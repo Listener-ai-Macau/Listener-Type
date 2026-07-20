@@ -14,6 +14,9 @@ const cdpUrl = takeArg("--cdp-url");
 const packagePath = takeArg("--package");
 const outputPath = takeArg("--output-json");
 const coldStart = process.argv.includes("--cold-start");
+const preflightOnly = process.argv.includes("--preflight-only");
+const MIN_PROTOCOL_TRANSFER_BYTES_PER_SECOND = 18_000;
+const MAX_NON_TRANSFER_FIXED_MS = 7_000;
 
 function writeResult(value) {
   writeFileSync(outputPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -60,6 +63,7 @@ function normalizedManifest(raw) {
 }
 
 let socket;
+let keepAlive;
 try {
   socket = new WebSocket(cdpUrl);
   await new Promise((resolve, reject) => {
@@ -107,12 +111,32 @@ try {
       socket.send(JSON.stringify({ id, method, params }));
     });
   const evaluate = async expression => {
-    const response = await cdp("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-      userGesture: false,
-    });
+    // Node's WebSocket client does not keep the event loop alive while a CDP
+    // Runtime.evaluate promise is pending. Keep the harness alive and bound the
+    // wait so an OTA result is always written as success or failure.
+    keepAlive = setInterval(() => {}, 1000);
+    let evaluationTimeout;
+    let response;
+    try {
+      response = await Promise.race([
+        cdp("Runtime.evaluate", {
+          expression,
+          awaitPromise: true,
+          returnByValue: true,
+          userGesture: false,
+        }),
+        new Promise((_, reject) => {
+          evaluationTimeout = setTimeout(
+            () => reject(new Error("CDP OTA evaluation timed out after 300000ms")),
+            300000,
+          );
+        }),
+      ]);
+    } finally {
+      clearInterval(keepAlive);
+      keepAlive = undefined;
+      clearTimeout(evaluationTimeout);
+    }
     if (response.exceptionDetails) {
       throw new Error(
         response.exceptionDetails.text ?? JSON.stringify(response.exceptionDetails),
@@ -145,6 +169,28 @@ try {
       const payload = await invoke("load_firmware_ota_package", { path: ${JSON.stringify(packagePath)} });
       const raw = JSON.parse(payload.manifestText);
       const manifest = ${normalizedManifest.toString()}(raw);
+      if (${preflightOnly}) {
+        const preflight = await invoke("get_firmware_ota_preflight_snapshot", {
+          protocolName: manifest.protocolName,
+        });
+        return {
+          typeReadyBeforeStart,
+          coldStart: ${coldStart},
+          preflightOnly: true,
+          runtimeBeforeStart,
+          manifest: {
+            schemaVersion: manifest.schemaVersion,
+            packageType: manifest.packageType,
+            protocolName: manifest.protocolName,
+            version: manifest.version,
+            fileSizeBytes: manifest.fileSizeBytes,
+            fileSha256: manifest.fileSha256,
+          },
+          preflight,
+          commandError: null,
+          progress: [],
+        };
+      }
       const progress = [];
       const unlisten = await window.__TAURI__.event.listen("firmware-ota:progress", event => {
         progress.push({ atMs: Date.now(), ...event.payload });
@@ -181,7 +227,38 @@ try {
     })()
   `;
   const outcome = await evaluate(remoteExpression);
-  writeResult({ status: outcome.commandError ? "FAIL" : "PASS", ...outcome });
+  const preflightPassed = !outcome.preflightOnly || (
+    outcome.typeReadyBeforeStart &&
+    outcome.preflight?.device?.connected &&
+    outcome.preflight?.device?.capabilities?.includes(outcome.manifest.protocolName) &&
+    !outcome.preflight?.recordingActive
+  );
+  const result = outcome.result;
+  const protocolTransferBytesPerSecond = result?.transferElapsedMs > 0
+    ? (result.bytesTransferred * 1000) / result.transferElapsedMs
+    : 0;
+  const transferPassed = outcome.preflightOnly || Boolean(
+    result
+      && result.bytesTransferred === outcome.manifest.fileSizeBytes
+      && result.confirmedVersion === outcome.manifest.version
+      && result.transport === outcome.manifest.protocolName
+      && result.pretransferTypeReady
+      && result.typeReady
+      && protocolTransferBytesPerSecond > MIN_PROTOCOL_TRANSFER_BYTES_PER_SECOND
+      && result.nonTransferFixedElapsedMs < MAX_NON_TRANSFER_FIXED_MS
+  );
+  writeResult({
+    status: outcome.commandError || !preflightPassed || !transferPassed ? "FAIL" : "PASS",
+    machineGate: {
+      preflightPassed,
+      transferPassed,
+      protocolTransferBytesPerSecond,
+      minProtocolTransferBytesPerSecond: MIN_PROTOCOL_TRANSFER_BYTES_PER_SECOND,
+      nonTransferFixedElapsedMs: result?.nonTransferFixedElapsedMs ?? null,
+      maxNonTransferFixedMs: MAX_NON_TRANSFER_FIXED_MS,
+    },
+    ...outcome,
+  });
 } catch (error) {
   writeResult({
     status: "FAIL",
@@ -189,5 +266,6 @@ try {
   });
   process.exitCode = 1;
 } finally {
+  if (keepAlive) clearInterval(keepAlive);
   socket?.close();
 }

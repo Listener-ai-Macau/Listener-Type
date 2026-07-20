@@ -6,7 +6,7 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::{mpsc, Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
@@ -4056,11 +4056,8 @@ pub async fn get_firmware_ota_preflight_snapshot(
         });
     }
     let handoff = crate::embedded_ble::request_listener_ota_v1_active_link(None);
-    let mut listener_paused = false;
     let mut device = match handoff {
         Ok(()) => {
-            coord.pause_embedded_ble_listener_for_ota();
-            listener_paused = true;
             let snapshot_task = tauri::async_runtime::spawn_blocking(move || {
                 crate::embedded_ble::listener_ota_v1_gatt_probe_after_active_link_hint(
                     FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT,
@@ -4089,9 +4086,6 @@ pub async fn get_firmware_ota_preflight_snapshot(
         )),
     };
     coord.end_firmware_ota_transfer();
-    if listener_paused {
-        coord.refresh_embedded_ble_listener();
-    }
     if device.usb_powered.is_none() {
         device.usb_powered = cached_power.usb_powered;
     }
@@ -4114,10 +4108,12 @@ pub struct FirmwareOtaBleTransferResult {
     transport: &'static str,
     pretransfer_type_ready: bool,
     pretransfer_type_ready_elapsed_ms: u64,
+    target_prepare_elapsed_ms: u64,
     transfer_elapsed_ms: u64,
     confirm_elapsed_ms: u64,
     type_ready: bool,
     type_ready_elapsed_ms: u64,
+    non_transfer_fixed_elapsed_ms: u64,
     total_elapsed_ms: u64,
 }
 
@@ -4135,6 +4131,7 @@ const FIRMWARE_OTA_FAST_SERVICE_CONFIRM_TIMEOUT: Duration = Duration::from_milli
 const FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
 const FIRMWARE_OTA_PRETRANSFER_READY_TIMEOUT: Duration = Duration::from_secs(8);
 const FIRMWARE_OTA_POST_READY_TIMEOUT: Duration = Duration::from_secs(8);
+const FIRMWARE_OTA_TARGET_PREPARE_TIMEOUT: Duration = Duration::from_secs(6);
 const FIRMWARE_OTA_PACKAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 fn elapsed_ms_u64(started: Instant) -> u64 {
@@ -6116,15 +6113,16 @@ pub async fn transfer_firmware_ota_ble(
         return Err(error);
     }
     log::info!(
-        "[firmware-ota] Listener OTA v1 reconnect handoff accepted before pausing the background listener"
+        "[firmware-ota] Listener OTA v1 reconnect handoff accepted before preparing the exclusive GATT target"
     );
-    coord.pause_embedded_ble_listener_for_ota();
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_sha256 = expected_sha256.clone();
+    let (target_ready_tx, target_ready_rx) = mpsc::sync_channel(1);
+    let (start_transfer_tx, start_transfer_rx) = mpsc::sync_channel(1);
     let app_for_progress = app;
-    let transfer_started = Instant::now();
-    let transfer = tauri::async_runtime::spawn_blocking(move || {
+    let target_prepare_started = Instant::now();
+    let transfer_task = tauri::async_runtime::spawn_blocking(move || {
         let progress = |bytes_sent, bytes_total| {
             let _ = app_for_progress.emit(
                 "firmware-ota:progress",
@@ -6134,16 +6132,50 @@ pub async fn transfer_firmware_ota_ble(
                 }),
             );
         };
-        crate::embedded_ble::transfer_listener_ota_v1_after_active_link_hint(
+        crate::embedded_ble::transfer_listener_ota_v1_after_active_link_hint_staged(
+            target_ready_tx,
+            start_transfer_rx,
+            FIRMWARE_OTA_TARGET_PREPARE_TIMEOUT,
             &transfer_sha256,
             &firmware_bytes,
             manifest_chunk_bytes,
             Some(&progress),
         )
+    });
+    let target_prepare = tauri::async_runtime::spawn_blocking(move || {
+        target_ready_rx.recv_timeout(FIRMWARE_OTA_TARGET_PREPARE_TIMEOUT)
     })
     .await
-    .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
+    .map_err(|err| format!("Listener BLE OTA target preparation wait task failed: {err}"))
+    .and_then(|result| {
+        result.map_err(|err| format!("Listener BLE OTA target preparation timed out: {err}"))
+    })
     .and_then(|result| result);
+    let target_prepare_elapsed_ms = elapsed_ms_u64(target_prepare_started);
+    if let Err(error) = target_prepare {
+        drop(start_transfer_tx);
+        let _ = transfer_task.await;
+        observability.record_transfer_failed(target_prepare_elapsed_ms, &error);
+        coord.end_firmware_ota_transfer();
+        return Err(error);
+    }
+    log::info!(
+        "[firmware-ota] Listener OTA v1 target prepared before listener pause elapsed_ms={target_prepare_elapsed_ms}"
+    );
+    coord.pause_embedded_ble_listener_for_ota();
+    if start_transfer_tx.send(()).is_err() {
+        let error = "Listener BLE OTA target closed before transfer start.".to_string();
+        let _ = transfer_task.await;
+        observability.record_transfer_failed(target_prepare_elapsed_ms, &error);
+        coord.end_firmware_ota_transfer();
+        coord.refresh_embedded_ble_listener();
+        return Err(error);
+    }
+    let transfer_started = Instant::now();
+    let transfer = transfer_task
+        .await
+        .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
+        .and_then(|result| result);
     let transfer_elapsed_ms = elapsed_ms_u64(transfer_started);
     match &transfer {
         Ok(_) => observability.record_transfer_completed(transfer_elapsed_ms),
@@ -6163,7 +6195,7 @@ pub async fn transfer_firmware_ota_ble(
     if transfer.is_ok() {
         observability.record_reconnect_confirmation(confirm.matched);
     } else {
-        // The OTA handoff paused the continuous capture before opening its fresh GATT path.
+        // The OTA handoff paused the continuous capture after staging its fresh GATT path.
         // A failed BEGIN/data/finish must restore that listener instead of leaving Type attached
         // at the Windows level but unable to receive audio notifications.
         coord.refresh_embedded_ble_listener();
@@ -6184,20 +6216,25 @@ pub async fn transfer_firmware_ota_ble(
         .wait_for_embedded_ble_listener_ready_after_firmware_ota(FIRMWARE_OTA_POST_READY_TIMEOUT)
         .await?;
     let type_ready_elapsed_ms = elapsed_ms_u64(type_ready_started);
+    let non_transfer_fixed_elapsed_ms = target_prepare_elapsed_ms
+        .saturating_add(confirm.elapsed_ms)
+        .saturating_add(type_ready_elapsed_ms);
     let total_elapsed_ms = elapsed_ms_u64(total_started);
     log::info!(
-        "[firmware-ota] BLE OTA result transport={} bytes={} chunks={} pretransfer_type_ready={} pretransfer_type_ready_ms={} transfer_ms={} confirm_ms={} confirm_attempts={} confirm_matched={} type_ready={} type_ready_ms={} total_ms={} data_write_ms={} control_write_ms={} status_read_ms={}",
+        "[firmware-ota] BLE OTA result transport={} bytes={} chunks={} pretransfer_type_ready={} pretransfer_type_ready_ms={} target_prepare_ms={} transfer_ms={} confirm_ms={} confirm_attempts={} confirm_matched={} type_ready={} type_ready_ms={} non_transfer_fixed_ms={} total_ms={} data_write_ms={} control_write_ms={} status_read_ms={}",
         stats.transport,
         stats.bytes_transferred,
         stats.chunks_sent,
         pretransfer_type_ready,
         pretransfer_type_ready_elapsed_ms,
+        target_prepare_elapsed_ms,
         transfer_elapsed_ms,
         confirm.elapsed_ms,
         confirm.attempts,
         confirm.matched,
         type_ready,
         type_ready_elapsed_ms,
+        non_transfer_fixed_elapsed_ms,
         total_elapsed_ms,
         stats.data_write_elapsed_ms,
         stats.control_write_elapsed_ms,
@@ -6210,10 +6247,12 @@ pub async fn transfer_firmware_ota_ble(
         transport: stats.transport,
         pretransfer_type_ready,
         pretransfer_type_ready_elapsed_ms,
+        target_prepare_elapsed_ms,
         transfer_elapsed_ms,
         confirm_elapsed_ms: confirm.elapsed_ms,
         type_ready,
         type_ready_elapsed_ms,
+        non_transfer_fixed_elapsed_ms,
         total_elapsed_ms,
     })
 }
@@ -8879,7 +8918,7 @@ mod tests {
     }
 
     #[test]
-    fn ota_preflight_reuses_active_link_handoff_and_restores_listener() {
+    fn ota_preflight_reuses_active_link_handoff_without_interrupting_notify() {
         let source = normalized_commands_source();
         let start = source
             .find("pub async fn get_firmware_ota_preflight_snapshot")
@@ -8898,22 +8937,14 @@ mod tests {
         let handoff = preflight
             .find("request_listener_ota_v1_active_link(None)")
             .expect("preflight must request the firmware OTA active-link handoff");
-        let pause = preflight
-            .find("coord.pause_embedded_ble_listener_for_ota()")
-            .expect("preflight must pause the background listener before fresh GATT");
         let probe = preflight
             .find("listener_ota_v1_gatt_probe_after_active_link_hint")
             .expect("preflight must probe through the verified active-link handoff path");
         let end_guard = preflight
             .find("coord.end_firmware_ota_transfer();")
             .expect("preflight must release its OTA operation reservation");
-        let refresh = preflight
-            .find("coord.refresh_embedded_ble_listener();")
-            .expect("preflight must restore the paused background listener");
-
         assert!(recording_guard < begin);
-        assert!(begin < handoff && handoff < pause && pause < probe);
-        assert!(probe < end_guard && end_guard < refresh);
+        assert!(begin < handoff && handoff < probe && probe < end_guard);
     }
 
     #[test]
@@ -8927,21 +8958,32 @@ mod tests {
             .map(|offset| transfer_start + offset)
             .expect("firmware OTA command should return its result");
         let transfer = &source[transfer_start..transfer_end];
-        let end = transfer
-            .find("coord.end_firmware_ota_transfer();")
-            .expect("OTA transfer must always clear its active guard");
         let success = transfer
             .find("if transfer.is_ok() {\n        observability.record_reconnect_confirmation")
             .expect("successful OTA confirmation branch should exist");
-        let refresh = transfer
-            .find("coord.refresh_embedded_ble_listener();")
-            .expect("failed OTA transfer must restore the paused listener");
         let result = transfer
             .find("let stats = transfer?;")
             .expect("OTA transfer should propagate its result after cleanup");
+        let end = transfer[..result]
+            .rfind("coord.end_firmware_ota_transfer();")
+            .expect("OTA transfer must always clear its active guard");
+        let refresh = success
+            + transfer[success..]
+                .find("coord.refresh_embedded_ble_listener();")
+                .expect("failed OTA transfer must restore the paused listener");
+        let target_ready = transfer
+            .find("Listener OTA v1 target prepared before listener pause")
+            .expect("OTA target must be prepared before listener pause");
+        let pause = transfer
+            .find("coord.pause_embedded_ble_listener_for_ota()")
+            .expect("OTA must pause the listener only after target preparation");
+        let transfer_start = transfer
+            .find("let transfer_started = Instant::now();")
+            .expect("OTA transfer timing must start after the listener is paused");
 
         assert!(end < refresh && refresh < result);
         assert!(success < refresh);
+        assert!(target_ready < pause && pause < transfer_start);
     }
 
     fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
