@@ -18,6 +18,7 @@ pub const DEFAULT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 pub const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 pub const CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(1800);
 pub const LISTENER_OTA_V1_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
+const LISTENER_OTA_V1_FAST_SERVICE_CONFIRM_TIMEOUT: Duration = Duration::from_millis(1200);
 
 fn elapsed_ms_u64(started: Instant) -> u64 {
     started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
@@ -581,13 +582,44 @@ pub async fn confirm_listener_ota_v1_reachable_version(expected_version: &str) -
 
     let deadline = Instant::now() + LISTENER_OTA_V1_REACHABLE_CONFIRM_TIMEOUT;
     loop {
-        let snapshot = crate::embedded_ble::listener_ota_v1_device_snapshot();
-        let reachable = snapshot.connected
-            && snapshot
-                .capabilities
-                .iter()
-                .any(|item| item == LISTENER_OTA_V1_FIRMWARE_CAPABILITY);
-        if reachable {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let fast_timeout = remaining.min(LISTENER_OTA_V1_FAST_SERVICE_CONFIRM_TIMEOUT);
+        let fast_snapshot = if fast_timeout.is_zero() {
+            None
+        } else {
+            tokio::task::spawn_blocking(move || {
+                crate::embedded_ble::listener_ota_v1_service_reachable_snapshot(fast_timeout)
+            })
+            .await
+            .ok()
+        };
+        let snapshot = if fast_snapshot
+            .as_ref()
+            .is_some_and(listener_ota_v1_snapshot_is_reachable)
+        {
+            fast_snapshot
+        } else {
+            if let Some(snapshot) = fast_snapshot.as_ref() {
+                log::info!(
+                    "[firmware-ota] headless fast OTA service confirmation did not reach Listener; falling back to complete GATT probe detail={:?}",
+                    snapshot.detail
+                );
+            }
+            let probe_timeout = deadline.saturating_duration_since(Instant::now());
+            if probe_timeout.is_zero() {
+                None
+            } else {
+                tokio::task::spawn_blocking(move || {
+                    crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(probe_timeout)
+                })
+                .await
+                .ok()
+            }
+        };
+        if snapshot
+            .as_ref()
+            .is_some_and(listener_ota_v1_snapshot_is_reachable)
+        {
             return Some(expected_version.to_string());
         }
         if Instant::now() >= deadline {
@@ -595,6 +627,16 @@ pub async fn confirm_listener_ota_v1_reachable_version(expected_version: &str) -
         }
         tokio::time::sleep(CONFIRM_INTERVAL).await;
     }
+}
+
+fn listener_ota_v1_snapshot_is_reachable(
+    snapshot: &crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+) -> bool {
+    snapshot.connected
+        && snapshot
+            .capabilities
+            .iter()
+            .any(|item| item == LISTENER_OTA_V1_FIRMWARE_CAPABILITY)
 }
 
 pub fn firmware_ota_versions_match(confirmed: &str, expected: &str) -> bool {
@@ -1121,6 +1163,27 @@ mod tests {
             usb_powered: None,
             detail: None,
         }
+    }
+
+    #[test]
+    fn listener_ota_v1_reachable_snapshot_requires_live_protocol_service() {
+        let reachable = ota_snapshot(
+            true,
+            None,
+            None,
+            vec![LISTENER_OTA_V1_FIRMWARE_CAPABILITY],
+        );
+        let disconnected = ota_snapshot(
+            false,
+            None,
+            None,
+            vec![LISTENER_OTA_V1_FIRMWARE_CAPABILITY],
+        );
+        let wrong_service = ota_snapshot(true, None, None, vec!["other_protocol"]);
+
+        assert!(listener_ota_v1_snapshot_is_reachable(&reachable));
+        assert!(!listener_ota_v1_snapshot_is_reachable(&disconnected));
+        assert!(!listener_ota_v1_snapshot_is_reachable(&wrong_service));
     }
 
     fn manifest_v2(extra: &str) -> String {
