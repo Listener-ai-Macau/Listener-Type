@@ -21,6 +21,7 @@ struct MachineEvidenceState {
     background_notify_ready_elapsed_ms: Option<u64>,
     background_notify_ready_count: u32,
     pair_async_attempt_count: u32,
+    unpair_async_attempt_count: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,6 +32,7 @@ struct MachineEvidenceSnapshot<'a> {
     background_notify_ready_elapsed_ms: Option<u64>,
     background_notify_ready_count: u32,
     pair_async_attempt_count: u32,
+    unpair_async_attempt_count: u32,
 }
 
 fn machine_evidence_path() -> Option<&'static PathBuf> {
@@ -52,6 +54,7 @@ impl MachineEvidenceState {
             background_notify_ready_elapsed_ms: None,
             background_notify_ready_count: 0,
             pair_async_attempt_count: 0,
+            unpair_async_attempt_count: 0,
         }
     }
 
@@ -63,6 +66,7 @@ impl MachineEvidenceState {
             background_notify_ready_elapsed_ms: self.background_notify_ready_elapsed_ms,
             background_notify_ready_count: self.background_notify_ready_count,
             pair_async_attempt_count: self.pair_async_attempt_count,
+            unpair_async_attempt_count: self.unpair_async_attempt_count,
         }
     }
 }
@@ -116,6 +120,12 @@ pub(crate) fn record_pair_async_attempt() {
     });
 }
 
+pub(crate) fn record_unpair_async_attempt() {
+    update(|state| {
+        state.unpair_async_attempt_count = state.unpair_async_attempt_count.saturating_add(1)
+    });
+}
+
 pub(crate) fn record_background_notify_ready() {
     update(|state| {
         state.background_notify_ready_count = state.background_notify_ready_count.saturating_add(1);
@@ -148,6 +158,7 @@ mod tests {
         assert_eq!(value["startup_path"], "native_windows_hid");
         assert_eq!(value["background_notify_ready_elapsed_ms"], 812);
         assert_eq!(value["pair_async_attempt_count"], 0);
+        assert_eq!(value["unpair_async_attempt_count"], 0);
         assert!(value.get("address").is_none());
         assert!(value.get("message").is_none());
         assert!(value.get("transcript").is_none());
@@ -166,6 +177,13 @@ mod tests {
             embedded_ble.matches("record_pair_async_attempt()").count(),
             2,
             "both standard and custom Windows PairAsync calls must remain observable",
+        );
+        assert_eq!(
+            embedded_ble
+                .matches("record_unpair_async_attempt()")
+                .count(),
+            1,
+            "the shared Windows UnpairAsync helper must remain observable",
         );
         assert!(coordinator.contains("record_background_notify_ready()"));
     }

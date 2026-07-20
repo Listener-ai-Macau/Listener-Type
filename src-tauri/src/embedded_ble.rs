@@ -4127,6 +4127,7 @@ mod windows_ble {
         }
         log::info!("[embedded-ble] unpairing Windows BLE device cache for {label}");
 
+        crate::startup_evidence::record_unpair_async_attempt();
         let operation = pairing
             .UnpairAsync()
             .map_err(|err| format!("Windows unpair operation failed to start: {err}"))?;
