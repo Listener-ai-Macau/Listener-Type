@@ -692,7 +692,28 @@ fn sync_device_firmware_preferences(
     next: &UserPreferences,
 ) -> Result<(), String> {
     let ble_name_changed = previous.device_ble_name != next.device_ble_name;
-    for packet in device_setting_packets_for_changes(previous, next) {
+    let packets = device_setting_packets_for_changes(previous, next);
+    match crate::device_control_platform::BleDeviceSettingsTransaction::begin(
+        Duration::from_secs(2),
+    ) {
+        Ok(mut transaction) => {
+            for packet in &packets {
+                transaction.write_setting(&packet.id, &packet.command, Duration::from_secs(2))?;
+            }
+            if ble_name_changed {
+                transaction.invoke_command("apply_ble_name", || {
+                    sync_device_ble_name_apply_to_firmware()
+                })?;
+            }
+            return Ok(());
+        }
+        Err(err) => {
+            // Older firmware and an active USB-only setup retain the existing
+            // settings path; a BLE transaction never silently degrades after it starts.
+            log::info!("[device-control] BLE settings transaction unavailable; preserving fallback: {err}");
+        }
+    }
+    for packet in packets {
         sync_device_setting_packet_to_firmware(packet)?;
     }
     if ble_name_changed {
@@ -6099,6 +6120,11 @@ pub async fn transfer_firmware_ota_ble(
     coord.end_firmware_ota_transfer();
     if transfer.is_ok() {
         observability.record_reconnect_confirmation(confirm.matched);
+    } else {
+        // The OTA handoff paused the continuous capture before opening its fresh GATT path.
+        // A failed BEGIN/data/finish must restore that listener instead of leaving Type attached
+        // at the Windows level but unable to receive audio notifications.
+        coord.refresh_embedded_ble_listener();
     }
 
     let stats = transfer?;
@@ -8810,6 +8836,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ota_transfer_failure_restores_the_background_listener() {
+        let source = normalized_commands_source();
+        let transfer_start = source
+            .find("pub async fn transfer_firmware_ota_ble")
+            .expect("firmware OTA command should exist");
+        let transfer_end = source[transfer_start..]
+            .find("Ok(FirmwareOtaBleTransferResult")
+            .map(|offset| transfer_start + offset)
+            .expect("firmware OTA command should return its result");
+        let transfer = &source[transfer_start..transfer_end];
+        let end = transfer
+            .find("coord.end_firmware_ota_transfer();")
+            .expect("OTA transfer must always clear its active guard");
+        let success = transfer
+            .find("if transfer.is_ok() {\n        observability.record_reconnect_confirmation")
+            .expect("successful OTA confirmation branch should exist");
+        let refresh = transfer
+            .find("coord.refresh_embedded_ble_listener();")
+            .expect("failed OTA transfer must restore the paused listener");
+        let result = transfer
+            .find("let stats = transfer?;")
+            .expect("OTA transfer should propagate its result after cleanup");
+
+        assert!(end < refresh && refresh < result);
+        assert!(success < refresh);
+    }
+
     fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
         FirmwareOtaDeviceSnapshot {
             connected: true,
@@ -9066,6 +9120,7 @@ mod tests {
                 plugged_low_power_enabled: true,
                 plugged_auto_shutdown_minutes: 0,
                 battery_auto_shutdown_minutes: 30,
+                settings_revision: 42,
                 knob_rotation_action: "screen_brightness".to_string(),
                 ble_name: "listener-dev".to_string(),
                 ble_name_pending_restart: true,
@@ -9125,6 +9180,7 @@ mod tests {
                 plugged_low_power_enabled: true,
                 plugged_auto_shutdown_minutes: 0,
                 battery_auto_shutdown_minutes: 30,
+                settings_revision: 42,
                 knob_rotation_action: "screen_brightness".to_string(),
                 ble_name: "listener-dev".to_string(),
                 ble_name_pending_restart: false,
@@ -9193,6 +9249,7 @@ mod tests {
                 plugged_low_power_enabled: true,
                 plugged_auto_shutdown_minutes: 0,
                 battery_auto_shutdown_minutes: 30,
+                settings_revision: 42,
                 knob_rotation_action: "screen_brightness".to_string(),
                 ble_name: "Blistener".to_string(),
                 ble_name_pending_restart: true,
@@ -9241,6 +9298,7 @@ mod tests {
             plugged_low_power_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
+            settings_revision: 42,
             knob_rotation_action: "screen_brightness".to_string(),
             ble_name: "Blistener".to_string(),
             ble_name_pending_restart: false,

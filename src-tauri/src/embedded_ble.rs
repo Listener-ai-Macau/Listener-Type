@@ -11,6 +11,7 @@ pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3
 pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093b";
 pub const DIAGNOSTIC_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093c";
 pub const DIAGNOSTIC_COUNT_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093d";
+pub const DEVICE_SETTINGS_REVISION_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091f";
 pub const LISTENER_OTA_V1_SERVICE_UUID_TEXT: &str = denzic_ota_core::GATT_SERVICE_UUID;
 pub const LISTENER_OTA_V1_CONTROL_UUID_TEXT: &str = denzic_ota_core::GATT_CONTROL_UUID;
 pub const LISTENER_OTA_V1_DATA_UUID_TEXT: &str = denzic_ota_core::GATT_DATA_UUID;
@@ -76,6 +77,7 @@ pub struct DeviceSettingsStatus {
     pub plugged_low_power_enabled: bool,
     pub plugged_auto_shutdown_minutes: u32,
     pub battery_auto_shutdown_minutes: u32,
+    pub settings_revision: u32,
     pub knob_rotation_action: String,
     pub ble_name: String,
     pub ble_name_pending_restart: bool,
@@ -84,6 +86,21 @@ pub struct DeviceSettingsStatus {
     pub charging: bool,
     pub charge_full: bool,
     pub raw_line: String,
+}
+
+pub(crate) fn parse_device_settings_revision_characteristic(value: &str) -> Result<u32, String> {
+    let revision = value
+        .split(';')
+        .map(str::trim)
+        .find_map(|field| field.strip_prefix("settings_revision="))
+        .ok_or_else(|| format!("device settings revision characteristic missing settings_revision: {value}"))?;
+    let revision = revision
+        .parse::<u32>()
+        .map_err(|err| format!("device settings revision is not u32: {err}"))?;
+    if revision == 0 {
+        return Err("device settings revision must be nonzero".to_string());
+    }
+    Ok(revision)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,6 +375,7 @@ pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
         BleFailureKind::DeviceAsleep
     } else if lower.contains("stale")
         || lower.contains("unknown gatt")
+        || lower.contains("0x80070016")
         || (lower.contains("cached") && !lower.contains("uncached"))
         || lower.contains("gatt cache")
         || lower.contains("service changed")
@@ -632,6 +650,8 @@ mod windows_ble {
         GUID::from_u128(denzic_ota_core::GATT_STATUS_UUID_U128);
     const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
     const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
+    const DEVICE_SETTINGS_REVISION_UUID: GUID =
+        GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091f);
     const WINDOWS_BLE_AEP_SELECTOR: &str =
         "(System.Devices.Aep.ProtocolId:=\"{bb7bb05e-5972-42b5-94fc-76eaa7084d49}\")";
     const WINDOWS_BLE_AEP_CONNECTABLE_SELECTOR: &str =
@@ -2303,6 +2323,20 @@ mod windows_ble {
             .lock()
             .map(|snapshot| snapshot.clone())
             .unwrap_or_default()
+    }
+
+    fn native_windows_hid_snapshot_refresh_is_useful(
+        startup_addresses: &[u64],
+        refreshed_addresses: &[u64],
+    ) -> bool {
+        !refreshed_addresses.is_empty() && refreshed_addresses != startup_addresses
+    }
+
+    fn native_windows_hid_current_address_uses_random_identity(
+        address: u64,
+        startup_addresses: &[u64],
+    ) -> bool {
+        startup_addresses.contains(&address)
     }
 
     pub(super) fn native_windows_hid_pairing_addresses_from_entries(
@@ -6304,6 +6338,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             plugged_low_power_enabled,
             plugged_auto_shutdown_minutes,
             battery_auto_shutdown_minutes,
+            settings_revision: optional_u32_field(&fields, "settings_revision").unwrap_or(0),
             knob_rotation_action: require_field(&fields, "knob_rotation")?.to_string(),
             ble_name: require_field(&fields, "ble_name")?.to_string(),
             ble_name_pending_restart: parse_bool_field(&fields, "ble_name_pending")?,
@@ -6667,10 +6702,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             return Err(format!("BLE CCCD notify write returned status={status:?}"));
         }
         log::info!("[embedded-ble] capture #{capture_id}: notify CCCD enabled");
-        on_ready()?;
         let type_heartbeat_enabled =
             type_heartbeat_enabled_for_terminal_behavior(terminal_behavior);
         let mut next_type_heartbeat = None;
+        // Notify subscription alone is not the recovery terminal state. The
+        // firmware keeps its pairing/LED recovery window open until it has
+        // accepted TYPE:READY (or a later Type heartbeat after a retry).
+        let mut type_ready_confirmed = false;
         let type_ready_command = type_ready_command_bytes();
         if type_heartbeat_enabled && ble_ota_process_mutex_busy() {
             log::info!(
@@ -6685,6 +6723,20 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 if let Some(address) = cleanup.target.bluetooth_address {
                     persist_successful_notify_target_address(address, "Type heartbeat ready");
                 }
+                if let Err(err) = cleanup.write_type_heartbeat(
+                    b"TYPE:AUDIO:LOSSLESS_RICE:3\n",
+                    "Type lossless audio capability",
+                ) {
+                    log::warn!(
+                        "[embedded-ble] capture #{capture_id}: lossless audio capability was not acknowledged; firmware will retain raw PCM: {err}"
+                    );
+                } else {
+                    log::info!(
+                        "[embedded-ble] capture #{capture_id}: lossless audio capability announced"
+                    );
+                }
+                on_ready()?;
+                type_ready_confirmed = true;
                 if type_heartbeat_enabled {
                     next_type_heartbeat = Some(Instant::now() + TYPE_HEARTBEAT_INTERVAL);
                 }
@@ -6766,6 +6818,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         }
                         consecutive_type_heartbeat_failures = 0;
                         cleanup.mark_type_heartbeat_open();
+                        if !type_ready_confirmed {
+                            on_ready()?;
+                            type_ready_confirmed = true;
+                            log::info!(
+                                "[embedded-ble] capture #{capture_id}: Type ready terminal confirmation recovered through heartbeat"
+                            );
+                        }
                     }
                     next_type_heartbeat = Some(now + TYPE_HEARTBEAT_INTERVAL);
                 }
@@ -7001,6 +7060,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     Some(Instant::now() + EC11_HARDWARE_RECOVERY_DISCONNECT_TIMEOUT);
                 continue;
             }
+            let notification = crate::audio_transport_codec::normalize_listener_audio_notification(
+                &notification,
+            )
+            .map_err(|err| {
+                format!(
+                    "[embedded-ble] capture #{capture_id}: lossless audio notification rejected: {err}"
+                )
+            })?;
             let terminal = super::is_terminal_notification(&notification);
             let local_event = collector.handle_notification(&notification).ok();
             on_event(crate::embedded_ble::BleNotificationEvent {
@@ -8057,6 +8124,55 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }))
     }
 
+    fn open_notify_target_for_current_native_windows_hid_service_endpoint(
+        addresses: &[u64],
+        timeout: Duration,
+    ) -> Result<OpenNotifyTarget, String> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(SERVICE_UUID)
+            .map_err(|err| format!("native Windows HID service selector failed: {err}"))?;
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .map_err(|err| format!("native Windows HID service query failed: {err}"))
+            .and_then(|op| {
+                wait_async_operation(op, timeout, "native Windows HID service query")
+            })?;
+        let count = devices
+            .Size()
+            .map_err(|err| format!("native Windows HID service collection size failed: {err}"))?;
+        let mut last_error = None;
+
+        for index in 0..count {
+            let info = devices.GetAt(index).map_err(|err| {
+                format!("native Windows HID service entry {index} read failed: {err}")
+            })?;
+            let id = info.Id().map_err(|err| {
+                format!("native Windows HID service entry {index} id read failed: {err}")
+            })?;
+            let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy())
+            else {
+                continue;
+            };
+            if !addresses.contains(&address) {
+                continue;
+            }
+
+            match open_notify_target_for_service_with_timeout(&id, timeout).and_then(|target| {
+                require_audio_control_for_notify_target(
+                    target,
+                    "current native Windows HID service-id endpoint",
+                )
+            }) {
+                Ok(target) => return Ok(target),
+                Err(err) => last_error = Some(format!(
+                    "native Windows HID service endpoint address={address:012X} failed: {err}"
+                )),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "no current native Windows HID service endpoint matched the paired identity".to_string()
+        }))
+    }
+
     fn open_notify_target() -> Result<OpenNotifyTarget, String> {
         if notify_capture_cancel_requested() {
             return Err(notify_capture_cancelled_error("notify target open"));
@@ -8121,10 +8237,74 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 }
             }
             if native_windows_hid_pairing {
-                return Err(native_windows_hid_error.unwrap_or_else(|| {
+                let startup_error = native_windows_hid_error.unwrap_or_else(|| {
                     "No current native Windows HID address was available for audio notify recovery"
                         .to_string()
-                }));
+                });
+                match native_windows_hid_pairing_addresses() {
+                    Ok(refreshed_addresses)
+                        if native_windows_hid_snapshot_refresh_is_useful(
+                            &native_windows_hid_addresses,
+                            &refreshed_addresses,
+                        ) =>
+                    {
+                        log::info!(
+                            "[embedded-ble] native Windows HID startup identity changed after direct GATT miss; retrying refreshed current identities only"
+                        );
+                        let mut refreshed_error = None;
+                        for address in &refreshed_addresses {
+                            match open_notify_target_for_current_native_windows_hid(*address) {
+                                Ok(target) => {
+                                    remember_runtime_bluetooth_target_address_for_current(
+                                        *address,
+                                        "refreshed native Windows HID audio notify",
+                                    );
+                                    log::info!(
+                                        "[embedded-ble] selected refreshed native Windows HID audio notify address={address:012X}"
+                                    );
+                                    return Ok(target);
+                                }
+                                Err(err) => {
+                                    refreshed_error = Some(err.clone());
+                                    log::info!(
+                                        "[embedded-ble] refreshed native Windows HID audio notify address={address:012X} not ready: {}",
+                                        err.chars().take(240).collect::<String>()
+                                    );
+                                }
+                            }
+                        }
+                        return Err(refreshed_error.unwrap_or(startup_error));
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        log::warn!(
+                            "[embedded-ble] native Windows HID startup identity refresh failed after direct GATT miss: {}",
+                            err.chars().take(240).collect::<String>()
+                        );
+                    }
+                }
+                match open_notify_target_for_current_native_windows_hid_service_endpoint(
+                    &native_windows_hid_addresses,
+                    STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT,
+                ) {
+                    Ok(target) => {
+                        if let Some(address) = target.bluetooth_address {
+                            remember_runtime_bluetooth_target_address_for_current(
+                                address,
+                                "native Windows HID service-id endpoint",
+                            );
+                        }
+                        log::info!(
+                            "[embedded-ble] selected current native Windows HID service-id endpoint after direct GATT miss"
+                        );
+                        return Ok(target);
+                    }
+                    Err(endpoint_error) => {
+                        return Err(format!(
+                            "{startup_error}; current native Windows HID service-id endpoint failed: {endpoint_error}"
+                        ));
+                    }
+                }
             }
             // An Idle wake happens in the same Type process that most recently had
             // a working notify subscription. Prefer that verified in-memory address
@@ -8521,6 +8701,20 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         ))
     }
 
+    pub fn read_device_settings_revision(timeout: Duration) -> Result<u32, String> {
+        let _fresh_guard = BleFreshGattGuard::enter("device settings revision")?;
+        let deadline = Instant::now() + timeout.max(Duration::from_millis(250));
+        let target = open_embedded_audio_status_target(timeout)?;
+        let value = read_embedded_audio_status_string_once(
+            &target.service,
+            DEVICE_SETTINGS_REVISION_UUID,
+            deadline,
+            "device settings revision",
+        )
+        .ok_or_else(|| "fresh Listener device settings revision read timed out".to_string())?;
+        crate::embedded_ble::parse_device_settings_revision_characteristic(&value)
+    }
+
     fn open_embedded_audio_status_target(
         timeout: Duration,
     ) -> Result<OpenEmbeddedAudioStatusTarget, String> {
@@ -8658,11 +8852,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             || err.contains("GattCommunicationStatus(3)")
             || err.contains("Unreachable")
             || err.contains("unreachable")
+            || err.contains("HRESULT(0x80070016)")
             || err.contains("HRESULT(0x800706BA)")
             || err.contains("BLE characteristic discovery returned status")
             || err.contains("BLE service open wait failed")
             || err.contains("BLE service discovery wait failed")
             || err.contains("GATT session did not become active")
+            || err.contains("BLE audio control unavailable while opening notify target")
             || err.contains("device open by address")
             || err.contains("device open by id")
     }
@@ -9695,6 +9891,29 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let direct_error = direct_error.unwrap_or_else(|| {
             "verified Listener address did not expose a writable OTA v1 service".to_string()
         });
+        let native_windows_hid_addresses = native_windows_hid_pairing_addresses_for_startup();
+        if native_windows_hid_addresses.contains(&address) {
+            match open_listener_ota_v1_target_for_current_native_windows_hid_service_endpoint(
+                &native_windows_hid_addresses,
+                BLE_DISCOVERY_TIMEOUT,
+            ) {
+                Ok(target) => {
+                    remember_runtime_bluetooth_target_address_for_current(
+                        address,
+                        "native Windows HID OTA service-id endpoint",
+                    );
+                    log::info!(
+                        "[embedded-ble] Listener OTA v1 selected current native Windows HID service-id endpoint after direct GATT miss"
+                    );
+                    return Ok(target);
+                }
+                Err(endpoint_error) => {
+                    return Err(format!(
+                        "Listener OTA v1 handoff direct address path failed: {direct_error}; current native Windows HID service-id endpoint failed: {endpoint_error}"
+                    ));
+                }
+            }
+        }
         log::warn!(
             "[embedded-ble] Listener OTA v1 handoff direct address path exhausted; falling back to normal service discovery: {direct_error}"
         );
@@ -9703,6 +9922,55 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 "Listener OTA v1 handoff direct address path failed: {direct_error}; normal service discovery fallback failed: {fallback_error}"
             )
         })
+    }
+
+    fn open_listener_ota_v1_target_for_current_native_windows_hid_service_endpoint(
+        addresses: &[u64],
+        timeout: Duration,
+    ) -> Result<OpenListenerOtaV1Target, String> {
+        let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V1_SERVICE_UUID)
+            .map_err(|err| format!("native Windows HID OTA service selector failed: {err}"))?;
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+            .map_err(|err| format!("native Windows HID OTA service query failed: {err}"))
+            .and_then(|op| {
+                wait_async_operation(op, timeout, "native Windows HID OTA service query")
+            })?;
+        let count = devices
+            .Size()
+            .map_err(|err| format!("native Windows HID OTA service collection size failed: {err}"))?;
+        let mut last_error = None;
+
+        for index in 0..count {
+            let info = devices.GetAt(index).map_err(|err| {
+                format!("native Windows HID OTA service entry {index} read failed: {err}")
+            })?;
+            let id = info.Id().map_err(|err| {
+                format!("native Windows HID OTA service entry {index} id read failed: {err}")
+            })?;
+            let Some(address) = parse_bluetooth_address_from_device_id(&id.to_string_lossy())
+            else {
+                continue;
+            };
+            if !addresses.contains(&address) {
+                continue;
+            }
+
+            // Windows can retain a service-id record while rejecting its uncached
+            // characteristic query. Firmware pins the legacy OTA data-plane handles,
+            // so this exact-identity endpoint may use its cached handle only after
+            // the uncached attempt has failed.
+            match open_listener_ota_v1_target_for_service_with_cache_policy(&id, true) {
+                Ok(target) => return Ok(target),
+                Err(err) => last_error = Some(format!(
+                    "native Windows HID OTA service endpoint address={address:012X} failed: {err}"
+                )),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            "no current native Windows HID OTA service endpoint matched the paired identity"
+                .to_string()
+        }))
     }
 
     fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
@@ -10393,8 +10661,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let mut last_error = None;
         // A verified active link makes its device handle and access grant reusable, but
         // OTA control writes still require fresh GATT characteristic handles.
-        let cache_modes = [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached];
-        for cache_mode in cache_modes {
+        let cache_modes: &[BluetoothCacheMode] = if verified_active_handoff {
+            &[BluetoothCacheMode::Uncached]
+        } else {
+            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]
+        };
+        for &cache_mode in cache_modes {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
@@ -10790,7 +11062,30 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     fn open_notify_target_for_current_native_windows_hid(
         address: u64,
     ) -> Result<OpenNotifyTarget, String> {
-        open_notify_target_for_device_with_cache_modes(address, &[BluetoothCacheMode::Uncached])
+        open_notify_target_for_device_with_cache_modes_and_timeout(
+            address,
+            &[BluetoothCacheMode::Uncached],
+            STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT,
+        )
+        .and_then(|target| {
+            require_audio_control_for_notify_target(target, "current native Windows HID address")
+        })
+    }
+
+    // Type readiness requires the control characteristic as well as audio notify.
+    // Otherwise the capture can receive packets but cannot send its heartbeat or
+    // recording lifecycle control, leaving it in a permanent half-ready state.
+    fn require_audio_control_for_notify_target(
+        target: OpenNotifyTarget,
+        source: &str,
+    ) -> Result<OpenNotifyTarget, String> {
+        if target.control.is_some() {
+            return Ok(target);
+        }
+
+        Err(format!(
+            "BLE audio control unavailable while opening notify target for {source}; retrying before capture starts"
+        ))
     }
 
     fn open_notify_target_for_device(address: u64) -> Result<OpenNotifyTarget, String> {
@@ -10804,11 +11099,24 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         address: u64,
         cache_modes: &[BluetoothCacheMode],
     ) -> Result<OpenNotifyTarget, String> {
-        let device = open_ble_device(address)?;
+        open_notify_target_for_device_with_cache_modes_and_timeout(
+            address,
+            cache_modes,
+            BLE_DISCOVERY_TIMEOUT,
+        )
+    }
+
+    fn open_notify_target_for_device_with_cache_modes_and_timeout(
+        address: u64,
+        cache_modes: &[BluetoothCacheMode],
+        timeout: Duration,
+    ) -> Result<OpenNotifyTarget, String> {
+        let timeout = timeout.min(BLE_DISCOVERY_TIMEOUT);
+        let device = open_ble_device_with_timeout(address, timeout)?;
         if let Some(access) = device
             .RequestAccessAsync()
             .ok()
-            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "device access").ok())
+            .and_then(|op| wait_async_operation(op, timeout, "device access").ok())
         {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!("BLE device access denied status={access:?}"));
@@ -10821,14 +11129,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, cache_mode)
                 .map_err(|err| format!("BLE {cache_mode:?} service discovery failed: {err}"))
                 .and_then(|op| {
-                    wait_async_operation(
-                        op,
-                        BLE_DISCOVERY_TIMEOUT,
-                        &format!("{cache_mode:?} service"),
+                    wait_async_operation(op, timeout, &format!("{cache_mode:?} service")).map_err(
+                        |err| format!("BLE {cache_mode:?} service discovery wait failed: {err}"),
                     )
-                    .map_err(|err| {
-                        format!("BLE {cache_mode:?} service discovery wait failed: {err}")
-                    })
                 }) {
                 Ok(result) => result,
                 Err(err) => {
@@ -10867,7 +11170,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         continue;
                     }
                 };
-                match open_notify_characteristic_from_service(&service, cache_mode) {
+                match open_notify_characteristic_from_service_with_timeout(
+                    &service, cache_mode, timeout,
+                ) {
                     Ok(prepared) => {
                         return Ok(OpenNotifyTarget {
                             characteristic: prepared.characteristic,
@@ -11026,13 +11331,36 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         address: u64,
         timeout: Duration,
     ) -> Result<BluetoothLEDevice, String> {
-        BluetoothLEDevice::FromBluetoothAddressAsync(address)
+        let native_windows_hid_random_identity =
+            native_windows_hid_current_address_uses_random_identity(
+                address,
+                &native_windows_hid_pairing_addresses_for_startup(),
+            );
+        let operation = if native_windows_hid_random_identity {
+            log::debug!(
+                "[embedded-ble] opening current native Windows HID address={address:012X} as a random BLE identity"
+            );
+            BluetoothLEDevice::FromBluetoothAddressWithBluetoothAddressTypeAsync(
+                address,
+                BluetoothAddressType::Random,
+            )
+        } else {
+            BluetoothLEDevice::FromBluetoothAddressAsync(address)
+        };
+        operation
             .map_err(|err| format!("BLE device open by address failed: {err}"))
             .and_then(|op| wait_async_operation(op, timeout, "device open by address"))
     }
 
     fn open_listener_ota_v1_target_for_service(
         service_id: &HSTRING,
+    ) -> Result<OpenListenerOtaV1Target, String> {
+        open_listener_ota_v1_target_for_service_with_cache_policy(service_id, true)
+    }
+
+    fn open_listener_ota_v1_target_for_service_with_cache_policy(
+        service_id: &HSTRING,
+        allow_cached: bool,
     ) -> Result<OpenListenerOtaV1Target, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
             .map_err(|err| format!("Listener OTA v1 service open failed: {err}"))
@@ -11053,7 +11381,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         });
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+        let cache_modes: &[BluetoothCacheMode] = if allow_cached {
+            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]
+        } else {
+            &[BluetoothCacheMode::Uncached]
+        };
+        for &cache_mode in cache_modes {
             match open_listener_ota_v1_characteristics_from_service_with_retry(&service, cache_mode)
             {
                 Ok(prepared) => {
@@ -11175,13 +11508,19 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         })
     }
 
-    fn open_notify_target_for_service(service_id: &HSTRING) -> Result<OpenNotifyTarget, String> {
+    fn open_notify_target_for_service_with_timeout(
+        service_id: &HSTRING,
+        timeout: Duration,
+    ) -> Result<OpenNotifyTarget, String> {
         let service = GattDeviceService::FromIdAsync(service_id)
             .map_err(|err| format!("BLE service open failed: {err}"))
-            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "service open"))?;
+            .and_then(|op| wait_async_operation(op, timeout, "service open"))?;
 
-        let prepared =
-            open_notify_characteristic_from_service(&service, BluetoothCacheMode::Uncached)?;
+        let prepared = open_notify_characteristic_from_service_with_timeout(
+            &service,
+            BluetoothCacheMode::Uncached,
+            timeout,
+        )?;
         Ok(OpenNotifyTarget {
             characteristic: prepared.characteristic,
             control: prepared.control,
@@ -11192,6 +11531,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 &service_id.to_string_lossy(),
             ),
         })
+    }
+
+    fn open_notify_target_for_service(service_id: &HSTRING) -> Result<OpenNotifyTarget, String> {
+        open_notify_target_for_service_with_timeout(service_id, BLE_DISCOVERY_TIMEOUT)
     }
 
     fn open_embedded_audio_status_target_for_service(
@@ -11839,22 +12182,46 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         service: &GattDeviceService,
         cache_mode: BluetoothCacheMode,
     ) -> Result<PreparedNotifyCharacteristic, String> {
+        open_notify_characteristic_from_service_with_timeout(
+            service,
+            cache_mode,
+            BLE_DISCOVERY_TIMEOUT,
+        )
+    }
+
+    fn open_notify_characteristic_from_service_with_timeout(
+        service: &GattDeviceService,
+        cache_mode: BluetoothCacheMode,
+        timeout: Duration,
+    ) -> Result<PreparedNotifyCharacteristic, String> {
+        let timeout = timeout.min(BLE_DISCOVERY_TIMEOUT);
         if let Some(access) = service
             .RequestAccessAsync()
             .ok()
-            .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "service access").ok())
+            .and_then(|op| wait_async_operation(op, timeout, "service access").ok())
         {
             if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
                 return Err(format!("BLE service access denied status={access:?}"));
             }
         }
-        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
-        let control = open_optional_audio_control_for_notify_setup(service, cache_mode);
+        let session = prepare_gatt_session(service, GATT_READY_TIMEOUT.min(timeout))?;
+        let control = if timeout == BLE_DISCOVERY_TIMEOUT {
+            open_optional_audio_control_for_notify_setup(service, cache_mode)
+        } else {
+            open_write_characteristic_from_service_with_timeout(
+                service,
+                AUDIO_CONTROL_UUID,
+                "native Windows HID audio control",
+                cache_mode,
+                timeout,
+            )
+            .ok()
+        };
 
         let result = service
             .GetCharacteristicsForUuidWithCacheModeAsync(NOTIFY_UUID, cache_mode)
             .map_err(|err| format!("BLE characteristic discovery failed: {err}"))?
-            .wait_ble_result(BLE_DISCOVERY_TIMEOUT, "notify characteristic")?;
+            .wait_ble_result(timeout, "notify characteristic")?;
         let status = result
             .Status()
             .map_err(|err| format!("BLE characteristic status read failed: {err}"))?;
@@ -15201,12 +15568,30 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             assert!(
                 notify_body.contains("for address in &native_windows_hid_addresses")
                     && notify_body.contains("open_notify_target_for_current_native_windows_hid(*address)")
-                    && notify_body.contains("if native_windows_hid_pairing {\n                return Err"),
-                "a fresh native HID identity must use only its own uncached direct-device path; a transient must retry that identity instead of falling through to stale system-service entries"
+                    && notify_body.contains("native_windows_hid_snapshot_refresh_is_useful")
+                    && notify_body.contains(
+                        "open_notify_target_for_current_native_windows_hid_service_endpoint("
+                    ),
+                "a native HID identity must retry only its exact current service endpoint after the direct uncached path misses"
             );
-            assert!(source.contains(
-                "open_notify_target_for_device_with_cache_modes(address, &[BluetoothCacheMode::Uncached])"
-            ));
+            assert!(source.contains("open_notify_target_for_device_with_cache_modes_and_timeout("));
+            assert!(source.contains("STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT"));
+            let native_service_start = source
+                .find("fn open_notify_target_for_current_native_windows_hid_service_endpoint(")
+                .expect("current native HID service endpoint helper should exist");
+            let native_service_end = source[native_service_start..]
+                .find("fn open_notify_target()")
+                .map(|offset| native_service_start + offset)
+                .expect("current native HID service endpoint helper boundary should exist");
+            let native_service_body = &source[native_service_start..native_service_end];
+            assert!(
+                native_service_body.contains("addresses.contains(&address)")
+                    && native_service_body.contains(
+                        "open_notify_target_for_service_with_timeout(&id, timeout)"
+                    )
+                    && !native_service_body.contains("ble_candidate_allowed"),
+                "native HID service fallback must remain an exact-address endpoint open without name-based candidate selection"
+            );
             assert!(
                 notify_body.contains("skipping stale service-selector address")
                     && notify_body.contains("native_windows_hid_addresses.contains(&address)"),
@@ -15220,6 +15605,65 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 !source.contains(&legacy_advertisement_helper),
                 "native HID pairing can be connected but no longer discoverable by advertisement, so takeover must not wait for an advertisement"
             );
+        }
+
+        #[test]
+        fn stale_native_windows_hid_snapshot_refreshes_only_current_direct_identities() {
+            assert!(native_windows_hid_snapshot_refresh_is_useful(
+                &[0x1111],
+                &[0x2222]
+            ));
+            assert!(!native_windows_hid_snapshot_refresh_is_useful(
+                &[0x1111],
+                &[0x1111]
+            ));
+            assert!(!native_windows_hid_snapshot_refresh_is_useful(
+                &[0x1111],
+                &[]
+            ));
+
+            let source = include_str!("embedded_ble.rs");
+            let notify_start = source
+                .find("fn open_notify_target()")
+                .expect("notify target helper should exist");
+            let notify_end = source[notify_start..]
+                .find("fn open_notify_target_with_retry")
+                .map(|offset| notify_start + offset)
+                .expect("notify target helper boundary should exist");
+            let notify_body = &source[notify_start..notify_end];
+
+            assert!(notify_body.contains("native_windows_hid_pairing_addresses()"));
+            assert!(notify_body.contains("native_windows_hid_snapshot_refresh_is_useful"));
+            assert!(notify_body.contains(
+                "selected refreshed native Windows HID audio notify address={address:012X}"
+            ));
+            assert!(
+                !notify_body.contains("GetDeviceSelectorFromUuid(SERVICE_UUID)")
+                    || notify_body
+                        .find("native_windows_hid_pairing_addresses()")
+                        .expect("native HID identity refresh should occur")
+                        < notify_body
+                            .find("GetDeviceSelectorFromUuid(SERVICE_UUID)")
+                            .expect("service selector should remain after native HID handling"),
+                "a changed current Windows HID identity must be retried directly before any system selector fallback"
+            );
+        }
+
+        #[test]
+        fn native_windows_hid_current_identity_uses_random_address_type() {
+            assert!(native_windows_hid_current_address_uses_random_identity(
+                0xE4DE_5CBB_4A9B,
+                &[0xE4DE_5CBB_4A9B],
+            ));
+            assert!(!native_windows_hid_current_address_uses_random_identity(
+                0xE4DE_5CBB_4A9B,
+                &[0xA4CB_8FF2_B510],
+            ));
+
+            let source = include_str!("embedded_ble.rs");
+            assert!(source
+                .contains("BluetoothLEDevice::FromBluetoothAddressWithBluetoothAddressTypeAsync("));
+            assert!(source.contains("BluetoothAddressType::Random"));
         }
 
         #[test]
@@ -15859,6 +16303,11 @@ pub fn read_device_settings_status(timeout: Duration) -> Result<DeviceSettingsSt
 }
 
 #[cfg(target_os = "windows")]
+pub fn read_device_settings_revision(timeout: Duration) -> Result<u32, String> {
+    windows_ble::read_device_settings_revision(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn capture_notification_events(
     timeout: Duration,
     on_event: &mut BleNotificationHandler<'_>,
@@ -16334,6 +16783,11 @@ pub fn send_status_led_command(_command: &str, _timeout: Duration) -> Result<(),
 #[cfg(not(target_os = "windows"))]
 pub fn read_device_settings_status(_timeout: Duration) -> Result<DeviceSettingsStatus, String> {
     Err("Listener device settings refresh is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_device_settings_revision(_timeout: Duration) -> Result<u32, String> {
+    Err("Listener device settings revision is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -17017,6 +17471,58 @@ mod tests {
             "Listener OTA v1 must acquire the cross-process OTA lock, send TYPE:OTA, then open BLE GATT"
         );
 
+        let ota_handoff_start = source
+            .find("fn open_listener_ota_v1_target_after_active_link_handoff")
+            .expect("OTA active-link handoff helper should exist");
+        let ota_handoff_end = source[ota_handoff_start..]
+            .find("fn open_listener_ota_v1_target()")
+            .map(|offset| ota_handoff_start + offset)
+            .expect("OTA active-link handoff boundary should exist");
+        let ota_handoff = &source[ota_handoff_start..ota_handoff_end];
+        assert!(
+            ota_handoff.contains("native_windows_hid_pairing_addresses_for_startup()")
+                && ota_handoff.contains("native_windows_hid_addresses.contains(&address)")
+                && ota_handoff.contains(
+                    "open_listener_ota_v1_target_for_current_native_windows_hid_service_endpoint("
+                )
+                && ota_handoff.contains("current native Windows HID service-id endpoint after direct GATT miss"),
+            "OTA must reach an exact current native-HID service endpoint before any generic cache fallback"
+        );
+
+        let ota_endpoint_start = source
+            .find("fn open_listener_ota_v1_target_for_current_native_windows_hid_service_endpoint(")
+            .expect("native HID OTA service endpoint helper should exist");
+        let ota_endpoint_end = source[ota_endpoint_start..]
+            .find("fn open_listener_ota_v1_target()")
+            .map(|offset| ota_endpoint_start + offset)
+            .expect("native HID OTA service endpoint boundary should exist");
+        let ota_endpoint = &source[ota_endpoint_start..ota_endpoint_end];
+        assert!(
+            ota_endpoint.contains("GetDeviceSelectorFromUuid(LISTENER_OTA_V1_SERVICE_UUID)")
+                && ota_endpoint.contains("addresses.contains(&address)")
+                && ota_endpoint.contains(
+                    "open_listener_ota_v1_target_for_service_with_cache_policy(&id, true)"
+                )
+                && source.contains(
+                    "if allow_cached {\n            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]"
+                ),
+            "native HID OTA endpoint must select only the current address and try uncached GATT before the legacy-compatible cache"
+        );
+
+        let direct_start = source
+            .find("fn open_listener_ota_v1_target_for_device_with_options(")
+            .expect("verified OTA direct-open helper should exist");
+        let direct_end = source[direct_start..]
+            .find("fn open_listener_ota_v1_target_for_device_with_deadline(")
+            .map(|offset| direct_start + offset)
+            .expect("verified OTA direct-open helper boundary should exist");
+        let direct = &source[direct_start..direct_end];
+        assert!(
+            direct.contains("if verified_active_handoff {\n            &[BluetoothCacheMode::Uncached]")
+                && direct.contains("for &cache_mode in cache_modes"),
+            "verified OTA handoff must not fall back to stale cached device GATT handles"
+        );
+
         let handoff_start = source
             .find("pub(super) fn request_listener_ota_v1_active_link")
             .expect("Listener OTA v1 reconnect handoff helper should exist");
@@ -17045,6 +17551,9 @@ mod tests {
         ));
         assert!(windows_ble::is_transient_notify_target_open_error(
             "BLE service open wait failed: HRESULT(0x800706BA)"
+        ));
+        assert!(windows_ble::is_transient_notify_target_open_error(
+            "BLE Uncached service discovery wait failed: Some(HRESULT(0x80070016))"
         ));
         assert!(!windows_ble::is_transient_notify_target_open_error(
             "Linda: BLE device path A4CB8FF2B512 failed: BluetoothCacheMode(0): BLE GATT session did not become active after 8000 ms; advertisement fallback failed: No paired BLE device found in Windows Bluetooth pairing store for advertised Listener address(es) D4E8768AB2EE; skipping audio notify advertisement GATT fallback until Windows pairing completes"
@@ -17257,6 +17766,11 @@ mod tests {
             ),
             (
                 "Unknown GATT service from stale cached service table",
+                BleFailureKind::StaleGattService,
+                true,
+            ),
+            (
+                "BLE Uncached service discovery wait failed: Some(HRESULT(0x80070016))",
                 BleFailureKind::StaleGattService,
                 true,
             ),
@@ -17501,6 +18015,18 @@ mod tests {
 
         assert_eq!(status.ble_name, "Blistener");
         assert_ne!(status.ble_name, "listenerB");
+    }
+
+    #[test]
+    fn parses_device_settings_revision_characteristic() {
+        assert_eq!(
+            parse_device_settings_revision_characteristic(
+                "schema=listener.device_settings.v1;settings_revision=42"
+            )
+            .expect("settings revision"),
+            42
+        );
+        assert!(parse_device_settings_revision_characteristic("settings_revision=0").is_err());
     }
 
     #[cfg(target_os = "windows")]
