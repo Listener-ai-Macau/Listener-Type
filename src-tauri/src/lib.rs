@@ -55,7 +55,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const LOG_ROTATE_LIMIT_BYTES: u64 = 10 * 1024 * 1024;
 const SUPPRESS_CAPSULE_WINDOW_ENV: &str = "LISTENER_TYPE_SUPPRESS_CAPSULE_WINDOW";
@@ -140,6 +140,7 @@ pub fn run() {
             | cli::CliIntent::SendEmbeddedAudioControlStop { .. }
             | cli::CliIntent::ReadEmbeddedAudioBleStatus { .. }
             | cli::CliIntent::ProbeListenerOtaV1Gatt { .. }
+            | cli::CliIntent::ProbeListenerOtaV1ActiveHandoff { .. }
             | cli::CliIntent::PromptEmbeddedBlePairing { .. }
             | cli::CliIntent::PromptEmbeddedBlePairingOnly { .. }
             | cli::CliIntent::CleanupEmbeddedBlePairing { .. } => {
@@ -1550,6 +1551,9 @@ fn dispatch_cli_intent<R: Runtime>(
         cli::CliIntent::ProbeListenerOtaV1Gatt { .. } => {
             log::warn!("[cli] Listener OTA v1 GATT probe is headless-only and was ignored by the running GUI instance");
         }
+        cli::CliIntent::ProbeListenerOtaV1ActiveHandoff { .. } => {
+            log::warn!("[cli] Listener OTA v1 active-link probe is headless-only and was ignored by the running GUI instance");
+        }
         cli::CliIntent::PromptEmbeddedBlePairing { .. } => {
             log::warn!("[cli] embedded BLE pairing prompt is headless-only and was ignored by the running GUI instance");
         }
@@ -1629,6 +1633,98 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
     sync_headless_embedded_ble_target_name_from_firmware(&coordinator);
 
     match intent {
+        cli::CliIntent::ProbeListenerOtaV1ActiveHandoff { timeout_ms } => {
+            let target_timeout_ms = timeout_ms.unwrap_or(1_500).clamp(1_000, 1_500);
+            log::info!(
+                "[cli] headless probe-listener-ota-v1-active-handoff: target_timeout_ms={target_timeout_ms}"
+            );
+            let report = runtime.block_on(async {
+                let listener_ready_started = Instant::now();
+                coordinator.auto_select_embedded_ble_input_source_in_background();
+                let listener_ready = coordinator
+                    .wait_for_embedded_ble_listener_ready_before_firmware_ota(Duration::from_secs(8))
+                    .await;
+                let listener_ready_elapsed_ms = listener_ready_started.elapsed().as_millis() as u64;
+                let listener_ready = match listener_ready {
+                    Ok(true) => true,
+                    Ok(false) => false,
+                    Err(error) => {
+                        return serde_json::json!({
+                            "status": "FAIL",
+                            "backend": "listener-type-rust-winrt",
+                            "backgroundListenerReady": false,
+                            "listenerReadyElapsedMs": listener_ready_elapsed_ms,
+                            "otaPayloadWriteStarted": false,
+                            "error": error,
+                        });
+                    }
+                };
+                if !listener_ready {
+                    return serde_json::json!({
+                        "status": "FAIL",
+                        "backend": "listener-type-rust-winrt",
+                        "backgroundListenerReady": false,
+                        "listenerReadyElapsedMs": listener_ready_elapsed_ms,
+                        "otaPayloadWriteStarted": false,
+                        "error": "Embedded BLE is not the active Type input, so no active-capture OTA handoff was available.",
+                    });
+                }
+
+                let handoff_started = Instant::now();
+                if let Err(error) = crate::embedded_ble::request_listener_ota_v1_active_link(None) {
+                    return serde_json::json!({
+                        "status": "FAIL",
+                        "backend": "listener-type-rust-winrt",
+                        "backgroundListenerReady": true,
+                        "listenerReadyElapsedMs": listener_ready_elapsed_ms,
+                        "handoffElapsedMs": handoff_started.elapsed().as_millis() as u64,
+                        "otaPayloadWriteStarted": false,
+                        "error": error,
+                    });
+                }
+                let handoff_elapsed_ms = handoff_started.elapsed().as_millis() as u64;
+                let target_probe_started = Instant::now();
+                let snapshot = crate::embedded_ble::listener_ota_v1_gatt_probe_after_active_link_hint(
+                    Duration::from_millis(target_timeout_ms),
+                );
+                let target_probe_elapsed_ms = target_probe_started.elapsed().as_millis() as u64;
+                let active_handoff_elapsed_ms = handoff_elapsed_ms.saturating_add(target_probe_elapsed_ms);
+                let has_capability = snapshot
+                    .capabilities
+                    .iter()
+                    .any(|item| item == crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY);
+                let status = if snapshot.connected
+                    && has_capability
+                    && active_handoff_elapsed_ms <= u64::from(target_timeout_ms)
+                {
+                    "PASS"
+                } else {
+                    "FAIL"
+                };
+                serde_json::json!({
+                    "status": status,
+                    "backend": "listener-type-rust-winrt",
+                    "backgroundListenerReady": true,
+                    "listenerReadyElapsedMs": listener_ready_elapsed_ms,
+                    "handoffElapsedMs": handoff_elapsed_ms,
+                    "targetProbeElapsedMs": target_probe_elapsed_ms,
+                    "activeHandoffElapsedMs": active_handoff_elapsed_ms,
+                    "maxActiveHandoffMs": target_timeout_ms,
+                    "otaPayloadWriteStarted": false,
+                    "snapshot": snapshot,
+                })
+            });
+            coordinator.request_shutdown();
+            let report_json = serde_json::to_string(&report)
+                .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
+            headless_print_line(format!("listener_ota_v1_active_handoff_probe_json={report_json}"));
+            log::info!("listener_ota_v1_active_handoff_probe_json={report_json}");
+            if report.get("status").and_then(|value| value.as_str()) == Some("PASS") {
+                0
+            } else {
+                1
+            }
+        }
         cli::CliIntent::ProbeListenerOtaV1Gatt { timeout_ms } => {
             log::info!("[cli] headless probe-listener-ota-v1-gatt: timeout_ms={timeout_ms:?}");
             let timeout_ms = timeout_ms.unwrap_or(20_000).clamp(1_000, 30_000);
@@ -2504,6 +2600,29 @@ mod tests {
         assert!(
             !only_body.contains("prompt_listener_pairing_after_type_recovery"),
             "pairing-only scan must stay conservative and must not force stale cache removal"
+        );
+    }
+
+    #[test]
+    fn headless_ota_active_handoff_probe_uses_notify_and_never_starts_transfer() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("cli::CliIntent::ProbeListenerOtaV1ActiveHandoff { timeout_ms }")
+            .expect("active-link OTA probe CLI arm should exist");
+        let end = source[start..]
+            .find("cli::CliIntent::ProbeListenerOtaV1Gatt { timeout_ms }")
+            .map(|offset| start + offset)
+            .expect("plain OTA GATT probe CLI arm should follow the active-link probe");
+        let probe = &source[start..end];
+
+        assert!(probe.contains("coordinator.auto_select_embedded_ble_input_source_in_background();"));
+        assert!(probe.contains("wait_for_embedded_ble_listener_ready_before_firmware_ota"));
+        assert!(probe.contains("request_listener_ota_v1_active_link(None)"));
+        assert!(probe.contains("listener_ota_v1_gatt_probe_after_active_link_hint"));
+        assert!(probe.contains("otaPayloadWriteStarted\": false"));
+        assert!(
+            !probe.contains("transfer_listener_ota_v1") && !probe.contains("prepared.transfer("),
+            "active-link diagnostic must stop after readiness and never write OTA payload data"
         );
     }
 

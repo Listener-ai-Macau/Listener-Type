@@ -53,6 +53,8 @@ pub enum CliIntent {
     ReadEmbeddedAudioBleStatus { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：只验证 Listener OTA v1 GATT 服务可达，不做版本升级判定。
     ProbeListenerOtaV1Gatt { timeout_ms: Option<u64> },
+    /// 调试 / 自动化入口：建立真实后台 notify 后验证 OTA active-link handoff，不写 OTA 数据。
+    ProbeListenerOtaV1ActiveHandoff { timeout_ms: Option<u64> },
     /// 调试 / 自动化入口：扫描未配对 Listener 并触发 Windows 系统配对体验。
     PromptEmbeddedBlePairing { expected_name: Option<String> },
     /// 调试 / 自动化入口：只执行 Windows 配对体验，不先通过串口打开 recovery 窗口。
@@ -168,6 +170,11 @@ pub fn parse_cli_intent<S: AsRef<str>>(args: &[S]) -> Option<CliIntent> {
             }
             "--probe-listener-ota-v1-gatt" => {
                 return Some(CliIntent::ProbeListenerOtaV1Gatt {
+                    timeout_ms: next_u64_arg(&mut args),
+                });
+            }
+            "--probe-listener-ota-v1-active-handoff" => {
+                return Some(CliIntent::ProbeListenerOtaV1ActiveHandoff {
                     timeout_ms: next_u64_arg(&mut args),
                 });
             }
@@ -533,6 +540,21 @@ mod tests {
             parse_cli_intent(&args),
             Some(CliIntent::ProbeListenerOtaV1Gatt {
                 timeout_ms: Some(20000),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_recognizes_listener_ota_v1_active_handoff_probe_with_timeout() {
+        let args = vec![
+            "listener-type",
+            "--probe-listener-ota-v1-active-handoff",
+            "1500",
+        ];
+        assert_eq!(
+            parse_cli_intent(&args),
+            Some(CliIntent::ProbeListenerOtaV1ActiveHandoff {
+                timeout_ms: Some(1500),
             })
         );
     }
