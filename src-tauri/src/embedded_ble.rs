@@ -7547,13 +7547,26 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 _ => "Denzic OTA v1 control",
             };
             let started_at = Instant::now();
-            let result = write_gatt_value_with_timeout(
-                &self.target.control,
-                packet,
-                GattWriteOption::WriteWithResponse,
-                OTA_WRITE_TIMEOUT,
-                label,
-            )
+            // SYNC has no state transition on Firmware. Its following uncached status
+            // read verifies the acknowledged offset, so avoid the slower detailed
+            // WinRT write-result path while retaining ATT write-with-response.
+            let result = if listener_ota_v1_sync_control_uses_status_write(packet) {
+                write_gatt_value_status_with_timeout(
+                    &self.target.control,
+                    packet,
+                    GattWriteOption::WriteWithResponse,
+                    OTA_WRITE_TIMEOUT,
+                    label,
+                )
+            } else {
+                write_gatt_value_with_timeout(
+                    &self.target.control,
+                    packet,
+                    GattWriteOption::WriteWithResponse,
+                    OTA_WRITE_TIMEOUT,
+                    label,
+                )
+            }
             .map(|_| ());
             self.control_write_elapsed += started_at.elapsed();
             result
@@ -12289,6 +12302,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         } else {
             Err("Listener OTA v1 data characteristic is not writable".to_string())
         }
+    }
+
+    pub(super) fn listener_ota_v1_sync_control_uses_status_write(
+        packet: &[u8; denzic_ota_core::CONTROL_BYTES],
+    ) -> bool {
+        packet[4] == denzic_ota_core::OP_SYNC
     }
 
     fn listener_ota_v1_data_chunk_payload_bytes(
@@ -18384,6 +18403,27 @@ mod tests {
                 "{message}"
             );
             assert!(!classification.user_action.is_empty());
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn ota_sync_uses_lightweight_response_status_path_only() {
+        let mut sync = [0u8; denzic_ota_core::CONTROL_BYTES];
+        sync[4] = denzic_ota_core::OP_SYNC;
+        assert!(super::windows_ble::listener_ota_v1_sync_control_uses_status_write(&sync));
+
+        for operation in [
+            denzic_ota_core::OP_BEGIN,
+            denzic_ota_core::OP_FINISH,
+            denzic_ota_core::OP_ABORT,
+        ] {
+            let mut control = [0u8; denzic_ota_core::CONTROL_BYTES];
+            control[4] = operation;
+            assert!(
+                !super::windows_ble::listener_ota_v1_sync_control_uses_status_write(&control),
+                "only SYNC may use the lightweight OTA control response path"
+            );
         }
     }
 
