@@ -61,9 +61,9 @@ pub(super) fn transcript_candidate_from_result(result: &Value) -> TranscriptCand
             (String::new(), Vec::new())
         };
 
-    // A definite two-pass utterance explicitly marks result.text as the
-    // provider's corrected cumulative transcript. Its older utterance list can
-    // be longer because it still contains the superseded streaming branch.
+    // A definite two-pass utterance makes result.text the corrected text for
+    // this response's time range. Its older utterance list can be longer
+    // because it still contains the superseded streaming branch.
     let text = if has_authoritative_two_pass_correction && !result_text.trim().is_empty() {
         result_text.trim().to_string()
     } else {
@@ -769,9 +769,9 @@ pub(super) fn merge_streaming_candidate(
     candidate: TranscriptCandidate,
 ) -> (String, Vec<TranscriptSegment>) {
     let candidate_text = candidate.text.trim().to_string();
-    if candidate.authoritative_cumulative && !candidate_text.is_empty() {
-        return (candidate_text, candidate.timed_segments);
-    }
+    // A two-pass correction can carry only the latest utterance of a longer
+    // session. Merge it by timing so a terminal correction cannot erase the
+    // already-confirmed prefix, while a full-range revision still replaces it.
     if candidate.timed_segments.is_empty() {
         return (
             merge_streaming_transcript(previous_text, &candidate_text),
@@ -1623,6 +1623,59 @@ mod tests {
             merge_streaming_candidate(previous_text, &previous_segments, candidate);
 
         assert_eq!(merged, final_text);
+        assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn merge_streaming_candidate_keeps_prefix_for_authoritative_two_pass_tail_segment() {
+        let previous_text = "first settled sentence. second settled sentence.";
+        let previous_segments = vec![TranscriptSegment {
+            start_ms: 0,
+            end_ms: Some(4_900),
+            text: previous_text.into(),
+        }];
+        let candidate = TranscriptCandidate {
+            authoritative_cumulative: true,
+            text: "final corrected sentence.".into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 5_000,
+                end_ms: Some(7_800),
+                text: "final corrected sentence.".into(),
+            }],
+        };
+
+        let (merged, segments) =
+            merge_streaming_candidate(previous_text, &previous_segments, candidate);
+
+        assert_eq!(
+            merged,
+            "first settled sentence. second settled sentence.final corrected sentence."
+        );
+        assert_eq!(segments.len(), 2);
+    }
+
+    #[test]
+    fn merge_streaming_candidate_replaces_with_authoritative_two_pass_full_revision() {
+        let previous_text = "first draft.";
+        let previous_segments = vec![TranscriptSegment {
+            start_ms: 0,
+            end_ms: Some(1_800),
+            text: previous_text.into(),
+        }];
+        let candidate = TranscriptCandidate {
+            authoritative_cumulative: true,
+            text: "first corrected sentence. final corrected sentence.".into(),
+            timed_segments: vec![TranscriptSegment {
+                start_ms: 0,
+                end_ms: Some(4_200),
+                text: "first corrected sentence. final corrected sentence.".into(),
+            }],
+        };
+
+        let (merged, segments) =
+            merge_streaming_candidate(previous_text, &previous_segments, candidate);
+
+        assert_eq!(merged, "first corrected sentence. final corrected sentence.");
         assert_eq!(segments.len(), 1);
     }
 
