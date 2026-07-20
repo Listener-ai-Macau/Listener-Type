@@ -339,7 +339,7 @@ function Pill({
     );
   };
   const renderRecordingPreview = (displayText: string): JSX.Element => {
-    const compactText = compactCapsuleText(displayText, os, 'processing', true);
+    const compactText = truncatePreview(displayText, os, 'recording');
     return (
       <div
         style={{
@@ -457,6 +457,9 @@ function Pill({
 // 退出动画只负责视觉收尾，避免文字落屏前出现一段空白等待。
 const EXIT_ANIM_MS = PREVIEW_FINAL_TRANSITION.exitAnimMs;
 const STOP_ACK_MS = PREVIEW_FINAL_TRANSITION.stopAckMs;
+const DEV_CAPSULE_PREVIEW_MESSAGE = !isTauri && import.meta.env.DEV
+  ? new URLSearchParams(window.location.search).get('preview')?.trim() || undefined
+  : undefined;
 const DISMISSED_NON_SESSION_SUPPRESS_MS = 13_000;
 const ERROR_AUTO_DISMISS_MS = 2_500;
 const STARTUP_MESSAGE_CARRYOVER_MS = 3_000;
@@ -510,7 +513,7 @@ export function Capsule() {
   const metrics = getCapsulePillMetrics(os);
   const [state, setState] = useState<CapsuleState>(INITIAL_VISIBLE_STATE);
   const [level, setLevel] = useState<number>(isTauri ? 0 : 0.6);
-  const [message, setMessage] = useState<string | undefined>();
+  const [message, setMessage] = useState<string | undefined>(DEV_CAPSULE_PREVIEW_MESSAGE);
   const [translation, setTranslation] = useState<boolean>(false);
   // `leaving` 与 `lastVisibleState` 协同实现「退出动画」：
   // - 当 state 从非 idle 变成 idle 时，不立即卸载，而是把 leaving 置为 true 并保留

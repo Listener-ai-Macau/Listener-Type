@@ -39,6 +39,19 @@ assertEqual(
   );
 }
 
+// Recording owns the full two-line column, unlike processing which reserves
+// room for the spinner. A longer tail window keeps CJK rows visually balanced.
+{
+  const long = '这是一段很长的测试文本需要被截断处理才能放进胶囊里面显示给用户看的录音预览内容区域';
+  const result = truncatePreview(long, 'win', 'recording');
+  assertOk(result.startsWith('...'), 'recording preview should preserve the tail marker');
+  assertEqual(
+    Array.from(result.slice(3)).length,
+    32,
+    'win recording preview should fill its two-line text column more evenly',
+  );
+}
+
 // Whitespace normalization
 assertEqual(
   truncatePreview('  hello   world  ', 'win', 'default'),

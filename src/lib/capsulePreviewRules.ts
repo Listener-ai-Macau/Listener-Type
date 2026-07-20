@@ -12,19 +12,28 @@
 // ── Truncation ──────────────────────────────────────────────
 
 /** Max visible characters in the pill center text (OS + kind dependent). */
-export const PREVIEW_MAX_CHARS: Record<string, { default: number; processing: number; error: number }> = {
-  // Windows processing text shares a 175px two-line column with the spinner.
-  // 28 CJK characters plus the leading ellipsis fit without the browser applying
-  // a second, invisible line-clamp truncation.
-  win: { default: 28, processing: 28, error: 28 },
-  mac: { default: 14, processing: 18, error: 14 },
+export const PREVIEW_MAX_CHARS: Record<string, {
+  default: number;
+  processing: number;
+  recording: number;
+  error: number;
+}> = {
+  // Processing shares a 175px two-line column with the spinner. Recording has
+  // the full 192px column, so retain 32 tail characters to fill both CJK lines
+  // more evenly without forcing an artificial line break.
+  win: { default: 28, processing: 28, recording: 32, error: 28 },
+  mac: { default: 14, processing: 18, recording: 18, error: 14 },
 };
 
 /**
  * Truncate preview text for display. Shows the *tail* of the text so the
  * user always sees the latest words (partial ASR grows from left to right).
  */
-export function truncatePreview(text: string, os: string, kind: 'default' | 'processing' | 'error'): string {
+export function truncatePreview(
+  text: string,
+  os: string,
+  kind: 'default' | 'processing' | 'recording' | 'error',
+): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   const max = (PREVIEW_MAX_CHARS[os] ?? PREVIEW_MAX_CHARS.win)[kind];
   const chars = Array.from(normalized);
