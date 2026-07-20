@@ -7740,6 +7740,37 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
+    pub fn listener_ota_v1_gatt_probe_after_active_link_hint(
+        timeout: Duration,
+    ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        let unavailable = |detail: String| crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+            connected: false,
+            hardware_revision: None,
+            firmware_version: None,
+            capabilities: Vec::new(),
+            battery_percent: None,
+            usb_powered: None,
+            detail: Some(detail),
+        };
+        let _ota_process_guard = match acquire_ble_ota_process_mutex("listener_ota_v1_preflight") {
+            Ok(guard) => guard,
+            Err(err) => return unavailable(err),
+        };
+        let _capture_guard = match BleCaptureGuard::enter(None) {
+            Ok(guard) => guard,
+            Err(err) => return unavailable(err),
+        };
+        let _fresh_guard = match BleFreshGattGuard::enter("Listener OTA v1 handoff preflight") {
+            Ok(guard) => guard,
+            Err(err) => return unavailable(err),
+        };
+        let deadline = Instant::now() + timeout.max(Duration::from_millis(1));
+        match open_listener_ota_v1_target_after_active_link_handoff_with_deadline(deadline) {
+            Ok(target) => listener_ota_v1_gatt_probe_snapshot_from_target(&target),
+            Err(err) => unavailable(err),
+        }
+    }
+
     pub fn listener_ota_v1_service_reachable_snapshot(
         timeout: Duration,
     ) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
@@ -9924,6 +9955,61 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         })
     }
 
+    fn open_listener_ota_v1_target_after_active_link_handoff_with_deadline(
+        deadline: Instant,
+    ) -> Result<OpenListenerOtaV1Target, String> {
+        let Some(address) = runtime_bluetooth_target_address() else {
+            return open_listener_ota_v1_target_with_deadline(deadline);
+        };
+
+        let mut direct_error = None;
+        for attempt in 1..=LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS.len() + 1 {
+            match open_listener_ota_v1_target_for_verified_active_handoff_with_deadline(
+                address, deadline,
+            ) {
+                Ok(target) => {
+                    log::info!(
+                        "[embedded-ble] Listener OTA v1 handoff preflight opened verified address {address:012X} on attempt {attempt}"
+                    );
+                    return Ok(target);
+                }
+                Err(err) => {
+                    direct_error = Some(err);
+                    let Some(delay) = LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS
+                        .get(attempt - 1)
+                        .copied()
+                    else {
+                        break;
+                    };
+                    if !is_transient_listener_ota_v1_discovery_error(
+                        direct_error.as_deref().unwrap_or_default(),
+                    ) {
+                        break;
+                    }
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    let delay = delay.min(remaining);
+                    log::info!(
+                        "[embedded-ble] Listener OTA v1 handoff preflight address {address:012X} not ready on attempt {attempt}; retrying in {} ms",
+                        delay.as_millis()
+                    );
+                    std::thread::sleep(delay);
+                }
+            }
+        }
+
+        let direct_error = direct_error.unwrap_or_else(|| {
+            "verified Listener address did not expose a writable OTA v1 service".to_string()
+        });
+        open_listener_ota_v1_target_with_deadline(deadline).map_err(|fallback_error| {
+            format!(
+                "Listener OTA v1 handoff preflight direct address path failed: {direct_error}; normal service discovery fallback failed: {fallback_error}"
+            )
+        })
+    }
+
     fn open_listener_ota_v1_target_for_current_native_windows_hid_service_endpoint(
         addresses: &[u64],
         timeout: Duration,
@@ -10759,36 +10845,62 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         address: u64,
         deadline: Instant,
     ) -> Result<OpenListenerOtaV1Target, String> {
-        let device = open_ble_device_with_timeout(
-            address,
-            remaining_ble_timeout(
-                deadline,
-                BLE_DISCOVERY_TIMEOUT,
-                "Listener OTA v1 device open",
-            )?,
+        open_listener_ota_v1_target_for_device_with_deadline_options(address, false, deadline)
+    }
+
+    fn open_listener_ota_v1_target_for_verified_active_handoff_with_deadline(
+        address: u64,
+        deadline: Instant,
+    ) -> Result<OpenListenerOtaV1Target, String> {
+        open_listener_ota_v1_target_for_device_with_deadline_options(address, true, deadline)
+    }
+
+    fn open_listener_ota_v1_target_for_device_with_deadline_options(
+        address: u64,
+        verified_active_handoff: bool,
+        deadline: Instant,
+    ) -> Result<OpenListenerOtaV1Target, String> {
+        let open_timeout = remaining_ble_timeout(
+            deadline,
+            BLE_DISCOVERY_TIMEOUT,
+            "Listener OTA v1 device open",
         )?;
-        if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
-            wait_async_operation(
-                op,
-                remaining_ble_timeout(
-                    deadline,
-                    BLE_DISCOVERY_TIMEOUT,
+        let device = if verified_active_handoff {
+            open_ble_device_by_address_with_timeout(address, open_timeout)?
+        } else {
+            open_ble_device_with_timeout(address, open_timeout)?
+        };
+        if !verified_active_handoff {
+            if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
+                wait_async_operation(
+                    op,
+                    remaining_ble_timeout(
+                        deadline,
+                        BLE_DISCOVERY_TIMEOUT,
+                        "Listener OTA v1 device access",
+                    )
+                    .ok()?,
                     "Listener OTA v1 device access",
                 )
-                .ok()?,
-                "Listener OTA v1 device access",
-            )
-            .ok()
-        }) {
-            if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
-                return Err(format!(
-                    "Listener OTA v1 device access denied status={access:?}"
-                ));
+                .ok()
+            }) {
+                if access != DeviceAccessStatus::Allowed
+                    && access != DeviceAccessStatus::Unspecified
+                {
+                    return Err(format!(
+                        "Listener OTA v1 device access denied status={access:?}"
+                    ));
+                }
             }
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        let cache_modes: &[BluetoothCacheMode] = if verified_active_handoff {
+            &[BluetoothCacheMode::Uncached]
+        } else {
+            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]
+        };
+        for &cache_mode in cache_modes {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
@@ -16518,6 +16630,13 @@ pub fn listener_ota_v1_gatt_probe_snapshot(timeout: Duration) -> FirmwareOtaDevi
 }
 
 #[cfg(target_os = "windows")]
+pub fn listener_ota_v1_gatt_probe_after_active_link_hint(
+    timeout: Duration,
+) -> FirmwareOtaDeviceSnapshot {
+    windows_ble::listener_ota_v1_gatt_probe_after_active_link_hint(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn listener_ota_v1_service_reachable_snapshot(timeout: Duration) -> FirmwareOtaDeviceSnapshot {
     windows_ble::listener_ota_v1_service_reachable_snapshot(timeout)
 }
@@ -16912,6 +17031,21 @@ pub fn listener_ota_v1_device_snapshot() -> FirmwareOtaDeviceSnapshot {
 
 #[cfg(not(target_os = "windows"))]
 pub fn listener_ota_v1_gatt_probe_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
+    FirmwareOtaDeviceSnapshot {
+        connected: false,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: Vec::new(),
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some("Listener OTA v1 over BLE is only supported on Windows".to_string()),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn listener_ota_v1_gatt_probe_after_active_link_hint(
+    _timeout: Duration,
+) -> FirmwareOtaDeviceSnapshot {
     FirmwareOtaDeviceSnapshot {
         connected: false,
         hardware_revision: None,
@@ -17537,6 +17671,42 @@ mod tests {
                 && handoff.contains("Duration::from_millis(300)")
                 && handoff.contains("ActiveControlTransientFallback::ReturnError"),
             "OTA must use a bounded optional observability context handoff before the compatible active-link command"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn listener_ota_handoff_preflight_uses_only_the_verified_fresh_gatt_path() {
+        let source = include_str!("embedded_ble.rs");
+        let probe_start = source
+            .find("pub fn listener_ota_v1_gatt_probe_after_active_link_hint")
+            .expect("OTA handoff preflight helper should exist");
+        let probe_end = source[probe_start..]
+            .find("pub fn listener_ota_v1_service_reachable_snapshot")
+            .map(|offset| probe_start + offset)
+            .expect("OTA handoff preflight helper boundary should exist");
+        let probe = &source[probe_start..probe_end];
+        assert!(
+            probe.contains("acquire_ble_ota_process_mutex(\"listener_ota_v1_preflight\")")
+                && probe.contains("BleCaptureGuard::enter(None)")
+                && probe.contains("BleFreshGattGuard::enter(\"Listener OTA v1 handoff preflight\")")
+                && probe.contains("open_listener_ota_v1_target_after_active_link_handoff_with_deadline"),
+            "OTA preflight must take exclusive ownership and use the bounded active-link GATT path"
+        );
+
+        let target_start = source
+            .find("fn open_listener_ota_v1_target_after_active_link_handoff_with_deadline")
+            .expect("bounded OTA handoff target helper should exist");
+        let target_end = source[target_start..]
+            .find("fn open_listener_ota_v1_target_for_current_native_windows_hid_service_endpoint")
+            .map(|offset| target_start + offset)
+            .expect("bounded OTA handoff target helper boundary should exist");
+        let target = &source[target_start..target_end];
+        assert!(
+            target.contains("open_listener_ota_v1_target_for_verified_active_handoff_with_deadline")
+                && target.contains("open_listener_ota_v1_target_with_deadline(deadline)")
+                && target.contains("deadline.saturating_duration_since(Instant::now())"),
+            "OTA preflight must prefer the verified active address and keep every fallback inside its deadline"
         );
     }
 

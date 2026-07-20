@@ -4011,6 +4011,20 @@ pub struct FirmwareOtaPreflightSnapshot {
 const FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(10);
 
+fn firmware_ota_preflight_unavailable_snapshot(
+    detail: impl Into<String>,
+) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+    crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        connected: false,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: Vec::new(),
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some(detail.into()),
+    }
+}
+
 #[tauri::command]
 pub async fn get_firmware_ota_preflight_snapshot(
     coord: CoordinatorState<'_>,
@@ -4024,32 +4038,60 @@ pub async fn get_firmware_ota_preflight_snapshot(
             device: firmware_ota_active_preflight_snapshot(),
         });
     }
+    if phase != SessionPhase::Idle {
+        return Ok(FirmwareOtaPreflightSnapshot {
+            recording_active: true,
+            dictation_phase: format!("{phase:?}"),
+            device: firmware_ota_preflight_unavailable_snapshot(
+                "Firmware OTA preflight is blocked while dictation is active; stop recording before opening an exclusive OTA GATT session.",
+            ),
+        });
+    }
     let cached_power = coord.embedded_ble_wake_recovery_snapshot();
-    let snapshot_task = tauri::async_runtime::spawn_blocking(move || {
-        crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(
-            FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT,
-        )
-    });
-    let mut device = match tokio::time::timeout(
-        FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,
-        snapshot_task,
-    )
-    .await
-    {
-        Ok(joined) => joined.map_err(|err| format!("Listener BLE OTA preflight task failed: {err}"))?,
-        Err(_) => crate::embedded_ble::FirmwareOtaDeviceSnapshot {
-            connected: false,
-            hardware_revision: None,
-            firmware_version: None,
-            capabilities: Vec::new(),
-            battery_percent: None,
-            usb_powered: None,
-            detail: Some(format!(
-                "Listener BLE OTA preflight timed out after {} ms; retry after reconnecting Listener or resetting Windows Bluetooth.",
-                FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT.as_millis()
-            )),
-        },
+    if !coord.try_begin_firmware_ota_transfer() {
+        return Ok(FirmwareOtaPreflightSnapshot {
+            recording_active: false,
+            dictation_phase: format!("{phase:?}"),
+            device: firmware_ota_active_preflight_snapshot(),
+        });
+    }
+    let handoff = crate::embedded_ble::request_listener_ota_v1_active_link(None);
+    let mut listener_paused = false;
+    let mut device = match handoff {
+        Ok(()) => {
+            coord.pause_embedded_ble_listener_for_ota();
+            listener_paused = true;
+            let snapshot_task = tauri::async_runtime::spawn_blocking(move || {
+                crate::embedded_ble::listener_ota_v1_gatt_probe_after_active_link_hint(
+                    FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT,
+                )
+            });
+            match tokio::time::timeout(
+                FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,
+                snapshot_task,
+            )
+            .await
+            {
+                Ok(joined) => match joined {
+                    Ok(snapshot) => snapshot,
+                    Err(err) => firmware_ota_preflight_unavailable_snapshot(format!(
+                        "Listener BLE OTA preflight task failed: {err}"
+                    )),
+                },
+                Err(_) => firmware_ota_preflight_unavailable_snapshot(format!(
+                    "Listener BLE OTA preflight timed out after {} ms; retry after reconnecting Listener or resetting Windows Bluetooth.",
+                    FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT.as_millis()
+                )),
+            }
+        }
+        Err(err) => firmware_ota_preflight_unavailable_snapshot(format!(
+            "Listener BLE OTA preflight could not hand off the active Type link: {err}"
+        )),
     };
+    coord.end_firmware_ota_transfer();
+    if listener_paused {
+        coord.refresh_embedded_ble_listener();
+    }
     if device.usb_powered.is_none() {
         device.usb_powered = cached_power.usb_powered;
     }
@@ -8834,6 +8876,44 @@ mod tests {
             handoff < pause,
             "OTA observability context must reach Firmware before the active listener is paused"
         );
+    }
+
+    #[test]
+    fn ota_preflight_reuses_active_link_handoff_and_restores_listener() {
+        let source = normalized_commands_source();
+        let start = source
+            .find("pub async fn get_firmware_ota_preflight_snapshot")
+            .expect("firmware OTA preflight command should exist");
+        let end = source[start..]
+            .find("pub struct FirmwareOtaBleTransferResult")
+            .map(|offset| start + offset)
+            .expect("firmware OTA preflight command boundary should exist");
+        let preflight = &source[start..end];
+        let recording_guard = preflight
+            .find("if phase != SessionPhase::Idle")
+            .expect("preflight must reject active dictation before changing the BLE link");
+        let begin = preflight
+            .find("coord.try_begin_firmware_ota_transfer()")
+            .expect("preflight must reserve the OTA operation before handoff");
+        let handoff = preflight
+            .find("request_listener_ota_v1_active_link(None)")
+            .expect("preflight must request the firmware OTA active-link handoff");
+        let pause = preflight
+            .find("coord.pause_embedded_ble_listener_for_ota()")
+            .expect("preflight must pause the background listener before fresh GATT");
+        let probe = preflight
+            .find("listener_ota_v1_gatt_probe_after_active_link_hint")
+            .expect("preflight must probe through the verified active-link handoff path");
+        let end_guard = preflight
+            .find("coord.end_firmware_ota_transfer();")
+            .expect("preflight must release its OTA operation reservation");
+        let refresh = preflight
+            .find("coord.refresh_embedded_ble_listener();")
+            .expect("preflight must restore the paused background listener");
+
+        assert!(recording_guard < begin);
+        assert!(begin < handoff && handoff < pause && pause < probe);
+        assert!(probe < end_guard && end_guard < refresh);
     }
 
     #[test]
