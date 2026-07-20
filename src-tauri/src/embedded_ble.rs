@@ -8839,7 +8839,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 return Err(notify_capture_cancelled_error("notify target open"));
             }
             let opened = match ota_post_confirm_address {
-                Some(address) => open_notify_target_for_current_native_windows_hid(address),
+                Some(address) => open_notify_target_for_post_confirm_native_windows_hid(address),
                 None => open_notify_target(),
             };
             match opened {
@@ -11481,6 +11481,22 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         )
         .and_then(|target| {
             require_audio_control_for_notify_target(target, "current native Windows HID address")
+        })
+    }
+
+    fn open_notify_target_for_post_confirm_native_windows_hid(
+        address: u64,
+    ) -> Result<OpenNotifyTarget, String> {
+        // The confirmed image retains its GATT schema. Rehydrate the Windows
+        // system cache first, while preserving an uncached fallback for a
+        // Service Changed/schema transition.
+        open_notify_target_for_device_with_cache_modes_and_timeout(
+            address,
+            &[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached],
+            STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT,
+        )
+        .and_then(|target| {
+            require_audio_control_for_notify_target(target, "post-confirm native Windows HID address")
         })
     }
 
@@ -15778,9 +15794,27 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
             assert!(retry_body.contains("take_listener_ota_post_confirm_notify_target_address()"));
             assert!(retry_body.contains(
-                "Some(address) => open_notify_target_for_current_native_windows_hid(address)"
+                "Some(address) => open_notify_target_for_post_confirm_native_windows_hid(address)"
             ));
             assert!(retry_body.contains("None => open_notify_target()"));
+        }
+
+        #[test]
+        fn post_confirm_ota_notify_rehydrates_cached_gatt_before_uncached_fallback() {
+            let source = include_str!("embedded_ble.rs");
+            let start = source
+                .find("fn open_notify_target_for_post_confirm_native_windows_hid(")
+                .expect("post-confirm native-HID opener should exist");
+            let end = source[start..]
+                .find("fn open_notify_target_for_device_with_cache_modes(")
+                .map(|offset| start + offset)
+                .expect("post-confirm native-HID opener boundary should exist");
+            let body = &source[start..end];
+
+            assert!(body.contains(
+                "&[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]"
+            ));
+            assert!(body.contains("require_audio_control_for_notify_target"));
         }
 
         #[test]
