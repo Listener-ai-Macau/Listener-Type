@@ -9187,7 +9187,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             || err.contains("HRESULT(0x800706BA)")
             || err.contains("BLE characteristic discovery returned status")
             || err.contains("BLE service open wait failed")
-            || err.contains("BLE service discovery wait failed")
+            || err.contains("service discovery wait failed")
             || err.contains("GATT session did not become active")
             || err.contains("BLE audio control unavailable while opening notify target")
             || err.contains("device open by address")
@@ -18143,6 +18143,9 @@ mod tests {
         ));
         assert!(windows_ble::is_transient_notify_target_open_error(
             "BLE Uncached service discovery wait failed: Some(HRESULT(0x80070016))"
+        ));
+        assert!(windows_ble::is_transient_notify_target_open_error(
+            "BLE BluetoothCacheMode(1) service discovery wait failed: BLE BluetoothCacheMode(1) service timed out after 600 ms"
         ));
         assert!(!windows_ble::is_transient_notify_target_open_error(
             "Linda: BLE device path A4CB8FF2B512 failed: BluetoothCacheMode(0): BLE GATT session did not become active after 8000 ms; advertisement fallback failed: No paired BLE device found in Windows Bluetooth pairing store for advertised Listener address(es) D4E8768AB2EE; skipping audio notify advertisement GATT fallback until Windows pairing completes"
