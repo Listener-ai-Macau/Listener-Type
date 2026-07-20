@@ -275,7 +275,9 @@ function Read-BootSafetyStatus {
     $port.Open()
     $port.DiscardInBuffer()
     $port.Write("~BOOT:STATUS`r`n")
-    $deadline = (Get-Date).AddMilliseconds(1100)
+    # Firmware may emit a pending idle-power-save line before BOOT:STATUS.
+    # Keep this bounded capture long enough to retain the requested status too.
+    $deadline = (Get-Date).AddMilliseconds(1600)
     while ((Get-Date) -lt $deadline) {
       $raw += $port.ReadExisting()
       Start-Sleep -Milliseconds 35
