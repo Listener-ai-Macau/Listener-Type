@@ -6588,7 +6588,7 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
     let expected_ble_name = inner.prefs.get().device_ble_name;
     let started_at = Instant::now();
     let native_hid_addresses = match async_runtime::spawn_blocking(|| {
-        crate::embedded_ble::native_windows_hid_present_pairing_addresses()
+        crate::embedded_ble::native_windows_hid_present_pairing_addresses_for_startup()
     })
     .await
     {

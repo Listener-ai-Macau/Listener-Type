@@ -825,6 +825,10 @@ mod windows_ble {
     static NATIVE_WINDOWS_HID_PAIRING_VISIBLE: AtomicBool = AtomicBool::new(false);
     static OTA_POST_CONFIRM_NOTIFY_TARGET_ADDRESS: OnceLock<Mutex<Option<u64>>> = OnceLock::new();
     static NATIVE_WINDOWS_HID_PAIRING_ADDRESSES: OnceLock<Mutex<Vec<u64>>> = OnceLock::new();
+    static NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RUNNING: AtomicBool = AtomicBool::new(false);
+    static NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RESULT: OnceLock<
+        Mutex<Option<Result<Vec<u64>, String>>>,
+    > = OnceLock::new();
     static LAST_PAIRING_PROMPT: OnceLock<Mutex<Option<PairingPromptThrottleState>>> =
         OnceLock::new();
     static LISTENER_PAIRING_MAINTENANCE_TOKEN: AtomicUsize = AtomicUsize::new(1);
@@ -2325,30 +2329,72 @@ mod windows_ble {
         }
     }
 
-    pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
-        let entries = powershell_listener_pnp_entries()?;
-        let addresses = native_windows_hid_pairing_addresses_from_entries(&entries);
+    fn store_native_windows_hid_pairing_addresses(addresses: &[u64]) {
         NATIVE_WINDOWS_HID_PAIRING_VISIBLE.store(!addresses.is_empty(), Ordering::SeqCst);
         if let Ok(mut snapshot) = NATIVE_WINDOWS_HID_PAIRING_ADDRESSES
             .get_or_init(|| Mutex::new(Vec::new()))
             .lock()
         {
-            *snapshot = addresses.clone();
+            *snapshot = addresses.to_vec();
         }
+    }
+
+    pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
+        let entries = powershell_listener_pnp_entries()?;
+        let addresses = native_windows_hid_pairing_addresses_from_entries(&entries);
+        store_native_windows_hid_pairing_addresses(&addresses);
         Ok(addresses)
     }
 
     pub fn native_windows_hid_present_pairing_addresses() -> Result<Vec<u64>, String> {
         let entries = powershell_listener_present_pnp_entries()?;
         let addresses = native_windows_hid_pairing_addresses_from_entries(&entries);
-        NATIVE_WINDOWS_HID_PAIRING_VISIBLE.store(!addresses.is_empty(), Ordering::SeqCst);
-        if let Ok(mut snapshot) = NATIVE_WINDOWS_HID_PAIRING_ADDRESSES
-            .get_or_init(|| Mutex::new(Vec::new()))
-            .lock()
-        {
-            *snapshot = addresses.clone();
-        }
+        store_native_windows_hid_pairing_addresses(&addresses);
         Ok(addresses)
+    }
+
+    pub fn warm_native_windows_hid_present_pairing_snapshot() {
+        if NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RUNNING.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if let Err(err) = std::thread::Builder::new()
+            .name("listener-native-hid-pnp".to_string())
+            .spawn(|| {
+                let result = native_windows_hid_present_pairing_addresses();
+                if let Ok(mut slot) = NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RESULT
+                    .get_or_init(|| Mutex::new(None))
+                    .lock()
+                {
+                    *slot = Some(result);
+                }
+                NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RUNNING.store(false, Ordering::SeqCst);
+            })
+        {
+            NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RUNNING.store(false, Ordering::SeqCst);
+            log::warn!("[embedded-ble] could not start native HID PnP prefetch: {err}");
+        }
+    }
+
+    pub fn native_windows_hid_present_pairing_addresses_for_startup() -> Result<Vec<u64>, String> {
+        // The PnP command is read-only and starts while Type initializes its UI/runtime.
+        // Wait briefly for that single prefetch so startup does not pay the pwsh launch cost
+        // serially, then retain the ordinary fresh query as the fallback.
+        for _ in 0..20 {
+            if let Ok(slot) = NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RESULT
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+            {
+                if let Some(result) = slot.as_ref() {
+                    crate::startup_evidence::record_startup_stage("native_hid_pnp_prefetch_ready");
+                    return result.clone();
+                }
+            }
+            if !NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RUNNING.load(Ordering::SeqCst) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        native_windows_hid_present_pairing_addresses()
     }
 
     pub fn native_windows_hid_pairing_active_connection(
@@ -17013,6 +17059,16 @@ pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
 #[cfg(target_os = "windows")]
 pub fn native_windows_hid_present_pairing_addresses() -> Result<Vec<u64>, String> {
     windows_ble::native_windows_hid_present_pairing_addresses()
+}
+
+#[cfg(target_os = "windows")]
+pub fn warm_native_windows_hid_present_pairing_snapshot() {
+    windows_ble::warm_native_windows_hid_present_pairing_snapshot()
+}
+
+#[cfg(target_os = "windows")]
+pub fn native_windows_hid_present_pairing_addresses_for_startup() -> Result<Vec<u64>, String> {
+    windows_ble::native_windows_hid_present_pairing_addresses_for_startup()
 }
 
 #[cfg(target_os = "windows")]

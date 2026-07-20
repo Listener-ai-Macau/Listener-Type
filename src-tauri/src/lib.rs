@@ -160,6 +160,9 @@ pub fn run() {
         }
     }
 
+    #[cfg(target_os = "windows")]
+    embedded_ble::warm_native_windows_hid_present_pairing_snapshot();
+
     let foundry_local_runtime = Arc::new(asr::local::FoundryLocalRuntime::new());
     #[cfg(target_os = "windows")]
     let coordinator = Arc::new(coordinator::Coordinator::new_with_foundry_runtime(
