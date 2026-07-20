@@ -13,6 +13,7 @@
 //! - commands: Tauri IPC surface
 
 mod asr;
+mod audio_transport_codec;
 mod audio_mute;
 mod capsule_log;
 mod cli;
