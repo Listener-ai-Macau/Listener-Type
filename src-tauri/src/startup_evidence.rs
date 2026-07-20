@@ -18,6 +18,7 @@ struct MachineEvidenceState {
     started_at: String,
     started_at_monotonic: Instant,
     startup_path: Option<&'static str>,
+    startup_path_elapsed_ms: Option<u64>,
     background_notify_ready_elapsed_ms: Option<u64>,
     background_notify_ready_count: u32,
     pair_async_attempt_count: u32,
@@ -29,6 +30,7 @@ struct MachineEvidenceSnapshot<'a> {
     schema: &'static str,
     started_at: &'a str,
     startup_path: Option<&'a str>,
+    startup_path_elapsed_ms: Option<u64>,
     background_notify_ready_elapsed_ms: Option<u64>,
     background_notify_ready_count: u32,
     pair_async_attempt_count: u32,
@@ -51,6 +53,7 @@ impl MachineEvidenceState {
             started_at: Utc::now().to_rfc3339(),
             started_at_monotonic: Instant::now(),
             startup_path: None,
+            startup_path_elapsed_ms: None,
             background_notify_ready_elapsed_ms: None,
             background_notify_ready_count: 0,
             pair_async_attempt_count: 0,
@@ -63,6 +66,7 @@ impl MachineEvidenceState {
             schema: "listener.type.startup-evidence.v1",
             started_at: &self.started_at,
             startup_path: self.startup_path,
+            startup_path_elapsed_ms: self.startup_path_elapsed_ms,
             background_notify_ready_elapsed_ms: self.background_notify_ready_elapsed_ms,
             background_notify_ready_count: self.background_notify_ready_count,
             pair_async_attempt_count: self.pair_async_attempt_count,
@@ -111,7 +115,19 @@ pub(crate) fn begin_process_evidence() {
 }
 
 pub(crate) fn record_startup_path(path: &'static str) {
-    update(|state| state.startup_path = Some(path));
+    update(|state| {
+        state.startup_path = Some(path);
+        if state.startup_path_elapsed_ms.is_none() {
+            state.startup_path_elapsed_ms = Some(
+                state
+                    .started_at_monotonic
+                    .elapsed()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u64::MAX),
+            );
+        }
+    });
 }
 
 pub(crate) fn record_pair_async_attempt() {
@@ -150,12 +166,14 @@ mod tests {
     fn startup_snapshot_contains_only_machine_timing_and_counts() {
         let mut state = MachineEvidenceState::new();
         state.startup_path = Some("native_windows_hid");
+        state.startup_path_elapsed_ms = Some(664);
         state.background_notify_ready_elapsed_ms = Some(812);
         state.background_notify_ready_count = 1;
         let value = serde_json::to_value(state.snapshot()).expect("snapshot should serialize");
 
         assert_eq!(value["schema"], "listener.type.startup-evidence.v1");
         assert_eq!(value["startup_path"], "native_windows_hid");
+        assert_eq!(value["startup_path_elapsed_ms"], 664);
         assert_eq!(value["background_notify_ready_elapsed_ms"], 812);
         assert_eq!(value["pair_async_attempt_count"], 0);
         assert_eq!(value["unpair_async_attempt_count"], 0);

@@ -72,12 +72,19 @@ function Read-MachineEvidence {
     [datetime]$Deadline
   )
 
+  $lastSnapshot = $null
   while ((Get-Date) -lt $Deadline) {
     if (Test-Path -LiteralPath $EvidencePath) {
       try {
         $value = Get-Content -Raw -LiteralPath $EvidencePath | ConvertFrom-Json
         if ($value.schema -eq 'listener.type.startup-evidence.v1') {
-          return $value
+          $lastSnapshot = $value
+          if (
+            -not [string]::IsNullOrWhiteSpace([string]$value.startup_path) -and
+            $null -ne $value.background_notify_ready_elapsed_ms
+          ) {
+            return $value
+          }
         }
       } catch {
         # The installed process may be replacing its bounded snapshot. Retry.
@@ -85,7 +92,7 @@ function Read-MachineEvidence {
     }
     Start-Sleep -Milliseconds 100
   }
-  return $null
+  return $lastSnapshot
 }
 
 function Read-BootSafetyStatus {
@@ -186,8 +193,8 @@ try {
 
 $evidence = Read-MachineEvidence -EvidencePath $evidencePath -Deadline ((Get-Date).AddSeconds($EvidenceTimeoutSeconds))
 $statusSamples = @(
-  Read-BleStatus -Label 'after-start-01' -RunDirectory $resolvedOutputDir,
-  Read-BleStatus -Label 'after-start-02' -RunDirectory $resolvedOutputDir
+  $(Read-BleStatus -Label 'after-start-01' -RunDirectory $resolvedOutputDir)
+  $(Read-BleStatus -Label 'after-start-02' -RunDirectory $resolvedOutputDir)
 )
 $bootAfter = Read-BootSafetyStatus -Label 'after-start' -RunDirectory $resolvedOutputDir
 
