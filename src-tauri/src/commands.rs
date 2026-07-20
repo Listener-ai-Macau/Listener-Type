@@ -4006,6 +4006,9 @@ pub struct FirmwareOtaPreflightSnapshot {
     recording_active: bool,
     dictation_phase: String,
     device: crate::embedded_ble::FirmwareOtaDeviceSnapshot,
+    handoff_elapsed_ms: Option<u64>,
+    target_probe_elapsed_ms: Option<u64>,
+    total_elapsed_ms: u64,
 }
 
 const FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -4036,6 +4039,9 @@ pub async fn get_firmware_ota_preflight_snapshot(
             recording_active: phase != SessionPhase::Idle,
             dictation_phase: format!("{phase:?}"),
             device: firmware_ota_active_preflight_snapshot(),
+            handoff_elapsed_ms: None,
+            target_probe_elapsed_ms: None,
+            total_elapsed_ms: 0,
         });
     }
     if phase != SessionPhase::Idle {
@@ -4045,6 +4051,9 @@ pub async fn get_firmware_ota_preflight_snapshot(
             device: firmware_ota_preflight_unavailable_snapshot(
                 "Firmware OTA preflight is blocked while dictation is active; stop recording before opening an exclusive OTA GATT session.",
             ),
+            handoff_elapsed_ms: None,
+            target_probe_elapsed_ms: None,
+            total_elapsed_ms: 0,
         });
     }
     let cached_power = coord.embedded_ble_wake_recovery_snapshot();
@@ -4053,17 +4062,24 @@ pub async fn get_firmware_ota_preflight_snapshot(
             recording_active: false,
             dictation_phase: format!("{phase:?}"),
             device: firmware_ota_active_preflight_snapshot(),
+            handoff_elapsed_ms: None,
+            target_probe_elapsed_ms: None,
+            total_elapsed_ms: 0,
         });
     }
+    let preflight_started = Instant::now();
+    let handoff_started = Instant::now();
     let handoff = crate::embedded_ble::request_listener_ota_v1_active_link(None);
-    let mut device = match handoff {
+    let handoff_elapsed_ms = elapsed_ms_u64(handoff_started);
+    let (mut device, target_probe_elapsed_ms) = match handoff {
         Ok(()) => {
+            let target_probe_started = Instant::now();
             let snapshot_task = tauri::async_runtime::spawn_blocking(move || {
                 crate::embedded_ble::listener_ota_v1_gatt_probe_after_active_link_hint(
                     FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT,
                 )
             });
-            match tokio::time::timeout(
+            let device = match tokio::time::timeout(
                 FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,
                 snapshot_task,
             )
@@ -4079,11 +4095,15 @@ pub async fn get_firmware_ota_preflight_snapshot(
                     "Listener BLE OTA preflight timed out after {} ms; retry after reconnecting Listener or resetting Windows Bluetooth.",
                     FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT.as_millis()
                 )),
-            }
+            };
+            (device, Some(elapsed_ms_u64(target_probe_started)))
         }
-        Err(err) => firmware_ota_preflight_unavailable_snapshot(format!(
-            "Listener BLE OTA preflight could not hand off the active Type link: {err}"
-        )),
+        Err(err) => (
+            firmware_ota_preflight_unavailable_snapshot(format!(
+                "Listener BLE OTA preflight could not hand off the active Type link: {err}"
+            )),
+            None,
+        ),
     };
     coord.end_firmware_ota_transfer();
     if device.usb_powered.is_none() {
@@ -4092,10 +4112,19 @@ pub async fn get_firmware_ota_preflight_snapshot(
     if device.battery_percent.is_none() {
         device.battery_percent = cached_power.battery_percent;
     }
+    let total_elapsed_ms = elapsed_ms_u64(preflight_started);
+    log::info!(
+        "[ota] active-link preflight timing handoff_elapsed_ms={handoff_elapsed_ms} target_probe_elapsed_ms={:?} total_elapsed_ms={total_elapsed_ms} connected={}",
+        target_probe_elapsed_ms,
+        device.connected,
+    );
     Ok(FirmwareOtaPreflightSnapshot {
         recording_active: phase != SessionPhase::Idle,
         dictation_phase: format!("{phase:?}"),
         device,
+        handoff_elapsed_ms: Some(handoff_elapsed_ms),
+        target_probe_elapsed_ms,
+        total_elapsed_ms,
     })
 }
 
@@ -8945,6 +8974,41 @@ mod tests {
             .expect("preflight must release its OTA operation reservation");
         assert!(recording_guard < begin);
         assert!(begin < handoff && handoff < probe && probe < end_guard);
+    }
+
+    #[test]
+    fn ota_preflight_reports_handoff_and_target_probe_timing_without_transfer() {
+        let source = normalized_commands_source();
+        let start = source
+            .find("pub async fn get_firmware_ota_preflight_snapshot")
+            .expect("firmware OTA preflight command should exist");
+        let end = source[start..]
+            .find("pub struct FirmwareOtaBleTransferResult")
+            .map(|offset| start + offset)
+            .expect("firmware OTA preflight command boundary should exist");
+        let preflight = &source[start..end];
+        let handoff_started = preflight
+            .find("let handoff_started = Instant::now();")
+            .expect("preflight must start its handoff timer before the active-link command");
+        let handoff = preflight
+            .find("request_listener_ota_v1_active_link(None)")
+            .expect("preflight must send the active-link command");
+        let probe_started = preflight
+            .find("let target_probe_started = Instant::now();")
+            .expect("preflight must start its target probe timer after the handoff");
+        let probe = preflight
+            .find("listener_ota_v1_gatt_probe_after_active_link_hint")
+            .expect("preflight must probe the target without starting a transfer");
+
+        assert!(handoff_started < handoff && handoff < probe_started && probe_started < probe);
+        assert!(preflight.contains("handoff_elapsed_ms: Some(handoff_elapsed_ms)"));
+        assert!(preflight.contains("target_probe_elapsed_ms,"));
+        assert!(preflight.contains("total_elapsed_ms,"));
+        assert!(preflight.contains("[ota] active-link preflight timing"));
+        assert!(
+            !preflight.contains("prepared.transfer("),
+            "readiness preflight must not write OTA control or payload data"
+        );
     }
 
     #[test]
