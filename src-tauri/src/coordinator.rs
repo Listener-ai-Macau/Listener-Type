@@ -5313,6 +5313,7 @@ fn take_embedded_ble_ota_recovery_preflight_bypass(inner: &Arc<Inner>, generatio
 
 async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u64) {
     log::info!("[embedded-ble] background listener started generation={generation}");
+    crate::startup_evidence::record_startup_stage("background_listener_started");
     let mut retry_delay = EMBEDDED_BLE_RETRY_BASE_DELAY;
     let mut last_stale_cleanup_at: Option<Instant> = None;
     let mut startup_pairing_preflight_checked = false;
@@ -6587,7 +6588,7 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
     let expected_ble_name = inner.prefs.get().device_ble_name;
     let started_at = Instant::now();
     let native_hid_addresses = match async_runtime::spawn_blocking(|| {
-        crate::embedded_ble::native_windows_hid_pairing_addresses()
+        crate::embedded_ble::native_windows_hid_present_pairing_addresses()
     })
     .await
     {
@@ -6605,13 +6606,15 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
             return false;
         }
     };
+    crate::startup_evidence::record_startup_stage("native_hid_pnp_ready");
     if !native_hid_addresses.is_empty() {
         let active_addresses = native_hid_addresses.clone();
-        match async_runtime::spawn_blocking(move || {
+        let active_connection = async_runtime::spawn_blocking(move || {
             crate::embedded_ble::native_windows_hid_pairing_active_connection(&active_addresses)
         })
-        .await
-        {
+        .await;
+        crate::startup_evidence::record_startup_stage("native_hid_active_connection_finished");
+        match active_connection {
             Ok(Ok(Some(address))) => {
                 log::info!(
                     "[embedded-ble] startup native Windows HID active connection allows persisted GATT reopen address={address:012X}; ignoring incomplete paired-device enumeration"

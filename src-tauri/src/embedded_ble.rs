@@ -2338,6 +2338,19 @@ mod windows_ble {
         Ok(addresses)
     }
 
+    pub fn native_windows_hid_present_pairing_addresses() -> Result<Vec<u64>, String> {
+        let entries = powershell_listener_present_pnp_entries()?;
+        let addresses = native_windows_hid_pairing_addresses_from_entries(&entries);
+        NATIVE_WINDOWS_HID_PAIRING_VISIBLE.store(!addresses.is_empty(), Ordering::SeqCst);
+        if let Ok(mut snapshot) = NATIVE_WINDOWS_HID_PAIRING_ADDRESSES
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+        {
+            *snapshot = addresses.clone();
+        }
+        Ok(addresses)
+    }
+
     pub fn native_windows_hid_pairing_active_connection(
         addresses: &[u64],
     ) -> Result<Option<u64>, String> {
@@ -4665,6 +4678,49 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
         Ok(entries)
     }
 
+    fn powershell_listener_present_pnp_entries() -> Result<Vec<ListenerPnpEntry>, String> {
+        let script = r#"
+$ProgressPreference = 'SilentlyContinue'
+Get-CimInstance Win32_PnPEntity -Filter "DeviceID LIKE 'BTHLE%' OR DeviceID LIKE 'BTHLEDEVICE%' OR DeviceID LIKE 'HID%'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.Present -ne $false } |
+  Select-Object @{ Name = 'FriendlyName'; Expression = { $_.Name } }, @{ Name = 'InstanceId'; Expression = { $_.DeviceID } } |
+  ConvertTo-Json -Compress
+"#;
+        let output = run_hidden_pwsh_script(
+            script,
+            "Get-CimInstance present Listener PnP enumeration",
+        )?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if stdout.is_empty() {
+            return Ok(Vec::new());
+        }
+        let value: serde_json::Value = serde_json::from_str(&stdout).map_err(|err| {
+            format!("parse present Win32_PnPEntity JSON failed: {err}; output={stdout}")
+        })?;
+        let raw_entries = match value {
+            serde_json::Value::Array(values) => values,
+            serde_json::Value::Null => Vec::new(),
+            other => vec![other],
+        };
+
+        let mut entries = Vec::new();
+        for value in raw_entries {
+            let device: PowerShellPnpDeviceEntry = serde_json::from_value(value)
+                .map_err(|err| format!("decode present Win32_PnPEntity entry failed: {err}"))?;
+            let Some(instance_id) = device.instance_id else {
+                continue;
+            };
+            if let Some(entry) = listener_pnp_entry_from_name_and_id(
+                device.friendly_name.unwrap_or_default(),
+                instance_id,
+            ) {
+                entries.push(entry);
+            }
+        }
+        Ok(entries)
+    }
+
     fn restart_windows_bluetooth_adapter_after_pairing_failure(
         candidate_label: &str,
     ) -> Result<String, String> {
@@ -6765,6 +6821,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             return Err(format!("BLE CCCD notify write returned status={status:?}"));
         }
         log::info!("[embedded-ble] capture #{capture_id}: notify CCCD enabled");
+        crate::startup_evidence::record_startup_stage("notify_cccd_enabled");
         let type_heartbeat_enabled =
             type_heartbeat_enabled_for_terminal_behavior(terminal_behavior);
         let mut next_type_heartbeat = None;
@@ -6782,6 +6839,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
         match cleanup.write_type_heartbeat(&type_ready_command, "Type heartbeat ready") {
             Ok(()) => {
+                crate::startup_evidence::record_startup_stage("type_ready_written");
                 cleanup.mark_type_heartbeat_open();
                 if let Some(address) = cleanup.target.bluetooth_address {
                     persist_successful_notify_target_address(address, "Type heartbeat ready");
@@ -8420,6 +8478,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         log::info!(
                             "[embedded-ble] selected native Windows HID startup audio notify address={address:012X}"
                         );
+                        crate::startup_evidence::record_startup_stage(
+                            "native_hid_notify_target_ready",
+                        );
                         crate::startup_evidence::record_startup_path("native_windows_hid");
                         return Ok(target);
                     }
@@ -8458,7 +8519,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                                     log::info!(
                                         "[embedded-ble] selected refreshed native Windows HID audio notify address={address:012X}"
                                     );
-                                    crate::startup_evidence::record_startup_path("native_windows_hid");
+                                    crate::startup_evidence::record_startup_stage(
+                                        "native_hid_notify_target_ready",
+                                    );
+                                    crate::startup_evidence::record_startup_path(
+                                        "native_windows_hid",
+                                    );
                                     return Ok(target);
                                 }
                                 Err(err) => {
@@ -8493,6 +8559,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         }
                         log::info!(
                             "[embedded-ble] selected current native Windows HID service-id endpoint after direct GATT miss"
+                        );
+                        crate::startup_evidence::record_startup_stage(
+                            "native_hid_notify_target_ready",
                         );
                         crate::startup_evidence::record_startup_path("native_windows_hid");
                         return Ok(target);
@@ -16942,6 +17011,11 @@ pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn native_windows_hid_present_pairing_addresses() -> Result<Vec<u64>, String> {
+    windows_ble::native_windows_hid_present_pairing_addresses()
+}
+
+#[cfg(target_os = "windows")]
 pub fn native_windows_hid_pairing_active_connection(
     addresses: &[u64],
 ) -> Result<Option<u64>, String> {
@@ -17429,6 +17503,11 @@ pub fn query_listener_pairing(_expected_name: Option<&str>) -> BleDevicePairingP
 
 #[cfg(not(target_os = "windows"))]
 pub fn native_windows_hid_pairing_addresses() -> Result<Vec<u64>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn native_windows_hid_present_pairing_addresses() -> Result<Vec<u64>, String> {
     Ok(Vec::new())
 }
 
