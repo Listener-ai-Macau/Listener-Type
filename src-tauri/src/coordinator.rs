@@ -5030,6 +5030,7 @@ fn record_embedded_ble_notify_ready(inner: &Arc<Inner>) -> bool {
     if recovered {
         snapshot.recent_disconnect_reason = None;
     }
+    crate::startup_evidence::record_background_notify_ready();
     emit_recovered_capsule
 }
 

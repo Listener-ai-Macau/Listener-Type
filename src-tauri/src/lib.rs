@@ -42,6 +42,7 @@ mod recorder;
 mod selection;
 mod shortcut_binding;
 mod shortcut_dispatch;
+mod startup_evidence;
 mod timeline;
 mod types;
 mod unicode_keystroke;
@@ -130,6 +131,7 @@ fn exit_after_headless_cli(exit_code: i32) -> ! {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    startup_evidence::begin_process_evidence();
     let first_run_args: Vec<String> = std::env::args().collect();
     if let Some(intent) = cli::parse_cli_intent(&first_run_args) {
         match intent {

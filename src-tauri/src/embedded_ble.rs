@@ -3931,6 +3931,7 @@ mod windows_ble {
         candidate_label: &str,
         label: &str,
     ) -> Result<DevicePairingResultStatus, String> {
+        crate::startup_evidence::record_pair_async_attempt();
         let operation = pairing
             .PairAsync()
             .map_err(|err| format!("Windows default pairing operation failed to start: {err}"))?;
@@ -3999,6 +4000,7 @@ mod windows_ble {
             .map_err(|err| format!("register Windows custom pairing handler failed: {err}"))?;
         let supported_pairing_kinds =
             DevicePairingKinds::ConfirmOnly | DevicePairingKinds::ConfirmPinMatch;
+        crate::startup_evidence::record_pair_async_attempt();
         let pair_result = custom
             .PairAsync(supported_pairing_kinds)
             .map_err(|err| format!("Windows custom pairing operation failed to start: {err}"))
@@ -8417,6 +8419,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         log::info!(
                             "[embedded-ble] selected native Windows HID startup audio notify address={address:012X}"
                         );
+                        crate::startup_evidence::record_startup_path("native_windows_hid");
                         return Ok(target);
                     }
                     Err(err) => {
@@ -8454,6 +8457,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                                     log::info!(
                                         "[embedded-ble] selected refreshed native Windows HID audio notify address={address:012X}"
                                     );
+                                    crate::startup_evidence::record_startup_path("native_windows_hid");
                                     return Ok(target);
                                 }
                                 Err(err) => {
@@ -8489,6 +8493,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         log::info!(
                             "[embedded-ble] selected current native Windows HID service-id endpoint after direct GATT miss"
                         );
+                        crate::startup_evidence::record_startup_path("native_windows_hid");
                         return Ok(target);
                     }
                     Err(endpoint_error) => {
@@ -8515,6 +8520,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                             log::info!(
                                 "[embedded-ble] selected runtime startup audio notify address={address:012X}"
                             );
+                            crate::startup_evidence::record_startup_path("runtime_cached");
                             return Ok(target);
                         }
                         Err(err) => {
@@ -8538,6 +8544,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                             log::info!(
                                 "[embedded-ble] selected persisted startup audio notify address={address:012X}"
                             );
+                            crate::startup_evidence::record_startup_path("persisted_cached");
                             return Ok(target);
                         }
                         Err(err) => {
@@ -8616,10 +8623,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                                 log::info!(
                                     "[embedded-ble] selected native Windows HID startup audio notify address={address:012X}"
                                 );
+                                crate::startup_evidence::record_startup_path("native_windows_hid");
                             } else {
                                 log::info!(
                                     "[embedded-ble] selected device path index={index} name={name} address={address:012X}"
                                 );
+                                crate::startup_evidence::record_startup_path("service_selector");
                             }
                             return Ok(target);
                         }
@@ -8645,6 +8654,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         log::info!(
                             "[embedded-ble] selected service-id fallback index={index} name={name}"
                         );
+                        crate::startup_evidence::record_startup_path("service_selector");
                         return Ok(target);
                     }
                     Err(err) => {
