@@ -104,7 +104,11 @@ const EMBEDDED_BLE_PAIRING_CONFIRMATION_POLL: Duration = Duration::from_secs(3);
 // A user can re-pair Listener to this Windows host after a cross-host recovery
 // handoff. Poll only while the old host is deliberately passive; a completed
 // local Windows pairing is the sole permission to rebuild GATT/notify.
-const EMBEDDED_BLE_PASSIVE_LOCAL_REATTACH_POLL: Duration = Duration::from_secs(3);
+// The monitor only lives inside the bounded manual-pairing confirmation window,
+// so a sub-second cadence is cheap; each pass is dominated by the blocking PnP
+// query itself. A 3 s poll added up to ~5 s of avoidable latency between the
+// explicit local pairing evidence and the background notify restore.
+const EMBEDDED_BLE_PASSIVE_LOCAL_REATTACH_POLL: Duration = Duration::from_millis(250);
 const EMBEDDED_BLE_PAIRING_GATT_REBUILD_TIMEOUT: Duration = Duration::from_secs(20);
 const DEVICE_KEY_BLE_PENDING_ACTION_TTL: Duration = Duration::from_secs(15);
 const EXTRA_ASR_HOTWORDS_ENV: &str = "LISTENER_TYPE_EXTRA_ASR_HOTWORDS";
