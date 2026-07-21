@@ -10276,7 +10276,7 @@ mod tests {
         let body = &source[start..end];
         assert!(
             body.find("embedded_ble_type_pairasync_startup_guard_active")
-                < body.find("native_windows_hid_pairing_addresses"),
+                < body.find("native_windows_hid_present_pairing_addresses_for_startup"),
             "a successful Type PairAsync must suppress startup manual-delete classification until Windows finishes rebuilding services"
         );
     }
@@ -10293,7 +10293,7 @@ mod tests {
             .expect("startup manual-delete preflight boundary should exist");
         let body = &source[start..end];
         let native_hid_index = body
-            .find("native_windows_hid_pairing_addresses")
+            .find("native_windows_hid_present_pairing_addresses_for_startup")
             .expect("startup must collect native Windows HID evidence");
         let active_connection_index = body
             .find("native_windows_hid_pairing_active_connection")
@@ -10863,7 +10863,7 @@ mod tests {
             "startup must hold a missing current Windows device before persisted GATT can reopen"
         );
         let native_hid_index = startup_helper
-            .find("native_windows_hid_pairing_addresses")
+            .find("native_windows_hid_present_pairing_addresses_for_startup")
             .expect("startup must recognize a complete native Windows Listener HID pairing");
         let manual_query_index = startup_helper.find("query_listener_pairing").expect(
             "startup manual-delete preflight must still query the weaker Windows BLE pairing view",
