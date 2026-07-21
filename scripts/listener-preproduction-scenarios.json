@@ -195,6 +195,19 @@
       "preserved_boundary": "Clipboard/automatic-Enter WIP remains in stash aiw-preserve-type-clipboard-enter-wip-20260721-preview-repair and is not part of this commit. Firmware tools/flash.ps1 and .rollback-firmware-1b37813/ remain untouched.",
       "acceptance_boundary": "This package audit restores the previously human-accepted recording path and proves source/build/install identity. It does not claim Bluetooth full Goal completion or close the separate clipboard/automatic-Enter WIP."
     },
+    "listener_owner_release_cleanup_tag_push_final_acceptance_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T14:30:00+08:00",
+      "source": "Product-owner direction: 把之前那些无用的分支和 stash 都清理一下；把1.0.2的最新的 tag 打上到最新的提交；推送一下；开启总验收重新整体验收。",
+      "requirement": "Delete obsolete local Listener branches, move v1.0.2 tags to the current accepted master commits, push Listener Type and Listener Firmware master plus the updated v1.0.2 tags, and open the canonical Chinese final acceptance window for a full reacceptance.",
+      "cleanup_boundary": "Delete only local branches already merged or demonstrably patch-equivalent to master. Do not delete remote branches. Preserve the protected Type clipboard/automatic-Enter WIP stash because it is not useless and remains outside the accepted platform release.",
+      "release_boundary": "The tag move and push cover Listener Type and Listener Firmware only. They do not complete the Goal automatically; final platform acceptance still depends on the canonical operator-prompt result and the existing Bluetooth/clipboard boundaries.",
+      "evidence_required": [
+        "Local branch/stash inventory before and after cleanup",
+        "v1.0.2 resolves to the latest pushed master commit in both Listener repositories",
+        "Canonical Chinese total-acceptance operator-prompt result and note stored beside its machine artifact"
+      ]
+    },
     "listener_recording_acceptance_owner_clarification_20260721": {
       "status": "owner_confirmed_recording_pass_invalid_fixture_only",
       "recorded_at": "2026-07-21",
