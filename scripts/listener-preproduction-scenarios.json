@@ -95,7 +95,8 @@
         "Listener-Firmware@6652094",
         "Listener-Type@7d318d2",
         "Listener-Type@bb0fbbe",
-        "Listener-Type@0aa9fcd"
+        "Listener-Type@0aa9fcd",
+        "Listener-Type@d349ecc"
       ],
       "remaining_uncommitted_boundary": "Type clipboard/automatic-Enter WIP remains outside these commits; Firmware tools/flash.ps1 and .rollback-firmware-1b37813/ remain unrelated dirty paths.",
       "acceptance_boundary": "The root zip is a user-facing release artifact and is not committed. Source commits are split or explicitly scoped to completed recording/Bluetooth/OTA/observability work; clipboard/automatic-Enter WIP and unrelated dirty paths remain uncommitted. The active Goal still requires its final completion audit."
@@ -209,6 +210,17 @@
       "finding": "A normal-rate 60,000 ms physical-microphone run with the bounded ESP 2x pre-AFE candidate produced AFE session peak 1368, 114 confirmed Type streaming-AGC voice blocks, zero AGC clipped samples, 32,000 B/s continuous transport, first preview 1163 ms, changed preview gap 2125 ms, whole coverage 1, and tail coverage 1. The previous whole-session AFE mean-absolute threshold of 100 rejected that valid natural speech because ordinary pauses dominate a full-minute average; it is not a product requirement recorded elsewhere in this registry.",
       "requirement": "For the normal-rate exact 60,000 ms anonymous physical-microphone mechanical diagnostic only, qualify non-silent acoustic input with AFE session peak >=500, installed-Type streaming-AGC confirmed voice blocks >=90, and AGC clipped samples=0. Do not use a whole-session mean-absolute floor that counts natural pauses as silence. Preserve the independent requirements for real PCM, exact duration, packet integrity, provider-authoritative changed previews, first-preview and maximum-gap limits, final coverage, tail coverage, and all Bluetooth/OTA/observability gates.",
       "acceptance_boundary": "This calibrates the machine-fixture signal qualifier, not the recording product result. It does not permit fabricated text, UI animation, arbitrary delay, discarded audio, synthetic audio as real-human evidence, or any relaxation of the separately recorded preview, transport, final, EC11, or human-acceptance contracts."
+    },
+    "listener_cached_gatt_wired_flash_followup_20260721": {
+      "status": "machine_pass_ble_recording_fixture_no_go",
+      "recorded_at": "2026-07-21T12:35:09+08:00",
+      "source": "Listener-Type commit d349ecc plus current Firmware@6652094 wired COM3 flash with PreserveOtaData.",
+      "finding": "The native-HID startup path now tries the exact current Windows GATT cache before its Uncached fallback. Microsoft documents Cached as cache-first with device retrieval fallback and Uncached as direct device retrieval. On the installed Program Files Type binary, startup reached native_windows_hid notify target in 1218 ms and background notify ready in 1398 ms; secure=1, e11r=1, dle_ready=1, TYPE:READY secure receipt=1, PairAsync=0, UnpairAsync=0, and boot crash_count remained 0. The first post-flash PnP scan was required to re-enumerate HID children; no pairing or deletion was performed.",
+      "ble_evidence": "Listener-Type/.cache/validation/platform-current-20260721/takeover-current-cached-after-pnp-scan-20260721/machine-summary.json",
+      "firmware_evidence": "Listener-Type/.cache/validation/platform-current-20260721/wired-flash-ble-status-20260721.log",
+      "recording_trial": "Listener-Type/.cache/validation/platform-current-20260721/mechanical-current-cached-after-wired-flash-20260721/mechanical-machine-summary.json",
+      "recording_trial_disposition": "NO_GO_INVALID_FIXTURE: exact 60000 ms transport completed with expected=sent=4051, 32000 B/s, zero transport failures, but AFE acoustic gate mean_abs=15 and streaming AGC voiced_chunks=1; fixture_acoustic_signal_below_minimum is retained as a failed fixture qualification, not product-quality recording evidence.",
+      "acceptance_boundary": "This closes the cached-GATT startup repair as a scoped machine PASS and preserves the mechanical trial as invalid-fixture evidence. It does not complete the active Goal, promote the invalid mechanical run to recording PASS, or alter the protected real-human recording acceptance."
     },
     "listener_capsule_preview_two_line_visual_balance_20260720": {
       "status": "active_owner_direction",
