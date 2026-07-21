@@ -4324,7 +4324,10 @@ fn start_embedded_ble_passive_local_reattach_watch(
     let inner = Arc::clone(inner);
     async_runtime::spawn(async move {
         let baseline_native_hid_addresses = match async_runtime::spawn_blocking(|| {
-            crate::embedded_ble::native_windows_hid_pairing_addresses()
+            // The present-only CIM query is ~3x cheaper than the full Get-PnpDevice
+            // enumeration and is the correct evidence class here: a fresh local
+            // re-pair always produces present PnP nodes.
+            crate::embedded_ble::native_windows_hid_present_pairing_addresses()
         })
         .await
         {
@@ -4372,7 +4375,7 @@ fn start_embedded_ble_passive_local_reattach_watch(
             }
 
             let native_hid_pairing = async_runtime::spawn_blocking(|| {
-                crate::embedded_ble::native_windows_hid_pairing_addresses()
+                crate::embedded_ble::native_windows_hid_present_pairing_addresses()
             })
             .await;
             let native_hid_addresses = match native_hid_pairing {
@@ -11512,7 +11515,7 @@ mod tests {
             .find("query_listener_pairing")
             .expect("passive monitor must read local Windows pairing state");
         let native_hid = body
-            .find("native_windows_hid_pairing_addresses")
+            .find("native_windows_hid_present_pairing_addresses")
             .expect("passive monitor must read local Windows HID pairing evidence");
         let pairing_ready = body
             .find("embedded_ble_passive_local_reattach_evidence_ready")
