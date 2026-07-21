@@ -171,6 +171,30 @@
       "commit_boundary": "Do not stage Type clipboard/automatic-Enter WIP, Firmware tools/flash.ps1 local changes, .rollback-firmware-1b37813/, caches, audio, transcripts, stimulus text, or build outputs. Keep each repository's accepted source changes in its own focused commit.",
       "acceptance_boundary": "Grouping accepted platform fixes together does not declare the current clean package valid until the recording preview regression is rebuilt, installed from C:\\Program Files\\Listener Type\\listener-type.exe, and backed by focused evidence."
     },
+    "listener_recording_preview_repair_package_20260721": {
+      "status": "completed_source_commit_and_installed_package_audit",
+      "recorded_at": "2026-07-21T14:18:00+08:00",
+      "source": "Owner direction to group accepted platform repairs; preview regression was traced to packaging clean HEAD without the accepted recording WIP.",
+      "source_commit": "Listener-Type@6640deb",
+      "repairs": [
+        "Provider partial transcript callbacks publish authoritative streaming preview updates.",
+        "3,200-byte provider blocks are aggregated and the final partial block is drained before finalization.",
+        "Volcengine uses session-level voice-gated AGC with per-block peak protection and a bounded 16x initial gain.",
+        "The capsule visual level uses raw PCM energy and observability records first/update provider events."
+      ],
+      "verification": {
+        "targeted_agc_tests": "9 passed, 0 failed",
+        "full_type_lib_tests": "840 passed, 0 failed, 1 ignored",
+        "release_build": "PASS: cargo build --release",
+        "msi_sha256": "6DF9B636C5B725D206929233AB3D24D6EFDBC8956DFE19E7884C9D5886BCF4E9",
+        "installed_exe_sha256": "00FB3041482368E89BAB105672DFCD54A1529EF5B5CB10DD9C27B2AFB575D188",
+        "installed_payload_matches_release": true,
+        "installed_path": "C:\\Program Files\\Listener Type\\listener-type.exe",
+        "audit_artifact": "Listener-Type/.cache/validation/preview-repair-current-20260721/preview-repair-audit.json"
+      },
+      "preserved_boundary": "Clipboard/automatic-Enter WIP remains in stash aiw-preserve-type-clipboard-enter-wip-20260721-preview-repair and is not part of this commit. Firmware tools/flash.ps1 and .rollback-firmware-1b37813/ remain untouched.",
+      "acceptance_boundary": "This package audit restores the previously human-accepted recording path and proves source/build/install identity. It does not claim Bluetooth full Goal completion or close the separate clipboard/automatic-Enter WIP."
+    },
     "listener_recording_acceptance_owner_clarification_20260721": {
       "status": "owner_confirmed_recording_pass_invalid_fixture_only",
       "recorded_at": "2026-07-21",
