@@ -88,6 +88,16 @@
       "recorded_at": "2026-07-21T11:55:00+08:00",
       "source": "Product-owner direction: ota的升级包不太对, 要在根目录才行, 替换现在的zip, 然后完整提交一下1.0.2, 应该是整个listner都做完了吧",
       "requirement": "Place the validated Listener 1.0.2 OTA zip at the Listener-Firmware repository root, replace the prior root zip, and prepare complete but scoped commits for finished Listener 1.0.2 work. Do not include cache, audio, transcripts, stimulus text, build outputs, or clipboard/automatic-Enter WIP; do not blanket-add unrelated dirty paths.",
+      "root_zip": "Listener-Firmware/listener-ota-1.0.2.zip",
+      "root_zip_sha256": "0324DA42FB40E22C43DC7261268EC693308821F44373CDAD4918D2FAD7BF6197",
+      "root_zip_layout": "ota_manifest.json and firmware_ota.bin are at the archive root; factory payload remains nested under factory/.",
+      "source_commits": [
+        "Listener-Firmware@6652094",
+        "Listener-Type@7d318d2",
+        "Listener-Type@bb0fbbe",
+        "Listener-Type@0aa9fcd"
+      ],
+      "remaining_uncommitted_boundary": "Type clipboard/automatic-Enter WIP remains outside these commits; Firmware tools/flash.ps1 and .rollback-firmware-1b37813/ remain unrelated dirty paths.",
       "acceptance_boundary": "The root zip is a user-facing release artifact and is not committed. Source commits are split or explicitly scoped to completed recording/Bluetooth/OTA/observability work; clipboard/automatic-Enter WIP and unrelated dirty paths remain uncommitted. The active Goal still requires its final completion audit."
     },
     "listener_fresh_native_pairing_machine_gap_20260721": {
