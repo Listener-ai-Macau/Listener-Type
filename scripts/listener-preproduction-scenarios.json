@@ -3,12 +3,366 @@
   "version": "1.0.2",
   "purpose": "Canonical Listener 1.0.2 preproduction physical acceptance scenarios. Human, bench, regression, and release audit gates must use this file as the scenario source of truth.",
   "pending_operator_steering": {
+    "listener_esp_platform_state_summary_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T08:55:00+08:00",
+      "source": "Product-owner direction: 我感觉现在还可以，就是你现在呃看一下日志吧。然后你给我一段话，说一下。",
+      "requirement": "The owner feels the current ESP platform state is roughly acceptable and directs the agent to review the structured machine logs and deliver one concise spoken-style explanation covering what the ESP recording/BLE/OTA work actually repaired, why the metrics pass under the calibrated registry gates, and what still requires human confirmation.",
+      "triage": "Recorded from operator-final-review-note.txt beside esp-machine-audit-0290 after the final human-window parent process exited without a captured selection. This is a direction to summarize evidence, not a pass selection; final human acceptance remains open and the Goal must not be completed on the basis of this note.",
+      "triage_artifact": "Listener-Type/.cache/validation/platform-current-20260721/esp-machine-audit-0290/operator-final-review-note-triage.json",
+      "acceptance_boundary": "Does not waive any machine gate, does not declare human acceptance, and does not authorize completing the active Goal. A subsequent explicit canonical operator-prompt selection is still required before final acceptance can be recorded."
+    },
+    "listener_real_human_recording_acceptance_20260721": {
+      "status": "human_accepted_recording_capability",
+      "recorded_at": "2026-07-21T11:08:19+08:00",
+      "source": "Canonical 真人录音验收: selected=通过.",
+      "machine_facts": "Installed Program Files Type with the current AGC candidate: AFE output peak 1077 with no clipping; expected_packets=audio_sent=4623; missing_packets=0; 32000 B/s; retry/queue/notify failures=0; first provider preview=1060 ms; provider max changed gap=1347 ms; capsule max visible gap=1279 ms against the calibrated 4000 ms gate; provider final and capsule Done both arrived.",
+      "human_result": "The operator explicitly accepted the just-completed real-person recording after the machine evidence was reviewed. The spoken stimulus, transcript, and audio are intentionally not retained.",
+      "evidence": [
+        "Listener-Type/.cache/validation/recording-human-acceptance-20260721/real-voice-60s-01/human-recording-machine-summary.json",
+        "Listener-Type/.cache/validation/recording-human-acceptance-20260721/real-voice-60s-01/20260721-110819-566-真人录音验收-9e20227a.json"
+      ],
+      "regression_contract": "Any change that can affect ESP capture gain, BLE PCM transport, Type streaming AGC, provider preview routing, capsule publication, or recording completion must retain real-PCM input, zero-loss transport, first preview <=5000 ms, maximum changed visible-preview gap <=4000 ms for normal-rate diagnostics, provider final, terminal capsule Done, and a focused human reacceptance when the user-visible behavior could change.",
+      "acceptance_boundary": "This closes the focused recording experience acceptance only. It does not reprove the EC11 direct fast-idle start within this particular session, does not waive the separate fresh native Windows pairing physical action, and does not authorize completing the active ESP platform Goal."
+    },
+    "listener_current_platform_machine_retest_20260721": {
+      "status": "machine_pass_with_fresh_pairing_no_go",
+      "recorded_at": "2026-07-21T11:15:00+08:00",
+      "installed_type_sha256": "D6E55000433E0D711693A815956DF32AE1E8ECBCB866CFC88CD9E21FFFE42D58",
+      "finding": "Current Program Files Type retest passes existing native-HID takeover, secure/e11r/dle_ready, KEY1 to RightControl, denzic_ota_v1 transfer/version/Type-ready recovery, and current Firmware/Type observability static and focused unit gates. OTA post-capture has serial_closed=true. No Type PairAsync/UnpairAsync or NimBLE panic/reboot was observed. The follow-up 60-second USB-controlled mechanical trial completed with zero transport loss but was classified INVALID_FIXTURE_ACOUSTIC_SIGNAL_BELOW_MINIMUM; it is not product-quality evidence and the accepted real-human recording evidence remains the recording capability contract.",
+      "machine_verdict": "PASS_PENDING_FRESH_NATIVE_PAIRING_PHYSICAL_GATE",
+      "remaining_gap": "Fresh native Windows pairing was intentionally not rerun: it requires deleting the current Windows pairing and a physical EC11 recovery double-click. Existing takeover evidence must not be promoted to full Bluetooth PASS.",
+      "evidence": [
+        "Listener-Type/.cache/validation/platform-current-20260721/platform-current-machine-retest-summary.json",
+        "Listener-Type/.cache/validation/platform-current-20260721/mechanical-current-type-0305/mechanical-trial-triage.json"
+      ],
+      "acceptance_boundary": "This current machine retest does not complete the active Goal and does not waive the separate physical fresh-pairing gate or final per-capability human acceptance."
+    },
+    "listener_owner_autonomous_bluetooth_log_review_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T11:35:00+08:00",
+      "source": "Product-owner direction: 不用带我，再操作了，你操作就好，反正我上次操作没感觉到啥问题。然后你看下能不能符合我们这些指标，如果符合的话就通过。",
+      "requirement": "Do not ask the operator to repeat the Bluetooth physical action. Judge the current Bluetooth capability from the existing structured takeover/key-delivery logs and numeric metrics; preserve the distinction between existing-pairing takeover evidence and the separate fresh native-pairing machine gate.",
+      "application": "Existing pairing takeover, KEY1 delivery, secure/e11r/dle_ready, no Type PairAsync/UnpairAsync, no panic/reboot, and stable HID identity remain machine PASS. The guided session now proves a fresh native pairing by the Windows HID identity change, but the first post-pairing Type startup took 5798 ms to background notify readiness against the 3000 ms gate; a steady restart later measured 1525 ms. Keep the full Bluetooth gate NO_GO until the first-start threshold is resolved or explicitly revised by the owner.",
+      "evidence": [
+        "Listener-Type/.cache/validation/platform-current-20260721/fresh-pairing-physical-20260721/takeover-after-operator-pass/machine-summary.json",
+        "Listener-Type/.cache/validation/platform-current-20260721/fresh-pairing-physical-20260721/operator-checklist-triage.json"
+      ],
+      "acceptance_boundary": "This owner direction authorizes autonomous log review and does not waive the explicit fresh native-pairing machine evidence requirement or authorize completing the active Goal."
+    },
+    "listener_owner_authorizes_physical_pairing_prompt_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T11:40:00+08:00",
+      "source": "Product-owner direction: 可以的，你可以打扰我。",
+      "requirement": "The operator authorizes one guided physical Bluetooth fresh-pairing session. Open the canonical Chinese prompt with the exact four-step sequence, then autonomously start the installed Program Files Type and collect the bounded takeover machine evidence.",
+      "acceptance_boundary": "This authorization permits the physical prompt only; it does not waive any Bluetooth metric, fresh-pairing evidence, or final Goal completion audit."
+    },
+    "listener_owner_clarifies_pairing_type_sequence_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T11:44:00+08:00",
+      "source": "Product-owner clarification: 理论上应该没有东西要接管，就是你不是让我关掉type吗",
+      "requirement": "During Windows native pairing, Listener Type must be closed. The post-pairing machine step is only a passive existing-pairing connection check from the installed Program Files Type; it must not initiate PairAsync/UnpairAsync or be described as performing a new pairing.",
+      "application": "The guided physical session closed Program Files Type before Windows deletion and native re-pair. The subsequent runner starts the installed Type only after pairing to verify passive HID/GATT connection, secure TYPE:READY, notify readiness, and zero pairing API calls.",
+      "acceptance_boundary": "This clarifies terminology and sequence; it does not waive the first post-pairing notify timing threshold."
+    },
+    "listener_owner_bluetooth_first_pairing_threshold_revision_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T11:46:00+08:00",
+      "source": "Product-owner direction: 不行的话你就降低一下目标，门栏也可以你看着好不好？优化吧？不好优化的就降低门槛",
+      "requirement": "If the first post-native-pairing startup timing cannot be optimized without destabilizing the secure HID/GATT handshake, lower only that first-cold-start acceptance gate. Keep ordinary existing-pairing startup at <=3000 ms; use <=6000 ms for the one-time first post-pairing notify-ready bootstrap, with the steady restart still required to remain <=3000 ms.",
+      "rationale": "Observed first post-pairing notify-ready=5798 ms, while the immediate cold restart was 1525 ms with secure/e11r/dle_ready=1 and no PairAsync/UnpairAsync. The extra delay is isolated to first Windows/PnP pairing bootstrap; no source optimization is justified before a focused attribution.",
+      "machine_application": "Run the installed takeover evidence with an explicit MaxNotifyReadyMs=6000 override only for the fresh-pairing first bootstrap artifact, retain the original 3000 ms result, and require a separate steady restart <=3000 ms.",
+      "acceptance_boundary": "This is a scoped acceptance revision for first fresh-pairing bootstrap only; it does not waive secure transport, zero loss/control, no Type pairing API calls, no panic/reboot, KEY1 delivery, or ordinary startup timing."
+    },
+    "listener_ota_human_note_triage_20260721": {
+      "status": "machine_pass_owner_uncertain_no_repro",
+      "recorded_at": "2026-07-21T11:50:00+08:00",
+      "source": "Final OTA acceptance note: 你看看吧, 我用denzic根目录的固件做的升级, 感觉还行, 就是升级完没有正确恢复type? 应该是固件包的问题吧",
+      "requirement": "Reconcile the operator's concern about Type recovery after OTA against the exact package identity, post-confirm TYPE:READY evidence, BLE secure state, installed Program Files Type process, and post-OTA serial capture before accepting the OTA item. Do not retain or infer any speech/transcript data.",
+      "triage_status": "RESOLVED_AS_MACHINE_PASS_WITH_REGRESSION_OBSERVATION",
+      "triage_artifact": "Listener-Type/.cache/validation/platform-current-20260721/final-human-acceptance-20260721/ota/ota-human-note-triage.json",
+      "acceptance_boundary": "The OTA human selection is accepted for this build because no recovery failure reproduced; the owner concern remains a protected regression observation and does not waive future OTA Type-ready checks."
+    },
+    "listener_release_1_0_2_root_ota_and_commit_20260721": {
+      "status": "completed_root_zip_scoped_source_commit_audit",
+      "recorded_at": "2026-07-21T11:55:00+08:00",
+      "source": "Product-owner direction: ota的升级包不太对, 要在根目录才行, 替换现在的zip, 然后完整提交一下1.0.2, 应该是整个listner都做完了吧",
+      "requirement": "Place the validated Listener 1.0.2 OTA zip at the Listener-Firmware repository root, replace the prior root zip, and prepare complete but scoped commits for finished Listener 1.0.2 work. Do not include cache, audio, transcripts, stimulus text, build outputs, or clipboard/automatic-Enter WIP; do not blanket-add unrelated dirty paths.",
+      "acceptance_boundary": "The root zip is a user-facing release artifact and is not committed. Source commits are split or explicitly scoped to completed recording/Bluetooth/OTA/observability work; clipboard/automatic-Enter WIP and unrelated dirty paths remain uncommitted. The active Goal still requires its final completion audit."
+    },
+    "listener_fresh_native_pairing_machine_gap_20260721": {
+      "status": "human_accepted_with_scoped_threshold_revision",
+      "recorded_at": "2026-07-21T09:30:00+08:00",
+      "source": "ESP platform machine audit 0290 boundary: fresh_native_pairing_not_rerun; ble-current-20260721/installed-takeover-after-ota-pdm-gain2-0262 full_bluetooth_goal_gap.",
+      "finding": "The guided physical session changed the Windows HID identity from BDEFAAD970561413D68562436277581901A0195215A0E7F3721BACC12D3B420B to 45D0A26B2298A8BBA4527FD29AAEC0300583709880DC250C703565933D00A444, proving a fresh native pairing occurred. The first installed-Type startup after that pairing reached background notify readiness in 5798 ms, exceeding the 3000 ms gate; a second cold restart reached 1525 ms. secure/e11r/dle_ready, TYPE:READY secure receipt, PairAsync/UnpairAsync=0, no panic/reboot, stable identity, and KEY1 delivery all passed.",
+      "current_gate": "Physical fresh pairing is machine-supported. Per the owner-approved scoped revision, the one-time first post-pairing bootstrap uses a 6000 ms ceiling (observed 5798 ms), while ordinary and steady restarts remain at 3000 ms (observed 1525 ms). Secure/e11r/dle_ready, TYPE:READY secure receipt, zero PairAsync/UnpairAsync, no panic/reboot, stable identity, and KEY1 delivery all pass. The Bluetooth machine gate is now PASS under the recorded scoped threshold revision; final per-capability human acceptance remains required.",
+      "operator_review_artifact": "Listener-Type/.cache/validation/platform-current-20260721/fresh-pairing-physical-20260721/operator-final-result.json",
+      "operator_review_triage": "Listener-Type/.cache/validation/platform-current-20260721/fresh-pairing-physical-20260721/operator-final-triage.json",
+      "fresh_pairing_final_summary": "Listener-Type/.cache/validation/platform-current-20260721/fresh-pairing-final-20260721/fresh-pairing-final-summary.json",
+      "threshold_revision_summary": "Listener-Type/.cache/validation/platform-current-20260721/fresh-pairing-final-20260721/threshold-revision-summary.json",
+      "acceptance_boundary": "Does not weaken the accepted manual-delete passivity, cross-host no-reclaim, or takeover contracts; those remain machine-closed on the current host. Per-item Bluetooth acceptance is recorded in final-human-acceptance-20260721/bluetooth/operator-result.json."
+    },
+    "listener_item_by_item_final_acceptance_20260721": {
+      "status": "human_accepted_all_capabilities",
+      "recorded_at": "2026-07-21T12:00:00+08:00",
+      "source": "Canonical per-capability final-acceptance windows: 录音、蓝牙、OTA、可观测均 selected=通过.",
+      "requirement": "Each platform capability was opened as its own canonical operator-prompt with its calibrated gate summary; the owner confirmed every item individually. Final acceptance requires every item explicitly 通过; any later 失败 note returns to repair and is triaged as requirement input.",
+      "triage_of_0291": "The 0291 blanket 通过 and its note are archived (ai-collaboration-workflow prompt-archive 20260721-094302); it is recorded as direction for the per-item session, not as completion evidence.",
+      "per_capability_results": [
+        "Listener-Type/.cache/validation/platform-current-20260721/final-human-acceptance-20260721/recording/operator-result.json",
+        "Listener-Type/.cache/validation/platform-current-20260721/final-human-acceptance-20260721/bluetooth/operator-result.json",
+        "Listener-Type/.cache/validation/platform-current-20260721/final-human-acceptance-20260721/ota/operator-result.json",
+        "Listener-Type/.cache/validation/platform-current-20260721/final-human-acceptance-20260721/observability/operator-result.json"
+      ],
+      "aggregate_result": "Listener-Type/.cache/validation/platform-current-20260721/final-human-acceptance-20260721/final-human-acceptance-summary.json",
+      "acceptance_boundary": "All four per-item selections are explicitly 通过 and machine evidence remains present. This records final human capability acceptance, but does not authorize calling update_goal complete until the source/release audit is complete."
+    },
     "listener_simple_issue_self_closure_20260715": {
       "status": "required",
       "recorded_at": "2026-07-15T22:40:00+08:00",
       "source": "Product-owner direction: 另外这些简单的问题你可以自己闭环, 不需要人协助.",
       "requirement": "For Listener-only issues that can be falsified by code inspection, deterministic simulation, installed-Type logs, Windows event/state evidence, or short locked device capture, complete diagnosis, repair, and machine validation without asking the operator to repeat simple input actions. Reserve a canonical operator-prompt for a remaining subjective or externally unobservable user-visible judgment; do not represent a machine-only conclusion as human acceptance.",
       "current_application": "The current-host Swift Pair protocol repair and the BLE-audio-Type-link check were self-closed with firmware advertisement/session evidence, Windows event evidence, and an installed Program Files Type GATT read. The operator is not asked to repeat simple input while those checks can distinguish the cause; a remaining subjective visual judgment still requires its own canonical prompt."
+    },
+    "listener_overnight_machine_closure_no_operator_prompt_20260719": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-19T22:40:00+08:00",
+      "source": "Product-owner direction: 我准备睡觉了，然后你不要人工暂停，然后你继续。把所有的机器闭环都做完。然后你看那些平台的能力全部做了，还有 listener 的东西。然后我明天起来看一下我怎么验收。",
+      "requirement": "Continue Listener 1.0.2 machine diagnosis, repair, build, installed-Type validation, and evidence collection autonomously while the operator is unavailable. Do not open an operator-prompt, wait for chat confirmation, or treat an unavailable human as a pass condition. Run the Goal's recording, Bluetooth connection/control, OTA integrity/throughput/staged timing, and unified-observability machine gates to explicit PASS or NO_GO, then prepare a concise next-day human-acceptance checklist only after all required machine gates pass.",
+      "acceptance_boundary": "A machine-only PASS remains distinct from physical EC11, real-human accuracy, and subjective visual acceptance. Any gate lacking its required evidence must stay NO_GO and must not trigger an operator window until the operator is available."
+    },
+    "listener_machine_diagnostics_autonomous_without_popup_20260719": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-19T16:35:00+08:00",
+      "source": "Product-owner direction: 机器做的, 你就直接开就好, 不要停下.",
+      "requirement": "Machine-only Listener diagnostics must start and complete autonomously without an operator prompt or a chat confirmation. A canonical operator-prompt is reserved only for an action the operator must physically perform or a subjective human-visible judgment; use one window at a time and continue automatically after it is answered.",
+      "current_application": "The fixed 60,000 ms mechanical-voice recording diagnostic proceeds automatically once the microphone placement has been confirmed; subsequent rebuilds and reruns do not ask again unless the physical setup must change."
+    },
+    "listener_diagnostic_idle_command_no_wait_20260719": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-19T21:15:00+08:00",
+      "source": "Product-owner direction: idle这种东西你在调试的时候不要傻等, 可以发命令进的.",
+      "requirement": "For a machine diagnostic that needs a Listener idle precondition, use the explicit supported test control command to enter the target idle state and immediately read back state, BLE readiness, and audio-idle status under the short Global\\Listener_COM3 mutex. Do not wait for production inactivity timers during iterative debugging.",
+      "evidence_rule": "The capture must record the command acknowledgement and a matching postcondition such as CONNECTED_IDLE, connected=1, secure=1, e11r=1, and the expected audio_idle_power_save value. A forced diagnostic state proves the following test's idle-start behavior only; it does not replace a separate natural-timeout/power-policy acceptance when that behavior is itself under test.",
+      "safety_boundary": "Use only the named test control plane, never modify persisted timeout settings or emulate physical EC11 input to obtain idle. The command must reject battery-only or blocked states that cannot safely enter the requested idle state."
+    },
+    "listener_mechanical_voice_two_x_speed_20260719": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-19T18:52:00+08:00",
+      "source": "Product-owner direction: 太快了, 你看看2倍速?",
+      "requirement": "The current high-rate mechanical-voice pressure diagnostic must use a true 2.0x playback-speed multiplier over a pre-rendered anonymous WAV while retaining exactly 60,000 ms of 16 kHz, 16-bit, mono physical playback. The multiplier, rendered duration, fixed duration, stimulus hash, and numeric result must be retained; the source text, transcript, and audio must not be retained or surfaced.",
+      "acceptance_boundary": "The 2.0x run is a transport and preview-cadence pressure diagnostic. It does not replace the separately required normal-rate readability, real physical EC11, real-human accuracy, or final human acceptance evidence."
+    },
+    "listener_mechanical_voice_one_point_five_speed_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T00:00:00+08:00",
+      "source": "Product-owner direction: 另外语速有点太慢了, 现在的1.5倍吧.",
+      "requirement": "The next and subsequent requested high-rate mechanical-voice pressure diagnostics use a true 1.5x playback-speed multiplier over the same anonymous natural single-passage 16 kHz, 16-bit, mono fixture, retaining exactly 60,000 ms of physical playback plus only stimulus hash, timing, numeric counters, and verdict.",
+      "acceptance_boundary": "The 1.5x diagnostic is a pressure reproduction for transport/provider cadence. It preserves real PCM, provider-authoritative callbacks, final completion, coverage, and tail checks, but it does not replace the normal-rate readability gate or change its accepted thresholds."
+    },
+    "listener_capsule_preview_still_stalls_20260720": {
+      "status": "active_owner_observation",
+      "recorded_at": "2026-07-20T00:00:00+08:00",
+      "source": "Product-owner observation: 预览还是有点卡.",
+      "requirement": "Treat the observed preview stall as an active production defect until installed-Type evidence proves bounded changed provider-preview cadence. Do not mask it with capsule animation, fabricated text, arbitrary delay, audio discard, or final-supplement-only updates; diagnose the no-text provider-to-preview timeline after confirming audio transport health.",
+      "current_evidence": "The exact 60,000 ms normal-rate run had continuous transport, provider audio max lag 473 ms, 90 provider preview candidates, zero final-supplement candidates, and a 7,085 ms maximum visible preview gap. This remains NO_GO against the normal-rate 4,000 ms owner-calibrated threshold."
+    },
+    "listener_mechanical_voice_natural_single_passage_20260719": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-19T21:45:00+08:00",
+      "source": "Product-owner direction: 然后你看看播放的那个声音不要一直重复, 一段话, 最好是类似人讲话的那种.",
+      "requirement": "Each mechanical-voice recording diagnostic must play one anonymous, coherent, natural-sounding spoken passage with varied sentences, ordinary pauses, and no repeated short phrase loop. It remains a pre-rendered physical-microphone fixture and must preserve the exact fixed 60,000 ms 16 kHz, 16-bit, mono playback and the configured rate multiplier.",
+      "privacy_boundary": "Generate the passage locally for the individual run. Retain only its opaque hash, timing, rate, and numeric results; do not retain or surface its wording, synthesized WAV, final transcript, or any owner speech.",
+      "acceptance_boundary": "Natural single-passage delivery improves the fixture's representativeness only. It does not turn synthetic audio into human-voice or physical-EC11 acceptance evidence."
+    },
+    "listener_capsule_preview_gap_regression_20260719": {
+      "status": "machine_closed_calibrated",
+      "machine_closure_20260721": {"closed_at": "2026-07-21", "basis": "The 1,500 ms maximum-gap clause was superseded for the normal-rate diagnostic by listener_capsule_preview_gap_acceptance_revision_20260720 (<=4,000 ms gap, <=5,000 ms first preview, coverage >=0.89). Current normal-rate run 0244: first preview 1,846 ms, maximum visible gap 2,192 ms, coverage 1.0, tail 1.0; pressure preview timing remains recorded-only per the calibrated split.", "evidence": ["Listener-Type/.cache/validation/firmware-pdm-gain2-candidate-20260721/normal-rate-0244/mechanical-machine-summary.json", "Listener-Type/.cache/validation/firmware-pdm-gain2-candidate-20260721/pressure-1p5-0246/mechanical-machine-summary.json", "Listener-Type/.cache/validation/platform-current-20260721/esp-machine-audit-0290/machine-summary.json"]},
+      "recorded_at": "2026-07-19T18:55:00+08:00",
+      "source": "Product-owner observation: 胶囊卡住了预览, 你看看日志.",
+      "observed_machine_evidence": "The fixed 60,000 ms 2.0x installed-Type session retained continuous PCM delivery and completed final/ready, but emitted 21 changed visible previews with a maximum inter-preview gap of 14,435 ms. Type pending-send high-water was 1 and provider audio max lag was 790 ms, so the visible-stall finding must not be mislabeled as BLE producer-over-consumer backlog.",
+      "requirement": "Every sustained recording diagnostic must compute the matching installed-Type changed-preview timeline and fail when its maximum visible-preview gap exceeds the accepted 1,500 ms smoothness contract or widens over the active speech interval. The repair must preserve text-only preview presentation once text exists, real PCM input, provider-authoritative preview/final semantics, and final completion; it must not fabricate text, hide the gap with a decorative animation, add arbitrary delay, or relax the metric because a final result eventually appears.",
+      "acceptance_boundary": "A machine PASS requires both continuous transport and the bounded visible-preview timeline. It remains separate from the required real physical EC11 and real-human accuracy evidence."
+    },
+    "listener_capsule_preview_gap_acceptance_revision_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T00:00:00+08:00",
+      "source": "Product-owner direction: 我感觉你现在看的这个流动性算是可以了，就为什么一直通不过呢？是因为我们的指标现在太严苛了吗？那你可以降低一下验收标准。",
+      "finding": "The latest exact 60,000 ms installed-Type physical-microphone run kept real PCM delivery continuous, reached a genuine provider final with whole-text coverage 0.9977 and tail coverage 1, and produced its first visible preview in 2,357 ms. Its only failed recording condition was a 3,434 ms maximum changed-preview gap against the prior 1,500 ms contract; the observed product flow was accepted by the owner as sufficiently continuous.",
+      "current_gate": "For a normal-rate (<=1.0x) exact 60,000 ms Listener 1.0.2 mechanical-voice diagnostic, maximum changed visible-preview gap is <=4,000 ms, first visible preview is <=5,000 ms, and whole-text coverage is >=0.89. This supersedes the 1,500 ms maximum-gap clause in listener_capsule_preview_gap_regression_20260719 for the normal-rate diagnostic only. The existing 2.0x fixture remains a transport/provider pressure diagnostic: it must retain real PCM, fixed-duration packet integrity, provider-authoritative changed previews and protocol final, whole-text coverage >=0.89, and tail coverage >=0.90, while its preview timing remains a required recorded trace rather than a normal-rate readability PASS condition. Neither mode permits fabricated text or cosmetic animation, arbitrary delay, or audio discard.",
+      "acceptance_boundary": "This calibrated split records owner-visible tolerance and the existing 2.0x pressure-fixture scope; it does not retroactively alter historical release evidence, replace real-human accuracy or physical-EC11 acceptance, or waive any Bluetooth, OTA, or observability machine gate."
+    },
+    "listener_mechanical_fixture_signal_qualification_revision_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T01:35:00+08:00",
+      "source": "Product-owner direction: 如果实在优化不出来，就降低验收标准；机械语音仍只作为机器诊断，不替代真人体验。",
+      "finding": "A normal-rate 60,000 ms physical-microphone run with the bounded ESP 2x pre-AFE candidate produced AFE session peak 1368, 114 confirmed Type streaming-AGC voice blocks, zero AGC clipped samples, 32,000 B/s continuous transport, first preview 1163 ms, changed preview gap 2125 ms, whole coverage 1, and tail coverage 1. The previous whole-session AFE mean-absolute threshold of 100 rejected that valid natural speech because ordinary pauses dominate a full-minute average; it is not a product requirement recorded elsewhere in this registry.",
+      "requirement": "For the normal-rate exact 60,000 ms anonymous physical-microphone mechanical diagnostic only, qualify non-silent acoustic input with AFE session peak >=500, installed-Type streaming-AGC confirmed voice blocks >=90, and AGC clipped samples=0. Do not use a whole-session mean-absolute floor that counts natural pauses as silence. Preserve the independent requirements for real PCM, exact duration, packet integrity, provider-authoritative changed previews, first-preview and maximum-gap limits, final coverage, tail coverage, and all Bluetooth/OTA/observability gates.",
+      "acceptance_boundary": "This calibrates the machine-fixture signal qualifier, not the recording product result. It does not permit fabricated text, UI animation, arbitrary delay, discarded audio, synthetic audio as real-human evidence, or any relaxation of the separately recorded preview, transport, final, EC11, or human-acceptance contracts."
+    },
+    "listener_capsule_preview_two_line_visual_balance_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T00:00:00+08:00",
+      "source": "Product-owner direction: 这个浏览显示的字好像上面的要比下面的多，你看要不要弄成两排一样多，还是怎么样？这样子感觉好像有点奇怪。你看一下别人的浏览是两排是一样多的，还是上面会比下面多？",
+      "requirement": "For the Windows two-line live capsule preview, retain natural text flow and the latest provider-authoritative tail, but size the visible tail window so a clipped two-line CJK preview is visually balanced rather than routinely presenting one full line plus a short second line. Do not force equal character counts per line, inject spacing, alter text content, delay provider updates, or replace real preview text with decorative animation.",
+      "acceptance_boundary": "This is a capsule typography/layout refinement only. It must preserve the fixed capsule footprint, existing clipping safeguards, recording transport, provider-preview cadence, and all recording machine gates; it is not a replacement for subjective human acceptance."
+    },
+    "listener_recording_machine_closure_freeze_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T00:00:00+08:00",
+      "source": "Product-owner direction: 能优化就优化，如果优化的话到极限的话就不优化了，然后你提交一下，然后看一下下一步要干什么？就是录音，这个应该已经算是结束了。",
+      "requirement": "Freeze recording-causality iteration at the latest exact normal-rate 60,000 ms installed-Type machine PASS. Preserve real PCM, provider-authoritative preview/final behavior, the calibrated normal-rate preview gates, and focused regression evidence. Do not pursue arbitrary extra preview-gap tuning unless a new reproducible regression violates an accepted gate.",
+      "machine_evidence": "Listener-Type/.cache/validation/recording-afe-type-agc-20260720/provider-tail-merge-candidate-physical-20260720-1611/mechanical-machine-summary.json: PASS; audio_sent=expected_packet_count=5332, missing=queue_full=notify_failed=audio_failed=0, 32,000 B/s, AFE peak=14,460, first preview=2,147 ms, maximum visible gap=3,718 ms, coverage=0.9913, tail=1.",
+      "acceptance_boundary": "This records the recording machine closure under the owner-calibrated normal-rate gate. It neither changes the active Goal's overall completion state nor claims final human acceptance; Bluetooth, OTA, and unified-observability remain separate NO_GO workstreams."
+    },
+    "listener_intermittent_recording_tail_omission_20260720": {
+      "status": "active_owner_observation",
+      "recorded_at": "2026-07-20T00:00:00+08:00",
+      "source": "Product-owner observation: 实际体验偶发吞掉尾部几个字，怀疑停止按钮时机。",
+      "requirement": "Treat an intermittent missing spoken tail as a production defect unless session-bound evidence proves the omitted sound began after the firmware stop boundary. On every focused tail diagnostic, retain only numeric/timing evidence linking the firmware stop boundary, last accepted PCM packet and bytes, Type ASR bytes, provider-confirmed audio duration, provider final, and final tail-coverage verdict. The repair must preserve real PCM, provider-authoritative final semantics, ordinary immediate stop behavior, and explicit cancellation; it must not require an arbitrary post-speech delay, fabricate final text, or silently pad/discard audio.",
+      "acceptance_boundary": "A single good final does not close this intermittent issue. A machine conclusion may identify whether the stop was genuinely early or the pipeline lost accepted tail audio, but it remains separate from real-human accuracy and final human acceptance."
+    },
+    "listener_capsule_text_preview_only_20260719": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-19T00:00:00+08:00",
+      "source": "Product-owner direction: real-time text preview should retain text only, restored to its previous behavior.",
+      "requirement": "The recording capsule shows its established audio waveform only before realtime preview text exists. Once preview text exists, the preview center renders text only: no compact audio bars, waveform, or left-side recording indicator. This visual branch must not alter recording state, audio level capture, realtime text events, event ordering, stop controls, or final-text behavior.",
+      "acceptance_boundary": "Installed-Type visual verification is required for this narrow presentation behavior; it is independent of recording transport, preview latency, final text, and ASR accuracy acceptance."
+    },
+    "listener_capsule_live_level_regression_20260720": {
+      "status": "active_owner_observation",
+      "recorded_at": "2026-07-20T21:50:00+08:00",
+      "source": "Product-owner observation: 主要是这个音量大小的东西没有了，现在它这个音量大小不会改变录音灯和那个胶囊的那个收音的效果。",
+      "requirement": "Before realtime preview text exists, the recording capsule waveform and recording-light intensity must track the actual raw microphone signal level: silence, quiet voice, ordinary voice, and louder voice produce distinguishable ordered display levels. The display meter may calibrate raw PCM sensitivity after firmware capture headroom is restored, but it must not alter PCM, depend on ASR gain, fabricate audio activity, or change the protected text-only presentation once preview text exists.",
+      "machine_gate": "A deterministic raw-PCM level test must prove silence=0, quiet exceeds the frontend silence gate, and quiet < ordinary < loud. The installed Program Files Type binary hash and a focused visual-regression artifact must identify the deployed repair. This visual machine gate is distinct from the later final subjective operator acceptance.",
+      "evidence": ".cache/validation/recording-capsule-level-meter-20260720/machine-summary.json"
+    },
+    "listener_recording_led_visual_range_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T22:10:00+08:00",
+      "source": "Product-owner feedback: 现在好像是可以了。就是这个录音灯是随着音量而变化，但是可能变化的幅度还不够大，你看要不要加一下？加个1.5倍或者是什么？",
+      "requirement": "Keep the restored physical recording-light response, then increase only its display-side response by approximately 1.5x above the existing raw-signal noise floor so quiet, ordinary, and loud speech are more clearly distinguishable. Preserve the 40-unit silence floor, the existing smoothing, quantization, brightness caps, and all capture/PCM/BLE/ASR behavior; no microphone or AFE gain may be changed for this visual adjustment.",
+      "machine_gate": "The calibration constants and static LED guard must prove a 1.5x display-slope change from the accepted 40-to-1250 baseline while leaving the PCM path untouched. A firmware build, exact binary hash, bounded wired-flash recovery status, and compact no-content trial ledger are required before subjective visual follow-up.",
+      "evidence": ".cache/validation/recording-led-level-calibration-20260720/machine-summary.json"
+    },
+    "listener_guided_fixed_phrase_accuracy_validation_20260718": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-18T18:50:00+08:00",
+      "source": "Product-owner direction: 你看看你这个东西要跟我说，我要说什么才行。然后你可以顺便把那个准准确率给验了。",
+      "requirement": "The next real-human sustained recording prompt must state the exact spoken script and target duration before recording begins. It must use that script only to calculate a local normalized accuracy metric for the matching installed-Type session, alongside the existing transport, preview, final, and EC11 evidence.",
+      "privacy_boundary": "Do not store the spoken script, final transcript, or voice audio in the registry, source control, or validation summary. Keep only the local run's opaque comparison inputs and emitted numeric accuracy/CER/pass-fail evidence under Listener-Type/.cache/validation; do not surface its text in chat or logs.",
+      "completion_rule": "A prompt selection alone is not an accuracy pass. The machine verdict must bind one real EC11 session to a non-empty final, compute normalized accuracy against the guided script locally, and fail when transport or accuracy evidence is absent."
+    },
+    "listener_mechanical_voice_machine_diagnosis_20260718": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-18T20:00:46+08:00",
+      "source": "Product-owner direction: 话说了，这个效果一般般，你看一下是什么样？然后你还是，因为我现在就不在了，你用那个机械语音先试一下。",
+      "requirement": "While the operator is away, run a reproducible mechanical-voice stimulus through the physical Listener microphone and installed Program Files Type to diagnose sustained BLE PCM delivery, preview/final timing, and end-to-end recording behavior. Preserve only source identity, timing, serial, installed-Type, and capsule evidence, and emit an explicit machine PASS or NO_GO without treating the stimulus as human input.",
+      "acceptance_boundary": "A mechanical-voice run may close reproducible diagnostic portions of transport, preview, and final behavior, but never replaces raw physical EC11 first-edge evidence, the real-human guided accuracy check, or final human acceptance.",
+      "privacy_boundary": "Use an anonymous local synthetic stimulus. Do not retain the owner's voice, transcript, or audio, and do not surface the diagnostic utterance text in source control, validation summaries, or chat."
+    },
+    "listener_mechanical_voice_fast_bounded_stimulus_20260718": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-18T21:32:00+08:00",
+      "source": "Product-owner feedback: 你刚才这个语速不错, 很快。",
+      "requirement": "Mechanical-voice diagnostics must use a high-rate, bounded anonymous stimulus that is short enough for efficient iteration while still exercising continuous preview. Render and preload the anonymous stimulus before the start command, then orchestrate start, playback, and stop as one bounded diagnostic flow so TTS initialization or agent scheduling latency cannot extend the recorded session with silence or accidentally turn a late stop into a new recording. Derive first-preview latency only from the matching installed-Type session's first provider preview-latency event, never from a later provider correction; retain numeric provider-audio-progress versus visible-preview-progress evidence to detect widening lag.",
+      "acceptance_boundary": "This improves machine-test reproducibility only. It does not replace the required physical EC11 first-edge, real-human guided accuracy, or final human acceptance evidence.",
+      "privacy_boundary": "Retain only the stimulus hash, duration, rate, and numeric outcome under Listener-Type/.cache/validation; never retain or surface the synthetic utterance text."
+    },
+    "listener_mechanical_voice_one_minute_sustained_consumption_20260718": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-18T22:10:00+08:00",
+      "source": "Product-owner direction: 然后很快, 很长的说完一段话, 说上一分钟左右吧, 这样才知道有没有彻底解决这上面的问题, 用机械录音方式验收",
+      "requirement": "Run a pre-rendered, high-rate anonymous mechanical-voice session with exactly 60,000 ms of 16 kHz, 16-bit, mono playback PCM through the physical Listener microphone and installed Program Files Type; text length or approximate wall time is not a substitute. The same session must prove sustained producer-to-consumer health and non-widening preview behavior: all expected firmware packets sent, zero Type missing packets, zero firmware QueueFull/notify failure/pool allocation failure, bounded provider-audio progress lag, a first visible preview within the current 5000 ms gate, and a non-empty final result.",
+      "acceptance_boundary": "A PASS closes only the reproducible one-minute mechanical transport/preview/final diagnostic. It cannot replace the required physical raw-EC11 first-edge evidence, real-human guided accuracy evidence, or final human acceptance.",
+      "privacy_boundary": "Store only the anonymous stimulus hash, duration, rate, session linkage, and numeric machine outcomes under Listener-Type/.cache/validation. Do not retain or surface the synthetic utterance text, audio, or transcript."
+    },
+    "listener_mechanical_voice_readability_separate_from_transport_20260719": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-19T16:49:00+08:00",
+      "source": "Product-owner observation: 感觉像是你的语速太快了识别不出来?",
+      "requirement": "Keep the exact 60,000 ms high-rate anonymous mechanical stimulus as a transport-pressure diagnostic only. Validate provider preview, final-text coverage, and tail accuracy in a separate exact 60,000 ms normal-rate anonymous mechanical-voice run. Report the two result classes separately: a high-rate lexical miss does not negate a measured no-backlog transport result, and a normal-rate ASR pass does not replace the high-rate transport gate.",
+      "fixture_rule": "When a fixed PCM cutoff falls inside a word, fill the remainder of the 60,000 ms playback with silence from the preceding complete-word boundary. Compare only the fully played text locally; do not store or surface that text, audio, or transcript."
+    },
+    "listener_mechanical_voice_single_session_continuity_20260719": {
+      "status": "machine_closed",
+      "machine_closure_20260721": {"closed_at": "2026-07-21", "basis": "Run 0244 binds firmware started_session_id=2 to transport summary session_id=2 and Type embedded_session_id=2; single_session_continuity=True, cancel_event_count=0, no notify reopen or replacement session during fixed playback.", "evidence": ["Listener-Type/.cache/validation/firmware-pdm-gain2-candidate-20260721/normal-rate-0244/mechanical-machine-summary.json"]},
+      "recorded_at": "2026-07-19T16:52:00+08:00",
+      "source": "Machine evidence: a normal-rate 60,000 ms run received a frontend cancel click at 10.7 s, sent firmware cancel for embedded session 6, reopened notify, and recorded a second session 7 before the scripted stop.",
+      "operator_clarification": "The product owner confirmed the observed explicit capsule and global-cancel-key cancellation events were intentional. They are not Listener lifecycle defects and must not be repaired by disabling ordinary explicit cancellation controls.",
+      "requirement": "A mechanical recording verdict must bind the firmware session id at start to the transport summary id at stop. Any frontend cancel, BLE listener teardown, TYPE:BYE, notify reopen, new embedded session, or session-id mismatch during the fixed playback is explicit NO_GO. The verifier must retain only numeric IDs, timing, and reason categories, never transcript content.",
+      "acceptance_boundary": "This protects the machine diagnostic from silently validating a trailing replacement session. It does not remove the user's ordinary explicit capsule cancel behavior."
+    },
+    "listener_current_issue_recording_consumption_priority_20260717": {
+      "status": "superseded_by_newer_owner_direction",
+      "recorded_at": "2026-07-17T22:20:00+08:00",
+      "source": "Product-owner correction: 为啥你又回去修蓝牙了, 没懂你的逻辑.",
+      "requirement": "The current and only user-visible work item is recording sustained-consumption stability. Do not continue Bluetooth platform extraction or change Bluetooth behavior unless a demonstrated Bluetooth transport defect directly blocks this recording investigation. Establish the real 45-60 second session production, confirmed-delivery, backlog, retry, and consumer-rate evidence before declaring the recording consumption problem repaired.",
+      "superseded_by": "listener_current_bluetooth_platform_continuation_20260717"
+    },
+    "listener_current_bluetooth_platform_continuation_20260717": {
+      "status": "active",
+      "recorded_at": "2026-07-17T22:25:00+08:00",
+      "source": "Product-owner direction: 没事吧？那你继续修蓝牙的问题。为什么你之前不是说修好了吗？又要修？",
+      "clarification": "The EC11 recovery capsule terminal-truth defect is machine-closed; the broader transport-neutral device connection/control protocol is not yet complete. Continue only the remaining protocol integration and preserve every accepted Listener recovery behavior.",
+      "current_scope": "Audit and minimally connect existing shared DeviceControlCore semantics to Listener BLE settings, command, capability, lifecycle, ownership, timeout, and classified-result paths. Do not reopen or reinterpret accepted EC11 recovery, manual-delete passivity, cross-host no-reclaim, recovery speed gates, LED policy, or the machine-closed capsule ordering fix.",
+      "completion_claim_rule": "Never describe a capability as fully repaired or platform-complete when only a subproblem has machine closure. Every completion statement must name the exact closed behavior, its evidence class, and the remaining named protocol facts or bench limits. A defect found during another capability must be separately identified as a new causal finding, never implied by an earlier overbroad claim."
+    },
+    "listener_platform_capabilities_first_with_type_send_options_20260717": {
+      "status": "active",
+      "recorded_at": "2026-07-17T23:35:00+08:00",
+      "source": "Product-owner clarification: 应该根据之前的说法是把平台能力先做好。就是蓝牙 OTA 录音,日志, 录音的话，之前就发现了有一个就是消费速度跟不上生产速度的问题。 Follow-up: 然后还有 type 要改一下。一个选项开关就是，把说完的话默认加入剪贴板和发送enter的功能。",
+      "priority": "Platform capabilities are the immediate organizing priority: Bluetooth connection/control, OTA integrity/throughput/staged timing, recording transport quality, and unified logging/observability must be machine-closed before treating Listener 1.0.2 as product-ready. The Type clipboard-retention and optional Enter-send settings remain required Type work, but must not be mixed into current EC11, Bluetooth, OTA, recording-transport, or logging commits.",
+      "recording_consumption_contract": "The known recording platform risk is sustained consumption falling behind production. A short successful recording cannot close this capability. Real 45-60 second human speech evidence must prove production, confirmed delivery, backlog, retry, and consumer-rate facts: effective steady consumption >= 32000 B/s for 16 kHz 16-bit mono PCM, no widening production-vs-delivery gap, audio_sent == expected_packet_count, missing_packets=0, queue_full=0, pool_alloc_failed=0, audio_failed=0, pool_high_water_pct <= 20, and mbuf/ENOMEM retries each <= 1% of audio_sent.",
+      "type_option_contract": "Type must later expose persistent settings for final-text clipboard retention and optional Enter sending. Clipboard retention defaults on and only writes non-empty final text after completion cleanup; Enter defaults off and sends exactly once only when user-initiated stop produced non-empty final text that was confirmed written to the original target. These settings are required, but they are not evidence that platform Bluetooth/OTA/recording/logging is complete."
+    },
+    "listener_capsule_preview_sustained_latency_regression_20260718": {
+      "status": "machine_closed_calibrated",
+      "machine_closure_20260721": {"closed_at": "2026-07-21", "basis": "Sustained 60 s run shows non-accumulating preview latency under the calibrated gate: first preview 1,846 ms, maximum gap 2,192 ms, Type pending-send high-water 3 frames, provider audio max lag 584 ms, no widening production-vs-delivery gap; root repairs are the consumer-ahead capture (1b37813) and provider-authoritative streaming preview path.", "evidence": ["Listener-Type/.cache/validation/firmware-pdm-gain2-candidate-20260721/normal-rate-0244/mechanical-machine-summary.json", "Listener-Type/.cache/validation/platform-current-20260721/esp-machine-audit-0290/machine-summary.json"]},
+      "recorded_at": "2026-07-18T11:18:00+08:00",
+      "source": "Product-owner observation: 胶囊出字的时间会随着说话时间越长而越慢，停止后还会持续很久才出完。",
+      "observed_user_failure": "The capsule's realtime text increasingly lags behind ongoing human speech during a longer utterance, then drains long after the user stops. This is a sustained end-to-end consumption/backlog symptom, not an acceptable first-preview delay or an ASR-accuracy conclusion.",
+      "requirement": "A recording repair must prove both continuous transport and non-accumulating visible preview latency in the same installed Program Files real-human long-speech session. Retain timeline evidence relating firmware PCM production and Type receipt to each capsule preview update and final completion. Reject any session where preview age or visible-update gap widens as speech continues, even if the transcript eventually becomes non-empty or the BLE session avoids notify timeout.",
+      "protected_behavior": "Preserve real-PCM-only input, the accepted preview/final convergence path, first-preview gate, EC11 fast-idle start, and explicit internal-versus-provider attribution. Do not hide backlog with an arbitrary delay, fabricated preview, phrase substitution, dropped audio, or a UI-only animation change.",
+      "falsifiable_evidence": "The consumption checker must return explicit NO_GO rather than throw when physical-start evidence is absent. A passing sustained run must contain physical first-edge evidence, continuous PCM/packet integrity, preview timeline data, a non-empty final, and a bounded non-widening preview-lag result."
+    },
+    "listener_recording_tail_coverage_regression_20260719": {
+      "status": "machine_closed",
+      "machine_closure_20260721": {"closed_at": "2026-07-21", "basis": "End-to-end tail preservation proven numerically: expected==sent packets, missing=0, provider final audio duration equals terminal PCM duration (gap 0 ms within 250 ms allowance), whole-text coverage 1.0, tail coverage 1.0 on both normal-rate and 1.5x pressure runs.", "evidence": ["Listener-Type/.cache/validation/firmware-pdm-gain2-candidate-20260721/normal-rate-0244/mechanical-machine-summary.json", "Listener-Type/.cache/validation/firmware-pdm-gain2-candidate-20260721/pressure-1p5-0246/mechanical-machine-summary.json", "Listener-Type/.cache/validation/platform-current-20260721/esp-machine-audit-0290/machine-summary.json"]},
+      "recorded_at": "2026-07-19T00:00:00+08:00",
+      "source": "Product-owner observation: the recording may swallow trailing words.",
+      "requirement": "Do not accept a recording solely because it returns non-empty final text. The exact 60,000 ms anonymous mechanical diagnostic must prove end-to-end tail preservation: Firmware expected packets equal sent packets, Type reports missing_packets=0, provider final audio-duration coverage reaches the terminal PCM duration within an explicit bounded endpoint allowance, and a local normalized expected-versus-final comparison records only numeric whole-text and trailing-segment coverage. No stimulus text, transcript, or audio may enter source control, runtime logs, or the validation summary.",
+      "failure_attribution": "When tail coverage fails, retain only session linkage and numeric evidence that distinguishes Firmware capture/AFE overwrite, BLE transmission/receipt, provider audio-duration coverage, provider final result, and post-provider preview/final selection. Queue sizing, arbitrary final delays, fabricated suffixes, or dropping final checks are forbidden shortcuts.",
+      "acceptance_boundary": "A mechanical PASS closes this repeatable tail-coverage regression only. It does not replace the required physical EC11 and real-human recording evidence."
+    },
+    "listener_real_human_queuefull_consumer_failure_20260718": {
+      "status": "machine_closed",
+      "machine_closure_20260721": {"closed_at": "2026-07-21", "basis": "Root repair 1b37813 keeps the PDM audio consumer ahead of capture; sustained 60 s run: 4112/4112 packets, steady 32,000 B/s, queue_full=notify_failed=pool_alloc_failed=audio_failed=0, pool high water bounded. The historical QueueFull/notify-Lost failure mode is falsified by current structured evidence.", "evidence": ["Listener-Type/.cache/validation/firmware-pdm-gain2-candidate-20260721/normal-rate-0244/mechanical-machine-summary.json", "Listener-Type/.cache/validation/platform-current-20260721/esp-machine-audit-0290/machine-summary.json"]},
+      "recorded_at": "2026-07-18T15:22:37+08:00",
+      "source": "Product-owner observation: 念完了以后出错了，还是那个越来越慢的问题。",
+      "observed_machine_evidence": "Installed Program Files Listener Type session c44c97c2-4518-4e75-b92d-d35c78999ae9 received packet sequence 2150 after 48.3 seconds while the firmware reported QueueFull with expected_packets=3180. The capsule entered Error and the Type listener marked notify state Lost. This confirms sustained real-device transmission falling behind 32 kB/s PCM production; it is not an ASR-accuracy result.",
+      "requirement": "The repair must remove the producer-over-consumer deficit at the actual Windows BLE and Program Files Type boundary. It must preserve every PCM sample, avoid QueueFull and notify loss, and prove a 45-60 second installed-Type real-human session has missing_packets=0, non-empty final text, no widening preview lag, and measured delivery at or above 32000 B/s over the active speech interval.",
+      "forbidden_shortcuts": "Do not silence QueueFull, increase only the queue depth, insert arbitrary delay, discard PCM, fabricate preview, or declare a synthetic transport-only run equivalent to this end-to-end evidence.",
+      "evidence": "%LOCALAPPDATA%/Listener Type/logs/listener-type.log lines for session c44c97c2-4518-4e75-b92d-d35c78999ae9 at 2026-07-18T07:21:48Z through 07:22:36Z",
+      "latest_machine_evidence": "After the single-PDU payload cap and controller CE-parameter selection, command-driven session 3 retained all 12,456 sequence numbers at Type but still averaged 26,005 B/s over 102,180 ms, below 32,000 B/s. Firmware pool high-water reached 258/264 (97%), transport backpressure reached 256/256, and ESP AFE emitted ringbuffer-full overwrite warnings. Artifact: Listener-Type/.cache/validation/ce-length-machine-throughput-retry-20260718-162000. This is explicit NO_GO: the queue no longer reaches QueueFull only because backlog is absorbed until capture quality is at risk."
+    },
+    "listener_opt_in_local_speech_replay_machine_fixture_20260718": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-18T16:08:00+08:00",
+      "source": "Product-owner direction: 我感觉你下次可以把我上次说的话录音下来，然后呢拿这个去做机器闭环，不用我每次都说一段很长的话。",
+      "requirement": "After an explicit canonical Chinese operator approval, Listener may retain a real-human speech fixture locally for repeated machine regression of the end-to-end BLE, PCM, preview, and final-text path. Store it only under Listener-Type/.cache/validation, exclude it from source control, do not create it by default, and provide a clear local deletion path.",
+      "acceptance_boundary": "An approved replay fixture reduces repeated operator narration but never substitutes for the initial physical recording evidence, a new real-EC11 check when hardware behavior changes, or the final human acceptance window. Its artifacts must be labeled replay-derived rather than live-human evidence.",
+      "privacy_boundary": "Do not retain voice audio, transcript, or identifying content without explicit approval for that capture. Do not write its content into this registry, commit it, or send it outside the local validation directory."
+    },
+    "listener_platform_machine_closure_before_physical_retest_20260718": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-18T13:18:00+08:00",
+      "source": "Product-owner note: 之前为什么是没有连上？你看一下。然后你做一下机器闭环验收吧，机器过了再让人来讲话验收。 Follow-up: 以后要根治这个问题啊，你根治一下，不要只治疗这一次。另：先过录音和四种平台能力的机器闭环验收。",
+      "priority": "Before another human long-speech prompt, machine-close the four platform capabilities: Bluetooth connection/control, OTA integrity/throughput/timing, recording transport/preview/final behavior, and unified logs/observability. Type clipboard and optional Enter remain required but are a separate Type workstream and must not be mixed into these platform commits.",
+      "bluetooth_attach_root_cause_contract": "A Windows Bluetooth connection is insufficient when the installed Type background listener has retained stale native HID addresses and all of their uncached GATT service queries fail. Type must refresh and validate the current local Windows HID/pairing identity after bounded stale-target failures, choose only a proven current local identity for direct GATT, and recover notify CCCD plus TYPE:READY without requiring a manual Type restart. Preserve manual-delete passivity, cross-host no-reclaim, and the rule that stale cache alone never authorizes PairAsync or GATT takeover.",
+      "recording_capture_integrity_contract": "A serial capture artifact is valid only when its bounded capture completed and contains its terminal serial_closed record. A background process ending after serial_opened/capture_only_ms is an explicit NO_GO capture-launch failure, not an empty recording or a human-test result. The capture launch itself needs a deterministic machine check before it is used for a physical session.",
+      "operator_note_triage": "The 2026-07-18 long-speech prompt recorded 已完成 with a non-empty owner note requiring root-cause repair and machine closure first. The accompanying serial artifact ended before completion and contains no speech, so this is triaged as capture-launch NO_GO; no human recording verdict may be inferred from it.",
+      "completion_rule": "No new human speech verification is requested until the relevant Bluetooth attach, recording transport, OTA, and observability machine gates produce current artifacts with explicit PASS/FAIL results. A future physical run remains required for real EC11 speech, but cannot be used to substitute for a missing machine closure."
     },
     "listener_physical_gate_guided_prompt_20260717": {
       "status": "required",
@@ -20,6 +374,90 @@
         "2/2: after the required Type setting/readback and CONNECTED_IDLE are confirmed, guide one real EC11 single-click while a command-free short capture records edge-to-recording-control dispatch."
       ],
       "non_substitution": "Neither prompt selection nor a serial ~KEY injection may replace the required raw physical firmware event and timing evidence."
+    },
+    "listener_human_collaboration_popup_20260717": {
+      "status": "required",
+      "recorded_at": "2026-07-17T21:05:00+08:00",
+      "source": "Product-owner direction: 开弹窗。要人协助的东西都要开弹窗。",
+      "requirement": "任何需要 operator 朗读、按键、确认、观察或提供反馈的 Listener 协作步骤，必须先打开一个中文可见窗口；不得只用聊天文本安排动作。窗口必须标明当前项目 N/total、动作目的、明确的物理操作和完成方式。朗读任务保留独立、只读的“请朗读的原文”框。",
+      "evidence_boundary": "协作窗口的选择只记录 operator 已完成动作或其反馈，不代替机器测量结果或人工最终验收。窗口选择、备注和对应的串口/运行时 artifact 必须一起归档；所有非空备注先 triage。",
+      "long_recording_stimulus": "涉及长话完成时延、预览连贯性或最终收敛的真人语音窗口，随机自然口语原文目标朗读时长必须为 45 至 60 秒；不足 45 秒的样本只可作诊断，不能代表长话验收。",
+      "operator_window_sequencing": "同一协作链一次只允许一个可见 operator 窗口。必须等待该窗口关闭、选择和非空备注归档、以及其对应机器日志完成初步分类后，才可打开下一窗口；不得以新窗口覆盖、催促或并行上一轮。"
+    },
+    "listener_operator_prompt_visibility_precondition_20260718": {
+      "status": "active_owner_observation",
+      "recorded_at": "2026-07-18T15:15:56+08:00",
+      "source": "Product-owner observation: 没有看见窗口。",
+      "requirement": "任何需要真人操作的 Listener 验收，在启动硬件采集前必须先确认 canonical operator-prompt 对当前交互用户可见。若后台启动的 Form 未显示，恢复窗口、置顶并请求前台激活；收到已看见选择之前不得要求按键或朗读。不可见、超时或无选择的窗口及其采集一律为 NO_GO。",
+      "verified_precondition": "2026-07-18 visibility artifact recorded 已看见 after the prompt window was restored, placed topmost, and foregrounded in the same Windows user session. This is a workflow visibility check only, not a product acceptance.",
+      "evidence": ".cache/validation/operator-visibility-check-20260718-151548/operator-prompt-result.json"
+    },
+    "ec11_idle_recording_only_gesture_contract_20260717": {
+      "status": "machine_closed_pending_final_human",
+      "machine_closure_20260721": {"closed_at": "2026-07-21", "basis": "verify_ec11_fast_idle_recording_static.py PASSes on firmware 6652094: first raw CONNECTED_IDLE edge starts recording within <=50 ms, short/multi/double presses stay inside the same recording action, no recovery-pairing branch while armed, long-press shutdown preserved; verify_ec11_recovery_critical_path_static.py PASSes for the non-idle double-click branch; firmware build PASS in focused gates.", "evidence": ["Listener-Type/.cache/validation/platform-current-20260721/esp-focused-gates-0270/machine-summary.json"]},
+      "recorded_at": "2026-07-17T21:45:00+08:00",
+      "source": "Product-owner direction: idle下双击识别这个需求就算了吧; idle进录音就行. Follow-up confirmation: idle 情况下双击只能进入录音，双击恢复只在非 idle 情况下做. Latest clarification: CONNECTED_IDLE 不需要新增手势识别；短按、连按或双击都归入同一录音动作，识别不了的 idle 手势不另作处理。",
+      "root_cause": "The accepted <=50 ms CONNECTED_IDLE recording path deliberately dispatches on the first raw EC11 edge. Letting the same first edge remain eligible for a later double-click recovery necessarily creates a visible start-then-cancel conflict; delaying the start until the 500 ms classifier would violate the recording-speed contract.",
+      "requirement": "CONNECTED_IDLE 下第一个原始 EC11 按压边沿立即启动录音；短按、连按和双击不新增专用识别或恢复分支，而是留在同一录音动作中。快速录音已 armed 后，后续短按必须被录音动作消费：不得打开恢复配对、取消或停止这次快速录音，也不得发出 fallback HID。第一个物理边沿到录音控制保持 <=50 ms。长按关机仍是既有安全例外。",
+      "non_idle_contract": "Outside the fast-idle recording gesture, retain the existing EC11 double-click recovery behavior, including bounded recovery advertising, local/cross-host ownership rules, and long-press shutdown cancellation.",
+      "evidence_required": "A root-cause regression guard must prove fast-idle ownership prevents the recovery acceptance branch while the ordinary non-idle double-click branch remains reachable. Run the affected static guard and Firmware build before any fresh physical prompt."
+    },
+    "ec11_idle_fast_start_same_edge_stop_regression_20260717": {
+      "status": "machine_closed_pending_final_human",
+      "machine_closure_20260721": {"closed_at": "2026-07-21", "basis": "Physical Idle press PASS retained 2026-07-19 (firmware 2247e2b, operator 已完成); platform machine closure now complete: verify_ec11_fast_active_stop_static.py PASSes on 6652094 (armed Idle gesture owns its first press, no premature active-stop dispatch, 50 ms target, classifier boundary and long-press cancellation preserved), firmware build PASS.", "evidence": ["Listener-Type/.cache/validation/platform-current-20260721/esp-focused-gates-0270/machine-summary.json"]},
+      "recorded_at": "2026-07-17T23:05:00+08:00",
+      "source": "Product-owner direction: 现在idle按下录音键反而显示未采集到语言, 找找记录修一下这个先, 修完提交.",
+      "observed_runtime_fact": "Installed Type session cf1f7637-91c6-42e5-9828-db681590b28c entered from CONNECTED_IDLE, received only 4 PCM packets / 1920 B / about 60 ms with missing_packets=0, then received stop and Volcengine correctly returned an empty result. This is a premature local recording stop, not an ASR accuracy conclusion.",
+      "root_cause_contract": "After a physical EC11 edge has armed fast Idle recording, that same edge must not become a fast active-recording stop merely because power activity has already transitioned the power state out of CONNECTED_IDLE. The armed Idle gesture owns its first press until its existing classifier consumes the fallback. Preserve the <=50 ms fast-start target, Idle recording-only behavior, non-Idle recovery behavior, 500 ms classifier boundary, and long-press cancellation.",
+      "machine_evidence_required": "Add a focused root-cause guard that rejects an active-stop dispatch while fast-Idle ownership is pending; run the guard and the mandated Firmware build. Then retain one short locked serial capture plus the installed-Type session evidence for a real Idle press; missing physical speech evidence remains NO_GO rather than a claimed pass.",
+      "latest_physical_validation": {
+        "recorded_at": "2026-07-19T22:24:00+08:00",
+        "result": "PASS",
+        "firmware_commit": "2247e2b",
+        "operator_result": "已完成",
+        "operator_note_triage": "No distinct operator note was provided; the structured prompt text mirrored its required spoken literal.",
+        "evidence": "Listener-Type/.cache/validation/ec11-idle-fast-start-physical-20260719/physical-idle-single-press-machine-summary.json",
+        "facts": "Installed Program Files Type and real EC11 input: CONNECTED_IDLE precondition; first press dispatch 0 ms (target <=50); same first edge logged fast-active-stop skipped with fast_idle_gesture_owns_press=1; later normal stop after 3880 ms; 3720 ms PCM; firmware expected_packets=audio_sent=342; Type missing_packets=0; final transcript non-empty."
+      }
+    },
+    "ec11_recovery_capsule_visual_truth_triage_20260717": {
+      "status": "machine_closed_pending_final_human",
+      "recorded_at": "2026-07-17T21:45:00+08:00",
+      "source": "Operator note: 双击后本机已恢复音频胶囊太快，灯光还在双闪，胶囊显得假；只应显示最终灰色 Listener 音频已恢复.",
+      "observed_evidence": "Listener-Type/.artifacts/bluetooth-machine-20260717/guided-double-click-physical-20260717-2135.log: recovery advertisement was accepted at 37 ms, pairing window closed at audio_notify_subscribe, then firmware accepted TYPE:READY. The Type recovery capsule must be correlated against this terminal truth and its visual completion boundary rather than a fixed delay.",
+      "triage": "Machine closed. The root cause was Type publishing ready after notify CCCD enablement, before the successful TYPE:READY control write which is the firmware recovery terminal. Type now defers ready until that write succeeds and suppresses only EC11 Type-controlled intermediate recovery capsules. No fixed delay was added; error, manual pairing, rename, and other-host paths remain distinct.",
+      "machine_closure": "Listener-Type/.cache/validation/ble-capsule-terminal-truth-20260717/machine-closure-final-only.json",
+      "regression_gate": "coordinator::tests::ec11_type_controlled_recovery_capsule_waits_for_firmware_terminal_control_write",
+      "final_human_boundary": "No individual human prompt is opened. This is machine-only closure and remains pending the single final human acceptance after Bluetooth, recording, OTA, and logging capabilities are all machine-closed. Physical EC11 timing and the no-second-host BENCH_REVIEW_NO_GO are not upgraded by this evidence."
+    },
+    "listener_final_text_clipboard_retention_20260717": {
+      "status": "required_machine_closure",
+      "recorded_at": "2026-07-17T22:20:00+08:00",
+      "source": "Product-owner direction: Type 默认有个开关，录音胶囊结束以后决定要不要把那段话放到剪贴板；没有可用鼠标光标时，完成文本不能丢失。",
+      "requirement": "Type 设置提供持久化的“完成后复制到剪贴板”开关，默认开启。对每个非空最终文本，开关开启时必须在成功完成胶囊收尾后写入最终文本，即使原始输入焦点不可恢复、上屏失败或原插入路径恢复了旧剪贴板也不能丢失；关闭时不得修改剪贴板。剪贴板内容必须与历史和最终完成文本一致，不得写预览或中间文本。",
+      "machine_evidence_required": "用可重复的完成路径验证：默认值与设置 round-trip、无焦点/插入失败路径仍安排最终文本保留、流式与非流式路径都只使用 final text、关闭开关时明确跳过。机器日志须记录 session、字符数、写入时机和失败原因，不记录文本正文。"
+    },
+    "listener_final_text_auto_enter_send_20260717": {
+      "status": "required_machine_closure",
+      "recorded_at": "2026-07-17T22:30:00+08:00",
+      "source": "Product-owner direction: Type 除了默认放进剪接版的开关以外，还要有点下暂停录音后自动 Enter 发送信息。",
+      "requirement": "Type 设置提供持久化的“完成后按 Enter 发送”开关，默认关闭。开启时，只有本次用户主动暂停/停止录音产生非空最终文本，且最终文本已确认写入原目标输入位置后，才向该原目标窗口发送一次 Enter。不得对预览、中间文本、识别失败、取消、无文本、恢复蓝牙、自动重试或非用户发起的结束发送 Enter。",
+      "ordering_and_safety": "最终文本保留优先于 Enter：复制到剪贴板开关开启时先完成剪贴板保留。仅剪贴板保留成功、但原目标输入未确认成功时，不得发送 Enter，避免误触发当前前台的其他窗口。每个 session 至多发送一次，必须记录 session、目标写入状态、剪贴板保留结果和 Enter 结果，不记录文本正文。",
+      "machine_evidence_required": "验证默认值和设置 round-trip，键盘注入只发生一次且仅在满足最终文本与用户停止条件时，关闭开关/取消/错误/空文本/预览/自动结束均不发送。验证焦点不可恢复时的剪贴板优先保留和错误归因。"
+    },
+    "listener_long_utterance_completion_latency_20260717": {
+      "status": "machine_closed_calibrated",
+      "machine_closure_20260721": {"closed_at": "2026-07-21", "calibration_source": "Product-owner direction 2026-07-21: 校准阈值到 ≤600ms（长话停止→出字门禁，当前候选 569/520ms 样本，归因 provider final 外部等待，无内部杠杆）。", "current_gate": "For sustained 45-60 s installed-Type sessions, physical/Type stop to final text available is <=600 ms; this supersedes the prior <=500 ms clause for the stop->provider-final segment under sustained long-utterance sessions. Stage breakdown (stop edge -> Type stop feedback -> transport stop -> ASR final -> completion/insert) must still be recorded per session, internal-versus-provider attribution retained, and no arbitrary delay, fabricated final text, or hidden slow path is permitted.", "basis": "Current-candidate samples: 569 ms (normal-rate-0244), 520 ms (final-latency-recheck-0291), both <=600 ms under the calibrated gate; historical samples 310 ms (2026-07-17 real-human) and 376 ms (2026-07-20 freeze). Attribution: tail_packets_after_stop=0, pending-send high-water 3 frames, transport stop->drained->stopped within ~250 ms, no internal obs event between stop_received and final; the residual wait is provider finalization of a full 60 s stream.", "evidence": ["Listener-Type/.cache/validation/firmware-pdm-gain2-candidate-20260721/normal-rate-0244/mechanical-machine-summary.json", "Listener-Type/.cache/validation/firmware-pdm-gain2-candidate-20260721/final-latency-recheck-0291/mechanical-machine-summary.json", "Listener-Type/.cache/validation/platform-current-20260721/esp-machine-audit-0290/machine-summary.json"]},
+      "recorded_at": "2026-07-17T20:05:00+08:00",
+      "source": "Product-owner direction: 长话结束后的延迟必须进入技术指标，目标是不可以有很多延迟。",
+      "scope": "Installed C:\\Program Files\\Listener Type\\listener-type.exe 的真实 EmbeddedBle 人声会话；长段定义为 8 至 60 秒自然口述。",
+      "requirement": "真实停止按键边沿到最终文本已上屏，或在无焦点时已可靠写入剪贴板，目标并且防回退门禁为 <=500ms。分段必须同时报告：physical-stop-edge 到 Type 停止反馈、停止反馈到 firmware/transport stop、transport stop 到 ASR final、ASR final 到完成/上屏或剪贴板保留。胶囊的 1050ms 成功反馈展示不计入文本可用时间，但必须另行记录，不能用延长胶囊或假进度遮掩慢路径。",
+      "failure_attribution": "任何阶段或端到端 500ms 超限都必须留下同一 session 的分段实测值、packet/missing 数据、ASR provider/backend、网络/协议结果和完成状态，并归为 internal_transport、provider_or_network、post_process_or_insert 或 unknown；不得把超限直接写成通过，也不得用固定等待掩盖。",
+      "sustained_transport_contract": "长话稳定性是录音能力的独立防回退维度。协议音源固定为 16kHz、16-bit、单声道 PCM，即 32000 B/s；每个 45 至 60 秒真人自然语音机器闭环必须同时证明：连续稳态窗口的有效消费速率 >= 32000 B/s、窗口内生产量与确认交付量的差额不扩大、audio_sent 等于 expected_packet_count、queue_full=0、pool_alloc_failed=0、audio_failed=0、pool_high_water_pct <= 20，并且 mbuf/ENOMEM 通知重试各不超过 audio_sent 的 1%。整段 audio_bytes_per_s 仅作辅助诊断，因为它受实时音源节拍和收尾时间影响，不能替代窗口消费速率。任何队列持续增长、窗口消费速率低于 32000 B/s 或中途 Error 都是 internal_transport 失败，不能由下一次偶然正常的短会话抵消。",
+      "trigger_coverage": "该指标是录音能力合同，不是 EC11 特例。所有用户可触发或终止 Listener 录音的入口及其产品适配器，都必须按同一物理操作到最终文本可用的 <=500ms 指标留证；任一入口新增、改动或回退时，必须重跑该入口的真实或等效机器证据。",
+      "root_cause_and_repair": "2026-07-17 source/runtime inspection: active device-mic EC11 short press only armed pending_single_click, then waited VOICE_KEY_INPUT_SINGLE_CLICK_DISPATCH_MS=500 before forwarding fallback HID to Type; the matching natural session spent a further 722ms from Type stop feedback to Done. Repair the active-recording first raw edge as a direct Firmware stop/transfer event while retaining the existing 500ms second-click recovery classifier and long-press shutdown path. The same session also attempted streaming polish against an invalid LLM credential after ASR final, then fell back to raw text; bypass that known-unavailable optional branch before it adds latency. Do not delay, fake, or mask the final result.",
+      "baseline_evidence": "C:\\Users\\Billy\\AppData\\Local\\Listener Type\\Logs\\{listener-type.log,capsule-timeline.log} session_id=6a69e670-72c0-42f1-bfc7-206d78fa9f6d: natural 12.893s session, stop-feedback-to-transport-stop=202ms, transport-stop-to-ASR-final=306ms, ASR-final-to-done=213ms, stop-feedback-to-done=722ms. C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Firmware\\.cache\\validation\\recording-latency-20260717\\physical-long-utterance-20260717-1.log plus installed Type session_id=81bb6e06-2a25-4a1c-8979-c7f41501718c: real EC11 raw-edge-to-recording-control=30ms, transport-stop-to-ASR-final=293ms, ASR-final-to-Done=203ms, transport-stop-to-Done=496ms, with missing_packets=0. The optional streaming polish made a known-invalid LLM 401 request before raw insertion. Physical-edge-to-final has not yet been clock-correlated, and the 496ms post-transport result leaves no budget for physical transport, so this is explicit NO_GO rather than a <=500ms pass.",
+      "latest_owner_steering": "2026-07-17: Product owner clarified that the same latency metric must hold for every recording case, not only the EC11 rotary press. 2026-07-17: Long recordings become progressively slower, so the recording metric must reject sustained transport backlog rather than only testing a fast start or one final result."
     },
     "workflow_evidence_closure_without_independent_plan_review_20260716": {
       "status": "required",
@@ -555,7 +993,8 @@
       "total_review_effect": "The local EC11 pairing-surface regression is now focused-human accepted with installed-Type and locked physical evidence. Keep visual LED review and the separate physical EC11 press-edge gate independent; do not re-open this accepted behavior without a change on its BLE lifecycle risk surface or new regression evidence."
     },
     "ble_recovery_timing_attribution_20260715": {
-      "status": "active_root_cause_repair",
+      "status": "machine_closed_current_host",
+      "machine_closure_20260721": {"closed_at": "2026-07-21", "basis": "Device-controlled advertising gate previously measured 241 ms <=250 ms and the EC11 recovery critical-path static guard passes on firmware 6652094; host-side gate: installed-Type takeover restores background notify/TYPE:READY in 1,533 ms <=6,000 ms from local-evidence observation with zero PairAsync/UnpairAsync; cross-host arbitration produced no local reclaim action. Second-host arbitration timing remains separately NO_GO, not a failure of these device/host-controlled metrics.", "evidence": ["Listener-Type/.cache/validation/ble-current-20260721/installed-takeover-after-ota-pdm-gain2-0262/machine-summary.json", "Listener-Type/.cache/validation/platform-current-20260721/esp-focused-gates-0270/machine-summary.json", "Listener-Type/.cache/validation/platform-current-20260721/esp-machine-audit-0290/machine-summary.json"]},
       "recorded_at": "2026-07-15T23:25:00+08:00",
       "source": "Product-owner direction: 你测速吧, 不要让我测速, 这个速度应该有门栏. Follow-up: 速度太慢了是啥问题; 现在又出现了, 这个间歇性很慢的问题; 你看一下，下一步就继续跑那个总验收就好了.",
       "root_requirement": "BLE recovery timing must be measured from causal boundaries that the device or host controls. A cross-host handoff intentionally gives Windows another host a bounded pairing opportunity, so old-host TYPE:READY before that handoff resolves is not a valid speed target and must never be disguised as a timeout failure or a passed reconnect.",
@@ -1264,10 +1703,10 @@
           "Add a preview anti-regression metric based on the mainstream streaming-ASR partial/final model: partial preview may revise while unstable, but stable visible preview updates must converge toward the final transcript."
         ],
         "proposed_quantitative_targets": [
-          "Release smoke summary must contain 12 unique installed Program Files sessions, at least 6 normal and 6 low-volume runs, with missing_packets=0 and retained-fixture transcript accuracy=1.0.",
-          "Release evidence must contain a retained seeded randomized-corpus manifest and its installed Program Files results; every selected sample must retain its expected transcript, source/transform identity, volume condition, session id, accuracy, packet-loss result, engine identity, attribution, preview/final consistency, and timing result.",
-          "Normal-volume first visible preview must be <=1300 ms, low-volume first visible preview must be <=2000 ms, per-group first-preview spread must be <=500 ms, max visible preview gap must be <=1300 ms, and stop-received-to-Done must be <=600 ms.",
-          "For retained replay fixtures with speech starting at frame zero, first audio PCM to first visible preview must be <=1000 ms for normal volume and <=1500 ms for low-volume runs, with per-group PCM-to-preview spread <=200 ms. For real human speech, sensitivity is measured from detected speech onset to first visible preview (normal <=800 ms, quiet <=1200 ms); raw PCM-to-preview remains a separate transport/startup attribution field because user deliberation before speaking is not a sensitivity failure. Until local PCM voice-onset telemetry is added, machine evidence may derive onset from the first authoritative core-ASR word timestamp and must label it as such.",
+          "Before human acceptance, retain one isolated installed Program Files physical preflight using one randomly selected long-text sample. It must have missing_packets=0 and retained-fixture transcript accuracy=1.0; there is no 12-session, normal-versus-low-volume, or group-spread batch quota.",
+          "The one machine preflight must retain its randomized-corpus manifest entry, expected transcript, source/transform identity, session id, accuracy, packet-loss result, engine identity, attribution, preview/final consistency, and timing result.",
+          "The one machine preflight must have first visible preview <=5000 ms after its first real PCM, max visible preview gap <=1500 ms, and stop-received-to-Done <=800 ms. Human sensitivity is judged in the final focused review from detected speech onset to first visible preview; no separate low-volume machine batch is required.",
+          "For the retained preflight fixture with speech starting at frame zero, first real audio PCM to first visible preview must be <=5000 ms. For real human speech, record raw PCM-to-preview separately from detected speech-onset-to-preview so user deliberation before speaking is not misclassified as a sensitivity failure.",
           "Last stable recording preview must have preview/final CER <=0.10 and final-text coverage >=0.90 for every retained fixture run.",
           "For every visible preview update after at least 4 normalized characters, at least 90% of updates must remain compatible with the final transcript by either preview-content support coverage >=0.90 or partial CER <=0.30; any consecutive divergent-preview window must stay <=1200 ms.",
           "Every smoke report must include asr_engine.core_accurate=true for release acceptance, or a user-visible non-core-engine accuracy warning plus an intentional test label.",
@@ -1290,6 +1729,62 @@
         "voice_gated_agc_human_acceptance_evidence": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-review-voice-gated-agc-accuracy-1-of-1-result.json",
         "voice_gated_agc_human_note_triage": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/operator-note-triage-20260714-1549-voice-gated-agc-human-pass.json",
         "voice_gated_agc_machine_observation": ".cache/validation/recording-sensitivity-stability-20260714/real-human-preview-followup-20260714/machine-observation-voice-gated-agc-human-session-8729cd80.json"
+      },
+      "current_machine_preflight_revision_20260717": {
+        "status": "superseded",
+        "recorded_at": "2026-07-17T11:15:00+08:00",
+        "source": "Product-owner direction: 12次机器稳定验收不必了, 浪费时间, 删掉.",
+        "supersedes": "Only the current 12-session/6-normal/6-low-volume machine batch in stricter_metric_revision.proposed_quantitative_targets. Historical 12-session evidence remains historical evidence, not a current required gate.",
+        "machine_preflight": "One isolated installed Program Files random long-text physical-device run is required before opening the human window. It must meet the active strict timing, packet-integrity, final-transcript, preview/final consistency, engine identity, and issue-attribution criteria. Do not run or request a 12-session stability batch.",
+        "human_acceptance": "After the one machine preflight passes, open one canonical Chinese popup with a randomly selected long natural sentence. The operator speaks it normally; capture and triage the same session before recording acceptance.",
+        "superseded_by": "current_real_human_voice_preflight_revision_20260717"
+      },
+      "current_real_human_voice_preflight_revision_20260717": {
+        "status": "active",
+        "recorded_at": "2026-07-17T11:52:00+08:00",
+        "source": "Product-owner direction: 还是不要机械录音了, 这一步要人声录你修吧; 改一下.",
+        "supersedes": "The synthetic speaker-to-Listener microphone run in current_machine_preflight_revision_20260717 for recording acceptance only. It does not remove retained parser, transport, or provider diagnostics.",
+        "real_human_preflight": "Before recording acceptance, use one isolated installed Program Files Listener Type session with a real person speaking one randomly selected natural Chinese long-text prompt. Do not use external-speaker TTS, prerecorded audio, synthetic preroll, or a mechanically generated voice as recording acceptance evidence. The machine may run hidden/background capture and collect Type, firmware, provider, Windows, packet, preview, timing, endpoint, and archive evidence while the operator performs the actual speech and physical recording action.",
+        "acceptance_measurement": "Retain the selected literal, raw physical device and installed-Type evidence, engine identity, missing_packets, first real PCM to visible preview, preview/final convergence, stop-to-Done, issue attribution, and all operator notes. Evaluate preview and final against the displayed stimulus at a normal semantic level, accepting punctuation, conventional number formatting, and equivalent connective wording. A material semantic difference is a triage input; do not ask the operator to reconstruct or classify a possible spoken slip.",
+        "human_window": "Use one canonical Chinese operator prompt with the randomly selected long prompt in its dedicated read-only spoken-text box and clear start/stop instructions. The result distinguishes completed, incomplete, and aborted. The prompt result and every non-empty note must be archived beside the matching machine evidence before a recording acceptance claim.",
+        "latest_human_evidence": {
+          "status": "accepted_with_external_configuration_warning",
+          "recorded_at": "2026-07-17T13:00:00+08:00",
+          "session_id": "46094ab0-b8d0-4cbb-8def-81db8b51a495",
+          "summary": ".cache/validation/recording-platform-current-20260717/preview-provider-rewrite-installed-machine/real-human-voice-preflight/human-voice-semantic-boxed-machine-summary.json",
+          "operator_result": ".cache/validation/recording-platform-current-20260717/preview-provider-rewrite-installed-machine/real-human-voice-preflight/human-voice-semantic-boxed-result.json",
+          "operator_note_triage": ".cache/validation/recording-platform-current-20260717/preview-provider-rewrite-installed-machine/real-human-voice-preflight/operator-note-triage-20260717-1300-semantic-human-voice.json",
+          "accepted_behavior": "A real human used the boxed randomized prompt and completed the focused review. The Installed Program Files Type EmbeddedBle session had zero missing packets, first preview 1744 ms, stop-to-final 310 ms, stop-to-Done 688 ms, and semantic preview/final convergence. The Ark optional polish HTTP 401 is classified as external post-processing configuration; it did not change the retained Volcengine text or violate the measured Done gate."
+        },
+        "non_goal": "Do not rerun synthetic speaker-to-microphone recordings to chase this acceptance. Mechanical audio tests may continue only as explicitly labeled diagnostics and cannot replace real-human recording evidence."
+      },
+      "current_real_human_voice_literal_box_revision_20260717": {
+        "status": "active",
+        "recorded_at": "2026-07-17T12:10:00+08:00",
+        "source": "Product-owner direction: 你要我说的东西还是专门弄一个框框起来.",
+        "requirement": "Every Listener human-voice recording prompt must show the exact randomized spoken literal in a dedicated, visible, read-only box labelled 请朗读的原文. The literal must not appear only inside instructions, acceptance criteria, or a free-form note field.",
+        "acceptance_effect": "A session whose prompt did not provide that dedicated literal box may supply diagnostic device evidence, but cannot claim a literal-confirmed human-voice recording acceptance. Reissue it with the boxed literal and retain the prompt result beside the matching machine evidence.",
+        "tool_contract": "Use the canonical operator-prompt SpokenText field so the displayed literal is also preserved in the structured prompt result."
+      },
+      "current_real_human_voice_semantic_slip_revision_20260717": {
+        "status": "active",
+        "recorded_at": "2026-07-17T12:55:00+08:00",
+        "source": "Product-owner direction: 有时候可能会发生口误，你就是正常看一下有没有理解错意思就行了。 Follow-up: 不要分有无口误, 我自己也不知道自己有没有口误.",
+        "requirement": "Human-voice recording acceptance is a normal semantic-understanding check, not a rote-reading or self-diagnosis check. Do not ask the operator whether a spoken slip occurred. Treat punctuation, conventional number formatting, and equivalent connective wording as expected human variation, then assess whether preview and final preserve the displayed prompt's important meaning.",
+        "evidence_rule": "Retain the displayed stimulus, raw/final transcript, packet and timing evidence, and the final classification: semantic match, material semantic mismatch requiring diagnosis, or inconclusive. A material mismatch is never silently blamed on the operator and never fabricated into a confirmed ASR defect without further evidence."
+      },
+      "current_volcengine_first_preview_latency_revision_20260717": {
+        "status": "active",
+        "recorded_at": "2026-07-17T11:40:00+08:00",
+        "source": "Product-owner direction: 首段预览时间这个好优化吗? 不好优化就算了降低一点门栏, 先调研一下, 这个不是一定要做.",
+        "finding": "The configured Volcengine optimized bidirectional service accepts both legacy and ASR 2.0 resource IDs and returns complete finals, but no safe parameter or endpoint trial reached the old 1500 ms target while preserving complete finals. A connection-warmup control using the same retained real audio measured first real PCM to first preview at 3865 ms without warmup and 3819 ms after 3000 ms warmup; warmup saved only 46 ms. The dominant wait is provider first-sentence decoding, not Type connection setup.",
+        "current_gate": "For the current Volcengine core engine, first real PCM to first visible preview is <=5000 ms. This replaces the active 1500 ms gate only; it does not permit synthetic preroll, fabricated preview text, hidden delay, sentence-specific replacement, or an incomplete final transcript.",
+        "evidence": [
+          ".cache/validation/recording-platform-current-20260717/preview-provider-rewrite-installed-machine/volcengine-warmup-control.json",
+          ".cache/validation/recording-platform-current-20260717/preview-provider-rewrite-installed-machine/volcengine-warmup-3000.json",
+          "https://www.volcengine.com/docs/6561/162929?lang=en",
+          "https://www.volcengine.com/docs/6561/1395846?lang=zh"
+        ]
       },
       "baseline_contract": "scripts/performance-baselines.json#contracts.recording_low_latency",
       "related_scenario_id": "recording-response-and-led-priority",
@@ -1332,6 +1827,73 @@
       "operator_review_timeout_evidence": ".cache/validation/recording-chain-regression-20260713-post-tail-and-gain-fix-installed/operator-review-recording-chain-1-of-1-timeout-20260714-0033.json",
       "resolved_acceptance_blocker": "2026-07-14 installed Program Files long randomized session bc1b3ebb-399a-4edb-bac0-91c9d4f67780 had missing_packets=0 and a core Volcengine final that matched the operator-observed inaccurate text. The preview/final branch repair held, but 801 short PCM chunks were independently boosted with max_gain=16.00. The stateless gain path was replaced with voice-gated session AGC, followed by real-device acoustic attribution, strict installed-path validation, and focused human acceptance.",
       "acceptance_closure": "The accepted baseline is 12 unique installed Program Files sessions, at least six normal and six low10 runs, retained-fixture accuracy=1.0, missing_packets=0, normal first preview <=1500 ms, low10 first preview <=2200 ms, per-group spread <=600 ms, maximum preview gap <=1500 ms, Done <=800 ms, preview/final CER <=0.10, preview coverage >=0.90, core Volcengine engine identity, and explicit issue attribution. The release gate at ../../ai-collaboration-workflow/.cache/v1.0.2-release-gate/20260714-191006/summary.json passed after this acceptance."
+    },
+    "listener_completed_work_commit_and_cleanup_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T00:00:00+08:00",
+      "source": "Product-owner direction: 你看把之前完成的一些功能提交一下。然后，这个仓库整理一下。",
+      "requirement": "Within Listener-Firmware and Listener-Type only, commit previously completed work as small, behaviorally coherent commits after its relevant machine evidence is rerun or inspected. Keep unfinished recording preview/AGC candidates and Type clipboard/auto Enter WIP uncommitted until their own contracts pass.",
+      "repository_hygiene": "Do not use blanket staging, reset, or cache cleanup. Never commit validation caches, audio, transcripts, stimuli, build outputs, or unrelated dirty changes; leave each remaining WIP boundary explicit in git status."
+    },
+    "listener_platform_repair_goal_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T00:00:00+08:00",
+      "source": "Product-owner direction: 开一个goal, 参考模板规则, 然后开始继续修platform了",
+      "requirement": "Create a complete Chinese Codex Goal for Listener 1.0.2 platform repair, then continue the ordered machine closure for recording, Bluetooth connection/control, OTA staging, and unified observability. Preserve committed behavior and retain an explicit NO_GO for every unclosed machine gate; do not fold Type clipboard/auto Enter WIP into these platform repairs."
+    },
+    "listener_recording_trial_ledger_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T00:00:00+08:00",
+      "source": "Product-owner direction: 你的试错记录都要存下来, 你这个录音调了好久了",
+      "requirement": "Every Listener recording hypothesis, including a rejected candidate, must retain a compact trial record under Listener-Type/.cache/validation. Record the hypothesis, affected Firmware/Type identity or hash, exact machine mode and duration, numeric transport/AFE/provider/coverage outcome, PASS or NO_GO, and whether the device and installed Type were restored. Link the record to its bounded serial and structured-summary artifacts.",
+      "privacy_and_repository_boundary": "The ledger and each linked artifact retain only hashes, timing, numeric counters, and status. They must not retain audio, stimulus wording, raw/final transcript, or operator speech, and .cache artifacts must never be committed."
+    },
+    "listener_ota_post_confirm_threshold_calibration_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T21:35:00+08:00",
+      "source": "Product-owner direction: 既然你觉得不能继续优化的话，你调研下资料，确定是不可以的话，那就开始降低标准。",
+      "finding": "On the current paired Windows host, the repair that rehydrates the verified post-confirm GATT cache reduced installed-Type recovery from 5.257s to independent 4.226s and 4.086s measurements. A bounded retry-classification repair and a firmware 500ms-to-200ms reboot-grace experiment did not reduce the remaining real CCCD/connection recovery. Microsoft documents that the GATT cache is system-wide and Uncached reads retrieve values from the device; the platform exposes asynchronous completion, not a fixed post-reboot service/CCCD deadline.",
+      "current_gate": "For the Listener 1.0.2 denzic_ota_v1 installed-Type machine path, version confirmation plus post-confirm Type-ready recovery is <=4,500ms. This supersedes the prior <=4,000ms recovery budget only for this OTA stage. The two stages remain separately recorded; version/hash/boot/readiness identity, pre-transfer handoff <=1,500ms, the 100-packet sync/status-read cadence, and the payload 20 bytes/ms optimization target plus strict 18 bytes/ms no-regression ceiling are unchanged.",
+      "evidence": [
+        ".cache/validation/ota-current-20260720/post-confirm-cache-candidate/machine-summary.json",
+        ".cache/validation/ota-current-20260720/reboot-delay-200-candidate/machine-summary.json"
+      ],
+      "acceptance_boundary": "This is a measured Windows/BLE recovery calibration, not permission to hide recovery with delay, cache stale GATT data without Uncached fallback, omit TYPE:READY, weaken OTA package identity, or waive any Bluetooth, recording, observability, physical-EC11, or real-human gate. A new installed candidate must still complete a full structured OTA run within this calibrated bound before it may be retained."
+    },
+    "listener_afe_companion_port_future_20260720": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-20T22:40:00+08:00",
+      "source": "Product-owner direction: AFE 是什么东西来的？这个东西到时候要移植到 Companion 那里。后续澄清：先不管 STM32WB，只在 ESP Listener 上实现，STM 移植以后单独做。",
+      "requirement": "Retain the Listener Audio Front End as a future Companion porting requirement. The future work must start under an explicit Companion Goal and independently verify microphone format, sample rate, CPU/PSRAM budget, firmware application-partition capacity, latency, audio quality, and OTA impact. Do not treat Listener source or Listener size measurements as proof that the Companion platform is compatible or has sufficient capacity.",
+      "listener_baseline": "Listener uses a WebRTC AFE before BLE/ASR transport for noise suppression and frame processing while Type owns session gain. The AFE-specific measured binary increment is 379152 bytes; Listener currently uses 1367744 of its 6291456-byte OTA application partition, leaving 4923712 bytes (about 78 percent).",
+      "scope_boundary": "The active Listener Goal implements and validates AFE only on ESP Listener. This registry entry does not authorize reading, modifying, building, validating, or releasing STM32WB/Companion; that port requires a separate future Goal."
+    },
+    "listener_esp_platform_closure_resume_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T02:20:00+08:00",
+      "source": "Product-owner direction: 继续吧, 开一个goal继续闭环一下.",
+      "requirement": "Resume Listener 1.0.2 platform closure on ESP only. Re-audit the current structured recording, Bluetooth, OTA, and observability evidence; triage the pending final-review note before changing behavior; preserve every accepted machine contract and keep the final human verdict explicit. Do not start an STM32WB or Companion port, and do not mix Type clipboard or automatic Enter work into this closure.",
+      "current_human_note": "The earlier canonical final-review window saved an operator note requesting log review and a concise explanation, but its selection result was not recoverable. Treat it as triage input, not a PASS or FAIL verdict."
+    },
+    "listener_capsule_center_position_regression_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T02:25:00+08:00",
+      "source": "Product-owner observation: 录音胶囊跑到左上角，要求放在中间。",
+      "requirement": "During recording, the Windows Listener capsule must be horizontally centered on the current monitor while preserving its accepted bottom anchor. Positioning must account for the monitor's global origin and DPI scale, including non-primary and negatively positioned displays. Do not rely on a stale window position, CSS-only offset, delayed reposition, or an animation to hide a placement failure.",
+      "machine_evidence_20260721": {
+        "status": "human_accepted",
+        "root_cause": "The native position calculation used the monitor dimensions but omitted the monitor global origin before Tauri LogicalPosition placement, so a non-primary or negatively positioned display could resolve toward the desktop origin.",
+        "repair": "lib.rs now converts both the physical monitor origin and size through the monitor DPI scale before adding the local bottom-center anchor.",
+        "validation": "Targeted Rust tests passed for a negative-origin monitor and a 150 percent DPI monitor; the Windows UI static gate passed; the release exe and DLL replaced the Program Files installation with matching SHA-256 hashes. Installed Type geometry on the 1440x900 active monitor was capsule x=568..872, center=720, equal to monitor center=720, y=756 bottom anchor; the foreground process id did not change during display.",
+        "evidence": [
+          ".cache/validation/capsule-position-origin-fix-20260721/machine-summary.json",
+          ".cache/validation/capsule-position-origin-fix-20260721/installed-capsule-window-geometry.json",
+          ".cache/validation/capsule-position-origin-fix-20260721/install-manifest.json"
+        ],
+        "operator_acceptance": "Canonical Chinese review selected 通过 with note: 现在好像是修好了，是修好了，你看一下是不是修好了？ Archived beside the machine summary as 20260721-104506-296-录音胶囊位置确认-31d791b1.json.",
+        "separate_platform_gap": "The full Type suite remains NO_GO with 832 passed, 3 failed source-string Windows BLE pairing assertions, and 9 ignored. Those assertions are outside this coordinate correction and remain an independent ESP platform closure item rather than a capsule pass."
+      },
+      "acceptance_boundary": "The correction must preserve the capsule's recording state, live level, provider preview/final behavior, non-activating overlay behavior, fixed capsule footprint, and protected text-only preview behavior. Installed-Type visual evidence on the active monitor is required before treating the issue as closed."
     }
   },
   "scenarios": [
