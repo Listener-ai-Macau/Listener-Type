@@ -2467,11 +2467,16 @@ pub(crate) fn position_capsule_bottom_center<R: tauri::Runtime>(
 
     let scale = monitor.scale_factor();
     let size = monitor.size();
-    let logical_w = size.width as f64 / scale;
-    let logical_h = size.height as f64 / scale;
-    let x = ((logical_w - bounds.width) / 2.0).max(0.0);
-    let y = (logical_h - capsule_visual_height(translation_active) - 80.0 - bounds.bottom_inset)
-        .max(0.0);
+    let origin = monitor.position();
+    let (x, y) = capsule_bottom_center_position(
+        origin.x,
+        origin.y,
+        size.width,
+        size.height,
+        scale,
+        bounds,
+        capsule_visual_height(translation_active),
+    );
     window.set_position(LogicalPosition::new(x, y))?;
     Ok(())
 }
@@ -2481,6 +2486,28 @@ struct CapsuleWindowBounds {
     width: f64,
     height: f64,
     bottom_inset: f64,
+}
+
+fn capsule_bottom_center_position(
+    monitor_x: i32,
+    monitor_y: i32,
+    monitor_width: u32,
+    monitor_height: u32,
+    scale: f64,
+    bounds: CapsuleWindowBounds,
+    visual_height: f64,
+) -> (f64, f64) {
+    let logical_w = monitor_width as f64 / scale;
+    let logical_h = monitor_height as f64 / scale;
+    let local_x = ((logical_w - bounds.width) / 2.0).max(0.0);
+    let local_y = (logical_h - visual_height - 80.0 - bounds.bottom_inset).max(0.0);
+
+    // Tauri monitor origins are physical desktop coordinates. Convert the origin too,
+    // then add the local anchor so secondary and negative-positioned displays stay valid.
+    (
+        monitor_x as f64 / scale + local_x,
+        monitor_y as f64 / scale + local_y,
+    )
 }
 
 fn capsule_window_bounds(translation_active: bool) -> CapsuleWindowBounds {
@@ -2529,10 +2556,10 @@ fn capsule_height_for_qa() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        capsule_height_for_qa, capsule_visual_height, capsule_window_bounds, log_dir_path,
-        parse_tray_polish_mode_id, rotate_log_if_too_large, should_hide_main_on_close,
-        should_keep_alive_on_exit_request, tray_polish_mode_menu_entries, tray_style_menu_enabled,
-        LOG_ROTATE_LIMIT_BYTES,
+        capsule_bottom_center_position, capsule_height_for_qa, capsule_visual_height,
+        capsule_window_bounds, log_dir_path, parse_tray_polish_mode_id, rotate_log_if_too_large,
+        should_hide_main_on_close, should_keep_alive_on_exit_request,
+        tray_polish_mode_menu_entries, tray_style_menu_enabled, LOG_ROTATE_LIMIT_BYTES,
     };
     #[cfg(target_os = "windows")]
     use super::{merge_webview2_test_browser_args, WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES};
@@ -2760,6 +2787,36 @@ mod tests {
 
         #[cfg(not(target_os = "windows"))]
         assert_eq!(capsule_visual_height(true), 96.0);
+    }
+
+    #[test]
+    fn capsule_bottom_center_position_keeps_negative_monitor_origin() {
+        let (x, y) = capsule_bottom_center_position(
+            -1920,
+            0,
+            1920,
+            1080,
+            1.0,
+            capsule_window_bounds(false),
+            capsule_visual_height(false),
+        );
+
+        assert_eq!((x, y), (-1112.0, 936.0));
+    }
+
+    #[test]
+    fn capsule_bottom_center_position_scales_monitor_origin_with_dpi() {
+        let (x, y) = capsule_bottom_center_position(
+            2880,
+            -1440,
+            2880,
+            1620,
+            1.5,
+            capsule_window_bounds(false),
+            capsule_visual_height(false),
+        );
+
+        assert_eq!((x, y), (2728.0, -24.0));
     }
 
     #[test]
