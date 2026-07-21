@@ -115,6 +115,12 @@
         "non_transfer_fixed_elapsed_ms": 4503,
         "type_ready": true,
         "secure_ready_before_start": true,
+        "post_ota_serial_evidence": "Listener-Type/.cache/validation/platform-current-20260721/ota-current-root-package-20260721/post-ota-serial-status.log",
+        "post_ota_boot_slot": "ota_1",
+        "post_ota_firmware_version": "1.0.2",
+        "post_ota_ble_status": "secure=1,e11r=1,dle_ready=1,active_applied=1",
+        "post_ota_power_idle": "accepted state=CONNECTED_IDLE",
+        "post_ota_serial_closed": true,
         "package_layout": "ota_manifest.json and firmware_ota.bin are at the archive root; factory payload remains nested under factory/"
       },
       "remaining_uncommitted_boundary": "Type clipboard/automatic-Enter WIP remains outside these commits; Firmware tools/flash.ps1 and .rollback-firmware-1b37813/ remain unrelated dirty paths.",
