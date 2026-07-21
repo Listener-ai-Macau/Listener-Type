@@ -126,6 +126,42 @@
       "remaining_uncommitted_boundary": "Type clipboard/automatic-Enter WIP remains outside these commits; Firmware tools/flash.ps1 and .rollback-firmware-1b37813/ remain unrelated dirty paths.",
       "acceptance_boundary": "The root zip is a user-facing release artifact and is not committed. Source commits are split or explicitly scoped to completed recording/Bluetooth/OTA/observability work; clipboard/automatic-Enter WIP and unrelated dirty paths remain uncommitted. The active Goal still requires its final completion audit."
     },
+    "listener_release_1_0_2_final_package_audit_20260721": {
+      "status": "completed_scoped_package_audit",
+      "recorded_at": "2026-07-21T13:44:30+08:00",
+      "source": "Product-owner direction: 全部打包一下，整理一下仓库，然后发布一下最新的1.0.2。",
+      "requirement": "Build and publish the current Listener 1.0.2 Firmware OTA and Type MSI from committed platform sources, keep the package identities reproducible, and preserve Type clipboard/automatic-Enter WIP and unrelated Firmware dirty paths outside the release commits.",
+      "scope_boundary": "Only Listener-Firmware and Listener-Type were operated. The Denzic parent root and Companion/other products were not touched.",
+      "type_package": {
+        "path": "Listener-Type/ListenerType_1.0.2_x64_en-US.msi",
+        "bytes": 14499840,
+        "sha256": "08D9A47A3BB61F5320E027F757461CFEE9781F7B3F21D42CF15A1D3A84E841EF",
+        "source_head": "974ee480b2ec2c52a2faa3e6d4b40e0e6642c2aa",
+        "product_input_commit": "d349ecc",
+        "installed_path": "C:\\Program Files\\Listener Type\\listener-type.exe",
+        "installed_exe_sha256": "F62844CD3181F82979979C3213D68F39A5294C78C34A9E4AA21A87BC6223D0F8",
+        "installed_payload_match": true
+      },
+      "firmware_package": {
+        "path": "Listener-Firmware/listener-ota-1.0.2.zip",
+        "bytes": 1521552,
+        "sha256": "FD2F8CFAC54DD77D72807E6D82FECB514EB5D3210D97B31335B6CE4C3A8B9553",
+        "source_head": "665209426376666df6d3852f2abd9642ba2855d3",
+        "manifest_version": "1.0.2",
+        "payload_bytes": 1367840,
+        "payload_sha256": "E9449E9ADC6AFE6D1D8E035FB3CA6AC6DDD3C9F9709A2966EE429D337B4564D9",
+        "archive_layout": "ota_manifest.json and firmware_ota.bin at archive root; factory/ nested"
+      },
+      "verification": [
+        "Firmware build PASS via pwsh -NoProfile -File .\\tools\\build.ps1.",
+        "Type AGC and full library tests PASS (9 and 835 passed; 9 ignored).",
+        "Type MSI same-version upgrade install PASS; Program Files payload hash matches the built MSI.",
+        "Known Type ja.ts/ko.ts clipboard/Enter translation WIP was not included or committed.",
+        "Unrelated Firmware tools/flash.ps1 and .rollback-firmware-1b37813/ were preserved and not committed."
+      ],
+      "evidence": "Listener-Type/.cache/validation/release-package-current-20260721/release-package-audit.json",
+      "release_boundary": "The platform capabilities are human-accepted and the current release packages are audited. This does not claim the separate Type clipboard/automatic-Enter WIP is complete, and package binaries remain ignored artifacts rather than source commits."
+    },
     "listener_recording_acceptance_owner_clarification_20260721": {
       "status": "owner_confirmed_recording_pass_invalid_fixture_only",
       "recorded_at": "2026-07-21",
