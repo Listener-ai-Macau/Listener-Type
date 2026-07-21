@@ -23,6 +23,21 @@ const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
 const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
 const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
 const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
+const EMBEDDED_AUDIO_VISUAL_RMS_REFERENCE: f64 = 700.0;
+// Volcengine streaming is latency sensitive. Calibrate from the first voiced
+// 100 ms block, then only raise that session gain when later confirmed speech
+// is quieter. Ignore the noisiest one percent of a block while calibrating:
+// a PDM impulse must not make an otherwise quiet spoken block look loud.
+const EMBEDDED_AUDIO_STREAMING_SPEECH_RMS: f64 = 120.0;
+const EMBEDDED_AUDIO_STREAMING_QUIET_SPEECH_RMS: f64 = 45.0;
+const EMBEDDED_AUDIO_STREAMING_QUIET_SPEECH_PEAK: u16 = 256;
+const EMBEDDED_AUDIO_STREAMING_AGC_PEAK_HEADROOM: f64 = 0.90;
+const EMBEDDED_AUDIO_STREAMING_AGC_SIGNAL_PERCENTILE_NUMERATOR: usize = 99;
+const EMBEDDED_AUDIO_STREAMING_AGC_SIGNAL_PERCENTILE_DENOMINATOR: usize = 100;
+// Firmware preserves microphone headroom instead of pre-amplifying it, so a
+// quiet first voiced block may need the full bounded streaming gain. Each
+// later block still has its own peak guard before it reaches the provider.
+const EMBEDDED_AUDIO_STREAMING_INITIAL_MAX_GAIN: f64 = EMBEDDED_AUDIO_MAX_GAIN;
 const EMBEDDED_BLE_PCM_EVENT_TRACE_PACKET_INTERVAL: u16 = 50;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
 const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 750;
@@ -195,11 +210,16 @@ fn log_dictation_asr_engine_selection(session_id: SessionId, active_asr: &str) {
     }
 }
 
-fn set_volcengine_final_supplemental_preview_callback(
+fn set_volcengine_preview_callbacks(
     asr: &Arc<VolcengineStreamingASR>,
     inner: &Arc<Inner>,
     session_id: SessionId,
 ) {
+    let inner_for_stream = Arc::clone(inner);
+    asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
+        update_embedded_audio_partial_preview(&inner_for_stream, session_id, text);
+    })));
+
     let inner_for_partial = Arc::clone(inner);
     asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
         update_embedded_audio_partial_preview_from_final_supplement(
@@ -215,7 +235,7 @@ fn build_volcengine_asr(inner: &Arc<Inner>, session_id: SessionId) -> Arc<Volcen
         read_volc_credentials(),
         enabled_hotwords(inner),
     ));
-    set_volcengine_final_supplemental_preview_callback(&asr, inner, session_id);
+    set_volcengine_preview_callbacks(&asr, inner, session_id);
     asr
 }
 
@@ -225,7 +245,7 @@ async fn open_volcengine_asr(
     let started = Instant::now();
     asr.open_session().await?;
     log::info!(
-        "[asr] authoritative bidirectional ASR ready; preview and final share one provider session elapsed_ms={}",
+        "[asr] authoritative optimized-bidirectional ASR ready; preview and final share one provider session elapsed_ms={}",
         started.elapsed().as_millis()
     );
     Ok(())
@@ -982,21 +1002,17 @@ fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: Session
         format!("chars={}", preview.chars().count()),
         |_| {
             let mut slot = inner.embedded_audio_partial_preview.lock();
-            let Some(stabilized_preview) =
-                stabilize_embedded_audio_partial_preview(slot.as_deref(), &preview)
-            else {
+            let Some(provider_preview) = provider_preview_change(slot.as_deref(), &preview) else {
                 return false;
             };
-            *slot = Some(stabilized_preview.clone());
-            let emitted = emit_embedded_audio_partial_preview_if_active(
-                inner,
-                session_id,
-                stabilized_preview,
-            );
+            *slot = Some(provider_preview.clone());
+            let emitted =
+                emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview);
             if emitted {
-                crate::observability::record_embedded_audio_first_preview(
+                crate::observability::record_embedded_audio_preview_published(
                     session_id,
-                    crate::observability::PreviewSource::Sidecar,
+                    crate::observability::PreviewSource::ProviderStream,
+                    embedded_audio_stop_feedback_latched(inner),
                 );
             }
             emitted
@@ -1025,30 +1041,33 @@ fn update_embedded_audio_partial_preview_from_final_supplement(
         ),
         |_| {
             let mut slot = inner.embedded_audio_partial_preview.lock();
-            let Some(stabilized_preview) =
-                stabilize_embedded_audio_final_supplemental_preview_with_provider_authority(
-                    slot.as_deref(),
-                    &preview,
-                    authoritative_two_pass,
-                )
-            else {
+            let Some(provider_preview) = provider_preview_change(slot.as_deref(), &preview) else {
                 return false;
             };
-            *slot = Some(stabilized_preview.clone());
-            let emitted = emit_embedded_audio_partial_preview_if_active(
-                inner,
-                session_id,
-                stabilized_preview,
-            );
+            *slot = Some(provider_preview.clone());
+            let emitted =
+                emit_embedded_audio_partial_preview_if_active(inner, session_id, provider_preview);
             if emitted {
-                crate::observability::record_embedded_audio_first_preview(
+                crate::observability::record_embedded_audio_preview_published(
                     session_id,
                     crate::observability::PreviewSource::FinalSupplement,
+                    embedded_audio_stop_feedback_latched(inner),
                 );
             }
             emitted
         },
     );
+}
+
+// `stream` and `two_pass` originate from the same authoritative ASR session.
+// A newer non-identical candidate must replace the capsule text, including an
+// early rewrite; only an exact duplicate is safe to suppress.
+fn provider_preview_change(current: Option<&str>, candidate: &str) -> Option<String> {
+    let candidate = candidate.trim();
+    if candidate.is_empty() || current.is_some_and(|value| value.trim() == candidate) {
+        return None;
+    }
+    Some(candidate.to_string())
 }
 
 fn stabilize_embedded_audio_partial_preview(
@@ -1777,6 +1796,8 @@ struct EmbeddedAudioDictationSession {
     archive_pcm: Option<Vec<u8>>,
     streamed_pcm_bytes: usize,
     normalized_pcm_bytes: usize,
+    streaming_pcm_buffer: Vec<u8>,
+    streaming_agc: EmbeddedStreamingAgcState,
     device_ai_processing_started: bool,
 }
 
@@ -1789,7 +1810,6 @@ impl EmbeddedAudioDictationSession {
             return Err("嵌入式音频 PCM chunk 长度不是 16-bit 对齐".to_string());
         }
 
-        let asr_pcm = self.prepare_streaming_pcm_for_asr(pcm);
         if embedded_audio_stop_feedback_latched(inner) {
             if !embedded_audio_streaming_session_accepts_pcm(inner, self.session_id) {
                 log::debug!(
@@ -1803,7 +1823,7 @@ impl EmbeddedAudioDictationSession {
                 inner,
                 self.session_id,
                 CapsuleState::Recording,
-                embedded_pcm_peak_level(&asr_pcm),
+                embedded_pcm_visual_level(pcm),
             ) {
                 log::debug!(
                     "[coord] embedded audio streaming PCM ignored for inactive dictation session ({})",
@@ -1818,22 +1838,59 @@ impl EmbeddedAudioDictationSession {
         }
 
         self.streamed_pcm_bytes += pcm.len();
-        self.normalized_pcm_bytes += asr_pcm.len();
-
-        for chunk in asr_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
-            self.consumer.consume_pcm_chunk(chunk);
-        }
+        self.streaming_pcm_buffer.extend_from_slice(pcm);
+        self.consume_ready_streaming_pcm_blocks();
         Ok(())
     }
 
-    fn prepare_streaming_pcm_for_asr(&mut self, pcm: &[u8]) -> Vec<u8> {
-        if self.active_asr == "volcengine" {
-            // Per-packet gain changes made identical speech sound different
-            // across a session. Volcengine receives device PCM verbatim.
-            return pcm.to_vec();
+    fn flush_streaming_pcm(&mut self) {
+        if self.streaming_pcm_buffer.is_empty() {
+            return;
         }
 
-        normalize_embedded_pcm_for_asr(pcm).0
+        let trailing_pcm = std::mem::take(&mut self.streaming_pcm_buffer);
+        self.consume_prepared_streaming_pcm(&trailing_pcm);
+    }
+
+    fn consume_ready_streaming_pcm_blocks(&mut self) {
+        let ready_bytes = self.streaming_pcm_buffer.len() / EMBEDDED_AUDIO_FEED_CHUNK_BYTES
+            * EMBEDDED_AUDIO_FEED_CHUNK_BYTES;
+        if ready_bytes == 0 {
+            return;
+        }
+
+        let trailing_pcm = self.streaming_pcm_buffer.split_off(ready_bytes);
+        let ready_pcm = std::mem::replace(&mut self.streaming_pcm_buffer, trailing_pcm);
+        for pcm_block in ready_pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
+            self.consume_prepared_streaming_pcm(pcm_block);
+        }
+    }
+
+    fn consume_prepared_streaming_pcm(&mut self, pcm: &[u8]) {
+        let source_pcm_offset_ms = (self.normalized_pcm_bytes as u64) / 32;
+        let (asr_pcm, gain_stats) = self.prepare_streaming_pcm_for_asr(pcm);
+        if self.active_asr == "volcengine"
+            && embedded_streaming_chunk_has_speech_energy(
+                gain_stats.rms_before,
+                gain_stats.peak_before,
+            )
+        {
+            self.streaming_agc
+                .first_voiced_pcm_ms
+                .get_or_insert(source_pcm_offset_ms);
+        }
+
+        self.normalized_pcm_bytes += asr_pcm.len();
+        self.consumer.consume_pcm_chunk(&asr_pcm);
+    }
+
+    fn prepare_streaming_pcm_for_asr(&mut self, pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
+        if self.active_asr == "volcengine" {
+            // The buffer is bounded to one established provider feed interval.
+            return normalize_embedded_streaming_pcm_for_asr(pcm, &mut self.streaming_agc);
+        }
+
+        normalize_embedded_pcm_for_asr(pcm)
     }
 }
 
@@ -3544,10 +3601,13 @@ impl EmbeddedStreamingDictation {
         store_embedded_audio_stats(inner, stats.clone());
         self.show_transcribing_after_stop(inner);
 
-        let session = self
+        let mut session = self
             .session
             .take()
             .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
+        // STOP ends device delivery, so commit the final partial provider block before
+        // finalizing ASR. This keeps the final syllables in the authoritative stream.
+        session.flush_streaming_pcm();
         let archive_active = session
             .archive_pcm
             .as_deref()
@@ -3556,11 +3616,32 @@ impl EmbeddedStreamingDictation {
         inner
             .audio_archive_active
             .store(archive_active, std::sync::atomic::Ordering::Relaxed);
+        if session.active_asr == "volcengine" {
+            log::info!(
+                "[coord] embedded audio streaming AGC summary (mode=voice_gated_fixed_session_gain, first_voiced_pcm_ms={:?}, voiced_chunks={}, quiet_chunks={}, observed_signal_rms_min={:?}, observed_signal_rms_max={:.2}, observed_signal_peak_max={}, pre_calibration_quiet_chunks={}, pre_calibration_signal_rms_max={:.2}, pre_calibration_signal_peak_max={}, first_eligible_signal_rms={:?}, first_eligible_signal_peak={:?}, first_gain={:?}, final_gain={:.2}, max_gain={:.2}, gain_updates={}, clipped_samples={})",
+                session.streaming_agc.first_voiced_pcm_ms,
+                session.streaming_agc.voiced_chunks,
+                session.streaming_agc.quiet_chunks,
+                session.streaming_agc.observed_signal_rms_min,
+                session.streaming_agc.observed_signal_rms_max,
+                session.streaming_agc.observed_signal_peak_max,
+                session.streaming_agc.pre_calibration_quiet_chunks,
+                session.streaming_agc.pre_calibration_signal_rms_max,
+                session.streaming_agc.pre_calibration_signal_peak_max,
+                session.streaming_agc.first_eligible_signal_rms,
+                session.streaming_agc.first_eligible_signal_peak,
+                session.streaming_agc.first_gain,
+                session.streaming_agc.gain,
+                session.streaming_agc.max_gain,
+                session.streaming_agc.gain_update_count,
+                session.streaming_agc.clipped_samples
+            );
+        }
         log::info!(
             "[coord] embedded audio streaming submitted to dictation pipeline (asr={}, input_mode={}, pcm_bytes={}, asr_pcm_bytes={}, archive={})",
             session.active_asr,
             if session.active_asr == "volcengine" {
-                "raw_device_pcm"
+                "voice_gated_fixed_session_gain"
             } else {
                 "normalized_pcm"
             },
@@ -3818,6 +3899,8 @@ async fn begin_embedded_audio_dictation_session(
         archive_pcm,
         streamed_pcm_bytes: 0,
         normalized_pcm_bytes: 0,
+        streaming_pcm_buffer: Vec::new(),
+        streaming_agc: EmbeddedStreamingAgcState::default(),
         device_ai_processing_started: false,
     })
 }
@@ -3919,8 +4002,10 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
     end_session(inner).await
 }
 
-fn embedded_streaming_chunk_is_asr_input(chunk: &crate::embedded_audio::StreamingPcmChunk) -> bool {
-    !chunk.after_stop_boundary
+fn embedded_streaming_chunk_is_asr_input(_chunk: &crate::embedded_audio::StreamingPcmChunk) -> bool {
+    // The collector has already validated session ownership and sequence. STOP ends capture,
+    // but firmware can still drain valid PCM from that same capture after its control packet.
+    true
 }
 
 fn embedded_ble_session_event_detail(
@@ -4150,12 +4235,81 @@ fn embedded_pcm_peak_level(pcm: &[u8]) -> f32 {
     (peak as f32 / i16::MAX as f32).clamp(0.0, 1.0)
 }
 
+fn embedded_pcm_visual_level(pcm: &[u8]) -> f32 {
+    let sample_count = pcm.len() / 2;
+    if sample_count == 0 {
+        return 0.0;
+    }
+
+    let sum = pcm
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f64)
+        .sum::<f64>();
+    let mean = sum / sample_count as f64;
+    let sum_deviation_squares = pcm
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f64 - mean)
+        .map(|sample| sample * sample)
+        .sum::<f64>();
+    let rms = (sum_deviation_squares / sample_count as f64).sqrt();
+
+    // This is a display-only raw-audio meter. It deliberately does not use the
+    // ASR gain, whose session calibration would make a quiet and a loud voice
+    // appear similarly bright after firmware capture headroom was restored.
+    (rms / EMBEDDED_AUDIO_VISUAL_RMS_REFERENCE).clamp(0.0, 1.0) as f32
+}
+
 #[derive(Debug, Clone, Copy)]
 struct EmbeddedPcmGainStats {
     rms_before: f64,
     peak_before: u16,
     gain: f64,
     clipped_samples: usize,
+}
+
+#[derive(Debug)]
+struct EmbeddedStreamingAgcState {
+    gain: f64,
+    gain_calibrated: bool,
+    first_voiced_pcm_ms: Option<u64>,
+    voiced_chunks: usize,
+    quiet_chunks: usize,
+    observed_signal_rms_min: Option<f64>,
+    observed_signal_rms_max: f64,
+    observed_signal_peak_max: u16,
+    pre_calibration_quiet_chunks: usize,
+    pre_calibration_signal_rms_max: f64,
+    pre_calibration_signal_peak_max: u16,
+    first_eligible_signal_rms: Option<f64>,
+    first_eligible_signal_peak: Option<u16>,
+    first_gain: Option<f64>,
+    max_gain: f64,
+    gain_update_count: usize,
+    clipped_samples: usize,
+}
+
+impl Default for EmbeddedStreamingAgcState {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            gain_calibrated: false,
+            first_voiced_pcm_ms: None,
+            voiced_chunks: 0,
+            quiet_chunks: 0,
+            observed_signal_rms_min: None,
+            observed_signal_rms_max: 0.0,
+            observed_signal_peak_max: 0,
+            pre_calibration_quiet_chunks: 0,
+            pre_calibration_signal_rms_max: 0.0,
+            pre_calibration_signal_peak_max: 0,
+            first_eligible_signal_rms: None,
+            first_eligible_signal_peak: None,
+            first_gain: None,
+            max_gain: 1.0,
+            gain_update_count: 0,
+            clipped_samples: 0,
+        }
+    }
 }
 
 fn normalize_embedded_pcm_for_asr(pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
@@ -4183,6 +4337,13 @@ fn normalize_embedded_pcm_for_asr_with_stats(
         return (pcm.to_vec(), stats);
     }
 
+    let (normalized, clipped_samples) = apply_embedded_pcm_gain(pcm, gain);
+    stats.gain = gain;
+    stats.clipped_samples = clipped_samples;
+    (normalized, stats)
+}
+
+fn apply_embedded_pcm_gain(pcm: &[u8], gain: f64) -> (Vec<u8>, usize) {
     let mut normalized = Vec::with_capacity(pcm.len());
     let mut clipped_samples = 0usize;
     for chunk in pcm.chunks_exact(2) {
@@ -4194,10 +4355,125 @@ fn normalize_embedded_pcm_for_asr_with_stats(
         }
         normalized.extend_from_slice(&(clamped as i16).to_le_bytes());
     }
+    (normalized, clipped_samples)
+}
 
-    stats.gain = gain;
+fn normalize_embedded_streaming_pcm_for_asr(
+    pcm: &[u8],
+    agc: &mut EmbeddedStreamingAgcState,
+) -> (Vec<u8>, EmbeddedPcmGainStats) {
+    let (rms_before, peak_before) = embedded_pcm_rms_and_peak(pcm);
+    let (signal_rms, signal_peak) = embedded_pcm_streaming_agc_signal_level(pcm);
+    let mut stats = EmbeddedPcmGainStats {
+        rms_before,
+        peak_before,
+        gain: 1.0,
+        clipped_samples: 0,
+    };
+
+    let has_speech_energy = embedded_streaming_chunk_has_speech_energy(signal_rms, signal_peak);
+    agc.observed_signal_rms_min = Some(
+        agc.observed_signal_rms_min
+            .map_or(signal_rms, |minimum| minimum.min(signal_rms)),
+    );
+    agc.observed_signal_rms_max = agc.observed_signal_rms_max.max(signal_rms);
+    agc.observed_signal_peak_max = agc.observed_signal_peak_max.max(signal_peak);
+    if !has_speech_energy {
+        agc.quiet_chunks += 1;
+        // Leading silence must not calibrate the session. Once calibration has
+        // happened, however, weak phonemes and word endings need the same
+        // stable gain as voiced blocks or the provider repeatedly sees gaps.
+        if !agc.gain_calibrated {
+            agc.pre_calibration_quiet_chunks += 1;
+            agc.pre_calibration_signal_rms_max =
+                agc.pre_calibration_signal_rms_max.max(signal_rms);
+            agc.pre_calibration_signal_peak_max =
+                agc.pre_calibration_signal_peak_max.max(signal_peak);
+            return (pcm.to_vec(), stats);
+        }
+    } else {
+        agc.voiced_chunks += 1;
+        agc.first_eligible_signal_rms.get_or_insert(signal_rms);
+        agc.first_eligible_signal_peak.get_or_insert(signal_peak);
+    }
+    let peak_limited_gain = if signal_peak == 0 {
+        EMBEDDED_AUDIO_MAX_GAIN
+    } else {
+        (i16::MAX as f64 * EMBEDDED_AUDIO_STREAMING_AGC_PEAK_HEADROOM / signal_peak as f64)
+            .min(EMBEDDED_AUDIO_MAX_GAIN)
+    };
+    let requested_gain = (EMBEDDED_AUDIO_TARGET_RMS / signal_rms)
+        .min(peak_limited_gain)
+        .clamp(1.0, EMBEDDED_AUDIO_STREAMING_INITIAL_MAX_GAIN);
+    let previous_gain = agc.gain;
+    let session_gain = if !agc.gain_calibrated {
+        agc.gain_calibrated = true;
+        requested_gain
+    } else if has_speech_energy {
+        // A later quieter phrase may otherwise fall below the provider's
+        // streaming recognition floor. Raising is monotonic for this session;
+        // a loud block is handled below without making later speech quieter.
+        agc.gain.max(requested_gain)
+    } else {
+        // Silence does not calibrate the session or amplify background noise.
+        agc.gain
+    };
+
+    if (session_gain - previous_gain).abs() > f64::EPSILON {
+        agc.gain_update_count += 1;
+    }
+    agc.first_gain.get_or_insert(session_gain);
+    agc.max_gain = agc.max_gain.max(session_gain);
+    agc.gain = session_gain;
+
+    // Limit only this over-peak block. Sparse PDM impulses may clip after the
+    // gain is applied, but must not make the rest of the block inaudible.
+    // Persisting a lower gain would make later normal speech too quiet and
+    // reintroduce accumulating ASR lag.
+    let block_gain = session_gain.min(peak_limited_gain);
+    stats.gain = block_gain;
+    if block_gain < EMBEDDED_AUDIO_MIN_GAIN {
+        return (pcm.to_vec(), stats);
+    }
+
+    let (normalized, clipped_samples) = apply_embedded_pcm_gain(pcm, block_gain);
     stats.clipped_samples = clipped_samples;
+    agc.clipped_samples += clipped_samples;
     (normalized, stats)
+}
+
+fn embedded_streaming_chunk_has_speech_energy(rms: f64, peak: u16) -> bool {
+    rms >= EMBEDDED_AUDIO_STREAMING_SPEECH_RMS
+        || (rms >= EMBEDDED_AUDIO_STREAMING_QUIET_SPEECH_RMS
+            && peak >= EMBEDDED_AUDIO_STREAMING_QUIET_SPEECH_PEAK)
+}
+
+fn embedded_pcm_streaming_agc_signal_level(pcm: &[u8]) -> (f64, u16) {
+    let mut magnitudes: Vec<u16> = pcm
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]).unsigned_abs())
+        .collect();
+    if magnitudes.is_empty() {
+        return (0.0, 0);
+    }
+
+    magnitudes.sort_unstable();
+    let retained_count = ((magnitudes.len()
+        * EMBEDDED_AUDIO_STREAMING_AGC_SIGNAL_PERCENTILE_NUMERATOR)
+        / EMBEDDED_AUDIO_STREAMING_AGC_SIGNAL_PERCENTILE_DENOMINATOR)
+        .max(1);
+    let retained = &magnitudes[..retained_count];
+    let sum_squares: f64 = retained
+        .iter()
+        .map(|&magnitude| {
+            let sample = magnitude as f64;
+            sample * sample
+        })
+        .sum();
+    (
+        (sum_squares / retained_count as f64).sqrt(),
+        retained[retained_count - 1],
+    )
 }
 
 fn embedded_pcm_rms_and_peak(pcm: &[u8]) -> (f64, u16) {
@@ -5138,19 +5414,23 @@ mod tests {
         embedded_audio_stop_feedback_latched, embedded_ble_listener_capture_ready,
         embedded_ble_processing_sync_disabled, embedded_ble_session_actor_history,
         embedded_ble_session_event_should_trace, embedded_ble_stream_idle_timeout,
-        embedded_pcm_rms_and_peak, embedded_streaming_chunk_is_asr_input,
+        embedded_pcm_rms_and_peak, embedded_pcm_visual_level,
+        embedded_streaming_chunk_is_asr_input,
         emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
         finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
         install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
-        normalize_embedded_pcm_for_asr, publish_embedded_ble_asr_final,
+        normalize_embedded_pcm_for_asr, normalize_embedded_streaming_pcm_for_asr,
+        provider_preview_change, publish_embedded_ble_asr_final,
         record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
         request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
         stabilize_embedded_audio_final_supplemental_preview,
         stabilize_embedded_audio_partial_preview, store_embedded_audio_stats,
         streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
-        EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingDictation,
-        DEVICE_AI_PROCESSING_MAX_VISIBLE_MS, DEVICE_AI_PROCESSING_MIN_VISIBLE_MS,
-        EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV,
+        EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingAgcState,
+        EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
+        DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
+        EMBEDDED_AUDIO_MAX_GAIN, EMBEDDED_AUDIO_STREAMING_SPEECH_RMS,
+        EMBEDDED_AUDIO_TARGET_RMS, EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV,
     };
     use crate::coordinator::Coordinator;
     use crate::coordinator_state::{new_session_id, SessionPhase};
@@ -5162,7 +5442,7 @@ mod tests {
         ChineseScriptPreference, CorrectionRule, DictationInputSource, InsertStatus, PolishMode,
     };
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
     #[derive(Default)]
@@ -5176,6 +5456,17 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct CapturingConsumer {
+        chunks: Mutex<Vec<Vec<u8>>>,
+    }
+
+    impl crate::recorder::AudioConsumer for CapturingConsumer {
+        fn consume_pcm_chunk(&self, pcm: &[u8]) {
+            self.chunks.lock().expect("capture lock").push(pcm.to_vec());
+        }
+    }
+
     #[test]
     fn embedded_audio_partial_preview_ignores_punctuation_only_revision() {
         assert_eq!(
@@ -5183,6 +5474,18 @@ mod tests {
                 Some("这个预览波动太大了。然后呢？对于用户"),
                 "这个预览波动太大了，然后呢？对于用户"
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn provider_preview_change_keeps_authoritative_early_rewrite_visible() {
+        assert_eq!(
+            provider_preview_change(Some("明天下午4点"), "明天下午4:15提醒我"),
+            Some("明天下午4:15提醒我".to_string())
+        );
+        assert_eq!(
+            provider_preview_change(Some("明天下午4:15提醒我"), "明天下午4:15提醒我"),
             None
         );
     }
@@ -5373,6 +5676,8 @@ mod tests {
             archive_pcm: Some(Vec::new()),
             streamed_pcm_bytes: 0,
             normalized_pcm_bytes: 0,
+            streaming_pcm_buffer: Vec::new(),
+            streaming_agc: EmbeddedStreamingAgcState::default(),
             device_ai_processing_started: false,
         }
     }
@@ -5392,6 +5697,25 @@ mod tests {
             .iter()
             .flat_map(|sample| sample.to_le_bytes())
             .collect()
+    }
+
+    #[test]
+    fn embedded_pcm_visual_level_tracks_raw_voice_energy_without_asr_gain() {
+        let silence = pcm_from_samples(&[0, 0, 0, 0]);
+        let quiet_voice = pcm_from_samples(&[50, -50, 50, -50]);
+        let ordinary_voice = pcm_from_samples(&[300, -300, 300, -300]);
+        let loud_voice = pcm_from_samples(&[1_000, -1_000, 1_000, -1_000]);
+
+        let silence_level = embedded_pcm_visual_level(&silence);
+        let quiet_level = embedded_pcm_visual_level(&quiet_voice);
+        let ordinary_level = embedded_pcm_visual_level(&ordinary_voice);
+        let loud_level = embedded_pcm_visual_level(&loud_voice);
+
+        assert_eq!(silence_level, 0.0);
+        assert!(quiet_level > 0.012, "quiet_level={quiet_level}");
+        assert!(ordinary_level > quiet_level, "{ordinary_level} <= {quiet_level}");
+        assert!(loud_level > ordinary_level, "{loud_level} <= {ordinary_level}");
+        assert_eq!(loud_level, 1.0);
     }
 
     fn samples_for_ms(ms: usize, sample: i16) -> Vec<i16> {
@@ -5647,7 +5971,7 @@ mod tests {
             session_id,
             consumer_for_session,
         ));
-        let pcm = pcm_from_samples(&[100, -100, 200, -200]);
+        let pcm = pcm_from_samples(&samples_for_ms(100, 3_000));
 
         let complete = streaming
             .handle_ble_packet_actor_command(
@@ -5959,7 +6283,7 @@ mod tests {
         let consumer = Arc::new(CountingConsumer::default());
         let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
         let mut session = embedded_audio_test_session(session_id, consumer_for_session);
-        let pcm = pcm_from_samples(&[100, -100, 200, -200]);
+        let pcm = pcm_from_samples(&samples_for_ms(100, 3_000));
 
         session
             .consume_streaming_pcm(&coordinator.inner, &pcm)
@@ -5985,7 +6309,7 @@ mod tests {
         let consumer = Arc::new(CountingConsumer::default());
         let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
         let mut session = embedded_audio_test_session(session_id, consumer_for_session);
-        let pcm = pcm_from_samples(&[100, -100, 200, -200]);
+        let pcm = pcm_from_samples(&samples_for_ms(100, 3_000));
 
         session
             .consume_streaming_pcm(&coordinator.inner, &pcm)
@@ -5996,6 +6320,111 @@ mod tests {
         assert!(!session.device_ai_processing_started);
         assert_eq!(session.archive_pcm.as_ref().expect("archive"), &pcm);
         assert_eq!(consumer.bytes.load(Ordering::SeqCst), pcm.len());
+    }
+
+    #[test]
+    fn embedded_streaming_pcm_combines_short_ble_packets_before_asr() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        let consumer = Arc::new(CapturingConsumer::default());
+        let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+        let mut session = embedded_audio_test_session(session_id, consumer_for_session);
+        let first_packet = pcm_from_samples(&samples_for_ms(40, 3_000));
+        let second_packet = pcm_from_samples(&samples_for_ms(60, 3_000));
+        let mut expected_pcm = first_packet.clone();
+        expected_pcm.extend_from_slice(&second_packet);
+
+        session
+            .consume_streaming_pcm(&coordinator.inner, &first_packet)
+            .expect("first short packet is accepted");
+        assert!(consumer.chunks.lock().expect("capture lock").is_empty());
+        assert_eq!(session.normalized_pcm_bytes, 0);
+
+        session
+            .consume_streaming_pcm(&coordinator.inner, &second_packet)
+            .expect("second short packet is accepted");
+
+        let chunks = consumer.chunks.lock().expect("capture lock");
+        assert_eq!(chunks.as_slice(), [expected_pcm]);
+        assert_eq!(session.streamed_pcm_bytes, EMBEDDED_AUDIO_FEED_CHUNK_BYTES);
+        assert_eq!(
+            session.normalized_pcm_bytes,
+            EMBEDDED_AUDIO_FEED_CHUNK_BYTES
+        );
+        assert!(session.streaming_pcm_buffer.is_empty());
+    }
+
+    #[test]
+    fn embedded_streaming_pcm_flushes_final_partial_block_once() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        let consumer = Arc::new(CapturingConsumer::default());
+        let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+        let mut session = embedded_audio_test_session(session_id, consumer_for_session);
+        let tail_pcm = pcm_from_samples(&samples_for_ms(50, 3_000));
+
+        session
+            .consume_streaming_pcm(&coordinator.inner, &tail_pcm)
+            .expect("partial tail is accepted");
+        assert!(consumer.chunks.lock().expect("capture lock").is_empty());
+
+        session.flush_streaming_pcm();
+        session.flush_streaming_pcm();
+
+        let chunks = consumer.chunks.lock().expect("capture lock");
+        assert_eq!(chunks.as_slice(), [tail_pcm]);
+        assert_eq!(
+            session.normalized_pcm_bytes,
+            EMBEDDED_AUDIO_FEED_CHUNK_BYTES / 2
+        );
+        assert!(session.streaming_pcm_buffer.is_empty());
+    }
+
+    #[test]
+    fn volcengine_streaming_agc_resolves_one_provider_block_not_each_ble_packet() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        let consumer = Arc::new(CountingConsumer::default());
+        let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+        let mut session = embedded_audio_test_session(session_id, consumer_for_session);
+        session.active_asr = "volcengine".into();
+        let packet = pcm_from_samples(&samples_for_ms(20, 320));
+
+        for _ in 0..4 {
+            session
+                .consume_streaming_pcm(&coordinator.inner, &packet)
+                .expect("short voiced packet is accepted");
+        }
+        assert_eq!(consumer.bytes.load(Ordering::SeqCst), 0);
+        assert_eq!(session.streaming_agc.voiced_chunks, 0);
+
+        session
+            .consume_streaming_pcm(&coordinator.inner, &packet)
+            .expect("provider block is accepted");
+        assert_eq!(
+            consumer.bytes.load(Ordering::SeqCst),
+            EMBEDDED_AUDIO_FEED_CHUNK_BYTES
+        );
+        assert_eq!(session.streaming_agc.voiced_chunks, 1);
+        assert_eq!(session.streaming_agc.first_voiced_pcm_ms, Some(0));
     }
 
     #[test]
@@ -6053,7 +6482,18 @@ mod tests {
     }
 
     #[test]
-    fn embedded_streaming_tail_chunk_is_not_asr_input() {
+    fn embedded_streaming_tail_chunk_remains_asr_input_until_the_session_drains() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        let consumer = Arc::new(CapturingConsumer::default());
+        let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+        let mut session = embedded_audio_test_session(session_id, consumer_for_session);
         let before_stop = StreamingPcmChunk {
             session_id: 1,
             packet_sequence: 0,
@@ -6068,7 +6508,15 @@ mod tests {
         };
 
         assert!(embedded_streaming_chunk_is_asr_input(&before_stop));
-        assert!(!embedded_streaming_chunk_is_asr_input(&after_stop));
+        assert!(embedded_streaming_chunk_is_asr_input(&after_stop));
+        session
+            .consume_streaming_pcm(&coordinator.inner, &after_stop.pcm)
+            .expect("post-stop drain PCM is forwarded to ASR");
+        session.flush_streaming_pcm();
+
+        let chunks = consumer.chunks.lock().expect("capture lock");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].len(), after_stop.pcm.len());
     }
 
     #[test]
@@ -6372,12 +6820,156 @@ mod tests {
     }
 
     #[test]
+    fn volcengine_streaming_agc_forwards_quiet_pcm_without_buffering() {
+        let quiet = pcm_from_samples(&vec![12i16; 320]);
+        let mut agc = EmbeddedStreamingAgcState::default();
+
+        let (forwarded, stats) = normalize_embedded_streaming_pcm_for_asr(&quiet, &mut agc);
+
+        assert_eq!(forwarded, quiet);
+        assert_eq!(stats.gain, 1.0);
+        assert_eq!(agc.quiet_chunks, 1);
+        assert_eq!(agc.voiced_chunks, 0);
+    }
+
+    #[test]
+    fn volcengine_streaming_agc_ignores_quiet_start_and_boosts_first_voice_immediately() {
+        let quiet = pcm_from_samples(&vec![12i16; 320]);
+        let voice = pcm_from_samples(&vec![320i16; 320]);
+        let mut agc = EmbeddedStreamingAgcState::default();
+
+        let (quiet_forwarded, _) = normalize_embedded_streaming_pcm_for_asr(&quiet, &mut agc);
+        let (voice_forwarded, voice_stats) =
+            normalize_embedded_streaming_pcm_for_asr(&voice, &mut agc);
+
+        assert_eq!(quiet_forwarded, quiet);
+        assert_eq!(voice_forwarded.len(), voice.len());
+        assert!(voice_stats.gain > 1.0, "gain={}", voice_stats.gain);
+        assert!(
+            embedded_pcm_rms_and_peak(&voice_forwarded).0 > embedded_pcm_rms_and_peak(&voice).0
+        );
+        assert_eq!(agc.quiet_chunks, 1);
+        assert_eq!(agc.voiced_chunks, 1);
+        assert_eq!(agc.first_gain, Some(voice_stats.gain));
+        assert_eq!(agc.max_gain, voice_stats.gain);
+        assert_eq!(agc.gain_update_count, 1);
+        assert_eq!(agc.clipped_samples, voice_stats.clipped_samples);
+    }
+
+    #[test]
+    fn volcengine_streaming_agc_uses_full_bounded_gain_for_quiet_voiced_input() {
+        let quiet_voice = pcm_from_samples(&vec![120i16; 1_600]);
+        let mut agc = EmbeddedStreamingAgcState::default();
+
+        let (_, stats) = normalize_embedded_streaming_pcm_for_asr(&quiet_voice, &mut agc);
+
+        assert_eq!(stats.gain, EMBEDDED_AUDIO_MAX_GAIN);
+        assert_eq!(agc.gain, EMBEDDED_AUDIO_MAX_GAIN);
+        assert_eq!(agc.gain_update_count, 1);
+    }
+
+    #[test]
+    fn volcengine_streaming_agc_amplifies_quiet_blocks_after_session_calibration() {
+        let calibration_voice = pcm_from_samples(&vec![120i16; 1_600]);
+        let quiet = pcm_from_samples(&vec![12i16; 1_600]);
+        let mut agc = EmbeddedStreamingAgcState::default();
+
+        normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
+        let (normalized_quiet, quiet_stats) =
+            normalize_embedded_streaming_pcm_for_asr(&quiet, &mut agc);
+
+        assert_eq!(quiet_stats.gain, EMBEDDED_AUDIO_MAX_GAIN);
+        assert_ne!(normalized_quiet, quiet);
+        assert_eq!(agc.quiet_chunks, 1);
+        assert_eq!(agc.gain_update_count, 1);
+    }
+
+    #[test]
+    fn volcengine_streaming_agc_does_not_calibrate_from_a_sparse_clipped_impulse() {
+        let mut samples = vec![0i16; 1_600];
+        samples[0] = i16::MIN;
+        let pcm = pcm_from_samples(&samples);
+        let mut agc = EmbeddedStreamingAgcState::default();
+
+        let (normalized, stats) = normalize_embedded_streaming_pcm_for_asr(&pcm, &mut agc);
+
+        assert_eq!(normalized, pcm);
+        assert!(stats.rms_before > EMBEDDED_AUDIO_STREAMING_SPEECH_RMS);
+        assert_eq!(agc.voiced_chunks, 0);
+        assert_eq!(agc.quiet_chunks, 1);
+        assert!(!agc.gain_calibrated);
+    }
+
+    #[test]
+    fn volcengine_streaming_agc_preserves_spoken_gain_despite_a_sparse_clipped_impulse() {
+        let mut samples = vec![180i16; 1_600];
+        samples[0] = i16::MIN;
+        let pcm = pcm_from_samples(&samples);
+        let mut agc = EmbeddedStreamingAgcState::default();
+
+        let (normalized, stats) = normalize_embedded_streaming_pcm_for_asr(&pcm, &mut agc);
+        let (normalized_rms, _) = embedded_pcm_rms_and_peak(&normalized);
+
+        assert!(stats.gain > 8.0, "gain={}", stats.gain);
+        assert!(stats.clipped_samples >= 1);
+        assert!(normalized_rms > EMBEDDED_AUDIO_TARGET_RMS * 0.8);
+        assert_eq!(agc.first_gain, Some(stats.gain));
+        assert!(agc.gain_calibrated);
+    }
+
+    #[test]
+    fn volcengine_streaming_agc_limits_only_the_later_over_peak_block() {
+        let calibration_voice = pcm_from_samples(&vec![500i16; 1_600]);
+        let ordinary_voice = pcm_from_samples(&vec![900i16; 1_600]);
+        let loud_voice = pcm_from_samples(&vec![16_000i16; 1_600]);
+        let later_moderate_voice = pcm_from_samples(&vec![600i16; 1_600]);
+        let mut agc = EmbeddedStreamingAgcState::default();
+
+        let (_, first_stats) =
+            normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
+        let calibrated_gain = first_stats.gain;
+        assert!(calibrated_gain > 1.0);
+
+        let (_, ordinary_stats) =
+            normalize_embedded_streaming_pcm_for_asr(&ordinary_voice, &mut agc);
+        assert_eq!(ordinary_stats.gain, calibrated_gain);
+
+        let (_, loud_stats) = normalize_embedded_streaming_pcm_for_asr(&loud_voice, &mut agc);
+        assert!(loud_stats.gain < calibrated_gain);
+        assert!(loud_stats.gain >= 1.0);
+        assert_eq!(loud_stats.clipped_samples, 0);
+
+        let (_, later_stats) =
+            normalize_embedded_streaming_pcm_for_asr(&later_moderate_voice, &mut agc);
+        assert_eq!(later_stats.gain, calibrated_gain);
+        assert_eq!(agc.gain_update_count, 1);
+    }
+
+    #[test]
+    fn volcengine_streaming_agc_raises_for_later_quiet_confirmed_speech() {
+        let calibration_voice = pcm_from_samples(&vec![700i16; 1_600]);
+        let later_quiet_voice = pcm_from_samples(&vec![180i16; 1_600]);
+        let mut agc = EmbeddedStreamingAgcState::default();
+
+        let (_, first_stats) =
+            normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
+        let (_, later_stats) =
+            normalize_embedded_streaming_pcm_for_asr(&later_quiet_voice, &mut agc);
+
+        assert!(later_stats.gain > first_stats.gain);
+        assert_eq!(agc.gain, later_stats.gain);
+        assert_eq!(agc.gain_update_count, 2);
+    }
+
+    #[test]
     fn volcengine_preview_and_final_share_the_authoritative_session() {
         let source = include_str!("dictation.rs");
         assert!(source.contains(
-            "authoritative bidirectional ASR ready; preview and final share one provider session"
+            "authoritative optimized-bidirectional ASR ready; preview and final share one provider session"
         ));
-        assert!(source.contains("set_volcengine_final_supplemental_preview_callback"));
+        assert!(source.contains("set_volcengine_preview_callbacks"));
+        assert!(source.contains("asr.set_partial_transcript_callback"));
+        assert!(source.contains("asr.set_final_intermediate_transcript_callback"));
         let builder_name = ["build", "_volcengine_asr("].concat();
         assert_eq!(source.matches(&builder_name).count(), 3);
     }
