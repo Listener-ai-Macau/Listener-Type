@@ -966,42 +966,17 @@ impl Coordinator {
     }
 
     pub fn start_device_custom_key_hotkey_listeners(&self) {
-        for gesture in DeviceCustomKeyGesture::ALL {
-            for key in DeviceCustomKeyId::ALL {
-                if !key.supports_gesture(gesture) {
-                    continue;
-                }
-                let inner = Arc::clone(&self.inner);
-                let name = format!(
-                    "listener-type-{}-{}-hotkey-supervisor",
-                    key.label().to_ascii_lowercase(),
-                    gesture.label()
-                );
-                std::thread::Builder::new()
-                    .name(name)
-                    .spawn(move || {
-                        action_hotkey_supervisor_loop(
-                            inner,
-                            ActionHotkeyKind::DeviceKey { key, gesture },
-                        )
-                    })
-                    .ok();
-            }
-        }
+        // Device fallback keys already enter through HotkeyMonitor's Windows
+        // low-level hook as HotkeyEvent::DeviceCustomKeyPressed. Registering
+        // the same F13-F24 combinations with global-hotkey creates a second
+        // delivery path whose delayed event can start a new recording after a
+        // previous EC11 session has completed.
+        log::info!("[coord] device custom keys use the direct low-level hook only");
     }
 
     pub fn stop_device_custom_key_hotkey_listeners(&self) {
-        for gesture in DeviceCustomKeyGesture::ALL {
-            for key in DeviceCustomKeyId::ALL {
-                if !key.supports_gesture(gesture) {
-                    continue;
-                }
-                take_action_hotkey_on_main_thread(
-                    &self.inner,
-                    ActionHotkeyKind::DeviceKey { key, gesture },
-                );
-            }
-        }
+        // See start_device_custom_key_hotkey_listeners: no global-hotkey
+        // monitors are installed for device-reserved fallback combinations.
     }
 
     /// 用户在设置里改了自定义组合键时调用。
@@ -1170,14 +1145,8 @@ impl Coordinator {
     }
 
     pub fn update_device_custom_key_hotkey_bindings(&self) {
-        for gesture in DeviceCustomKeyGesture::ALL {
-            for key in DeviceCustomKeyId::ALL {
-                if !key.supports_gesture(gesture) {
-                    continue;
-                }
-                self.update_action_hotkey_binding(ActionHotkeyKind::DeviceKey { key, gesture });
-            }
-        }
+        // Device mappings are read when the direct hook event is handled, so
+        // preferences need no parallel global-hotkey registrations.
     }
 
     fn update_action_hotkey_binding(&self, kind: ActionHotkeyKind) {
@@ -4220,10 +4189,17 @@ fn resume_embedded_ble_listener_after_pairing_recovery(
     inner: &Arc<Inner>,
     reason: &'static str,
     message: EmbeddedBleRecoveryCapsuleMessage,
+    emit_reconnecting_capsule: bool,
 ) {
     clear_embedded_ble_passive_local_reattach(inner, reason);
     mark_embedded_ble_pairing_link_reachable(inner, reason);
-    emit_embedded_ble_recovery_capsule(inner, "reconnecting", message, Some(1800));
+    if emit_reconnecting_capsule {
+        emit_embedded_ble_recovery_capsule(inner, "reconnecting", message, Some(1800));
+    } else {
+        log::info!(
+            "[embedded-ble] EC11 Type-controlled recovery suppresses intermediate capsule until firmware Type-ready terminal confirmation"
+        );
+    }
     clear_embedded_ble_pairing_confirmation_hold(inner, reason);
     refresh_embedded_ble_listener(inner);
 }
@@ -4480,6 +4456,7 @@ fn start_embedded_ble_passive_local_reattach_watch(
                         &inner,
                         "passive local Windows reattach paired and link reachable",
                         EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
+                        true,
                     );
                     break;
                 }
@@ -4656,6 +4633,7 @@ fn start_embedded_ble_pairing_confirmation_watch(
                             } else {
                                 EmbeddedBleRecoveryCapsuleMessage::RestoringAudio
                             },
+                            true,
                         );
                         break;
                     }
@@ -5617,6 +5595,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         native_windows_hid_pairing_visible && !native_windows_hid_pairing_blocks_pairasync;
     let type_controlled_recovery =
         type_observed_recovery_advertisement || stale_native_hid_recovery;
+    let ec11_type_controlled_recovery = type_controlled_recovery && hardware_ec11_recovery_notice;
     let recovery_advertisement_type_owned_cleanup = type_controlled_recovery;
     let noisy_cccd_stale_cache_type_owned_cleanup =
         pairing_before_cleanup.as_ref().is_some_and(|pairing| {
@@ -5787,16 +5766,22 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         direct_gatt_instability_recovery,
         embedded_ble_log_preview(err),
     );
-    emit_embedded_ble_recovery_capsule(
-        inner,
-        "reconnecting",
-        if direct_gatt_instability_recovery {
-            EmbeddedBleRecoveryCapsuleMessage::RebuildingPairing
-        } else {
-            EmbeddedBleRecoveryCapsuleMessage::CleaningPairing
-        },
-        Some(2600),
-    );
+    if ec11_type_controlled_recovery {
+        log::info!(
+            "[embedded-ble] EC11 Type-controlled recovery suppresses pairing-progress capsule until firmware Type-ready terminal confirmation"
+        );
+    } else {
+        emit_embedded_ble_recovery_capsule(
+            inner,
+            "reconnecting",
+            if direct_gatt_instability_recovery {
+                EmbeddedBleRecoveryCapsuleMessage::RebuildingPairing
+            } else {
+                EmbeddedBleRecoveryCapsuleMessage::CleaningPairing
+            },
+            Some(2600),
+        );
+    }
     if direct_gatt_instability_recovery {
         let recovery = async_runtime::spawn_blocking(|| {
             crate::embedded_ble::send_recording_control_recovery(Duration::from_secs(5))
@@ -5927,6 +5912,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                         inner,
                         "background Type recovery PairAsync paired; reopening notify for GATT validation",
                         EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
+                        !ec11_type_controlled_recovery,
                     );
                     return EmbeddedBleStalePairingCleanupOutcome::RetryImmediate;
                 }
@@ -5941,6 +5927,7 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                         inner,
                         "background Type recovery PairAsync paired and link reachable",
                         EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
+                        true,
                     );
                     return EmbeddedBleStalePairingCleanupOutcome::RetryImmediate;
                 }
@@ -7310,6 +7297,8 @@ fn hotkey_bridge_loop(inner: Arc<Inner>, rx: mpsc::Receiver<HotkeyEvent>) {
                 async_runtime::spawn(async move { handle_released_edge(&inner_cloned).await });
             }
             HotkeyEvent::Cancelled => {
+                let phase = inner_cloned.state.lock().phase;
+                log::info!("[coord] global hotkey cancel received phase={phase:?}");
                 cancel_session(&inner_cloned);
             }
             HotkeyEvent::TranslationModifierPressed => {
@@ -8986,6 +8975,23 @@ mod tests {
 
     fn session_id(n: u128) -> SessionId {
         Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn device_custom_keys_do_not_register_parallel_global_hotkeys() {
+        let coordinator = Coordinator::new();
+
+        coordinator.start_device_custom_key_hotkey_listeners();
+        coordinator.update_device_custom_key_hotkey_bindings();
+
+        assert!(
+            coordinator
+                .inner
+                .device_key_hotkeys
+                .iter()
+                .all(|slot| slot.lock().is_none()),
+            "device-reserved fallback keys must use the direct low-level hook only"
+        );
     }
 
     #[test]
@@ -11232,6 +11238,73 @@ mod tests {
     }
 
     #[test]
+    fn ec11_type_controlled_recovery_capsule_waits_for_firmware_terminal_control_write() {
+        let source = include_str!("coordinator.rs");
+        let cleanup_start = source
+            .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+            .expect("background BLE recovery helper should exist");
+        let cleanup_end = source[cleanup_start..]
+            .find("async fn maybe_probe_embedded_ble_recovery_pairing_advertisement")
+            .map(|offset| cleanup_start + offset)
+            .expect("background BLE recovery helper boundary should exist");
+        let cleanup = &source[cleanup_start..cleanup_end];
+        assert!(
+            cleanup.contains(
+                "let ec11_type_controlled_recovery = type_controlled_recovery && hardware_ec11_recovery_notice;"
+            ) && cleanup.contains(
+                "EC11 Type-controlled recovery suppresses pairing-progress capsule until firmware Type-ready terminal confirmation"
+            ),
+            "EC11 Type-controlled recovery must suppress its pre-terminal pairing-progress capsule"
+        );
+        assert!(
+            cleanup.contains(
+                "EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,\n                        !ec11_type_controlled_recovery,"
+            ),
+            "the EC11 Type-controlled PairAsync path must not publish a local-pairing capsule before terminal confirmation"
+        );
+
+        let resume_start = source
+            .find("fn resume_embedded_ble_listener_after_pairing_recovery")
+            .expect("pairing recovery resume helper should exist");
+        let resume_end = source[resume_start..]
+            .find("fn arm_embedded_ble_type_pairasync_startup_guard")
+            .map(|offset| resume_start + offset)
+            .expect("pairing recovery resume helper boundary should exist");
+        let resume = &source[resume_start..resume_end];
+        assert!(
+            resume.contains("if emit_reconnecting_capsule")
+                && resume.contains(
+                    "EC11 Type-controlled recovery suppresses intermediate capsule until firmware Type-ready terminal confirmation"
+                ),
+            "the notify-reopen path must retain the same terminal-only UI boundary"
+        );
+
+        let embedded_ble_source = std::include_str!("embedded_ble.rs").replace("\r\n", "\n");
+        let cccd_enabled = embedded_ble_source
+            .find("capture #{capture_id}: notify CCCD enabled")
+            .expect("background capture must log notify CCCD enablement");
+        let terminal_write = embedded_ble_source[cccd_enabled..]
+            .find("cleanup.write_type_heartbeat(&type_ready_command, \"Type heartbeat ready\")")
+            .map(|offset| cccd_enabled + offset)
+            .expect("background capture must write TYPE:READY after notify CCCD");
+        let ready_callback = embedded_ble_source[terminal_write..]
+            .find("on_ready()?;")
+            .map(|offset| terminal_write + offset)
+            .expect("ready callback must remain after the terminal control write");
+        assert!(
+            cccd_enabled < terminal_write && terminal_write < ready_callback,
+            "CCCD enablement alone must never publish the recovery terminal UI"
+        );
+        assert!(
+            embedded_ble_source
+                .contains("if !type_ready_confirmed {\n                            on_ready()?;")
+                && embedded_ble_source
+                    .contains("Type ready terminal confirmation recovered through heartbeat"),
+            "a retried TYPE:READY heartbeat must publish the terminal state exactly once"
+        );
+    }
+
+    #[test]
     fn embedded_ble_passive_local_reattach_stops_the_failed_background_retry_loop() {
         let source = include_str!("coordinator.rs");
         let start = source
@@ -13013,6 +13086,34 @@ mod tests {
     }
 
     #[test]
+    fn capsule_recording_diagnostics_are_sampled_but_state_and_text_are_retained() {
+        let mut throttle = CapsuleUiThrottleState::default();
+        let start = Instant::now();
+        let recording = CapsulePayload {
+            seq: 1,
+            session_id: Some("session-1".to_string()),
+            state: CapsuleState::Recording,
+            level: 0.2,
+            elapsed_ms: 0,
+            message: None,
+            inserted_chars: None,
+            translation: false,
+        };
+
+        assert!(throttle.should_record_backend_emit(&recording, start));
+        assert!(
+            !throttle.should_record_backend_emit(&recording, start + Duration::from_millis(950),)
+        );
+        assert!(throttle.should_record_backend_emit(&recording, start + Duration::from_secs(1),));
+
+        let preview = CapsulePayload {
+            message: Some("preview".to_string()),
+            ..recording
+        };
+        assert!(throttle.should_record_backend_emit(&preview, start + Duration::from_millis(1010),));
+    }
+
+    #[test]
     fn capsule_recording_level_ticks_continue_after_preview_payload() {
         let mut throttle = CapsuleUiThrottleState::default();
         let start = Instant::now();
@@ -13784,11 +13885,13 @@ fn emit_capsule_with_session(
         translation,
     };
 
-    crate::capsule_log::record_backend_emit(&payload, visible, show_capsule);
-    let should_trace_emit = !matches!(state, CapsuleState::Recording)
-        || elapsed_ms == 0
-        || payload.message.is_some()
-        || elapsed_ms % 500 == 0;
+    let should_trace_emit = {
+        let mut throttle = inner.capsule_ui_throttle.lock();
+        throttle.should_record_backend_emit(&payload, now)
+    };
+    if should_trace_emit {
+        crate::capsule_log::record_backend_emit(&payload, visible, show_capsule);
+    }
     let session_id_for_log = payload
         .session_id
         .clone()
@@ -13916,6 +14019,8 @@ struct CapsuleUiThrottleState {
     last_recording_keepalive_at: Option<Instant>,
     last_frontend_request: Option<CapsuleFrontendRequest>,
     last_frontend_emit_at: Option<Instant>,
+    last_recording_diagnostic_session_id: Option<String>,
+    last_recording_diagnostic_at: Option<Instant>,
 }
 
 impl CapsuleUiThrottleState {
@@ -13941,6 +14046,32 @@ impl CapsuleUiThrottleState {
         }
 
         false
+    }
+
+    fn should_record_backend_emit(&mut self, payload: &CapsulePayload, now: Instant) -> bool {
+        let plain_recording_level_tick = matches!(payload.state, CapsuleState::Recording)
+            && payload.message.is_none()
+            && payload.inserted_chars.is_none();
+        if !plain_recording_level_tick {
+            self.last_recording_diagnostic_session_id = None;
+            self.last_recording_diagnostic_at = None;
+            return true;
+        }
+
+        if self.last_recording_diagnostic_session_id.as_deref() != payload.session_id.as_deref() {
+            self.last_recording_diagnostic_session_id = payload.session_id.clone();
+            self.last_recording_diagnostic_at = Some(now);
+            return true;
+        }
+
+        let due = self
+            .last_recording_diagnostic_at
+            .map(|last| now.duration_since(last) >= Duration::from_secs(1))
+            .unwrap_or(true);
+        if due {
+            self.last_recording_diagnostic_at = Some(now);
+        }
+        due
     }
 
     fn should_run_window_ops(&mut self, request: CapsuleWindowRequest, now: Instant) -> bool {
