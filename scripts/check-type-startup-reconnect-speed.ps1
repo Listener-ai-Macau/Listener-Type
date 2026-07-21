@@ -3,7 +3,8 @@ param(
   [int]$ReadyTimeoutSeconds = 25,
   [int]$MaxNotifyReadyMs = 3000,
   [string]$OutputJson = "",
-  [switch]$RequirePersistedPath
+  [switch]$RequirePersistedPath,
+  [switch]$AllowForcedTermination
 )
 
 $ErrorActionPreference = "Stop"
@@ -103,7 +104,28 @@ if ($running.Count -gt 0) {
   $remaining = @(Get-Process -Name "listener-type" -ErrorAction SilentlyContinue)
   if ($remaining.Count -gt 0) {
     $gracefulShutdown = $false
-    $remaining | Stop-Process -Force
+    if ($AllowForcedTermination) {
+      $remaining | Stop-Process -Force
+    } else {
+      $summary = [ordered]@{
+        status                           = "FAIL"
+        errors                           = @("Listener Type did not exit after --quit; forced termination is disabled")
+        started_at                       = $null
+        process_id                       = $null
+        persisted_path_used              = $false
+        native_windows_hid_path_used     = $false
+        startup_fast_path_used           = $false
+        no_pair_async                    = $null
+        graceful_shutdown                = $false
+        start_to_notify_ready_ms         = $null
+        start_to_type_heartbeat_ready_ms = $null
+        max_start_to_notify_ready_ms     = $MaxNotifyReadyMs
+        events                           = @()
+        ble_device_state_json            = $null
+      }
+      $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $OutputJson -Encoding UTF8
+      throw "Listener Type did not exit after --quit; forced termination is disabled"
+    }
   }
 }
 
@@ -128,7 +150,12 @@ if (-not $last) {
 $ready = $last.events | Where-Object { $_.msg -like "*background listener notify ready*" } | Select-Object -Last 1
 $heartbeat = $last.events | Where-Object { $_.msg -like "*Type heartbeat ready sent*" } | Select-Object -Last 1
 $persistedSelected = $last.events | Where-Object { $_.msg -like "*selected persisted startup audio notify*" } | Select-Object -Last 1
-$nativeHidSelected = $last.events | Where-Object { $_.msg -like "*selected native Windows HID startup audio notify*" } | Select-Object -Last 1
+$nativeHidSelected = $last.events | Where-Object {
+  $_.msg -like "*selected native Windows HID startup audio notify*" -or
+  $_.msg -like "*selected active native Windows HID startup audio notify*" -or
+  $_.msg -like "*selected active native Windows HID service-id endpoint after direct GATT miss*" -or
+  $_.msg -like "*selected current native Windows HID service-id endpoint after direct GATT miss*"
+} | Select-Object -Last 1
 $startupFastPathSelected = @(
   $persistedSelected
   $nativeHidSelected

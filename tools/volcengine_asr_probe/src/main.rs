@@ -32,6 +32,8 @@ Options:
   --format <wav|pcm16le>      Optional input format. Defaults to path inference.
   --timeout-seconds <n>       Final result timeout. Defaults to 60.
   --chunk-bytes <n>           Feed chunk size. Defaults to 3200.
+  --initial-burst-ms <n>      Immediately feed this much initial audio before pacing. Defaults to 0.
+  --session-warmup-ms <n>     Wait after the ASR session is ready before real audio. Defaults to 0.
   --preview-only              Report first authoritative streaming preview timing.
   --resource-id <id>          Validation-only resource ID override; does not save credentials.
   --endpoint <bigmodel_async|bigmodel>
@@ -60,6 +62,8 @@ struct Args {
     format: Option<EmbeddedAudioInputFormat>,
     timeout_seconds: u64,
     chunk_bytes: usize,
+    initial_burst_ms: u64,
+    session_warmup_ms: u64,
     preview_only: bool,
     preroll_ms: u64,
     post_feed_wait_ms: u64,
@@ -96,7 +100,9 @@ struct ProbeReport {
     transcript_duration_ms: Option<u64>,
     preview_first_partial: Option<String>,
     preview_first_partial_elapsed_ms: Option<u64>,
+    preview_first_partial_after_first_pcm_ms: Option<u64>,
     preview_partial_updates: Option<usize>,
+    preview_max_gap_ms: Option<u64>,
     error: Option<String>,
 }
 
@@ -198,7 +204,9 @@ async fn main() {
                 transcript_duration_ms: None,
                 preview_first_partial: None,
                 preview_first_partial_elapsed_ms: None,
+                preview_first_partial_after_first_pcm_ms: None,
                 preview_partial_updates: None,
+                preview_max_gap_ms: None,
                 error: Some(format!("{error:#}")),
             };
             print_report(&report, None);
@@ -234,7 +242,9 @@ async fn run() -> Result<RunOutput> {
             transcript_duration_ms: None,
             preview_first_partial: None,
             preview_first_partial_elapsed_ms: None,
+            preview_first_partial_after_first_pcm_ms: None,
             preview_partial_updates: None,
+            preview_max_gap_ms: None,
             error: if configured {
                 None
             } else {
@@ -259,7 +269,9 @@ async fn run() -> Result<RunOutput> {
                         transcript_duration_ms: None,
                         preview_first_partial: None,
                         preview_first_partial_elapsed_ms: None,
+                        preview_first_partial_after_first_pcm_ms: None,
                         preview_partial_updates: None,
+                        preview_max_gap_ms: None,
                         error: Some("volcengine credentials missing".to_string()),
                     },
                     json_out: args.json_out,
@@ -281,6 +293,8 @@ async fn run() -> Result<RunOutput> {
                             &creds,
                             &pcm,
                             args.chunk_bytes,
+                            args.initial_burst_ms,
+                            args.session_warmup_ms,
                             args.preroll_ms,
                             args.post_feed_wait_ms,
                             args.pace_audio,
@@ -312,7 +326,10 @@ async fn run() -> Result<RunOutput> {
                                     preview_first_partial: preview.first_partial,
                                     preview_first_partial_elapsed_ms: preview
                                         .first_partial_elapsed_ms,
+                                    preview_first_partial_after_first_pcm_ms: preview
+                                        .first_partial_after_first_pcm_ms,
                                     preview_partial_updates: Some(preview.partial_updates),
+                                    preview_max_gap_ms: preview.max_gap_ms,
                                     error: if text_empty {
                                         Some("no preview partial".to_string())
                                     } else {
@@ -335,7 +352,9 @@ async fn run() -> Result<RunOutput> {
                                 transcript_duration_ms: None,
                                 preview_first_partial: None,
                                 preview_first_partial_elapsed_ms: None,
+                                preview_first_partial_after_first_pcm_ms: None,
                                 preview_partial_updates: None,
+                                preview_max_gap_ms: None,
                                 error: Some(format!("{error:#}")),
                             },
                         }
@@ -344,6 +363,8 @@ async fn run() -> Result<RunOutput> {
                             &creds,
                             &pcm,
                             args.chunk_bytes,
+                            args.initial_burst_ms,
+                            args.session_warmup_ms,
                             args.preroll_ms,
                             args.timeout_seconds,
                             args.pace_audio,
@@ -369,7 +390,9 @@ async fn run() -> Result<RunOutput> {
                                     transcript_duration_ms: Some(transcript.duration_ms),
                                     preview_first_partial: None,
                                     preview_first_partial_elapsed_ms: None,
+                                    preview_first_partial_after_first_pcm_ms: None,
                                     preview_partial_updates: None,
+                                    preview_max_gap_ms: None,
                                     error: if text_empty {
                                         Some("empty transcript".to_string())
                                     } else {
@@ -392,7 +415,9 @@ async fn run() -> Result<RunOutput> {
                                 transcript_duration_ms: None,
                                 preview_first_partial: None,
                                 preview_first_partial_elapsed_ms: None,
+                                preview_first_partial_after_first_pcm_ms: None,
                                 preview_partial_updates: None,
+                                preview_max_gap_ms: None,
                                 error: Some(format!("{error:#}")),
                             },
                         }
@@ -413,7 +438,9 @@ async fn run() -> Result<RunOutput> {
                     transcript_duration_ms: None,
                     preview_first_partial: None,
                     preview_first_partial_elapsed_ms: None,
+                    preview_first_partial_after_first_pcm_ms: None,
                     preview_partial_updates: None,
+                    preview_max_gap_ms: None,
                     error: Some(format!("{error:#}")),
                 },
             }
@@ -430,12 +457,14 @@ async fn transcribe_pcm(
     creds: &VolcengineCredentials,
     pcm: &[u8],
     chunk_bytes: usize,
+    initial_burst_ms: u64,
+    session_warmup_ms: u64,
     preroll_ms: u64,
     timeout_seconds: u64,
     pace_audio: bool,
     session_options: VolcengineSessionOptions,
 ) -> Result<asr::RawTranscript> {
-    let chunk_bytes = chunk_bytes.max(640).min(64 * 1024);
+    let chunk_bytes = chunk_bytes.max(480).min(64 * 1024);
     let asr = Arc::new(VolcengineStreamingASR::new_with_session_options(
         creds.clone(),
         Vec::new(),
@@ -445,8 +474,15 @@ async fn transcribe_pcm(
         .await
         .context("open Volcengine ASR session")?;
     asr.mark_audio_delivery_ready();
+    if session_warmup_ms > 0 {
+        tokio::time::sleep(Duration::from_millis(session_warmup_ms)).await;
+    }
     feed_preroll(&asr, chunk_bytes, preroll_ms, pace_audio).await;
-    for chunk in pcm.chunks(chunk_bytes) {
+    let initial_burst_bytes = ((initial_burst_ms as usize) * 32).min(pcm.len()) & !1;
+    if initial_burst_bytes > 0 {
+        asr.consume_pcm_chunk(&pcm[..initial_burst_bytes]);
+    }
+    for chunk in pcm[initial_burst_bytes..].chunks(chunk_bytes) {
         asr.consume_pcm_chunk(chunk);
         if pace_audio {
             let duration_ms = ((chunk.len() as f64) / 32.0).ceil().max(1.0) as u64;
@@ -466,49 +502,76 @@ async fn transcribe_pcm(
 struct PreviewProbeOutput {
     first_partial: Option<String>,
     first_partial_elapsed_ms: Option<u64>,
+    first_partial_after_first_pcm_ms: Option<u64>,
     partial_updates: usize,
+    max_gap_ms: Option<u64>,
 }
 
 async fn preview_pcm(
     creds: &VolcengineCredentials,
     pcm: &[u8],
     chunk_bytes: usize,
+    initial_burst_ms: u64,
+    session_warmup_ms: u64,
     preroll_ms: u64,
     post_feed_wait_ms: u64,
     pace_audio: bool,
     session_options: VolcengineSessionOptions,
 ) -> Result<PreviewProbeOutput> {
-    let chunk_bytes = chunk_bytes.max(640).min(64 * 1024);
+    let chunk_bytes = chunk_bytes.max(480).min(64 * 1024);
     let asr = Arc::new(VolcengineStreamingASR::new_with_session_options(
         creds.clone(),
         Vec::new(),
         session_options,
     ));
     let started = Instant::now();
-    let partials = Arc::new(ParkingMutex::new(Vec::<(u64, String)>::new()));
+    let first_real_pcm_at = Arc::new(ParkingMutex::new(None::<Instant>));
+    let partials = Arc::new(ParkingMutex::new(Vec::<(u64, u64, String)>::new()));
     let partials_for_intermediate = Arc::clone(&partials);
+    let first_real_pcm_for_intermediate = Arc::clone(&first_real_pcm_at);
     asr.set_final_intermediate_transcript_callback(Some(Arc::new(move |update| {
         let text = update.text;
         if text.trim().is_empty() {
             return;
         }
         let elapsed_ms = started.elapsed().as_millis() as u64;
-        partials_for_intermediate.lock().push((elapsed_ms, text));
+        let after_first_pcm_ms = first_real_pcm_for_intermediate
+            .lock()
+            .map(|at| at.elapsed().as_millis() as u64)
+            .unwrap_or_default();
+        partials_for_intermediate
+            .lock()
+            .push((elapsed_ms, after_first_pcm_ms, text));
     })));
     let partials_for_generic = Arc::clone(&partials);
+    let first_real_pcm_for_generic = Arc::clone(&first_real_pcm_at);
     asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
         if text.trim().is_empty() {
             return;
         }
         let elapsed_ms = started.elapsed().as_millis() as u64;
-        partials_for_generic.lock().push((elapsed_ms, text));
+        let after_first_pcm_ms = first_real_pcm_for_generic
+            .lock()
+            .map(|at| at.elapsed().as_millis() as u64)
+            .unwrap_or_default();
+        partials_for_generic
+            .lock()
+            .push((elapsed_ms, after_first_pcm_ms, text));
     })));
     asr.open_session()
         .await
         .context("open Volcengine preview ASR session")?;
     asr.mark_audio_delivery_ready();
+    if session_warmup_ms > 0 {
+        tokio::time::sleep(Duration::from_millis(session_warmup_ms)).await;
+    }
     feed_preroll(&asr, chunk_bytes, preroll_ms, pace_audio).await;
-    for chunk in pcm.chunks(chunk_bytes) {
+    *first_real_pcm_at.lock() = Some(Instant::now());
+    let initial_burst_bytes = ((initial_burst_ms as usize) * 32).min(pcm.len()) & !1;
+    if initial_burst_bytes > 0 {
+        asr.consume_pcm_chunk(&pcm[..initial_burst_bytes]);
+    }
+    for chunk in pcm[initial_burst_bytes..].chunks(chunk_bytes) {
         asr.consume_pcm_chunk(chunk);
         if pace_audio {
             let duration_ms = ((chunk.len() as f64) / 32.0).ceil().max(1.0) as u64;
@@ -523,10 +586,17 @@ async fn preview_pcm(
     asr.cancel();
     let partials = partials.lock();
     let first = partials.first().cloned();
+    let max_gap_ms = partials
+        .windows(2)
+        .map(|pair| pair[1].0.saturating_sub(pair[0].0))
+        .max();
     Ok(PreviewProbeOutput {
-        first_partial: first.as_ref().map(|(_, text)| text.clone()),
-        first_partial_elapsed_ms: first.map(|(elapsed_ms, _)| elapsed_ms),
+        first_partial: first.as_ref().map(|(_, _, text)| text.clone()),
+        first_partial_elapsed_ms: first.as_ref().map(|(elapsed_ms, _, _)| *elapsed_ms),
+        first_partial_after_first_pcm_ms: first
+            .map(|(_, after_first_pcm_ms, _)| after_first_pcm_ms),
         partial_updates: partials.len(),
+        max_gap_ms,
     })
 }
 
@@ -585,6 +655,8 @@ where
         format: None,
         timeout_seconds: 60,
         chunk_bytes: DEFAULT_CHUNK_BYTES,
+        initial_burst_ms: 0,
+        session_warmup_ms: 0,
         preview_only: false,
         preroll_ms: 0,
         post_feed_wait_ms: 3_000,
@@ -614,6 +686,12 @@ where
             }
             "--chunk-bytes" => {
                 parsed.chunk_bytes = next_value(&mut args, "--chunk-bytes")?.parse()?
+            }
+            "--initial-burst-ms" => {
+                parsed.initial_burst_ms = next_value(&mut args, "--initial-burst-ms")?.parse()?
+            }
+            "--session-warmup-ms" => {
+                parsed.session_warmup_ms = next_value(&mut args, "--session-warmup-ms")?.parse()?
             }
             "--preview-only" => parsed.preview_only = true,
             "--preroll-ms" => parsed.preroll_ms = next_value(&mut args, "--preroll-ms")?.parse()?,
@@ -811,6 +889,8 @@ mod tests {
     fn parse_preview_options_without_explicit_transcribe_command() {
         let args = parse_args([
             "--preview-only".to_string(),
+            "--session-warmup-ms".to_string(),
+            "3000".to_string(),
             "--preroll-ms".to_string(),
             "800".to_string(),
             "--resource-id".to_string(),
@@ -821,6 +901,7 @@ mod tests {
 
         assert!(matches!(args.command, Command::Transcribe));
         assert!(args.preview_only);
+        assert_eq!(args.session_warmup_ms, 3000);
         assert_eq!(args.preroll_ms, 800);
         assert_eq!(
             args.resource_id_override.as_deref(),

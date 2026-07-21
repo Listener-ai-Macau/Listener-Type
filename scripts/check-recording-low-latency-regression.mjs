@@ -193,19 +193,57 @@ requireIncludes(
   "Recording capsule partial preview must reuse the latest audio level",
 );
 for (const token of [
-  "fn stabilize_embedded_audio_partial_preview",
-  "candidate_key.starts_with(&current_key)",
-  "current_key.starts_with(&candidate_key)",
-  "embedded_audio_partial_preview_ignores_punctuation_only_revision",
-  "embedded_audio_partial_preview_extends_without_rewriting_visible_prefix",
-  "embedded_audio_partial_preview_does_not_shrink_visible_text",
+  "fn provider_preview_change",
+  "current.is_some_and(|value| value.trim() == candidate)",
+  "provider_preview_change(slot.as_deref(), &preview)",
+  "provider_preview_change_keeps_authoritative_early_rewrite_visible",
 ]) {
   requireIncludes(
     dictation,
     token,
-    "Recording capsule partial preview must grow without rewriting visible text",
+    "Recording capsule preview must preserve every non-duplicate provider candidate",
   );
 }
+
+const streamingPcm = section(
+  dictation,
+  "struct EmbeddedAudioDictationSession",
+  "#[derive(Default)]\nstruct EmbeddedStreamingDictation",
+  "Embedded streaming PCM batching",
+);
+for (const token of [
+  "streaming_pcm_buffer: Vec<u8>",
+  "self.streaming_pcm_buffer.extend_from_slice(pcm);",
+  "fn consume_ready_streaming_pcm_blocks",
+  "EMBEDDED_AUDIO_FEED_CHUNK_BYTES",
+  "fn flush_streaming_pcm",
+  "self.consumer.consume_pcm_chunk(&asr_pcm);",
+]) {
+  requireIncludes(
+    streamingPcm,
+    token,
+    "Streaming AGC must resolve the bounded provider PCM block instead of each BLE packet",
+  );
+}
+const streamingStop = section(
+  dictation,
+  "async fn finish_streaming_session",
+  "async fn finish_completed_streaming_session",
+  "Embedded streaming stop finalization",
+);
+requireIncludes(
+  streamingStop,
+  "session.flush_streaming_pcm();",
+  "Streaming stop must submit the final partial PCM block before ASR completion",
+);
+for (const token of [
+  "embedded_streaming_pcm_combines_short_ble_packets_before_asr",
+  "embedded_streaming_pcm_flushes_final_partial_block_once",
+  "volcengine_streaming_agc_resolves_one_provider_block_not_each_ble_packet",
+]) {
+  requireIncludes(dictation, token, "Streaming PCM batching regression test");
+}
+
 const partialPreviewEmit = section(
   dictation,
   "fn emit_embedded_audio_partial_preview_if_active",

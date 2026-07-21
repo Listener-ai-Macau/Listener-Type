@@ -39,7 +39,8 @@ for (const token of [
   'const FINAL_TRANSCRIPT_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";',
   'const BIDIRECTIONAL_TRANSCRIPT_ENDPOINT: &str',
   '"wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";',
-  'endpoint: VolcengineSessionEndpoint::OptimizedBidirectional,',
+  'Self::OptimizedBidirectional => FINAL_TRANSCRIPT_ENDPOINT,',
+  'Self::Bidirectional => BIDIRECTIONAL_TRANSCRIPT_ENDPOINT,',
   '"enable_nonstream": self.session_options.enable_nonstream',
   'request["end_window_size"] = Value::from(end_window_size_ms);',
   'request["force_to_speech_time"] = Value::from(force_to_speech_time_ms);',
@@ -92,8 +93,36 @@ const builder = section(
 );
 requireIncludes(
   builder,
-  "set_volcengine_final_supplemental_preview_callback(&asr, inner, session_id);",
-  "Authoritative ASR builder",
+  "set_volcengine_preview_callbacks(&asr, inner, session_id);",
+  "Authoritative realtime ASR builder",
+);
+
+const previewCallbacks = section(
+  dictation,
+  "fn set_volcengine_preview_callbacks(",
+  "fn build_volcengine_asr(",
+  "Authoritative realtime ASR callbacks",
+);
+for (const token of [
+  "asr.set_partial_transcript_callback",
+  "asr.set_final_intermediate_transcript_callback",
+]) {
+  requireIncludes(previewCallbacks, token, "Authoritative realtime ASR callbacks");
+}
+requireIncludes(
+  dictation,
+  "record_embedded_audio_preview_published",
+  "Published preview observability",
+);
+requireIncludes(
+  volcengine,
+  "Self::OptimizedBidirectional | Self::Bidirectional => true,",
+  "Realtime ASR preview delivery",
+);
+requireIncludes(
+  volcengine,
+  ".emits_stream_preview_before_final()",
+  "Realtime ASR preview delivery",
 );
 
 const opener = section(
@@ -104,8 +133,8 @@ const opener = section(
 );
 requireIncludes(
   opener,
-  "authoritative bidirectional ASR ready; preview and final share one provider session",
-  "Authoritative ASR opener",
+  "authoritative optimized-bidirectional ASR ready; preview and final share one provider session",
+  "Authoritative optimized bidirectional ASR opener",
 );
 
 for (const token of [
@@ -139,15 +168,15 @@ requireIncludes(
 const completion = section(
   volcengine,
   "pub async fn await_final_result_with_timeout",
-  "fn complete_from_stable_partial_after_finish_grace",
+  "fn final_partial_coverage_gap",
   "Final-result completion",
 );
 for (const token of [
   "const FINAL_RESULT_TIMEOUT: Duration = Duration::from_secs(12);",
-  "waiting up to {} ms for protocol final frame",
-  "tokio::time::timeout(remaining, rx)",
+  "tokio::time::timeout(timeout, &mut rx)",
   "final transcript coverage incomplete after full provider timeout",
   "VolcengineASRError::FinalResultCoverageIncomplete",
+  "provider final result timed out after {} ms",
 ]) {
   requireIncludes(volcengine, token, "Final-result completion");
 }
@@ -172,36 +201,33 @@ for (const token of [
 const finalSupplement = section(
   dictation,
   "fn update_embedded_audio_partial_preview_from_final_supplement",
-  "fn stabilize_embedded_audio_partial_preview",
+  "fn provider_preview_change",
   "Final supplement handoff",
 );
 for (const token of [
   "crate::asr::volcengine::FinalIntermediateTranscript",
   "let authoritative_two_pass = update.authoritative_two_pass;",
-  "stabilize_embedded_audio_final_supplemental_preview_with_provider_authority(",
+  "provider_preview_change(slot.as_deref(), &preview)",
 ]) {
   requireIncludes(finalSupplement, token, "Final supplement handoff");
 }
 
-const stabilization = section(
+const providerPreviewPolicy = section(
   dictation,
-  "fn stabilize_embedded_audio_final_supplemental_preview_with_provider_authority",
-  "fn embedded_audio_final_supplement_adds_decorative_progress",
-  "Authoritative preview correction",
+  "fn provider_preview_change",
+  "fn stabilize_embedded_audio_partial_preview",
+  "Provider preview replacement policy",
 );
 for (const token of [
-  "if authoritative_two_pass && current_key != candidate_key",
-  "applied provider-authoritative two-pass preview correction",
-  "return Some(candidate.to_string());",
+  "current.is_some_and(|value| value.trim() == candidate)",
+  "Some(candidate.to_string())",
 ]) {
-  requireIncludes(stabilization, token, "Authoritative preview correction");
+  requireIncludes(providerPreviewPolicy, token, "Provider preview replacement policy");
 }
-const authorityRewrite = stabilization.indexOf("if authoritative_two_pass && current_key != candidate_key");
-const heuristicRewrite = stabilization.indexOf("embedded_audio_final_supplement_is_brief_bounded_revision");
-if (authorityRewrite < 0 || heuristicRewrite < 0 || authorityRewrite > heuristicRewrite) {
-  fail("Provider-authoritative preview correction must take precedence over heuristic rewrites");
+if (providerPreviewPolicy.includes("embedded_audio_partial_preview_stability_key")) {
+  fail("Provider preview replacement must not reintroduce heuristic text suppression");
 }
 
 console.log(
-  "PASS: preview and final use one authoritative bidirectional ASR session; provider-authoritative two-pass corrections reach the live preview without a replaying sidecar.",
+  "PASS: default preview and final use one authoritative optimized bidirectional ASR session; its early stream preview and later two-pass correction both reach the live preview without a replaying sidecar.",
 );

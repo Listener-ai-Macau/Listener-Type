@@ -107,8 +107,10 @@ const captureWindow = inferCaptureWindow(args.serialLog, serialText);
 
 if (!prompt) {
   errors.push("prompt result JSON is empty or missing");
-} else if (prompt.selected !== "已完成") {
-  errors.push(`operator prompt selected ${JSON.stringify(prompt.selected)} instead of "已完成"`);
+} else if (!["已完成", "通过"].includes(prompt.selected)) {
+  errors.push(
+    `operator prompt selected ${JSON.stringify(prompt.selected)} instead of a completed review result`,
+  );
 }
 
 const dispatches = [];
@@ -159,6 +161,13 @@ for (const [index, line] of serialLines.entries()) {
   }
 }
 
+// Firmware records capture integrity after the terminal transport summary.
+// Associate it only after the whole capture is parsed, rather than making
+// line order turn an otherwise complete physical session into a false NO_GO.
+for (const summary of summaries) {
+  summary.integrity = integrityBySession.get(summary.session) ?? null;
+}
+
 if (dispatches.length === 0) {
   errors.push("serial log has no EC11 fast Idle recording dispatch");
 }
@@ -170,9 +179,9 @@ for (const dispatch of dispatches) {
   }
 }
 const firstDispatch = dispatches[0] ?? null;
-if (firstDispatch?.espMs !== null) {
-  for (const stop of activeStops) {
-    if (stop.espMs !== null && stop.espMs - firstDispatch.espMs <= 500) {
+if (Number.isInteger(firstDispatch?.espMs)) {
+    for (const stop of activeStops) {
+      if (stop.espMs !== null && stop.espMs - firstDispatch.espMs <= 500) {
       errors.push(
         `fast active recording stop appeared ${stop.espMs - firstDispatch.espMs} ms after fast Idle dispatch at line ${stop.line}`,
       );

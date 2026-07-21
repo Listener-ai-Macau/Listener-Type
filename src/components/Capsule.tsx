@@ -57,9 +57,6 @@ function AudioBars({ level }: AudioBarsProps) {
             background: 'var(--ol-blue)',
             opacity: 0.82,
             transformOrigin: 'center',
-            // 0.08s 在 60Hz audio-level 更新下太快，每次 re-render 都重启 transition，
-            // 视觉上是阶梯式跳变。延长到 0.18s 让多次 update 在曲线内平滑混合，
-            // easeOutExpo-like 缓动让圆点→长条的形变自然顺滑（用户原话"圆形跳成矩形"）。
             transition: 'height 0.18s cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         />
@@ -357,7 +354,7 @@ function Pill({
             fontSize: 11,
             fontWeight: 500,
             color: '#171714',
-            flex: '1 1 auto',
+            flex: '1 1 100%',
             minWidth: 0,
             maxWidth: metrics.textWidth,
             textAlign: 'center',
@@ -526,6 +523,11 @@ export function Capsule() {
   const previousElapsedMsRef = useRef<number>(0);
   const messageSessionIdRef = useRef<string | null>(null);
   const capsuleOrderingRef = useRef(createCapsuleOrderingTracker());
+  const capsuleIngressTraceRef = useRef<{
+    elapsedMs: number;
+    sessionId: string | null | undefined;
+    state: CapsuleState | null;
+  }>({ elapsedMs: 0, sessionId: null, state: null });
   const suppressNonSessionEventsUntilRef = useRef<number>(0);
   const stopAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorAutoDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -600,18 +602,34 @@ export function Capsule() {
           });
           return;
         }
-        traceCapsule('event_received', {
-          state: p.state,
-          elapsedMs: p.elapsedMs,
-          detail: {
-            level: p.level,
-            insertedChars: p.insertedChars ?? null,
-            hasMessage: Boolean(p.message),
-            translation: p.translation === true,
-            seq: p.seq,
+        const previousTrace = capsuleIngressTraceRef.current;
+        const significantRecordingEvent =
+          p.state !== 'recording'
+          || Boolean(p.message)
+          || p.insertedChars != null
+          || previousTrace.state !== p.state
+          || previousTrace.sessionId !== p.sessionId
+          || p.elapsedMs < previousTrace.elapsedMs
+          || p.elapsedMs - previousTrace.elapsedMs >= 1000;
+        if (significantRecordingEvent) {
+          capsuleIngressTraceRef.current = {
+            elapsedMs: p.elapsedMs,
             sessionId: p.sessionId,
-          },
-        });
+            state: p.state,
+          };
+          traceCapsule('event_received', {
+            state: p.state,
+            elapsedMs: p.elapsedMs,
+            detail: {
+              level: p.level,
+              insertedChars: p.insertedChars ?? null,
+              hasMessage: Boolean(p.message),
+              translation: p.translation === true,
+              seq: p.seq,
+              sessionId: p.sessionId,
+            },
+          });
+        }
         const ordering = applyCapsulePayloadOrdering(capsuleOrderingRef.current, p);
         if (!ordering.accepted) {
           traceCapsule('event_dropped_stale', {
