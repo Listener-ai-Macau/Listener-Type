@@ -126,6 +126,16 @@
       "remaining_uncommitted_boundary": "Type clipboard/automatic-Enter WIP remains outside these commits; Firmware tools/flash.ps1 and .rollback-firmware-1b37813/ remain unrelated dirty paths.",
       "acceptance_boundary": "The root zip is a user-facing release artifact and is not committed. Source commits are split or explicitly scoped to completed recording/Bluetooth/OTA/observability work; clipboard/automatic-Enter WIP and unrelated dirty paths remain uncommitted. The active Goal still requires its final completion audit."
     },
+    "listener_recording_acceptance_owner_clarification_20260721": {
+      "status": "owner_confirmed_recording_pass_invalid_fixture_only",
+      "recorded_at": "2026-07-21",
+      "source": "Product-owner direction: 没有吧，你就继续验收就好了。而且那个录音为什么还没过？不是已经过了吗？",
+      "requirement": "Treat the Listener recording product acceptance as already passed under the retained real-human evidence and explicit canonical recording selection. Continue the remaining platform acceptance audit instead of reopening recording causality solely because a later external-speaker mechanical fixture was below its acoustic qualifier.",
+      "accepted_recording_evidence": "Listener-Type/.cache/validation/recording-human-acceptance-20260721/real-voice-60s-01/human-recording-machine-summary.json: AFE output peak=1077, clipped=false, expected=sent=4623, missing=0, effective consumption=32000 B/s, retry/queue/notify failures=0, first preview=1060 ms, maximum provider gap=1347 ms, capsule gap=1279 ms, provider final=true.",
+      "accepted_recording_operator_result": "Listener-Type/.cache/validation/platform-current-20260721/final-human-acceptance-20260721/recording/operator-result.json: selected=通过.",
+      "diagnostic_fixture_boundary": "The current UsbRecordingToggle, SyntheticEc11, and sine-tone runs are retained as NO_GO_INVALID_FIXTURE evidence because the external playback path delivered insufficient acoustic level. They do not revoke the accepted real-human recording result, and they do not authorize raising Firmware gain or fabricating preview text.",
+      "acceptance_boundary": "Recording remains product-accepted. The mechanical fixture is a diagnostic-only evidence gap; future valid fixture work may improve machine diagnostics but must not reopen accepted recording behavior without a reproducible real-human regression."
+    },
     "listener_fresh_native_pairing_machine_gap_20260721": {
       "status": "human_accepted_with_scoped_threshold_revision",
       "recorded_at": "2026-07-21T09:30:00+08:00",
