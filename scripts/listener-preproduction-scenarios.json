@@ -208,6 +208,32 @@
         "Canonical Chinese total-acceptance operator-prompt result and note stored beside its machine artifact"
       ]
     },
+    "listener_owner_replay_total_acceptance_and_prepare_1_0_3_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T14:42:00+08:00",
+      "source": "Product-owner note from the total-acceptance window: 之前不是有一些总验收的步骤嘛，就重新再做一遍那个验收；把仓库整理一下；也可以进行 1.0.3 的开发。",
+      "requirement": "Replay the canonical Listener 1.0.2 total-acceptance steps from windows-listener-preproduction-human-review.ps1, preserve every machine result and operator note, then keep the repositories organized and prepare a separate 1.0.3 development line only after the 1.0.2 replay is recorded.",
+      "verification_update": "The one-shot total prompt is treated as a routing confirmation only; the 20-step canonical review remains the acceptance authority. Any non-empty operator note stops the review for triage before later steps continue.",
+      "release_boundary": "Do not mix 1.0.3 development changes into the pushed v1.0.2 tag or its replay artifacts. Keep clipboard/automatic-Enter WIP outside both releases until its own acceptance.",
+      "evidence_required": [
+        "Canonical 20-step review summary and per-step prompt results",
+        "Machine evidence for each current step, with no stimulus audio/transcript retention beyond existing contracts",
+        "A clean v1.0.2 repository/tag audit before any 1.0.3 source change"
+      ]
+    },
+    "listener_owner_release_tag_requires_root_package_sync_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T15:05:00+08:00",
+      "source": "Product-owner direction: 以后发布打tag都要确保这两个东西是最新的",
+      "requirement": "Before every Listener release tag or tag push, rebuild or select the current Type MSI and stable Firmware OTA from the release source commits, copy both user-facing artifacts to the two Listener repository roots, and prove root hashes match the staged artifacts and their source commits. Do not tag or push a release while either root package is stale or points to an older build.",
+      "required_evidence": [
+        "Root Listener-Type/ListenerType_<version>_x64_en-US.msi SHA256 equals the current MSVC MSI staging artifact and installed Program Files payload hash",
+        "Root Listener-Firmware/listener-ota-<version>.zip SHA256 equals the current stable OTA staging artifact and ota_manifest.json git_commit/payload hash",
+        "A package-sync audit is stored under Listener-Type/.cache/validation without audio, transcript, or stimulus text"
+      ],
+      "release_boundary": "The package sync gate is mandatory for future tags and does not authorize mixing clipboard/automatic-Enter WIP, caches, audio, transcripts, stimulus text, or unrelated Firmware dirty paths into a release.",
+      "current_application": "The 1.0.2 root package sync is being re-run after the installed Program Files Type was found to be an older 2026-07-12 build; the release tag remains immutable until the current MSVC MSI is installed and the root MSI hash is re-audited."
+    },
     "listener_recording_acceptance_owner_clarification_20260721": {
       "status": "owner_confirmed_recording_pass_invalid_fixture_only",
       "recorded_at": "2026-07-21",
