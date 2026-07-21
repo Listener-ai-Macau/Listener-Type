@@ -4436,12 +4436,24 @@ fn start_embedded_ble_passive_local_reattach_watch(
                 );
                 let link_reachable = match fresh_native_hid_address {
                     Some(address) => {
-                        embedded_ble_pairing_recovery_link_reachable_for_device(
+                        let preferred_reachable = embedded_ble_pairing_recovery_link_reachable_for_device(
                             &inner,
                             "passive local Windows reattach fresh GATT link check",
                             address,
                         )
-                        .await
+                        .await;
+                        if preferred_reachable {
+                            true
+                        } else {
+                            log::info!(
+                                "[embedded-ble] passive local Windows reattach fresh HID address was not a GATT target; retrying the current Listener selector"
+                            );
+                            embedded_ble_pairing_recovery_link_reachable(
+                                &inner,
+                                "passive local Windows reattach selector GATT link fallback",
+                            )
+                            .await
+                        }
                     }
                     None => {
                         embedded_ble_pairing_recovery_link_reachable(
@@ -4452,6 +4464,11 @@ fn start_embedded_ble_passive_local_reattach_watch(
                     }
                 };
                 if link_reachable {
+                    // Windows may still rebuild the HID/GATT service graph after the
+                    // fresh local pairing is reachable. Skip one startup stale-HID
+                    // preflight during that bounded rebuild window; otherwise the
+                    // old deleted address can pause notify immediately again.
+                    arm_embedded_ble_type_pairasync_startup_guard(&inner);
                     resume_embedded_ble_listener_after_pairing_recovery(
                         &inner,
                         "passive local Windows reattach paired and link reachable",
@@ -6276,13 +6293,13 @@ async fn hold_embedded_ble_for_manual_windows_unpair(inner: &Arc<Inner>, expecte
         EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON,
     );
     let firmware_recovery = async_runtime::spawn_blocking(|| {
-        crate::embedded_ble::send_recording_control_recovery(Duration::from_secs(3))
+        crate::embedded_ble::send_recording_control_manual_pairing(Duration::from_secs(3))
     })
     .await;
     match firmware_recovery {
         Ok(Ok(())) => {
             log::warn!(
-                "[embedded-ble] manual Windows unpair sent Listener recovery pairing command without Windows PairAsync"
+                "[embedded-ble] manual Windows unpair sent Listener manual-pairing recovery cue without Windows PairAsync"
             );
             tokio::time::sleep(Duration::from_millis(700)).await;
         }
@@ -10820,14 +10837,14 @@ mod tests {
             "background stale cleanup must keep a Windows pairing confirmation watcher alive instead of sleeping through the hold window"
         );
         assert!(
-            manual_helper.contains("manual Windows unpair sent Listener recovery pairing command without Windows PairAsync"),
+            manual_helper.contains("manual Windows unpair sent Listener manual-pairing recovery cue without Windows PairAsync"),
             "manual Windows removal should clear/open the firmware pairing window without letting Type automatically PairAsync the old PC"
         );
         let manual_suppression_index = manual_helper
             .find("suppressed automatic PairAsync because Windows no longer reports a paired Listener")
             .expect("manual removal suppression log should exist");
         let manual_recovery_index = manual_helper[manual_suppression_index..]
-            .find("manual Windows unpair sent Listener recovery pairing command without Windows PairAsync")
+            .find("manual Windows unpair sent Listener manual-pairing recovery cue without Windows PairAsync")
             .map(|offset| manual_suppression_index + offset)
             .expect("manual removal branch should command firmware recovery");
         let manual_emit_index = manual_helper[manual_suppression_index..]
@@ -11522,6 +11539,12 @@ mod tests {
         assert!(
             fresh_hid_address < direct_gatt,
             "passive reattach must use the newly observed HID address as its first GATT target"
+        );
+        assert!(
+            body.contains("arm_embedded_ble_type_pairasync_startup_guard")
+                && body.find("arm_embedded_ble_type_pairasync_startup_guard")
+                    < body.find("resume_embedded_ble_listener_after_pairing_recovery"),
+            "a proven local reattach must protect the notify restart from the startup stale-HID preflight while Windows rebuilds services"
         );
         for forbidden in [
             "PairAsync",

@@ -5559,6 +5559,28 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         )
     }
 
+    pub fn send_recording_control_manual_pairing(timeout: Duration) -> Result<(), String> {
+        let serial_result =
+            send_recovery_control_command_via_usb_serial("VREC:RECOVERY:TYPE:MANUAL", timeout);
+        match &serial_result {
+            Ok(()) => {
+                log::info!("[embedded-ble] manual pairing recovery sent via USB serial");
+                return Ok(());
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] manual pairing recovery USB serial path unavailable; trying BLE control: {err}"
+                );
+            }
+        }
+        send_recording_control_command(
+            b"VREC:RECOVERY:TYPE:MANUAL\n",
+            timeout,
+            "manual pairing recovery",
+            ActiveControlTransientFallback::TryFreshGatt,
+        )
+    }
+
     pub fn send_recording_control_silent_recovery(timeout: Duration) -> Result<(), String> {
         let serial_result =
             send_recovery_control_command_via_usb_serial("VREC:RECOVERY:TYPE:SILENT", timeout);
@@ -8491,8 +8513,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
         let recent_pairing = recent_pairing_fast_gatt_active(Instant::now());
         if let Some(state) = recent_pairing.as_ref() {
-            match open_notify_target_for_known_addresses("recent pairing fast GATT", state.address)
-            {
+            match open_notify_target_for_known_addresses_with_cache_modes(
+                "recent pairing fast GATT",
+                state.address,
+                &[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached],
+            ) {
                 Ok(target) => {
                     log::info!(
                         "[embedded-ble] selected recent-pairing fast GATT path target={:?}",
@@ -9477,6 +9502,18 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         context: &str,
         preferred_address: Option<u64>,
     ) -> Result<OpenNotifyTarget, String> {
+        open_notify_target_for_known_addresses_with_cache_modes(
+            context,
+            preferred_address,
+            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached],
+        )
+    }
+
+    fn open_notify_target_for_known_addresses_with_cache_modes(
+        context: &str,
+        preferred_address: Option<u64>,
+        cache_modes: &[BluetoothCacheMode],
+    ) -> Result<OpenNotifyTarget, String> {
         let mut addresses = Vec::new();
         if let Some(address) = preferred_address {
             push_unique_address(&mut addresses, address);
@@ -9493,7 +9530,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
         let mut last_error = None;
         for address in addresses {
-            match open_notify_target_for_device(address) {
+            match open_notify_target_for_device_with_cache_modes(address, cache_modes) {
                 Ok(target) => {
                     remember_runtime_bluetooth_target_address_for_current(
                         address,
@@ -15690,6 +15727,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             assert!(source.contains("pub fn send_recording_control_silent_recovery"));
             assert!(source.contains("\"VREC:RECOVERY:TYPE:SILENT\""));
             assert!(source.contains("b\"VREC:RECOVERY:TYPE:SILENT\\n\""));
+            assert!(source.contains("pub fn send_recording_control_manual_pairing"));
+            assert!(source.contains("\"VREC:RECOVERY:TYPE:MANUAL\""));
+            assert!(source.contains("b\"VREC:RECOVERY:TYPE:MANUAL\\n\""));
             assert!(!production.contains("send_recording_control_native_pairing_recovery"));
         }
 
@@ -16695,6 +16735,11 @@ pub fn send_recording_control_recovery(timeout: Duration) -> Result<(), String> 
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_manual_pairing(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_control_manual_pairing(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_control_silent_recovery(timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_control_silent_recovery(timeout)
 }
@@ -17221,6 +17266,11 @@ pub fn send_recording_control_stop(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_recovery(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recovery is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_manual_pairing(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE manual pairing recovery is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
