@@ -11476,7 +11476,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     ) -> Result<OpenNotifyTarget, String> {
         open_notify_target_for_device_with_cache_modes_and_timeout(
             address,
-            &[BluetoothCacheMode::Uncached],
+            // A persisted native-HID bond can have a valid system GATT cache
+            // while Windows is temporarily unable to complete a fresh
+            // Uncached service query (for example during link rehydration).
+            // Keep the exact current address, then fall back to the device.
+            &[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached],
             STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT,
         )
         .and_then(|target| {
