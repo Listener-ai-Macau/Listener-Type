@@ -3362,6 +3362,26 @@ pub async fn set_device_settings(
                 log::info!(
                     "[device-settings] BLE name USB apply ACK confirms firmware advertising handoff; starting Windows cache refresh before final readback"
                 );
+                // The USB apply acknowledgement already leaves the firmware's settings
+                // endpoint available. Read it before pausing for Windows cache cleanup so
+                // the post-write verification can reuse this confirmed snapshot instead of
+                // paying for a second serial round-trip after pairing recovery.
+                if let Ok(snapshot) = read_device_settings_snapshot_from_firmware().await {
+                    if snapshot.ble_name == request.ble_name && !snapshot.ble_name_pending_restart {
+                        post_apply_snapshot = Some(snapshot);
+                        log::info!(
+                            "[device-settings] BLE name USB apply readback confirmed before Windows cache refresh"
+                        );
+                    } else {
+                        log::warn!(
+                            "[device-settings] BLE name USB apply readback did not confirm requested name before Windows cache refresh"
+                        );
+                    }
+                } else {
+                    log::warn!(
+                        "[device-settings] BLE name USB apply early readback unavailable; final readback remains required"
+                    );
+                }
                 crate::embedded_ble::set_configured_bluetooth_target_name(&request.ble_name);
                 match refresh_windows_ble_cache_after_device_ble_name_change(
                     &coord,
