@@ -940,6 +940,20 @@ $steps = @(
             "Windows 不能自己重新出现已连接。"
             "可以提示用户手动恢复，但不能自动 PairAsync 抢回，这用于换电脑。"))
     New-ReviewStep `
+        -Id "manual-windows-repair-type-reattach" `
+        -Title "Windows 手动恢复后 Type 自动接回" `
+        -Action (Join-Text @(
+            "保持 Type 打开，不要重启 Type。"
+            "在刚才删除 Listener 后，按设备上的 EC11 旋钮快速双击，等待 Windows 蓝牙配对/连接弹窗。"
+            "在 Windows 弹窗里明确点击连接/允许恢复；不要在 Type 里点 PairAsync、不要手动重启 Type。"
+            "等待最多 20 秒，确认 Type 胶囊回到可用状态后再记录结果。")) `
+        -Expected (Join-Text @(
+            "Type 只等待这次明确的 Windows 本机配对证据，不会自动 PairAsync 或 UnpairAsync 抢回旧电脑。"
+            "Windows 配对弹窗确认后，Type 自动恢复后台 BLE notify/录音通道，无需重启 Type。"
+            "日志必须出现 explicit local pairing/HID evidence、GATT/notify 恢复和 secure TYPE:READY（或等价 ready 终态）。"
+            "删除到恢复窗口内不能出现 NimBLE panic/reboot；恢复后的音频传输不得丢包。"
+            "未真正连上前显示琥珀色低亮双闪；连上后才回到正常 BLE/TYPE_READY 灯效。"))
+    New-ReviewStep `
         -Id "no-type-native-pairing" `
         -Title "没有 Type 的原生配对" `
         -Action (Join-Text @(
