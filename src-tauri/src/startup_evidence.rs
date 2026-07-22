@@ -247,7 +247,7 @@ mod tests {
         assert!(coordinator.contains("native_windows_hid_present_pairing_addresses_for_startup()"));
         assert!(coordinator.contains("native_hid_active_connection_finished"));
         assert!(embedded_ble.contains("powershell_listener_present_pnp_entries"));
-        assert!(embedded_ble.contains("Get-CimInstance Win32_PnPEntity"));
+        assert!(embedded_ble.contains("denzic_ble_windows::enumerate_present_ble_hid_pnp_entries"));
         assert!(embedded_ble.contains("warm_native_windows_hid_present_pairing_snapshot"));
         assert!(embedded_ble.contains("native_hid_pnp_prefetch_ready"));
     }

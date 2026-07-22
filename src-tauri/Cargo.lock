@@ -1318,6 +1318,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "denzic-ble-windows"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "denzic-device-control-v1-core"
 version = "0.1.0"
 dependencies = [
@@ -3214,6 +3224,7 @@ dependencies = [
  "core-graphics 0.24.0",
  "cpal",
  "denzic-audio-v1-core",
+ "denzic-ble-windows",
  "denzic-device-control-v1-core",
  "denzic-observability-v1-core",
  "denzic-ota-core",

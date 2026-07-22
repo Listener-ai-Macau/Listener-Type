@@ -329,204 +329,110 @@ impl FirmwareDiagnosticLogPull {
     }
 }
 
+const LISTENER_BLE_FAILURE_HINTS: denzic_ble_windows::failure::BleFailureHints =
+    denzic_ble_windows::failure::BleFailureHints {
+        background_contention: &["background listener"],
+        missing_pairing: &["no paired listener", "pair the listener"],
+        device_asleep: &["press key4", "key4"],
+        device_missing: &["no writable listener ble ota"],
+    };
+
 pub fn classify_ble_failure(error: &str) -> BleFailureClassification {
-    let lower = error.to_ascii_lowercase();
-    let kind = if lower.contains("only supported on windows") {
-        BleFailureKind::UnsupportedPlatform
-    } else if lower.contains("ota reboot")
-        || lower.contains("after ota")
-        || lower.contains("confirm")
-        || lower.contains("reboot window")
-    {
-        BleFailureKind::OtaRebootWindow
-    } else if lower.contains("background listener")
-        || lower.contains("background capture")
-        || lower.contains("already active")
-        || lower.contains("foreground probe skipped")
-        || lower.contains("cancelled")
-        || lower.contains("canceled")
-    {
-        BleFailureKind::BackgroundListenerContention
-    } else if lower.contains("firmware revision")
-        || lower.contains("dis firmware")
-        || lower.contains("firmware version")
-    {
-        BleFailureKind::MissingDisFirmwareRevision
-    } else if lower.contains("cccd")
-        || lower.contains("protocol_error")
-        || lower.contains("protocol error")
-        || lower.contains("notify write")
-        || lower.contains("notify characteristic")
-    {
-        BleFailureKind::CccdProtocolError
-    } else if lower.contains("bluetooth service")
-        || lower.contains("radio")
-        || lower.contains("adapter")
-        || lower.contains("0x8007048f")
-        || lower.contains("0x800710df")
-        || lower.contains("service reset")
-    {
-        BleFailureKind::WindowsBluetoothServiceResetNeeded
-    } else if lower.contains("access denied") || lower.contains("denied") {
-        BleFailureKind::AccessDenied
-    } else if ble_error_suggests_missing_pairing(&lower) {
-        BleFailureKind::MissingPairing
-    } else if ble_error_suggests_device_asleep(&lower) {
-        BleFailureKind::DeviceAsleep
-    } else if lower.contains("stale")
-        || lower.contains("unknown gatt")
-        || lower.contains("0x80070016")
-        || (lower.contains("cached") && !lower.contains("uncached"))
-        || lower.contains("gatt cache")
-        || lower.contains("service changed")
-    {
-        BleFailureKind::StaleGattService
-    } else if ble_error_suggests_low_power_idle_disconnect(&lower) {
-        BleFailureKind::LowPowerIdleDisconnect
-    } else if lower.contains("unreachable")
-        || lower.contains("disconnected")
-        || (lower.contains("transport_not_ready") && lower.contains("disconnect"))
-        || lower.contains("timed out")
-        || lower.contains("timeout")
-    {
-        BleFailureKind::PairedButDisconnected
-    } else if lower.contains("not found")
-        || lower.contains("no subscribable")
-        || lower.contains("no writable listener ble ota")
-        || lower.contains("selector returned no")
-        || lower.contains("returned no devices")
-        || lower.contains("no devices")
-        || lower.contains("no paired ble device")
-    {
-        BleFailureKind::DeviceMissing
-    } else {
-        BleFailureKind::Unknown
-    };
-
-    let (retryable, automatic_recovery, user_action) = match kind {
-        BleFailureKind::DeviceMissing => (
-            true,
-            false,
-            "Wake the Listener device, confirm it is paired, then retry or re-pair.",
-        ),
-        BleFailureKind::DeviceAsleep => (
-            true,
-            false,
-            "Press KEY4 or the wake key, wait for the device to return online, then retry.",
-        ),
-        BleFailureKind::MissingPairing => (
-            true,
-            false,
-            "Pair the Listener device in Windows Bluetooth, then return and refresh Listener BLE.",
-        ),
-        BleFailureKind::LowPowerIdleDisconnect => (
-            true,
-            true,
-            "Listener BLE entered offline state; retrying will reconnect, or press KEY4 if it is offline.",
-        ),
-        BleFailureKind::PairedButDisconnected => (
-            true,
-            true,
-            "Wait for automatic reconnect; press the wake key if it stays disconnected.",
-        ),
-        BleFailureKind::StaleGattService => (
-            true,
-            true,
-            "Retry after Listener Type refreshes the GATT path; re-pair if stale services persist.",
-        ),
-        BleFailureKind::CccdProtocolError => (
-            true,
-            true,
-            "Retry after the notify subscription is reopened; reboot Type if repeated.",
-        ),
-        BleFailureKind::MissingDisFirmwareRevision => (
-            false,
-            false,
-            "Collect diagnostics and update firmware readiness/DIS exposure before release.",
-        ),
-        BleFailureKind::BackgroundListenerContention => (
-            true,
-            true,
-            "Pause the competing BLE operation and retry through the shared listener path.",
-        ),
-        BleFailureKind::OtaRebootWindow => (
-            true,
-            true,
-            "Wait for the OTA reboot window to finish, then refresh device status.",
-        ),
-        BleFailureKind::WindowsBluetoothServiceResetNeeded => (
-            true,
-            false,
-            "Toggle Windows Bluetooth or restart the Bluetooth Support Service, then retry.",
-        ),
-        BleFailureKind::AccessDenied => (
-            false,
-            false,
-            "Allow Bluetooth/device access in Windows settings or re-pair the device.",
-        ),
-        BleFailureKind::UnsupportedPlatform => (
-            false,
-            false,
-            "Use the supported Windows BLE path for this diagnostic.",
-        ),
-        BleFailureKind::Unknown => (
-            true,
-            false,
-            "Export diagnostics and retry after restarting Listener Type.",
-        ),
-    };
-
+    let classification = denzic_ble_windows::failure::classify_ble_failure_with_hints(
+        error,
+        &LISTENER_BLE_FAILURE_HINTS,
+    );
+    let kind = map_platform_ble_failure_kind(classification.kind);
     BleFailureClassification {
         kind,
-        retryable,
-        automatic_recovery,
-        user_action,
-        evidence: error.chars().take(480).collect(),
+        retryable: classification.retryable,
+        automatic_recovery: classification.automatic_recovery,
+        user_action: listener_ble_failure_user_action(kind),
+        evidence: classification.evidence,
     }
 }
 
-fn ble_error_suggests_missing_pairing(lower: &str) -> bool {
-    lower.contains("no paired ble device")
-        || lower.contains("no paired listener")
-        || lower.contains("not paired")
-        || lower.contains("missing pairing")
-        || lower.contains("pairing missing")
-        || lower.contains("pair the listener")
+fn map_platform_ble_failure_kind(kind: denzic_ble_windows::BleFailureKind) -> BleFailureKind {
+    match kind {
+        denzic_ble_windows::BleFailureKind::DeviceMissing => BleFailureKind::DeviceMissing,
+        denzic_ble_windows::BleFailureKind::DeviceAsleep => BleFailureKind::DeviceAsleep,
+        denzic_ble_windows::BleFailureKind::MissingPairing => BleFailureKind::MissingPairing,
+        denzic_ble_windows::BleFailureKind::LowPowerIdleDisconnect => {
+            BleFailureKind::LowPowerIdleDisconnect
+        }
+        denzic_ble_windows::BleFailureKind::PairedButDisconnected => {
+            BleFailureKind::PairedButDisconnected
+        }
+        denzic_ble_windows::BleFailureKind::StaleGattService => BleFailureKind::StaleGattService,
+        denzic_ble_windows::BleFailureKind::CccdProtocolError => BleFailureKind::CccdProtocolError,
+        denzic_ble_windows::BleFailureKind::MissingDisFirmwareRevision => {
+            BleFailureKind::MissingDisFirmwareRevision
+        }
+        denzic_ble_windows::BleFailureKind::BackgroundContention => {
+            BleFailureKind::BackgroundListenerContention
+        }
+        denzic_ble_windows::BleFailureKind::OtaRebootWindow => BleFailureKind::OtaRebootWindow,
+        denzic_ble_windows::BleFailureKind::WindowsBluetoothServiceResetNeeded => {
+            BleFailureKind::WindowsBluetoothServiceResetNeeded
+        }
+        denzic_ble_windows::BleFailureKind::AccessDenied => BleFailureKind::AccessDenied,
+        denzic_ble_windows::BleFailureKind::UnsupportedPlatform => {
+            BleFailureKind::UnsupportedPlatform
+        }
+        denzic_ble_windows::BleFailureKind::Unknown => BleFailureKind::Unknown,
+    }
 }
 
-fn ble_error_suggests_device_asleep(lower: &str) -> bool {
-    lower.contains("deep sleep")
-        || lower.contains("asleep")
-        || lower.contains("sleeping")
-        || lower.contains("wake key")
-        || lower.contains("press key4")
-        || lower.contains("key4")
-}
-
-fn ble_error_suggests_low_power_idle_disconnect(lower: &str) -> bool {
-    let reason_546 = lower.contains("reason=546")
-        || lower.contains("reason: 546")
-        || lower.contains("reason 546")
-        || lower.contains("reason=0x222")
-        || lower.contains("reason: 0x222");
-    let idle_label = lower.contains("low-power idle")
-        || lower.contains("low power idle")
-        || lower.contains("idle disconnect")
-        || lower.contains("idle-disconnect")
-        || lower.contains("intentional idle");
-    let transport_not_ready =
-        lower.contains("transport_not_ready") || lower.contains("transport not ready");
-
-    reason_546 || idle_label || (transport_not_ready && lower.contains("low power"))
+fn listener_ble_failure_user_action(kind: BleFailureKind) -> &'static str {
+    match kind {
+        BleFailureKind::DeviceMissing => {
+            "Wake the Listener device, confirm it is paired, then retry or re-pair."
+        }
+        BleFailureKind::DeviceAsleep => {
+            "Press KEY4 or the wake key, wait for the device to return online, then retry."
+        }
+        BleFailureKind::MissingPairing => {
+            "Pair the Listener device in Windows Bluetooth, then return and refresh Listener BLE."
+        }
+        BleFailureKind::LowPowerIdleDisconnect => {
+            "Listener BLE entered offline state; retrying will reconnect, or press KEY4 if it is offline."
+        }
+        BleFailureKind::PairedButDisconnected => {
+            "Wait for automatic reconnect; press the wake key if it stays disconnected."
+        }
+        BleFailureKind::StaleGattService => {
+            "Retry after Listener Type refreshes the GATT path; re-pair if stale services persist."
+        }
+        BleFailureKind::CccdProtocolError => {
+            "Retry after the notify subscription is reopened; reboot Type if repeated."
+        }
+        BleFailureKind::MissingDisFirmwareRevision => {
+            "Collect diagnostics and update firmware readiness/DIS exposure before release."
+        }
+        BleFailureKind::BackgroundListenerContention => {
+            "Pause the competing BLE operation and retry through the shared listener path."
+        }
+        BleFailureKind::OtaRebootWindow => {
+            "Wait for the OTA reboot window to finish, then refresh device status."
+        }
+        BleFailureKind::WindowsBluetoothServiceResetNeeded => {
+            "Toggle Windows Bluetooth or restart the Bluetooth Support Service, then retry."
+        }
+        BleFailureKind::AccessDenied => {
+            "Allow Bluetooth/device access in Windows settings or re-pair the device."
+        }
+        BleFailureKind::UnsupportedPlatform => {
+            "Use the supported Windows BLE path for this diagnostic."
+        }
+        BleFailureKind::Unknown => "Export diagnostics and retry after restarting Listener Type.",
+    }
 }
 
 fn utc_now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-fn format_bluetooth_address(address: u64) -> String {
-    format!("{address:012X}")
-}
+pub(crate) use denzic_ble_windows::format_bluetooth_address;
 
 fn format_crc32(value: u32) -> String {
     format!("0x{value:08x}")
@@ -588,13 +494,27 @@ fn stop_drain_timeout_reason(stats: &crate::embedded_audio::SessionStats) -> Str
 #[cfg(target_os = "windows")]
 mod windows_ble {
     use super::DeviceSettingsCommandTransport;
+    use denzic_ble_windows::{
+        advertisement_manufacturer_data_summary, advertisement_swift_pair_display_name,
+        bluetooth_name_matches_any, bluetooth_name_matches_expected, buffer_to_vec,
+        configret_detail, device_information_bluetooth_address, device_information_display_name,
+        device_information_property_bool, device_information_property_string, hidden_command,
+        push_unique_address, run_hidden_pwsh_script, scan_ble_advertisements_by_name,
+        wait_gatt_write_result, write_cccd_with_timeout, write_gatt_value_status_with_timeout,
+        write_gatt_value_with_timeout, WINDOWS_AEP_BLE_IS_CONNECTABLE_PROPERTY,
+        WINDOWS_AEP_DEVICE_ADDRESS_PROPERTY, WINDOWS_AEP_IS_CONNECTED_PROPERTY,
+        WINDOWS_AEP_IS_PAIRED_PROPERTY, WINDOWS_AEP_IS_PRESENT_PROPERTY,
+        WINDOWS_BLE_AEP_CONNECTABLE_SELECTOR, WINDOWS_BLE_AEP_SELECTOR,
+    };
+    pub(super) use denzic_ble_windows::{
+        decode_bthport_device_name, normalize_pnp_device_instance_id,
+        parse_bluetooth_address_from_device_id, parse_bluetooth_address_hex,
+    };
     use std::cell::RefCell;
     use std::fmt;
     use std::fs;
     use std::io::{Read, Write};
-    use std::os::windows::process::CommandExt;
     use std::path::PathBuf;
-    use std::process::{Command, Output};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
@@ -602,16 +522,16 @@ mod windows_ble {
 
     use serde::{Deserialize, Serialize};
     use serialport::{SerialPortInfo, SerialPortType};
-    use windows::core::{IInspectable, Interface, GUID, HSTRING, PCWSTR};
+    use windows::core::{IInspectable, GUID, HSTRING, PCWSTR};
     use windows::Devices::Bluetooth::Advertisement::{
-        BluetoothLEAdvertisement, BluetoothLEAdvertisementReceivedEventArgs,
-        BluetoothLEAdvertisementWatcher, BluetoothLEScanningMode,
+        BluetoothLEAdvertisementReceivedEventArgs, BluetoothLEAdvertisementWatcher,
+        BluetoothLEScanningMode,
     };
     use windows::Devices::Bluetooth::GenericAttributeProfile::{
         GattCharacteristic, GattCharacteristicProperties,
         GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
         GattDeviceService, GattSession, GattSessionStatus, GattSessionStatusChangedEventArgs,
-        GattValueChangedEventArgs, GattWriteOption, GattWriteResult,
+        GattValueChangedEventArgs, GattWriteOption,
     };
     use windows::Devices::Bluetooth::{
         BluetoothAddressType, BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
@@ -621,15 +541,11 @@ mod windows_ble {
         DeviceInformationKind, DeviceInformationPairing, DevicePairingKinds,
         DevicePairingRequestedEventArgs, DevicePairingResultStatus, DeviceUnpairingResultStatus,
     };
-    use windows::Foundation::{
-        AsyncStatus, EventRegistrationToken, IAsyncOperation, IPropertyValue, TypedEventHandler,
-    };
-    use windows::Storage::Streams::{DataReader, DataWriter, IBuffer};
+    use windows::Foundation::{EventRegistrationToken, IAsyncOperation, TypedEventHandler};
     use windows::Win32::Devices::DeviceAndDriverInstallation::{
         CM_Locate_DevNodeW, CM_Query_And_Remove_SubTreeW, CM_LOCATE_DEVNODE_NORMAL,
-        CM_LOCATE_DEVNODE_PHANTOM, CM_REMOVE_NO_RESTART, CM_REMOVE_UI_NOT_OK, CONFIGRET,
-        CR_ACCESS_DENIED, CR_NO_SUCH_DEVINST, CR_NO_SUCH_DEVNODE, CR_QUERY_VETOED,
-        CR_REMOVE_VETOED, CR_SUCCESS, PNP_VETO_TYPE,
+        CM_LOCATE_DEVNODE_PHANTOM, CM_REMOVE_NO_RESTART, CM_REMOVE_UI_NOT_OK, CR_NO_SUCH_DEVINST,
+        CR_NO_SUCH_DEVNODE, CR_SUCCESS, PNP_VETO_TYPE,
     };
     use windows::Win32::Foundation::{
         CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
@@ -652,17 +568,6 @@ mod windows_ble {
     const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
     const DEVICE_SETTINGS_REVISION_UUID: GUID =
         GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091f);
-    const WINDOWS_BLE_AEP_SELECTOR: &str =
-        "(System.Devices.Aep.ProtocolId:=\"{bb7bb05e-5972-42b5-94fc-76eaa7084d49}\")";
-    const WINDOWS_BLE_AEP_CONNECTABLE_SELECTOR: &str =
-        "(System.Devices.Aep.ProtocolId:=\"{bb7bb05e-5972-42b5-94fc-76eaa7084d49}\") AND (System.Devices.Aep.Bluetooth.Le.IsConnectable:=System.StructuredQueryType.Boolean#True)";
-    const WINDOWS_AEP_DEVICE_ADDRESS_PROPERTY: &str = "System.Devices.Aep.DeviceAddress";
-    const WINDOWS_AEP_IS_PAIRED_PROPERTY: &str = "System.Devices.Aep.IsPaired";
-    const WINDOWS_AEP_IS_CONNECTED_PROPERTY: &str = "System.Devices.Aep.IsConnected";
-    const WINDOWS_AEP_IS_PRESENT_PROPERTY: &str = "System.Devices.Aep.IsPresent";
-    const WINDOWS_AEP_BLE_IS_CONNECTABLE_PROPERTY: &str =
-        "System.Devices.Aep.Bluetooth.Le.IsConnectable";
-    const WINDOWS_ITEM_NAME_DISPLAY_PROPERTY: &str = "System.ItemNameDisplay";
 
     const DIAGNOSTIC_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093a);
     const DIAGNOSTIC_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093b);
@@ -734,7 +639,6 @@ mod windows_ble {
     const BLE_RECENT_PAIRING_FAST_GATT_WINDOW: Duration = Duration::from_secs(45);
     const BLE_ADAPTER_RESTART_SETTLE: Duration = Duration::from_millis(2500);
     const BLE_PAIRING_IN_PROGRESS_SETTLE: Duration = Duration::from_millis(2200);
-    const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
     const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
     const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
 
@@ -779,6 +683,16 @@ mod windows_ble {
 
     fn notify_capture_cancelled_error(label: &str) -> String {
         format!("BLE {label} cancelled by background listener recovery")
+    }
+
+    fn ble_wait_cancel() -> denzic_ble_windows::BleCancel {
+        ACTIVE_NOTIFY_CAPTURE_CANCEL.with(|slot| match slot.borrow().as_ref() {
+            Some(token) => denzic_ble_windows::BleCancel::new(
+                Arc::clone(token),
+                "background listener recovery",
+            ),
+            None => denzic_ble_windows::BleCancel::NONE,
+        })
     }
 
     pub(super) fn notify_capture_session_active() -> bool {
@@ -1890,14 +1804,6 @@ mod windows_ble {
         pub(super) has_listener_service_signature: bool,
         pub(super) is_ble_device_root: bool,
         pub(super) is_listener_hid_keyboard: bool,
-    }
-
-    #[derive(Deserialize)]
-    struct PowerShellPnpDeviceEntry {
-        #[serde(rename = "FriendlyName")]
-        friendly_name: Option<String>,
-        #[serde(rename = "InstanceId")]
-        instance_id: Option<String>,
     }
 
     #[derive(Clone)]
@@ -3429,45 +3335,6 @@ mod windows_ble {
         });
     }
 
-    fn device_information_display_name(info: &DeviceInformation) -> String {
-        info.Name()
-            .map(|value| value.to_string_lossy())
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                device_information_property_string(info, WINDOWS_ITEM_NAME_DISPLAY_PROPERTY)
-            })
-            .unwrap_or_default()
-    }
-
-    fn device_information_bluetooth_address(info: &DeviceInformation) -> Option<u64> {
-        device_information_property_string(info, WINDOWS_AEP_DEVICE_ADDRESS_PROPERTY)
-            .as_deref()
-            .and_then(parse_bluetooth_address_hex)
-    }
-
-    fn device_information_property_string(info: &DeviceInformation, key: &str) -> Option<String> {
-        let properties = info.Properties().ok()?;
-        let key = HSTRING::from(key);
-        if !properties.HasKey(&key).ok()? {
-            return None;
-        }
-        let value = properties.Lookup(&key).ok()?;
-        let value = value.cast::<IPropertyValue>().ok()?;
-        value.GetString().ok().map(|value| value.to_string_lossy())
-    }
-
-    fn device_information_property_bool(info: &DeviceInformation, key: &str) -> Option<bool> {
-        let properties = info.Properties().ok()?;
-        let key = HSTRING::from(key);
-        if !properties.HasKey(&key).ok()? {
-            return None;
-        }
-        let value = properties.Lookup(&key).ok()?;
-        let value = value.cast::<IPropertyValue>().ok()?;
-        value.GetBoolean().ok()
-    }
-
     fn push_listener_pairing_advertisement_candidates(
         candidates: &mut Vec<ListenerPairingCandidate>,
         seen_ids: &mut Vec<String>,
@@ -4686,85 +4553,31 @@ mod windows_ble {
     }
 
     fn powershell_listener_pnp_entries() -> Result<Vec<ListenerPnpEntry>, String> {
-        let script = r#"
-$ProgressPreference = 'SilentlyContinue'
-Get-PnpDevice -ErrorAction SilentlyContinue |
-  Where-Object { $_.InstanceId -match '^(BTHLE|BTHLEDEVICE|HID)\\' } |
-  Select-Object FriendlyName,InstanceId |
-  ConvertTo-Json -Compress
-"#;
-        let output = run_hidden_pwsh_script(script, "Get-PnpDevice Listener PnP enumeration")?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if stdout.is_empty() {
-            return Ok(Vec::new());
-        }
-        let value: serde_json::Value = serde_json::from_str(&stdout)
-            .map_err(|err| format!("parse Get-PnpDevice JSON failed: {err}; output={stdout}"))?;
-        let raw_entries = match value {
-            serde_json::Value::Array(values) => values,
-            serde_json::Value::Null => Vec::new(),
-            other => vec![other],
-        };
-
-        let mut entries = Vec::new();
-        for value in raw_entries {
-            let device: PowerShellPnpDeviceEntry = serde_json::from_value(value)
-                .map_err(|err| format!("decode Get-PnpDevice entry failed: {err}"))?;
-            let Some(instance_id) = device.instance_id else {
-                continue;
-            };
-            if let Some(entry) = listener_pnp_entry_from_name_and_id(
-                device.friendly_name.unwrap_or_default(),
-                instance_id,
-            ) {
-                entries.push(entry);
-            }
-        }
-        Ok(entries)
+        let raw_entries = denzic_ble_windows::enumerate_ble_hid_pnp_entries()?;
+        Ok(listener_pnp_entries_from_raw(raw_entries))
     }
 
     fn powershell_listener_present_pnp_entries() -> Result<Vec<ListenerPnpEntry>, String> {
-        let script = r#"
-$ProgressPreference = 'SilentlyContinue'
-Get-CimInstance Win32_PnPEntity -Filter "DeviceID LIKE 'BTHLE%' OR DeviceID LIKE 'BTHLEDEVICE%' OR DeviceID LIKE 'HID%'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.Present -ne $false } |
-  Select-Object @{ Name = 'FriendlyName'; Expression = { $_.Name } }, @{ Name = 'InstanceId'; Expression = { $_.DeviceID } } |
-  ConvertTo-Json -Compress
-"#;
-        let output = run_hidden_pwsh_script(
-            script,
-            "Get-CimInstance present Listener PnP enumeration",
-        )?;
+        let raw_entries = denzic_ble_windows::enumerate_present_ble_hid_pnp_entries()?;
+        Ok(listener_pnp_entries_from_raw(raw_entries))
+    }
 
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if stdout.is_empty() {
-            return Ok(Vec::new());
-        }
-        let value: serde_json::Value = serde_json::from_str(&stdout).map_err(|err| {
-            format!("parse present Win32_PnPEntity JSON failed: {err}; output={stdout}")
-        })?;
-        let raw_entries = match value {
-            serde_json::Value::Array(values) => values,
-            serde_json::Value::Null => Vec::new(),
-            other => vec![other],
-        };
-
+    fn listener_pnp_entries_from_raw(
+        raw_entries: Vec<denzic_ble_windows::PnpDeviceEntry>,
+    ) -> Vec<ListenerPnpEntry> {
         let mut entries = Vec::new();
-        for value in raw_entries {
-            let device: PowerShellPnpDeviceEntry = serde_json::from_value(value)
-                .map_err(|err| format!("decode present Win32_PnPEntity entry failed: {err}"))?;
-            let Some(instance_id) = device.instance_id else {
+        for entry in raw_entries {
+            let Some(instance_id) = entry.instance_id else {
                 continue;
             };
             if let Some(entry) = listener_pnp_entry_from_name_and_id(
-                device.friendly_name.unwrap_or_default(),
+                entry.friendly_name.unwrap_or_default(),
                 instance_id,
             ) {
                 entries.push(entry);
             }
         }
-        Ok(entries)
+        entries
     }
 
     fn restart_windows_bluetooth_adapter_after_pairing_failure(
@@ -4850,7 +4663,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         for key_result in devices.enum_keys() {
             let address_key = key_result
                 .map_err(|err| format!("enumerate BTHPORT device cache failed: {err}"))?;
-            let address = parse_bluetooth_address_hex_exact(&address_key);
+            let address = parse_bluetooth_address_hex(&address_key);
             let subkey = match devices.open_subkey_with_flags(&address_key, KEY_READ) {
                 Ok(value) => value,
                 Err(err) => {
@@ -4900,41 +4713,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     fn read_bthport_device_name(key: &RegKey) -> Option<String> {
         let raw = key.get_raw_value("Name").ok()?;
         Some(decode_bthport_device_name(&raw.bytes))
-    }
-
-    pub(super) fn decode_bthport_device_name(bytes: &[u8]) -> String {
-        let mut utf16_end = bytes.len();
-        while utf16_end >= 2 && bytes[utf16_end - 1] == 0 && bytes[utf16_end - 2] == 0 {
-            utf16_end -= 2;
-        }
-        let utf16_candidate = &bytes[..utf16_end];
-        if utf16_candidate.len() >= 2 && utf16_candidate.len() % 2 == 0 {
-            let zero_high_bytes = utf16_candidate
-                .chunks_exact(2)
-                .filter(|pair| pair[1] == 0)
-                .count();
-            if zero_high_bytes * 2 >= utf16_candidate.len() {
-                let utf16: Vec<u16> = utf16_candidate
-                    .chunks_exact(2)
-                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-                    .collect();
-                return String::from_utf16_lossy(&utf16)
-                    .trim_matches('\0')
-                    .trim()
-                    .to_string();
-            }
-        }
-
-        let end = bytes
-            .iter()
-            .rposition(|byte| *byte != 0)
-            .map(|index| index + 1)
-            .unwrap_or(0);
-        let trimmed = &bytes[..end];
-        String::from_utf8_lossy(trimmed)
-            .trim_matches('\0')
-            .trim()
-            .to_string()
     }
 
     fn delete_bthport_cache_candidate(
@@ -4992,40 +4770,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 false
             }
         }
-    }
-
-    pub(super) fn normalize_pnp_device_instance_id(raw_id: &str) -> Option<String> {
-        let trimmed = raw_id.trim().trim_matches('\0');
-        if trimmed.is_empty() {
-            return None;
-        }
-        let upper = trimmed.to_ascii_uppercase();
-        let start = [
-            "BTHLE\\",
-            "BTHLE#",
-            "BTHLEDEVICE\\",
-            "BTHLEDEVICE#",
-            "HID\\",
-            "HID#",
-        ]
-        .iter()
-        .filter_map(|marker| upper.find(marker))
-        .min()?;
-        let mut value = trimmed[start..].to_string();
-        if let Some(guid_marker) = value.find("#{") {
-            value.truncate(guid_marker);
-        }
-        if value.contains('#') {
-            value = value.replace('#', "\\");
-        }
-        let normalized_upper = value.to_ascii_uppercase();
-        if !normalized_upper.starts_with("BTHLE\\")
-            && !normalized_upper.starts_with("BTHLEDEVICE\\")
-            && !normalized_upper.starts_with("HID\\")
-        {
-            return None;
-        }
-        Some(value)
     }
 
     fn remove_pnp_device_candidate(
@@ -5142,71 +4886,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 combined.trim()
             )
         })
-    }
-
-    fn hidden_command(program: &str) -> Command {
-        let mut command = Command::new(program);
-        command.creation_flags(WINDOWS_CREATE_NO_WINDOW);
-        command
-    }
-
-    fn hidden_pwsh_command() -> Command {
-        hidden_command("pwsh")
-    }
-
-    fn run_hidden_pwsh_script(script: &str, label: &str) -> Result<Output, String> {
-        let output = hidden_pwsh_command()
-            .args(["-NoProfile", "-Command", script])
-            .output()
-            .map_err(|err| format!("start pwsh for {label} failed: {err}"))?;
-        if output.status.success() {
-            return Ok(output);
-        }
-
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(if stderr.is_empty() {
-            format!("pwsh for {label} exited with status {}", output.status)
-        } else {
-            format!(
-                "pwsh for {label} exited with status {}: {stderr}",
-                output.status
-            )
-        })
-    }
-
-    fn configret_detail(status: CONFIGRET, veto: Option<(&PNP_VETO_TYPE, &[u16])>) -> String {
-        let label = if status == CR_ACCESS_DENIED {
-            "access denied"
-        } else if status == CR_REMOVE_VETOED {
-            "remove vetoed"
-        } else if status == CR_QUERY_VETOED {
-            "query vetoed"
-        } else if status == CR_NO_SUCH_DEVINST || status == CR_NO_SUCH_DEVNODE {
-            "device node not found"
-        } else {
-            "configuration manager error"
-        };
-        let mut detail = format!("{label} ({status:?})");
-        if let Some((veto_type, veto_name)) = veto {
-            let end = veto_name
-                .iter()
-                .position(|ch| *ch == 0)
-                .unwrap_or(veto_name.len());
-            let veto_name = String::from_utf16_lossy(&veto_name[..end]);
-            if !veto_name.trim().is_empty() || veto_type.0 != 0 {
-                detail.push_str(&format!(
-                    ", veto_type={veto_type:?}, veto_name={}",
-                    veto_name.trim()
-                ));
-            }
-        }
-        detail
-    }
-
-    fn push_unique_address(addresses: &mut Vec<u64>, address: u64) {
-        if !addresses.contains(&address) {
-            addresses.push(address);
-        }
     }
 
     pub fn pull_firmware_diagnostic_log(
@@ -9856,39 +9535,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         timeout: Duration,
         context: &str,
     ) -> Option<u64> {
-        let selector = GattDeviceService::GetDeviceSelectorFromUuid(service_uuid).ok()?;
-        let services = DeviceInformation::FindAllAsyncAqsFilter(&selector)
-            .ok()
-            .and_then(|op| wait_async_operation(op, timeout, context).ok())?;
-        let mut service_addresses = Vec::new();
-        for index in 0..services.Size().ok()? {
-            let info = services.GetAt(index).ok()?;
-            let name = info
-                .Name()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
-            let id = info.Id().ok()?.to_string_lossy();
-            if let Some(address) = parse_bluetooth_address_from_device_id(&id) {
-                push_unique_address(&mut service_addresses, address);
-            }
-            if !bluetooth_name_matches_expected(&name, target_name) {
-                continue;
-            }
-            if let Some(address) = parse_bluetooth_address_from_device_id(&id) {
-                log::info!(
-                    "[embedded-ble] {context}: learned Listener address from service target={target_name:?} name={name:?} address={address:012X}"
-                );
-                return Some(address);
-            }
-        }
-        if service_addresses.len() == 1 {
-            let address = service_addresses[0];
-            log::info!(
-                "[embedded-ble] {context}: learned sole Listener service address despite Windows name cache mismatch target={target_name:?} address={address:012X}"
-            );
-            return Some(address);
-        }
-        None
+        denzic_ble_windows::find_bluetooth_target_service_address(
+            service_uuid,
+            target_name,
+            timeout,
+            context,
+            &ble_wait_cancel(),
+        )
     }
 
     fn find_paired_bluetooth_target_address(
@@ -9896,28 +9549,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         timeout: Duration,
         context: &str,
     ) -> Option<u64> {
-        let selector = BluetoothLEDevice::GetDeviceSelectorFromPairingState(true).ok()?;
-        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
-            .ok()
-            .and_then(|op| wait_async_operation(op, timeout, context).ok())?;
-        for index in 0..devices.Size().ok()? {
-            let info = devices.GetAt(index).ok()?;
-            let name = info
-                .Name()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
-            if !bluetooth_name_matches_expected(&name, target_name) {
-                continue;
-            }
-            let id = info.Id().ok()?.to_string_lossy();
-            if let Some(address) = parse_bluetooth_address_from_device_id(&id) {
-                log::info!(
-                    "[embedded-ble] {context}: learned Listener address from paired device target={target_name:?} name={name:?} address={address:012X}"
-                );
-                return Some(address);
-            }
-        }
-        None
+        denzic_ble_windows::find_paired_bluetooth_target_address(
+            target_name,
+            timeout,
+            context,
+            &ble_wait_cancel(),
+        )
     }
 
     fn read_optional_string_characteristic(
@@ -9925,10 +9562,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         service_uuid: GUID,
         characteristic_uuid: GUID,
     ) -> Option<String> {
-        read_optional_characteristic_bytes(device, service_uuid, characteristic_uuid)
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-            .map(|value| value.trim_matches(char::from(0)).trim().to_string())
-            .filter(|value| !value.is_empty())
+        denzic_ble_windows::read_optional_string_characteristic(
+            device,
+            service_uuid,
+            characteristic_uuid,
+            &ble_wait_cancel(),
+        )
     }
 
     fn read_optional_string_characteristic_from_service_with_timeout(
@@ -9937,15 +9576,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         cache_mode: BluetoothCacheMode,
         timeout: Duration,
     ) -> Option<String> {
-        read_optional_characteristic_from_service_with_timeout(
+        denzic_ble_windows::read_optional_string_characteristic_from_service_with_timeout(
             service,
             characteristic_uuid,
             cache_mode,
             timeout,
+            &ble_wait_cancel(),
         )
-        .and_then(|bytes| String::from_utf8(bytes).ok())
-        .map(|value| value.trim_matches(char::from(0)).trim().to_string())
-        .filter(|value| !value.is_empty())
     }
 
     fn read_optional_string_characteristic_from_service(
@@ -9953,11 +9590,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         characteristic_uuid: GUID,
         cache_mode: BluetoothCacheMode,
     ) -> Option<String> {
-        read_optional_string_characteristic_from_service_with_timeout(
+        denzic_ble_windows::read_optional_string_characteristic_from_service(
             service,
             characteristic_uuid,
             cache_mode,
-            BLE_DISCOVERY_TIMEOUT.min(Duration::from_secs(2)),
+            &ble_wait_cancel(),
         )
     }
 
@@ -10022,8 +9659,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         service_uuid: GUID,
         characteristic_uuid: GUID,
     ) -> Option<u8> {
-        read_optional_characteristic_bytes(device, service_uuid, characteristic_uuid)
-            .and_then(|bytes| bytes.first().copied())
+        denzic_ble_windows::read_optional_u8_characteristic(
+            device,
+            service_uuid,
+            characteristic_uuid,
+            &ble_wait_cancel(),
+        )
     }
 
     fn read_optional_string_characteristic_from_discovered_service(
@@ -10120,31 +9761,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         service_uuid: GUID,
         characteristic_uuid: GUID,
     ) -> Option<Vec<u8>> {
-        let optional_timeout = BLE_DISCOVERY_TIMEOUT.min(Duration::from_secs(2));
-        for cache_mode in [BluetoothCacheMode::Uncached] {
-            let services_result = device
-                .GetGattServicesForUuidWithCacheModeAsync(service_uuid, cache_mode)
-                .ok()?
-                .wait_ble_result(optional_timeout, "optional GATT service discovery")
-                .ok()?;
-            if services_result.Status().ok()? != GattCommunicationStatus::Success {
-                continue;
-            }
-            let services = services_result.Services().ok()?;
-            for index in 0..services.Size().ok()? {
-                let service = services.GetAt(index).ok()?;
-                let read_result = read_optional_characteristic_from_service(
-                    &service,
-                    characteristic_uuid,
-                    cache_mode,
-                );
-                let _ = service.Close();
-                if read_result.is_some() {
-                    return read_result;
-                }
-            }
-        }
-        None
+        denzic_ble_windows::read_optional_characteristic_bytes(
+            device,
+            service_uuid,
+            characteristic_uuid,
+            &ble_wait_cancel(),
+        )
     }
 
     fn read_optional_characteristic_from_service_with_timeout(
@@ -10153,56 +9775,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         cache_mode: BluetoothCacheMode,
         timeout: Duration,
     ) -> Option<Vec<u8>> {
-        let timeout = timeout.min(BLE_DISCOVERY_TIMEOUT);
-        let result = match service
-            .GetCharacteristicsForUuidWithCacheModeAsync(characteristic_uuid, cache_mode)
-            .ok()?
-            .wait_ble_result(timeout, "optional characteristic")
-        {
-            Ok(result) => result,
-            Err(err) => {
-                log::debug!(
-                    "[embedded-ble] optional characteristic {characteristic_uuid:?} discovery wait failed via {cache_mode:?}: {err}"
-                );
-                return None;
-            }
-        };
-        let status = result.Status().ok()?;
-        if status != GattCommunicationStatus::Success {
-            log::debug!(
-                "[embedded-ble] optional characteristic {characteristic_uuid:?} discovery returned status={status:?} via {cache_mode:?}"
-            );
-            return None;
-        }
-        let characteristics = result.Characteristics().ok()?;
-        if characteristics.Size().ok()? == 0 {
-            log::debug!(
-                "[embedded-ble] optional characteristic {characteristic_uuid:?} not found via {cache_mode:?}"
-            );
-            return None;
-        }
-        let characteristic = characteristics.GetAt(0).ok()?;
-        let read = match characteristic
-            .ReadValueWithCacheModeAsync(cache_mode)
-            .ok()?
-            .wait_ble_result(timeout, "optional characteristic read")
-        {
-            Ok(read) => read,
-            Err(err) => {
-                log::debug!(
-                    "[embedded-ble] optional characteristic {characteristic_uuid:?} read wait failed via {cache_mode:?}: {err}"
-                );
-                return None;
-            }
-        };
-        let status = read.Status().ok()?;
-        if status != GattCommunicationStatus::Success {
-            log::debug!(
-                "[embedded-ble] optional characteristic {characteristic_uuid:?} read returned status={status:?} via {cache_mode:?}"
-            );
-            return None;
-        }
-        buffer_to_vec(&read.Value().ok()?).ok()
+        denzic_ble_windows::read_optional_characteristic_from_service_with_timeout(
+            service,
+            characteristic_uuid,
+            cache_mode,
+            timeout,
+            &ble_wait_cancel(),
+        )
     }
 
     fn read_optional_characteristic_from_service(
@@ -10210,11 +9789,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         characteristic_uuid: GUID,
         cache_mode: BluetoothCacheMode,
     ) -> Option<Vec<u8>> {
-        read_optional_characteristic_from_service_with_timeout(
+        denzic_ble_windows::read_optional_characteristic_from_service(
             service,
             characteristic_uuid,
             cache_mode,
-            BLE_DISCOVERY_TIMEOUT.min(Duration::from_secs(2)),
+            &ble_wait_cancel(),
         )
     }
 
@@ -10852,89 +10431,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             );
         }
         Ok(visible)
-    }
-
-    fn scan_ble_advertisements_by_name(
-        context: &str,
-        expected_name: &str,
-        timeout: Duration,
-    ) -> Result<Vec<u64>, String> {
-        let watcher = BluetoothLEAdvertisementWatcher::new()
-            .map_err(|err| format!("{context} advertisement watcher create failed: {err}"))?;
-        watcher
-            .SetScanningMode(BluetoothLEScanningMode::Active)
-            .map_err(|err| format!("{context} advertisement active scan failed: {err}"))?;
-
-        let (tx, rx) = mpsc::channel::<(u64, String, i16)>();
-        let expected_name_for_handler = expected_name.to_string();
-        let handler = TypedEventHandler::<
-            BluetoothLEAdvertisementWatcher,
-            BluetoothLEAdvertisementReceivedEventArgs,
-        >::new(move |_watcher, args| {
-            let Some(args) = args.as_ref() else {
-                return Ok(());
-            };
-            let Ok(advertisement) = args.Advertisement() else {
-                return Ok(());
-            };
-            let name = advertisement
-                .LocalName()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
-            if !ble_advertisement_name_matches(&name, &expected_name_for_handler) {
-                return Ok(());
-            }
-            let address = args.BluetoothAddress().unwrap_or_default();
-            if address == 0 {
-                return Ok(());
-            }
-            let rssi = args.RawSignalStrengthInDBm().unwrap_or_default();
-            let _ = tx.send((address, name, rssi));
-            Ok(())
-        });
-
-        let token = watcher
-            .Received(&handler)
-            .map_err(|err| format!("{context} advertisement handler failed: {err}"))?;
-        watcher
-            .Start()
-            .map_err(|err| format!("{context} advertisement scan start failed: {err}"))?;
-
-        let deadline = Instant::now() + timeout;
-        let mut addresses = Vec::new();
-        while Instant::now() < deadline {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let timeout = remaining.min(Duration::from_millis(500));
-            match rx.recv_timeout(timeout) {
-                Ok((address, name, rssi)) => {
-                    if addresses.contains(&address) {
-                        continue;
-                    }
-                    log::info!(
-                        "[embedded-ble] {context} advertisement candidate name={name} address={address:012X} rssi={rssi}"
-                    );
-                    addresses.push(address);
-                    break;
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            }
-        }
-
-        let _ = watcher.Stop();
-        let _ = watcher.RemoveReceived(token);
-
-        if addresses.is_empty() {
-            return Err(format!(
-                "no Bluetooth advertisement named {expected_name:?} seen for {context} in {} ms",
-                timeout.as_millis()
-            ));
-        }
-        Ok(addresses)
-    }
-
-    fn ble_advertisement_name_matches(name: &str, expected_name: &str) -> bool {
-        name.trim().eq_ignore_ascii_case(expected_name.trim())
     }
 
     fn diagnostic_target_candidates() -> Result<Vec<DiagnosticTargetCandidate>, String> {
@@ -11773,54 +11269,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         address: u64,
         timeout: Duration,
     ) -> Result<BluetoothLEDevice, String> {
-        let device = open_ble_device_by_address_with_timeout(address, timeout)?;
-
-        let device_id = device
-            .DeviceId()
-            .map(|id| id.to_string_lossy())
-            .unwrap_or_default();
-        if device_id.is_empty() {
-            return Ok(device);
-        }
-
-        match BluetoothLEDevice::FromIdAsync(&HSTRING::from(device_id.as_str()))
-            .ok()
-            .and_then(|op| wait_async_operation(op, timeout, "device open by id").ok())
-        {
-            Some(device_by_id) => {
-                let _ = device.Close();
-                Ok(device_by_id)
-            }
-            None => {
-                log::warn!("[embedded-ble] BLE device reopen by id failed, using address handle");
-                Ok(device)
-            }
-        }
+        denzic_ble_windows::open_ble_device_with_timeout(
+            address,
+            timeout,
+            native_windows_hid_address_uses_random_identity(address),
+            &ble_wait_cancel(),
+        )
     }
 
     fn open_ble_device_by_address_with_timeout(
         address: u64,
         timeout: Duration,
     ) -> Result<BluetoothLEDevice, String> {
-        let native_windows_hid_random_identity =
-            native_windows_hid_current_address_uses_random_identity(
-                address,
-                &native_windows_hid_pairing_addresses_for_startup(),
-            );
-        let operation = if native_windows_hid_random_identity {
-            log::debug!(
-                "[embedded-ble] opening current native Windows HID address={address:012X} as a random BLE identity"
-            );
-            BluetoothLEDevice::FromBluetoothAddressWithBluetoothAddressTypeAsync(
-                address,
-                BluetoothAddressType::Random,
-            )
-        } else {
-            BluetoothLEDevice::FromBluetoothAddressAsync(address)
-        };
-        operation
-            .map_err(|err| format!("BLE device open by address failed: {err}"))
-            .and_then(|op| wait_async_operation(op, timeout, "device open by address"))
+        denzic_ble_windows::open_ble_device_by_address_with_timeout(
+            address,
+            timeout,
+            native_windows_hid_address_uses_random_identity(address),
+            &ble_wait_cancel(),
+        )
+    }
+
+    fn native_windows_hid_address_uses_random_identity(address: u64) -> bool {
+        native_windows_hid_current_address_uses_random_identity(
+            address,
+            &native_windows_hid_pairing_addresses_for_startup(),
+        )
     }
 
     fn open_listener_ota_v1_target_for_service(
@@ -12898,28 +12371,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
     }
 
-    pub(super) fn parse_bluetooth_address_from_device_id(device_id: &str) -> Option<u64> {
-        let upper = device_id.to_ascii_uppercase();
-        for marker in ["DEV_", "_"] {
-            let Some((_, suffix)) = upper.rsplit_once(marker) else {
-                continue;
-            };
-            let hex: String = suffix
-                .chars()
-                .take_while(|ch| ch.is_ascii_hexdigit())
-                .collect();
-            if hex.len() == 12 {
-                return u64::from_str_radix(&hex, 16).ok();
-            }
-        }
-        for segment in upper.rsplit(|ch: char| matches!(ch, '\\' | '/' | '#' | '_' | '-')) {
-            if let Some(address) = parse_bluetooth_address_hex_exact(segment) {
-                return Some(address);
-            }
-        }
-        None
-    }
-
     fn configured_bluetooth_address_from_env() -> Option<u64> {
         for key in [
             "LISTENER_TYPE_BLE_ADDRESS",
@@ -13234,17 +12685,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         names
     }
 
-    fn bluetooth_name_matches_expected(name: &str, expected_name: &str) -> bool {
-        let trimmed = name.trim();
-        !trimmed.is_empty() && trimmed.eq_ignore_ascii_case(expected_name.trim())
-    }
-
-    fn bluetooth_name_matches_any(name: &str, target_names: &[String]) -> bool {
-        target_names
-            .iter()
-            .any(|target| bluetooth_name_matches_expected(name, target))
-    }
-
     fn default_target_name_can_accept_candidate(
         expected_name: &str,
         candidate_name: &str,
@@ -13308,127 +12748,16 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         true
     }
 
-    pub(super) fn parse_bluetooth_address_hex(value: &str) -> Option<u64> {
-        parse_bluetooth_address_hex_exact(value)
-    }
-
-    fn parse_bluetooth_address_hex_exact(value: &str) -> Option<u64> {
-        let hex: String = value.chars().filter(|ch| ch.is_ascii_hexdigit()).collect();
-        if hex.len() != 12 {
-            return None;
-        }
-        u64::from_str_radix(&hex, 16).ok()
-    }
-
-    fn advertisement_manufacturer_data_summary(advertisement: &BluetoothLEAdvertisement) -> String {
-        let Ok(manufacturer_data) = advertisement.ManufacturerData() else {
-            return "mfg=unavailable".to_string();
-        };
-        let Ok(count) = manufacturer_data.Size() else {
-            return "mfg=size-unavailable".to_string();
-        };
-        if count == 0 {
-            return "mfg=none".to_string();
-        }
-
-        let mut entries = Vec::new();
-        for index in 0..count {
-            let Ok(entry) = manufacturer_data.GetAt(index) else {
-                entries.push(format!("index={index}:unreadable"));
-                continue;
-            };
-            let company_id = entry.CompanyId().unwrap_or_default();
-            let bytes = entry
-                .Data()
-                .ok()
-                .and_then(|buffer| buffer_to_vec(&buffer).ok())
-                .unwrap_or_default();
-            entries.push(format!(
-                "company=0x{company_id:04X} data={}",
-                hex_bytes(&bytes)
-            ));
-        }
-        format!("mfg=[{}]", entries.join(";"))
-    }
-
-    fn advertisement_swift_pair_display_name(
-        advertisement: &BluetoothLEAdvertisement,
-    ) -> Option<String> {
-        let manufacturer_data = advertisement.ManufacturerData().ok()?;
-        let count = manufacturer_data.Size().ok()?;
-        for index in 0..count {
-            let entry = manufacturer_data.GetAt(index).ok()?;
-            let company_id = entry.CompanyId().ok()?;
-            let bytes = entry
-                .Data()
-                .ok()
-                .and_then(|buffer| buffer_to_vec(&buffer).ok())
-                .unwrap_or_default();
-            if let Some(name) = swift_pair_display_name_from_manufacturer_entry(company_id, &bytes)
-            {
-                return Some(name);
-            }
-        }
-        None
-    }
-
-    fn swift_pair_display_name_from_manufacturer_entry(
-        company_id: u16,
-        bytes: &[u8],
-    ) -> Option<String> {
-        if company_id != 0x0006 {
-            return None;
-        }
-
-        let payload = if bytes.len() >= 5 && bytes[0] == 0x06 && bytes[1] == 0x00 {
-            &bytes[2..]
-        } else {
-            bytes
-        };
-        if payload.len() <= 3 || payload[0] != 0x03 {
-            return None;
-        }
-
-        let name = String::from_utf8_lossy(&payload[3..])
-            .trim_matches(char::from(0))
-            .trim()
-            .to_string();
-        if name.is_empty() {
-            None
-        } else {
-            Some(name)
-        }
-    }
-
-    fn hex_bytes(bytes: &[u8]) -> String {
-        if bytes.is_empty() {
-            return "-".to_string();
-        }
-        bytes
-            .iter()
-            .map(|byte| format!("{byte:02X}"))
-            .collect::<Vec<_>>()
-            .join("")
-    }
-
-    fn buffer_to_vec(buffer: &IBuffer) -> windows::core::Result<Vec<u8>> {
-        let length = buffer.Length()? as usize;
-        let reader = DataReader::FromBuffer(buffer)?;
-        let mut bytes = vec![0u8; length];
-        reader.ReadBytes(&mut bytes)?;
-        Ok(bytes)
-    }
-
     fn read_characteristic_bytes(
         characteristic: &GattCharacteristic,
         cache_mode: BluetoothCacheMode,
         label: &str,
     ) -> Result<Vec<u8>, String> {
-        read_characteristic_bytes_with_timeout(
+        denzic_ble_windows::read_characteristic_bytes(
             characteristic,
             cache_mode,
             label,
-            BLE_DISCOVERY_TIMEOUT,
+            &ble_wait_cancel(),
         )
     }
 
@@ -13438,23 +12767,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         label: &str,
         timeout: Duration,
     ) -> Result<Vec<u8>, String> {
-        let read = characteristic
-            .ReadValueWithCacheModeAsync(cache_mode)
-            .map_err(|err| format!("BLE {label} read failed: {err}"))?
-            .wait_ble_result(timeout, &format!("{label} read"))
-            .map_err(|err| format!("BLE {label} read wait failed: {err}"))?;
-        let status = read
-            .Status()
-            .map_err(|err| format!("BLE {label} read status failed: {err}"))?;
-        if status != GattCommunicationStatus::Success {
-            return Err(format!("BLE {label} read returned status={status:?}"));
-        }
-        buffer_to_vec(
-            &read
-                .Value()
-                .map_err(|err| format!("BLE {label} read value failed: {err}"))?,
+        denzic_ble_windows::read_characteristic_bytes_with_timeout(
+            characteristic,
+            cache_mode,
+            label,
+            timeout,
+            &ble_wait_cancel(),
         )
-        .map_err(|err| format!("BLE {label} read buffer failed: {err}"))
     }
 
     fn read_diagnostic_count(characteristic: &GattCharacteristic) -> Result<u32, String> {
@@ -13520,28 +12839,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Ok((event_count, global_offset, firmware_crc, payload))
     }
 
-    fn write_cccd_with_timeout(
-        characteristic: &GattCharacteristic,
-        value: GattClientCharacteristicConfigurationDescriptorValue,
-        timeout: Duration,
-    ) -> Result<GattCommunicationStatus, String> {
-        let operation = characteristic
-            .WriteClientCharacteristicConfigurationDescriptorWithResultAsync(value)
-            .map_err(|err| format!("BLE CCCD write failed: {err}"))?;
-        let result = wait_gatt_write_result(operation, timeout, "CCCD")?;
-        let status = result
-            .Status()
-            .map_err(|err| format!("BLE CCCD write status read failed: {err}"))?;
-        let protocol_error = result
-            .ProtocolError()
-            .ok()
-            .and_then(|value| value.Value().ok());
-        if let Some(protocol_error) = protocol_error {
-            log::warn!("[embedded-ble] CCCD write protocol_error={protocol_error}");
-        }
-        Ok(status)
-    }
-
     fn write_cccd_notify_with_retry(
         capture_id: u64,
         label: &str,
@@ -13549,57 +12846,17 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         timeout: Duration,
         recovery_probe_address: Option<u64>,
     ) -> Result<GattCommunicationStatus, String> {
-        let mut last_error: Option<String> = None;
-        let mut last_status: Option<GattCommunicationStatus> = None;
-        for attempt in 1..=CCCD_ENABLE_RETRY_DELAYS.len() + 1 {
-            match write_cccd_with_timeout(
-                characteristic,
-                GattClientCharacteristicConfigurationDescriptorValue::Notify,
-                timeout,
-            ) {
-                Ok(GattCommunicationStatus::Success) => {
-                    return Ok(GattCommunicationStatus::Success);
-                }
-                Ok(status) => {
-                    if attempt > CCCD_ENABLE_RETRY_DELAYS.len() {
-                        return Ok(status);
-                    }
-                    last_status = Some(status);
-                    let delay = cccd_enable_retry_delay(attempt);
-                    log::warn!(
-                        "[embedded-ble] {label} #{capture_id}: notify CCCD enable attempt {attempt} returned status={status:?}; retrying in {} ms",
-                        delay.as_millis()
-                    );
-                    std::thread::sleep(delay);
-                }
-                Err(err) => {
-                    if let Some(recovery_error) =
-                        cccd_notify_recovery_pairing_error(&err, recovery_probe_address)
-                    {
-                        log::warn!(
-                            "[embedded-ble] {label} #{capture_id}: notify CCCD enable attempt {attempt} hit recovery pairing window; entering Type PairAsync recovery instead of retrying CCCD: {err}"
-                        );
-                        return Err(recovery_error);
-                    }
-                    if attempt > CCCD_ENABLE_RETRY_DELAYS.len() {
-                        return Err(err);
-                    }
-                    let delay = cccd_enable_retry_delay(attempt);
-                    log::warn!(
-                        "[embedded-ble] {label} #{capture_id}: notify CCCD enable attempt {attempt} failed: {err}; retrying in {} ms",
-                        delay.as_millis()
-                    );
-                    last_error = Some(err);
-                    std::thread::sleep(delay);
-                }
-            }
-        }
-        Err(last_error.unwrap_or_else(|| {
-            format!(
-                "BLE CCCD notify write returned status={:?}",
-                last_status.unwrap_or(GattCommunicationStatus::Unreachable)
-            )
-        }))
+        let recovery_error =
+            |err: &str| cccd_notify_recovery_pairing_error(err, recovery_probe_address);
+        denzic_ble_windows::write_cccd_with_retry(
+            label,
+            capture_id,
+            characteristic,
+            GattClientCharacteristicConfigurationDescriptorValue::Notify,
+            timeout,
+            &CCCD_ENABLE_RETRY_DELAYS,
+            Some(&recovery_error),
+        )
     }
 
     fn cccd_notify_recovery_pairing_error(
@@ -13624,128 +12881,15 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         characteristic: &GattCharacteristic,
         timeout: Duration,
     ) -> Result<GattCommunicationStatus, String> {
-        let mut last_error: Option<String> = None;
-        let mut last_status: Option<GattCommunicationStatus> = None;
-        for attempt in 1..=CCCD_ENABLE_RETRY_DELAYS.len() + 1 {
-            match write_cccd_with_timeout(
-                characteristic,
-                GattClientCharacteristicConfigurationDescriptorValue::Indicate,
-                timeout,
-            ) {
-                Ok(GattCommunicationStatus::Success) => {
-                    return Ok(GattCommunicationStatus::Success);
-                }
-                Ok(status) => {
-                    if attempt > CCCD_ENABLE_RETRY_DELAYS.len() {
-                        return Ok(status);
-                    }
-                    last_status = Some(status);
-                    let delay = cccd_enable_retry_delay(attempt);
-                    log::warn!(
-                        "[embedded-ble] {label} #{transfer_id}: indicate CCCD enable attempt {attempt} returned status={status:?}; retrying in {} ms",
-                        delay.as_millis()
-                    );
-                    std::thread::sleep(delay);
-                }
-                Err(err) => {
-                    if attempt > CCCD_ENABLE_RETRY_DELAYS.len() {
-                        return Err(err);
-                    }
-                    let delay = cccd_enable_retry_delay(attempt);
-                    log::warn!(
-                        "[embedded-ble] {label} #{transfer_id}: indicate CCCD enable attempt {attempt} failed: {err}; retrying in {} ms",
-                        delay.as_millis()
-                    );
-                    last_error = Some(err);
-                    std::thread::sleep(delay);
-                }
-            }
-        }
-        Err(last_error.unwrap_or_else(|| {
-            format!(
-                "BLE CCCD indicate write returned status={:?}",
-                last_status.unwrap_or(GattCommunicationStatus::Unreachable)
-            )
-        }))
-    }
-
-    fn cccd_enable_retry_delay(attempt: usize) -> Duration {
-        CCCD_ENABLE_RETRY_DELAYS
-            .get(attempt.saturating_sub(1))
-            .copied()
-            .unwrap_or_else(|| *CCCD_ENABLE_RETRY_DELAYS.last().expect("retry delays"))
-    }
-
-    fn write_gatt_value_with_timeout(
-        characteristic: &GattCharacteristic,
-        bytes: &[u8],
-        write_option: GattWriteOption,
-        timeout: Duration,
-        label: &str,
-    ) -> Result<GattCommunicationStatus, String> {
-        let buffer = bytes_to_buffer(bytes)?;
-        if write_option == GattWriteOption::WriteWithoutResponse {
-            let operation = characteristic
-                .WriteValueWithOptionAsync(&buffer, write_option)
-                .map_err(|err| format!("BLE {label} write failed: {err}"))?;
-            let status = wait_gatt_communication_status(operation, timeout, label)?;
-            if status != GattCommunicationStatus::Success {
-                return Err(format!("BLE {label} write returned status={status:?}"));
-            }
-            return Ok(status);
-        }
-
-        let operation = characteristic
-            .WriteValueWithResultAndOptionAsync(&buffer, write_option)
-            .map_err(|err| format!("BLE {label} write failed: {err}"))?;
-        let result = wait_gatt_write_result(operation, timeout, label)?;
-        let status = result
-            .Status()
-            .map_err(|err| format!("BLE {label} write status read failed: {err}"))?;
-        let protocol_error = result
-            .ProtocolError()
-            .ok()
-            .and_then(|value| value.Value().ok());
-        if let Some(protocol_error) = protocol_error {
-            log::warn!("[embedded-ble] {label} write protocol_error={protocol_error}");
-        }
-        if status != GattCommunicationStatus::Success {
-            let protocol_suffix = protocol_error
-                .map(|value| format!(" protocol_error={value}"))
-                .unwrap_or_default();
-            return Err(format!(
-                "BLE {label} write returned status={status:?}{protocol_suffix}"
-            ));
-        }
-        Ok(status)
-    }
-
-    fn write_gatt_value_status_with_timeout(
-        characteristic: &GattCharacteristic,
-        bytes: &[u8],
-        write_option: GattWriteOption,
-        timeout: Duration,
-        label: &str,
-    ) -> Result<GattCommunicationStatus, String> {
-        let buffer = bytes_to_buffer(bytes)?;
-        let operation = characteristic
-            .WriteValueWithOptionAsync(&buffer, write_option)
-            .map_err(|err| format!("BLE {label} write failed: {err}"))?;
-        let status = wait_gatt_communication_status(operation, timeout, label)?;
-        if status != GattCommunicationStatus::Success {
-            return Err(format!("BLE {label} write returned status={status:?}"));
-        }
-        Ok(status)
-    }
-
-    fn bytes_to_buffer(bytes: &[u8]) -> Result<IBuffer, String> {
-        let writer = DataWriter::new().map_err(|err| format!("BLE buffer writer failed: {err}"))?;
-        writer
-            .WriteBytes(bytes)
-            .map_err(|err| format!("BLE buffer write failed: {err}"))?;
-        writer
-            .DetachBuffer()
-            .map_err(|err| format!("BLE buffer detach failed: {err}"))
+        denzic_ble_windows::write_cccd_with_retry(
+            label,
+            transfer_id,
+            characteristic,
+            GattClientCharacteristicConfigurationDescriptorValue::Indicate,
+            timeout,
+            &CCCD_ENABLE_RETRY_DELAYS,
+            None,
+        )
     }
 
     trait AsyncOperationTimeoutExt<T: windows::core::RuntimeType> {
@@ -13763,136 +12907,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         timeout: Duration,
         label: &str,
     ) -> Result<T, String> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if notify_capture_cancel_requested() {
-                let _ = operation.Cancel();
-                let _ = operation.Close();
-                return Err(notify_capture_cancelled_error(label));
-            }
-            match operation
-                .Status()
-                .map_err(|err| format!("BLE {label} async status failed: {err}"))?
-            {
-                AsyncStatus::Completed => {
-                    return operation
-                        .GetResults()
-                        .map_err(|err| format!("BLE {label} async result failed: {err}"));
-                }
-                AsyncStatus::Error => {
-                    let code = operation.ErrorCode().ok();
-                    let _ = operation.Close();
-                    return Err(format!("BLE {label} async error: {code:?}"));
-                }
-                AsyncStatus::Canceled => {
-                    let _ = operation.Close();
-                    return Err(format!("BLE {label} async canceled"));
-                }
-                AsyncStatus::Started => {
-                    if Instant::now() >= deadline {
-                        let _ = operation.Cancel();
-                        let _ = operation.Close();
-                        return Err(format!(
-                            "BLE {label} timed out after {} ms",
-                            timeout.as_millis()
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(25));
-                }
-                status => {
-                    let _ = operation.Close();
-                    return Err(format!("BLE {label} unknown async status={status:?}"));
-                }
-            }
-        }
-    }
-
-    fn wait_gatt_write_result(
-        operation: IAsyncOperation<GattWriteResult>,
-        timeout: Duration,
-        label: &str,
-    ) -> Result<GattWriteResult, String> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            match operation
-                .Status()
-                .map_err(|err| format!("BLE {label} write async status failed: {err}"))?
-            {
-                AsyncStatus::Completed => {
-                    return operation
-                        .GetResults()
-                        .map_err(|err| format!("BLE {label} write result failed: {err}"));
-                }
-                AsyncStatus::Error => {
-                    let code = operation.ErrorCode().ok();
-                    let _ = operation.Close();
-                    return Err(format!("BLE {label} write async error: {code:?}"));
-                }
-                AsyncStatus::Canceled => {
-                    let _ = operation.Close();
-                    return Err(format!("BLE {label} write async canceled"));
-                }
-                AsyncStatus::Started => {
-                    if Instant::now() >= deadline {
-                        let _ = operation.Cancel();
-                        let _ = operation.Close();
-                        return Err(format!(
-                            "BLE {label} write timed out after {} ms",
-                            timeout.as_millis()
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(25));
-                }
-                status => {
-                    let _ = operation.Close();
-                    return Err(format!("BLE {label} write unknown async status={status:?}"));
-                }
-            }
-        }
-    }
-
-    fn wait_gatt_communication_status(
-        operation: IAsyncOperation<GattCommunicationStatus>,
-        timeout: Duration,
-        label: &str,
-    ) -> Result<GattCommunicationStatus, String> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            match operation
-                .Status()
-                .map_err(|err| format!("BLE {label} write async status failed: {err}"))?
-            {
-                AsyncStatus::Completed => {
-                    return operation
-                        .GetResults()
-                        .map_err(|err| format!("BLE {label} write result failed: {err}"));
-                }
-                AsyncStatus::Error => {
-                    let code = operation.ErrorCode().ok();
-                    let _ = operation.Close();
-                    return Err(format!("BLE {label} write async error: {code:?}"));
-                }
-                AsyncStatus::Canceled => {
-                    let _ = operation.Close();
-                    return Err(format!("BLE {label} write async canceled"));
-                }
-                AsyncStatus::Started => {
-                    if Instant::now() >= deadline {
-                        let _ = operation.Cancel();
-                        let _ = operation.Close();
-                        return Err(format!(
-                            "BLE {label} write timed out after {} ms",
-                            timeout.as_millis()
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(25));
-                }
-                status => {
-                    let _ = operation.Close();
-                    return Err(format!("BLE {label} write unknown async status={status:?}"));
-                }
-            }
-        }
+        denzic_ble_windows::wait_async_operation_with_cancel(
+            operation,
+            timeout,
+            label,
+            &ble_wait_cancel(),
+        )
     }
 
     #[derive(Default)]
@@ -14597,16 +13617,18 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 "a cancelled recent-pairing open must stop before service-selector or advertisement fallbacks"
             );
 
-            let wait_start = source
-                .find("fn wait_async_operation<T")
-                .expect("WinRT async wait helper should exist");
-            let wait_end = source[wait_start..]
-                .find("fn wait_gatt_write_result")
-                .map(|offset| wait_start + offset)
-                .expect("WinRT async wait helper boundary should exist");
-            let wait_body = &source[wait_start..wait_end];
-            assert!(wait_body.contains("notify_capture_cancel_requested()"));
-            assert!(wait_body.contains("operation.Cancel()"));
+            let wait_cancel = Arc::new(AtomicBool::new(true));
+            let _scope = NotifyCaptureCancelScope::install(&wait_cancel);
+            let Ok(operation) = BluetoothLEDevice::FromBluetoothAddressAsync(0x0000_A1B2_C3D4)
+            else {
+                return; // WinRT Bluetooth unavailable on this host
+            };
+            let err = wait_async_operation(operation, Duration::from_secs(30), "cancel probe")
+                .expect_err("an installed cancel scope must interrupt the WinRT wait");
+            assert!(
+                err.contains("cancelled by background listener recovery"),
+                "a cancelled wait must surface the background recovery reason: {err}"
+            );
         }
 
         #[test]
@@ -14703,9 +13725,18 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
         #[test]
         fn ble_advertisement_name_matching_trims_expected_target() {
-            assert!(ble_advertisement_name_matches(" Companion ", "companion"));
-            assert!(ble_advertisement_name_matches("companion", " Companion "));
-            assert!(!ble_advertisement_name_matches("Blistener", "companion"));
+            assert!(denzic_ble_windows::ble_advertisement_name_matches(
+                " Companion ",
+                "companion"
+            ));
+            assert!(denzic_ble_windows::ble_advertisement_name_matches(
+                "companion",
+                " Companion "
+            ));
+            assert!(!denzic_ble_windows::ble_advertisement_name_matches(
+                "Blistener",
+                "companion"
+            ));
         }
 
         #[test]
@@ -15095,7 +14126,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .find("fn push_listener_pairing_candidate_if_matching")
                 .expect("pairing candidate filter should exist");
             let end = source[start..]
-                .find("fn device_information_display_name")
+                .find("fn push_listener_pairing_advertisement_candidates")
                 .map(|offset| start + offset)
                 .expect("pairing candidate filter boundary should exist");
             let body = &source[start..end];
@@ -15629,13 +14660,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .find("    mod tests {")
                 .expect("Windows BLE test module boundary should exist")];
 
-            assert!(production.contains("fn hidden_pwsh_command() -> Command"));
-            assert!(production.contains("hidden_command(\"pwsh\")"));
-            assert!(production.contains("run_hidden_pwsh_script"));
             assert!(
                 !production.contains("powershell.exe"),
                 "workflow/product diagnostics must not spawn Windows PowerShell 5.1 or visible pwsh windows"
             );
+            let command = denzic_ble_windows::hidden_pwsh_command();
+            assert_eq!(command.get_program().to_string_lossy(), "pwsh");
         }
 
         #[test]
@@ -15898,7 +14928,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .find("fn listener_swift_pair_advertisement_visible_for_address")
                 .expect("Swift Pair guard scan helper should exist");
             let scan_end = source[scan_start..]
-                .find("fn scan_ble_advertisements_by_name")
+                .find("fn diagnostic_target_candidates")
                 .map(|offset| scan_start + offset)
                 .expect("Swift Pair guard scan helper boundary should exist");
             let scan_body = &source[scan_start..scan_end];
@@ -15939,8 +14969,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             assert!(cccd_body.contains("cccd_notify_recovery_pairing_error"));
             assert!(cccd_body.contains("0x800704C7"));
             assert!(
-                cccd_body.contains("entering Type PairAsync recovery instead of retrying CCCD"),
-                "recovery-window CCCD cancellation must not burn the full CCCD retry ladder before PairAsync"
+                cccd_body.contains("denzic_ble_windows::write_cccd_with_retry"),
+                "recovery-window CCCD cancellation must delegate the retry ladder to the shared platform helper so PairAsync recovery can preempt it"
             );
 
             assert!(source.contains(
@@ -16244,7 +15274,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .find("fn ble_candidate_allowed")
                 .expect("BLE candidate filter should exist");
             let end = source[start..]
-                .find("pub(super) fn parse_bluetooth_address_hex")
+                .find("fn read_characteristic_bytes")
                 .map(|offset| start + offset)
                 .expect("BLE candidate filter boundary should exist");
             let body = &source[start..end];
@@ -16264,7 +15294,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .find("fn ble_candidate_allowed")
                 .expect("BLE candidate filter should exist");
             let end = source[start..]
-                .find("pub(super) fn parse_bluetooth_address_hex")
+                .find("fn read_characteristic_bytes")
                 .map(|offset| start + offset)
                 .expect("BLE candidate filter boundary should exist");
             let body = &source[start..end];
@@ -16286,14 +15316,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         #[test]
         fn swift_pair_manufacturer_data_exposes_display_name() {
             assert_eq!(
-                swift_pair_display_name_from_manufacturer_entry(
+                denzic_ble_windows::swift_pair_display_name_from_manufacturer_entry(
                     0x0006,
                     &[0x03, 0x00, 0x80, b'l', b'i', b's', b't', b'e', b'n', b'e', b'r', b'B']
                 ),
                 Some("listenerB".to_string())
             );
             assert_eq!(
-                swift_pair_display_name_from_manufacturer_entry(
+                denzic_ble_windows::swift_pair_display_name_from_manufacturer_entry(
                     0x0006,
                     &[
                         0x06, 0x00, 0x03, 0x00, 0x80, b'l', b'i', b's', b't', b'e', b'n', b'e',
@@ -16303,7 +15333,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 Some("listenerB".to_string())
             );
             assert_eq!(
-                swift_pair_display_name_from_manufacturer_entry(
+                denzic_ble_windows::swift_pair_display_name_from_manufacturer_entry(
                     0x004C,
                     &[0x03, 0x00, 0x80, b'l', b'i', b's', b't', b'e', b'n', b'e', b'r', b'B']
                 ),
