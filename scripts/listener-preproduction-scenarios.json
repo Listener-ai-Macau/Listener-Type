@@ -3,6 +3,46 @@
   "version": "1.0.2",
   "purpose": "Canonical Listener 1.0.2 preproduction physical acceptance scenarios. Human, bench, regression, and release audit gates must use this file as the scenario source of truth.",
   "pending_operator_steering": {
+    "listener_manual_delete_repair_and_type_auto_reattach_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T16:00:00+08:00",
+      "source": "Product-owner direction: 删除蓝牙后，通过 Windows 配对弹窗恢复时，Type 没有自动恢复；这个要加入验收。",
+      "requirement": "Add a physical acceptance step for keeping the installed Program Files Type open while the current Listener pairing is deleted, then explicitly restoring the Listener through the Windows Bluetooth pairing popup. Type must automatically resume the background BLE notify/audio listener after the new local Windows pairing/HID evidence is present, without Type PairAsync/UnpairAsync and without reclaiming a different host.",
+      "machine_gates": [
+        "manual-delete path emits the bounded manual-pairing cue and does not show the ordinary blue EC11 recovery cue while Windows is unpaired",
+        "explicit Windows pairing/HID evidence is observed after deletion",
+        "Type logs automatic notify/listener recovery and secure TYPE:READY or equivalent ready evidence",
+        "PairAsync=0 and UnpairAsync=0 in the delete-to-reattach action window",
+        "no NimBLE panic/reboot and no audio transport loss after reattach"
+      ],
+      "operator_sequence": "With Type running from C:\\Program Files\\Listener Type\\listener-type.exe, delete Listener in Windows Bluetooth, wait for the manual-pairing cue, use the device recovery double-click and accept the Windows pairing popup, then wait for Type to restore notify/audio without restarting Type.",
+      "evidence_boundary": "Store only structured timing, LED/BLE status, API-call counts, and log hashes. Do not retain pairing prompt text, stimulus audio, transcripts, or spoken content.",
+      "acceptance_boundary": "This is a required Bluetooth/Type reconnect gate. It does not waive secure transport, existing-pairing takeover, recording acceptance, or final Goal completion.",
+      "latest_validation": {
+        "recorded_at": "2026-07-21T16:24:00+08:00",
+        "status": "NO_GO_popup_route_retained",
+        "operator_note": "按了, 显示type无法接回",
+        "finding": "The popup action window contained no fresh Listener HID evidence and no PairAsync/UnpairAsync. A later Windows Settings Connect created native HID C724FD9E258E; Type accepted that explicit local evidence, completed a fresh GATT read, and restored notify without restart. On the next physical double-click, Firmware accepted EC11 recovery but diagnostic action 6 refreshed an already-open pairing window, so no new Swift Pair popup appeared.",
+        "evidence": [
+          "Listener-Type/.cache/validation/manual-pair-reconnect-20260721/step-08-reattach/preproduction-operator-note-triage.json",
+          "Listener-Type/.cache/validation/manual-pair-reconnect-20260721/step-08-reattach/preproduction-human-review-summary.md",
+          "C:\\Users\\Billy\\AppData\\Local\\Listener Type\\Logs\\listener-type.log"
+        ],
+        "next_action": "Retest one clean physical EC11 double-click after the stale-window bypass fix with a command-free locked COM3 capture and Windows pairing events; require a fresh native identity and popup before accepting the passive HID-gated Type reattach behavior."
+      }
+    },
+    "listener_manual_delete_requires_fresh_identity_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T16:30:00+08:00",
+      "source": "Product-owner clarification: 删除以后双击就要像是新的一样连接回来。",
+      "requirement": "After Windows deletes Listener, the physical EC11 recovery double-click must rotate to a fresh native Windows BLE identity and complete Swift Pair as a first-time device. It must not reuse the deleted address or rely on the stale Windows cache. The installed Type process remains passive and may auto-reattach only after explicit new HID evidence.",
+      "machine_gates": [
+        "manual RECOVERY:TYPE:MANUAL only arms the bounded handoff cue and does not reset bonds or open stable-identity recovery",
+        "EC11 recovery with no active Type link logs type_controlled=0 and advertises a fresh native Windows identity",
+        "Windows popup click produces fresh BLE/HID evidence and Type reattaches without PairAsync or UnpairAsync"
+      ],
+      "acceptance_boundary": "This clarifies the required fresh-pair semantics for the manual-delete Bluetooth gate; it does not waive secure transport, no panic/reboot, recording acceptance, or final Goal completion."
+    },
     "listener_esp_platform_state_summary_20260721": {
       "status": "active_owner_direction",
       "recorded_at": "2026-07-21T08:55:00+08:00",
@@ -2074,6 +2114,55 @@
         "separate_platform_gap": "The full Type suite remains NO_GO with 832 passed, 3 failed source-string Windows BLE pairing assertions, and 9 ignored. Those assertions are outside this coordinate correction and remain an independent ESP platform closure item rather than a capsule pass."
       },
       "acceptance_boundary": "The correction must preserve the capsule's recording state, live level, provider preview/final behavior, non-activating overlay behavior, fixed capsule footprint, and protected text-only preview behavior. Installed-Type visual evidence on the active monitor is required before treating the issue as closed."
+    },
+    "listener_owner_continue_only_unpassed_with_log_recheck_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T15:20:00+08:00",
+      "source": "Product-owner direction: 从通过的就不用验了，然后没通过的继续验；之前的备注要同时看日志没有问题才行。",
+      "requirement": "For the next canonical Listener preproduction review, carry forward only original human PASS records whose referenced machine evidence and log artifacts still exist and remain consistent with the recorded result. Focus rerun on records that are missing, failed, incomplete, or contain an operator note requiring log confirmation. A non-empty operator note is not a new PASS by itself; reconcile it against structured logs and retain the triage result beside the matching machine artifact.",
+      "evidence_required": [
+        "carry-forward source summary and original record identity",
+        "per-record log recheck or structured machine snapshot",
+        "focused continuation summary containing carried and rerun records",
+        "operator-note triage artifact whenever a carried candidate has a non-empty note"
+      ],
+      "acceptance_boundary": "No prior human selection may waive a current log contradiction, installed Program Files identity check, or an unclosed physical/machine gate. This continuation does not complete the active Goal and does not authorize changing the scenario thresholds."
+    },
+    "listener_owner_current_session_only_skip_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T15:08:00+08:00",
+      "source": "Product-owner clarification: 这次过的就不用再过一遍，以前过的还是要拿出来再验。",
+      "requirement": "A PASS recorded in the current canonical continuation session may be skipped for the remainder of that same session. A PASS from any earlier session is evidence to compare against, not a current-session completion; rerun it in numeric scenario order before advancing. Preserve the earlier summary and logs, and attach the new result beside them.",
+      "machine_application": "The explicit total-review state may carry only records produced by the current continuation session. Historical records must not be listed in completed_records merely because their old result was PASS.",
+      "acceptance_boundary": "Do not claim a full total review until every scenario either has a current-session PASS or a current-session explicit machine closure. Existing human notes still require the matching log recheck; no prior acceptance waives a current rerun."
+    },
+    "listener_owner_defer_cross_product_ble_rename_port_20260721": {
+      "status": "deferred_follow_up_requirement",
+      "recorded_at": "2026-07-21T15:24:00+08:00",
+      "source": "Product-owner direction: 如果没有的话，那你就先不管，继续验收；验收完以后再改。",
+      "requirement": "Do not pause the current Listener acceptance to platformize BLE-name rename/recovery. Finish the ordered Listener 1.0.2 acceptance first, then evaluate extracting the reusable BLE settings contract and recovery state machine for other products.",
+      "current_boundary": "Listener BLE rename remains a Listener-specific implementation spanning ESP32 GAP/device settings and Windows Type cache cleanup, PairAsync, GATT reopen, and silent recovery. The shared Denzic platform currently supplies protocol/state contracts, not a drop-in cross-product Windows rename service.",
+      "follow_up_scope": [
+        "define the portable BLE-name settings/apply contract",
+        "separate host-OS pairing/cache adapters from Listener Type",
+        "add per-product firmware GAP/name persistence adapters",
+        "re-run product-specific physical and machine acceptance after extraction"
+      ],
+      "acceptance_boundary": "This deferral does not waive current Listener BLE rename evidence or change its existing speed gate; it only prevents cross-product refactoring from blocking the ordered acceptance run."
+    },
+    "listener_owner_ble_rename_speed_gate_revision_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T15:32:00+08:00",
+      "source": "Product-owner direction: 或者你看要改一下，变成12秒门栏，或者是怎么样？或者你再努力一下，变为10秒。你觉得这个东西好优化吗？",
+      "decision": "Use a scoped 12000 ms ceiling for random BLE-name rename/restore until a future Windows PnP/GATT recovery redesign is separately approved. Keep the existing implementation optimizations and preserve all functional recovery requirements.",
+      "rationale": "Current installed Program Files Type samples after Cached GATT and early USB readback optimization were 10169.6063 ms, 10517.2534 ms, 11084.2163 ms and 10726.4401 ms. The remaining variance is Windows PnP removal and GATT session activation, not UI delay or audio transport. Further reduction to a stable 10000 ms would require changing cache-cleanup/reconnect ordering and carries pairing regression risk.",
+      "scope": "Only ble_rename_recovery random/restore elapsed time. Ordinary Type startup notify-ready remains <=3000 ms; PairAsync success, exact new name, no Bluetooth Settings/user prompt, recovery command confirmation, secure BLE and notify-ready remain mandatory.",
+      "evidence": [
+        "Listener-Type/.cache/validation/acceptance-continuation-20260721/step-05-random-name-retry-02/random-name-speed-log-recheck.json",
+        "Listener-Type/.cache/validation/acceptance-continuation-20260721/step-05-random-name-optimized/preproduction-human-review-summary.json",
+        "Listener-Type/.cache/validation/acceptance-continuation-20260721/step-05-random-name-stack-zero/preproduction-human-review-summary.json"
+      ],
+      "acceptance_boundary": "This is an explicit scoped threshold revision, not a claim that the old 10000 ms machine result passed. Revisit only with a focused Windows recovery optimization and new evidence."
     }
   },
   "scenarios": [
@@ -2124,6 +2213,13 @@
       "bench_title": "Manual Windows delete must not autopair with Type",
       "bench_capabilities": ["type_runtime", "windows_ble_automation"],
       "bench_evidence": ["delete_log", "twenty_second_state", "type_log"]
+    },
+    {
+      "id": "manual-windows-repair-type-reattach",
+      "bench_title": "Windows manual repair automatically reattaches Type",
+      "bench_capabilities": ["physical_input_fixture", "type_runtime", "windows_ble_automation", "led_optical_capture"],
+      "bench_evidence": ["delete_to_pair_log", "manual_pairing_led_status", "type_notify_ready", "pairing_api_counts", "gatt_probe"],
+      "product_contract": "After Type remains open while Windows deletes Listener, an explicit EC11 recovery double-click and Windows pairing-popup confirmation must restore the local Windows pairing/HID evidence. Type must then automatically rebuild GATT/background notify/audio without restarting, without PairAsync or UnpairAsync, without reclaiming another host, and without reporting connected/TYPE_READY before the link is actually reachable. The unpaired wait cue is a bounded amber low double-flash; existing EC11/normal Type recovery remains the accepted blue cue."
     },
     {
       "id": "no-type-native-pairing",
