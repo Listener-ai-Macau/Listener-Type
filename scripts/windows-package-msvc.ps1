@@ -363,7 +363,8 @@ function Invoke-MsvcBuild {
 
   $commandParts = @(
     "call `"$VsDevCmd`" -arch=x64 -host_arch=x64",
-    "set `"PATH=$CargoBin;%PATH%`""
+    "set `"PATH=$CargoBin;%PATH%`"",
+    "set `"PATH=%PATH:C:\Program Files\Git\usr\bin;=%`""
   )
 
   if ($CargoBuildJobs -gt 0) {
@@ -390,9 +391,16 @@ function Invoke-MsvcBuild {
 
   $commandParts += "npm.cmd run tauri build -- --target x86_64-pc-windows-msvc --bundles msi"
   $buildCommand = $commandParts -join " && "
+  $buildStartedAt = Get-Date
   $exitCode = Invoke-CmdWithHeartbeat -Command $buildCommand -Label "Tauri Windows MSI build" -TimeoutSeconds $CommandTimeoutSeconds
   if ($exitCode -ne 0) {
-    Write-Warning "Tauri Windows MSI build returned exit code $exitCode. Trying to finish MSI linking from generated WiX objects."
+    $payloadExe = Join-Path $releaseRoot "listener-type.exe"
+    $payloadFresh = (Test-Path -LiteralPath $payloadExe) -and
+      ((Get-Item -LiteralPath $payloadExe).LastWriteTime -ge $buildStartedAt.AddMinutes(-1))
+    if (-not $payloadFresh) {
+      throw "Tauri Windows MSI build failed with exit code $exitCode and the release payload was not rebuilt in this run; refusing to package a stale exe."
+    }
+    Write-Warning "Tauri Windows MSI build returned exit code $exitCode, but the release payload was rebuilt in this run. Trying to finish MSI linking from generated WiX objects."
     Repair-TauriMsiBundle
   }
 }
