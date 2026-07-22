@@ -1094,8 +1094,6 @@ function FirmwareOtaReadinessSummary({
     [t('settings.recording.firmwareOtaDeviceConnected', '连接'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.connected ? t('settings.recording.firmwareOtaConnected', '已连接') : t('settings.recording.firmwareOtaDisconnected', '未连接')],
     [t('settings.recording.firmwareOtaDeviceHardware', '硬件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.hardwareRevision ?? (otaServiceConfirmed ? t('settings.recording.firmwareOtaCompatibleHardware', '兼容') : t('settings.recording.firmwareOtaUnavailable', '未获取'))],
     [t('settings.recording.firmwareOtaDeviceFirmware', '固件'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : device?.firmwareVersion ?? (otaServiceConfirmed ? t('settings.recording.firmwareOtaVersionNotReported', '版本未报告') : t('settings.recording.firmwareOtaUnavailable', '未获取'))],
-    [t('settings.recording.firmwareOtaDevicePower', '供电'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : formatPower(device, t)],
-    [t('settings.recording.firmwareOtaDictationPhase', '录音'), statusPending ? t('settings.recording.firmwareOtaReading', '读取中') : snapshot?.recordingActive ? snapshot.dictationPhase : t('settings.recording.firmwareOtaIdle', '空闲')],
   ];
 
   return (
@@ -1130,18 +1128,6 @@ function formatFirmwareOtaSnapshotError(
     return t('settings.recording.firmwareOtaSnapshotTimeout', '设备状态暂时没有响应，请重新查询后再更新。');
   }
   return t('settings.recording.firmwareOtaSnapshotUnavailable', '暂时无法读取设备状态，请确认蓝牙连接后重新查询。');
-}
-
-function formatPower(
-  device: FirmwareOtaDeviceSnapshot | null | undefined,
-  t: ReturnType<typeof useTranslation>['t'],
-): string {
-  if (!device) return t('settings.recording.firmwareOtaUnavailable', '未获取');
-  if (device.usbPowered === true) return 'USB';
-  if (device.usbPowered === false && typeof device.batteryPercent === 'number') {
-    return `${device.batteryPercent}%`;
-  }
-  return t('settings.recording.firmwareOtaUnavailable', '未获取');
 }
 
 function makeDisconnectedSnapshot(detail: string): FirmwareOtaPreflightSnapshot {
