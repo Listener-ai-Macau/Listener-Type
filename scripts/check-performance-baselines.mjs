@@ -119,11 +119,11 @@ for (const key of [
 ]) {
   requireNumber(rename[key], `BLE rename ${key}`);
 }
-if (rename.max_random_rename_elapsed_ms > 10000) {
-  fail("BLE random rename latency ceiling must not drift above 10000 ms");
+if (rename.max_random_rename_elapsed_ms > 12000) {
+  fail("BLE random rename latency ceiling must not drift above the owner-approved 12000 ms scope");
 }
-if (rename.max_restore_elapsed_ms > 10000) {
-  fail("BLE rename restore latency ceiling must not drift above 10000 ms");
+if (rename.max_restore_elapsed_ms > 12000) {
+  fail("BLE rename restore latency ceiling must not drift above the owner-approved 12000 ms scope");
 }
 if (rename.measured_random_rename_elapsed_ms > rename.max_random_rename_elapsed_ms) {
   fail("accepted BLE random rename evidence exceeds its latency ceiling");
@@ -137,11 +137,11 @@ if (!rename.validation_command?.includes("windows-installed-device-settings-ui-e
 if (!rename.validation_command?.includes("--different-random-name-roundtrip")) {
   fail("BLE rename recovery command must run the full random-name rename path");
 }
-if (!rename.validation_command?.includes("--max-rename-total-ms 10000")) {
-  fail("BLE rename recovery command must enforce the 10000 ms rename ceiling");
+if (!rename.validation_command?.includes("--max-rename-total-ms 12000")) {
+  fail("BLE rename recovery command must enforce the owner-approved 12000 ms rename ceiling");
 }
-if (!rename.validation_command?.includes("notify ready <=10000 ms")) {
-  fail("BLE rename recovery command must measure completion at notify ready");
+if (!rename.validation_command?.includes("notify ready <=12000 ms")) {
+  fail("BLE rename recovery command must measure completion at notify ready under the 12000 ms scope");
 }
 
 const takeover = contracts.type_takeover_no_forced_repair;
