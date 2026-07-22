@@ -358,6 +358,14 @@ struct Inner {
     shutdown: AtomicBool,
 }
 
+#[cfg(target_os = "windows")]
+pub(super) struct WindowsInsertionResult {
+    pub(super) status: InsertStatus,
+    /// 只有 TSF 已接受目标线程的提交，才把它视为可以安全跟随 Enter 的确认写入。
+    /// SendInput 与 Ctrl+V 都只能证明事件已发送，不能证明目标控件真正接收。
+    pub(super) target_confirmed: bool,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddedBleWakeRecoverySnapshot {
@@ -7565,9 +7573,10 @@ async fn insert_with_windows_ime_first(
     polished: &str,
     restore_clipboard: bool,
     allow_non_tsf_insertion_fallback: bool,
+    allow_clipboard_fallback: bool,
     paste_shortcut: PasteShortcut,
     ime_target: Option<ImeSubmitTarget>,
-) -> InsertStatus {
+) -> WindowsInsertionResult {
     let prepared = {
         let mut slot = inner.prepared_windows_ime_session.lock();
         take_matching_prepared_windows_ime_session(&mut slot, session_id)
@@ -7578,10 +7587,19 @@ async fn insert_with_windows_ime_first(
             allow_non_tsf_insertion_fallback,
             InsertStatus::Failed,
         ) {
-            return insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut);
+            return insert_via_non_tsf_fallback(
+                inner,
+                polished,
+                restore_clipboard,
+                allow_clipboard_fallback,
+                paste_shortcut,
+            );
         }
         log::warn!("[windows-ime] non-TSF insertion fallback is disabled; failing insert");
-        return InsertStatus::Failed;
+        return WindowsInsertionResult {
+            status: InsertStatus::Failed,
+            target_confirmed: false,
+        };
     };
 
     let request = crate::windows_ime_ipc::ImeSubmitRequest {
@@ -7601,12 +7619,24 @@ async fn insert_with_windows_ime_first(
     inner.windows_ime.restore_session(prepared);
 
     if ime_status == InsertStatus::Inserted {
-        ime_status
+        WindowsInsertionResult {
+            status: ime_status,
+            target_confirmed: true,
+        }
     } else if should_try_non_tsf_insertion_fallback(allow_non_tsf_insertion_fallback, ime_status) {
-        insert_via_non_tsf_fallback(inner, polished, restore_clipboard, paste_shortcut)
+        insert_via_non_tsf_fallback(
+            inner,
+            polished,
+            restore_clipboard,
+            allow_clipboard_fallback,
+            paste_shortcut,
+        )
     } else {
         log::warn!("[windows-ime] TSF did not insert; non-TSF insertion fallback is disabled");
-        InsertStatus::Failed
+        WindowsInsertionResult {
+            status: InsertStatus::Failed,
+            target_confirmed: false,
+        }
     }
 }
 
@@ -7623,15 +7653,30 @@ fn insert_via_non_tsf_fallback(
     inner: &Arc<Inner>,
     polished: &str,
     restore_clipboard: bool,
+    allow_clipboard_fallback: bool,
     paste_shortcut: PasteShortcut,
-) -> InsertStatus {
+) -> WindowsInsertionResult {
     if inner.inserter.insert_via_unicode_keystrokes(polished) == InsertStatus::Inserted {
-        log::info!("[windows-ime] TSF unavailable; inserted via Unicode SendInput");
-        InsertStatus::Inserted
+        log::info!("[windows-ime] TSF unavailable; Unicode SendInput dispatched without target confirmation");
+        WindowsInsertionResult {
+            status: InsertStatus::Inserted,
+            target_confirmed: false,
+        }
+    } else if !allow_clipboard_fallback {
+        log::warn!("[windows-ime] clipboard fallback disabled by final clipboard preference");
+        WindowsInsertionResult {
+            status: InsertStatus::Failed,
+            target_confirmed: false,
+        }
     } else {
-        inner
-            .inserter
-            .insert_via_clipboard_fallback(polished, restore_clipboard, paste_shortcut)
+        WindowsInsertionResult {
+            status: inner.inserter.insert_via_clipboard_fallback(
+                polished,
+                restore_clipboard,
+                paste_shortcut,
+            ),
+            target_confirmed: false,
+        }
     }
 }
 

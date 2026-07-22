@@ -924,6 +924,10 @@ export function RecordingSection() {
     savePrefs({ ...prefs, dictationInputSource, dictationInputSourceUserOverridden: true });
   const onRestoreClipboardChange = (restoreClipboardAfterPaste: boolean) =>
     savePrefs({ ...prefs, restoreClipboardAfterPaste });
+  const onCopyFinalToClipboardChange = (copyFinalToClipboard: boolean) =>
+    savePrefs({ ...prefs, copyFinalToClipboard });
+  const onAutoEnterSendChange = (autoEnterSend: boolean) =>
+    savePrefs({ ...prefs, autoEnterSend });
   const onPasteShortcutChange = (pasteShortcut: PasteShortcut) =>
     savePrefs({ ...prefs, pasteShortcut });
   const onAllowNonTsfFallbackChange = (allowNonTsfInsertionFallback: boolean) =>
@@ -1117,6 +1121,18 @@ export function RecordingSection() {
 
     {/* ─── 插入与剪贴板（折叠） ──────────────────────────────────── */}
     <Collapsible title={t('settings.recording.insertGroupTitle')}>
+      <SettingRow
+        label={t('settings.recording.copyFinalToClipboardLabel')}
+        desc={t('settings.recording.copyFinalToClipboardDesc')}
+      >
+        <Toggle on={prefs.copyFinalToClipboard} onToggle={onCopyFinalToClipboardChange} />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.recording.autoEnterSendLabel')}
+        desc={t('settings.recording.autoEnterSendDesc')}
+      >
+        <Toggle on={prefs.autoEnterSend} onToggle={onAutoEnterSendChange} />
+      </SettingRow>
       <SettingRow
         label={t('settings.recording.restoreClipboardLabel')}
         desc={t('settings.recording.restoreClipboardDesc')}

@@ -291,46 +291,72 @@ pub(crate) fn record_embedded_audio_stop(session_id: SessionId) {
 
 #[derive(Clone, Copy)]
 pub(crate) enum PreviewSource {
-    Sidecar,
+    ProviderStream,
     FinalSupplement,
 }
 
 impl PreviewSource {
-    fn event_name(self) -> &'static str {
+    fn first_event_name(self) -> &'static str {
         match self {
-            Self::Sidecar => "embedded_audio_preview_first_sidecar",
+            Self::ProviderStream => "embedded_audio_preview_first_provider_stream",
             Self::FinalSupplement => "embedded_audio_preview_first_final_supplement",
+        }
+    }
+
+    fn update_event_name(self) -> &'static str {
+        match self {
+            Self::ProviderStream => "embedded_audio_preview_provider_stream",
+            Self::FinalSupplement => "embedded_audio_preview_final_supplement",
         }
     }
 }
 
-pub(crate) fn record_embedded_audio_first_preview(
+pub(crate) fn record_embedded_audio_preview_published(
     session_id: SessionId,
     preview_source: PreviewSource,
+    after_stop: bool,
 ) {
     let now = Instant::now();
-    let event = {
+    let (event, event_name) = {
         let mut observations = audio_observations().lock();
         let Some(observation) = observations.get_mut(&session_id) else {
             return;
         };
-        if observation.first_preview_observed {
-            return;
-        }
-        observation.first_preview_observed = true;
-        let elapsed = elapsed_ms(observation.started_at, now);
-        observation.next_event(
-            now,
-            EventSource::Provider,
-            Capability::Audio,
-            BleLifecycleState::Recording,
-            CommandResult::Started,
-            ErrorCategory::None,
-            TimingMetric::PreviewLatencyMs,
-            elapsed,
+        let first_preview = !observation.first_preview_observed;
+        let elapsed = if first_preview {
+            observation.first_preview_observed = true;
+            elapsed_ms(observation.started_at, now)
+        } else {
+            0
+        };
+        let lifecycle = if after_stop {
+            BleLifecycleState::ConnectedIdle
+        } else {
+            BleLifecycleState::Recording
+        };
+        (
+            observation.next_event(
+                now,
+                EventSource::Provider,
+                Capability::Audio,
+                lifecycle,
+                CommandResult::Started,
+                ErrorCategory::None,
+                if first_preview {
+                    TimingMetric::PreviewLatencyMs
+                } else {
+                    TimingMetric::None
+                },
+                elapsed,
+            ),
+            if first_preview {
+                preview_source.first_event_name()
+            } else {
+                preview_source.update_event_name()
+            },
         )
     };
-    emit(preview_source.event_name(), event);
+    emit(event_name, event);
 }
 
 pub(crate) fn record_embedded_audio_final(session_id: SessionId) {

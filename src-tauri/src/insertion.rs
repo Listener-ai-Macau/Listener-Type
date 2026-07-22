@@ -77,6 +77,18 @@ impl TextInserter {
         }
     }
 
+    /// Send one Enter only after the caller has independently revalidated the
+    /// original target. This method never touches the clipboard.
+    #[cfg(target_os = "windows")]
+    pub fn send_enter(&self) -> Result<(), String> {
+        use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+
+        let mut enigo = Enigo::new(&Settings::default()).map_err(|err| err.to_string())?;
+        enigo
+            .key(Key::Return, Direction::Click)
+            .map_err(|err| err.to_string())
+    }
+
     /// Insert `text` at the current cursor position.
     /// macOS 走 AX 直写 / Cmd+V：`_restore_clipboard_after_paste` 与 `_paste_shortcut`
     /// 仅为跨平台调用方对齐签名而存在，本路径不读它们。

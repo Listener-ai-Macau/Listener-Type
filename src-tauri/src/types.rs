@@ -1392,12 +1392,14 @@ pub struct UserPreferences {
     /// 缺少此标记的旧文件统一迁到 true；迁移后用户再关会带着标记保存，后续保留 false。
     #[serde(default)]
     pub streaming_insert_default_migrated: bool,
-    /// 流式输入成功后是否把最终润色文本写回剪贴板。一次性路径天然走剪贴板，所以
-    /// Cmd+V 可以重复粘贴；流式路径直接合成键盘事件、不动剪贴板，会让用户失去这层
-    /// 兜底。开启后流式成功收尾时把 final text 写到系统剪贴板，跟一次性行为对齐。
-    /// 默认 true（更接近用户习惯）。
+    /// 每次非空最终文本是否保留到剪贴板。它覆盖流式和一次性路径；关闭时完成路径
+    /// 不得以剪贴板作为上屏或兜底手段。
     #[serde(default = "default_true")]
-    pub streaming_insert_save_clipboard: bool,
+    pub copy_final_to_clipboard: bool,
+    /// 用户主动停止并且确认写入原输入目标后，是否自动按一次 Enter 发送。
+    /// 默认关闭，任何预览、取消、错误或未确认上屏都不得触发。
+    #[serde(default)]
+    pub auto_enter_send: bool,
     /// 主窗口启动 + 后台每 60 分钟自动检查 Listener Type 发布通道。
     /// 本地优先版本默认 false；关闭后仅手动「检查更新」按钮可用。
     #[serde(default)]
@@ -1566,8 +1568,14 @@ struct UserPreferencesWire {
     streaming_insert: bool,
     #[serde(default)]
     streaming_insert_default_migrated: bool,
-    #[serde(default = "default_true")]
-    streaming_insert_save_clipboard: bool,
+    #[serde(default)]
+    copy_final_to_clipboard: Option<bool>,
+    #[serde(default)]
+    auto_enter_send: bool,
+    /// 兼容旧版只作用于流式路径的设置；读取后迁移到 copy_final_to_clipboard，
+    /// 新配置不再写出这个字段。
+    #[serde(default)]
+    streaming_insert_save_clipboard: Option<bool>,
     #[serde(default)]
     auto_update_check: bool,
     #[serde(default)]
@@ -1651,7 +1659,9 @@ impl Default for UserPreferencesWire {
             dark_mode: prefs.dark_mode,
             streaming_insert: prefs.streaming_insert,
             streaming_insert_default_migrated: prefs.streaming_insert_default_migrated,
-            streaming_insert_save_clipboard: prefs.streaming_insert_save_clipboard,
+            copy_final_to_clipboard: Some(prefs.copy_final_to_clipboard),
+            auto_enter_send: prefs.auto_enter_send,
+            streaming_insert_save_clipboard: None,
             auto_update_check: prefs.auto_update_check,
             history_max_entries: prefs.history_max_entries,
             record_audio_for_debug: prefs.record_audio_for_debug,
@@ -1681,6 +1691,10 @@ impl<'de> Deserialize<'de> for UserPreferences {
         } else {
             true
         };
+        let copy_final_to_clipboard = wire
+            .copy_final_to_clipboard
+            .or(wire.streaming_insert_save_clipboard)
+            .unwrap_or(true);
         let dictation_input_source = if wire.dictation_input_source_user_overridden {
             wire.dictation_input_source
         } else {
@@ -1841,7 +1855,8 @@ impl<'de> Deserialize<'de> for UserPreferences {
             dark_mode: wire.dark_mode,
             streaming_insert,
             streaming_insert_default_migrated: true,
-            streaming_insert_save_clipboard: wire.streaming_insert_save_clipboard,
+            copy_final_to_clipboard,
+            auto_enter_send: wire.auto_enter_send,
             auto_update_check: wire.auto_update_check,
             history_max_entries: wire.history_max_entries,
             record_audio_for_debug: wire.record_audio_for_debug,
@@ -2256,7 +2271,8 @@ impl Default for UserPreferences {
             dark_mode: false,
             streaming_insert: true,
             streaming_insert_default_migrated: true,
-            streaming_insert_save_clipboard: true,
+            copy_final_to_clipboard: true,
+            auto_enter_send: false,
             auto_update_check: false,
             history_max_entries: None,
             record_audio_for_debug: false,
@@ -3375,12 +3391,14 @@ mod tests {
         let prefs = UserPreferences::default();
         assert!(prefs.streaming_insert);
         assert!(prefs.streaming_insert_default_migrated);
-        assert!(prefs.streaming_insert_save_clipboard);
+        assert!(prefs.copy_final_to_clipboard);
+        assert!(!prefs.auto_enter_send);
 
         let from_empty: UserPreferences = serde_json::from_str("{}").unwrap();
         assert!(from_empty.streaming_insert);
         assert!(from_empty.streaming_insert_default_migrated);
-        assert!(from_empty.streaming_insert_save_clipboard);
+        assert!(from_empty.copy_final_to_clipboard);
+        assert!(!from_empty.auto_enter_send);
 
         let from_legacy_false: UserPreferences = serde_json::from_str(
             r#"{
@@ -3391,6 +3409,7 @@ mod tests {
         .unwrap();
         assert!(from_legacy_false.streaming_insert);
         assert!(from_legacy_false.streaming_insert_default_migrated);
+        assert!(from_legacy_false.copy_final_to_clipboard);
     }
 
     #[test]
@@ -3399,14 +3418,25 @@ mod tests {
             r#"{
                 "streamingInsert": false,
                 "streamingInsertDefaultMigrated": true,
-                "streamingInsertSaveClipboard": false
+                "copyFinalToClipboard": false,
+                "autoEnterSend": true
             }"#,
         )
         .unwrap();
 
         assert!(!prefs.streaming_insert);
         assert!(prefs.streaming_insert_default_migrated);
-        assert!(!prefs.streaming_insert_save_clipboard);
+        assert!(!prefs.copy_final_to_clipboard);
+        assert!(prefs.auto_enter_send);
+    }
+
+    #[test]
+    fn legacy_streaming_clipboard_setting_migrates_to_final_clipboard_preference() {
+        let prefs: UserPreferences =
+            serde_json::from_str(r#"{ "streamingInsertSaveClipboard": false }"#).unwrap();
+
+        assert!(!prefs.copy_final_to_clipboard);
+        assert!(!prefs.auto_enter_send);
     }
 
     #[test]

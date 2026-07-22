@@ -40,6 +40,11 @@ pub(crate) struct SessionState {
     /// 用户在 Processing 阶段按 Esc 取消：end_session 在 polish/insert 检查点跳过插入 +
     /// 跳过 history.append。issue #52。
     pub(crate) cancelled: bool,
+    /// 本次结束是否来自用户的录音停止动作。只有它为 true 时，完成后自动 Enter 才可能
+    /// 触发；自动收尾、错误和取消都保持 false。
+    pub(crate) user_initiated_stop: bool,
+    /// 该 session 是否已经领取过自动 Enter。即使完成回调意外重入，也只能发送一次。
+    pub(crate) auto_enter_send_claimed: bool,
     pub(crate) focus_target: Option<usize>,
     /// 每次 begin_session 生成新的 UUID session id。
     /// recorder error monitor 持有 captured id，处理时若与当前不等说明
@@ -57,6 +62,8 @@ impl Default for SessionState {
             started_at: Instant::now(),
             pending_stop: false,
             cancelled: false,
+            user_initiated_stop: false,
+            auto_enter_send_claimed: false,
             focus_target: None,
             session_id: initial_session_id(),
             front_app: None,
@@ -72,6 +79,7 @@ pub(crate) enum DictationEvent {
     },
     Stop {
         session_id: SessionId,
+        user_initiated: bool,
     },
     Cancel {
         session_id: SessionId,
@@ -256,6 +264,8 @@ pub(crate) fn apply_dictation_event(
             state.started_at = Instant::now();
             state.pending_stop = false;
             state.cancelled = false;
+            state.user_initiated_stop = false;
+            state.auto_enter_send_claimed = false;
             state.focus_target = focus_target;
             state.session_id = new_session_id();
             state.front_app = front_app;
@@ -264,10 +274,14 @@ pub(crate) fn apply_dictation_event(
                 snapshot: None,
             }
         }
-        DictationEvent::Stop { session_id } => {
+        DictationEvent::Stop {
+            session_id,
+            user_initiated,
+        } => {
             if let Some(result) = dictation_stale_or_cancelled(state, session_id) {
                 return result;
             }
+            state.user_initiated_stop = user_initiated;
             match state.phase {
                 SessionPhase::Starting => {
                     state.pending_stop = true;
@@ -545,7 +559,13 @@ pub(crate) fn request_stop_during_starting_state(state: &mut SessionState) -> bo
     }
     let session_id = state.session_id;
     matches!(
-        apply_dictation_event(state, DictationEvent::Stop { session_id },),
+        apply_dictation_event(
+            state,
+            DictationEvent::Stop {
+                session_id,
+                user_initiated: true,
+            },
+        ),
         DictationTransition::Applied { .. }
     )
 }
@@ -988,6 +1008,7 @@ mod tests {
             (
                 DictationEvent::Stop {
                     session_id: session_id(1),
+                    user_initiated: true,
                 },
                 SessionPhase::Processing,
                 Some(DictationUiState::Transcribing),
@@ -1035,6 +1056,7 @@ mod tests {
                 vec![
                     DictationEvent::Stop {
                         session_id: session_id(2),
+                        user_initiated: true,
                     },
                     DictationEvent::Cancel {
                         session_id: session_id(2),
@@ -1055,6 +1077,7 @@ mod tests {
                     },
                     DictationEvent::Stop {
                         session_id: session_id(2),
+                        user_initiated: true,
                     },
                 ],
                 SessionPhase::Idle,
@@ -1083,6 +1106,27 @@ mod tests {
             assert_eq!(state.phase, expected_phase, "{label}");
             assert_eq!(state.cancelled, expected_cancelled, "{label}");
         }
+    }
+
+    #[test]
+    fn automatic_stop_does_not_mark_session_as_user_initiated() {
+        let mut state = SessionState {
+            phase: SessionPhase::Listening,
+            session_id: session_id(31),
+            ..Default::default()
+        };
+
+        let transition = apply_dictation_event(
+            &mut state,
+            DictationEvent::Stop {
+                session_id: session_id(31),
+                user_initiated: false,
+            },
+        );
+
+        assert!(matches!(transition, DictationTransition::Applied { .. }));
+        assert_eq!(state.phase, SessionPhase::Processing);
+        assert!(!state.user_initiated_stop);
     }
 
     #[test]

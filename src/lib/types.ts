@@ -499,9 +499,10 @@ export interface UserPreferences {
   /** issue #440 一次性迁移标记：旧配置缺少该字段时后端会把老默认 false 迁到 true；
    *  迁移后用户再手动关掉 streamingInsert 时保留 false。 */
   streamingInsertDefaultMigrated: boolean;
-  /** 流式输入成功后是否把最终润色文本写回剪贴板。开启后 Cmd+V 还能重复粘贴该次输出，
-   *  与一次性路径行为对齐。默认 true。 */
-  streamingInsertSaveClipboard: boolean;
+  /** 每次非空最终文本是否保留到剪贴板。覆盖流式与一次性路径，默认 true。 */
+  copyFinalToClipboard: boolean;
+  /** 仅在用户主动停止且确认写入原目标输入位置后自动按一次 Enter，默认 false。 */
+  autoEnterSend: boolean;
   /** 主窗口启动 + 后台每 60 分钟自动检查 Listener Type 发布通道。默认 false。
    *  关闭后仅 Settings → 关于 的「检查更新」手动按钮可用。 */
   autoUpdateCheck: boolean;

@@ -162,6 +162,15 @@
       "evidence": "Listener-Type/.cache/validation/release-package-current-20260721/release-package-audit.json",
       "release_boundary": "The platform capabilities are human-accepted and the current release packages are audited. This does not claim the separate Type clipboard/automatic-Enter WIP is complete, and package binaries remain ignored artifacts rather than source commits."
     },
+    "listener_owner_groups_accepted_platform_release_20260721": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-21T15:00:00+08:00",
+      "source": "Product-owner direction: 你应该所有东西都一起提交吧？反正那些功能都是验收过的",
+      "requirement": "Group the accepted Listener platform repairs into a coherent scoped release commit set, including provider streaming preview, PCM block aggregation/tail drain, session AGC, visual-level observability, and the already accepted Firmware/BLE/OTA source changes.",
+      "interpretation": "This direction applies to platform-accepted work only. The separately tracked Type clipboard/automatic-Enter WIP remains outside this release because its registry entries still require machine closure and the standing product boundary forbids mixing it into the accepted platform release.",
+      "commit_boundary": "Do not stage Type clipboard/automatic-Enter WIP, Firmware tools/flash.ps1 local changes, .rollback-firmware-1b37813/, caches, audio, transcripts, stimulus text, or build outputs. Keep each repository's accepted source changes in its own focused commit.",
+      "acceptance_boundary": "Grouping accepted platform fixes together does not declare the current clean package valid until the recording preview regression is rebuilt, installed from C:\\Program Files\\Listener Type\\listener-type.exe, and backed by focused evidence."
+    },
     "listener_recording_acceptance_owner_clarification_20260721": {
       "status": "owner_confirmed_recording_pass_invalid_fixture_only",
       "recorded_at": "2026-07-21",
