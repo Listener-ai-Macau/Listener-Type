@@ -8289,15 +8289,17 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 crate::embedded_ble::format_bluetooth_address(value)
             )
         });
+        let (_, dis_hardware, dis_firmware, dis_battery) =
+            read_dis_metadata_from_discovered_services(target.bluetooth_address);
         let snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             connected: true,
-            hardware_revision: None,
-            firmware_version: None,
+            hardware_revision: dis_hardware,
+            firmware_version: dis_firmware,
             capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],
-            battery_percent: None,
+            battery_percent: dis_battery,
             usb_powered: None,
             detail: Some(format!(
-                "Listener OTA v1 service is reachable{}; bounded GATT probe skipped optional DIS metadata.",
+                "Listener OTA v1 service is reachable{}; DIS metadata read on a best-effort basis.",
                 address.as_deref().unwrap_or("")
             )),
         };
