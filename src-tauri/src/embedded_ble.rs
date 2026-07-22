@@ -7231,9 +7231,6 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         target: &'a OpenListenerOtaV1Target,
         transfer_id: u64,
         data_write_option: GattWriteOption,
-        data_write_elapsed: Duration,
-        control_write_elapsed: Duration,
-        status_read_elapsed: Duration,
     }
 
     impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
@@ -7247,11 +7244,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 denzic_ota_core::OP_ABORT => "Denzic OTA v1 abort",
                 _ => "Denzic OTA v1 control",
             };
-            let started_at = Instant::now();
             // SYNC has no state transition on Firmware. Its following uncached status
             // read verifies the acknowledged offset, so avoid the slower detailed
             // WinRT write-result path while retaining ATT write-with-response.
-            let result = if listener_ota_v1_sync_control_uses_status_write(packet) {
+            if listener_ota_v1_sync_control_uses_status_write(packet) {
                 write_gatt_value_status_with_timeout(
                     &self.target.control,
                     packet,
@@ -7268,13 +7264,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     label,
                 )
             }
-            .map(|_| ());
-            self.control_write_elapsed += started_at.elapsed();
-            result
+            .map(|_| ())
         }
 
         fn write_data(&mut self, packet: &[u8]) -> Result<(), String> {
-            let started_at = Instant::now();
             let result = write_listener_ota_v1_value_with_fallback(
                 &self.target.data,
                 packet,
@@ -7282,21 +7275,17 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 OTA_WRITE_TIMEOUT,
                 "Denzic OTA v1 data",
             );
-            self.data_write_elapsed += started_at.elapsed();
             self.data_write_option = result?;
             Ok(())
         }
 
         fn read_status(&mut self) -> Result<Vec<u8>, String> {
-            let started_at = Instant::now();
-            let result = read_characteristic_bytes_with_timeout(
+            read_characteristic_bytes_with_timeout(
                 &self.target.status,
                 BluetoothCacheMode::Uncached,
                 "Denzic OTA v1 status",
                 LISTENER_OTA_V1_STATUS_READ_TIMEOUT,
-            );
-            self.status_read_elapsed += started_at.elapsed();
-            result
+            )
         }
 
         fn status_retry_wait(&mut self, attempt: u8) {
@@ -7355,12 +7344,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             target,
             transfer_id,
             data_write_option: target.data_write_option,
-            data_write_elapsed: Duration::ZERO,
-            control_write_elapsed: Duration::ZERO,
-            status_read_elapsed: Duration::ZERO,
         };
 
-        let started_at = Instant::now();
         let report = denzic_ota_core::transfer(
             &mut transport,
             firmware_bytes,
@@ -7380,25 +7365,27 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             },
         )?;
         log::info!(
-            "[embedded-ble] Denzic OTA v1 #{transfer_id}: transferred {}/{} bytes in {} data writes, {} status reads, {} offset recoveries, active_link_confirmed={}, elapsed_ms={}, data_write_ms={}, control_write_ms={}, status_read_ms={}",
+            "[embedded-ble] Denzic OTA v1 #{transfer_id}: transferred {}/{} bytes in {} data writes, {} status reads, {} offset recoveries, resumed_bytes={}, active_link_confirmed={}, elapsed_ms={}, data_write_ms={}, control_write_ms={}, status_read_ms={}, non_transfer_ms={}",
             report.firmware_bytes,
             firmware_bytes.len(),
             report.data_writes,
             report.status_reads,
             report.recovered_offsets,
+            report.resumed_bytes,
             report.active_link_confirmed,
-            started_at.elapsed().as_millis(),
-            transport.data_write_elapsed.as_millis(),
-            transport.control_write_elapsed.as_millis(),
-            transport.status_read_elapsed.as_millis()
+            report.timings.total.as_millis(),
+            report.timings.data_write.as_millis(),
+            report.timings.control_write.as_millis(),
+            report.timings.status_read.as_millis(),
+            report.timings.non_transfer_elapsed().as_millis()
         );
         Ok(crate::embedded_ble::FirmwareOtaTransferStats {
             bytes_transferred: report.firmware_bytes,
             chunks_sent: report.data_writes as usize,
             transport: denzic_ota_core::PROTOCOL_NAME,
-            data_write_elapsed_ms: transport.data_write_elapsed.as_millis() as u64,
-            control_write_elapsed_ms: transport.control_write_elapsed.as_millis() as u64,
-            status_read_elapsed_ms: transport.status_read_elapsed.as_millis() as u64,
+            data_write_elapsed_ms: report.timings.data_write.as_millis() as u64,
+            control_write_elapsed_ms: report.timings.control_write.as_millis() as u64,
+            status_read_elapsed_ms: report.timings.status_read.as_millis() as u64,
         })
     }
 
