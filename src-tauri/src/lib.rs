@@ -250,7 +250,7 @@ pub fn run() {
             // 与 Swift `CapsuleWindowController.repositionToBottomCenter` 同语义。
             if let Some(capsule) = app.get_webview_window("capsule") {
                 prepare_capsule_window_for_overlay(&capsule);
-                if let Err(e) = position_capsule_bottom_center(&capsule, false) {
+                if let Err(e) = position_capsule_bottom_center(app.handle(), &capsule, false) {
                     log::warn!("[capsule] position failed: {e}");
                 }
                 let _ = capsule.hide();
@@ -2452,15 +2452,85 @@ fn show_qa_window_no_activate<R: tauri::Runtime>(window: &tauri::WebviewWindow<R
     true
 }
 
-/// 把 capsule 窗口移到屏幕底部居中，与 Swift `CapsuleWindowController.repositionToBottomCenter` 同效。
+/// 选择胶囊应落位的显示器：优先光标所在屏（用户正在看的屏幕），其次胶囊窗口
+/// 当前所在屏，再退回主显示器，最后任一可用显示器。
+/// 修复：窗口被旧 DPI/拓扑甩到屏外后 `current_monitor()` 返回 None、
+/// 胶囊永远无法被重新定位回可见区域的问题。
+pub(crate) fn capsule_target_monitor<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+) -> Option<tauri::Monitor> {
+    if let Ok(cursor) = app.cursor_position() {
+        if let Ok(Some(monitor)) = app.monitor_from_point(cursor.x, cursor.y) {
+            return Some(monitor);
+        }
+    }
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        return Some(monitor);
+    }
+    if let Ok(Some(monitor)) = app.primary_monitor() {
+        return Some(monitor);
+    }
+    app.available_monitors()
+        .ok()
+        .and_then(|monitors| monitors.into_iter().next())
+}
+
+/// 物理矩形是否与任一显示器有正面积交叠（纯函数，便于单测）。
+fn rect_intersects_any_monitor(
+    rect: (i32, i32, u32, u32),
+    monitors: &[(i32, i32, u32, u32)],
+) -> bool {
+    let (x, y, w, h) = rect;
+    let right = x.saturating_add(w as i32);
+    let bottom = y.saturating_add(h as i32);
+    monitors.iter().any(|&(mx, my, mw, mh)| {
+        let mright = mx.saturating_add(mw as i32);
+        let mbottom = my.saturating_add(mh as i32);
+        right > mx && x < mright && bottom > my && y < mbottom
+    })
+}
+
+/// 胶囊窗口是否完全落在所有显示器可见区域之外。
+pub(crate) fn capsule_window_off_all_monitors<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+) -> bool {
+    let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return false;
+    };
+    let Ok(monitors) = app.available_monitors() else {
+        return false;
+    };
+    if monitors.is_empty() {
+        return false;
+    }
+    let monitor_rects: Vec<(i32, i32, u32, u32)> = monitors
+        .iter()
+        .map(|m| {
+            (
+                m.position().x,
+                m.position().y,
+                m.size().width,
+                m.size().height,
+            )
+        })
+        .collect();
+    !rect_intersects_any_monitor(
+        (position.x, position.y, size.width, size.height),
+        &monitor_rects,
+    )
+}
+
+/// 把 capsule 窗口移到目标显示器底部居中，与 Swift `CapsuleWindowController.repositionToBottomCenter` 同效。
 /// 留 80pt 给 macOS Dock；Windows 任务栏一般在底部 48pt 以内，整体也合适。
 pub(crate) fn position_capsule_bottom_center<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
     translation_active: bool,
 ) -> tauri::Result<()> {
-    let monitor = match window.current_monitor()? {
-        Some(m) => m,
-        None => return Ok(()),
+    let Some(monitor) = capsule_target_monitor(app, window) else {
+        return Ok(());
     };
     let bounds = capsule_window_bounds(translation_active);
     window.set_size(LogicalSize::new(bounds.width, bounds.height))?;
@@ -2557,9 +2627,10 @@ fn capsule_height_for_qa() -> f64 {
 mod tests {
     use super::{
         capsule_bottom_center_position, capsule_height_for_qa, capsule_visual_height,
-        capsule_window_bounds, log_dir_path, parse_tray_polish_mode_id, rotate_log_if_too_large,
-        should_hide_main_on_close, should_keep_alive_on_exit_request,
-        tray_polish_mode_menu_entries, tray_style_menu_enabled, LOG_ROTATE_LIMIT_BYTES,
+        capsule_window_bounds, log_dir_path, parse_tray_polish_mode_id,
+        rect_intersects_any_monitor, rotate_log_if_too_large, should_hide_main_on_close,
+        should_keep_alive_on_exit_request, tray_polish_mode_menu_entries, tray_style_menu_enabled,
+        LOG_ROTATE_LIMIT_BYTES,
     };
     #[cfg(target_os = "windows")]
     use super::{merge_webview2_test_browser_args, WRY_DEFAULT_DISABLED_WEBVIEW2_FEATURES};
@@ -2817,6 +2888,35 @@ mod tests {
         );
 
         assert_eq!((x, y), (2728.0, -24.0));
+    }
+
+    #[test]
+    fn rect_intersects_any_monitor_detects_off_screen_window() {
+        let monitors = [(0, 0, 2560, 1440)];
+        // 复现 2026-07-23 线上事故：胶囊被旧 DPI 甩到屏幕下方，完全不可见。
+        assert!(!rect_intersects_any_monitor(
+            (1395, 1613, 486, 134),
+            &monitors
+        ));
+        assert!(rect_intersects_any_monitor(
+            (1128, 1220, 486, 134),
+            &monitors
+        ));
+    }
+
+    #[test]
+    fn rect_intersects_any_monitor_handles_negative_origins() {
+        let monitors = [(-1920, 0, 1920, 1080), (0, 0, 2560, 1440)];
+        assert!(rect_intersects_any_monitor((-100, 500, 200, 80), &monitors));
+        assert!(!rect_intersects_any_monitor(
+            (-3000, 500, 200, 80),
+            &monitors
+        ));
+        // 仅边缘相贴不算可见。
+        assert!(!rect_intersects_any_monitor(
+            (2560, 100, 200, 80),
+            &monitors
+        ));
     }
 
     #[test]

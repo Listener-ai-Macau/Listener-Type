@@ -13817,7 +13817,7 @@ fn apply_capsule_window_request<R: tauri::Runtime>(
         return;
     };
     crate::prepare_capsule_window_for_overlay(&window);
-    maybe_position_capsule_bottom_center(inner, &window, translation);
+    maybe_position_capsule_bottom_center(inner, app, &window, translation);
     if show_capsule && visible {
         let shown_no_activate = show_capsule_window_no_activate(app, &window);
         crate::timeline::mark(
@@ -14146,10 +14146,11 @@ struct CapsuleLayoutState {
 
 fn maybe_position_capsule_bottom_center<R: tauri::Runtime>(
     inner: &Arc<Inner>,
+    app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
     translation_active: bool,
 ) {
-    let Some(monitor) = window.current_monitor().ok().flatten() else {
+    let Some(monitor) = crate::capsule_target_monitor(app, window) else {
         return;
     };
     let next = CapsuleLayoutState {
@@ -14160,13 +14161,16 @@ fn maybe_position_capsule_bottom_center<R: tauri::Runtime>(
         monitor_height: monitor.size().height,
         scale_bits: monitor.scale_factor().to_bits(),
     };
+    // 窗口被甩到所有显示器之外时（DPI/拓扑变化后常见），缓存状态不再可信，
+    // 必须强制重定位；否则胶囊一旦出屏就永远回不来。
+    let off_screen = crate::capsule_window_off_all_monitors(app, window);
     {
         let last = inner.capsule_layout.lock();
-        if last.as_ref() == Some(&next) {
+        if !off_screen && last.as_ref() == Some(&next) {
             return;
         }
     }
-    if crate::position_capsule_bottom_center(window, translation_active).is_ok() {
+    if crate::position_capsule_bottom_center(app, window, translation_active).is_ok() {
         let mut last = inner.capsule_layout.lock();
         *last = Some(next);
     }
