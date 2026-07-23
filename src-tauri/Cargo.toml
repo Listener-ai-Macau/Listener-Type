@@ -52,6 +52,7 @@ denzic-audio-v1-core = { path = "../third_party/denzic-platform/audio/host/rust"
 denzic-device-control-v1-core = { path = "../third_party/denzic-platform/device_control/host/rust" }
 denzic-observability-v1-core = { path = "../third_party/denzic-platform/observability/host/rust" }
 denzic-ble-windows = { path = "../third_party/denzic-platform/ble_windows/host/rust" }
+denzic-ble-pairing = { path = "../third_party/denzic-platform/ble_pairing/host/rust" }
 
 # Hotkey + audio + insertion
 global-hotkey = "0.6"

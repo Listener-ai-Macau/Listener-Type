@@ -4505,14 +4505,18 @@ fn embedded_ble_passive_local_reattach_evidence_ready(
     native_hid_addresses: &[u64],
     baseline_native_hid_addresses: Option<&[u64]>,
 ) -> bool {
-    let current_windows_pairing = pairing.is_some_and(|value| value.already_paired_devices > 0)
-        && !native_hid_addresses.is_empty();
+    let paired_devices_visible =
+        pairing.is_some_and(|value| value.already_paired_devices > 0);
     let fresh_native_hid_after_baseline = baseline_native_hid_addresses.is_some_and(|baseline| {
         native_hid_addresses
             .iter()
             .any(|address| !baseline.contains(address))
     });
-    current_windows_pairing || fresh_native_hid_after_baseline
+    denzic_ble_pairing::reattach_evidence_ready(
+        paired_devices_visible,
+        !native_hid_addresses.is_empty(),
+        fresh_native_hid_after_baseline,
+    )
 }
 
 fn start_embedded_ble_pairing_confirmation_watch(

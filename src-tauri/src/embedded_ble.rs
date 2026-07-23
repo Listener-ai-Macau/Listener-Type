@@ -7,17 +7,19 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093a";
-pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093b";
-pub const DIAGNOSTIC_DATA_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093c";
-pub const DIAGNOSTIC_COUNT_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3093d";
-pub const DEVICE_SETTINGS_REVISION_UUID_TEXT: &str = "710af845-6d9f-6583-0c4d-9e5b3bc3091f";
+pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str = denzic_observability_v1_core::DIAG_LOG_GATT_SERVICE_UUID;
+pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str = denzic_observability_v1_core::DIAG_LOG_GATT_CONTROL_UUID;
+pub const DIAGNOSTIC_DATA_UUID_TEXT: &str = denzic_observability_v1_core::DIAG_LOG_GATT_DATA_UUID;
+pub const DIAGNOSTIC_COUNT_UUID_TEXT: &str = denzic_observability_v1_core::DIAG_LOG_GATT_COUNT_UUID;
+pub const DEVICE_SETTINGS_REVISION_UUID_TEXT: &str =
+    denzic_device_control_v1_core::SETTINGS_REVISION_CHARACTERISTIC_UUID;
 pub const LISTENER_OTA_V1_SERVICE_UUID_TEXT: &str = denzic_ota_core::GATT_SERVICE_UUID;
 pub const LISTENER_OTA_V1_CONTROL_UUID_TEXT: &str = denzic_ota_core::GATT_CONTROL_UUID;
 pub const LISTENER_OTA_V1_DATA_UUID_TEXT: &str = denzic_ota_core::GATT_DATA_UUID;
 pub const LISTENER_OTA_V1_STATUS_UUID_TEXT: &str = denzic_ota_core::GATT_STATUS_UUID;
-pub const DIAGNOSTIC_EVENT_BYTES: usize = 24;
-pub const DIAGNOSTIC_CHUNK_HEADER_BYTES: usize = 8;
+pub const DIAGNOSTIC_EVENT_BYTES: usize = denzic_observability_v1_core::DIAG_LOG_EVENT_WIRE_BYTES;
+pub const DIAGNOSTIC_CHUNK_HEADER_BYTES: usize =
+    denzic_observability_v1_core::DIAG_LOG_CHUNK_HEADER_BYTES;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BleNotificationEvent {
@@ -89,18 +91,7 @@ pub struct DeviceSettingsStatus {
 }
 
 pub(crate) fn parse_device_settings_revision_characteristic(value: &str) -> Result<u32, String> {
-    let revision = value
-        .split(';')
-        .map(str::trim)
-        .find_map(|field| field.strip_prefix("settings_revision="))
-        .ok_or_else(|| format!("device settings revision characteristic missing settings_revision: {value}"))?;
-    let revision = revision
-        .parse::<u32>()
-        .map_err(|err| format!("device settings revision is not u32: {err}"))?;
-    if revision == 0 {
-        return Err("device settings revision must be nonzero".to_string());
-    }
-    Ok(revision)
+    denzic_device_control_v1_core::parse_settings_revision_value(value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,7 +311,7 @@ impl FirmwareDiagnosticLogPull {
             max_events_per_chunk_observed,
             max_value_bytes_observed,
             event_bytes: raw_event_bytes.len(),
-            aggregate_crc32: Some(format_crc32(crc32(&raw_event_bytes))),
+            aggregate_crc32: Some(format_crc32(denzic_ota_core::crc32_ieee(&raw_event_bytes))),
             events_sha256: Some(crate::firmware_ota::sha256_hex(&raw_event_bytes)),
             chunks,
             error: None,
@@ -438,29 +429,18 @@ fn format_crc32(value: u32) -> String {
     format!("0x{value:08x}")
 }
 
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
-    for byte in bytes {
-        crc ^= u32::from(*byte);
-        for _ in 0..8 {
-            let mask = 0u32.wrapping_sub(crc & 1);
-            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
-        }
-    }
-    !crc
-}
-
-const EC11_HARDWARE_RECOVERY_NOTICE: &[u8] = b"listener-ec11-recovery-v1";
-const EC11_HARDWARE_RECOVERY_ACK: &[u8] = b"TYPE:EC11:RECOVERY:ACK\n";
-const EC11_HARDWARE_RECOVERY_PREPARE_NOTICE: &[u8] = b"listener-ec11-recovery-prepare-v1";
-const EC11_HARDWARE_RECOVERY_PREPARE_ACK: &[u8] = b"TYPE:EC11:RECOVERY:PREPARE:ACK\n";
+// EC11 recovery handshake tokens come from the shared platform contract
+// (`denzic_device_control_v1`); only the write-side aliases live here.
+const EC11_HARDWARE_RECOVERY_ACK: &[u8] = denzic_device_control_v1_core::EC11_RECOVERY_ACK_WRITE;
+const EC11_HARDWARE_RECOVERY_PREPARE_ACK: &[u8] =
+    denzic_device_control_v1_core::EC11_RECOVERY_PREPARE_ACK_WRITE;
 
 fn is_ec11_hardware_recovery_prepare_notice(notification: &[u8]) -> bool {
-    notification == EC11_HARDWARE_RECOVERY_PREPARE_NOTICE
+    denzic_device_control_v1_core::is_ec11_recovery_prepare_notice(notification)
 }
 
 fn is_ec11_hardware_recovery_notice(notification: &[u8]) -> bool {
-    notification == EC11_HARDWARE_RECOVERY_NOTICE
+    denzic_device_control_v1_core::is_ec11_recovery_notice(notification)
 }
 
 fn is_terminal_notification(notification: &[u8]) -> bool {
@@ -566,13 +546,18 @@ mod windows_ble {
         GUID::from_u128(denzic_ota_core::GATT_STATUS_UUID_U128);
     const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
     const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
-    const DEVICE_SETTINGS_REVISION_UUID: GUID =
-        GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091f);
+    const DEVICE_SETTINGS_REVISION_UUID: GUID = GUID::from_u128(
+        denzic_device_control_v1_core::SETTINGS_REVISION_CHARACTERISTIC_UUID_U128,
+    );
 
-    const DIAGNOSTIC_SERVICE_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093a);
-    const DIAGNOSTIC_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093b);
-    const DIAGNOSTIC_DATA_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093c);
-    const DIAGNOSTIC_COUNT_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3093d);
+    const DIAGNOSTIC_SERVICE_UUID: GUID =
+        GUID::from_u128(denzic_observability_v1_core::DIAG_LOG_GATT_SERVICE_UUID_U128);
+    const DIAGNOSTIC_CONTROL_UUID: GUID =
+        GUID::from_u128(denzic_observability_v1_core::DIAG_LOG_GATT_CONTROL_UUID_U128);
+    const DIAGNOSTIC_DATA_UUID: GUID =
+        GUID::from_u128(denzic_observability_v1_core::DIAG_LOG_GATT_DATA_UUID_U128);
+    const DIAGNOSTIC_COUNT_UUID: GUID =
+        GUID::from_u128(denzic_observability_v1_core::DIAG_LOG_GATT_COUNT_UUID_U128);
     const DIS_SERVICE_UUID: GUID = GUID::from_u128(0x0000180a_0000_1000_8000_00805f9b34fb);
     const DIS_MODEL_NUMBER_UUID: GUID = GUID::from_u128(0x00002a24_0000_1000_8000_00805f9b34fb);
     const DIS_FIRMWARE_REVISION_UUID: GUID =
@@ -2736,10 +2721,15 @@ mod windows_ble {
             return None;
         }
         let elapsed = now.saturating_duration_since(last.attempted_at);
-        if elapsed >= BLE_PAIRING_PROMPT_SUPPRESS_WINDOW {
+        let remaining_ms = denzic_ble_pairing::window_remaining_ms(
+            1,
+            BLE_PAIRING_PROMPT_SUPPRESS_WINDOW.as_millis() as i64,
+            1 + elapsed.as_millis() as i64,
+        );
+        if remaining_ms <= 0 {
             return None;
         }
-        Some(BLE_PAIRING_PROMPT_SUPPRESS_WINDOW - elapsed)
+        Some(Duration::from_millis(remaining_ms as u64))
     }
 
     fn remember_pairing_prompt_attempt(_target_name: &str, now: Instant) {
@@ -4989,12 +4979,12 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 })?;
                 let (event_count, header_offset, firmware_crc, payload) =
                     parse_diagnostic_chunk(&packet, offset)?;
-                if header_offset != (offset & 0xFFFF) as u16 {
+                if header_offset != offset as u32 {
                     return Err(format!(
                         "BLE diagnostic chunk offset mismatch: host={offset} firmware_header={header_offset}"
                     ));
                 }
-                let host_crc = crate::embedded_ble::crc32(payload);
+                let host_crc = denzic_ota_core::crc32_ieee(payload);
                 if host_crc != firmware_crc {
                     return Err(format!(
                         "BLE diagnostic chunk CRC mismatch: offset={offset} firmware={} host={}",
@@ -6723,7 +6713,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 let reason = super::stop_drain_timeout_reason(&stats);
                 log::warn!("[embedded-ble] {reason}");
                 cleanup.disable_notify();
-                return if collector.has_stopped_with_audio() {
+                return if crate::embedded_audio::transport_v1::stop_drain_expired_finalizes(
+                    &collector,
+                ) {
                     Ok(())
                 } else {
                     Err(reason)
@@ -6796,7 +6788,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                         let reason = super::stop_drain_timeout_reason(&stats);
                         log::warn!("[embedded-ble] {reason}");
                         cleanup.disable_notify();
-                        return if collector.has_stopped_with_audio() {
+                        return if crate::embedded_audio::transport_v1::stop_drain_expired_finalizes(
+                            &collector,
+                        ) {
                             Ok(())
                         } else {
                             Err(reason)
@@ -6982,7 +6976,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     pub(super) fn collector_has_active_recoverable_session(
         collector: &crate::embedded_audio::SessionCollector,
     ) -> bool {
-        collector.session_id().is_some() && !collector.terminal_received()
+        crate::embedded_audio::transport_v1::has_active_recoverable_session(collector)
     }
 
     fn type_heartbeat_enabled_for_terminal_behavior(
@@ -12799,31 +12793,32 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     fn parse_diagnostic_chunk(
         packet: &[u8],
         host_offset: usize,
-    ) -> Result<(u16, u16, u32, &[u8]), String> {
-        if packet.len() < crate::embedded_ble::DIAGNOSTIC_CHUNK_HEADER_BYTES {
-            return Err(format!(
-                "BLE diagnostic notification too short at offset {host_offset}: {} bytes",
-                packet.len()
-            ));
-        }
-        let event_count = u16::from_le_bytes([packet[0], packet[1]]);
-        let global_offset = u16::from_le_bytes([packet[2], packet[3]]);
-        let firmware_crc = u32::from_le_bytes([packet[4], packet[5], packet[6], packet[7]]);
-        if event_count == 0 {
-            return Err(format!(
-                "BLE diagnostic empty chunk at offset {host_offset}"
-            ));
-        }
-        let payload = &packet[crate::embedded_ble::DIAGNOSTIC_CHUNK_HEADER_BYTES..];
-        let expected_payload_len =
-            usize::from(event_count) * crate::embedded_ble::DIAGNOSTIC_EVENT_BYTES;
-        if payload.len() != expected_payload_len {
-            return Err(format!(
-                "BLE diagnostic chunk payload length mismatch: offset={host_offset} count={event_count} bytes={} expected={expected_payload_len}",
-                payload.len()
-            ));
-        }
-        Ok((event_count, global_offset, firmware_crc, payload))
+    ) -> Result<(u16, u32, u32, &[u8]), String> {
+        let chunk = denzic_observability_v1_core::parse_diag_log_chunk(packet).map_err(|err| {
+            match err {
+                denzic_observability_v1_core::DiagLogChunkError::TooShort { packet_len } => {
+                    format!(
+                        "BLE diagnostic notification too short at offset {host_offset}: {packet_len} bytes"
+                    )
+                }
+                denzic_observability_v1_core::DiagLogChunkError::EmptyChunk => {
+                    format!("BLE diagnostic empty chunk at offset {host_offset}")
+                }
+                denzic_observability_v1_core::DiagLogChunkError::PayloadLengthMismatch {
+                    event_count,
+                    actual,
+                    expected,
+                } => format!(
+                    "BLE diagnostic chunk payload length mismatch: offset={host_offset} count={event_count} bytes={actual} expected={expected}"
+                ),
+            }
+        })?;
+        Ok((
+            chunk.event_count,
+            chunk.global_offset,
+            chunk.events_crc32,
+            chunk.payload,
+        ))
     }
 
     fn write_cccd_notify_with_retry(
@@ -17860,7 +17855,7 @@ mod tests {
 
     #[test]
     fn crc32_matches_standard_vector() {
-        assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
+        assert_eq!(denzic_ota_core::crc32_ieee(b"123456789"), 0xcbf4_3926);
         assert_eq!(format_crc32(0xcbf4_3926), "0xcbf43926");
     }
 }

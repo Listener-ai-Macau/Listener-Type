@@ -5,15 +5,15 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const OTA_FILE_NAME: &str = "firmware_ota.bin";
+pub const OTA_FILE_NAME: &str = denzic_ota_core::MANIFEST_PACKAGE_FILE_NAME;
 pub const LISTENER_OTA_V1_PROTOCOL_NAME: &str = denzic_ota_core::PROTOCOL_NAME;
 pub const LISTENER_OTA_V1_FIRMWARE_CAPABILITY: &str = denzic_ota_core::PROTOCOL_NAME;
 pub const LISTENER_OTA_V1_SERVICE_UUID: &str = denzic_ota_core::GATT_SERVICE_UUID;
 pub const LISTENER_OTA_V1_CONTROL_UUID: &str = denzic_ota_core::GATT_CONTROL_UUID;
 pub const LISTENER_OTA_V1_DATA_UUID: &str = denzic_ota_core::GATT_DATA_UUID;
 pub const LISTENER_OTA_V1_STATUS_UUID: &str = denzic_ota_core::GATT_STATUS_UUID;
-pub const LISTENER_OTA_V1_CHUNK_BYTES: u64 = 500;
-pub const OTA_MAX_VERSION_CHARS: usize = 31;
+pub const LISTENER_OTA_V1_CHUNK_BYTES: u64 = denzic_ota_core::MANIFEST_DEFAULT_GATT_CHUNK_BYTES;
+pub const OTA_MAX_VERSION_CHARS: usize = denzic_ota_core::MANIFEST_FIRMWARE_VERSION_MAX_CHARS;
 pub const DEFAULT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(45);
 pub const CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 pub const CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(1800);
@@ -24,37 +24,18 @@ fn elapsed_ms_u64(started: Instant) -> u64 {
     started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct FirmwareOtaManifest {
-    pub schema_version: u64,
-    pub package_type: String,
-    pub project: String,
-    pub version: String,
-    pub protocol_name: String,
-    pub protocol_version: u64,
-    pub hardware_revision: String,
-    pub min_desktop_version: String,
-    pub channel: String,
-    pub file_name: String,
-    pub file_size_bytes: u64,
-    pub file_sha256: String,
-    pub firmware_capability: String,
-    pub gatt_service_uuid: String,
-    pub gatt_control_uuid: String,
-    pub gatt_data_uuid: String,
-    pub gatt_confirm_uuid: Option<String>,
-    #[serde(default)]
-    pub gatt_status_uuid: Option<String>,
-    pub gatt_chunk_bytes: u64,
-    pub rollback_instructions: Vec<String>,
-    pub recovery_instructions: Vec<String>,
-}
+/// Listener OTA package manifest. The schema lives in the platform
+/// (`ota/protocol/ota_manifest_v2.json`); parsing and normalized validation
+/// come from `denzic_ota_core::manifest` with the Listener policy below.
+pub use denzic_ota_core::manifest::OtaManifest as FirmwareOtaManifest;
 
-impl FirmwareOtaManifest {
-    pub fn is_denzic_ota_v1(&self) -> bool {
-        self.protocol_name == LISTENER_OTA_V1_PROTOCOL_NAME
-    }
+fn listener_ota_manifest_policy() -> denzic_ota_core::manifest::OtaManifestPolicy {
+    denzic_ota_core::manifest::OtaManifestPolicy::denzic_ota_v1(
+        "listener-firmware-ota",
+        "voice-keyboard-firmware",
+        "Listener OTA",
+        "Listener OTA v1",
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -763,344 +744,13 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn parse_manifest(value: &Value) -> Result<FirmwareOtaManifest, String> {
-    let schema_version = require_u64(
-        value
-            .get("schema_version")
-            .or_else(|| value.get("schemaVersion")),
-        "schema_version",
-    )?;
-    if schema_version == 2 {
-        parse_manifest_v2(value, schema_version)
-    } else {
-        Err(format!(
-            "Unsupported OTA manifest schema_version {schema_version}."
-        ))
-    }
-}
-
-fn parse_manifest_v2(value: &Value, schema_version: u64) -> Result<FirmwareOtaManifest, String> {
-    let firmware = require_object(value.get("firmware"), "firmware")?;
-    let requirements = require_object(value.get("requirements"), "requirements")?;
-    let protocol = require_object(value.get("protocol"), "protocol")?;
-    let gatt = require_object(protocol.get("gatt"), "protocol.gatt")?;
-    let ble_identity = require_object(
-        value
-            .get("ble_identity")
-            .or_else(|| value.get("bleIdentity")),
-        "ble_identity",
-    )?;
-    let dis = require_object(ble_identity.get("dis"), "ble_identity.dis")?;
-    let rollback = require_object(value.get("rollback"), "rollback")?;
-    let recovery = require_object(value.get("recovery"), "recovery")?;
-
-    require_string(
-        value
-            .get("created_at_utc")
-            .or_else(|| value.get("createdAtUtc")),
-        "created_at_utc",
-    )?;
-    require_string(
-        firmware
-            .get("git_commit")
-            .or_else(|| firmware.get("gitCommit")),
-        "firmware.git_commit",
-    )?;
-    require_bool(
-        firmware
-            .get("git_dirty")
-            .or_else(|| firmware.get("gitDirty")),
-        "firmware.git_dirty",
-    )?;
-    require_string(firmware.get("target"), "firmware.target")?;
-    require_string(ble_identity.get("name"), "ble_identity.name")?;
-    require_string(ble_identity.get("appearance"), "ble_identity.appearance")?;
-    require_string(dis.get("model"), "ble_identity.dis.model")?;
-    require_string(
-        dis.get("hardware_revision")
-            .or_else(|| dis.get("hardwareRevision")),
-        "ble_identity.dis.hardware_revision",
-    )?;
-    require_string(
-        dis.get("firmware_revision")
-            .or_else(|| dis.get("firmwareRevision")),
-        "ble_identity.dis.firmware_revision",
-    )?;
-
-    if !require_bool(rollback.get("supported"), "rollback.supported")? {
-        return Err("rollback.supported must be true.".to_string());
-    }
-    let rollback_method = require_string(rollback.get("method"), "rollback.method")?;
-    if rollback_method != "esp_idf_bootloader_rollback" {
-        return Err(format!("Unsupported rollback.method {rollback_method}."));
-    }
-    let factory_reflash = require_string(
-        recovery
-            .get("factory_reflash")
-            .or_else(|| recovery.get("factoryReflash")),
-        "recovery.factory_reflash",
-    )?;
-    let serial_commands = require_string(
-        recovery
-            .get("serial_commands")
-            .or_else(|| recovery.get("serialCommands")),
-        "recovery.serial_commands",
-    )?;
-
-    let manifest = FirmwareOtaManifest {
-        schema_version,
-        package_type: "listener-firmware-ota".to_string(),
-        project: require_string(firmware.get("project"), "firmware.project")?,
-        version: require_string(firmware.get("version"), "firmware.version")?,
-        protocol_name: require_string(protocol.get("name"), "protocol.name")?,
-        protocol_version: require_u64(protocol.get("version"), "protocol.version")?,
-        hardware_revision: require_string(
-            requirements
-                .get("hardware_revision")
-                .or_else(|| requirements.get("hardwareRevision")),
-            "requirements.hardware_revision",
-        )?,
-        min_desktop_version: require_string(
-            requirements
-                .get("min_desktop_version")
-                .or_else(|| requirements.get("minDesktopVersion")),
-            "requirements.min_desktop_version",
-        )?,
-        channel: require_channel(value.get("channel"))?,
-        file_name: require_string(firmware.get("file"), "firmware.file")?,
-        file_size_bytes: require_u64(
-            firmware
-                .get("size_bytes")
-                .or_else(|| firmware.get("sizeBytes")),
-            "firmware.size_bytes",
-        )?,
-        file_sha256: require_string(firmware.get("sha256"), "firmware.sha256")?
-            .to_ascii_lowercase(),
-        firmware_capability: require_string(
-            protocol
-                .get("firmware_capability")
-                .or_else(|| protocol.get("firmwareCapability")),
-            "protocol.firmware_capability",
-        )?,
-        gatt_service_uuid: optional_gatt_string(
-            Some(gatt),
-            "service_uuid",
-            "serviceUuid",
-            LISTENER_OTA_V1_SERVICE_UUID,
-        )?,
-        gatt_control_uuid: optional_gatt_string(
-            Some(gatt),
-            "control_uuid",
-            "controlUuid",
-            LISTENER_OTA_V1_CONTROL_UUID,
-        )?,
-        gatt_data_uuid: optional_gatt_string(
-            Some(gatt),
-            "data_uuid",
-            "dataUuid",
-            LISTENER_OTA_V1_DATA_UUID,
-        )?,
-        gatt_confirm_uuid: optional_gatt_optional_string(
-            Some(gatt),
-            "confirm_uuid",
-            "confirmUuid",
-        )?,
-        gatt_status_uuid: optional_gatt_optional_string(Some(gatt), "status_uuid", "statusUuid")?,
-        gatt_chunk_bytes: optional_gatt_u64(
-            Some(gatt),
-            "chunk_bytes",
-            "chunkBytes",
-            LISTENER_OTA_V1_CHUNK_BYTES,
-        )?,
-        rollback_instructions: require_instructions(
-            rollback.get("instructions"),
-            "rollback.instructions",
-        )?,
-        recovery_instructions: vec![factory_reflash, serial_commands],
-    };
-    validate_normalized_manifest(manifest)
+    denzic_ota_core::manifest::parse_manifest(value, &listener_ota_manifest_policy())
 }
 
 pub fn validate_normalized_manifest(
     manifest: FirmwareOtaManifest,
 ) -> Result<FirmwareOtaManifest, String> {
-    if !manifest.is_denzic_ota_v1() {
-        return Err(format!(
-            "Unsupported OTA protocol {}.",
-            manifest.protocol_name
-        ));
-    }
-    let expected_package_type = "listener-firmware-ota";
-    if manifest.package_type != expected_package_type {
-        return Err(format!(
-            "ota_manifest.json package_type must be {expected_package_type}."
-        ));
-    }
-    if manifest.protocol_version != 1 {
-        return Err(format!(
-            "Listener OTA protocol.version must be 1, got {}.",
-            manifest.protocol_version
-        ));
-    }
-    if manifest.project != "voice-keyboard-firmware" {
-        return Err("Listener OTA v1 project must be voice-keyboard-firmware.".to_string());
-    }
-    if manifest.firmware_capability != LISTENER_OTA_V1_FIRMWARE_CAPABILITY {
-        return Err(
-            "Listener OTA v1 package requires unsupported firmware capability.".to_string(),
-        );
-    }
-    if !uuid_eq(&manifest.gatt_service_uuid, LISTENER_OTA_V1_SERVICE_UUID)
-        || !uuid_eq(&manifest.gatt_control_uuid, LISTENER_OTA_V1_CONTROL_UUID)
-        || !uuid_eq(&manifest.gatt_data_uuid, LISTENER_OTA_V1_DATA_UUID)
-        || manifest
-            .gatt_status_uuid
-            .as_deref()
-            .map_or(true, |value| !uuid_eq(value, LISTENER_OTA_V1_STATUS_UUID))
-    {
-        return Err("Listener OTA v1 package uses an unsupported GATT boundary.".to_string());
-    }
-    if manifest.gatt_confirm_uuid.is_some() {
-        return Err("Listener OTA v1 must use status_uuid, not confirm_uuid.".to_string());
-    }
-    if manifest.gatt_chunk_bytes != LISTENER_OTA_V1_CHUNK_BYTES {
-        return Err(format!(
-            "Listener OTA v1 chunk size must be {LISTENER_OTA_V1_CHUNK_BYTES} bytes, got {}.",
-            manifest.gatt_chunk_bytes
-        ));
-    }
-    if manifest.file_size_bytes == 0 {
-        return Err("file.size_bytes must be greater than zero.".to_string());
-    }
-    if !is_lower_sha256(&manifest.file_sha256) {
-        return Err("file.sha256 must be lowercase SHA256 hex.".to_string());
-    }
-    Ok(manifest)
-}
-
-fn require_object<'a>(
-    value: Option<&'a Value>,
-    field: &str,
-) -> Result<&'a serde_json::Map<String, Value>, String> {
-    value
-        .and_then(Value::as_object)
-        .ok_or_else(|| format!("{field} must be an object."))
-}
-
-fn require_string(value: Option<&Value>, field: &str) -> Result<String, String> {
-    let value = value
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{field} must be a non-empty string."))?;
-    Ok(value.to_string())
-}
-
-fn require_u64(value: Option<&Value>, field: &str) -> Result<u64, String> {
-    value
-        .and_then(Value::as_u64)
-        .ok_or_else(|| format!("{field} must be a number."))
-}
-
-fn optional_u64(value: Option<&Value>, default_value: u64) -> Result<u64, String> {
-    match value {
-        Some(value) => value
-            .as_u64()
-            .ok_or_else(|| "optional numeric field must be a number.".to_string()),
-        None => Ok(default_value),
-    }
-}
-
-fn require_bool(value: Option<&Value>, field: &str) -> Result<bool, String> {
-    value
-        .and_then(Value::as_bool)
-        .ok_or_else(|| format!("{field} must be a boolean."))
-}
-
-fn require_channel(value: Option<&Value>) -> Result<String, String> {
-    let channel = require_string(value, "channel")?;
-    match channel.as_str() {
-        "stable" | "development" => Ok(channel),
-        _ => Err("channel must be stable or development.".to_string()),
-    }
-}
-
-fn uuid_eq(left: &str, right: &str) -> bool {
-    left.eq_ignore_ascii_case(right)
-}
-
-fn require_instructions(value: Option<&Value>, field: &str) -> Result<Vec<String>, String> {
-    if let Some(text) = value.and_then(Value::as_str) {
-        let text = text.trim();
-        if !text.is_empty() {
-            return Ok(vec![text.to_string()]);
-        }
-    }
-    let Some(items) = value.and_then(Value::as_array) else {
-        return Err(format!("{field} must be an array."));
-    };
-    let strings: Vec<String> = items
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect();
-    if strings.is_empty() {
-        return Err(format!("{field} must contain at least one instruction."));
-    }
-    Ok(strings)
-}
-
-fn optional_gatt_string(
-    gatt: Option<&serde_json::Map<String, Value>>,
-    snake: &str,
-    camel: &str,
-    default_value: &str,
-) -> Result<String, String> {
-    match gatt {
-        Some(gatt) => require_string(
-            gatt.get(snake).or_else(|| gatt.get(camel)),
-            &format!("protocol.gatt.{snake}"),
-        ),
-        None => Ok(default_value.to_string()),
-    }
-}
-
-fn optional_gatt_optional_string(
-    gatt: Option<&serde_json::Map<String, Value>>,
-    snake: &str,
-    camel: &str,
-) -> Result<Option<String>, String> {
-    let Some(gatt) = gatt else {
-        return Ok(None);
-    };
-    let value = gatt.get(snake).or_else(|| gatt.get(camel));
-    match value {
-        Some(_) => require_string(value, &format!("protocol.gatt.{snake}")).map(Some),
-        None => Ok(None),
-    }
-}
-
-fn optional_gatt_u64(
-    gatt: Option<&serde_json::Map<String, Value>>,
-    snake: &str,
-    camel: &str,
-    default_value: u64,
-) -> Result<u64, String> {
-    match gatt {
-        Some(gatt) => require_u64(
-            gatt.get(snake).or_else(|| gatt.get(camel)),
-            &format!("protocol.gatt.{snake}"),
-        ),
-        None => Ok(default_value),
-    }
-}
-
-fn is_lower_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    denzic_ota_core::manifest::validate_manifest(manifest, &listener_ota_manifest_policy())
 }
 
 fn normalize_firmware_ota_version(value: &str) -> String {
