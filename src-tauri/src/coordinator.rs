@@ -719,6 +719,90 @@ impl Coordinator {
         }
     }
 
+    pub fn reposition_capsule_after_display_change<R: tauri::Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        force: bool,
+    ) {
+        let Some(window) = app.get_webview_window("capsule") else {
+            return;
+        };
+        let translation_active = self
+            .inner
+            .capsule_layout
+            .lock()
+            .as_ref()
+            .map(|layout| layout.translation_active)
+            .unwrap_or(false);
+        let current_monitor = window.current_monitor().ok().flatten();
+        let target_monitor = crate::capsule_target_monitor(app, &window);
+        let off_screen = crate::capsule_window_off_all_monitors(app, &window);
+        let target_changed = match target_monitor.as_ref() {
+            Some(monitor) => {
+                let position = monitor.position();
+                let size = monitor.size();
+                self.inner
+                    .capsule_layout
+                    .lock()
+                    .as_ref()
+                    .map_or(true, |last| {
+                        last.monitor_x != position.x
+                            || last.monitor_y != position.y
+                            || last.monitor_width != size.width
+                            || last.monitor_height != size.height
+                            || last.scale_bits != monitor.scale_factor().to_bits()
+                    })
+            }
+            None => off_screen,
+        };
+        let window_on_target_monitor = match (current_monitor.as_ref(), target_monitor.as_ref()) {
+            (Some(current), Some(target)) => {
+                let current_position = current.position();
+                let current_size = current.size();
+                let target_position = target.position();
+                let target_size = target.size();
+                current_position.x == target_position.x
+                    && current_position.y == target_position.y
+                    && current_size.width == target_size.width
+                    && current_size.height == target_size.height
+                    && current.scale_factor().to_bits() == target.scale_factor().to_bits()
+            }
+            (None, None) => true,
+            _ => false,
+        };
+        if !force && !off_screen && !target_changed && window_on_target_monitor {
+            return;
+        }
+
+        let result = match target_monitor.as_ref() {
+            Some(monitor) => crate::position_capsule_bottom_center_on_monitor(
+                &window,
+                monitor,
+                translation_active,
+            ),
+            None => crate::position_capsule_bottom_center(app, &window, translation_active),
+        };
+        if let Err(error) = result {
+            log::warn!("[coord] capsule display-change reposition failed: {error}");
+            return;
+        }
+
+        let Some(monitor) = target_monitor.or_else(|| crate::capsule_target_monitor(app, &window)) else {
+            return;
+        };
+        let position = monitor.position();
+        let size = monitor.size();
+        let mut layout = self.inner.capsule_layout.lock();
+        *layout = Some(CapsuleLayoutState {
+            translation_active,
+            monitor_x: position.x,
+            monitor_y: position.y,
+            monitor_width: size.width,
+            monitor_height: size.height,
+            scale_bits: monitor.scale_factor().to_bits(),
+        });
+    }
+
     /// 后台预加载本地 ASR 引擎；当用户在 UI 切到 local-qwen3 provider 时调一次。
     /// 加载是阻塞且数秒，所以放 spawn_blocking 里，不影响 UI 响应。
     /// 模型未下载或不在 macOS 上时静默跳过。

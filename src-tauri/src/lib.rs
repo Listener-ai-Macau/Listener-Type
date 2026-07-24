@@ -76,7 +76,8 @@ use tauri::menu::{
 };
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime, WebviewWindow,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, RunEvent, Runtime,
+    WebviewWindow,
 };
 
 use crate::types::{DictationInputSource, PolishMode};
@@ -583,6 +584,20 @@ pub fn run() {
                 }
             }
             RunEvent::WindowEvent { label, event, .. } => {
+                if label == "capsule"
+                    && matches!(
+                        &event,
+                        tauri::WindowEvent::Moved(_)
+                            | tauri::WindowEvent::ScaleFactorChanged { .. }
+                    )
+                {
+                    let coordinator = app.state::<Arc<coordinator::Coordinator>>();
+                    let force = matches!(
+                        &event,
+                        tauri::WindowEvent::ScaleFactorChanged { .. }
+                    );
+                    coordinator.reposition_capsule_after_display_change(app, force);
+                }
                 if label == "main" {
                     if let tauri::WindowEvent::CloseRequested { ref api, .. } = event {
                         if should_hide_main_on_close(APP_QUIT_REQUESTED.load(Ordering::Relaxed)) {
@@ -2532,13 +2547,21 @@ pub(crate) fn position_capsule_bottom_center<R: tauri::Runtime>(
     let Some(monitor) = capsule_target_monitor(app, window) else {
         return Ok(());
     };
+    position_capsule_bottom_center_on_monitor(window, &monitor, translation_active)
+}
+
+pub(crate) fn position_capsule_bottom_center_on_monitor<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    monitor: &tauri::Monitor,
+    translation_active: bool,
+) -> tauri::Result<()> {
     let bounds = capsule_window_bounds(translation_active);
     window.set_size(LogicalSize::new(bounds.width, bounds.height))?;
 
     let scale = monitor.scale_factor();
     let size = monitor.size();
     let origin = monitor.position();
-    let (x, y) = capsule_bottom_center_position(
+    let (x, y) = capsule_bottom_center_physical_position(
         origin.x,
         origin.y,
         size.width,
@@ -2547,7 +2570,7 @@ pub(crate) fn position_capsule_bottom_center<R: tauri::Runtime>(
         bounds,
         capsule_visual_height(translation_active),
     );
-    window.set_position(LogicalPosition::new(x, y))?;
+    window.set_position(PhysicalPosition::new(x, y))?;
     Ok(())
 }
 
@@ -2578,6 +2601,28 @@ fn capsule_bottom_center_position(
         monitor_x as f64 / scale + local_x,
         monitor_y as f64 / scale + local_y,
     )
+}
+
+fn capsule_bottom_center_physical_position(
+    monitor_x: i32,
+    monitor_y: i32,
+    monitor_width: u32,
+    monitor_height: u32,
+    scale: f64,
+    bounds: CapsuleWindowBounds,
+    visual_height: f64,
+) -> (i32, i32) {
+    let (x, y) = capsule_bottom_center_position(
+        monitor_x,
+        monitor_y,
+        monitor_width,
+        monitor_height,
+        scale,
+        bounds,
+        visual_height,
+    );
+    // `Monitor` coordinates and `set_position` both use physical desktop pixels here.
+    ((x * scale).round() as i32, (y * scale).round() as i32)
 }
 
 fn capsule_window_bounds(translation_active: bool) -> CapsuleWindowBounds {
@@ -2626,10 +2671,11 @@ fn capsule_height_for_qa() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        capsule_bottom_center_position, capsule_height_for_qa, capsule_visual_height,
-        capsule_window_bounds, log_dir_path, parse_tray_polish_mode_id,
-        rect_intersects_any_monitor, rotate_log_if_too_large, should_hide_main_on_close,
-        should_keep_alive_on_exit_request, tray_polish_mode_menu_entries, tray_style_menu_enabled,
+        capsule_bottom_center_physical_position, capsule_bottom_center_position,
+        capsule_height_for_qa, capsule_visual_height, capsule_window_bounds, log_dir_path,
+        parse_tray_polish_mode_id, rect_intersects_any_monitor, rotate_log_if_too_large,
+        should_hide_main_on_close, should_keep_alive_on_exit_request,
+        tray_polish_mode_menu_entries, tray_style_menu_enabled, CapsuleWindowBounds,
         LOG_ROTATE_LIMIT_BYTES,
     };
     #[cfg(target_os = "windows")]
@@ -2888,6 +2934,19 @@ mod tests {
         );
 
         assert_eq!((x, y), (2728.0, -24.0));
+    }
+
+    #[test]
+    fn capsule_bottom_center_physical_position_keeps_desktop_coordinates() {
+        let bounds = CapsuleWindowBounds {
+            width: 304.0,
+            height: 84.0,
+            bottom_inset: 12.0,
+        };
+        let position =
+            capsule_bottom_center_physical_position(2880, -1440, 2880, 1620, 1.5, bounds, 52.0);
+
+        assert_eq!(position, (4092, -36));
     }
 
     #[test]
