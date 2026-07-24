@@ -22,14 +22,16 @@ export function SettingRow({ label, desc, children, controlWidth }: SettingRowPr
   );
 }
 
-export function Toggle({ on, onToggle }: { on: boolean; onToggle?: (next: boolean) => void }) {
+export function Toggle({ on, onToggle, disabled = false }: { on: boolean; onToggle?: (next: boolean) => void; disabled?: boolean }) {
   return (
     <button
       onClick={() => onToggle?.(!on)}
+      disabled={disabled}
       style={{
         position: 'relative', width: 32, height: 18, borderRadius: 999, border: 0,
         background: on ? 'var(--ol-blue)' : 'var(--ol-switch-off)',
-        cursor: 'default',
+        cursor: disabled ? 'not-allowed' : 'default',
+        opacity: disabled ? 0.55 : 1,
         transition: 'background 0.16s var(--ol-motion-quick)',
       }}
     >

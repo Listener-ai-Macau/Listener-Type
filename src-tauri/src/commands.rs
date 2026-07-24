@@ -2468,6 +2468,8 @@ pub struct DeviceSettingsSnapshot {
     plugged_low_power_idle_minutes: u32,
     battery_low_power_idle_minutes: u32,
     plugged_low_power_enabled: bool,
+    voice_auto_start_enabled: bool,
+    voice_auto_stop_enabled: bool,
     plugged_auto_shutdown_ms: u32,
     battery_auto_shutdown_ms: u32,
     knob_rotation_action: String,
@@ -2489,6 +2491,8 @@ pub struct DeviceSettingsUpdateRequest {
     plugged_low_power_idle_minutes: u32,
     battery_low_power_idle_minutes: u32,
     plugged_low_power_enabled: bool,
+    voice_auto_start_enabled: bool,
+    voice_auto_stop_enabled: bool,
     plugged_auto_shutdown_minutes: u32,
     battery_auto_shutdown_minutes: u32,
     ble_name: String,
@@ -3638,6 +3642,8 @@ fn device_settings_snapshot_from_status(
         plugged_low_power_idle_minutes: status.plugged_low_power_idle_minutes,
         battery_low_power_idle_minutes: status.battery_low_power_idle_minutes,
         plugged_low_power_enabled: status.plugged_low_power_enabled,
+        voice_auto_start_enabled: status.voice_auto_start_enabled,
+        voice_auto_stop_enabled: status.voice_auto_stop_enabled,
         plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: status.battery_auto_shutdown_minutes.saturating_mul(60_000),
         knob_rotation_action: ui_knob_rotation_action_from_firmware(&status.knob_rotation_action),
@@ -3695,6 +3701,8 @@ fn device_settings_snapshot_from_device(
         plugged_low_power_idle_minutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
         battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_enabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
+        voice_auto_start_enabled: false,
+        voice_auto_stop_enabled: false,
         plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         knob_rotation_action: ui_knob_rotation_action_from_firmware(
@@ -3729,6 +3737,8 @@ fn device_settings_snapshot_from_request(
         plugged_low_power_idle_minutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
         battery_low_power_idle_minutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
         plugged_low_power_enabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
+        voice_auto_start_enabled: false,
+        voice_auto_stop_enabled: false,
         plugged_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_PLUGGED_AUTO_SHUTDOWN_MS,
         battery_auto_shutdown_ms: DEVICE_SETTINGS_DEFAULT_BATTERY_AUTO_SHUTDOWN_MS,
         knob_rotation_action: ui_knob_rotation_action_from_firmware(
@@ -3754,6 +3764,8 @@ fn device_settings_snapshot_from_request(
     snapshot.plugged_low_power_idle_minutes = request.plugged_low_power_idle_minutes;
     snapshot.battery_low_power_idle_minutes = request.battery_low_power_idle_minutes;
     snapshot.plugged_low_power_enabled = plugged_low_power_enabled;
+    snapshot.voice_auto_start_enabled = request.voice_auto_start_enabled;
+    snapshot.voice_auto_stop_enabled = request.voice_auto_stop_enabled;
     snapshot.low_power_idle_minutes = match snapshot.active_power_source {
         "plugged" => request.plugged_low_power_idle_minutes,
         "battery" => request.battery_low_power_idle_minutes,
@@ -3823,6 +3835,18 @@ fn device_settings_readback_mismatches(
         mismatches.push(format!(
             "plugged_low_power_enabled expected={} actual={}",
             plugged_low_power_enabled, snapshot.plugged_low_power_enabled
+        ));
+    }
+    if snapshot.voice_auto_start_enabled != request.voice_auto_start_enabled {
+        mismatches.push(format!(
+            "voice_auto_start expected={} actual={}",
+            request.voice_auto_start_enabled, snapshot.voice_auto_start_enabled
+        ));
+    }
+    if snapshot.voice_auto_stop_enabled != request.voice_auto_stop_enabled {
+        mismatches.push(format!(
+            "voice_auto_stop expected={} actual={}",
+            request.voice_auto_stop_enabled, snapshot.voice_auto_stop_enabled
         ));
     }
     let expected_battery_auto_shutdown_ms =
@@ -3949,6 +3973,24 @@ fn device_settings_update_commands(
         assignments.push(device_setting_assignment(
             "plugged_low_power_enabled",
             if plugged_low_power_enabled { 1 } else { 0 },
+            compact_set_supported,
+        ));
+    }
+    if previous_snapshot.map_or(true, |snapshot| {
+        snapshot.voice_auto_start_enabled != request.voice_auto_start_enabled
+    }) {
+        assignments.push(device_setting_assignment(
+            "voice_auto_start",
+            if request.voice_auto_start_enabled { 1 } else { 0 },
+            compact_set_supported,
+        ));
+    }
+    if previous_snapshot.map_or(true, |snapshot| {
+        snapshot.voice_auto_stop_enabled != request.voice_auto_stop_enabled
+    }) {
+        assignments.push(device_setting_assignment(
+            "voice_auto_stop",
+            if request.voice_auto_stop_enabled { 1 } else { 0 },
             compact_set_supported,
         ));
     }
@@ -9141,6 +9183,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
@@ -9159,6 +9203,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener=bad".to_string(),
@@ -9177,6 +9223,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener dev".to_string(),
@@ -9195,6 +9243,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-1234567890123456789012".to_string(),
@@ -9213,6 +9263,8 @@ mod tests {
             plugged_low_power_idle_minutes: MAX_DEVICE_LOW_POWER_IDLE_MINUTES + 1,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
@@ -9231,6 +9283,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 30,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
@@ -9267,6 +9321,8 @@ mod tests {
             plugged_low_power_idle_minutes: 3,
             battery_low_power_idle_minutes: 1,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_ms: 0,
             battery_auto_shutdown_ms: 18 * 60_000,
             knob_rotation_action: "screenBrightness".to_string(),
@@ -9326,6 +9382,8 @@ mod tests {
                 plugged_low_power_idle_minutes: 2,
                 battery_low_power_idle_minutes: 3,
                 plugged_low_power_enabled: true,
+                voice_auto_start_enabled: false,
+                voice_auto_stop_enabled: false,
                 plugged_auto_shutdown_minutes: 0,
                 battery_auto_shutdown_minutes: 30,
                 settings_revision: 42,
@@ -9367,6 +9425,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
@@ -9386,6 +9446,8 @@ mod tests {
                 plugged_low_power_idle_minutes: 2,
                 battery_low_power_idle_minutes: 3,
                 plugged_low_power_enabled: true,
+                voice_auto_start_enabled: false,
+                voice_auto_stop_enabled: false,
                 plugged_auto_shutdown_minutes: 0,
                 battery_auto_shutdown_minutes: 30,
                 settings_revision: 42,
@@ -9436,6 +9498,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "Blistener".to_string(),
@@ -9455,6 +9519,8 @@ mod tests {
                 plugged_low_power_idle_minutes: 2,
                 battery_low_power_idle_minutes: 3,
                 plugged_low_power_enabled: true,
+                voice_auto_start_enabled: false,
+                voice_auto_stop_enabled: false,
                 plugged_auto_shutdown_minutes: 0,
                 battery_auto_shutdown_minutes: 30,
                 settings_revision: 42,
@@ -9504,6 +9570,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             settings_revision: 42,
@@ -9885,6 +9953,8 @@ mod tests {
             plugged_low_power_idle_minutes: status.plugged_low_power_idle_minutes,
             battery_low_power_idle_minutes: status.battery_low_power_idle_minutes,
             plugged_low_power_enabled: status.plugged_low_power_enabled,
+            voice_auto_start_enabled: status.voice_auto_start_enabled,
+            voice_auto_stop_enabled: status.voice_auto_stop_enabled,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: status.battery_auto_shutdown_minutes,
             ble_name: status.ble_name.clone(),
@@ -9943,6 +10013,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: true,
+            voice_auto_stop_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "OfficeType01".to_string(),
@@ -9977,6 +10049,8 @@ mod tests {
             plugged_low_power_idle_minutes: 1440,
             battery_low_power_idle_minutes: 1440,
             plugged_low_power_enabled: false,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 1440,
             ble_name: "listener-12345678901234567890123".to_string(),
@@ -9999,10 +10073,16 @@ mod tests {
         );
         assert!(commands
             .iter()
-            .any(|command| { command == "DEVICE:SET plugged_low_power_enabled=0" }));
+            .any(|command| command.contains("plugged_low_power_enabled=0")));
         assert!(commands
             .iter()
-            .any(|command| { command == "DEVICE:SET plugged_auto_shutdown_minutes=off" }));
+            .any(|command| command.contains("plugged_auto_shutdown_minutes=off")));
+        assert!(commands
+            .iter()
+            .any(|command| command.contains("voice_auto_start=0")));
+        assert!(commands
+            .iter()
+            .any(|command| command.contains("voice_auto_stop=0")));
         assert!(commands.iter().all(|command| {
             command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
         }));
@@ -10034,6 +10114,8 @@ mod tests {
             plugged_low_power_idle_minutes: 10,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: true,
+            voice_auto_stop_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 10,
             ble_name: "Billy".to_string(),
@@ -10053,6 +10135,8 @@ mod tests {
             plugged_low_power_idle_minutes: 3,
             battery_low_power_idle_minutes: 1,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: true,
+            voice_auto_stop_enabled: true,
             plugged_auto_shutdown_ms: 0,
             battery_auto_shutdown_ms: 10 * 60_000,
             knob_rotation_action: "systemVolume".to_string(),
@@ -10169,6 +10253,8 @@ mod tests {
             plugged_low_power_idle_minutes: 12,
             battery_low_power_idle_minutes: 12,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: true,
+            voice_auto_stop_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
@@ -10188,6 +10274,8 @@ mod tests {
             plugged_low_power_idle_minutes: 13,
             battery_low_power_idle_minutes: 12,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: true,
+            voice_auto_stop_enabled: true,
             plugged_auto_shutdown_ms: 0,
             battery_auto_shutdown_ms: 30 * 60_000,
             knob_rotation_action: "systemVolume".to_string(),
@@ -10216,6 +10304,8 @@ mod tests {
             plugged_low_power_idle_minutes: 23,
             battery_low_power_idle_minutes: 37,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: true,
+            voice_auto_stop_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 45,
             ble_name: "listener-dev".to_string(),
@@ -10235,6 +10325,8 @@ mod tests {
             plugged_low_power_idle_minutes: request.plugged_low_power_idle_minutes,
             battery_low_power_idle_minutes: request.battery_low_power_idle_minutes,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: true,
+            voice_auto_stop_enabled: true,
             plugged_auto_shutdown_ms: 0,
             battery_auto_shutdown_ms: request.battery_auto_shutdown_minutes * 60_000,
             knob_rotation_action: "systemVolume".to_string(),
@@ -10384,6 +10476,8 @@ mod tests {
             plugged_low_power_idle_minutes: 2,
             battery_low_power_idle_minutes: 3,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: true,
+            voice_auto_stop_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 30,
             ble_name: "listener-dev".to_string(),
@@ -10423,6 +10517,8 @@ mod tests {
             plugged_low_power_idle_minutes: 0,
             battery_low_power_idle_minutes: 0,
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: false,
+            voice_auto_stop_enabled: false,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: 0,
             ble_name: "listener-dev".to_string(),
@@ -10443,7 +10539,7 @@ mod tests {
             .any(|command| { command == "DEVICE:SET battery_low_power_idle_minutes=0" }));
         assert!(commands
             .iter()
-            .any(|command| { command == "DEVICE:SET plugged_low_power_enabled=0" }));
+            .any(|command| command.contains("plugged_low_power_enabled=0")));
     }
 
     #[cfg(target_os = "windows")]
@@ -10489,6 +10585,8 @@ mod tests {
             plugged_low_power_idle_minutes: pick_minutes(11, before.plugged_low_power_idle_minutes),
             battery_low_power_idle_minutes: pick_minutes(17, before.battery_low_power_idle_minutes),
             plugged_low_power_enabled: true,
+            voice_auto_start_enabled: true,
+            voice_auto_stop_enabled: true,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: before.battery_auto_shutdown_minutes,
             ble_name: before.ble_name.clone(),
@@ -10587,6 +10685,8 @@ mod tests {
             plugged_low_power_idle_minutes: before.plugged_low_power_idle_minutes,
             battery_low_power_idle_minutes: before.battery_low_power_idle_minutes,
             plugged_low_power_enabled: before.plugged_low_power_enabled,
+            voice_auto_start_enabled: before.voice_auto_start_enabled,
+            voice_auto_stop_enabled: before.voice_auto_stop_enabled,
             plugged_auto_shutdown_minutes: 0,
             battery_auto_shutdown_minutes: before.battery_auto_shutdown_minutes,
             ble_name: before.ble_name.clone(),

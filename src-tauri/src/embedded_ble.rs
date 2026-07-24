@@ -77,6 +77,8 @@ pub struct DeviceSettingsStatus {
     pub plugged_low_power_idle_minutes: u32,
     pub battery_low_power_idle_minutes: u32,
     pub plugged_low_power_enabled: bool,
+    pub voice_auto_start_enabled: bool,
+    pub voice_auto_stop_enabled: bool,
     pub plugged_auto_shutdown_minutes: u32,
     pub battery_auto_shutdown_minutes: u32,
     pub settings_revision: u32,
@@ -6161,6 +6163,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     crate::types::DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED
                 }
             });
+        let voice_auto_start_enabled =
+            optional_bool_field(&fields, "voice_auto_start").unwrap_or(false);
+        let voice_auto_stop_enabled =
+            optional_bool_field(&fields, "voice_auto_stop").unwrap_or(false);
         let legacy_auto_shutdown_minutes = optional_u32_field(&fields, "auto_shutdown_ms")
             .map(auto_shutdown_minutes_from_ms)
             .unwrap_or(crate::types::DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES);
@@ -6192,6 +6198,8 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             plugged_low_power_idle_minutes,
             battery_low_power_idle_minutes,
             plugged_low_power_enabled,
+            voice_auto_start_enabled,
+            voice_auto_stop_enabled,
             plugged_auto_shutdown_minutes,
             battery_auto_shutdown_minutes,
             settings_revision: optional_u32_field(&fields, "settings_revision").unwrap_or(0),
@@ -17818,7 +17826,7 @@ mod tests {
     #[test]
     fn parses_device_settings_status_line() {
         let status = super::windows_ble::parse_device_settings_status_line(
-            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 led_status=70 led_key=65 led_ec11=60 led_edge=55 compact_set=1 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,led_zone_brightness_0_100,low_power_idle_ms_0_86400000"
+            "~DEVICE:SETTINGS schema=listener.device_settings.v1 result=OK plugged_brightness=80 battery_brightness=50 active_power=external active_brightness=80 led_status=70 led_key=65 led_ec11=60 led_edge=55 compact_set=1 low_power_idle_ms=60000 plugged_low_power_idle_ms=120000 battery_low_power_idle_minutes=3 plugged_low_power_enabled=1 voice_auto_start=1 voice_auto_stop=1 low_power_idle_mode=power_mode auto_shutdown_ms=1800000 plugged_auto_shutdown_ms=0 battery_auto_shutdown_minutes=45 auto_shutdown_mode=power_mode knob_rotation=screen_brightness ble_name=\"listener-dev\" ble_name_pending=1 ble_name_apply=restart_ble_or_reboot loaded_from_nvs=1 external_power_present=1 usb_power_present=1 charging=0 charge_full=1 valid_ranges=brightness_0_100,led_zone_brightness_0_100,low_power_idle_ms_0_86400000"
         )
         .expect("parse device settings");
         assert_eq!(status.brightness_percent, 80);
@@ -17834,6 +17842,8 @@ mod tests {
         assert_eq!(status.plugged_low_power_idle_minutes, 2);
         assert_eq!(status.battery_low_power_idle_minutes, 3);
         assert!(status.plugged_low_power_enabled);
+        assert!(status.voice_auto_start_enabled);
+        assert!(status.voice_auto_stop_enabled);
         assert_eq!(status.plugged_auto_shutdown_minutes, 0);
         assert_eq!(status.battery_auto_shutdown_minutes, 45);
         assert_eq!(status.knob_rotation_action, "screen_brightness");

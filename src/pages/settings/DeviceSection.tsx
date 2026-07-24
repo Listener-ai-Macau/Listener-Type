@@ -314,6 +314,8 @@ function DeviceFirmwareSettingsCard() {
     pluggedLowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
     batteryLowPowerIdleMinutes: 1,
     pluggedLowPowerEnabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
+    voiceAutoStartEnabled: false,
+    voiceAutoStopEnabled: false,
     pluggedAutoShutdownMinutes: 0,
     batteryAutoShutdownMinutes: DEFAULT_BATTERY_AUTO_SHUTDOWN_MINUTES,
     bleName: 'listener',
@@ -495,6 +497,28 @@ function DeviceFirmwareSettingsCard() {
           desc={t('settings.recording.postActionsDesc')}
         >
           <div className="ol-recording-automation-settings">
+            <SettingRow
+              label={t('settings.recording.voiceAutoStartLabel', '检测到人声后自动开始')}
+              desc={t('settings.recording.voiceAutoStartDesc', '仅在设备正常唤醒且蓝牙灯亮时监听；噪声不会触发。')}
+            >
+              <Toggle
+                on={form.voiceAutoStartEnabled}
+                onToggle={voiceAutoStartEnabled =>
+                  setForm(current => ({ ...current, voiceAutoStartEnabled }))}
+                disabled={controlsDisabled}
+              />
+            </SettingRow>
+            <SettingRow
+              label={t('settings.recording.voiceAutoStopLabel', '检测不到人声后自动结束')}
+              desc={t('settings.recording.voiceAutoStopDesc', '持续无人声后结束；人声恢复会取消结束计时。')}
+            >
+              <Toggle
+                on={form.voiceAutoStopEnabled}
+                onToggle={voiceAutoStopEnabled =>
+                  setForm(current => ({ ...current, voiceAutoStopEnabled }))}
+                disabled={controlsDisabled}
+              />
+            </SettingRow>
             <SettingRow
               label={t('settings.recording.copyDictationToClipboardLabel')}
               desc={t('settings.recording.copyDictationToClipboardDesc')}
@@ -1329,6 +1353,8 @@ function snapshotToForm(snapshot: DeviceSettingsSnapshot): DeviceSettingsUpdateR
     pluggedLowPowerIdleMinutes: snapshot.pluggedLowPowerEnabled ? snapshot.pluggedLowPowerIdleMinutes : 0,
     batteryLowPowerIdleMinutes: snapshot.batteryLowPowerIdleMinutes,
     pluggedLowPowerEnabled: snapshot.pluggedLowPowerEnabled,
+    voiceAutoStartEnabled: snapshot.voiceAutoStartEnabled,
+    voiceAutoStopEnabled: snapshot.voiceAutoStopEnabled,
     pluggedAutoShutdownMinutes: 0,
     batteryAutoShutdownMinutes: minutesFromMsForDeviceForm(snapshot.batteryAutoShutdownMs),
     bleName: snapshot.bleName,

@@ -38,6 +38,8 @@ export function applyMockDeviceSettingsWrite(
     pluggedLowPowerIdleMinutes: request.pluggedLowPowerIdleMinutes,
     batteryLowPowerIdleMinutes: request.batteryLowPowerIdleMinutes,
     pluggedLowPowerEnabled: request.pluggedLowPowerEnabled,
+    voiceAutoStartEnabled: request.voiceAutoStartEnabled,
+    voiceAutoStopEnabled: request.voiceAutoStopEnabled,
     pluggedAutoShutdownMs,
     batteryAutoShutdownMs,
     bleName: request.bleName,

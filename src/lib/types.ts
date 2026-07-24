@@ -592,6 +592,8 @@ export interface DeviceFirmwareSettingsStatus {
   pluggedLowPowerIdleMinutes: number;
   batteryLowPowerIdleMinutes: number;
   pluggedLowPowerEnabled: boolean;
+  voiceAutoStartEnabled: boolean;
+  voiceAutoStopEnabled: boolean;
   pluggedAutoShutdownMinutes: number;
   batteryAutoShutdownMinutes: number;
   knobRotationAction: string;
@@ -621,6 +623,8 @@ export interface DeviceSettingsSnapshot {
   pluggedLowPowerIdleMinutes: number;
   batteryLowPowerIdleMinutes: number;
   pluggedLowPowerEnabled: boolean;
+  voiceAutoStartEnabled: boolean;
+  voiceAutoStopEnabled: boolean;
   pluggedAutoShutdownMs: number;
   batteryAutoShutdownMs: number;
   knobRotationAction: DeviceKnobRotationAction | string;
@@ -640,6 +644,8 @@ export interface DeviceSettingsUpdateRequest {
   pluggedLowPowerIdleMinutes: number;
   batteryLowPowerIdleMinutes: number;
   pluggedLowPowerEnabled: boolean;
+  voiceAutoStartEnabled: boolean;
+  voiceAutoStopEnabled: boolean;
   pluggedAutoShutdownMinutes: number;
   batteryAutoShutdownMinutes: number;
   bleName: string;

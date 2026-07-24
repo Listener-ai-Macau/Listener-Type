@@ -218,6 +218,8 @@ let mockDeviceSettings: DeviceSettingsSnapshot = {
   pluggedLowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
   batteryLowPowerIdleMinutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
   pluggedLowPowerEnabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
+  voiceAutoStartEnabled: false,
+  voiceAutoStopEnabled: false,
   pluggedAutoShutdownMs: 0,
   batteryAutoShutdownMs: 10 * 60 * 1000,
   knobRotationAction: 'systemVolume',
@@ -801,6 +803,8 @@ export function refreshDeviceSettingsStatus(): Promise<DeviceFirmwareSettingsSta
     pluggedLowPowerIdleMinutes: mockSettings.devicePluggedLowPowerIdleMinutes,
     batteryLowPowerIdleMinutes: mockSettings.deviceBatteryLowPowerIdleMinutes,
     pluggedLowPowerEnabled: mockSettings.devicePluggedLowPowerEnabled,
+    voiceAutoStartEnabled: mockDeviceSettings.voiceAutoStartEnabled,
+    voiceAutoStopEnabled: mockDeviceSettings.voiceAutoStopEnabled,
     pluggedAutoShutdownMinutes: 0,
     batteryAutoShutdownMinutes: mockSettings.deviceBatteryAutoShutdownMinutes,
     knobRotationAction:

@@ -2203,6 +2203,34 @@
         "operator_note": "",
         "accepted_behavior": "The Device-page Recording automation group has no divider lines between its controls and remains the home for future automatic start and automatic stop."
       }
+    },
+    "listener_owner_enable_voice_activation_for_acceptance_20260724": {
+      "status": "implementation_requested",
+      "recorded_at": "2026-07-24T10:50:00+08:00",
+      "source": "Product-owner direction: 自动开始和自动结束现在做出来并启用，让 owner 先验收。",
+      "requirement": "Add independent automatic-start and automatic-stop controls to the accepted Device-page Recording automation group, deploy an enabled acceptance candidate to the current Listener, and preserve physical-button override behavior.",
+      "initial_acceptance_thresholds": {
+        "power_scope": "external power only",
+        "speech_confirmation_ms": 300,
+        "pre_roll_ms": 600,
+        "silence_stop_ms": 1000,
+        "tail_ms": 250,
+        "minimum_automatic_session_ms": 500,
+        "maximum_automatic_session_ms": 60000,
+        "cooldown_ms": 1500
+      },
+      "architecture_contract": "Use a Denzic-Platform voice_activation pure state machine. Firmware owns PCM classification, real-audio pre-roll, timers, power/blocker checks, BLE recording-control effects and diagnostics. Type owns the two settings and device-setting transport. Do not use the desktop microphone as an always-listening substitute.",
+      "speech_detection_contract": "Automatic start must use the ESP-SR/WebRTC AFE voice-activity result as human-speech evidence, not a raw volume threshold. Keyboard noise, desk impacts, wind-like bursts and stable background noise do not count as speech. Raw energy may only reject implausibly weak or clipped classifier output; it must never independently trigger recording.",
+      "power_state_contract": "Latest owner correction overrides the transient low-power wake interpretation: voice monitoring and automatic recording are allowed only while the device power manager is ACTIVE and the normal Bluetooth-ready light is on. Entering connected-idle or disconnected-idle low power disables VAD monitoring and clears volatile pre-roll; low-power states cannot wake from speech. Monitoring resumes only after an ordinary physical or system wake returns the device to ACTIVE.",
+      "safety_contract": "The feature defaults off for general installations. The acceptance deployment may explicitly enable both settings on the current device. Physical start/stop/cancel overrides reset voice activation. OTA, reconnect, playback and error states block automatic start. Automatic stop must remain non-user-initiated and therefore must not trigger the already accepted post-dictation auto-submit behavior.",
+      "privacy_contract": "Do not retain idle audio or transcripts. The pre-roll ring contains only bounded volatile PCM and is cleared after use, disable, blocker entry or cooldown.",
+      "required_evidence": [
+        "platform generator, Rust and C state-machine tests",
+        "firmware build and explicit static/host state-machine evidence",
+        "Type settings default, persistence and device-setting round-trip tests",
+        "installed Type plus flashed current-device acceptance candidate",
+        "canonical Chinese owner acceptance result stored beside machine evidence"
+      ]
     }
   },
   "scenarios": [

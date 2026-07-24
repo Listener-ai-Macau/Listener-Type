@@ -33,6 +33,8 @@ const initial: DeviceSettingsSnapshot = {
   pluggedLowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
   batteryLowPowerIdleMinutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
   pluggedLowPowerEnabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
+  voiceAutoStartEnabled: false,
+  voiceAutoStopEnabled: false,
   pluggedAutoShutdownMs: 0,
   batteryAutoShutdownMs: 10 * 60 * 1000,
   knobRotationAction: 'systemVolume',
@@ -56,6 +58,8 @@ function requestFromSnapshot(
     pluggedLowPowerIdleMinutes: snapshot.pluggedLowPowerIdleMinutes,
     batteryLowPowerIdleMinutes: snapshot.batteryLowPowerIdleMinutes,
     pluggedLowPowerEnabled: snapshot.pluggedLowPowerEnabled,
+    voiceAutoStartEnabled: snapshot.voiceAutoStartEnabled,
+    voiceAutoStopEnabled: snapshot.voiceAutoStopEnabled,
     pluggedAutoShutdownMinutes: minutesFromMs(snapshot.pluggedAutoShutdownMs),
     batteryAutoShutdownMinutes: minutesFromMs(snapshot.batteryAutoShutdownMs),
     bleName: snapshot.bleName,
@@ -380,3 +384,15 @@ for (const profile of [
   assert.equal(write.snapshot.batteryLowPowerIdleMinutes, profile.battery, 'battery low-power snapshot must read back exact profile value');
   assert.equal(write.snapshot.batteryAutoShutdownMs, profile.shutdown * 60_000, 'battery auto-shutdown snapshot must use the exact requested minutes');
 }
+
+const voiceAutomationWrite = applyMockDeviceSettingsWrite(
+  currentSettings,
+  initial,
+  requestFromSnapshot(initial, {
+    voiceAutoStartEnabled: true,
+    voiceAutoStopEnabled: true,
+  }),
+  '2026-07-24T00:00:00.000Z',
+);
+assert.equal(voiceAutomationWrite.snapshot.voiceAutoStartEnabled, true);
+assert.equal(voiceAutomationWrite.snapshot.voiceAutoStopEnabled, true);
