@@ -3517,6 +3517,7 @@ impl EmbeddedStreamingDictation {
             crate::embedded_audio::StreamingSessionEvent::Stopped {
                 session_id,
                 expected_packet_count,
+                ..
             } => {
                 if let Some(session) = self.session.as_ref() {
                     crate::observability::record_embedded_audio_stop(session.session_id);
@@ -3681,8 +3682,11 @@ impl EmbeddedStreamingDictation {
             archive_active
         );
         let coordinator_session_id = session.session_id;
+        let user_initiated_stop =
+            embedded_audio_stop_is_user_initiated(self.collector.inner().stats().stop_origin);
         let end_result = end_embedded_ble_session(
             inner,
+            user_initiated_stop,
             format!(
                 "embedded_session_id={embedded_session_id} coordinator_session_id={} expected_packets={expected_packet_count}",
                 coordinator_session_id
@@ -4039,6 +4043,12 @@ fn embedded_streaming_chunk_is_asr_input(_chunk: &crate::embedded_audio::Streami
     true
 }
 
+fn embedded_audio_stop_is_user_initiated(
+    origin: Option<crate::embedded_audio::SessionStopOrigin>,
+) -> bool {
+    origin != Some(crate::embedded_audio::SessionStopOrigin::VoiceActivation)
+}
+
 fn embedded_ble_session_event_detail(
     event: &crate::embedded_audio::StreamingSessionEvent,
 ) -> String {
@@ -4056,8 +4066,9 @@ fn embedded_ble_session_event_detail(
         crate::embedded_audio::StreamingSessionEvent::Stopped {
             session_id,
             expected_packet_count,
+            origin,
         } => format!(
-            "event=stop embedded_session_id={session_id} expected_packets={expected_packet_count}"
+            "event=stop embedded_session_id={session_id} expected_packets={expected_packet_count} origin={origin:?}"
         ),
         crate::embedded_audio::StreamingSessionEvent::Cancelled {
             session_id,
@@ -4539,6 +4550,7 @@ async fn end_session_with_stop_origin(
 
 async fn end_embedded_ble_session(
     inner: &Arc<Inner>,
+    user_initiated_stop: bool,
     detail: impl Into<String>,
 ) -> Result<(), String> {
     let session_id = inner.state.lock().session_id;
@@ -4547,7 +4559,7 @@ async fn end_embedded_ble_session(
         EmbeddedBleSessionActorCommand::StopCommand,
         Some(session_id),
         detail,
-        |_| begin_stop_session_transition(inner, true),
+        |_| begin_stop_session_transition(inner, user_initiated_stop),
     );
     finish_end_session_after_stop_transition(inner, transition).await
 }
@@ -5572,7 +5584,7 @@ mod tests {
         embedded_audio_stop_feedback_latched, embedded_ble_listener_capture_ready,
         embedded_ble_processing_sync_disabled, embedded_ble_session_actor_history,
         embedded_ble_session_event_should_trace, embedded_ble_stream_idle_timeout,
-        embedded_pcm_rms_and_peak, embedded_pcm_visual_level,
+        embedded_audio_stop_is_user_initiated, embedded_pcm_rms_and_peak, embedded_pcm_visual_level,
         embedded_streaming_chunk_is_asr_input,
         emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
         finalize_polished_text, finish_dictation_pipeline_error, finish_dictation_timeout,
@@ -6321,7 +6333,7 @@ mod tests {
             state.cancelled = false;
         }
 
-        end_embedded_ble_session(&coordinator.inner, "unit test stop command")
+        end_embedded_ble_session(&coordinator.inner, true, "unit test stop command")
             .await
             .expect("stop command completes without ASR resource");
 
@@ -6714,6 +6726,7 @@ mod tests {
             &StreamingSessionEvent::Stopped {
                 session_id: 1,
                 expected_packet_count: 52,
+                origin: crate::embedded_audio::SessionStopOrigin::User,
             }
         ));
     }
@@ -6856,6 +6869,17 @@ mod tests {
 
         prefs.copy_dictation_to_clipboard = false;
         assert!(should_restore_clipboard_after_dictation(&prefs, false));
+    }
+
+    #[test]
+    fn voice_activation_stop_never_counts_as_user_initiated() {
+        assert!(!embedded_audio_stop_is_user_initiated(Some(
+            crate::embedded_audio::SessionStopOrigin::VoiceActivation
+        )));
+        assert!(embedded_audio_stop_is_user_initiated(Some(
+            crate::embedded_audio::SessionStopOrigin::User
+        )));
+        assert!(embedded_audio_stop_is_user_initiated(None));
     }
 
     #[test]

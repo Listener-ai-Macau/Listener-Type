@@ -11461,6 +11461,7 @@ mod tests {
             start_inferred_from_audio: false,
             terminal_received: true,
             end_reason: Some(SessionEndReason::Error(SessionErrorCode::QueueFull)),
+            stop_origin: None,
             expected_packet_count: Some(4),
             received_packet_count: 3,
             missing_packet_count: 1,
