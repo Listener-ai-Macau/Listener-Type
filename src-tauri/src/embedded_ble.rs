@@ -320,7 +320,7 @@ impl FirmwareDiagnosticLogPull {
     }
 }
 
-const LISTENER_BLE_FAILURE_HINTS: denzic_ble_windows::failure::BleFailureHints =
+pub(crate) const LISTENER_BLE_FAILURE_HINTS: denzic_ble_windows::failure::BleFailureHints =
     denzic_ble_windows::failure::BleFailureHints {
         background_contention: &["background listener"],
         missing_pairing: &["no paired listener", "pair the listener"],
@@ -7773,7 +7773,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             Err(err) => return unavailable(err),
         };
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+        for &cache_mode in bluetooth_cache_modes_for_policy(
+            denzic_ble_pairing::SERVICE_REACHABILITY_PROBE_CACHE_POLICY,
+        ) {
             let discovery_timeout = match remaining_ble_timeout(
                 deadline,
                 BLE_DISCOVERY_TIMEOUT,
@@ -8178,7 +8180,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             match open_notify_target_for_known_addresses_with_cache_modes(
                 "recent pairing fast GATT",
                 state.address,
-                &[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached],
+                bluetooth_cache_modes_for_policy(
+                    denzic_ble_pairing::RECENT_PAIRING_NOTIFY_CACHE_POLICY,
+                ),
             ) {
                 Ok(target) => {
                     log::info!(
@@ -9160,6 +9164,24 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         Ok(false)
     }
 
+    // Maps a platform GATT cache policy (denzic_ble_pairing, protocol section 9)
+    // onto the WinRT cache-mode attempt sequence. The platform table decides
+    // which policy each scenario uses; this adapter only translates the modes.
+    fn bluetooth_cache_modes_for_policy(
+        policy: denzic_ble_pairing::GattCachePolicy,
+    ) -> &'static [BluetoothCacheMode] {
+        match policy {
+            denzic_ble_pairing::GattCachePolicy::CachedOnly => &[BluetoothCacheMode::Cached],
+            denzic_ble_pairing::GattCachePolicy::UncachedOnly => &[BluetoothCacheMode::Uncached],
+            denzic_ble_pairing::GattCachePolicy::UncachedFirst => {
+                &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]
+            }
+            denzic_ble_pairing::GattCachePolicy::CachedFirst => {
+                &[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]
+            }
+        }
+    }
+
     fn open_notify_target_for_known_addresses(
         context: &str,
         preferred_address: Option<u64>,
@@ -9167,7 +9189,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         open_notify_target_for_known_addresses_with_cache_modes(
             context,
             preferred_address,
-            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached],
+            bluetooth_cache_modes_for_policy(denzic_ble_pairing::KNOWN_ADDRESS_NOTIFY_CACHE_POLICY),
         )
     }
 
@@ -10563,11 +10585,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let mut last_error = None;
         // A verified active link makes its device handle and access grant reusable, but
         // OTA control writes still require fresh GATT characteristic handles.
-        let cache_modes: &[BluetoothCacheMode] = if verified_active_handoff {
-            &[BluetoothCacheMode::Uncached]
-        } else {
-            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]
-        };
+        let cache_modes = bluetooth_cache_modes_for_policy(
+            denzic_ble_pairing::ota_device_control_cache_policy(verified_active_handoff),
+        );
         for &cache_mode in cache_modes {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
@@ -10711,11 +10731,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        let cache_modes: &[BluetoothCacheMode] = if verified_active_handoff {
-            &[BluetoothCacheMode::Uncached]
-        } else {
-            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]
-        };
+        let cache_modes = bluetooth_cache_modes_for_policy(
+            denzic_ble_pairing::ota_device_control_cache_policy(verified_active_handoff),
+        );
         for &cache_mode in cache_modes {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(LISTENER_OTA_V1_SERVICE_UUID, cache_mode)
@@ -10822,7 +10840,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached] {
+        for &cache_mode in
+            bluetooth_cache_modes_for_policy(denzic_ble_pairing::DIAGNOSTIC_CACHE_POLICY)
+        {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(DIAGNOSTIC_SERVICE_UUID, cache_mode)
                 .map_err(|err| {
@@ -10922,7 +10942,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+        for &cache_mode in
+            bluetooth_cache_modes_for_policy(denzic_ble_pairing::STATUS_PROBE_CACHE_POLICY)
+        {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, cache_mode)
                 .map_err(|err| format!("BLE status {cache_mode:?} service discovery failed: {err}"))
@@ -10996,7 +11018,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             // while Windows is temporarily unable to complete a fresh
             // Uncached service query (for example during link rehydration).
             // Keep the exact current address, then fall back to the device.
-            &[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached],
+            bluetooth_cache_modes_for_policy(
+                denzic_ble_pairing::PERSISTED_BOND_NOTIFY_CACHE_POLICY,
+            ),
             STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT,
         )
         .and_then(|target| {
@@ -11012,7 +11036,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         // Service Changed/schema transition.
         open_notify_target_for_device_with_cache_modes_and_timeout(
             address,
-            &[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached],
+            bluetooth_cache_modes_for_policy(denzic_ble_pairing::POST_CONFIRM_NOTIFY_CACHE_POLICY),
             STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT,
         )
         .and_then(|target| {
@@ -11039,7 +11063,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
     fn open_notify_target_for_device(address: u64) -> Result<OpenNotifyTarget, String> {
         open_notify_target_for_device_with_cache_modes(
             address,
-            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached],
+            bluetooth_cache_modes_for_policy(denzic_ble_pairing::DEVICE_NOTIFY_CACHE_POLICY),
         )
     }
 
@@ -11159,7 +11183,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         }
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached] {
+        for &cache_mode in
+            bluetooth_cache_modes_for_policy(denzic_ble_pairing::CONTROL_WRITE_CACHE_POLICY)
+        {
             let services_result = match device
                 .GetGattServicesForUuidWithCacheModeAsync(SERVICE_UUID, cache_mode)
                 .map_err(|err| {
@@ -11306,11 +11332,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         });
 
         let mut last_error = None;
-        let cache_modes: &[BluetoothCacheMode] = if allow_cached {
-            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]
-        } else {
-            &[BluetoothCacheMode::Uncached]
-        };
+        let cache_modes = bluetooth_cache_modes_for_policy(
+            denzic_ble_pairing::ota_service_endpoint_cache_policy(allow_cached),
+        );
         for &cache_mode in cache_modes {
             match open_listener_ota_v1_characteristics_from_service_with_retry(&service, cache_mode)
             {
@@ -11375,7 +11399,9 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         });
 
         let mut last_error = None;
-        for cache_mode in [BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached] {
+        for &cache_mode in bluetooth_cache_modes_for_policy(
+            denzic_ble_pairing::DEADLINE_SERVICE_ENDPOINT_CACHE_POLICY,
+        ) {
             match open_listener_ota_v1_characteristics_from_service_with_retry_deadline(
                 &service, cache_mode, deadline,
             ) {
@@ -14869,10 +14895,31 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 .expect("post-confirm native-HID opener boundary should exist");
             let body = &source[start..end];
 
-            assert!(body.contains(
-                "&[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]"
-            ));
+            assert!(body.contains("bluetooth_cache_modes_for_policy("));
+            assert!(body.contains("denzic_ble_pairing::POST_CONFIRM_NOTIFY_CACHE_POLICY"));
             assert!(body.contains("require_audio_control_for_notify_target"));
+        }
+
+        #[test]
+        fn gatt_cache_policy_adapter_maps_platform_table_to_winrt_modes() {
+            use denzic_ble_pairing::GattCachePolicy;
+
+            assert_eq!(
+                bluetooth_cache_modes_for_policy(GattCachePolicy::CachedOnly),
+                &[BluetoothCacheMode::Cached]
+            );
+            assert_eq!(
+                bluetooth_cache_modes_for_policy(GattCachePolicy::UncachedOnly),
+                &[BluetoothCacheMode::Uncached]
+            );
+            assert_eq!(
+                bluetooth_cache_modes_for_policy(GattCachePolicy::UncachedFirst),
+                &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]
+            );
+            assert_eq!(
+                bluetooth_cache_modes_for_policy(GattCachePolicy::CachedFirst),
+                &[BluetoothCacheMode::Cached, BluetoothCacheMode::Uncached]
+            );
         }
 
         #[test]
@@ -17157,9 +17204,7 @@ mod tests {
                 && ota_endpoint.contains(
                     "open_listener_ota_v1_target_for_service_with_cache_policy(&id, true)"
                 )
-                && source.contains(
-                    "if allow_cached {\n            &[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]"
-                ),
+                && source.contains("ota_service_endpoint_cache_policy(allow_cached)"),
             "native HID OTA endpoint must select only the current address and try uncached GATT before the legacy-compatible cache"
         );
 
@@ -17172,7 +17217,7 @@ mod tests {
             .expect("verified OTA direct-open helper boundary should exist");
         let direct = &source[direct_start..direct_end];
         assert!(
-            direct.contains("if verified_active_handoff {\n            &[BluetoothCacheMode::Uncached]")
+            direct.contains("ota_device_control_cache_policy(verified_active_handoff)")
                 && direct.contains("for &cache_mode in cache_modes"),
             "verified OTA handoff must not fall back to stale cached device GATT handles"
         );

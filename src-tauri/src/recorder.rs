@@ -698,23 +698,8 @@ impl Drop for WavArchiver {
 }
 
 fn build_wav_header(data_size: u32) -> [u8; 44] {
-    // RIFF/WAVE PCM 标准 44-byte header，16 kHz / mono / 16-bit 写死。
-    let total_size = data_size.saturating_add(36);
-    let mut h = [0u8; 44];
-    h[0..4].copy_from_slice(b"RIFF");
-    h[4..8].copy_from_slice(&total_size.to_le_bytes());
-    h[8..12].copy_from_slice(b"WAVE");
-    h[12..16].copy_from_slice(b"fmt ");
-    h[16..20].copy_from_slice(&16u32.to_le_bytes()); // fmt chunk size
-    h[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
-    h[22..24].copy_from_slice(&1u16.to_le_bytes()); // mono
-    h[24..28].copy_from_slice(&(TARGET_SAMPLE_RATE).to_le_bytes());
-    h[28..32].copy_from_slice(&(TARGET_SAMPLE_RATE * 2).to_le_bytes()); // byte rate (sr * block_align)
-    h[32..34].copy_from_slice(&2u16.to_le_bytes()); // block align
-    h[34..36].copy_from_slice(&16u16.to_le_bytes()); // bits per sample
-    h[36..40].copy_from_slice(b"data");
-    h[40..44].copy_from_slice(&data_size.to_le_bytes());
-    h
+    // RIFF/WAVE PCM 标准 44-byte header，布局由平台 host_audio 契约统一定义。
+    denzic_host_audio_v1_core::wav::wav_header(data_size)
 }
 
 #[cfg(test)]

@@ -6913,26 +6913,14 @@ fn is_embedded_ble_automatic_recovery_error(err: &str) -> bool {
 }
 
 fn is_embedded_ble_background_offline_backoff_error(err: &str) -> bool {
-    let lower = err.to_ascii_lowercase();
-    lower.contains("gatt session did not become active")
-        || lower.contains("paired device disconnected")
-        || lower.contains("stale gatt/cache")
-        || lower.contains("device is asleep")
-        || lower.contains("device asleep")
-        || lower.contains("wake key")
-        || lower.contains("not found from service selector")
+    denzic_ble_windows::failure::is_ble_offline_backoff_error(err)
 }
 
 fn is_embedded_ble_noisy_cccd_failure(err: &str) -> bool {
-    let lower = err.to_ascii_lowercase();
-    matches!(
-        crate::embedded_ble::classify_ble_failure(err).kind,
-        crate::embedded_ble::BleFailureKind::CccdProtocolError
-    ) && (lower.contains("hresult(0x800704c7)")
-        || lower.contains("cccd write timed out")
-        || lower.contains("gattcommunicationstatus(1)")
-        || lower.contains("protocol_error=3")
-        || lower.contains("protocol error=3"))
+    denzic_ble_windows::failure::is_ble_noisy_cccd_failure(
+        err,
+        &crate::embedded_ble::LISTENER_BLE_FAILURE_HINTS,
+    )
 }
 
 fn embedded_ble_usb_power_allows_low_power_idle(usb_powered: Option<bool>) -> bool {
@@ -7021,26 +7009,11 @@ fn should_emit_embedded_ble_recovered_capsule_for_reason(
 }
 
 fn is_embedded_ble_link_loss_error(err: &str) -> bool {
-    let lower = err.to_ascii_lowercase();
-    lower.contains("connection status changed")
-        || lower.contains("gatt session status changed")
-        || (lower.contains("notification wait failed") && lower.contains("disconnected"))
-        || lower.contains("transport_not_ready")
-        || lower.contains("transport not ready")
-        || lower.contains("reason=546")
-        || lower.contains("reason: 546")
-        || lower.contains("reason 546")
-        || lower.contains("low-power idle")
-        || lower.contains("low power idle")
-        || lower.contains("idle disconnect")
+    denzic_ble_windows::failure::is_ble_link_loss_error(err)
 }
 
 fn is_embedded_ble_transient_reopen_error(err: &str) -> bool {
-    err.contains("GattCommunicationStatus(1)")
-        || err.contains("GattCommunicationStatus(3)")
-        || err.contains("HRESULT(0x800706BA)")
-        || err.contains("BLE characteristic discovery returned status")
-        || err.contains("BLE service open wait failed")
+    denzic_ble_windows::failure::is_ble_transient_reopen_error(err)
 }
 
 fn is_embedded_ble_idle_timeout_error(err: &str) -> bool {
