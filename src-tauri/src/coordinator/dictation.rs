@@ -1945,10 +1945,24 @@ impl EmbeddedAudioDictationSession {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BufferedSpeakerCandidateKind {
+    Enrollment,
+    Verification,
+}
+
+struct BufferedSpeakerCandidate {
+    kind: BufferedSpeakerCandidateKind,
+    pcm: Vec<u8>,
+}
+
+const MAX_BUFFERED_SPEAKER_CANDIDATE_BYTES: usize = 2_100_000;
+
 #[derive(Default)]
 struct EmbeddedStreamingDictation {
     collector: crate::embedded_audio::StreamingSessionCollector,
     session: Option<EmbeddedAudioDictationSession>,
+    speaker_candidate: Option<BufferedSpeakerCandidate>,
     embedded_session_id: Option<u32>,
     transcript: Option<crate::embedded_audio::EmbeddedAudioTranscriptResult>,
     pending_stop_expected_packet_count: Option<u16>,
@@ -3478,11 +3492,31 @@ impl EmbeddedStreamingDictation {
     ) -> Result<bool, String> {
         match event {
             crate::embedded_audio::StreamingSessionEvent::Started { session_id } => {
-                self.begin_session_if_needed(inner, session_id).await?;
+                self.begin_candidate_or_session(inner, session_id).await?;
                 Ok(false)
             }
             crate::embedded_audio::StreamingSessionEvent::PcmChunk(chunk) => {
                 let chunk_session_id = chunk.session_id;
+                if let Some(candidate) = self.speaker_candidate.as_mut() {
+                    if candidate.pcm.len().saturating_add(chunk.pcm.len())
+                        > MAX_BUFFERED_SPEAKER_CANDIDATE_BYTES
+                    {
+                        return Err("声纹候选录音超过安全缓冲上限".to_string());
+                    }
+                    candidate.pcm.extend_from_slice(&chunk.pcm);
+                    if let Some(expected_packet_count) = self.pending_stop_expected_packet_count {
+                        if self.collector.inner().has_successful_complete_session() {
+                            self.finish_completed_streaming_session(
+                                inner,
+                                chunk_session_id,
+                                expected_packet_count,
+                            )
+                            .await?;
+                            return Ok(true);
+                        }
+                    }
+                    return Ok(false);
+                }
                 if embedded_streaming_chunk_is_asr_input(&chunk) {
                     self.begin_session_if_needed(inner, chunk.session_id)
                         .await?;
@@ -3593,6 +3627,41 @@ impl EmbeddedStreamingDictation {
         Ok(())
     }
 
+    async fn begin_candidate_or_session(
+        &mut self,
+        inner: &Arc<Inner>,
+        embedded_session_id: u32,
+    ) -> Result<(), String> {
+        if self.session.is_some() || self.speaker_candidate.is_some() {
+            if self.embedded_session_id != Some(embedded_session_id) {
+                return Err(format!(
+                    "嵌入式音频流式 session 不一致: current={:?}, incoming={embedded_session_id}",
+                    self.embedded_session_id
+                ));
+            }
+            return Ok(());
+        }
+        self.embedded_session_id = Some(embedded_session_id);
+        let kind = if crate::speaker_verification::take_enrollment_arm() {
+            Some(BufferedSpeakerCandidateKind::Enrollment)
+        } else if crate::speaker_verification::is_enrolled() {
+            Some(BufferedSpeakerCandidateKind::Verification)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            log::info!(
+                "[speaker-verification] buffering embedded candidate kind={kind:?} embedded_session_id={embedded_session_id}"
+            );
+            self.speaker_candidate = Some(BufferedSpeakerCandidate {
+                kind,
+                pcm: Vec::new(),
+            });
+            return Ok(());
+        }
+        self.begin_session_if_needed(inner, embedded_session_id).await
+    }
+
     async fn finish_streaming_session(
         &mut self,
         inner: &Arc<Inner>,
@@ -3631,6 +3700,13 @@ impl EmbeddedStreamingDictation {
             );
         }
         store_embedded_audio_stats(inner, stats.clone());
+        if self.speaker_candidate.is_some()
+            && self
+                .finish_buffered_speaker_candidate(inner, embedded_session_id, &stats)
+                .await?
+        {
+            return Ok(());
+        }
         self.show_transcribing_after_stop(inner);
 
         let mut session = self
@@ -3697,6 +3773,115 @@ impl EmbeddedStreamingDictation {
             self.transcript = take_embedded_audio_final_result(inner, coordinator_session_id);
         }
         end_result
+    }
+
+    async fn finish_buffered_speaker_candidate(
+        &mut self,
+        inner: &Arc<Inner>,
+        embedded_session_id: u32,
+        stats: &crate::embedded_audio::SessionStats,
+    ) -> Result<bool, String> {
+        let Some(candidate) = self.speaker_candidate.take() else {
+            return Ok(false);
+        };
+        if candidate.kind == BufferedSpeakerCandidateKind::Enrollment {
+            let pcm = candidate.pcm;
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                crate::speaker_verification::finish_enrollment(&pcm)
+            })
+            .await
+            .map_err(|err| format!("声纹登记处理任务失败: {err}"))
+            .and_then(|result| result);
+            let status = match result {
+                Ok(status) => status,
+                Err(err) => {
+                    crate::speaker_verification::fail_enrollment(&err);
+                    log::warn!(
+                        "[speaker-verification] enrollment failed embedded_session_id={embedded_session_id}: {err}"
+                    );
+                    complete_rejected_or_enrollment_candidate("voiceprint_enrollment_failed");
+                    return Ok(true);
+                }
+            };
+            log::info!(
+                "[speaker-verification] enrollment complete embedded_session_id={} enrolled={} score={:?}",
+                embedded_session_id,
+                status.enrolled,
+                status.score
+            );
+            complete_rejected_or_enrollment_candidate("voiceprint_enrollment_complete");
+            return Ok(true);
+        }
+
+        let automatic =
+            stats.stop_origin == Some(crate::embedded_audio::SessionStopOrigin::VoiceActivation);
+        if automatic {
+            let pcm = candidate.pcm.clone();
+            let verification = tauri::async_runtime::spawn_blocking(move || {
+                crate::speaker_verification::verify(&pcm)
+            })
+            .await
+            .map_err(|err| format!("声纹验证任务失败: {err}"))
+            .and_then(|result| result);
+            if !speaker_candidate_may_reach_asr(true, verification.as_ref().ok().map(|v| v.matched))
+            {
+                let reason = match verification {
+                    Ok(result) => {
+                        log::info!(
+                            "[speaker-verification] automatic candidate rejected embedded_session_id={} score={:.4}",
+                            embedded_session_id,
+                            result.score
+                        );
+                        "voiceprint_non_match"
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[speaker-verification] automatic candidate rejected because verification failed embedded_session_id={embedded_session_id}: {err}"
+                        );
+                        "voiceprint_verification_failed"
+                    }
+                };
+                complete_rejected_or_enrollment_candidate(reason);
+                return Ok(true);
+            }
+            let result = match verification {
+                Ok(result) => result,
+                Err(_) => {
+                    unreachable!("fail-closed speaker verification rejected the error above")
+                }
+            };
+            log::info!(
+                "[speaker-verification] automatic candidate decision embedded_session_id={} matched={} score={:.4}",
+                embedded_session_id,
+                result.matched,
+                result.score
+            );
+        } else {
+            log::info!(
+                "[speaker-verification] physical recording bypass embedded_session_id={embedded_session_id}"
+            );
+        }
+
+        let session = begin_embedded_audio_dictation_session(inner).await?;
+        if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
+            return Err("嵌入式音频听写会话已被取消".to_string());
+        }
+        crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
+        self.session = Some(session);
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
+        crate::observability::record_embedded_audio_first_packet(session.session_id);
+        for chunk in candidate.pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
+            session.consume_streaming_pcm(inner, chunk)?;
+        }
+        log::info!(
+            "[speaker-verification] released buffered candidate to ASR embedded_session_id={} pcm_bytes={}",
+            embedded_session_id,
+            candidate.pcm.len()
+        );
+        Ok(false)
     }
 
     async fn finish_completed_streaming_session(
@@ -3776,6 +3961,14 @@ impl EmbeddedStreamingDictation {
 
     fn abort_active_session(&mut self, inner: &Arc<Inner>, message: &str) {
         set_device_ai_processing_async(inner, false, "embedded_stream_abort");
+        if matches!(
+            self.speaker_candidate
+                .as_ref()
+                .map(|candidate| candidate.kind),
+            Some(BufferedSpeakerCandidateKind::Enrollment)
+        ) {
+            crate::speaker_verification::fail_enrollment(message);
+        }
         let event_session_id = self.session.as_ref().map(|session| session.session_id);
         if let Some(session) = self.session.take() {
             crate::observability::record_embedded_audio_failure(session.session_id, message);
@@ -3824,6 +4017,7 @@ impl EmbeddedStreamingDictation {
     fn reset_for_next_session(&mut self) {
         self.collector.reset();
         self.session = None;
+        self.speaker_candidate = None;
         self.embedded_session_id = None;
         self.transcript = None;
         self.pending_stop_expected_packet_count = None;
@@ -4043,10 +4237,27 @@ fn embedded_streaming_chunk_is_asr_input(_chunk: &crate::embedded_audio::Streami
     true
 }
 
+fn complete_rejected_or_enrollment_candidate(reason: &'static str) {
+    tauri::async_runtime::spawn_blocking(move || {
+        match crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2)) {
+            Ok(()) => log::info!(
+                "[speaker-verification] device processing completed reason={reason}"
+            ),
+            Err(err) => log::warn!(
+                "[speaker-verification] device processing completion failed reason={reason}: {err}"
+            ),
+        }
+    });
+}
+
 fn embedded_audio_stop_is_user_initiated(
     origin: Option<crate::embedded_audio::SessionStopOrigin>,
 ) -> bool {
     origin != Some(crate::embedded_audio::SessionStopOrigin::VoiceActivation)
+}
+
+fn speaker_candidate_may_reach_asr(automatic: bool, verified_match: Option<bool>) -> bool {
+    !automatic || verified_match == Some(true)
 }
 
 fn embedded_ble_session_event_detail(
@@ -6857,6 +7068,14 @@ mod tests {
             wayland_done_message(InsertStatus::Failed, false),
             Some("Wayland 未启用自动输入，剪贴板写入失败".to_string())
         );
+    }
+
+    #[test]
+    fn automatic_speaker_candidate_reaches_asr_only_after_verified_match() {
+        assert!(super::speaker_candidate_may_reach_asr(false, None));
+        assert!(super::speaker_candidate_may_reach_asr(true, Some(true)));
+        assert!(!super::speaker_candidate_may_reach_asr(true, Some(false)));
+        assert!(!super::speaker_candidate_may_reach_asr(true, None));
     }
 
     #[test]

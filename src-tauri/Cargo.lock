@@ -588,6 +588,16 @@ dependencies = [
 
 [[package]]
 name = "bzip2"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdb116a6ef3f6c3698828873ad02c3014b3c85cadb88496095628e3ef1e347f8"
+dependencies = [
+ "bzip2-sys",
+ "libc",
+]
+
+[[package]]
+name = "bzip2"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49ecfb22d906f800d4fe833b6282cf4dc1c298f5057ca0b5445e5c209735ca47"
@@ -1361,6 +1371,13 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "denzic-speaker-verification-v1-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -3235,8 +3252,10 @@ version = "1.0.2"
 dependencies = [
  "anyhow",
  "arboard",
+ "base64 0.22.1",
  "block2 0.5.1",
  "bytes",
+ "bzip2 0.4.4",
  "cc",
  "chrono",
  "core-foundation 0.10.1",
@@ -3249,6 +3268,7 @@ dependencies = [
  "denzic-host-audio-v1-core",
  "denzic-observability-v1-core",
  "denzic-ota-core",
+ "denzic-speaker-verification-v1-core",
  "enigo",
  "env_logger",
  "espflash",
@@ -3258,6 +3278,7 @@ dependencies = [
  "global-hotkey",
  "keyring",
  "libc",
+ "libloading 0.8.9",
  "log",
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
@@ -3272,6 +3293,7 @@ dependencies = [
  "serialport",
  "sha2",
  "simplelog",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -8482,7 +8504,7 @@ checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
 dependencies = [
  "aes",
  "arbitrary",
- "bzip2",
+ "bzip2 0.5.2",
  "constant_time_eq",
  "crc32fast",
  "crossbeam-utils",

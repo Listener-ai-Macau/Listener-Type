@@ -117,6 +117,27 @@ pub fn get_settings(coord: CoordinatorState<'_>) -> UserPreferences {
 }
 
 #[tauri::command]
+pub fn get_voiceprint_status() -> crate::speaker_verification::VoiceprintStatus {
+    crate::speaker_verification::status()
+}
+
+#[tauri::command]
+pub async fn start_voiceprint_enrollment(
+) -> Result<crate::speaker_verification::VoiceprintStatus, String> {
+    tauri::async_runtime::spawn_blocking(crate::speaker_verification::start_enrollment)
+        .await
+        .map_err(|err| format!("声纹登记任务失败: {err}"))?
+}
+
+#[tauri::command]
+pub async fn delete_voiceprint(
+) -> Result<crate::speaker_verification::VoiceprintStatus, String> {
+    tauri::async_runtime::spawn_blocking(crate::speaker_verification::delete_template)
+        .await
+        .map_err(|err| format!("删除声纹任务失败: {err}"))?
+}
+
+#[tauri::command]
 pub fn is_main_window_start_hidden(coord: CoordinatorState<'_>) -> bool {
     if std::env::var("LISTENER_TYPE_SHOW_MAIN_ON_START")
         .ok()

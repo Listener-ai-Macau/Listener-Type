@@ -6,8 +6,11 @@ import { SelectLite } from '../../components/ui/SelectLite';
 import {
   getDeviceSettings,
   getEmbeddedBleRuntimeStatus,
+  getVoiceprintStatus,
   listInstalledApplications,
+  deleteVoiceprint,
   setDeviceSettings,
+  startVoiceprintEnrollment,
 } from '../../lib/ipc';
 import type {
   DeviceCustomKeyAction,
@@ -22,6 +25,7 @@ import type {
   InstalledApplication,
   PostDictationKey,
   ShortcutBinding,
+  VoiceprintStatus,
 } from '../../lib/types';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Btn, Card } from '../_atoms';
@@ -322,6 +326,50 @@ function DeviceFirmwareSettingsCard() {
   });
   const [status, setStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
   const [message, setMessage] = useState('');
+  const [voiceprint, setVoiceprint] = useState<VoiceprintStatus | null>(null);
+  const [voiceprintBusy, setVoiceprintBusy] = useState(false);
+
+  const refreshVoiceprint = async () => {
+    try {
+      setVoiceprint(await getVoiceprintStatus());
+    } catch (error) {
+      setVoiceprint(current => current ? {
+        ...current,
+        state: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      } : null);
+    }
+  };
+
+  useEffect(() => {
+    void refreshVoiceprint();
+    const timer = window.setInterval(() => void refreshVoiceprint(), 1200);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const enrollVoiceprint = async () => {
+    setVoiceprintBusy(true);
+    try {
+      setVoiceprint(await startVoiceprintEnrollment());
+    } catch (error) {
+      setVoiceprint(current => current ? {
+        ...current,
+        state: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      } : null);
+    } finally {
+      setVoiceprintBusy(false);
+    }
+  };
+
+  const clearVoiceprint = async () => {
+    setVoiceprintBusy(true);
+    try {
+      setVoiceprint(await deleteVoiceprint());
+    } finally {
+      setVoiceprintBusy(false);
+    }
+  };
 
   const refresh = async () => {
     setStatus(previous => (previous === 'saving' ? previous : 'loading'));
@@ -508,6 +556,52 @@ function DeviceFirmwareSettingsCard() {
                 disabled={controlsDisabled}
               />
             </SettingRow>
+            <SettingRow
+              label={t('settings.recording.voiceprintLabel', '仅本人语音自动开始')}
+              desc={
+                voiceprint?.enrolled
+                  ? t('settings.recording.voiceprintReadyDesc', '已启用本机声纹校验；旁人说话不会进入转写。')
+                  : t('settings.recording.voiceprintDesc', '录制约 7 秒本人语音；只保存系统保护的声纹模板，不保存录音。')
+              }
+            >
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <Btn
+                  variant={voiceprint?.enrolled ? 'ghost' : 'blue'}
+                  size="sm"
+                  icon="mic"
+                  disabled={voiceprintBusy || !voiceprint?.available || ['preparing', 'armed', 'capturing', 'processing'].includes(voiceprint?.state ?? '')}
+                  onClick={() => void enrollVoiceprint()}
+                  style={{ minWidth: 104, justifyContent: 'center' }}
+                >
+                  {voiceprint?.state === 'preparing'
+                    ? t('settings.recording.voiceprintPreparing', '准备中')
+                    : voiceprint?.state === 'capturing' || voiceprint?.state === 'armed'
+                      ? t('settings.recording.voiceprintCapturing', '请持续说话')
+                      : voiceprint?.state === 'processing'
+                        ? t('settings.recording.voiceprintProcessing', '校验中')
+                        : voiceprint?.enrolled
+                          ? t('settings.recording.voiceprintRedo', '重新录制')
+                          : t('settings.recording.voiceprintEnroll', '录制声纹')}
+                </Btn>
+                {voiceprint?.enrolled && (
+                  <Btn
+                    variant="ghost"
+                    size="sm"
+                    icon="trash"
+                    disabled={voiceprintBusy}
+                    onClick={() => void clearVoiceprint()}
+                    style={{ justifyContent: 'center' }}
+                  >
+                    {t('settings.recording.voiceprintDelete', '删除')}
+                  </Btn>
+                )}
+              </div>
+            </SettingRow>
+            {voiceprint?.error && (
+              <div style={{ color: 'var(--ol-err)', fontSize: 11.5, lineHeight: 1.4 }}>
+                {voiceprint.error}
+              </div>
+            )}
             <SettingRow
               label={t('settings.recording.voiceAutoStopLabel', '检测不到人声后自动结束')}
               desc={t('settings.recording.voiceAutoStopDesc', '持续无人声后结束；人声恢复会取消结束计时。')}

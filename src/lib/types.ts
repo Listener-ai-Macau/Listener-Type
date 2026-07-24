@@ -526,6 +526,21 @@ export interface UserPreferences {
   marketplaceDevLogin: string;
 }
 
+export interface VoiceprintStatus {
+  available: boolean;
+  runtimeReady: boolean;
+  modelReady: boolean;
+  enrolled: boolean;
+  state: 'idle' | 'preparing' | 'armed' | 'capturing' | 'processing' | 'complete' | 'error' | 'unavailable';
+  progress: number;
+  score: number | null;
+  threshold: number;
+  error: string | null;
+  modelName: string;
+  runtimeVersion: string;
+  localOnly: boolean;
+}
+
 export type DeviceCustomKeyId = 'key1' | 'key2' | 'key3' | 'key4' | 'knob';
 export type DeviceCustomKeyGesture = 'singleClick' | 'doubleClick' | 'longPress';
 

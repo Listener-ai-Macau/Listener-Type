@@ -34,6 +34,7 @@ import type {
   StylePackRuntimeDiagnostics,
   StyleSystemPrompts,
   UserPreferences,
+  VoiceprintStatus,
   VocabPresetStore,
   WindowsImeStatus,
 } from './types';
@@ -74,6 +75,37 @@ export async function invokeOrMock<T>(
   }
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<T>(cmd, args);
+}
+
+const mockVoiceprintStatus: VoiceprintStatus = {
+  available: true,
+  runtimeReady: false,
+  modelReady: false,
+  enrolled: false,
+  state: 'idle',
+  progress: 0,
+  score: null,
+  threshold: 0.5,
+  error: null,
+  modelName: '3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx',
+  runtimeVersion: '1.13.1',
+  localOnly: true,
+};
+
+export async function getVoiceprintStatus(): Promise<VoiceprintStatus> {
+  return invokeOrMock('get_voiceprint_status', undefined, () => mockVoiceprintStatus);
+}
+
+export async function startVoiceprintEnrollment(): Promise<VoiceprintStatus> {
+  return invokeOrMock('start_voiceprint_enrollment', undefined, () => ({
+    ...mockVoiceprintStatus,
+    state: 'capturing',
+    progress: 35,
+  }));
+}
+
+export async function deleteVoiceprint(): Promise<VoiceprintStatus> {
+  return invokeOrMock('delete_voiceprint', undefined, () => mockVoiceprintStatus);
 }
 
 async function invokeMarketplace<T>(

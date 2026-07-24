@@ -2205,7 +2205,7 @@
       }
     },
     "listener_owner_enable_voice_activation_for_acceptance_20260724": {
-      "status": "machine_closed_human_acceptance_open",
+      "status": "human_acceptance_failed_voiceprint_followup_requested",
       "recorded_at": "2026-07-24T10:50:00+08:00",
       "source": "Product-owner direction: 自动开始和自动结束现在做出来并启用，让 owner 先验收。",
       "requirement": "Add independent automatic-start and automatic-stop controls to the accepted Device-page Recording automation group, deploy an enabled acceptance candidate to the current Listener, and preserve physical-button override behavior.",
@@ -2239,7 +2239,55 @@
         "listener_type": "8e4c82c",
         "companion_type": "5473160"
       },
-      "acceptance_boundary": "Machine evidence closes platform policy, firmware build/flash, installed Type identity, settings readback, sustained ACTIVE microphone monitoring, zero-loss transport, no false trigger during the available playback fixture, and no speech wake from CONNECTED_IDLE. The repository speech fixture did not produce useful sound pressure at the physical Listener microphone, so normal human speech start/stop remains the explicit canonical Chinese owner acceptance step; synthetic volume detection is not an acceptable substitute."
+      "acceptance_boundary": "Machine evidence closes platform policy, firmware build/flash, installed Type identity, settings readback, sustained ACTIVE microphone monitoring, zero-loss transport, no false trigger during the available playback fixture, and no speech wake from CONNECTED_IDLE. The repository speech fixture did not produce useful sound pressure at the physical Listener microphone, so normal human speech start/stop remains the explicit canonical Chinese owner acceptance step; synthetic volume detection is not an acceptable substitute.",
+      "acceptance_20260724": {
+        "status": "FAIL",
+        "operator_result": ".cache/validation/voice-activation-20260724/voice-activation-operator-result.json",
+        "operator_note": "",
+        "machine_followup": ".cache/validation/voice-activation-20260724/post-failed-acceptance-status.log",
+        "observed_behavior": "The owner selected failure. Immediate device diagnostics remained ACTIVE with both settings enabled and sustained microphone monitoring, but the bounded voice_rec diagnostic scan contained zero events, so automatic start did not trigger during the acceptance attempt."
+      }
+    },
+    "listener_owner_voiceprint_gated_activation_20260724": {
+      "status": "machine_closed_human_acceptance_pending",
+      "recorded_at": "2026-07-24T11:45:00+08:00",
+      "source": "Product-owner direction after failed human-speech activation acceptance: 还是你要录制一下声纹吧，就是要特定的人说话才能自动唤醒。",
+      "requirement": "Add an explicit voiceprint enrollment flow and gate hands-free activation to an enrolled speaker. A non-enrolled speaker must not produce a transcript, paste, clipboard update, or post-dictation submit action.",
+      "architecture_boundary": "Voiceprint is a second-stage speaker-verification gate and cannot replace human-speech detection. The current ESP-SR firmware package has WebRTC VAD but no speaker-verification API. Prefer local Type inference over a reviewed speaker-embedding model, with firmware providing only bounded candidate audio through the existing lossless BLE session path. Keep speaker verification behind a platform capability contract before product integration.",
+      "privacy_contract": "Enrollment requires an explicit owner action and clear local-only storage. Persist only the minimum encrypted or OS-protected speaker template needed for matching; do not retain idle PCM, rejected candidate audio, transcripts, or cloud-uploaded voiceprints.",
+      "safety_contract": "A rejected or uncertain speaker match silently cancels the provisional session and never reaches ASR or insertion. Physical recording remains available regardless of voiceprint. Low-power states still cannot wake from speech. Do not implement raw-volume, handcrafted spectral-distance, or transcript-text matching as a voiceprint substitute.",
+      "implementation": "Denzic-Platform speaker_verification provides the reusable policy FSM and generated Rust/C/TS contract. Listener Type dynamically loads the official sherpa-onnx 1.13.1 Windows x64 runtime and 3D-Speaker CAMPPlus Chinese 16 kHz model, records a seven-second three-segment enrollment, stores only the normalized embedding in Windows Credential Manager, and buffers automatic candidates in memory until local verification completes. Manual hardware recording bypasses identity gating. Firmware WebRTC VAD mode 1 supplies higher-recall human-speech candidates while Type remains the identity gate.",
+      "model_provenance": {
+        "runtime": "sherpa-onnx 1.13.1 Windows x64 shared MD Release no-TTS",
+        "runtime_sha256": "6760B0E25EAAD0DADFFBA9029B1270778E0DBFD43F314CF070B2F9C1DCB4AF25",
+        "model": "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+        "model_sha256": "F682B514C05D947EE3FA91CD6EC6C5C7543479A128373FA29B1FAEDCCD21FD11",
+        "runtime_license": "Apache-2.0",
+        "model_license": "Apache-2.0",
+        "verification_threshold": 0.5
+      },
+      "machine_evidence": {
+        "platform_commit": "41adc9b3d5200bf3737cb7e78c7276f5133df48a",
+        "platform_verify": "Denzic-Platform tools/verify.ps1 passed including 19/19 Release C tests",
+        "firmware_commit": "0ca7b5d",
+        "type_tests": ".cache/validation/voiceprint-20260724/listener-type-cargo-test-lib-closure.log (857 total; 847 passed; 10 ignored)",
+        "runtime_score_test": ".cache/validation/voiceprint-20260724/runtime-score-test-final.log",
+        "runtime_scores": "same speaker 0.595135; different speaker -0.081081; threshold 0.500",
+        "firmware_build": "../evidence/voiceprint-firmware-build-20260724.log",
+        "firmware_flash": "../evidence/voiceprint-firmware-flash-20260724.log",
+        "firmware_settings": ".cache/validation/voiceprint-20260724/firmware-settings-final.log",
+        "installed_msi_sha256": "78ECFAB39EAF7B2E11247BFC4D1655E9A146260A48005CC2D1AB43946FC81BE6",
+        "installed_exe_sha256": "D85ACFDAB4572A6C2576FE25323B130CBD1F86247B246C6DD455227316223BD8",
+        "hardware_status": ".cache/validation/voiceprint-20260724/hardware-status-final.log"
+      },
+      "required_evidence": [
+        "reviewed model/runtime provenance and license",
+        "enrollment quality and corrupted-template tests",
+        "same-speaker and different-speaker score evidence with explicit threshold",
+        "provisional-session cancellation evidence with no ASR, paste, clipboard or submit effects",
+        "installed Type plus current Listener human acceptance"
+      ],
+      "acceptance_boundary": "Machine closure proves verified dependency hashes/licenses, local-only template storage, fail-closed policy, same/different upstream fixture separation, full Type tests, firmware build/flash, installed payload identity, ACTIVE BLE state, and voice_auto_start=1/voice_auto_stop=1 readback. The owner must still enroll their own voice and confirm owner speech is accepted while another person is rejected; those biometric and acoustic outcomes cannot be fabricated by machine fixtures."
     }
   },
   "scenarios": [

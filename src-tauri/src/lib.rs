@@ -40,6 +40,7 @@ mod polish;
 mod qa_hotkey;
 mod recorder;
 mod selection;
+mod speaker_verification;
 mod shortcut_binding;
 mod shortcut_dispatch;
 mod startup_evidence;
@@ -427,11 +428,14 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
+            commands::get_voiceprint_status,
             commands::is_main_window_start_hidden,
             commands::get_default_style_system_prompts,
             commands::list_installed_applications,
             commands::record_ui_timeline_event,
             commands::set_settings,
+            commands::start_voiceprint_enrollment,
+            commands::delete_voiceprint,
             commands::refresh_device_settings_status,
             commands::get_hotkey_status,
             commands::get_hotkey_capability,

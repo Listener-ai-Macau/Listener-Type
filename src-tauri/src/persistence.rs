@@ -130,6 +130,12 @@ fn data_dir() -> Result<PathBuf> {
     }
 }
 
+pub(crate) fn speaker_verification_root() -> Result<PathBuf> {
+    let dir = data_dir()?.join("models").join("speaker-verification");
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
 fn ensure_dir(dir: &Path) -> Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("create dir failed: {}", dir.display()))?;
     Ok(())
