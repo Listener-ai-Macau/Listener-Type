@@ -90,11 +90,22 @@ type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
 type SharedWriter = Arc<AsyncMutex<Option<WsSink>>>;
 type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
 type FinalIntermediateTranscriptCallback = Arc<dyn Fn(FinalIntermediateTranscript) + Send + Sync>;
+type StreamingEventCallback = Arc<dyn Fn(VolcengineStreamingEvent) + Send + Sync>;
 
 #[derive(Clone, Debug)]
 pub struct FinalIntermediateTranscript {
     pub text: String,
     pub authoritative_two_pass: bool,
+}
+
+/// Events exposed to the platform adapter without changing the legacy
+/// product preview callbacks. The product callback intentionally also emits
+/// the final preview; the adapter needs the protocol-level distinction.
+#[derive(Clone, Debug)]
+pub(crate) enum VolcengineStreamingEvent {
+    Partial(String),
+    Final(String),
+    Error(VolcengineASRError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -294,6 +305,7 @@ pub struct VolcengineStreamingASR {
     state: ParkingMutex<SyncState>,
     partial_callback: ParkingMutex<Option<PartialTranscriptCallback>>,
     final_intermediate_callback: ParkingMutex<Option<FinalIntermediateTranscriptCallback>>,
+    streaming_event_callback: ParkingMutex<Option<StreamingEventCallback>>,
     /// Guards the WebSocket write half so concurrent `send` calls serialize.
     /// Stored as Arc so spawned send tasks can hold their own clone — independent
     /// of the lifetime of any particular `&self` borrow.
@@ -332,6 +344,7 @@ impl VolcengineStreamingASR {
             state: ParkingMutex::new(SyncState::default()),
             partial_callback: ParkingMutex::new(None),
             final_intermediate_callback: ParkingMutex::new(None),
+            streaming_event_callback: ParkingMutex::new(None),
             writer: Arc::new(AsyncMutex::new(None)),
             final_rx: ParkingMutex::new(None),
             audio_tx: ParkingMutex::new(None),
@@ -481,6 +494,10 @@ impl VolcengineStreamingASR {
         *self.final_intermediate_callback.lock() = callback;
     }
 
+    pub(crate) fn set_streaming_event_callback(&self, callback: Option<StreamingEventCallback>) {
+        *self.streaming_event_callback.lock() = callback;
+    }
+
     fn emit_partial_transcript(&self, text: &str) {
         let callback = self.partial_callback.lock().clone();
         if let Some(callback) = callback {
@@ -492,6 +509,13 @@ impl VolcengineStreamingASR {
         let callback = self.final_intermediate_callback.lock().clone();
         if let Some(callback) = callback {
             callback(update);
+        }
+    }
+
+    fn emit_streaming_event(&self, event: VolcengineStreamingEvent) {
+        let callback = self.streaming_event_callback.lock().clone();
+        if let Some(callback) = callback {
+            callback(event);
         }
     }
 
@@ -845,7 +869,9 @@ impl VolcengineStreamingASR {
                 }
             });
         }
-        self.signal_error(VolcengineASRError::NoFinalResult);
+        // Wake an async final-result waiter without reporting user cancellation
+        // as a provider error to the platform event sink.
+        self.signal_error_silently(VolcengineASRError::NoFinalResult);
     }
 
     // ---- internals ----
@@ -1076,6 +1102,11 @@ impl VolcengineStreamingASR {
                 elapsed_ms
             );
             self.emit_partial_transcript(&full_text);
+            self.emit_streaming_event(if has_final {
+                VolcengineStreamingEvent::Final(full_text.clone())
+            } else {
+                VolcengineStreamingEvent::Partial(full_text.clone())
+            });
         }
 
         if has_final {
@@ -1105,6 +1136,11 @@ impl VolcengineStreamingASR {
     }
 
     fn signal_error(&self, err: VolcengineASRError) {
+        self.emit_streaming_event(VolcengineStreamingEvent::Error(err.clone()));
+        self.signal_error_silently(err);
+    }
+
+    fn signal_error_silently(&self, err: VolcengineASRError) {
         let tx = self.state.lock().final_tx.take();
         if let Some(tx) = tx {
             let _ = tx.send(Err(err));
@@ -1370,6 +1406,27 @@ mod tests {
             VolcengineCredentials::default_resource_id(),
             "volc.bigasr.sauc.duration"
         );
+    }
+
+    #[test]
+    fn cancel_does_not_emit_a_platform_provider_error() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        let events = Arc::new(ParkingMutex::new(Vec::new()));
+        let events_for_callback = Arc::clone(&events);
+        asr.set_streaming_event_callback(Some(Arc::new(move |event| {
+            events_for_callback.lock().push(event);
+        })));
+
+        asr.cancel();
+
+        assert!(events.lock().is_empty());
     }
 
     #[test]

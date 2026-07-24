@@ -1,4 +1,4 @@
-//! 麦克风采集：cpal 拉流 → 16 kHz 单声道 Int16 PCM → 喂给 `AudioConsumer`。
+//! 麦克风采集：平台 CaptureSession 拉流 → 16 kHz 单声道 Int16 PCM → 喂给 `AudioConsumer`。
 //!
 //! 与 Swift 版 `ListenerTypeRecorder/Recorder.swift` 行为对齐：
 //! - 输出格式固定为 16 kHz 单声道小端 Int16，方便 ASR 直接消费。
@@ -7,17 +7,17 @@
 //! - 每 ~50 个回调打一行诊断日志，包含峰值 RMS。
 //!
 //! 线程模型：
-//! - cpal `Stream` 是 `!Send`，所以独立线程持有它。
-//! - 主线程通过 `AtomicBool` 通知"该停了"，并 `join` 线程；线程内 `drop` Stream。
+//! - 平台线程持有 `!Send` 的 cpal `Stream`。
+//! - 产品句柄停止平台 session，并保留 Listener 的 PCM/RMS/WAV 语义。
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{SampleFormat, StreamConfig};
+use denzic_host_audio_v1_core::capture::{
+    self, CaptureError, CaptureOptions, CaptureSession,
+};
 use parking_lot::Mutex;
 use serde::Serialize;
 use thiserror::Error;
@@ -54,8 +54,7 @@ pub enum RecorderError {
 
 /// 采集器句柄。Drop 时不会自动停止——必须显式调用 `stop`。
 pub struct Recorder {
-    stop_flag: Arc<AtomicBool>,
-    join_handle: Mutex<Option<JoinHandle<()>>>,
+    session: Mutex<Option<CaptureSession>>,
 }
 
 impl Recorder {
@@ -68,19 +67,15 @@ impl Recorder {
     /// 决定 `has_audio_recording`，而不是 prefs 开关。开关打开但写盘失败（路径不存在 /
     /// 权限不足 / 磁盘满）时仍返回 false，避免前端渲染播放按钮后端却 404。
     ///
-    /// 实际的 cpal Stream 在独立线程里构造、播放、最终析构——因为它 `!Send`。
+    /// 实际的 cpal Stream 由平台 CaptureSession 在线程内构造、播放和析构。
     pub fn start(
         microphone_device_name: Option<String>,
         consumer: Arc<dyn AudioConsumer>,
         level_handler: Arc<dyn Fn(f32) + Send + Sync>,
         audio_archive_path: Option<PathBuf>,
     ) -> Result<(Self, Receiver<RecorderError>, bool), RecorderError> {
-        // 启动信号：子线程构造 Stream 完成后通过 startup_tx 报告结果。
-        let (startup_tx, startup_rx) = channel::<Result<(), RecorderError>>();
-        // 运行期错误：Stream 已成功启动后，cpal 通过 err_cb 异步上报。
+        // 运行期错误：平台统一上报 cpal 与 liveness watchdog 事件。
         let (runtime_error_tx, runtime_error_rx) = channel::<RecorderError>();
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let stop_for_thread = Arc::clone(&stop_flag);
 
         // 同步路径上尝试创建 WavArchiver——成功 / 失败都立刻知道，传给 caller 决定
         // 是否在 history 标 has_audio_recording。失败仅 log::warn 不抛错，主路径继续。
@@ -92,33 +87,36 @@ impl Recorder {
             }
         });
         let archive_active = archiver.is_some();
-
-        let join_handle = thread::Builder::new()
-            .name("listener-type-recorder".into())
-            .spawn(move || {
-                run_audio_thread(
-                    microphone_device_name,
-                    consumer,
-                    level_handler,
-                    archiver,
-                    stop_for_thread,
-                    startup_tx,
-                    runtime_error_tx,
+        let state = Arc::new(StreamState::new());
+        let state_for_sink = Arc::clone(&state);
+        let consumer_for_sink = Arc::clone(&consumer);
+        let level_for_sink = Arc::clone(&level_handler);
+        let archive_for_sink = archiver.clone();
+        let error_tx = runtime_error_tx.clone();
+        let session = CaptureSession::start(
+            CaptureOptions {
+                device_name: microphone_device_name,
+                on_stream_error: Some(Arc::new(move |message| {
+                    let _ = error_tx.send(map_capture_runtime_error(message));
+                })),
+            },
+            move |samples, input_sr| {
+                process_callback(
+                    samples,
+                    1,
+                    input_sr,
+                    consumer_for_sink.as_ref(),
+                    level_for_sink.as_ref(),
+                    archive_for_sink.as_deref(),
+                    state_for_sink.as_ref(),
                 );
-            })
-            .map_err(|e| RecorderError::EngineFailed(format!("spawn audio thread: {e}")))?;
-
-        // 等待子线程报告启动结果。子线程要么 Send Ok 后继续 park，
-        // 要么 Send Err 后立即退出——两种情况都保证 recv 能解锁。
-        let startup_result = startup_rx
-            .recv()
-            .map_err(|e| RecorderError::EngineFailed(format!("audio thread vanished: {e}")))?;
-        startup_result?;
+            },
+        )
+        .map_err(map_capture_error)?;
 
         Ok((
             Self {
-                stop_flag,
-                join_handle: Mutex::new(Some(join_handle)),
+                session: Mutex::new(Some(session)),
             },
             runtime_error_rx,
             archive_active,
@@ -129,332 +127,49 @@ impl Recorder {
     ///
     /// 用 `self`（消费）签名，与 Swift API 语义一致——一次性资源。
     pub fn stop(self) {
-        self.stop_flag.store(true, Ordering::SeqCst);
-        if let Some(handle) = self.join_handle.lock().take() {
-            if let Err(err) = handle.join() {
-                log::warn!("recorder 线程 join 失败: {:?}", err);
+        if let Some(session) = self.session.lock().take() {
+            if let Err(err) = session.stop() {
+                log::warn!("recorder 线程停止失败: {err}");
             }
         }
     }
 }
 
 pub fn list_input_devices() -> Result<Vec<MicrophoneDevice>, RecorderError> {
-    let host = cpal::default_host();
-    let default_name = host
-        .default_input_device()
-        .and_then(|device| device.name().ok());
-    let devices = host
-        .input_devices()
-        .map_err(|e| RecorderError::EngineFailed(format!("input_devices: {e}")))?;
-
-    let mut result = Vec::new();
-    for device in devices {
-        let name = match device.name() {
-            Ok(name) => name,
-            Err(err) => {
-                log::warn!("[recorder] failed to read input device name: {err}");
-                continue;
-            }
-        };
-        result.push(MicrophoneDevice {
-            is_default: default_name.as_deref() == Some(name.as_str()),
-            name,
-        });
-    }
-    Ok(result)
-}
-
-/// 音频线程主体：构造 Stream → 通过 startup_tx 报告 → 循环到 stop_flag。
-/// `archiver` 由 caller 在同步路径上已经尝试创建好（成功 → Some / 失败 → None），
-/// 这里只负责把它穿透到 build_input_stream 给 cpal callback 用。
-fn run_audio_thread(
-    microphone_device_name: Option<String>,
-    consumer: Arc<dyn AudioConsumer>,
-    level_handler: Arc<dyn Fn(f32) + Send + Sync>,
-    archiver: Option<Arc<Mutex<WavArchiver>>>,
-    stop_flag: Arc<AtomicBool>,
-    startup_tx: Sender<Result<(), RecorderError>>,
-    runtime_error_tx: Sender<RecorderError>,
-) {
-    let (stream, state) = match build_input_stream(
-        microphone_device_name,
-        consumer,
-        level_handler,
-        archiver,
-        runtime_error_tx.clone(),
-    ) {
-        Ok(s) => s,
-        Err(err) => {
-            // 启动失败：通知主线程后即退出。
-            let _ = startup_tx.send(Err(err));
-            return;
-        }
-    };
-
-    if let Err(err) = stream.play() {
-        let _ = startup_tx.send(Err(RecorderError::EngineFailed(format!("play: {err}"))));
-        return;
-    }
-
-    // 启动成功。
-    let _ = startup_tx.send(Ok(()));
-
-    // 启动 liveness watchdog 线程：检测录音回调是否静默停止
-    const WATCHDOG_CHECK_INTERVAL_MS: u64 = 1000; // 每秒检查一次
-    const CALLBACK_TIMEOUT_SECS: u64 = 3; // 3 秒没有回调视为异常
-    const FIRST_CALLBACK_DEADLINE_SECS: u64 = 5; // 5 秒内必须收到首次回调
-
-    let stop_flag_for_watchdog = Arc::clone(&stop_flag);
-    let state_for_watchdog = Arc::clone(&state);
-    let runtime_error_tx_for_watchdog = runtime_error_tx.clone();
-
-    let watchdog_handle = thread::Builder::new()
-        .name("listener-type-recorder-watchdog".into())
-        .spawn(move || {
-            // 记录 watchdog 启动时间，确保首次回调截止时间从播放真正开始时计时
-            let watchdog_start_time = std::time::Instant::now();
-
-            while !stop_flag_for_watchdog.load(Ordering::SeqCst) {
-                thread::sleep(std::time::Duration::from_millis(WATCHDOG_CHECK_INTERVAL_MS));
-
-                // 关键：sleep 醒来后必须重新检查 stop_flag，再去看 elapsed。
-                //
-                // 否则会与 hotkey-release 停采路径产生竞态：
-                //   1. 用户松开 hotkey → end_session 调 rec.stop() → 设置 stop_flag
-                //      → audio 线程 pause 了 cpal Stream → 回调真的静默
-                //   2. 但 watchdog 此时正卡在上面的 1 秒 sleep 里
-                //   3. sleep 结束后，若不重新检查 stop_flag，
-                //      就会读到 last_callback_time 已经"老 4 秒"，
-                //      把"我们主动停掉的录音"错报成 EngineFailed("录音回调静默停止 N 秒")，
-                //      coordinator 收到错误后会终止 session、胶囊弹错。
-                //
-                // 修复方式是 sleep 后立即再 load 一次：进入 stop 流程后 watchdog 静默退出，
-                // 不影响 watchdog 在真正活动期捕获 CoreAudio 设备掉线等真故障。
-                if stop_flag_for_watchdog.load(Ordering::SeqCst) {
-                    break;
-                }
-
-                let last_callback = *state_for_watchdog.last_callback_time.lock();
-                match last_callback {
-                    Some(last_time) => {
-                        // 已收到首次回调，检查是否停止
-                        let elapsed = last_time.elapsed();
-                        if elapsed.as_secs() > CALLBACK_TIMEOUT_SECS {
-                            log::error!(
-                                "[recorder] watchdog: 录音回调已停止 {} 秒，触发错误恢复",
-                                elapsed.as_secs()
-                            );
-                            let _ =
-                                runtime_error_tx_for_watchdog.send(RecorderError::EngineFailed(
-                                    format!("录音回调静默停止 {} 秒", elapsed.as_secs()),
-                                ));
-                            break; // 只报告一次
-                        }
-                    }
-                    None => {
-                        // 尚未收到首次回调，检查是否超过截止时间
-                        let elapsed = watchdog_start_time.elapsed();
-                        if elapsed.as_secs() > FIRST_CALLBACK_DEADLINE_SECS {
-                            log::error!(
-                                "[recorder] watchdog: {} 秒内未收到首次回调，触发错误恢复",
-                                elapsed.as_secs()
-                            );
-                            let _ =
-                                runtime_error_tx_for_watchdog.send(RecorderError::EngineFailed(
-                                    format!("录音启动后 {} 秒内未收到回调", elapsed.as_secs()),
-                                ));
-                            break; // 只报告一次
-                        }
-                    }
-                }
-            }
+    capture::list_input_devices()
+        .map(|devices| {
+            devices
+                .into_iter()
+                .map(|device| MicrophoneDevice {
+                    name: device.name,
+                    is_default: device.is_default,
+                })
+                .collect()
         })
-        .ok();
+        .map_err(map_capture_error)
+}
 
-    // 自旋等待停止信号——cpal 自身没有 wait API，sleep 50ms 完全够用。
-    while !stop_flag.load(Ordering::SeqCst) {
-        thread::sleep(std::time::Duration::from_millis(50));
-    }
-
-    // 显式 pause 再 drop。
-    // 实测 cpal 0.15 在 macOS coreaudio 上单纯 drop(Stream) 不会同步调用
-    // AudioOutputUnitStop，AudioUnit 的 render callback 会继续被系统调，
-    // process_callback 仍然以 ~5 ms / 帧的速率打 cb# 日志，macOS 一直认为
-    // 我们在用 mic（橙点不灭）。pause() 走的是 StreamTrait::pause —— 在
-    // coreaudio backend 里直接 AudioOutputUnitStop，同步终止 callback。
-    // 之后 drop 处理 dispose / 资源释放。pause 失败时仅 warn，不阻塞 drop。
-    if let Err(err) = stream.pause() {
-        log::warn!("[recorder] cpal Stream pause before drop failed: {err}");
-    }
-    drop(stream);
-    log::info!("[recorder] cpal Stream dropped (mic released)");
-
-    // 等待 watchdog 线程退出
-    if let Some(handle) = watchdog_handle {
-        let _ = handle.join();
+fn map_capture_error(error: CaptureError) -> RecorderError {
+    match error {
+        CaptureError::PermissionDenied => RecorderError::PermissionDenied,
+        other => RecorderError::EngineFailed(other.to_string()),
     }
 }
 
-/// 选默认输入设备 + 默认配置 + 构造 Stream。
-fn build_input_stream(
-    microphone_device_name: Option<String>,
-    consumer: Arc<dyn AudioConsumer>,
-    level_handler: Arc<dyn Fn(f32) + Send + Sync>,
-    archiver: Option<Arc<Mutex<WavArchiver>>>,
-    runtime_error_tx: Sender<RecorderError>,
-) -> Result<(cpal::Stream, Arc<StreamState>), RecorderError> {
-    let host = cpal::default_host();
-    let device = select_input_device(&host, microphone_device_name.as_deref())?;
-
-    let supported = device
-        .default_input_config()
-        .map_err(|e| classify_default_config_err(e.to_string()))?;
-
-    let sample_format = supported.sample_format();
-    let config: StreamConfig = supported.config();
-    let input_sr = config.sample_rate.0;
-    let channels = config.channels as usize;
-
-    log::info!(
-        "[recorder] inputDevice={} inputFormat sampleRate={} channels={} fmt={:?}",
-        device.name().unwrap_or_else(|_| "<unknown>".into()),
-        input_sr,
-        channels,
-        sample_format
-    );
-
-    let state = Arc::new(StreamState::new());
-    let stream = build_stream_for_format(
-        &device,
-        &config,
-        sample_format,
-        consumer,
-        level_handler,
-        archiver,
-        Arc::clone(&state),
-        input_sr,
-        channels,
-        runtime_error_tx,
-    )?;
-    Ok((stream, state))
-}
-
-fn select_input_device(
-    host: &cpal::Host,
-    microphone_device_name: Option<&str>,
-) -> Result<cpal::Device, RecorderError> {
-    let preferred = microphone_device_name
-        .map(str::trim)
-        .filter(|name| !name.is_empty());
-    if let Some(preferred) = preferred {
-        let devices = host
-            .input_devices()
-            .map_err(|e| RecorderError::EngineFailed(format!("input_devices: {e}")))?;
-        for device in devices {
-            if device.name().ok().as_deref() == Some(preferred) {
-                return Ok(device);
-            }
-        }
-        log::warn!(
-            "[recorder] preferred input device not found; falling back to default: {preferred}"
-        );
+fn map_capture_runtime_error(message: String) -> RecorderError {
+    if let Some(seconds) = message
+        .strip_prefix("audio callback silent for ")
+        .and_then(|rest| rest.strip_suffix(" seconds"))
+    {
+        return RecorderError::EngineFailed(format!("录音回调静默停止 {seconds} 秒"));
     }
-
-    host.default_input_device()
-        .ok_or_else(|| RecorderError::EngineFailed("no default input device".into()))
-}
-
-/// 启动期 default_input_config 失败：依靠错误字符串关键字粗判权限问题。
-/// cpal 在 macOS 没拿到 mic 授权时通常返回 `BackendSpecific`，我们尽力识别。
-fn classify_default_config_err(msg: String) -> RecorderError {
-    let lower = msg.to_lowercase();
-    if lower.contains("permission") || lower.contains("denied") || lower.contains("authoriz") {
-        RecorderError::PermissionDenied
-    } else {
-        RecorderError::EngineFailed(format!("default_input_config: {msg}"))
+    if let Some(seconds) = message
+        .strip_prefix("no audio callback within ")
+        .and_then(|rest| rest.strip_suffix(" seconds after capture start"))
+    {
+        return RecorderError::EngineFailed(format!("录音启动后 {seconds} 秒内未收到回调"));
     }
-}
-
-/// 启动期 build_stream 失败：同上，可能是权限问题。
-fn classify_build_stream_err(err: cpal::BuildStreamError) -> RecorderError {
-    let msg = err.to_string();
-    let lower = msg.to_lowercase();
-    if lower.contains("permission") || lower.contains("denied") || lower.contains("authoriz") {
-        RecorderError::PermissionDenied
-    } else {
-        RecorderError::EngineFailed(format!("build_input_stream: {msg}"))
-    }
-}
-
-/// `SupportedStreamConfig` → 对应 SampleFormat 的具体 build 调用。
-/// 只支持 cpal 常见的浮点和整型格式；其它格式 fallback 报错。
-#[allow(clippy::too_many_arguments)]
-fn build_stream_for_format(
-    device: &cpal::Device,
-    config: &StreamConfig,
-    sample_format: SampleFormat,
-    consumer: Arc<dyn AudioConsumer>,
-    level_handler: Arc<dyn Fn(f32) + Send + Sync>,
-    archiver: Option<Arc<Mutex<WavArchiver>>>,
-    state: Arc<StreamState>,
-    input_sr: u32,
-    channels: usize,
-    runtime_error_tx: Sender<RecorderError>,
-) -> Result<cpal::Stream, RecorderError> {
-    macro_rules! make_stream {
-        ($t:ty, $to_f32:expr) => {{
-            let consumer = Arc::clone(&consumer);
-            let level_handler = Arc::clone(&level_handler);
-            let archiver = archiver.clone();
-            let state = Arc::clone(&state);
-            let runtime_error_tx = runtime_error_tx.clone();
-            let err_cb = move |err| {
-                log::error!("[recorder] stream error: {err}");
-                let _ =
-                    runtime_error_tx.send(RecorderError::EngineFailed(format!("stream: {err}")));
-            };
-            device
-                .build_input_stream::<$t, _, _>(
-                    config,
-                    move |data: &[$t], _info| {
-                        let mut floats = Vec::with_capacity(data.len());
-                        for s in data {
-                            floats.push($to_f32(*s));
-                        }
-                        process_callback(
-                            &floats,
-                            channels,
-                            input_sr,
-                            consumer.as_ref(),
-                            level_handler.as_ref(),
-                            archiver.as_deref(),
-                            &state,
-                        );
-                    },
-                    err_cb,
-                    None,
-                )
-                .map_err(classify_build_stream_err)
-        }};
-    }
-
-    match sample_format {
-        SampleFormat::F32 => make_stream!(f32, |s: f32| s),
-        SampleFormat::I16 => make_stream!(i16, |s: i16| s as f32 / i16::MAX as f32),
-        SampleFormat::U16 => {
-            make_stream!(u16, |s: u16| (s as f32 - 32768.0) / 32768.0)
-        }
-        SampleFormat::I32 => {
-            make_stream!(i32, |s: i32| s as f32 / i32::MAX as f32)
-        }
-        SampleFormat::I8 => make_stream!(i8, |s: i8| s as f32 / i8::MAX as f32),
-        SampleFormat::U8 => {
-            make_stream!(u8, |s: u8| (s as f32 - 128.0) / 128.0)
-        }
-        other => Err(RecorderError::EngineFailed(format!(
-            "unsupported sample format: {other:?}"
-        ))),
-    }
+    RecorderError::EngineFailed(format!("stream: {message}"))
 }
 
 /// 跨回调维持的状态：上一帧残留（重采样），诊断计数与峰值。
@@ -874,5 +589,24 @@ mod tests {
         assert!(consumer.chunks.lock().unwrap().is_empty());
         assert!(state.last_callback_time.lock().is_none());
         assert_eq!(state.callback_count.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn platform_runtime_errors_keep_listener_wording() {
+        assert_eq!(
+            map_capture_runtime_error("audio callback silent for 4 seconds".into()).to_string(),
+            "audio engine failed: 录音回调静默停止 4 秒"
+        );
+        assert_eq!(
+            map_capture_runtime_error(
+                "no audio callback within 6 seconds after capture start".into()
+            )
+            .to_string(),
+            "audio engine failed: 录音启动后 6 秒内未收到回调"
+        );
+        assert_eq!(
+            map_capture_runtime_error("device lost".into()).to_string(),
+            "audio engine failed: stream: device lost"
+        );
     }
 }

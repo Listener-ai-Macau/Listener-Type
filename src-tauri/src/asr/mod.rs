@@ -9,12 +9,15 @@ pub mod bailian;
 mod frame;
 pub mod local;
 pub mod volcengine;
+mod volcengine_platform;
 mod volcengine_transcript;
 pub mod wav;
 pub mod whisper;
 
 pub use bailian::{BailianCredentials, BailianRealtimeASR};
 pub use volcengine::{VolcengineCredentials, VolcengineStreamingASR};
+#[allow(unused_imports)]
+pub use volcengine_platform::{VolcengineStreamingProvider, VolcengineStreamingSession};
 pub use whisper::WhisperBatchASR;
 
 /// Sink for raw 16 kHz / 16-bit / mono PCM bytes coming off the recorder.
