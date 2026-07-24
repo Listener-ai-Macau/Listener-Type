@@ -2205,7 +2205,7 @@
       }
     },
     "listener_owner_enable_voice_activation_for_acceptance_20260724": {
-      "status": "implementation_requested",
+      "status": "machine_closed_human_acceptance_open",
       "recorded_at": "2026-07-24T10:50:00+08:00",
       "source": "Product-owner direction: 自动开始和自动结束现在做出来并启用，让 owner 先验收。",
       "requirement": "Add independent automatic-start and automatic-stop controls to the accepted Device-page Recording automation group, deploy an enabled acceptance candidate to the current Listener, and preserve physical-button override behavior.",
@@ -2230,7 +2230,16 @@
         "Type settings default, persistence and device-setting round-trip tests",
         "installed Type plus flashed current-device acceptance candidate",
         "canonical Chinese owner acceptance result stored beside machine evidence"
-      ]
+      ],
+      "machine_evidence": ".cache/validation/voice-activation-20260724/machine-summary.json",
+      "machine_result": "PASS_WITH_HUMAN_SPEECH_ACCEPTANCE_REQUIRED",
+      "deployed_commits": {
+        "denzic_platform": "c4d966c7dd820cebe96272e4756461e353c42c29",
+        "listener_firmware": "8807776",
+        "listener_type": "8e4c82c",
+        "companion_type": "5473160"
+      },
+      "acceptance_boundary": "Machine evidence closes platform policy, firmware build/flash, installed Type identity, settings readback, sustained ACTIVE microphone monitoring, zero-loss transport, no false trigger during the available playback fixture, and no speech wake from CONNECTED_IDLE. The repository speech fixture did not produce useful sound pressure at the physical Listener microphone, so normal human speech start/stop remains the explicit canonical Chinese owner acceptance step; synthetic volume detection is not an acceptable substitute."
     }
   },
   "scenarios": [
