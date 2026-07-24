@@ -62,6 +62,14 @@ pub enum PasteShortcut {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
+pub enum PostDictationKey {
+    #[default]
+    Enter,
+    CtrlEnter,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
 pub enum DictationInputSource {
     Microphone,
     #[default]
@@ -1224,6 +1232,13 @@ pub struct UserPreferences {
     /// 关掉就把听写文本留在剪贴板，让 simulate_paste 实际没生效时用户能 Ctrl+V 找回。
     /// macOS 走 AX 直写，不受这个开关影响。详见 issue #111。
     pub restore_clipboard_after_paste: bool,
+    /// 普通听写结束后把最终文本保留在剪贴板。默认开启；开启时覆盖剪贴板恢复设置。
+    pub copy_dictation_to_clipboard: bool,
+    /// 普通听写成功插入后是否自动发送提交按键。默认关闭，避免升级后意外提交。
+    pub send_key_after_dictation: bool,
+    /// 自动发送使用的按键。仅在 send_key_after_dictation 开启时生效。
+    #[serde(default)]
+    pub post_dictation_key: PostDictationKey,
     /// Windows / Linux 的模拟粘贴键。macOS 走 AX 直写不受影响。详见 issue #360：
     /// kitty 等 Linux 终端不接受 Ctrl+V，只能配 Ctrl+Shift+V。默认 CtrlV 与历史
     /// 行为一致，不破坏既有用户。
@@ -1489,6 +1504,11 @@ struct UserPreferencesWire {
     llm_thinking_enabled: bool,
     restore_clipboard_after_paste: bool,
     #[serde(default)]
+    copy_dictation_to_clipboard: Option<bool>,
+    send_key_after_dictation: bool,
+    #[serde(default)]
+    post_dictation_key: PostDictationKey,
+    #[serde(default)]
     paste_shortcut: PasteShortcut,
     allow_non_tsf_insertion_fallback: bool,
     working_languages: Vec<String>,
@@ -1604,6 +1624,9 @@ impl Default for UserPreferencesWire {
             active_llm_provider: prefs.active_llm_provider,
             llm_thinking_enabled: prefs.llm_thinking_enabled,
             restore_clipboard_after_paste: prefs.restore_clipboard_after_paste,
+            copy_dictation_to_clipboard: Some(prefs.copy_dictation_to_clipboard),
+            send_key_after_dictation: prefs.send_key_after_dictation,
+            post_dictation_key: prefs.post_dictation_key,
             paste_shortcut: prefs.paste_shortcut,
             allow_non_tsf_insertion_fallback: prefs.allow_non_tsf_insertion_fallback,
             working_languages: prefs.working_languages,
@@ -1784,6 +1807,11 @@ impl<'de> Deserialize<'de> for UserPreferences {
             active_llm_provider: wire.active_llm_provider,
             llm_thinking_enabled: wire.llm_thinking_enabled,
             restore_clipboard_after_paste: wire.restore_clipboard_after_paste,
+            copy_dictation_to_clipboard: wire
+                .copy_dictation_to_clipboard
+                .unwrap_or(wire.streaming_insert_save_clipboard),
+            send_key_after_dictation: wire.send_key_after_dictation,
+            post_dictation_key: wire.post_dictation_key,
             paste_shortcut: wire.paste_shortcut,
             allow_non_tsf_insertion_fallback: wire.allow_non_tsf_insertion_fallback,
             working_languages: wire.working_languages,
@@ -2212,6 +2240,9 @@ impl Default for UserPreferences {
             active_llm_provider: "ark".into(),
             llm_thinking_enabled: false,
             restore_clipboard_after_paste: true,
+            copy_dictation_to_clipboard: true,
+            send_key_after_dictation: false,
+            post_dictation_key: PostDictationKey::default(),
             paste_shortcut: PasteShortcut::default(),
             allow_non_tsf_insertion_fallback: true,
             working_languages: default_working_languages(),
@@ -2985,6 +3016,40 @@ mod tests {
 
         let from_empty: UserPreferences = serde_json::from_str("{}").unwrap();
         assert_eq!(from_empty.paste_shortcut, PasteShortcut::CtrlV);
+    }
+
+    #[test]
+    fn post_dictation_actions_keep_upgrade_safe_defaults() {
+        let prefs = UserPreferences::default();
+        assert!(prefs.copy_dictation_to_clipboard);
+        assert!(!prefs.send_key_after_dictation);
+        assert_eq!(prefs.post_dictation_key, PostDictationKey::Enter);
+
+        let from_legacy: UserPreferences =
+            serde_json::from_str(r#"{"restoreClipboardAfterPaste":true}"#).unwrap();
+        assert!(from_legacy.copy_dictation_to_clipboard);
+        assert!(!from_legacy.send_key_after_dictation);
+        assert_eq!(from_legacy.post_dictation_key, PostDictationKey::Enter);
+
+        let from_legacy_streaming_pref: UserPreferences =
+            serde_json::from_str(r#"{"streamingInsertSaveClipboard":false}"#).unwrap();
+        assert!(!from_legacy_streaming_pref.copy_dictation_to_clipboard);
+    }
+
+    #[test]
+    fn post_dictation_actions_round_trip_explicit_values() {
+        let prefs: UserPreferences = serde_json::from_str(
+            r#"{
+                "copyDictationToClipboard": false,
+                "sendKeyAfterDictation": true,
+                "postDictationKey": "ctrlEnter"
+            }"#,
+        )
+        .unwrap();
+
+        assert!(!prefs.copy_dictation_to_clipboard);
+        assert!(prefs.send_key_after_dictation);
+        assert_eq!(prefs.post_dictation_key, PostDictationKey::CtrlEnter);
     }
 
     #[test]

@@ -20,12 +20,13 @@ import type {
   DeviceSettingsSnapshot,
   DeviceSettingsUpdateRequest,
   InstalledApplication,
+  PostDictationKey,
   ShortcutBinding,
 } from '../../lib/types';
 import { useHotkeySettings } from '../../state/HotkeySettingsContext';
 import { Btn, Card } from '../_atoms';
 import { FirmwareOtaPanel } from './FirmwareOtaPanel';
-import { inputStyle, SettingRow } from './shared';
+import { inputStyle, SettingRow, Toggle } from './shared';
 import type { EmbeddedBleProbeStatus } from '../../components/EmbeddedBleStatusPanel';
 import {
   DEFAULT_DEVICE_KEY_LED_BRIGHTNESS_PERCENT,
@@ -303,6 +304,7 @@ export function DeviceSection() {
 
 function DeviceFirmwareSettingsCard() {
   const { t } = useTranslation();
+  const { prefs, updatePrefs: savePrefs } = useHotkeySettings();
   const [snapshot, setSnapshot] = useState<DeviceSettingsSnapshot | null>(null);
   const [form, setForm] = useState<DeviceSettingsUpdateRequest>({
     statusLedBrightnessPercent: DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
@@ -486,6 +488,57 @@ function DeviceFirmwareSettingsCard() {
           {t('settings.device.zeroMeansOff', '0 = 关闭')}
         </div>
       </DeviceSettingsPanel>
+
+      {prefs && (
+        <DeviceSettingsPanel
+          title={t('settings.recording.postActionsTitle')}
+          desc={t('settings.recording.postActionsDesc')}
+        >
+          <div className="ol-recording-automation-settings">
+            <SettingRow
+              label={t('settings.recording.copyDictationToClipboardLabel')}
+              desc={t('settings.recording.copyDictationToClipboardDesc')}
+            >
+              <Toggle
+                on={prefs.copyDictationToClipboard}
+                onToggle={copyDictationToClipboard =>
+                  savePrefs(current => ({ ...current, copyDictationToClipboard }))}
+              />
+            </SettingRow>
+            <SettingRow
+              label={t('settings.recording.sendKeyAfterDictationLabel')}
+              desc={t('settings.recording.sendKeyAfterDictationDesc')}
+            >
+              <Toggle
+                on={prefs.sendKeyAfterDictation}
+                onToggle={sendKeyAfterDictation =>
+                  savePrefs(current => ({ ...current, sendKeyAfterDictation }))}
+              />
+            </SettingRow>
+            {prefs.sendKeyAfterDictation && (
+              <SettingRow
+                label={t('settings.recording.postDictationKeyLabel')}
+                desc={t('settings.recording.postDictationKeyDesc')}
+              >
+                <SelectLite
+                  value={prefs.postDictationKey}
+                  onChange={postDictationKey =>
+                    savePrefs(current => ({
+                      ...current,
+                      postDictationKey: postDictationKey as PostDictationKey,
+                    }))}
+                  options={[
+                    { value: 'enter', label: t('settings.recording.postDictationKeyEnter') },
+                    { value: 'ctrlEnter', label: t('settings.recording.postDictationKeyCtrlEnter') },
+                  ]}
+                  ariaLabel={t('settings.recording.postDictationKeyLabel')}
+                  style={{ ...inputStyle, maxWidth: 220 }}
+                />
+              </SettingRow>
+            )}
+          </div>
+        </DeviceSettingsPanel>
+      )}
 
       <DeviceLedBrightnessGroup
         supported={snapshot?.ledZoneBrightnessSupported ?? false}

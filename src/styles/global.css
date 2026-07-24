@@ -280,6 +280,10 @@ a { color: inherit; text-decoration: none; }
   border-top: 0 !important;
 }
 
+.ol-recording-automation-settings .ol-setting-row {
+  border-top: 0 !important;
+}
+
 .ol-device-ble-name-card {
   min-width: 0;
   display: flex;

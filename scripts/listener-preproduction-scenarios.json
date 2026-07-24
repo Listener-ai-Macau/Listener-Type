@@ -651,19 +651,21 @@
       "final_human_boundary": "No individual human prompt is opened. This is machine-only closure and remains pending the single final human acceptance after Bluetooth, recording, OTA, and logging capabilities are all machine-closed. Physical EC11 timing and the no-second-host BENCH_REVIEW_NO_GO are not upgraded by this evidence."
     },
     "listener_final_text_clipboard_retention_20260717": {
-      "status": "required_machine_closure",
+      "status": "machine_closed_human_accepted_20260724",
       "recorded_at": "2026-07-17T22:20:00+08:00",
       "source": "Product-owner direction: Type 默认有个开关，录音胶囊结束以后决定要不要把那段话放到剪贴板；没有可用鼠标光标时，完成文本不能丢失。",
       "requirement": "Type 设置提供持久化的“完成后复制到剪贴板”开关，默认开启。对每个非空最终文本，开关开启时必须在成功完成胶囊收尾后写入最终文本，即使原始输入焦点不可恢复、上屏失败或原插入路径恢复了旧剪贴板也不能丢失；关闭时不得修改剪贴板。剪贴板内容必须与历史和最终完成文本一致，不得写预览或中间文本。",
-      "machine_evidence_required": "用可重复的完成路径验证：默认值与设置 round-trip、无焦点/插入失败路径仍安排最终文本保留、流式与非流式路径都只使用 final text、关闭开关时明确跳过。机器日志须记录 session、字符数、写入时机和失败原因，不记录文本正文。"
+      "machine_evidence_required": "用可重复的完成路径验证：默认值与设置 round-trip、无焦点/插入失败路径仍安排最终文本保留、流式与非流式路径都只使用 final text、关闭开关时明确跳过。机器日志须记录 session、字符数、写入时机和失败原因，不记录文本正文。",
+      "closure_20260724": "Defaults, legacy migration, setting round-trip, final-only clipboard precedence, focus-loss behavior, and disabled behavior are covered by the 850-test Listener Type library run. Settings placement and default-on state were accepted through the canonical Chinese operator prompt. Evidence: .cache/validation/post-dictation-settings-20260724/."
     },
     "listener_final_text_auto_enter_send_20260717": {
-      "status": "required_machine_closure",
+      "status": "machine_closed_human_accepted_20260724",
       "recorded_at": "2026-07-17T22:30:00+08:00",
       "source": "Product-owner direction: Type 除了默认放进剪接版的开关以外，还要有点下暂停录音后自动 Enter 发送信息。",
       "requirement": "Type 设置提供持久化的“完成后按 Enter 发送”开关，默认关闭。开启时，只有本次用户主动暂停/停止录音产生非空最终文本，且最终文本已确认写入原目标输入位置后，才向该原目标窗口发送一次 Enter。不得对预览、中间文本、识别失败、取消、无文本、恢复蓝牙、自动重试或非用户发起的结束发送 Enter。",
       "ordering_and_safety": "最终文本保留优先于 Enter：复制到剪贴板开关开启时先完成剪贴板保留。仅剪贴板保留成功、但原目标输入未确认成功时，不得发送 Enter，避免误触发当前前台的其他窗口。每个 session 至多发送一次，必须记录 session、目标写入状态、剪贴板保留结果和 Enter 结果，不记录文本正文。",
-      "machine_evidence_required": "验证默认值和设置 round-trip，键盘注入只发生一次且仅在满足最终文本与用户停止条件时，关闭开关/取消/错误/空文本/预览/自动结束均不发送。验证焦点不可恢复时的剪贴板优先保留和错误归因。"
+      "machine_evidence_required": "验证默认值和设置 round-trip，键盘注入只发生一次且仅在满足最终文本与用户停止条件时，关闭开关/取消/错误/空文本/预览/自动结束均不发送。验证焦点不可恢复时的剪贴板优先保留和错误归因。",
+      "closure_20260724": "The implementation requires a user-initiated stop, non-empty final text, a confirmed original TSF target, successful focus revalidation, and one dispatch claim per session. Cancellation, automatic stop, translation, empty output, failed insertion, Unicode fallback, and paste fallback cannot auto-submit. Enter and Ctrl+Enter use the shared shortcut dispatcher. Evidence: .cache/validation/post-dictation-settings-20260724/."
     },
     "listener_long_utterance_completion_latency_20260717": {
       "status": "machine_closed_calibrated",
@@ -2151,7 +2153,7 @@
       "acceptance_boundary": "This deferral does not waive current Listener BLE rename evidence or change its existing speed gate; it only prevents cross-product refactoring from blocking the ordered acceptance run."
     },
     "listener_owner_ble_rename_speed_gate_revision_20260721": {
-      "status": "active_owner_direction",
+      "status": "implemented_human_accepted",
       "recorded_at": "2026-07-21T15:32:00+08:00",
       "source": "Product-owner direction: 或者你看要改一下，变成12秒门栏，或者是怎么样？或者你再努力一下，变为10秒。你觉得这个东西好优化吗？",
       "decision": "Use a scoped 12000 ms ceiling for random BLE-name rename/restore until a future Windows PnP/GATT recovery redesign is separately approved. Keep the existing implementation optimizations and preserve all functional recovery requirements.",
@@ -2163,6 +2165,44 @@
         "Listener-Type/.cache/validation/acceptance-continuation-20260721/step-05-random-name-stack-zero/preproduction-human-review-summary.json"
       ],
       "acceptance_boundary": "This is an explicit scoped threshold revision, not a claim that the old 10000 ms machine result passed. Revisit only with a focused Windows recovery optimization and new evidence."
+    },
+    "listener_owner_post_dictation_actions_20260724": {
+      "status": "implemented_machine_closed_human_accepted_pending_release_integration",
+      "recorded_at": "2026-07-24T00:00:00+08:00",
+      "source": "Product-owner direction: Type 要加两个功能，一个开关让录音文本自动加入剪贴板，另一个开关在录音结束后发送默认按键，例如 Enter 或 Ctrl+Enter；同时评估无需录音键的自动语音启停。",
+      "requirement": "Add two independently configurable post-dictation actions to Listener Type: retain the completed transcript in the clipboard, and automatically send a selected submit key after successful transcript insertion. The submit action supports Enter and Ctrl+Enter. Clipboard retention defaults on for new and upgraded installations; auto-send defaults off so upgrades never submit text unexpectedly.",
+      "interaction_contract": "Expose both toggles in Device settings directly below Power timing and above LED brightness. Show the Enter/Ctrl+Enter selector only when auto-send is enabled. Run auto-send only after a successful dictation insertion; never send it for QA, translation, cancellation, empty output, or failed insertion. When clipboard retention is enabled it wins over restore-after-paste for the completed transcript.",
+      "voice_activation_scope": "Evaluate hands-free speech start/stop using the existing recording state machine and available audio/VAD boundaries. Do not enable always-listening behavior or change the core recording interaction without a separate owner decision covering privacy, power, false triggers, and acceptance thresholds.",
+      "evidence_required": [
+        "focused backend tests for defaults, persistence, clipboard precedence, successful insertion gating, and Enter/Ctrl+Enter dispatch",
+        "frontend typecheck/tests and settings rendering evidence",
+        "full Listener Type cargo test --lib",
+        "written voice-activation feasibility and risk assessment"
+      ],
+      "acceptance_boundary": "Machine evidence establishes implementation correctness. Any final subjective settings-layout review uses the canonical Chinese aiw operator-prompt and stores the selected result and note beside the matching machine artifact.",
+      "acceptance_20260724": {
+        "status": "PASS",
+        "machine_evidence": ".cache/validation/post-dictation-settings-20260724/machine-summary.json",
+        "operator_result": ".cache/validation/post-dictation-settings-20260724/operator-result.json",
+        "operator_note": "可以的, 另外发送可以有ctrl+enter 或者是 enter",
+        "protected_behavior": "Keep both Enter and Ctrl+Enter choices; clipboard retention defaults on; auto-send defaults off; the settings remain in Device directly below Power timing."
+      },
+      "release_integration_boundary": "Do not claim the current platform migration release complete until the final Denzic-Platform commit is pushed, Listener Type/Firmware and Companion Type pins are updated to that SHA, and the required consumer verification commands pass."
+    },
+    "listener_owner_recording_automation_group_and_git_authorization_20260724": {
+      "status": "active_owner_direction",
+      "recorded_at": "2026-07-24T10:35:00+08:00",
+      "source": "Product-owner direction: 同一项目里面的东西不用划线；以后自动结束和自动开始也放在这个区域；以后 git 操作不需要逐次授权。",
+      "ui_contract": "Treat clipboard retention, post-dictation submit, and future automatic recording start/stop as one Recording automation group in Device settings below Power timing. Do not draw divider lines between controls inside this group. Keep the group extensible without implementing automatic start/stop until its separate privacy, power, false-trigger, and threshold contract is approved.",
+      "git_authorization": "Standing owner authorization is granted for project-scoped git commits and pushes needed to complete requested work. Do not ask for per-operation authorization. Continue to inspect staged diffs, preserve unrelated work, avoid Companion-Firmware worktree changes, and report exact pushed commits.",
+      "protected_behavior": "Clipboard retention remains default on; automatic submit remains default off; Enter and Ctrl+Enter remain available; future automatic start and automatic stop belong in the same Recording automation group.",
+      "acceptance_20260724": {
+        "status": "PASS",
+        "machine_evidence": ".cache/validation/post-dictation-settings-20260724/machine-summary.json",
+        "operator_result": ".cache/validation/post-dictation-settings-20260724/recording-automation-operator-result.json",
+        "operator_note": "",
+        "accepted_behavior": "The Device-page Recording automation group has no divider lines between its controls and remains the home for future automatic start and automatic stop."
+      }
     }
   },
   "scenarios": [

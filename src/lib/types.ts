@@ -292,6 +292,7 @@ export type ComboBinding = ShortcutBinding;
  *  - shiftInsert : xterm / urxvt 等老派 X11 终端
  *  详见 issue #360。 */
 export type PasteShortcut = 'ctrlV' | 'ctrlShiftV' | 'shiftInsert';
+export type PostDictationKey = 'enter' | 'ctrlEnter';
 
 export type DictationInputSource = 'microphone' | 'embeddedBle';
 
@@ -406,6 +407,12 @@ export interface UserPreferences {
   llmThinkingEnabled: boolean;
   /** 仅 Windows/Linux：粘贴成功后是否恢复用户原剪贴板。默认 true。详见 issue #111。 */
   restoreClipboardAfterPaste: boolean;
+  /** 普通听写结束后将最终文本保留在剪贴板。默认开启。 */
+  copyDictationToClipboard: boolean;
+  /** 普通听写成功插入后自动发送提交按键。默认关闭。 */
+  sendKeyAfterDictation: boolean;
+  /** 自动提交使用的按键。 */
+  postDictationKey: PostDictationKey;
   /** 仅 Windows/Linux：模拟粘贴时按下的快捷键。详见 issue #360：kitty/alacritty
    *  等终端只接受 Ctrl+Shift+V，硬编码 Ctrl+V 会被吞掉，听写文本只剩在剪贴板里。
    *  macOS 走 AX 直写不受影响。默认 'ctrlV' 与历史行为一致。 */

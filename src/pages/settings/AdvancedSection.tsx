@@ -143,16 +143,6 @@ export function AdvancedSection() {
             }}
           />
         </SettingRow>
-        <SettingRow
-          label={t('settings.advanced.streamingInsertSaveClipboardLabel')}
-          desc={t('settings.advanced.streamingInsertSaveClipboardHint')}>
-          <Toggle
-            on={!!prefs?.streamingInsertSaveClipboard}
-            onToggle={(next) => {
-              if (prefs) void updatePrefs({ ...prefs, streamingInsertSaveClipboard: next });
-            }}
-          />
-        </SettingRow>
       </Card>
 
       <Card>

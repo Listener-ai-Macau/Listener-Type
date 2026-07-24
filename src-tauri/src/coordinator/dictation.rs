@@ -9,7 +9,8 @@ use crate::coordinator_state::{
 };
 use crate::correction::apply_correction_rules;
 use crate::types::{
-    ChineseScriptPreference, HotkeyMode, OutputLanguagePreference, UserPreferences,
+    ChineseScriptPreference, HotkeyMode, InsertStatus, OutputLanguagePreference,
+    PostDictationKey, ShortcutBinding, UserPreferences,
 };
 
 use super::qa::handle_qa_option_edge;
@@ -48,6 +49,56 @@ const EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV: &str =
 const EMBEDDED_BLE_CONTROL_START_SIGNAL_ENV: &str =
     "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_START_SIGNAL";
 const EMBEDDED_BLE_CONTROL_STOP_SIGNAL_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_STOP_SIGNAL";
+const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
+
+fn should_restore_clipboard_after_dictation(
+    prefs: &UserPreferences,
+    final_retention_applies: bool,
+) -> bool {
+    prefs.restore_clipboard_after_paste && !final_retention_applies
+}
+
+fn should_send_post_dictation_key(
+    enabled: bool,
+    key: PostDictationKey,
+    status: InsertStatus,
+    user_initiated_stop: bool,
+    has_nonempty_final_text: bool,
+    original_target_confirmed: bool,
+    clipboard_retention_satisfied: bool,
+    translation_active: bool,
+) -> Option<ShortcutBinding> {
+    if !enabled
+        || !user_initiated_stop
+        || !has_nonempty_final_text
+        || !original_target_confirmed
+        || !clipboard_retention_satisfied
+        || translation_active
+        || status != InsertStatus::Inserted
+    {
+        return None;
+    }
+
+    Some(match key {
+        PostDictationKey::Enter => ShortcutBinding {
+            primary: "Enter".to_string(),
+            modifiers: Vec::new(),
+        },
+        PostDictationKey::CtrlEnter => ShortcutBinding {
+            primary: "Enter".to_string(),
+            modifiers: vec!["ctrl".to_string()],
+        },
+    })
+}
+
+fn claim_post_dictation_key(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    let mut state = inner.state.lock();
+    if state.session_id != session_id || state.post_dictation_key_claimed {
+        return false;
+    }
+    state.post_dictation_key_claimed = true;
+    true
+}
 
 struct FoundryLanguageHintSelection {
     hint: Option<String>,
@@ -2114,26 +2165,6 @@ async fn run_streaming_polish(
                 Some(e) => (typed_text, Some(format!("typing partially failed: {e}"))),
                 None => (text, None),
             };
-            // 把 final_text 写回剪贴板（默认 on，可关）。一次性路径天然走剪贴板，
-            // 开关默认对齐一次性行为，让 Cmd+V 重复粘贴可用。
-            if inner.prefs.get().streaming_insert_save_clipboard {
-                match arboard::Clipboard::new() {
-                    Ok(mut cb) => match cb.set_text(final_text.clone()) {
-                        Ok(()) => log::info!(
-                            "[coord] streaming_insert: final text written to clipboard ({} chars)",
-                            final_text.chars().count()
-                        ),
-                        Err(e) => {
-                            log::warn!("[coord] streaming_insert: clipboard set_text failed: {e}")
-                        }
-                    },
-                    Err(e) => {
-                        log::warn!("[coord] streaming_insert: clipboard handle init failed: {e}")
-                    }
-                }
-            } else {
-                log::info!("[coord] streaming_insert: clipboard save skipped (pref off)");
-            }
             (final_text, polish_err, true)
         }
         super::StreamingPolishOutcome::UnsupportedFallback => {
@@ -3999,7 +4030,7 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
         store_embedded_audio_stats(inner, stats);
     }
 
-    end_session(inner).await
+    end_session_with_stop_origin(inner, false).await
 }
 
 fn embedded_streaming_chunk_is_asr_input(_chunk: &crate::embedded_audio::StreamingPcmChunk) -> bool {
@@ -4495,7 +4526,14 @@ fn embedded_pcm_rms_and_peak(pcm: &[u8]) -> (f64, u16) {
 }
 
 pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
-    let transition = begin_stop_session_transition(inner);
+    end_session_with_stop_origin(inner, true).await
+}
+
+async fn end_session_with_stop_origin(
+    inner: &Arc<Inner>,
+    user_initiated_stop: bool,
+) -> Result<(), String> {
+    let transition = begin_stop_session_transition(inner, user_initiated_stop);
     finish_end_session_after_stop_transition(inner, transition).await
 }
 
@@ -4509,15 +4547,24 @@ async fn end_embedded_ble_session(
         EmbeddedBleSessionActorCommand::StopCommand,
         Some(session_id),
         detail,
-        |_| begin_stop_session_transition(inner),
+        |_| begin_stop_session_transition(inner, true),
     );
     finish_end_session_after_stop_transition(inner, transition).await
 }
 
-fn begin_stop_session_transition(inner: &Arc<Inner>) -> DictationTransition {
+fn begin_stop_session_transition(
+    inner: &Arc<Inner>,
+    user_initiated: bool,
+) -> DictationTransition {
     let mut state = inner.state.lock();
     let session_id = state.session_id;
-    apply_dictation_event(&mut state, DictationEvent::Stop { session_id })
+    apply_dictation_event(
+        &mut state,
+        DictationEvent::Stop {
+            session_id,
+            user_initiated,
+        },
+    )
 }
 
 async fn finish_end_session_after_stop_transition(
@@ -4532,6 +4579,10 @@ async fn finish_end_session_after_stop_transition(
         _ => {
             return Ok(());
         }
+    };
+    let user_initiated_stop = {
+        let state = inner.state.lock();
+        state.session_id == current_session_id && state.user_initiated_stop
     };
     publish_dictation_transition(
         inner,
@@ -5022,59 +5073,68 @@ async fn finish_end_session_after_stop_transition(
     let focus_target = inner.state.lock().focus_target;
     let focus_ready_for_paste = restore_focus_target_if_possible(focus_target);
     let prefs = inner.prefs.get();
-    let restore_clipboard = prefs.restore_clipboard_after_paste;
+    let retain_plain_dictation = prefs.copy_dictation_to_clipboard
+        && !translation_active
+        && !polished.trim().is_empty();
+    let restore_clipboard =
+        should_restore_clipboard_after_dictation(&prefs, retain_plain_dictation);
+    let allow_clipboard_fallback = translation_active || retain_plain_dictation;
     let allow_non_tsf_insertion_fallback = prefs.allow_non_tsf_insertion_fallback;
     let allow_foreground_insert_fallback =
         std::env::var("LISTENER_TYPE_INSERT_INTO_FOREGROUND_FALLBACK")
             .map(|value| value == "1")
             .unwrap_or(false);
     let paste_shortcut = prefs.paste_shortcut;
-    // 流式路径下，字符已经通过 Unicode keystroke 落到光标处，跳过 inserter.insert。
-    let status = if already_streamed {
+    // 流式键入和非 TSF 输入只能证明事件已发出。自动提交要求 TSF 确认原目标接受文本。
+    let (status, original_target_confirmed) = if already_streamed {
         log::info!(
             "[coord] insertion skipped: {} chars already streamed via unicode_keystroke (polish_error={:?})",
             polished.chars().count(),
             polish_error
         );
-        InsertStatus::Inserted
+        (InsertStatus::Inserted, false)
     } else if wayland_session {
-        log::info!(
-            "[coord] Wayland session detected; skipping synthetic paste and attempting copy-only fallback ({} chars)",
-            polished.chars().count()
-        );
-        let status = inner.inserter.copy_fallback(&polished);
-        match status {
-            InsertStatus::CopiedFallback => {
-                log::info!("[coord] Wayland copy-only fallback succeeded")
-            }
-            InsertStatus::Failed => {
-                log::error!("[coord] Wayland copy-only fallback failed: clipboard write failed")
-            }
-            other => log::warn!(
-                "[coord] Wayland copy-only fallback returned unexpected status: {other:?}"
-            ),
+        if allow_clipboard_fallback {
+            log::info!(
+                "[coord] Wayland session detected; retaining final text without synthetic paste ({} chars)",
+                polished.chars().count()
+            );
+            (inner.inserter.copy_fallback(&polished), false)
+        } else {
+            log::warn!(
+                "[coord] Wayland insertion skipped because final clipboard retention is disabled"
+            );
+            (InsertStatus::Failed, false)
         }
-        status
     } else if focus_ready_for_paste {
         #[cfg(target_os = "windows")]
         {
             let ime_target = capture_ime_submit_target();
-            insert_with_windows_ime_first(
+            let result = insert_with_windows_ime_first(
                 inner,
                 current_session_id,
                 &polished,
                 restore_clipboard,
                 allow_non_tsf_insertion_fallback,
+                allow_clipboard_fallback,
                 paste_shortcut,
                 ime_target,
             )
-            .await
+            .await;
+            (result.status, result.target_confirmed)
         }
         #[cfg(not(target_os = "windows"))]
         {
-            inner
-                .inserter
-                .insert(&polished, restore_clipboard, paste_shortcut)
+            if allow_clipboard_fallback {
+                (
+                    inner
+                        .inserter
+                        .insert(&polished, restore_clipboard, paste_shortcut),
+                    false,
+                )
+            } else {
+                (InsertStatus::Failed, false)
+            }
         }
     } else if allow_foreground_insert_fallback {
         log::warn!(
@@ -5083,34 +5143,131 @@ async fn finish_end_session_after_stop_transition(
         #[cfg(target_os = "windows")]
         {
             let ime_target = capture_ime_submit_target();
-            insert_with_windows_ime_first(
+            let result = insert_with_windows_ime_first(
                 inner,
                 current_session_id,
                 &polished,
                 restore_clipboard,
                 allow_non_tsf_insertion_fallback,
+                allow_clipboard_fallback,
                 paste_shortcut,
                 ime_target,
             )
-            .await
+            .await;
+            (result.status, false)
         }
         #[cfg(not(target_os = "windows"))]
         {
-            inner
-                .inserter
-                .insert(&polished, restore_clipboard, paste_shortcut)
+            if allow_clipboard_fallback {
+                (
+                    inner
+                        .inserter
+                        .insert(&polished, restore_clipboard, paste_shortcut),
+                    false,
+                )
+            } else {
+                (InsertStatus::Failed, false)
+            }
         }
     } else {
-        log::warn!(
-            "[coord] original insertion target is not foreground; copied output without paste"
-        );
-        if allow_non_tsf_insertion_fallback {
-            inner.inserter.copy_fallback(&polished)
+        if allow_clipboard_fallback {
+            log::warn!(
+                "[coord] original insertion target is not foreground; retaining final output without paste"
+            );
+            (inner.inserter.copy_fallback(&polished), false)
         } else {
-            InsertStatus::Failed
+            log::warn!(
+                "[coord] original insertion target is not foreground and final clipboard retention is disabled"
+            );
+            (InsertStatus::Failed, false)
         }
     };
     restore_prepared_windows_ime_session(inner, current_session_id);
+
+    let clipboard_retention_satisfied =
+        if retain_plain_dictation {
+            if inner.inserter.copy_fallback(&polished) == InsertStatus::Failed {
+                log::warn!(
+                    "[coord] final clipboard retention failed session_id={} chars={}",
+                    current_session_id,
+                    polished.chars().count()
+                );
+                false
+            } else {
+                log::info!(
+                    "[coord] final clipboard retention complete session_id={} chars={}",
+                    current_session_id,
+                    polished.chars().count()
+                );
+                true
+            }
+        } else {
+            true
+        };
+
+    let mut post_dictation_key_result = "not_eligible";
+    if let Some(binding) = should_send_post_dictation_key(
+        prefs.send_key_after_dictation,
+        prefs.post_dictation_key,
+        status,
+        user_initiated_stop,
+        !polished.trim().is_empty(),
+        original_target_confirmed,
+        clipboard_retention_satisfied,
+        translation_active,
+    ) {
+        tokio::time::sleep(POST_DICTATION_KEY_DELAY).await;
+        if !restore_focus_target_if_possible(focus_target) {
+            post_dictation_key_result = "original_target_lost";
+            log::warn!(
+                "[coord] post-dictation shortcut skipped session_id={} reason=original_target_lost",
+                current_session_id
+            );
+        } else if claim_post_dictation_key(inner, current_session_id) {
+            match crate::shortcut_dispatch::send_shortcut(&binding) {
+                Ok(()) => {
+                    post_dictation_key_result = "sent";
+                    log::info!(
+                        "[coord] post-dictation shortcut sent session_id={} shortcut={} original_target_confirmed=true",
+                        current_session_id,
+                        binding.display_label()
+                    );
+                }
+                Err(error) => {
+                    post_dictation_key_result = "failed";
+                    log::warn!(
+                        "[coord] post-dictation shortcut failed session_id={} shortcut={}: {error}",
+                        current_session_id,
+                        binding.display_label()
+                    );
+                }
+            }
+        } else {
+            post_dictation_key_result = "already_claimed_or_stale";
+            log::warn!(
+                "[coord] post-dictation shortcut skipped session_id={} reason=already_claimed_or_stale",
+                current_session_id
+            );
+        }
+    }
+    let clipboard_result = if !retain_plain_dictation {
+        "disabled"
+    } else if clipboard_retention_satisfied {
+        "stored"
+    } else {
+        "failed"
+    };
+    log::info!(
+        "[coord] final completion actions session_id={} chars={} insertion_status={:?} target_confirmed={} user_stop={} clipboard={} post_key={}",
+        current_session_id,
+        polished.chars().count(),
+        status,
+        original_target_confirmed,
+        user_initiated_stop,
+        clipboard_result,
+        post_dictation_key_result
+    );
+
     let inserted_chars = polished.chars().count() as u32;
 
     // 累计每条 enabled 词条在最终文本中的命中次数。
@@ -5406,7 +5563,8 @@ fn append_typed_prefix(target: &mut String, delta: &str, typed_chars: usize) -> 
 mod tests {
     use super::{
         append_typed_prefix, begin_embedded_audio_dictation_session_id,
-        cancel_embedded_ble_listener_capture, cancel_session, clear_embedded_ble_cancel_flag,
+        cancel_embedded_ble_listener_capture, cancel_session, claim_post_dictation_key,
+        clear_embedded_ble_cancel_flag,
         current_embedded_audio_partial_preview, default_done_message,
         device_ai_processing_completion_delay, device_processing_final_succeeded,
         dictation_asr_engine_backend_id, dictation_asr_quality_warning,
@@ -5423,6 +5581,7 @@ mod tests {
         provider_preview_change, publish_embedded_ble_asr_final,
         record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
         request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
+        should_restore_clipboard_after_dictation, should_send_post_dictation_key,
         stabilize_embedded_audio_final_supplemental_preview,
         stabilize_embedded_audio_partial_preview, store_embedded_audio_stats,
         streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
@@ -5440,6 +5599,7 @@ mod tests {
     };
     use crate::types::{
         ChineseScriptPreference, CorrectionRule, DictationInputSource, InsertStatus, PolishMode,
+        PostDictationKey, UserPreferences,
     };
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -6684,6 +6844,127 @@ mod tests {
             wayland_done_message(InsertStatus::Failed, false),
             Some("Wayland 未启用自动输入，剪贴板写入失败".to_string())
         );
+    }
+
+    #[test]
+    fn clipboard_retention_takes_precedence_over_restore() {
+        let mut prefs = UserPreferences::default();
+        prefs.restore_clipboard_after_paste = true;
+        prefs.copy_dictation_to_clipboard = true;
+        assert!(!should_restore_clipboard_after_dictation(&prefs, true));
+        assert!(should_restore_clipboard_after_dictation(&prefs, false));
+
+        prefs.copy_dictation_to_clipboard = false;
+        assert!(should_restore_clipboard_after_dictation(&prefs, false));
+    }
+
+    #[test]
+    fn post_dictation_key_requires_a_successful_plain_dictation_insert() {
+        let enter = should_send_post_dictation_key(
+            true,
+            PostDictationKey::Enter,
+            InsertStatus::Inserted,
+            true,
+            true,
+            true,
+            true,
+            false,
+        )
+        .expect("inserted dictation should submit");
+        assert_eq!(enter.primary, "Enter");
+        assert!(enter.modifiers.is_empty());
+
+        let ctrl_enter = should_send_post_dictation_key(
+            true,
+            PostDictationKey::CtrlEnter,
+            InsertStatus::Inserted,
+            true,
+            true,
+            true,
+            true,
+            false,
+        )
+        .expect("confirmed dictation should submit");
+        assert_eq!(ctrl_enter.primary, "Enter");
+        assert_eq!(ctrl_enter.modifiers, ["ctrl"]);
+
+        for status in [
+            InsertStatus::PasteSent,
+            InsertStatus::CopiedFallback,
+            InsertStatus::Failed,
+        ] {
+            assert!(should_send_post_dictation_key(
+                true,
+                PostDictationKey::Enter,
+                status,
+                true,
+                true,
+                true,
+                true,
+                false,
+            )
+            .is_none());
+        }
+        assert!(should_send_post_dictation_key(
+            false,
+            PostDictationKey::Enter,
+            InsertStatus::Inserted,
+            true,
+            true,
+            true,
+            true,
+            false,
+        )
+        .is_none());
+        for denied_context in 0..4 {
+            let (user_stop, nonempty, target_confirmed, clipboard_satisfied) =
+                match denied_context {
+                    0 => (false, true, true, true),
+                    1 => (true, false, true, true),
+                    2 => (true, true, false, true),
+                    _ => (true, true, true, false),
+                };
+            assert!(should_send_post_dictation_key(
+                true,
+                PostDictationKey::Enter,
+                InsertStatus::Inserted,
+                user_stop,
+                nonempty,
+                target_confirmed,
+                clipboard_satisfied,
+                false,
+            )
+            .is_none());
+        }
+        assert!(should_send_post_dictation_key(
+            true,
+            PostDictationKey::Enter,
+            InsertStatus::Inserted,
+            true,
+            true,
+            true,
+            true,
+            true,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn post_dictation_key_claim_is_once_per_session() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Inserting;
+        }
+
+        assert!(claim_post_dictation_key(&coordinator.inner, session_id));
+        assert!(!claim_post_dictation_key(&coordinator.inner, session_id));
+        assert!(!claim_post_dictation_key(
+            &coordinator.inner,
+            new_session_id()
+        ));
     }
 
     #[test]

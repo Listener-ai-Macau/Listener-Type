@@ -739,6 +739,8 @@ pub fn set_settings(
     if !prefs.dictation_input_source_user_overridden {
         prefs.dictation_input_source = DictationInputSource::EmbeddedBle;
     }
+    // Keep the retired streaming-only field synchronized for downgrade compatibility.
+    prefs.streaming_insert_save_clipboard = prefs.copy_dictation_to_clipboard;
     let next_input_source = prefs.dictation_input_source;
     let should_sync_device_firmware = device_firmware_settings_changed(&previous_prefs, &prefs);
     if should_sync_device_firmware {
