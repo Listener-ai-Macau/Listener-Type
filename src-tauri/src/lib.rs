@@ -13,8 +13,8 @@
 //! - commands: Tauri IPC surface
 
 mod asr;
-mod audio_transport_codec;
 mod audio_mute;
+mod audio_transport_codec;
 mod capsule_log;
 mod cli;
 mod combo_hotkey;
@@ -40,13 +40,14 @@ mod polish;
 mod qa_hotkey;
 mod recorder;
 mod selection;
-mod speaker_verification;
 mod shortcut_binding;
 mod shortcut_dispatch;
+mod speaker_verification;
 mod startup_evidence;
 mod timeline;
 mod types;
 mod unicode_keystroke;
+mod wake_phrase;
 mod windows_ime_ipc;
 mod windows_ime_profile;
 mod windows_ime_protocol;
@@ -137,6 +138,9 @@ pub fn run() {
     let first_run_args: Vec<String> = std::env::args().collect();
     if let Some(intent) = cli::parse_cli_intent(&first_run_args) {
         match intent {
+            cli::CliIntent::LocalWakeHelper => {
+                exit_after_headless_cli(asr::local::wake_helper::run_helper());
+            }
             cli::CliIntent::SubmitEmbeddedAudioBleOnce { .. }
             | cli::CliIntent::SubmitEmbeddedAudioBleStream { .. }
             | cli::CliIntent::SendEmbeddedAudioControlStop { .. }
@@ -389,6 +393,31 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             coordinator.bind_app(app_handle);
+            let wake_phrase = coordinator.prefs().get().voice_wake_phrase;
+            std::thread::Builder::new()
+                .name("voice-activation-preload".to_string())
+                .spawn(move || {
+                    if !crate::speaker_verification::is_enrolled() {
+                        return;
+                    }
+                    let started = std::time::Instant::now();
+                    let speaker_prepare =
+                        std::thread::spawn(crate::speaker_verification::prepare);
+                    let wake_result = crate::wake_phrase::prepare(&wake_phrase);
+                    let speaker_result = speaker_prepare
+                        .join()
+                        .unwrap_or_else(|_| Err("声纹预热线程异常退出".to_string()));
+                    match (wake_result, speaker_result) {
+                        (Ok(()), Ok(())) => log::info!(
+                            "[wake-phrase] automatic owner gate prepared elapsed_ms={}",
+                            started.elapsed().as_millis()
+                        ),
+                        (wake, speaker) => log::warn!(
+                            "[wake-phrase] automatic owner gate prepare incomplete wake={wake:?} speaker={speaker:?}"
+                        ),
+                    }
+                })
+                .ok();
             // Spin up hotkey listener; coordinator owns the lifecycle.
             coordinator.start_hotkey_listener();
             coordinator.auto_select_embedded_ble_input_source_in_background();
@@ -1582,6 +1611,9 @@ fn dispatch_cli_intent<R: Runtime>(
         cli::CliIntent::CleanupEmbeddedBlePairing { .. } => {
             log::warn!("[cli] embedded BLE pairing cleanup is headless-only and was ignored by the running GUI instance");
         }
+        cli::CliIntent::LocalWakeHelper => {
+            log::warn!("[cli] local wake helper is headless-only and was ignored by the running GUI instance");
+        }
         cli::CliIntent::FirmwareOta {
             manifest_path,
             firmware_path,
@@ -1736,7 +1768,9 @@ fn run_embedded_ble_headless_cli(intent: cli::CliIntent) -> i32 {
             coordinator.request_shutdown();
             let report_json = serde_json::to_string(&report)
                 .unwrap_or_else(|err| format!("{{\"jsonError\":\"{err}\"}}"));
-            headless_print_line(format!("listener_ota_v1_active_handoff_probe_json={report_json}"));
+            headless_print_line(format!(
+                "listener_ota_v1_active_handoff_probe_json={report_json}"
+            ));
             log::info!("listener_ota_v1_active_handoff_probe_json={report_json}");
             if report.get("status").and_then(|value| value.as_str()) == Some("PASS") {
                 0
@@ -2763,7 +2797,9 @@ mod tests {
             .expect("plain OTA GATT probe CLI arm should follow the active-link probe");
         let probe = &source[start..end];
 
-        assert!(probe.contains("coordinator.auto_select_embedded_ble_input_source_in_background();"));
+        assert!(
+            probe.contains("coordinator.auto_select_embedded_ble_input_source_in_background();")
+        );
         assert!(probe.contains("wait_for_embedded_ble_listener_ready_before_firmware_ota"));
         assert!(probe.contains("request_listener_ota_v1_active_link(None)"));
         assert!(probe.contains("listener_ota_v1_gatt_probe_after_active_link_hint"));

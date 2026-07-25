@@ -161,7 +161,7 @@ fn choose_transcript_text(result_text: &str, utterance_text: &str) -> String {
     if utterance_text.is_empty() {
         return result_text.to_string();
     }
-    if result_text_has_short_terminal_suffix_echo(result_text, utterance_text) {
+    if result_text_has_bounded_terminal_suffix_echo(result_text, utterance_text) {
         return result_text.to_string();
     }
     if has_duplicate_prefix_before_suffix(result_text, utterance_text) {
@@ -189,31 +189,25 @@ fn choose_transcript_text(result_text: &str, utterance_text: &str) -> String {
     }
 }
 
-// Volcengine can report the authoritative cumulative result.text alongside an
-// utterance aggregation that still carries a short echo from an older segment.
-// Keep the completed result when that suffix is demonstrably a repeated tail.
-fn result_text_has_short_terminal_suffix_echo(result_text: &str, utterance_text: &str) -> bool {
+fn result_text_has_bounded_terminal_suffix_echo(result_text: &str, utterance_text: &str) -> bool {
     const MIN_SUFFIX_CHARS: usize = 2;
     const MAX_SUFFIX_CHARS: usize = 6;
 
-    if !result_text
-        .chars()
-        .next_back()
-        .is_some_and(is_sentence_terminal_punctuation)
-    {
-        return false;
-    }
     let Some(suffix) = utterance_text.strip_prefix(result_text) else {
         return false;
     };
     let suffix = suffix.trim();
-    if suffix.chars().any(|ch| !is_cjk_unified_ideograph(ch)) {
-        return false;
-    }
     let suffix_len = suffix.chars().count();
-    if !(MIN_SUFFIX_CHARS..=MAX_SUFFIX_CHARS).contains(&suffix_len) {
+    if !(MIN_SUFFIX_CHARS..=MAX_SUFFIX_CHARS).contains(&suffix_len)
+        || suffix.chars().any(|ch| !is_cjk_unified_ideograph(ch))
+        || !result_text
+            .chars()
+            .next_back()
+            .is_some_and(is_sentence_terminal_punctuation)
+    {
         return false;
     }
+
     compact_transcript_for_duplicate_check(result_text).contains(suffix)
 }
 
@@ -783,6 +777,13 @@ pub(super) fn merge_streaming_candidate(
     let mut incoming_segments = candidate.timed_segments;
     incoming_segments.sort_by_key(|segment| segment.start_ms);
     let old_segment_text = join_timed_segment_text(previous_segments);
+    if candidate.authoritative_cumulative
+        && !previous_text.is_empty()
+        && timed_segments_represent_text(previous_segments, previous_text)
+        && authoritative_segments_cover_previous(previous_segments, &incoming_segments)
+    {
+        return (candidate_text, incoming_segments);
+    }
     if let Some((merged_text, segments)) = merge_provider_segmentation_revision(
         previous_text,
         previous_segments,
@@ -855,6 +856,54 @@ pub(super) fn merge_streaming_candidate(
         merge_streaming_transcript(previous_text, &append_text),
         merged_segments,
     )
+}
+
+fn authoritative_segments_cover_previous(
+    previous_segments: &[TranscriptSegment],
+    incoming_segments: &[TranscriptSegment],
+) -> bool {
+    const TIMELINE_TOLERANCE_MS: i64 = 500;
+
+    let Some(previous_start) = previous_segments
+        .iter()
+        .map(|segment| segment.start_ms)
+        .min()
+    else {
+        return false;
+    };
+    let Some(previous_end) = previous_segments
+        .iter()
+        .filter_map(|segment| segment.end_ms)
+        .max()
+    else {
+        return false;
+    };
+    let Some(incoming_start) = incoming_segments
+        .iter()
+        .map(|segment| segment.start_ms)
+        .min()
+    else {
+        return false;
+    };
+    let Some(incoming_end) = incoming_segments
+        .iter()
+        .filter_map(|segment| segment.end_ms)
+        .max()
+    else {
+        return false;
+    };
+
+    incoming_start <= previous_start + TIMELINE_TOLERANCE_MS
+        && incoming_end + TIMELINE_TOLERANCE_MS >= previous_end
+}
+
+fn timed_segments_represent_text(segments: &[TranscriptSegment], text: &str) -> bool {
+    let segment_text = segments
+        .iter()
+        .map(|segment| segment.text.trim())
+        .collect::<String>();
+    compact_transcript_for_duplicate_check(&segment_text)
+        == compact_transcript_for_duplicate_check(text)
 }
 
 fn merge_provider_segmentation_revision(
@@ -1675,8 +1724,109 @@ mod tests {
         let (merged, segments) =
             merge_streaming_candidate(previous_text, &previous_segments, candidate);
 
-        assert_eq!(merged, "first corrected sentence. final corrected sentence.");
+        assert_eq!(
+            merged,
+            "first corrected sentence. final corrected sentence."
+        );
         assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn merge_streaming_candidate_replaces_growing_authoritative_segments_atomically() {
+        let wake = transcript_candidate_from_result(&json!({
+            "text": "开始录音。",
+            "utterances": [{
+                "text": "开始录音。",
+                "start_time": 200,
+                "end_time": 900,
+                "words": [
+                    { "text": "开始", "start_time": 200, "end_time": 280 },
+                    { "text": "录音", "start_time": 660, "end_time": 740 }
+                ]
+            }]
+        }));
+        let (text, segments) = merge_streaming_candidate("", &[], wake);
+
+        let first_body_partial = transcript_candidate_from_result(&json!({
+            "text": "开始录音。你",
+            "utterances": [
+                {
+                    "text": "开始录音。",
+                    "definite": true,
+                    "additions": { "source": "two_pass" },
+                    "words": [
+                        { "text": "开", "start_time": 120, "end_time": 320 },
+                        { "text": "音", "start_time": 1220, "end_time": 1380 }
+                    ]
+                },
+                {
+                    "text": "你",
+                    "words": [
+                        { "text": "你", "start_time": 2300, "end_time": 2360 }
+                    ]
+                }
+            ]
+        }));
+        let (text, segments) = merge_streaming_candidate(&text, &segments, first_body_partial);
+        assert_eq!(text, "开始录音。你");
+        assert_eq!(segments.len(), 2);
+        let single_body_segments = segments.clone();
+
+        // The provider can move the provisional segment's start backward by
+        // more than the normal identity tolerance as one character grows.
+        let grown_body_partial = transcript_candidate_from_result(&json!({
+            "text": "开始录音。你帮我看",
+            "utterances": [
+                {
+                    "text": "开始录音。",
+                    "definite": true,
+                    "additions": { "source": "two_pass" },
+                    "words": [
+                        { "text": "开", "start_time": 120, "end_time": 320 },
+                        { "text": "音", "start_time": 1220, "end_time": 1380 }
+                    ]
+                },
+                {
+                    "text": "你帮我看",
+                    "words": [
+                        { "text": "你", "start_time": 1940, "end_time": 2020 },
+                        { "text": "看", "start_time": 3000, "end_time": 3100 }
+                    ]
+                }
+            ]
+        }));
+        assert!(grown_body_partial.authoritative_cumulative);
+        assert!(timed_segments_represent_text(&segments, &text));
+        assert!(authoritative_segments_cover_previous(
+            &segments,
+            &grown_body_partial.timed_segments
+        ));
+        let (text, segments) = merge_streaming_candidate(&text, &segments, grown_body_partial);
+
+        assert_eq!(text, "开始录音。你帮我看");
+        assert_eq!(segments.len(), 2);
+
+        let repeated_body = TranscriptCandidate {
+            authoritative_cumulative: true,
+            text: "开始录音。你你".into(),
+            timed_segments: vec![
+                TranscriptSegment {
+                    start_ms: 120,
+                    end_ms: Some(1380),
+                    text: "开始录音。".into(),
+                },
+                TranscriptSegment {
+                    start_ms: 1940,
+                    end_ms: Some(3300),
+                    text: "你你".into(),
+                },
+            ],
+        };
+        let (repeated_text, repeated_segments) =
+            merge_streaming_candidate("开始录音。你", &single_body_segments, repeated_body);
+
+        assert_eq!(repeated_text, "开始录音。你你");
+        assert_eq!(repeated_segments.len(), 2);
     }
 
     #[test]

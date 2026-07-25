@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str = denzic_observability_v1_core::DIAG_LOG_GATT_SERVICE_UUID;
-pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str = denzic_observability_v1_core::DIAG_LOG_GATT_CONTROL_UUID;
+pub const DIAGNOSTIC_SERVICE_UUID_TEXT: &str =
+    denzic_observability_v1_core::DIAG_LOG_GATT_SERVICE_UUID;
+pub const DIAGNOSTIC_CONTROL_UUID_TEXT: &str =
+    denzic_observability_v1_core::DIAG_LOG_GATT_CONTROL_UUID;
 pub const DIAGNOSTIC_DATA_UUID_TEXT: &str = denzic_observability_v1_core::DIAG_LOG_GATT_DATA_UUID;
 pub const DIAGNOSTIC_COUNT_UUID_TEXT: &str = denzic_observability_v1_core::DIAG_LOG_GATT_COUNT_UUID;
 pub const DEVICE_SETTINGS_REVISION_UUID_TEXT: &str =
@@ -548,9 +550,8 @@ mod windows_ble {
         GUID::from_u128(denzic_ota_core::GATT_STATUS_UUID_U128);
     const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
     const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
-    const DEVICE_SETTINGS_REVISION_UUID: GUID = GUID::from_u128(
-        denzic_device_control_v1_core::SETTINGS_REVISION_CHARACTERISTIC_UUID_U128,
-    );
+    const DEVICE_SETTINGS_REVISION_UUID: GUID =
+        GUID::from_u128(denzic_device_control_v1_core::SETTINGS_REVISION_CHARACTERISTIC_UUID_U128);
 
     const DIAGNOSTIC_SERVICE_UUID: GUID =
         GUID::from_u128(denzic_observability_v1_core::DIAG_LOG_GATT_SERVICE_UUID_U128);
@@ -1933,7 +1934,9 @@ mod windows_ble {
         owner: &'static str,
     ) -> Result<BleOtaPreparationGuard, String> {
         try_acquire_ble_ota_preparation_mutex(owner).ok_or_else(|| {
-            format!("BLE OTA preparation is already active in another Listener Type process ({owner}).")
+            format!(
+                "BLE OTA preparation is already active in another Listener Type process ({owner})."
+            )
         })
     }
 
@@ -5204,6 +5207,15 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         )
     }
 
+    pub fn send_recording_control_activate(timeout: Duration) -> Result<(), String> {
+        send_recording_control_command(
+            b"VREC:ACTIVATE\n",
+            timeout,
+            "automatic recording activation",
+            ActiveControlTransientFallback::ReturnError,
+        )
+    }
+
     pub fn send_recording_control_stop(timeout: Duration) -> Result<(), String> {
         send_recording_stop_control_command(timeout)
     }
@@ -7727,10 +7739,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             usb_powered: None,
             detail: Some(detail),
         };
-        let _preparation_guard = match acquire_ble_ota_preparation_mutex("listener_ota_v1_preflight") {
-            Ok(guard) => guard,
-            Err(err) => return unavailable(err),
-        };
+        let _preparation_guard =
+            match acquire_ble_ota_preparation_mutex("listener_ota_v1_preflight") {
+                Ok(guard) => guard,
+                Err(err) => return unavailable(err),
+            };
         let _fresh_guard = match BleFreshGattGuard::enter("Listener OTA v1 handoff preflight") {
             Ok(guard) => guard,
             Err(err) => return unavailable(err),
@@ -8138,9 +8151,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             .map_err(|err| format!("native Windows HID service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
             .map_err(|err| format!("native Windows HID service query failed: {err}"))
-            .and_then(|op| {
-                wait_async_operation(op, timeout, "native Windows HID service query")
-            })?;
+            .and_then(|op| wait_async_operation(op, timeout, "native Windows HID service query"))?;
         let count = devices
             .Size()
             .map_err(|err| format!("native Windows HID service collection size failed: {err}"))?;
@@ -8168,9 +8179,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 )
             }) {
                 Ok(target) => return Ok(target),
-                Err(err) => last_error = Some(format!(
-                    "native Windows HID service endpoint address={address:012X} failed: {err}"
-                )),
+                Err(err) => {
+                    last_error = Some(format!(
+                        "native Windows HID service endpoint address={address:012X} failed: {err}"
+                    ))
+                }
             }
         }
 
@@ -9943,16 +9956,17 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         addresses: &[u64],
         timeout: Duration,
     ) -> Result<OpenListenerOtaV1Target, String> {
-        let selector = GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V1_SERVICE_UUID)
-            .map_err(|err| format!("native Windows HID OTA service selector failed: {err}"))?;
+        let selector =
+            GattDeviceService::GetDeviceSelectorFromUuid(LISTENER_OTA_V1_SERVICE_UUID)
+                .map_err(|err| format!("native Windows HID OTA service selector failed: {err}"))?;
         let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
             .map_err(|err| format!("native Windows HID OTA service query failed: {err}"))
             .and_then(|op| {
                 wait_async_operation(op, timeout, "native Windows HID OTA service query")
             })?;
-        let count = devices
-            .Size()
-            .map_err(|err| format!("native Windows HID OTA service collection size failed: {err}"))?;
+        let count = devices.Size().map_err(|err| {
+            format!("native Windows HID OTA service collection size failed: {err}")
+        })?;
         let mut last_error = None;
 
         for index in 0..count {
@@ -9976,9 +9990,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             // the uncached attempt has failed.
             match open_listener_ota_v1_target_for_service_with_cache_policy(&id, true) {
                 Ok(target) => return Ok(target),
-                Err(err) => last_error = Some(format!(
+                Err(err) => {
+                    last_error = Some(format!(
                     "native Windows HID OTA service endpoint address={address:012X} failed: {err}"
-                )),
+                ))
+                }
             }
         }
 
@@ -11048,7 +11064,10 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT,
         )
         .and_then(|target| {
-            require_audio_control_for_notify_target(target, "post-confirm native Windows HID address")
+            require_audio_control_for_notify_target(
+                target,
+                "post-confirm native Windows HID address",
+            )
         })
     }
 
@@ -15794,6 +15813,11 @@ pub fn send_recording_control_cancel(timeout: Duration) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_activate(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_control_activate(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_control_stop(timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_control_stop(timeout)
 }
@@ -16325,6 +16349,11 @@ pub fn send_recording_control_toggle(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_cancel(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording cancel is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_activate(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE recording activation is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

@@ -1,6 +1,6 @@
 [package]
 name = "listener-type"
-version = "1.0.2"
+version = "1.0.3"
 description = "Listener Type — local voice input that types where your cursor is"
 authors = ["Listener Type"]
 edition = "2021"
@@ -38,6 +38,7 @@ env_logger = "0.11"
 simplelog = "0.12"
 parking_lot = "0.12"
 once_cell = "1"
+pinyin = "0.10"
 serialport = "4.7"
 espflash = { version = "=3.2.0", default-features = false, features = ["serialport"] }
 sha2 = "0.10"
@@ -52,6 +53,7 @@ denzic-audio-v1-core = { path = "../third_party/denzic-platform/audio/host/rust"
 denzic-device-control-v1-core = { path = "../third_party/denzic-platform/device_control/host/rust" }
 denzic-observability-v1-core = { path = "../third_party/denzic-platform/observability/host/rust" }
 denzic-speaker-verification-v1-core = { path = "../third_party/denzic-platform/speaker_verification/host/rust" }
+denzic-voice-activation-v1-core = { path = "../third_party/denzic-platform/voice_activation/host/rust" }
 denzic-ble-windows = { path = "../third_party/denzic-platform/ble_windows/host/rust" }
 denzic-ble-pairing = { path = "../third_party/denzic-platform/ble_pairing/host/rust" }
 denzic-host-audio-v1-core = { path = "../third_party/denzic-platform/host_audio/host/rust" }

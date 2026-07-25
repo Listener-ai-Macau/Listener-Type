@@ -668,7 +668,7 @@ assert.ok(
   'firmware OTA preflight IPC must keep an outer timeout around Windows BLE snapshot probing',
 );
 assert.ok(
-  commandsSource.includes('tokio::time::timeout(\n        FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,\n        snapshot_task,'),
+  /tokio::time::timeout\(\s*FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,\s*snapshot_task,\s*\)/.test(commandsSource),
   'firmware OTA preflight IPC timeout must wrap the blocking BLE snapshot task',
 );
 assert.ok(
@@ -689,7 +689,7 @@ assert.ok(
   'Listener OTA v1 UI transfer confirmation must use the fast reachable-service confirmation path',
 );
 assert.ok(
-  commandsSource.includes('tauri::async_runtime::spawn_blocking(|| {\n            crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot('),
+  /tauri::async_runtime::spawn_blocking\(\|\| \{\s*crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot\(/.test(commandsSource),
   'Listener OTA v1 confirmation must probe only the OTA service instead of waiting for optional DIS metadata',
 );
 assert.ok(
@@ -760,7 +760,9 @@ assert.ok(
   'Listener OTA v1 snapshot must document that DIS metadata is best-effort and not a hard blocker',
 );
 assert.ok(
-  embeddedBleSource.includes('for cache_mode in [BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]'),
+  embeddedBleSource.includes('denzic_ble_pairing::ota_device_control_cache_policy(')
+    && embeddedBleSource.includes('denzic_ble_pairing::GattCachePolicy::UncachedFirst')
+    && embeddedBleSource.includes('&[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]'),
   'Listener OTA v1 discovery must prefer uncached characteristics so a firmware GATT schema update cannot reuse stale handles',
 );
 assert.ok(

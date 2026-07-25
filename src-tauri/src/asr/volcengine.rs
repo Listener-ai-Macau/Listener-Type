@@ -826,7 +826,8 @@ impl VolcengineStreamingASR {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(VolcengineASRError::NoFinalResult),
             Err(_) => {
-                if let Some((sent_audio_ms, transcript_end_ms)) = self.final_partial_coverage_gap() {
+                if let Some((sent_audio_ms, transcript_end_ms)) = self.final_partial_coverage_gap()
+                {
                     log::error!(
                         "[asr] final transcript coverage incomplete after full provider timeout: sent_audio_ms={sent_audio_ms} transcript_end_ms={transcript_end_ms}"
                     );
@@ -1738,7 +1739,10 @@ mod tests {
             .await_final_result_with_timeout(std::time::Duration::from_millis(10))
             .await;
 
-        assert!(matches!(result, Err(VolcengineASRError::FinalResultTimeout)));
+        assert!(matches!(
+            result,
+            Err(VolcengineASRError::FinalResultTimeout)
+        ));
     }
 
     #[tokio::test]
@@ -1813,7 +1817,10 @@ mod tests {
             .await_final_result_with_timeout(std::time::Duration::from_millis(10))
             .await;
 
-        assert!(matches!(result, Err(VolcengineASRError::FinalResultTimeout)));
+        assert!(matches!(
+            result,
+            Err(VolcengineASRError::FinalResultTimeout)
+        ));
     }
 
     #[derive(Default)]
@@ -1905,7 +1912,10 @@ mod tests {
             // harness reaches its explicit stop. Keep reading the final result
             // instead of misclassifying that close as an endpoint failure.
             let finish_result = asr.send_last_frame().await;
-            match asr.await_final_result_with_timeout(Duration::from_secs(15)).await {
+            match asr
+                .await_final_result_with_timeout(Duration::from_secs(15))
+                .await
+            {
                 Ok(final_result) => Ok(final_result),
                 Err(final_error) => match finish_result {
                     Ok(()) => Err(final_error),
@@ -1994,12 +2004,8 @@ mod tests {
         ];
         let mut results = Vec::with_capacity(variants.len());
         for options in variants {
-            results.push(run_live_provider_cadence_variant(
-                credentials.clone(),
-                &pcm,
-                options,
-            )
-            .await);
+            results
+                .push(run_live_provider_cadence_variant(credentials.clone(), &pcm, options).await);
         }
 
         let summary_path = PathBuf::from(summary_path);

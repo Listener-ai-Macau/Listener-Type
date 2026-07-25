@@ -110,6 +110,7 @@ const EMBEDDED_BLE_PAIRING_CONFIRMATION_POLL: Duration = Duration::from_secs(3);
 // explicit local pairing evidence and the background notify restore.
 const EMBEDDED_BLE_PASSIVE_LOCAL_REATTACH_POLL: Duration = Duration::from_millis(250);
 const EMBEDDED_BLE_PAIRING_GATT_REBUILD_TIMEOUT: Duration = Duration::from_secs(20);
+const EMBEDDED_BLE_POWER_CYCLE_AUDIO_RECOVERY_TARGET: Duration = Duration::from_secs(3);
 const DEVICE_KEY_BLE_PENDING_ACTION_TTL: Duration = Duration::from_secs(15);
 const EXTRA_ASR_HOTWORDS_ENV: &str = "LISTENER_TYPE_EXTRA_ASR_HOTWORDS";
 const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
@@ -119,9 +120,10 @@ const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
 use dictation::dictation_error_code;
 use dictation::{
     begin_session, cancel_session, current_embedded_audio_partial_preview, end_session,
-    handle_pressed, handle_pressed_edge, handle_released_edge,
+    handle_pressed, handle_pressed_edge, handle_released_edge, hidden_automatic_candidate_active,
     request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
-    request_stop_during_starting, submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
+    request_hidden_automatic_candidate_promotion, request_stop_during_starting,
+    submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
     submit_embedded_audio_ble_stream_background, submit_embedded_audio_file,
     submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,
     submit_embedded_audio_streaming_notifications, HOTKEY_DEBOUNCE,
@@ -240,6 +242,9 @@ struct Inner {
     /// 嵌入式 BLE 流式 ASR 的最近一次 partial preview。只用于胶囊视觉反馈；
     /// 光标仍只在 final text 完成后写入。
     embedded_audio_partial_preview: Mutex<Option<String>>,
+    /// 自动唤醒会话的激活词。只用于从该会话的预览和最终文本中移除激活词；
+    /// 手动录音没有这个标记，因此保留相同文字。
+    embedded_audio_wake_phrase_filter: Mutex<Option<(SessionId, String)>>,
     /// 最近一次用于录音胶囊的嵌入式 BLE PCM 电平。ASR partial preview 到达时沿用它，
     /// 避免文字刷新把音量动画刷成 0。
     embedded_audio_last_capsule_level: Mutex<f32>,
@@ -288,6 +293,9 @@ struct Inner {
     /// 观察时，用户稍后手动配回本机只会让一次性 GATT probe 成功，常驻 notify
     /// listener 却会永远停在取消态。
     embedded_ble_passive_local_reattach_active: AtomicBool,
+    /// 设备断电后重新出现的本机 HID 时刻。notify ready 消费该值并输出冷启动音频
+    /// 恢复指标；它不参与连接决策。
+    embedded_ble_power_cycle_hid_observed_at: Mutex<Option<Instant>>,
     /// Type 控制的 Windows 配对恢复流程正在运行。覆盖 UnpairAsync / PairAsync /
     /// fresh GATT link-check 的完整窗口，避免第二个后台 cleanup 在第一轮刚配好时
     /// 又删掉 Windows link key，造成系统 UI 在已连接/未连接之间反复跳。
@@ -596,6 +604,7 @@ impl Coordinator {
                     embedded_audio_stats: Mutex::new(None),
                     embedded_audio_final_result: Mutex::new(None),
                     embedded_audio_partial_preview: Mutex::new(None),
+                    embedded_audio_wake_phrase_filter: Mutex::new(None),
                     embedded_audio_last_capsule_level: Mutex::new(0.0),
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
@@ -611,6 +620,7 @@ impl Coordinator {
                     embedded_ble_pairing_hold_until: Mutex::new(None),
                     embedded_ble_pairing_hold_generation: AtomicU64::new(0),
                     embedded_ble_passive_local_reattach_active: AtomicBool::new(false),
+                    embedded_ble_power_cycle_hid_observed_at: Mutex::new(None),
                     embedded_ble_pairing_recovery_active: AtomicBool::new(false),
                     embedded_ble_type_pairasync_startup_guard_until: Mutex::new(None),
                     embedded_ble_wake_recovery: Mutex::new(
@@ -677,6 +687,7 @@ impl Coordinator {
                 embedded_audio_stats: Mutex::new(None),
                 embedded_audio_final_result: Mutex::new(None),
                 embedded_audio_partial_preview: Mutex::new(None),
+                embedded_audio_wake_phrase_filter: Mutex::new(None),
                 embedded_audio_last_capsule_level: Mutex::new(0.0),
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),
@@ -692,6 +703,7 @@ impl Coordinator {
                 embedded_ble_pairing_hold_until: Mutex::new(None),
                 embedded_ble_pairing_hold_generation: AtomicU64::new(0),
                 embedded_ble_passive_local_reattach_active: AtomicBool::new(false),
+                embedded_ble_power_cycle_hid_observed_at: Mutex::new(None),
                 embedded_ble_pairing_recovery_active: AtomicBool::new(false),
                 embedded_ble_type_pairasync_startup_guard_until: Mutex::new(None),
                 embedded_ble_wake_recovery: Mutex::new(EmbeddedBleWakeRecoverySnapshot::default()),
@@ -794,7 +806,8 @@ impl Coordinator {
             return;
         }
 
-        let Some(monitor) = target_monitor.or_else(|| crate::capsule_target_monitor(app, &window)) else {
+        let Some(monitor) = target_monitor.or_else(|| crate::capsule_target_monitor(app, &window))
+        else {
             return;
         };
         let position = monitor.position();
@@ -857,7 +870,29 @@ impl Coordinator {
             let inner = Arc::clone(&self.inner);
             tauri::async_runtime::spawn(async move {
                 let prefs = inner.prefs.get();
-                if !foundry::is_foundry_local_whisper(&prefs.active_asr_provider) {
+                let active_foundry = foundry::is_foundry_local_whisper(&prefs.active_asr_provider);
+                let wake_confirmation = crate::speaker_verification::is_enrolled();
+                if !active_foundry && !wake_confirmation {
+                    return;
+                }
+                if wake_confirmation {
+                    let helper_result = tauri::async_runtime::spawn_blocking(
+                        crate::asr::local::wake_helper::preload,
+                    )
+                    .await;
+                    match helper_result {
+                        Ok(Ok(())) => log::info!(
+                            "[wake-phrase] isolated local confirmation helper ready reason={reason}"
+                        ),
+                        Ok(Err(error)) => log::warn!(
+                            "[wake-phrase] isolated local confirmation helper unavailable reason={reason}: {error}"
+                        ),
+                        Err(error) => log::warn!(
+                            "[wake-phrase] isolated local confirmation helper task failed reason={reason}: {error}"
+                        ),
+                    }
+                }
+                if !active_foundry {
                     return;
                 }
                 let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
@@ -868,9 +903,10 @@ impl Coordinator {
                 let runtime_source = prefs.foundry_local_runtime_source.clone();
                 let runtime = Arc::clone(&inner.foundry_local_runtime);
                 log::info!(
-                    "[foundry-asr] background preload started reason={reason} model={model_alias} source={runtime_source}"
+                    "[foundry-asr] background preload started reason={reason} model={model_alias} source={runtime_source} cached_only=false"
                 );
-                match runtime.ensure_loaded(&model_alias, &runtime_source).await {
+                let result = runtime.ensure_loaded(&model_alias, &runtime_source).await;
+                match result {
                     Ok(model_id) => log::info!(
                         "[foundry-asr] background preload ready reason={reason} model={model_alias} model_id={model_id}"
                     ),
@@ -2902,6 +2938,10 @@ async fn handle_device_dictation_action(
         }
 
         let control_decision = device_key_ble_recording_control_decision(&inner);
+        let promote_hidden_candidate = should_promote_hidden_automatic_candidate(
+            control_decision,
+            hidden_automatic_candidate_active(),
+        );
         if let DeviceKeyBleRecordingControlDecision::IgnoreStarting {
             session_id,
             elapsed_ms,
@@ -2932,7 +2972,9 @@ async fn handle_device_dictation_action(
         }
 
         let control_session = control_decision.control_session();
-        let waiting_message = if control_session.is_some() {
+        let waiting_message = if promote_hidden_candidate {
+            "正在接管当前录音..."
+        } else if control_session.is_some() {
             "正在发送设备录音停止控制..."
         } else {
             "正在启动 Listener 录音..."
@@ -2974,7 +3016,11 @@ async fn handle_device_dictation_action(
             }
         );
         let result = async_runtime::spawn_blocking(move || {
-            if send_stop_control {
+            if promote_hidden_candidate {
+                crate::embedded_ble::send_recording_control_activate(
+                    EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+                )
+            } else if send_stop_control {
                 crate::embedded_ble::send_recording_control_stop(
                     EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
                 )
@@ -2989,13 +3035,37 @@ async fn handle_device_dictation_action(
         .and_then(|value| value);
         match result {
             Ok(()) => {
+                let promotion_requested = if promote_hidden_candidate {
+                    request_hidden_automatic_candidate_promotion()
+                } else {
+                    false
+                };
                 clear_embedded_ble_listener_last_error(&inner);
                 clear_pending_device_key_ble_start(&inner, key, gesture, "control_sent");
                 crate::timeline::mark(
                     "backend.device_key",
                     "ble_recording_control_sent",
-                    format!("key={} gesture={}", key.label(), gesture.label()),
+                    format!(
+                        "key={} gesture={} hidden_candidate_promotion={promotion_requested}",
+                        key.label(),
+                        gesture.label()
+                    ),
                 );
+                if promote_hidden_candidate {
+                    if promotion_requested {
+                        log::info!(
+                            "[device-key] {} {} promoted the active hidden automatic candidate",
+                            key.label(),
+                            gesture.label()
+                        );
+                    } else {
+                        log::warn!(
+                            "[device-key] {} {} activation arrived after the hidden automatic candidate had already resolved",
+                            key.label(),
+                            gesture.label()
+                        );
+                    }
+                }
                 if matches!(control_session, Some((_, SessionPhase::Listening))) {
                     return;
                 }
@@ -3100,6 +3170,13 @@ fn device_key_ble_recording_control_decision(
         },
         _ => DeviceKeyBleRecordingControlDecision::Start,
     }
+}
+
+fn should_promote_hidden_automatic_candidate(
+    decision: DeviceKeyBleRecordingControlDecision,
+    hidden_candidate_active: bool,
+) -> bool {
+    hidden_candidate_active && matches!(decision, DeviceKeyBleRecordingControlDecision::Start)
 }
 
 fn pending_device_key_ble_action_age(action: PendingDeviceKeyBleAction, now: Instant) -> Duration {
@@ -4275,7 +4352,7 @@ fn mark_embedded_ble_pairing_link_reachable(inner: &Arc<Inner>, reason: &'static
     wake.status = EmbeddedBleWakeRecoveryStatus::Reconnecting;
     wake.notify_subscription_state = EmbeddedBleNotifySubscriptionState::Opening;
     wake.recent_disconnect_reason = Some(format!(
-        "{reason}: Listener GATT is reachable again; restoring background notify"
+        "{reason}: local recovery evidence accepted; restoring background notify"
     ));
     wake.user_guidance = "Listener 蓝牙已经重新连上，Type 正在恢复音频 notify。".to_string();
 }
@@ -4327,20 +4404,6 @@ async fn embedded_ble_pairing_recovery_link_reachable(
         reason,
         EMBEDDED_BLE_PAIRING_GATT_REBUILD_TIMEOUT,
         None,
-    )
-    .await
-}
-
-async fn embedded_ble_pairing_recovery_link_reachable_for_device(
-    inner: &Arc<Inner>,
-    reason: &'static str,
-    address: u64,
-) -> bool {
-    embedded_ble_pairing_recovery_link_reachable_with_timeout(
-        inner,
-        reason,
-        EMBEDDED_BLE_PAIRING_GATT_REBUILD_TIMEOUT,
-        Some(address),
     )
     .await
 }
@@ -4532,35 +4595,25 @@ fn start_embedded_ble_passive_local_reattach_watch(
                     pairing.as_ref().map_or(0, |value| value.matched_devices),
                     pairing.as_ref().map_or(0, |value| value.already_paired_devices)
                 );
-                let link_reachable = match fresh_native_hid_address {
-                    Some(address) => {
-                        let preferred_reachable = embedded_ble_pairing_recovery_link_reachable_for_device(
-                            &inner,
-                            "passive local Windows reattach fresh GATT link check",
-                            address,
-                        )
-                        .await;
-                        if preferred_reachable {
-                            true
-                        } else {
-                            log::info!(
-                                "[embedded-ble] passive local Windows reattach fresh HID address was not a GATT target; retrying the current Listener selector"
-                            );
-                            embedded_ble_pairing_recovery_link_reachable(
-                                &inner,
-                                "passive local Windows reattach selector GATT link fallback",
-                            )
-                            .await
-                        }
-                    }
-                    None => {
-                        embedded_ble_pairing_recovery_link_reachable(
-                            &inner,
-                            "passive local Windows reattach fresh GATT link check",
-                        )
-                        .await
-                    }
-                };
+                if let Some(address) = fresh_native_hid_address {
+                    *inner.embedded_ble_power_cycle_hid_observed_at.lock() = Some(Instant::now());
+                    log::info!(
+                        "[embedded-ble] passive local Windows reattach observed new local HID address={address:012X}; reopening background notify directly without the status-characteristic probe"
+                    );
+                    arm_embedded_ble_type_pairasync_startup_guard(&inner);
+                    resume_embedded_ble_listener_after_pairing_recovery(
+                        &inner,
+                        "passive local Windows reattach new HID evidence",
+                        EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
+                        true,
+                    );
+                    break;
+                }
+                let link_reachable = embedded_ble_pairing_recovery_link_reachable(
+                    &inner,
+                    "passive local Windows reattach current-pairing GATT link check",
+                )
+                .await;
                 if link_reachable {
                     // Windows may still rebuild the HID/GATT service graph after the
                     // fresh local pairing is reachable. Skip one startup stale-HID
@@ -4596,8 +4649,7 @@ fn embedded_ble_passive_local_reattach_evidence_ready(
     native_hid_addresses: &[u64],
     baseline_native_hid_addresses: Option<&[u64]>,
 ) -> bool {
-    let paired_devices_visible =
-        pairing.is_some_and(|value| value.already_paired_devices > 0);
+    let paired_devices_visible = pairing.is_some_and(|value| value.already_paired_devices > 0);
     let fresh_native_hid_after_baseline = baseline_native_hid_addresses.is_some_and(|baseline| {
         native_hid_addresses
             .iter()
@@ -7231,6 +7283,16 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             .notify_waiters();
         clear_embedded_ble_listener_last_error(inner);
         let recovered = record_embedded_ble_notify_ready(inner);
+        if let Some(hid_observed_at) = inner.embedded_ble_power_cycle_hid_observed_at.lock().take()
+        {
+            let elapsed = hid_observed_at.elapsed();
+            let elapsed_ms = elapsed.as_millis();
+            let target_ms = EMBEDDED_BLE_POWER_CYCLE_AUDIO_RECOVERY_TARGET.as_millis();
+            log::info!(
+                "[embedded-ble] power-cycle audio notify recovery elapsed_ms={elapsed_ms} target_ms={target_ms} met={}",
+                elapsed <= EMBEDDED_BLE_POWER_CYCLE_AUDIO_RECOVERY_TARGET
+            );
+        }
         record_embedded_ble_session_actor_command(
             inner,
             EmbeddedBleSessionActorCommand::NotifyReady,
@@ -9550,6 +9612,25 @@ mod tests {
     }
 
     #[test]
+    fn physical_start_promotes_only_an_active_hidden_automatic_candidate() {
+        assert!(should_promote_hidden_automatic_candidate(
+            DeviceKeyBleRecordingControlDecision::Start,
+            true,
+        ));
+        assert!(!should_promote_hidden_automatic_candidate(
+            DeviceKeyBleRecordingControlDecision::Start,
+            false,
+        ));
+        assert!(!should_promote_hidden_automatic_candidate(
+            DeviceKeyBleRecordingControlDecision::Stop {
+                session_id: new_session_id(),
+                phase: SessionPhase::Listening,
+            },
+            true,
+        ));
+    }
+
+    #[test]
     fn device_key_ble_recording_control_ignores_starting_retry() {
         let coordinator = Coordinator::new();
         let session_id = new_session_id();
@@ -11629,13 +11710,13 @@ mod tests {
             .expect("passive monitor must require current local pairing plus HID evidence");
         let gatt = body
             .find("embedded_ble_pairing_recovery_link_reachable")
-            .expect("passive monitor must perform a fresh bounded GATT check after pairing");
+            .expect("an unchanged current pairing must retain a bounded GATT check");
         let resume = body
             .find("resume_embedded_ble_listener_after_pairing_recovery")
-            .expect("a proven local link must restore the persistent notify listener");
+            .expect("new local HID evidence must restore the persistent notify listener");
         assert!(
-            native_hid < pairing_query && pairing_query < pairing_ready && pairing_ready < gatt && gatt < resume,
-            "passive reattach must observe HID and Windows pairing evidence before GATT, then restart notify"
+            native_hid < pairing_query && pairing_query < pairing_ready && pairing_ready < resume && resume < gatt,
+            "passive reattach must use new local HID evidence to restart notify before the slower unchanged-pairing GATT fallback"
         );
         assert!(
             body.contains("baseline_native_hid_addresses")
@@ -11645,14 +11726,16 @@ mod tests {
         let fresh_hid_address = body
             .find("fresh_native_hid_address")
             .expect("passive monitor must retain the exact new HID address");
-        let direct_gatt = body
-            .find("embedded_ble_pairing_recovery_link_reachable_for_device")
-            .expect(
-                "a fresh HID identity must select direct GATT instead of the stale selector cache",
-            );
+        let direct_notify = body
+            .find("reopening background notify directly without the status-characteristic probe")
+            .expect("a fresh HID identity must bypass the long status-characteristic probe");
         assert!(
-            fresh_hid_address < direct_gatt,
-            "passive reattach must use the newly observed HID address as its first GATT target"
+            fresh_hid_address < direct_notify && direct_notify < resume,
+            "a newly observed local HID address must reopen notify immediately"
+        );
+        assert!(
+            body.contains("embedded_ble_power_cycle_hid_observed_at"),
+            "fresh local HID evidence must arm the power-cycle audio recovery metric"
         );
         assert!(
             body.contains("arm_embedded_ble_type_pairasync_startup_guard")
@@ -12398,6 +12481,25 @@ mod tests {
             !body.contains("EMBEDDED_BLE_PRE_PAIR_LINK_CHECK_TIMEOUT"),
             "EC11 Type double-click recovery must clear the local stale pair first instead of using a pre-pair GATT shortcut"
         );
+    }
+
+    #[test]
+    fn embedded_ble_notify_ready_reports_power_cycle_audio_recovery_target() {
+        let source = include_str!("coordinator.rs");
+        let start = source
+            .find("fn mark_embedded_ble_listener_ready")
+            .expect("notify-ready helper should exist");
+        let end = source[start..]
+            .find("fn install_embedded_ble_listener_cancel")
+            .map(|offset| start + offset)
+            .expect("notify-ready helper boundary should exist");
+        let body = &source[start..end];
+
+        assert!(body.contains("embedded_ble_power_cycle_hid_observed_at"));
+        assert!(body.contains("EMBEDDED_BLE_POWER_CYCLE_AUDIO_RECOVERY_TARGET"));
+        assert!(source.contains(
+            "const EMBEDDED_BLE_POWER_CYCLE_AUDIO_RECOVERY_TARGET: Duration = Duration::from_secs(3);"
+        ));
     }
 
     #[test]
@@ -13269,18 +13371,13 @@ mod tests {
         };
 
         assert!(throttle.should_emit_frontend(preview, start));
-        assert!(throttle.should_emit_frontend(
-            level_tick.clone(),
-            start + Duration::from_millis(10),
-        ));
-        assert!(!throttle.should_emit_frontend(
-            level_tick.clone(),
-            start + Duration::from_millis(40),
-        ));
-        assert!(throttle.should_emit_frontend(
-            level_tick,
-            start + Duration::from_millis(60),
-        ));
+        assert!(
+            throttle.should_emit_frontend(level_tick.clone(), start + Duration::from_millis(10),)
+        );
+        assert!(
+            !throttle.should_emit_frontend(level_tick.clone(), start + Duration::from_millis(40),)
+        );
+        assert!(throttle.should_emit_frontend(level_tick, start + Duration::from_millis(60),));
     }
 
     #[test]

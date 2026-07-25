@@ -171,6 +171,36 @@ mod imp {
             Ok(result.text)
         }
 
+        pub async fn ensure_cached_loaded(&self, alias: &str) -> Result<String> {
+            let _lifecycle = self.lifecycle.lock().await;
+            Ok(self.ensure_cached_loaded_locked(alias).await?.model_id)
+        }
+
+        pub async fn transcribe_cached_audio_file(
+            &self,
+            alias: &str,
+            language_hint: Option<&str>,
+            audio_path: &Path,
+            audio_timeout: std::time::Duration,
+        ) -> Result<String> {
+            let _lifecycle = self.lifecycle.lock().await;
+            let model = self.ensure_cached_loaded_locked(alias).await?.model;
+            let mut client = model.create_audio_client();
+            if let Some(language_hint) = normalized_language_hint(language_hint) {
+                client = client.language(language_hint);
+            }
+            let result = tokio::time::timeout(audio_timeout, client.transcribe(audio_path))
+                .await
+                .with_context(|| {
+                    format!(
+                        "transcribe cached audio with Foundry model {alias} timed out after {} seconds",
+                        audio_timeout.as_secs()
+                    )
+                })?
+                .with_context(|| format!("transcribe cached audio with Foundry model {alias}"))?;
+            Ok(result.text)
+        }
+
         pub async fn release_now(&self) -> Result<()> {
             let _lifecycle = self.lifecycle.lock().await;
             self.release_now_locked().await
@@ -370,6 +400,48 @@ mod imp {
                 alias,
                 format!("{model_label} ready"),
             ));
+            Ok(loaded)
+        }
+
+        async fn ensure_cached_loaded_locked(&self, alias: &str) -> Result<LoadedModel> {
+            if let Some(loaded) = self.cached_loaded_model(alias) {
+                return Ok(loaded);
+            }
+            if !foundry_native::runtime_ready() {
+                anyhow::bail!("Foundry Local runtime is not already installed");
+            }
+
+            let manager = self.manager()?;
+            let model = manager
+                .catalog()
+                .get_model(alias)
+                .await
+                .with_context(|| format!("get cached Foundry model {alias}"))?;
+            if !model
+                .is_cached()
+                .await
+                .with_context(|| format!("check cached Foundry model {alias}"))?
+            {
+                anyhow::bail!("Foundry Local model {alias} is not already cached");
+            }
+
+            if let Some(previous) = self.loaded_for_different_alias(alias) {
+                Self::unload_model(&previous).await?;
+                self.clear_loaded_if_model_id(&previous.model_id);
+            }
+            model
+                .load()
+                .await
+                .with_context(|| format!("load cached Foundry model {alias}"))?;
+            let loaded = LoadedModel {
+                alias: alias.to_string(),
+                model_id: model.id().to_string(),
+                model,
+            };
+            *self.state.lock() = RuntimeState {
+                manager: Some(manager),
+                loaded: Some(loaded.clone()),
+            };
             Ok(loaded)
         }
 
@@ -619,6 +691,10 @@ impl FoundryLocalRuntime {
         anyhow::bail!("Foundry Local Whisper is only available on Windows: {alias}");
     }
 
+    pub async fn ensure_cached_loaded(&self, alias: &str) -> anyhow::Result<String> {
+        anyhow::bail!("Foundry Local Whisper is only available on Windows: {alias}");
+    }
+
     pub async fn ensure_loaded_with_progress<F>(
         &self,
         alias: &str,
@@ -643,6 +719,16 @@ impl FoundryLocalRuntime {
         &self,
         alias: &str,
         _runtime_source: &str,
+        _language_hint: Option<&str>,
+        _audio_path: &std::path::Path,
+        _audio_timeout: std::time::Duration,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!("Foundry Local Whisper is only available on Windows: {alias}");
+    }
+
+    pub async fn transcribe_cached_audio_file(
+        &self,
+        alias: &str,
         _language_hint: Option<&str>,
         _audio_path: &std::path::Path,
         _audio_timeout: std::time::Duration,

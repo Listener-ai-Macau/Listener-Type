@@ -1234,11 +1234,17 @@ pub struct UserPreferences {
     pub restore_clipboard_after_paste: bool,
     /// 普通听写结束后把最终文本保留在剪贴板。默认开启；开启时覆盖剪贴板恢复设置。
     pub copy_dictation_to_clipboard: bool,
+    /// 从听写预览和最终文本中移除独立的中文犹豫语气词。默认关闭。
+    #[serde(default)]
+    pub remove_filler_words: bool,
     /// 普通听写成功插入后是否自动发送提交按键。默认关闭，避免升级后意外提交。
     pub send_key_after_dictation: bool,
     /// 自动发送使用的按键。仅在 send_key_after_dictation 开启时生效。
     #[serde(default)]
     pub post_dictation_key: PostDictationKey,
+    /// 自动录音的本地唤醒词。
+    #[serde(default = "default_voice_wake_phrase")]
+    pub voice_wake_phrase: String,
     /// Windows / Linux 的模拟粘贴键。macOS 走 AX 直写不受影响。详见 issue #360：
     /// kitty 等 Linux 终端不接受 Ctrl+V，只能配 Ctrl+Shift+V。默认 CtrlV 与历史
     /// 行为一致，不破坏既有用户。
@@ -1473,6 +1479,10 @@ fn default_active_asr_provider() -> String {
     "volcengine".into()
 }
 
+fn default_voice_wake_phrase() -> String {
+    "开始录音".into()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct UserPreferencesWire {
@@ -1505,9 +1515,13 @@ struct UserPreferencesWire {
     restore_clipboard_after_paste: bool,
     #[serde(default)]
     copy_dictation_to_clipboard: Option<bool>,
+    #[serde(default)]
+    remove_filler_words: bool,
     send_key_after_dictation: bool,
     #[serde(default)]
     post_dictation_key: PostDictationKey,
+    #[serde(default = "default_voice_wake_phrase")]
+    voice_wake_phrase: String,
     #[serde(default)]
     paste_shortcut: PasteShortcut,
     allow_non_tsf_insertion_fallback: bool,
@@ -1625,8 +1639,10 @@ impl Default for UserPreferencesWire {
             llm_thinking_enabled: prefs.llm_thinking_enabled,
             restore_clipboard_after_paste: prefs.restore_clipboard_after_paste,
             copy_dictation_to_clipboard: Some(prefs.copy_dictation_to_clipboard),
+            remove_filler_words: prefs.remove_filler_words,
             send_key_after_dictation: prefs.send_key_after_dictation,
             post_dictation_key: prefs.post_dictation_key,
+            voice_wake_phrase: prefs.voice_wake_phrase,
             paste_shortcut: prefs.paste_shortcut,
             allow_non_tsf_insertion_fallback: prefs.allow_non_tsf_insertion_fallback,
             working_languages: prefs.working_languages,
@@ -1810,8 +1826,14 @@ impl<'de> Deserialize<'de> for UserPreferences {
             copy_dictation_to_clipboard: wire
                 .copy_dictation_to_clipboard
                 .unwrap_or(wire.streaming_insert_save_clipboard),
+            remove_filler_words: wire.remove_filler_words,
             send_key_after_dictation: wire.send_key_after_dictation,
             post_dictation_key: wire.post_dictation_key,
+            voice_wake_phrase: if wire.voice_wake_phrase.trim().is_empty() {
+                default_voice_wake_phrase()
+            } else {
+                wire.voice_wake_phrase
+            },
             paste_shortcut: wire.paste_shortcut,
             allow_non_tsf_insertion_fallback: wire.allow_non_tsf_insertion_fallback,
             working_languages: wire.working_languages,
@@ -2241,8 +2263,10 @@ impl Default for UserPreferences {
             llm_thinking_enabled: false,
             restore_clipboard_after_paste: true,
             copy_dictation_to_clipboard: true,
+            remove_filler_words: false,
             send_key_after_dictation: false,
             post_dictation_key: PostDictationKey::default(),
+            voice_wake_phrase: default_voice_wake_phrase(),
             paste_shortcut: PasteShortcut::default(),
             allow_non_tsf_insertion_fallback: true,
             working_languages: default_working_languages(),
@@ -3022,12 +3046,14 @@ mod tests {
     fn post_dictation_actions_keep_upgrade_safe_defaults() {
         let prefs = UserPreferences::default();
         assert!(prefs.copy_dictation_to_clipboard);
+        assert!(!prefs.remove_filler_words);
         assert!(!prefs.send_key_after_dictation);
         assert_eq!(prefs.post_dictation_key, PostDictationKey::Enter);
 
         let from_legacy: UserPreferences =
             serde_json::from_str(r#"{"restoreClipboardAfterPaste":true}"#).unwrap();
         assert!(from_legacy.copy_dictation_to_clipboard);
+        assert!(!from_legacy.remove_filler_words);
         assert!(!from_legacy.send_key_after_dictation);
         assert_eq!(from_legacy.post_dictation_key, PostDictationKey::Enter);
 
@@ -3041,6 +3067,7 @@ mod tests {
         let prefs: UserPreferences = serde_json::from_str(
             r#"{
                 "copyDictationToClipboard": false,
+                "removeFillerWords": true,
                 "sendKeyAfterDictation": true,
                 "postDictationKey": "ctrlEnter"
             }"#,
@@ -3048,6 +3075,7 @@ mod tests {
         .unwrap();
 
         assert!(!prefs.copy_dictation_to_clipboard);
+        assert!(prefs.remove_filler_words);
         assert!(prefs.send_key_after_dictation);
         assert_eq!(prefs.post_dictation_key, PostDictationKey::CtrlEnter);
     }

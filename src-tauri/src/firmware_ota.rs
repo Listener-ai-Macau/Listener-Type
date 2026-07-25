@@ -817,18 +817,9 @@ mod tests {
 
     #[test]
     fn listener_ota_v1_reachable_snapshot_requires_live_protocol_service() {
-        let reachable = ota_snapshot(
-            true,
-            None,
-            None,
-            vec![LISTENER_OTA_V1_FIRMWARE_CAPABILITY],
-        );
-        let disconnected = ota_snapshot(
-            false,
-            None,
-            None,
-            vec![LISTENER_OTA_V1_FIRMWARE_CAPABILITY],
-        );
+        let reachable = ota_snapshot(true, None, None, vec![LISTENER_OTA_V1_FIRMWARE_CAPABILITY]);
+        let disconnected =
+            ota_snapshot(false, None, None, vec![LISTENER_OTA_V1_FIRMWARE_CAPABILITY]);
         let wrong_service = ota_snapshot(true, None, None, vec!["other_protocol"]);
 
         assert!(listener_ota_v1_snapshot_is_reachable(&reachable));

@@ -203,7 +203,7 @@ if (!advertisementAddressSection.includes("runtime_bluetooth_target_address()"))
 }
 
 const candidateAllowedStart = source.indexOf("fn ble_candidate_allowed");
-const candidateAllowedEnd = source.indexOf("pub(super) fn parse_bluetooth_address_hex", candidateAllowedStart);
+const candidateAllowedEnd = source.indexOf("fn read_characteristic_bytes", candidateAllowedStart);
 if (candidateAllowedStart < 0 || candidateAllowedEnd < 0) {
   throw new Error("Could not locate BLE candidate filter helper");
 }

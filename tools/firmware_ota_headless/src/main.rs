@@ -2,6 +2,7 @@
 
 mod embedded_ble {
     use serde::Serialize;
+    use std::time::Duration;
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -63,6 +64,16 @@ mod embedded_ble {
                 "Standalone headless validation cannot access the Windows BLE adapter.".to_string(),
             ),
         }
+    }
+
+    pub fn listener_ota_v1_service_reachable_snapshot(
+        _timeout: Duration,
+    ) -> FirmwareOtaDeviceSnapshot {
+        listener_ota_v1_device_snapshot()
+    }
+
+    pub fn listener_ota_v1_gatt_probe_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
+        listener_ota_v1_device_snapshot()
     }
 }
 
@@ -315,7 +326,7 @@ mod tests {
         .expect("args");
 
         assert_eq!(args.desktop_version, repository_desktop_version().unwrap());
-        assert_eq!(args.desktop_version, "1.0.2");
+        assert_eq!(args.desktop_version, "1.0.3");
     }
 
     #[test]

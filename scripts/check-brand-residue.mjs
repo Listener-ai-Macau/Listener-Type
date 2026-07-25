@@ -16,7 +16,7 @@ const blocked = [
   /openless\.app/,
   /\.openless/,
 ];
-const ignoredDirs = new Set(['.git', '.omx', '.task', 'node_modules', 'target']);
+const ignoredDirs = new Set(['.artifacts', '.cache', '.git', '.omx', '.task', 'node_modules', 'target']);
 const ignoredPrefixes = [
   'ref/',
   'src-tauri/target/',

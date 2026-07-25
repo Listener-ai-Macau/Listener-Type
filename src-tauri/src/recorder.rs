@@ -15,9 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
-use denzic_host_audio_v1_core::capture::{
-    self, CaptureError, CaptureOptions, CaptureSession,
-};
+use denzic_host_audio_v1_core::capture::{self, CaptureError, CaptureOptions, CaptureSession};
 use parking_lot::Mutex;
 use serde::Serialize;
 use thiserror::Error;

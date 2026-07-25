@@ -11,7 +11,9 @@ pub mod foundry_provider;
 pub mod foundry_runtime;
 mod local_provider;
 pub mod models;
+pub mod paraformer;
 pub mod test_run;
+pub mod wake_helper;
 
 pub use cache::LocalAsrCache;
 #[allow(unused_imports)]

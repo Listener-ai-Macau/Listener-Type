@@ -155,6 +155,31 @@ impl crate::recorder::AudioConsumer for FoundryLocalWhisperAsr {
     }
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) async fn transcribe_cached_pcm(
+    runtime: Arc<FoundryLocalRuntime>,
+    model_alias: &str,
+    language_hint: Option<&str>,
+    pcm: &[u8],
+    audio_timeout: std::time::Duration,
+) -> Result<RawTranscript> {
+    if pcm.is_empty() {
+        return Ok(RawTranscript {
+            text: String::new(),
+            duration_ms: 0,
+        });
+    }
+    let wav_file = TempWavFile::create(pcm)?;
+    let text = runtime
+        .transcribe_cached_audio_file(model_alias, language_hint, wav_file.path(), audio_timeout)
+        .await
+        .with_context(|| format!("transcribe cached PCM with Foundry Local model {model_alias}"))?;
+    Ok(RawTranscript {
+        text: trim_transcript_text(&text),
+        duration_ms: pcm_duration_ms(pcm),
+    })
+}
+
 fn pcm_duration_ms(pcm: &[u8]) -> u64 {
     (pcm.len() as u64 / 2) * 1000 / 16_000
 }
@@ -177,13 +202,13 @@ fn pcm_to_wav_with_foundry_context_padding(pcm: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(target_os = "windows")]
-struct TempWavFile {
+pub(crate) struct TempWavFile {
     path: PathBuf,
 }
 
 #[cfg(target_os = "windows")]
 impl TempWavFile {
-    fn create(pcm: &[u8]) -> Result<Self> {
+    pub(crate) fn create(pcm: &[u8]) -> Result<Self> {
         let dir = foundry_temp_dir();
         fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
         let path = dir.join(format!("foundry-whisper-{}.wav", Uuid::new_v4()));
@@ -208,7 +233,7 @@ impl TempWavFile {
         Ok(Self { path })
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 }
@@ -379,5 +404,62 @@ mod tests {
         provider.cancel();
 
         assert!(runtime.cancel_prepare_requested_for_tests());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    #[ignore = "requires cached Foundry Local Whisper and consented local WAV fixtures"]
+    async fn cached_local_wake_confirmation_replays_positive_and_negative_fixtures() {
+        let positive_path =
+            std::env::var("LISTENER_WAKE_PHRASE_WAV").expect("positive fixture path");
+        let negative_paths =
+            std::env::var("LISTENER_NON_WAKE_PHRASE_WAVS").expect("negative fixture paths");
+        let phrase =
+            std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
+        let runtime = std::sync::Arc::new(super::FoundryLocalRuntime::new());
+
+        let positive_wav = std::fs::read(positive_path).expect("read positive fixture");
+        let positive_pcm =
+            denzic_audio_v1_core::read_wav_pcm16le(&positive_wav).expect("decode positive fixture");
+        let positive = super::transcribe_cached_pcm(
+            std::sync::Arc::clone(&runtime),
+            crate::asr::local::foundry::DEFAULT_MODEL_ALIAS,
+            Some("zh"),
+            &positive_pcm,
+            std::time::Duration::from_secs(8),
+        )
+        .await
+        .expect("transcribe positive fixture");
+        assert!(
+            crate::wake_phrase::local_transcript_matches_phrase(&positive.text, &phrase),
+            "positive transcript did not start with configured phrase: {:?}",
+            positive.text
+        );
+
+        let mut negative_count = 0usize;
+        for path in negative_paths.split(';').filter(|path| !path.is_empty()) {
+            let wav = std::fs::read(path).expect("read negative fixture");
+            let pcm =
+                denzic_audio_v1_core::read_wav_pcm16le(&wav).expect("decode negative fixture");
+            let transcript = super::transcribe_cached_pcm(
+                std::sync::Arc::clone(&runtime),
+                crate::asr::local::foundry::DEFAULT_MODEL_ALIAS,
+                Some("zh"),
+                &pcm,
+                std::time::Duration::from_secs(8),
+            )
+            .await
+            .expect("transcribe negative fixture");
+            assert!(
+                !crate::wake_phrase::local_transcript_matches_phrase(&transcript.text, &phrase),
+                "negative fixture false-triggered: {path}"
+            );
+            negative_count += 1;
+        }
+        assert!(negative_count > 0);
+        runtime
+            .release_now()
+            .await
+            .expect("release cached Foundry model");
     }
 }

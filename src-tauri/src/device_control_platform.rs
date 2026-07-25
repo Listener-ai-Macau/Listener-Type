@@ -111,9 +111,7 @@ impl BleDeviceSettingsTransaction {
     pub(crate) fn begin(timeout: Duration) -> Result<Self, String> {
         let status = crate::embedded_ble::read_embedded_audio_status(timeout).map_err(|err| {
             let category = classify_ble_error_category(&err);
-            format!(
-                "Listener BLE settings control unavailable category={category:?}: {err}"
-            )
+            format!("Listener BLE settings control unavailable category={category:?}: {err}")
         })?;
         if !status.connected {
             return Err(format!(
@@ -208,11 +206,7 @@ impl BleDeviceSettingsTransaction {
         Ok(())
     }
 
-    pub(crate) fn invoke_command<F>(
-        &mut self,
-        id: &str,
-        operation: F,
-    ) -> Result<(), String>
+    pub(crate) fn invoke_command<F>(&mut self, id: &str, operation: F) -> Result<(), String>
     where
         F: FnOnce() -> Result<(), String>,
     {
@@ -347,7 +341,10 @@ impl BleDeviceSettingsTransaction {
     }
 
     fn elapsed_ms(&self) -> u32 {
-        self.started_at.elapsed().as_millis().min(u128::from(u32::MAX)) as u32
+        self.started_at
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u32::MAX)) as u32
     }
 }
 

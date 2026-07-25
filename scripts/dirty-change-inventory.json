@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-10",
-  "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.2 preproduction burn-down is still in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
+  "updated_at": "2026-07-25",
+  "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.3 release consolidation is in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
   "entries": [
     {
       "id": "repo_hygiene_and_review_traceability",
@@ -16,8 +16,9 @@
       "patterns": [
         "package.json",
         "scripts/release-check.mjs",
-        "scripts/check-repo-hygiene.mjs",
-        "scripts/check-dirty-change-inventory.mjs",
+      "scripts/check-repo-hygiene.mjs",
+      "scripts/check-brand-residue.mjs",
+      "scripts/check-dirty-change-inventory.mjs",
         "scripts/check-preproduction-operator-note-triage.mjs",
         "scripts/check-regression-guard-commits.mjs",
         "scripts/dirty-change-inventory.json",
@@ -39,10 +40,13 @@
         "scripts/listener-preproduction-scenarios.json",
         "scripts/windows-listener-type-lifecycle-e2e.py",
         "scripts/windows-package-msvc.ps1",
-        "scripts/windows-package-msvc.test.mjs",
-        "scripts/windows-startup-lifecycle-contract.test.mjs",
-        "scripts/windows-ui-config.test.mjs"
-      ]
+      "scripts/windows-package-msvc.test.mjs",
+      "scripts/windows-startup-lifecycle-contract.test.mjs",
+      "scripts/windows-ui-config.test.mjs",
+      "tools/firmware_ota_headless/Cargo.lock",
+      "tools/firmware_ota_headless/Cargo.toml",
+      "tools/firmware_ota_headless/src/main.rs"
+    ]
     },
     {
       "id": "type_performance_baselines_and_startup_takeover",
@@ -195,6 +199,54 @@
         "tools/verify_audio_ble_product_matrix.py",
         "tools/verify_ble_audio_backpressure_static.ps1",
         "tools/verify_ble_audio_transport_model.py"
+      ]
+    },
+    {
+      "id": "listener_1_0_3_type_voice_automation_and_platform",
+      "repo": "type",
+      "item": "1.0.3 local wake phrase, owner voiceprint, post-dictation automation, streaming ASR, platform pin, and release version",
+      "state": "machine_validated_pending_release_commit",
+      "evidence": [
+        "cargo test --lib: 877 passed, 16 ignored, 0 failed",
+        "npm test PASS",
+        "npm run build PASS",
+        ".cache/validation/power-cycle-audio-recovery-20260725/machine-summary.json"
+      ],
+      "patterns": [
+        "package-lock.json",
+        "src-tauri/Cargo.lock",
+        "src-tauri/Cargo.toml",
+        "src-tauri/tauri.conf.json",
+        "src-tauri/src/asr/local/*.rs",
+        "src-tauri/src/device_control_platform.rs",
+        "src-tauri/src/firmware_ota.rs",
+        "src-tauri/src/recorder.rs",
+        "src-tauri/src/speaker_verification.rs",
+        "src-tauri/src/wake_phrase.rs",
+        "src/lib/firmwareOta.test.ts",
+        "src/styles/global.css",
+        "third_party/denzic-platform"
+      ]
+    },
+    {
+      "id": "listener_1_0_3_firmware_voice_automation",
+      "repo": "firmware",
+      "item": "1.0.3 hidden voice candidate lifecycle, session origin, automatic stop, protocol, and release version",
+      "state": "pending_release_validation",
+      "evidence": [
+        "Current Type/Firmware physical automatic-stop acceptance is retained in the product registry",
+        "Firmware tools/build.ps1 required before release commit"
+      ],
+      "patterns": [
+        "CMakeLists.txt",
+        "VERSION",
+        "components/voice_recording_control/voice_recording_control.c",
+        "ports/esp32/audio_capture/audio_capture_esp32.c",
+        "ports/esp32/ble_audio_stream/include/ble_audio_stream.h",
+        "protocols/listener_proto/include/listener_audio_proto.h",
+        "tools/package_factory_firmware.ps1",
+        "tools/package_ota_firmware.ps1",
+        "tools/verify_voice_recording_control_fsm.py"
       ]
     }
   ]

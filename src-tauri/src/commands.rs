@@ -117,21 +117,26 @@ pub fn get_settings(coord: CoordinatorState<'_>) -> UserPreferences {
 }
 
 #[tauri::command]
-pub fn get_voiceprint_status() -> crate::speaker_verification::VoiceprintStatus {
+pub fn get_voiceprint_status(
+    _coord: CoordinatorState<'_>,
+) -> crate::speaker_verification::VoiceprintStatus {
     crate::speaker_verification::status()
 }
 
 #[tauri::command]
 pub async fn start_voiceprint_enrollment(
+    coord: CoordinatorState<'_>,
 ) -> Result<crate::speaker_verification::VoiceprintStatus, String> {
-    tauri::async_runtime::spawn_blocking(crate::speaker_verification::start_enrollment)
-        .await
-        .map_err(|err| format!("声纹登记任务失败: {err}"))?
+    let wake_phrase = coord.prefs().get().voice_wake_phrase;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::speaker_verification::start_enrollment(&wake_phrase)
+    })
+    .await
+    .map_err(|err| format!("声纹登记任务失败: {err}"))?
 }
 
 #[tauri::command]
-pub async fn delete_voiceprint(
-) -> Result<crate::speaker_verification::VoiceprintStatus, String> {
+pub async fn delete_voiceprint() -> Result<crate::speaker_verification::VoiceprintStatus, String> {
     tauri::async_runtime::spawn_blocking(crate::speaker_verification::delete_template)
         .await
         .map_err(|err| format!("删除声纹任务失败: {err}"))?
@@ -714,9 +719,9 @@ fn sync_device_firmware_preferences(
 ) -> Result<(), String> {
     let ble_name_changed = previous.device_ble_name != next.device_ble_name;
     let packets = device_setting_packets_for_changes(previous, next);
-    match crate::device_control_platform::BleDeviceSettingsTransaction::begin(
-        Duration::from_secs(2),
-    ) {
+    match crate::device_control_platform::BleDeviceSettingsTransaction::begin(Duration::from_secs(
+        2,
+    )) {
         Ok(mut transaction) => {
             for packet in &packets {
                 transaction.write_setting(&packet.id, &packet.command, Duration::from_secs(2))?;
@@ -731,7 +736,9 @@ fn sync_device_firmware_preferences(
         Err(err) => {
             // Older firmware and an active USB-only setup retain the existing
             // settings path; a BLE transaction never silently degrades after it starts.
-            log::info!("[device-control] BLE settings transaction unavailable; preserving fallback: {err}");
+            log::info!(
+                "[device-control] BLE settings transaction unavailable; preserving fallback: {err}"
+            );
         }
     }
     for packet in packets {
@@ -4002,7 +4009,11 @@ fn device_settings_update_commands(
     }) {
         assignments.push(device_setting_assignment(
             "voice_auto_start",
-            if request.voice_auto_start_enabled { 1 } else { 0 },
+            if request.voice_auto_start_enabled {
+                1
+            } else {
+                0
+            },
             compact_set_supported,
         ));
     }
@@ -4011,7 +4022,11 @@ fn device_settings_update_commands(
     }) {
         assignments.push(device_setting_assignment(
             "voice_auto_stop",
-            if request.voice_auto_stop_enabled { 1 } else { 0 },
+            if request.voice_auto_stop_enabled {
+                1
+            } else {
+                0
+            },
             compact_set_supported,
         ));
     }
@@ -11480,6 +11495,7 @@ mod tests {
             session_id: Some(7),
             explicit_start_received: true,
             start_inferred_from_audio: false,
+            start_origin: None,
             terminal_received: true,
             end_reason: Some(SessionEndReason::Error(SessionErrorCode::QueueFull)),
             stop_origin: None,

@@ -52,10 +52,15 @@ mod platform {
     const RUNTIME_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.1/sherpa-onnx-v1.13.1-win-x64-shared-MD-Release-no-tts.tar.bz2";
     const KEYRING_SERVICE: &str = "com.listener.type.voiceprint";
     const KEYRING_ACCOUNT: &str = "owner-template-v1";
+    const KEYRING_SUPPLEMENTAL_ACCOUNT_PREFIX: &str = "owner-template-v2-";
+    const MAX_SUPPLEMENTAL_TEMPLATES: usize = 3;
     const SAMPLE_RATE: i32 = 16_000;
+    const VERIFICATION_MIN_SPEECH_MS: usize = 1_000;
     const ENROLLMENT_SECONDS: u64 = 7;
-    const ENROLLMENT_SEGMENTS: usize = 3;
-    const ENROLLMENT_MIN_PAIR_SCORE: f32 = 0.45;
+    const ENROLLMENT_MIN_SECONDS: usize = 3;
+    const ENROLLMENT_FRAME_MS: usize = 100;
+    const ENROLLMENT_MIN_ACTIVE_FRAMES: usize = 18;
+    const TEMPLATE_WINDOW_MS: usize = 1_600;
     const VERIFICATION_THRESHOLD: f32 = DEFAULT_SCORE_MILLI as f32 / 1000.0;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,7 +111,7 @@ mod platform {
 
     #[derive(Debug, Clone)]
     struct SpeakerTemplate {
-        embedding: Vec<f32>,
+        embeddings: Vec<Vec<f32>>,
     }
 
     #[repr(C)]
@@ -236,13 +241,7 @@ mod platform {
         }
 
         fn embedding(&self, pcm: &[u8]) -> Result<Vec<f32>, String> {
-            let samples = pcm
-                .chunks_exact(2)
-                .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
-                .collect::<Vec<_>>();
-            if samples.len() < SAMPLE_RATE as usize {
-                return Err("voiceprint audio is shorter than one second".to_string());
-            }
+            let samples = prepare_embedding_samples(pcm)?;
             let sample_count =
                 i32::try_from(samples.len()).map_err(|_| "voiceprint audio is too long")?;
             unsafe {
@@ -270,6 +269,20 @@ mod platform {
         }
     }
 
+    fn prepare_embedding_samples(pcm: &[u8]) -> Result<Vec<f32>, String> {
+        let samples = pcm
+            .chunks_exact(2)
+            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
+            .collect::<Vec<_>>();
+        let minimum_speech_samples = SAMPLE_RATE as usize * VERIFICATION_MIN_SPEECH_MS / 1000;
+        if samples.len() < minimum_speech_samples {
+            return Err(format!(
+                "voiceprint audio is shorter than {VERIFICATION_MIN_SPEECH_MS} ms"
+            ));
+        }
+        Ok(samples)
+    }
+
     fn normalize(values: &mut [f32]) -> Result<(), String> {
         let norm = values.iter().map(|value| value * value).sum::<f32>().sqrt();
         if !norm.is_finite() || norm <= f32::EPSILON {
@@ -286,6 +299,163 @@ mod platform {
             return Err("voiceprint dimensions do not match".to_string());
         }
         Ok(left.iter().zip(right).map(|(a, b)| a * b).sum())
+    }
+
+    fn frame_rms(pcm: &[u8], frame_bytes: usize) -> Vec<f32> {
+        pcm.chunks(frame_bytes)
+            .map(|frame| {
+                let mut sum = 0.0f64;
+                let mut count = 0usize;
+                for sample in frame.chunks_exact(2) {
+                    let value = i16::from_le_bytes([sample[0], sample[1]]) as f64;
+                    sum += value * value;
+                    count += 1;
+                }
+                if count == 0 {
+                    0.0
+                } else {
+                    (sum / count as f64).sqrt() as f32
+                }
+            })
+            .collect()
+    }
+
+    fn active_speech_bounds(
+        pcm: &[u8],
+        frame_bytes: usize,
+        min_peak_rms: f32,
+    ) -> Result<(usize, usize, usize, f32, f32, f32), String> {
+        let frame_rms = frame_rms(pcm, frame_bytes);
+        if frame_rms.is_empty() {
+            return Err("voiceprint audio is empty".to_string());
+        }
+        let peak_rms = frame_rms.iter().copied().fold(0.0f32, f32::max);
+        if peak_rms < min_peak_rms {
+            return Err("voiceprint audio contains no clear speech".to_string());
+        }
+        let mut sorted_rms = frame_rms.clone();
+        sorted_rms.sort_by(f32::total_cmp);
+        let reference_index = (sorted_rms.len() * 85 / 100).min(sorted_rms.len() - 1);
+        let reference_rms = sorted_rms[reference_index];
+        let active_threshold = (reference_rms * 0.25).max(16.0);
+        let active = frame_rms
+            .iter()
+            .enumerate()
+            .filter_map(|(index, rms)| (*rms >= active_threshold).then_some(index))
+            .collect::<Vec<_>>();
+        if active.is_empty() {
+            return Err("voiceprint audio contains no active speech".to_string());
+        }
+        Ok((
+            active[0],
+            active[active.len() - 1],
+            active.len(),
+            peak_rms,
+            reference_rms,
+            active_threshold,
+        ))
+    }
+
+    fn enrollment_speech_window(pcm: &[u8]) -> Result<&[u8], String> {
+        let min_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_MIN_SECONDS;
+        if pcm.len() < min_bytes {
+            return Err("声纹录制过短，请用自然语速连续说三遍唤醒词。".to_string());
+        }
+
+        let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1000;
+        let (first_active, last_active, active_frames, peak_rms, reference_rms, active_threshold) =
+            active_speech_bounds(pcm, frame_bytes, 60.0)
+                .map_err(|_| "没有检测到清晰人声，请靠近设备并连续说三遍唤醒词。")?;
+        log::info!(
+            "[speaker-verification] enrollment audio quality frames={} active_frames={} peak_rms={peak_rms:.1} reference_rms={reference_rms:.1} threshold_rms={active_threshold:.1}",
+            pcm.len().div_ceil(frame_bytes),
+            active_frames
+        );
+        if active_frames < ENROLLMENT_MIN_ACTIVE_FRAMES {
+            return Err("有效人声太短，请用自然语速完整说三遍唤醒词。".to_string());
+        }
+
+        let first = first_active.saturating_sub(2);
+        let last = (last_active + 3).min(pcm.len().div_ceil(frame_bytes));
+        let start = first * frame_bytes;
+        let end = (last * frame_bytes).min(pcm.len()) & !1usize;
+        Ok(&pcm[start..end])
+    }
+
+    fn evenly_spaced_windows(pcm: &[u8], window_ms: usize, count: usize) -> Vec<&[u8]> {
+        let window_bytes = SAMPLE_RATE as usize * 2 * window_ms / 1000;
+        if count == 0 || pcm.len() <= window_bytes {
+            return vec![pcm];
+        }
+        let last_start = pcm.len().saturating_sub(window_bytes) & !1usize;
+        (0..count)
+            .map(|index| {
+                let start = if count == 1 {
+                    last_start / 2
+                } else {
+                    (last_start * index / (count - 1)) & !1usize
+                };
+                &pcm[start..start + window_bytes]
+            })
+            .collect()
+    }
+
+    fn enrollment_template_windows(pcm: &[u8]) -> Result<Vec<&[u8]>, String> {
+        let speech = enrollment_speech_window(pcm)?;
+        let mut windows = Vec::with_capacity(MAX_SUPPLEMENTAL_TEMPLATES + 1);
+        windows.push(speech);
+        for window in evenly_spaced_windows(speech, TEMPLATE_WINDOW_MS, MAX_SUPPLEMENTAL_TEMPLATES)
+        {
+            if window.len() >= SAMPLE_RATE as usize * 2 * VERIFICATION_MIN_SPEECH_MS / 1000 {
+                windows.push(window);
+            }
+        }
+        windows.truncate(MAX_SUPPLEMENTAL_TEMPLATES + 1);
+        Ok(windows)
+    }
+
+    fn verification_speech_window(pcm: &[u8]) -> Result<&[u8], String> {
+        let max_bytes = DEFAULT_MAX_CANDIDATE_MS as usize * 32;
+        let pcm = &pcm[..pcm.len().min(max_bytes) & !1usize];
+        let minimum_bytes = SAMPLE_RATE as usize * 2 * VERIFICATION_MIN_SPEECH_MS / 1000;
+        if pcm.len() < minimum_bytes {
+            return Err(format!(
+                "voiceprint audio is shorter than {VERIFICATION_MIN_SPEECH_MS} ms"
+            ));
+        }
+
+        let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1000;
+        let (first_active, last_active, _, _, _, _) = active_speech_bounds(pcm, frame_bytes, 20.0)?;
+        let frame_count = pcm.len().div_ceil(frame_bytes);
+        let mut first = first_active.saturating_sub(1);
+        let mut last = (last_active + 2).min(frame_count);
+        let minimum_frames = VERIFICATION_MIN_SPEECH_MS.div_ceil(ENROLLMENT_FRAME_MS);
+        while last.saturating_sub(first) < minimum_frames {
+            if first > 0 {
+                first -= 1;
+            } else if last < frame_count {
+                last += 1;
+            } else {
+                break;
+            }
+        }
+        let start = first * frame_bytes;
+        let end = (last * frame_bytes).min(pcm.len()) & !1usize;
+        Ok(&pcm[start..end])
+    }
+
+    fn verification_template_windows(pcm: &[u8]) -> Result<Vec<&[u8]>, String> {
+        let max_bytes = DEFAULT_MAX_CANDIDATE_MS as usize * 32;
+        let raw = &pcm[..pcm.len().min(max_bytes) & !1usize];
+        let speech = verification_speech_window(pcm)?;
+        let mut windows = vec![raw];
+        if speech.as_ptr() != raw.as_ptr() || speech.len() != raw.len() {
+            windows.push(speech);
+        }
+        if speech.len() > SAMPLE_RATE as usize * 2 * TEMPLATE_WINDOW_MS / 1000 {
+            windows.extend(evenly_spaced_windows(speech, TEMPLATE_WINDOW_MS, 2));
+        }
+        Ok(windows)
     }
 
     fn sha256(path: &Path) -> Result<String, String> {
@@ -373,24 +543,65 @@ mod platform {
         }
     }
 
-    fn ensure_runtime() -> Result<Arc<SpeakerRuntime>, String> {
-        if let Some(runtime) = STATE.lock().runtime.clone() {
-            return Ok(runtime);
-        }
+    fn ensure_runtime_assets() -> Result<std::path::PathBuf, String> {
         let root = crate::persistence::speaker_verification_root()
             .map_err(|err| format!("create voiceprint model directory failed: {err}"))?;
         let archive_path = root.join(format!("sherpa-onnx-{RUNTIME_VERSION}.tar.bz2"));
         download_verified(RUNTIME_URL, &archive_path, RUNTIME_ARCHIVE_SHA256)?;
-        download_verified(MODEL_URL, &root.join(MODEL_NAME), MODEL_SHA256)?;
         extract_runtime(&root, &archive_path)?;
+        Ok(root)
+    }
+
+    fn ensure_runtime() -> Result<Arc<SpeakerRuntime>, String> {
+        if let Some(runtime) = STATE.lock().runtime.clone() {
+            return Ok(runtime);
+        }
+        let root = ensure_runtime_assets()?;
+        download_verified(MODEL_URL, &root.join(MODEL_NAME), MODEL_SHA256)?;
         let runtime = Arc::new(SpeakerRuntime::load(&root)?);
         STATE.lock().runtime = Some(Arc::clone(&runtime));
         Ok(runtime)
     }
 
-    fn keyring_entry() -> Result<keyring::Entry, String> {
-        keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+    fn keyring_entry_for(account: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(KEYRING_SERVICE, account)
             .map_err(|err| format!("open system voiceprint credential failed: {err}"))
+    }
+
+    fn keyring_entry() -> Result<keyring::Entry, String> {
+        keyring_entry_for(KEYRING_ACCOUNT)
+    }
+
+    fn supplemental_keyring_entry(index: usize) -> Result<keyring::Entry, String> {
+        keyring_entry_for(&format!("{KEYRING_SUPPLEMENTAL_ACCOUNT_PREFIX}{index}"))
+    }
+
+    fn delete_stored_credentials() -> Result<(), String> {
+        match keyring_entry()?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(err) => {
+                return Err(format!("delete system voiceprint credential failed: {err}"));
+            }
+        }
+        for index in 0..MAX_SUPPLEMENTAL_TEMPLATES {
+            match supplemental_keyring_entry(index)?.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => {}
+                Err(err) => {
+                    return Err(format!(
+                        "delete supplemental system voiceprint credential failed: {err}"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn clear_stored_credentials_after_failed_enrollment() {
+        if let Err(err) = delete_stored_credentials() {
+            log::warn!(
+                "[speaker-verification] failed to clear partial enrollment credentials: {err}"
+            );
+        }
     }
 
     fn encode_template(embedding: &[f32]) -> Result<String, String> {
@@ -424,7 +635,9 @@ mod platform {
             .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
             .collect::<Vec<_>>();
         normalize(&mut embedding)?;
-        Ok(SpeakerTemplate { embedding })
+        Ok(SpeakerTemplate {
+            embeddings: vec![embedding],
+        })
     }
 
     fn load_template_locked(state: &mut State) {
@@ -439,7 +652,34 @@ mod platform {
         });
         match result {
             Ok(Some(value)) => match decode_template(&value) {
-                Ok(template) => state.template = Some(template),
+                Ok(mut template) => {
+                    for index in 0..MAX_SUPPLEMENTAL_TEMPLATES {
+                        let supplemental = supplemental_keyring_entry(index).and_then(|entry| {
+                            match entry.get_password() {
+                                Ok(value) => Ok(Some(value)),
+                                Err(keyring::Error::NoEntry) => Ok(None),
+                                Err(err) => Err(format!(
+                                    "read supplemental voiceprint credential failed: {err}"
+                                )),
+                            }
+                        });
+                        match supplemental {
+                            Ok(Some(value)) => match decode_template(&value) {
+                                Ok(extra) => template.embeddings.extend(extra.embeddings),
+                                Err(err) => {
+                                    log::warn!(
+                                        "[speaker-verification] ignored supplemental owner template index={index}: {err}"
+                                    );
+                                }
+                            },
+                            Ok(None) => {}
+                            Err(err) => log::warn!(
+                                "[speaker-verification] supplemental owner template unavailable index={index}: {err}"
+                            ),
+                        }
+                    }
+                    state.template = Some(template);
+                }
                 Err(err) => state.error = Some(err),
             },
             Ok(None) => {}
@@ -487,7 +727,33 @@ mod platform {
         state.template.is_some()
     }
 
-    pub fn start_enrollment() -> Result<VoiceprintStatus, String> {
+    pub fn prepare() -> Result<(), String> {
+        let started = std::time::Instant::now();
+        ensure_runtime()?;
+        let mut state = STATE.lock();
+        load_template_locked(&mut state);
+        if state.template.is_none() {
+            return Err("voiceprint is not enrolled".to_string());
+        }
+        log::info!(
+            "[speaker-verification] owner gate prepared elapsed_ms={}",
+            started.elapsed().as_millis()
+        );
+        Ok(())
+    }
+
+    pub(crate) fn prepare_runtime_assets() -> Result<(), String> {
+        ensure_runtime_assets().map(|_| ())
+    }
+
+    pub fn start_enrollment(wake_phrase: &str) -> Result<VoiceprintStatus, String> {
+        let wake_phrase = wake_phrase.trim();
+        if wake_phrase.is_empty() {
+            return Err("请先输入唤醒词，再录制声纹。".to_string());
+        }
+        log::info!(
+            "[speaker-verification] enrollment requested for configured wake phrase={wake_phrase}"
+        );
         {
             let mut state = STATE.lock();
             if matches!(
@@ -543,55 +809,44 @@ mod platform {
             state.capture = Some(CaptureState::Processing);
             state.progress = 70;
         }
-        let result = (|| {
+        let result: Result<VoiceprintStatus, String> = (|| {
             let runtime = ensure_runtime()?;
-            let sample_count = pcm.len() / 2;
-            let segment_samples = sample_count / ENROLLMENT_SEGMENTS;
-            if segment_samples < SAMPLE_RATE as usize {
-                return Err(
-                    "voiceprint enrollment needs at least 3 seconds of clear speech".to_string(),
-                );
-            }
-            let mut embeddings = Vec::with_capacity(ENROLLMENT_SEGMENTS);
-            for index in 0..ENROLLMENT_SEGMENTS {
-                let start = index * segment_samples * 2;
-                let end = if index + 1 == ENROLLMENT_SEGMENTS {
-                    pcm.len()
-                } else {
-                    (index + 1) * segment_samples * 2
-                };
-                embeddings.push(runtime.embedding(&pcm[start..end])?);
-            }
-            let mut min_pair_score = 1.0f32;
-            for left in 0..embeddings.len() {
-                for right in (left + 1)..embeddings.len() {
-                    min_pair_score =
-                        min_pair_score.min(cosine(&embeddings[left], &embeddings[right])?);
+            let windows = enrollment_template_windows(pcm)?;
+            let embeddings = windows
+                .iter()
+                .map(|speech| {
+                    runtime
+                        .embedding(speech)
+                        .map_err(|err| format!("声纹特征提取失败，请重新说三遍唤醒词：{err}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let encoded = embeddings
+                .iter()
+                .map(|embedding| encode_template(embedding))
+                .collect::<Result<Vec<_>, _>>()?;
+            delete_stored_credentials()?;
+            for index in 0..MAX_SUPPLEMENTAL_TEMPLATES {
+                let entry = supplemental_keyring_entry(index)?;
+                if let Some(value) = encoded.get(index + 1) {
+                    if let Err(err) = entry.set_password(value) {
+                        clear_stored_credentials_after_failed_enrollment();
+                        return Err(format!(
+                            "save supplemental system voiceprint credential failed: {err}"
+                        ));
+                    }
                 }
             }
-            if min_pair_score < ENROLLMENT_MIN_PAIR_SCORE {
-                return Err(format!(
-                    "voiceprint segments are inconsistent; retry with one speaker in a quiet room (score {min_pair_score:.3})"
-                ));
+            if let Err(err) = keyring_entry()?.set_password(&encoded[0]) {
+                clear_stored_credentials_after_failed_enrollment();
+                return Err(format!("save system voiceprint credential failed: {err}"));
             }
-            let mut average = vec![0.0f32; embeddings[0].len()];
-            for embedding in &embeddings {
-                for (target, value) in average.iter_mut().zip(embedding) {
-                    *target += *value;
-                }
-            }
-            normalize(&mut average)?;
-            let encoded = encode_template(&average)?;
-            keyring_entry()?
-                .set_password(&encoded)
-                .map_err(|err| format!("save system voiceprint credential failed: {err}"))?;
             {
                 let mut state = STATE.lock();
-                state.template = Some(SpeakerTemplate { embedding: average });
+                state.template = Some(SpeakerTemplate { embeddings });
                 state.template_checked = true;
                 state.capture = Some(CaptureState::Complete);
                 state.progress = 100;
-                state.last_score = Some(min_pair_score);
+                state.last_score = None;
                 state.error = None;
             }
             Ok(status())
@@ -612,10 +867,21 @@ mod platform {
                 .clone()
                 .ok_or_else(|| "voiceprint is not enrolled".to_string())?
         };
-        let max_bytes = DEFAULT_MAX_CANDIDATE_MS as usize * 32;
-        let candidate = &pcm[..pcm.len().min(max_bytes)];
-        let embedding = runtime.embedding(candidate)?;
-        let score = cosine(&template.embedding, &embedding)?;
+        let candidate_windows = verification_template_windows(pcm)?;
+        let candidate_embeddings = candidate_windows
+            .iter()
+            .map(|candidate| runtime.embedding(candidate))
+            .collect::<Result<Vec<_>, _>>()?;
+        let score = template
+            .embeddings
+            .iter()
+            .flat_map(|enrolled| {
+                candidate_embeddings
+                    .iter()
+                    .filter_map(|candidate| cosine(enrolled, candidate).ok())
+            })
+            .max_by(f32::total_cmp)
+            .ok_or_else(|| "voiceprint dimensions do not match".to_string())?;
         let verdict = if score >= VERIFICATION_THRESHOLD {
             Verdict::Match
         } else {
@@ -626,9 +892,15 @@ mod platform {
             enrolled: true,
             origin: CandidateOrigin::Automatic,
             candidate_complete: true,
-            candidate_ms: (candidate.len() / 32) as u32,
+            candidate_ms: (pcm.len() / 32) as u32,
             verdict,
         });
+        log::info!(
+            "[speaker-verification] compared enrolled_templates={} candidate_windows={} speech_ms={} score={score:.6}",
+            template.embeddings.len(),
+            candidate_embeddings.len(),
+            candidate_windows[0].len() / 32
+        );
         STATE.lock().last_score = Some(score);
         Ok(VerificationResult {
             matched: matches!(decision.action, Action::Release),
@@ -637,11 +909,7 @@ mod platform {
     }
 
     pub fn delete_template() -> Result<VoiceprintStatus, String> {
-        let entry = keyring_entry()?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(err) => return Err(format!("delete system voiceprint credential failed: {err}")),
-        }
+        delete_stored_credentials()?;
         let mut state = STATE.lock();
         state.template = None;
         state.template_checked = true;
@@ -674,7 +942,7 @@ mod platform {
             let encoded = encode_template(&embedding).unwrap();
             assert!(encoded.len() < 1800);
             let decoded = decode_template(&encoded).unwrap();
-            assert!((cosine(&embedding, &decoded.embedding).unwrap() - 1.0).abs() < 1e-5);
+            assert!((cosine(&embedding, &decoded.embeddings[0]).unwrap() - 1.0).abs() < 1e-5);
         }
 
         #[test]
@@ -694,6 +962,79 @@ mod platform {
         fn cosine_separates_aligned_and_opposed_vectors() {
             assert_eq!(cosine(&[1.0, 0.0], &[1.0, 0.0]).unwrap(), 1.0);
             assert_eq!(cosine(&[1.0, 0.0], &[-1.0, 0.0]).unwrap(), -1.0);
+        }
+
+        #[test]
+        fn enrollment_window_keeps_repeated_phrase_span_and_drops_outer_silence() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut samples = vec![0i16; SAMPLE_RATE as usize];
+            samples.extend(vec![800i16; frame_samples * 10]);
+            samples.extend(vec![0i16; frame_samples * 2]);
+            samples.extend(vec![-900i16; frame_samples * 10]);
+            samples.extend(vec![0i16; SAMPLE_RATE as usize]);
+            let pcm = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            let window = enrollment_speech_window(&pcm).expect("speech window");
+            assert!(window.len() < pcm.len());
+            assert!(window.len() >= SAMPLE_RATE as usize * 2 * 2);
+        }
+
+        #[test]
+        fn enrollment_builds_bounded_long_and_short_owner_templates() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut samples = vec![0i16; frame_samples * 5];
+            samples.extend(vec![800i16; frame_samples * 45]);
+            samples.extend(vec![0i16; frame_samples * 5]);
+            let pcm = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            let windows = enrollment_template_windows(&pcm).expect("template windows");
+            assert_eq!(windows.len(), MAX_SUPPLEMENTAL_TEMPLATES + 1);
+            assert!(windows[0].len() > windows[1].len());
+            assert!(windows[1..]
+                .iter()
+                .all(|window| window.len() == TEMPLATE_WINDOW_MS * 32));
+        }
+
+        #[test]
+        fn enrollment_rejects_a_short_sound_inside_a_long_capture() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut samples = vec![0i16; frame_samples * 20];
+            samples.extend(vec![900i16; frame_samples * 3]);
+            samples.extend(vec![0i16; frame_samples * 20]);
+            let pcm = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            assert!(enrollment_speech_window(&pcm).is_err());
+        }
+
+        #[test]
+        fn verification_window_removes_outer_silence_and_keeps_model_floor() {
+            let frame_samples = SAMPLE_RATE as usize * ENROLLMENT_FRAME_MS / 1000;
+            let mut samples = vec![0i16; frame_samples * 6];
+            samples.extend(vec![900i16; frame_samples * 12]);
+            samples.extend(vec![0i16; frame_samples * 6]);
+            let pcm = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            let window = verification_speech_window(&pcm).expect("verification window");
+            assert!(window.len() < pcm.len());
+            assert!(window.len() >= VERIFICATION_MIN_SPEECH_MS * 32);
+        }
+
+        #[test]
+        fn owner_verification_uses_real_pcm_without_silence_padding() {
+            let pcm = vec![32u8; SAMPLE_RATE as usize * 2 * 1_100 / 1000];
+            let samples = prepare_embedding_samples(&pcm).expect("1.1 second continuous speech");
+            assert_eq!(samples.len(), SAMPLE_RATE as usize * 1_100 / 1000);
+            assert_eq!(VERIFICATION_THRESHOLD, DEFAULT_SCORE_MILLI as f32 / 1000.0);
+            let short_pcm = vec![32u8; SAMPLE_RATE as usize * 2 * 955 / 1000];
+            assert!(prepare_embedding_samples(&short_pcm).is_err());
         }
 
         #[test]
@@ -723,13 +1064,52 @@ mod platform {
             assert!(different_score < VERIFICATION_THRESHOLD);
             assert!(same_score > different_score);
         }
+
+        #[test]
+        #[ignore = "requires the enrolled owner credential and a consented local WAV"]
+        fn runtime_reports_enrolled_owner_window_scores() {
+            let path = std::env::var("LISTENER_VOICEPRINT_OWNER_WAV")
+                .expect("LISTENER_VOICEPRINT_OWNER_WAV path");
+            let wav = fs::read(path).expect("read consented owner fixture");
+            let pcm =
+                denzic_audio_v1_core::read_wav_pcm16le(&wav).expect("decode 16 kHz mono fixture");
+            let runtime = ensure_runtime().expect("load verified runtime");
+            let template = {
+                let mut state = STATE.lock();
+                load_template_locked(&mut state);
+                state.template.clone().expect("enrolled owner template")
+            };
+            let raw = runtime.embedding(&pcm).expect("raw embedding");
+            let raw_score = template
+                .embeddings
+                .iter()
+                .map(|enrolled| cosine(enrolled, &raw).expect("raw score"))
+                .max_by(f32::total_cmp)
+                .expect("raw score");
+            let windows = verification_template_windows(&pcm).expect("verification windows");
+            let mut processed_score = f32::NEG_INFINITY;
+            for window in &windows {
+                let candidate = runtime.embedding(window).expect("window embedding");
+                for enrolled in &template.embeddings {
+                    processed_score =
+                        processed_score.max(cosine(enrolled, &candidate).expect("window score"));
+                }
+            }
+            println!(
+                "raw_score={raw_score:.6} processed_score={processed_score:.6} enrolled_templates={} candidate_windows={} threshold={VERIFICATION_THRESHOLD:.3}",
+                template.embeddings.len(),
+                windows.len()
+            );
+        }
     }
 }
 
 #[cfg(target_os = "windows")]
+pub(crate) use platform::prepare_runtime_assets;
+#[cfg(target_os = "windows")]
 pub use platform::{
-    delete_template, fail_enrollment, finish_enrollment, is_enrolled, start_enrollment, status,
-    take_enrollment_arm, verify,
+    delete_template, fail_enrollment, finish_enrollment, is_enrolled, prepare, start_enrollment,
+    status, take_enrollment_arm, verify,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -761,7 +1141,7 @@ pub fn take_enrollment_arm() -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn start_enrollment() -> Result<VoiceprintStatus, String> {
+pub fn start_enrollment(_wake_phrase: &str) -> Result<VoiceprintStatus, String> {
     Err("voiceprint enrollment is currently available on Windows only".into())
 }
 
@@ -780,6 +1160,16 @@ pub fn fail_enrollment(_error: &str) {}
 
 #[cfg(not(target_os = "windows"))]
 pub fn verify(_pcm: &[u8]) -> Result<VerificationResult, String> {
+    Err("voiceprint verification is currently available on Windows only".into())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn prepare() -> Result<(), String> {
+    Err("voiceprint verification is currently available on Windows only".into())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn prepare_runtime_assets() -> Result<(), String> {
     Err("voiceprint verification is currently available on Windows only".into())
 }
 

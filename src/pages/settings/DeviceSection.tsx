@@ -403,11 +403,11 @@ function DeviceFirmwareSettingsCard() {
       ? t('settings.device.writingDetail', '正在写入设备设置...')
       : '';
 
-  const save = async () => {
+  const persistForm = async (nextForm: DeviceSettingsUpdateRequest) => {
     if (writeDisabled) return;
     const submittedForm: DeviceSettingsUpdateRequest = {
-      ...form,
-      pluggedLowPowerEnabled: form.pluggedLowPowerIdleMinutes > 0,
+      ...nextForm,
+      pluggedLowPowerEnabled: nextForm.pluggedLowPowerIdleMinutes > 0,
       pluggedAutoShutdownMinutes: 0,
     };
     setStatus('saving');
@@ -427,6 +427,14 @@ function DeviceFirmwareSettingsCard() {
       setStatus('error');
       setMessage(error instanceof Error ? error.message : String(error));
     }
+  };
+  const save = async () => persistForm(form);
+  const saveVoiceAutomation = (
+    patch: Partial<Pick<DeviceSettingsUpdateRequest, 'voiceAutoStartEnabled' | 'voiceAutoStopEnabled'>>,
+  ) => {
+    const nextForm = { ...form, ...patch };
+    setForm(nextForm);
+    void persistForm(nextForm);
   };
   const handleSettingsKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) {
@@ -552,49 +560,57 @@ function DeviceFirmwareSettingsCard() {
               <Toggle
                 on={form.voiceAutoStartEnabled}
                 onToggle={voiceAutoStartEnabled =>
-                  setForm(current => ({ ...current, voiceAutoStartEnabled }))}
+                  saveVoiceAutomation({ voiceAutoStartEnabled })}
                 disabled={controlsDisabled}
               />
             </SettingRow>
             <SettingRow
-              label={t('settings.recording.voiceprintLabel', '仅本人语音自动开始')}
-              desc={
-                voiceprint?.enrolled
-                  ? t('settings.recording.voiceprintReadyDesc', '已启用本机声纹校验；旁人说话不会进入转写。')
-                  : t('settings.recording.voiceprintDesc', '录制约 7 秒本人语音；只保存系统保护的声纹模板，不保存录音。')
-              }
+              label={t('settings.recording.wakePhraseLabel', '唤醒词')}
+              desc={t('settings.recording.wakePhraseDesc', '只有本人说出这个词后才开始录音。')}
             >
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                <Btn
-                  variant={voiceprint?.enrolled ? 'ghost' : 'blue'}
-                  size="sm"
-                  icon="mic"
-                  disabled={voiceprintBusy || !voiceprint?.available || ['preparing', 'armed', 'capturing', 'processing'].includes(voiceprint?.state ?? '')}
-                  onClick={() => void enrollVoiceprint()}
-                  style={{ minWidth: 104, justifyContent: 'center' }}
-                >
-                  {voiceprint?.state === 'preparing'
-                    ? t('settings.recording.voiceprintPreparing', '准备中')
-                    : voiceprint?.state === 'capturing' || voiceprint?.state === 'armed'
-                      ? t('settings.recording.voiceprintCapturing', '请持续说话')
-                      : voiceprint?.state === 'processing'
-                        ? t('settings.recording.voiceprintProcessing', '校验中')
-                        : voiceprint?.enrolled
-                          ? t('settings.recording.voiceprintRedo', '重新录制')
-                          : t('settings.recording.voiceprintEnroll', '录制声纹')}
-                </Btn>
-                {voiceprint?.enrolled && (
+              <div className="ol-wake-phrase-control">
+                <input
+                  value={prefs.voiceWakePhrase}
+                  onChange={event => savePrefs(current => ({
+                    ...current,
+                    voiceWakePhrase: event.target.value,
+                  }))}
+                  maxLength={16}
+                  aria-label={t('settings.recording.wakePhraseLabel', '唤醒词')}
+                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                />
+                <div className="ol-voiceprint-actions">
                   <Btn
-                    variant="ghost"
+                    variant={voiceprint?.enrolled ? 'ghost' : 'blue'}
                     size="sm"
-                    icon="trash"
-                    disabled={voiceprintBusy}
-                    onClick={() => void clearVoiceprint()}
+                    icon="mic"
+                    disabled={voiceprintBusy || !voiceprint?.available || ['preparing', 'armed', 'capturing', 'processing'].includes(voiceprint?.state ?? '')}
+                    onClick={() => void enrollVoiceprint()}
                     style={{ justifyContent: 'center' }}
                   >
-                    {t('settings.recording.voiceprintDelete', '删除')}
+                    {voiceprint?.state === 'preparing'
+                      ? t('settings.recording.voiceprintPreparing', '准备中')
+                      : voiceprint?.state === 'capturing' || voiceprint?.state === 'armed'
+                        ? t('settings.recording.voiceprintCapturing', { phrase: prefs.voiceWakePhrase })
+                        : voiceprint?.state === 'processing'
+                          ? t('settings.recording.voiceprintProcessing', '校验中')
+                          : voiceprint?.enrolled
+                            ? t('settings.recording.voiceprintRedo', '重新录制')
+                            : t('settings.recording.voiceprintEnroll', '录制声纹')}
                   </Btn>
-                )}
+                  {voiceprint?.enrolled && (
+                    <Btn
+                      variant="ghost"
+                      size="sm"
+                      icon="trash"
+                      disabled={voiceprintBusy}
+                      onClick={() => void clearVoiceprint()}
+                      style={{ justifyContent: 'center' }}
+                    >
+                      {t('settings.recording.voiceprintDelete', '删除')}
+                    </Btn>
+                  )}
+                </div>
               </div>
             </SettingRow>
             {voiceprint?.error && (
@@ -609,8 +625,18 @@ function DeviceFirmwareSettingsCard() {
               <Toggle
                 on={form.voiceAutoStopEnabled}
                 onToggle={voiceAutoStopEnabled =>
-                  setForm(current => ({ ...current, voiceAutoStopEnabled }))}
+                  saveVoiceAutomation({ voiceAutoStopEnabled })}
                 disabled={controlsDisabled}
+              />
+            </SettingRow>
+            <SettingRow
+              label={t('settings.recording.removeFillerWordsLabel')}
+              desc={t('settings.recording.removeFillerWordsDesc')}
+            >
+              <Toggle
+                on={prefs.removeFillerWords}
+                onToggle={removeFillerWords =>
+                  savePrefs(current => ({ ...current, removeFillerWords }))}
               />
             </SettingRow>
             <SettingRow
@@ -627,17 +653,12 @@ function DeviceFirmwareSettingsCard() {
               label={t('settings.recording.sendKeyAfterDictationLabel')}
               desc={t('settings.recording.sendKeyAfterDictationDesc')}
             >
-              <Toggle
-                on={prefs.sendKeyAfterDictation}
-                onToggle={sendKeyAfterDictation =>
-                  savePrefs(current => ({ ...current, sendKeyAfterDictation }))}
-              />
-            </SettingRow>
-            {prefs.sendKeyAfterDictation && (
-              <SettingRow
-                label={t('settings.recording.postDictationKeyLabel')}
-                desc={t('settings.recording.postDictationKeyDesc')}
-              >
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Toggle
+                  on={prefs.sendKeyAfterDictation}
+                  onToggle={sendKeyAfterDictation =>
+                    savePrefs(current => ({ ...current, sendKeyAfterDictation }))}
+                />
                 <SelectLite
                   value={prefs.postDictationKey}
                   onChange={postDictationKey =>
@@ -650,10 +671,11 @@ function DeviceFirmwareSettingsCard() {
                     { value: 'ctrlEnter', label: t('settings.recording.postDictationKeyCtrlEnter') },
                   ]}
                   ariaLabel={t('settings.recording.postDictationKeyLabel')}
-                  style={{ ...inputStyle, maxWidth: 220 }}
+                  style={{ ...inputStyle, width: 132 }}
+                  disabled={!prefs.sendKeyAfterDictation}
                 />
-              </SettingRow>
-            )}
+              </div>
+            </SettingRow>
           </div>
         </DeviceSettingsPanel>
       )}

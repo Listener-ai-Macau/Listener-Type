@@ -1381,6 +1381,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "denzic-voice-activation-v1-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3248,7 +3255,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listener-type"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3269,6 +3276,7 @@ dependencies = [
  "denzic-observability-v1-core",
  "denzic-ota-core",
  "denzic-speaker-verification-v1-core",
+ "denzic-voice-activation-v1-core",
  "enigo",
  "env_logger",
  "espflash",
@@ -3285,6 +3293,7 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "once_cell",
  "parking_lot",
+ "pinyin",
  "raw-window-handle",
  "rdev",
  "reqwest 0.12.28",
@@ -4366,6 +4375,12 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pinyin"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16f2611cd06a1ac239a0cea4521de9eb068a6ca110324ee00631aa68daa74fc0"
 
 [[package]]
 name = "piper"
