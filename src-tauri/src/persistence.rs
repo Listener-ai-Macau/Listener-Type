@@ -100,6 +100,15 @@ fn app_profile_dir_name() -> &'static str {
 }
 
 fn data_dir() -> Result<PathBuf> {
+    // 诊断 / 便携版 / 测试覆盖：显式指定的 data dir 优先（绝对路径）。生产路径不
+    // set 这个 env，仍走平台默认（APPDATA / ~/Library/Application Support / XDG_DATA_HOME）。
+    // 便携版或排障时可重定向整个用户数据目录，避免污染系统 Application Support。
+    if let Ok(custom) = std::env::var("LISTENER_TYPE_DATA_DIR") {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var("HOME").context("HOME not set")?;
@@ -1137,19 +1146,68 @@ impl HistoryStore {
     }
 
     pub fn delete(&self, id: &str) -> Result<()> {
-        let _guard = self.lock.lock();
-        let mut sessions = self.read_locked()?;
-        let original_len = sessions.len();
-        sessions.retain(|s| s.id != id);
-        if sessions.len() == original_len {
-            return Ok(());
+        {
+            let _guard = self.lock.lock();
+            let mut sessions = self.read_locked()?;
+            let original_len = sessions.len();
+            sessions.retain(|s| s.id != id);
+            if sessions.len() == original_len {
+                return Ok(()); // 条目不存在，不动 wav
+            }
+            self.write_locked(&sessions)?;
         }
-        self.write_locked(&sessions)
+        // 同步删该会话的 debug 录音归档：用户删一条历史，录音文件也该一起清掉
+        // （隐私预期 + 避免孤儿 wav 占据 recordings cap 挤掉有效录音）。best-effort。
+        Self::remove_session_recording(id);
+        Ok(())
     }
 
     pub fn clear(&self) -> Result<()> {
-        let _guard = self.lock.lock();
-        self.write_locked(&Vec::<DictationSession>::new())
+        {
+            let _guard = self.lock.lock();
+            self.write_locked(&Vec::<DictationSession>::new())?;
+        }
+        // 清空历史时同步清掉所有 debug 录音归档：clear 语义是"全部清空"，留着 wav
+        // 违背预期，且孤儿 wav 不会被 history append 触发的 prune 回收。best-effort。
+        Self::remove_all_recordings();
+        Ok(())
+    }
+
+    /// best-effort 删除单个 session 的 wav 归档。文件不存在或删除失败都不影响调用方。
+    fn remove_session_recording(id: &str) {
+        let path = match recording_path_for_session(id) {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("[history] recording path for {id} unavailable: {e}");
+                return;
+            }
+        };
+        if !path.exists() {
+            return;
+        }
+        if let Err(err) = fs::remove_file(&path) {
+            log::warn!("[history] delete wav failed for {path:?}: {err}");
+        }
+    }
+
+    /// best-effort 删除 recordings 目录下所有 wav。clear 时调用，避免孤儿归档残留。
+    fn remove_all_recordings() {
+        let dir = match recordings_root() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("wav") {
+                if let Err(err) = fs::remove_file(&path) {
+                    log::warn!("[history] clear wav failed for {path:?}: {err}");
+                }
+            }
+        }
     }
 
     fn read_locked(&self) -> Result<Vec<DictationSession>> {
@@ -2500,11 +2558,100 @@ mod tests {
     use super::{
         chunk_json_payload, list_vocab_presets, read_preferences, save_vocab_presets,
         sync_style_pack_preferences, validate_correction_rule_syntax,
-        KEYRING_CHUNK_MAX_UTF16_UNITS,
+        HistoryStore, KEYRING_CHUNK_MAX_UTF16_UNITS, recording_path_for_session, recordings_root,
     };
+    use crate::types::DictationSession;
     use crate::types::{builtin_style_packs, CustomStylePrompts, VocabPreset, VocabPresetStore};
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::{Mutex, MutexGuard};
+
+    // LISTENER_TYPE_DATA_DIR 是进程级全局 env，并行测试会互相踩。用模块级 mutex
+    // 串行所有依赖 scoped_data_dir 的测试，保证 set/restore 不被打断。
+    static DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// RAII guard：set LISTENER_TYPE_DATA_DIR 指向唯一临时目录，drop 时恢复 env 并
+    /// 删除临时目录，确保 history delete/clear 测试不污染真实用户 data_dir。
+    struct DataDirGuard {
+        _lock: MutexGuard<'static, ()>,
+        path: PathBuf,
+    }
+    impl Drop for DataDirGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("LISTENER_TYPE_DATA_DIR");
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+    fn scoped_data_dir() -> DataDirGuard {
+        let lock = DATA_DIR_TEST_LOCK.lock().expect("data dir test lock poisoned");
+        let tmp: PathBuf = std::env::temp_dir()
+            .join(format!("listener-type-data-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&tmp).expect("create temp data dir");
+        std::env::set_var("LISTENER_TYPE_DATA_DIR", &tmp);
+        DataDirGuard { _lock: lock, path: tmp }
+    }
+
+    fn make_session(id: &str) -> DictationSession {
+        serde_json::from_str(&format!(
+            r#"{{"id":"{id}","createdAt":"2026-07-26T00:00:00Z","rawTranscript":"r","finalText":"f","mode":"raw","insertStatus":"copiedFallback"}}"#
+        ))
+        .expect("parse DictationSession")
+    }
+
+    /// 删一条历史时，对应的 debug 录音归档也必须被清掉（隐私预期 + 避免孤儿 wav）。
+    #[test]
+    fn history_delete_removes_session_recording_wav() {
+        let _guard = scoped_data_dir();
+        let store = HistoryStore::new().expect("history store");
+        let id = "11111111-1111-1111-1111-111111111111";
+        store.append(make_session(id)).expect("append");
+        let wav = recording_path_for_session(id).expect("recording path");
+        fs::write(&wav, b"RIFFfake").expect("write wav");
+        assert!(wav.exists());
+        assert_eq!(store.list().expect("list").len(), 1);
+
+        store.delete(id).expect("delete");
+
+        assert!(
+            store.list().expect("list after").is_empty(),
+            "history entry should be deleted"
+        );
+        assert!(
+            !wav.exists(),
+            "delete must also remove the session wav recording"
+        );
+    }
+
+    /// 清空全部历史时，recordings 下所有 wav 也必须被清掉，不能留孤儿归档。
+    #[test]
+    fn history_clear_removes_all_recordings() {
+        let _guard = scoped_data_dir();
+        let store = HistoryStore::new().expect("history store");
+        let recordings = recordings_root().expect("recordings root");
+        fs::write(
+            recordings.join("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.wav"),
+            b"x",
+        )
+        .expect("write wav a");
+        fs::write(
+            recordings.join("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.wav"),
+            b"y",
+        )
+        .expect("write wav b");
+
+        store.clear().expect("clear");
+
+        assert!(store.list().expect("list").is_empty(), "history should be empty");
+        let remaining: Vec<_> = fs::read_dir(&recordings)
+            .expect("read dir after")
+            .flatten()
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("wav"))
+            .collect();
+        assert!(
+            remaining.is_empty(),
+            "clear must remove all wav recordings, found {remaining:?}"
+        );
+    }
 
     #[test]
     fn credential_payload_chunks_stay_under_windows_blob_limit() {
