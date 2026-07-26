@@ -569,7 +569,7 @@ for (const requiredToken of [
   "source_hash_comparison",
   "root MSI hash must match the latest Type MSI source artifact",
   "root firmware OTA zip hash must match the latest stable firmware OTA source artifact",
-  "no Type portable zip or older package",
+  "no Type portable zip or older root package",
 ]) {
   if (!JSON.stringify(releaseScenario ?? {}).includes(requiredToken)) {
     failures.push(`release package final scenario must encode source-hash root staging contract: ${requiredToken}`);
