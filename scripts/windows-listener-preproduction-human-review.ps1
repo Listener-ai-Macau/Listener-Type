@@ -1058,6 +1058,32 @@ $steps = @(
             "录音数据能传输，Type-ready 灯效和实际 Type 连接一致。"
             "不能出现 Windows 已连接但蓝牙灯一直是未连接/配对状态。"))
     New-ReviewStep `
+        -Id "wake-phrase-false-wake-rejection" `
+        -Title "唤醒词误唤醒拒识（严格模式）" `
+        -Action (Join-Text @(
+            "保持 Type 已连接、capsule 处于空闲，唤醒词为默认「开始录音」。"
+            "依次清晰说出三个近音词，每个说完等约 2 秒观察 capsule 是否进入录音："
+            "1.「开始吃饭」"
+            "2.「开始工作」"
+            "3.「开始开会」"
+            "三个都说完再记录结果；任何一个让 capsule 进入录音，本项失败。")) `
+        -Expected (Join-Text @(
+            "三个近音词都不触发录音：capsule 保持空闲，不进入录音态。"
+            "桌面日志里这几次会话的 gate_decision 应为 Reject，phrase_signal 不应是 KeywordModel 命中完整唤醒词。"
+            "只有完整说出「开始录音」才允许进入录音；近音前缀词必须被严格模式拒掉。"))
+    New-ReviewStep `
+        -Id "wake-phrase-sensitivity-and-latency" `
+        -Title "唤醒灵敏度和延迟（连续多次）" `
+        -Action (Join-Text @(
+            "保持 Type 已连接、capsule 处于空闲，唤醒词为默认「开始录音」。"
+            "连续说 5 次完整的「开始录音」，每次说完等 capsule 进入录音后停止（按你平时的办法停止），回 idle 再说下一次。"
+            "重点看两件事：(a) 每次说完都能进录音吗；(b) 从你说完到 capsule 弹出大概多久。"
+            "5 次都说完，按整体体感记录结果（几次成功、延迟快还是慢）。")) `
+        -Expected (Join-Text @(
+            "5 次完整「开始录音」都应进入录音，不漏。"
+            "从说完到 capsule 进入录音应在 1~2 秒内（机器指标 wake_to_capsule ≤1.5s），不能出现之前说完要等 5 秒才进的情况。"
+            "连续背靠背唤醒每次都应及时响应；间歇性漏检或延迟突增算回归。"))
+    New-ReviewStep `
         -Id "led-independent-contract" `
         -Title "灯效独立和防回退" `
         -Action (Join-Text @(

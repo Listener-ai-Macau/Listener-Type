@@ -223,14 +223,21 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     listen<DeviceCustomKeyAppPage>('device-key:open-app-page', event => {
       openDeviceKeyAppPage(event.payload);
     }).then(fn => {
-      unlisten = fn;
+      // effect 已卸载但 listen promise 才 resolve：立即销毁句柄，避免订阅泄漏。
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
     }).catch(error => {
       console.warn('[device-key] open app page listener setup failed', error);
     });
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
     };
     // openSettings only wraps stable React setters.

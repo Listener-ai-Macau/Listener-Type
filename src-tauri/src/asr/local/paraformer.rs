@@ -16,6 +16,14 @@ mod imp {
     const MODEL_SHA256: &str = "3EF6C19369B912F7CAF3CEF8E545C5CCD1A33D9D7EC792A46668DC41C4B229EC";
     const TOKENS_SHA256: &str = "4B2D964E18B9CF139B473003B6698FB2ED9A2A5EC55B93DAA677B28F578897AA";
 
+    // 单麦场景下唤醒鲁棒性的关键:候选 WAV 转写前先做离线语音增强(GTCRN,
+    // ~48K 参数,开销可忽略),把电视/环境底噪压下去,paraformer 才转得出"开始录音"。
+    // 这是 OR 门里 KWS 漏掉时的兜底路径(见 dictation.rs 本地确认)。严格可选:
+    // 模型或符号不可用时回退到原始音频,绝不阻塞唤醒。
+    const DENOISER_MODEL: &str = "gtcrn_simple.onnx";
+    const DENOISER_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx";
+    const DENOISER_SHA256: &str = "E77603AC0C23DAC3227DD2D7135B3A585CBEE2679048AECFA886657D3AE1B534";
+
     #[repr(C)]
     struct FeatureConfig {
         sample_rate: i32,
@@ -179,6 +187,35 @@ mod imp {
         hr: HomophoneReplacerConfig,
     }
 
+    // --- sherpa-onnx v1.13.1 离线语音增强 C API (c-api.h 4015-4131) ---
+    // 字段顺序/对齐必须与头文件逐字段一致(见 FFI 布局测试)。
+    #[repr(C)]
+    struct OfflineSpeechDenoiserGtcrnModelConfig {
+        model: *const c_char,
+    }
+    #[repr(C)]
+    struct OfflineSpeechDenoiserDpdfNetModelConfig {
+        model: *const c_char,
+    }
+    #[repr(C)]
+    struct OfflineSpeechDenoiserModelConfig {
+        gtcrn: OfflineSpeechDenoiserGtcrnModelConfig,
+        num_threads: i32,
+        debug: i32,
+        provider: *const c_char,
+        dpdfnet: OfflineSpeechDenoiserDpdfNetModelConfig,
+    }
+    #[repr(C)]
+    struct OfflineSpeechDenoiserConfig {
+        model: OfflineSpeechDenoiserModelConfig,
+    }
+    #[repr(C)]
+    struct DenoisedAudio {
+        samples: *const f32,
+        n: i32,
+        sample_rate: i32,
+    }
+
     type CreateRecognizer = unsafe extern "C" fn(*const OfflineRecognizerConfig) -> *const c_void;
     type DestroyRecognizer = unsafe extern "C" fn(*const c_void);
     type CreateStream = unsafe extern "C" fn(*const c_void) -> *const c_void;
@@ -187,10 +224,24 @@ mod imp {
     type DecodeStream = unsafe extern "C" fn(*const c_void, *const c_void);
     type GetResultJson = unsafe extern "C" fn(*const c_void) -> *const c_char;
     type DestroyResultJson = unsafe extern "C" fn(*const c_char);
+    // Denoiser 用裸指针存储,在 helper 单线程请求循环中使用(与 recognizer 同生命周期)。
+    type CreateDenoiser = unsafe extern "C" fn(*const OfflineSpeechDenoiserConfig) -> *const c_void;
+    type DestroyDenoiser = unsafe extern "C" fn(*const c_void);
+    type DenoiserRun = unsafe extern "C" fn(*const c_void, *const f32, i32, i32) -> *const DenoisedAudio;
+    type DestroyDenoisedAudio = unsafe extern "C" fn(*const DenoisedAudio);
 
     #[derive(Deserialize)]
     struct RecognitionResult {
         text: String,
+    }
+
+    // 降噪器句柄 + 它需要的功能指针打包在一起;整体可选(None=降噪不可用)。
+    // 裸指针在 helper 单线程请求循环里使用,不跨线程。
+    struct DenoiserBundle {
+        handle: *const c_void,
+        run: DenoiserRun,
+        destroy: DestroyDenoiser,
+        destroy_audio: DestroyDenoisedAudio,
     }
 
     pub struct ParaformerRuntime {
@@ -205,11 +256,17 @@ mod imp {
         get_result_json: GetResultJson,
         destroy_result_json: DestroyResultJson,
         destroy_recognizer: DestroyRecognizer,
+        denoiser: Option<DenoiserBundle>,
     }
 
     impl Drop for ParaformerRuntime {
         fn drop(&mut self) {
-            unsafe { (self.destroy_recognizer)(self.recognizer) };
+            unsafe {
+                if let Some(denoiser) = self.denoiser.take() {
+                    (denoiser.destroy)(denoiser.handle);
+                }
+                (self.destroy_recognizer)(self.recognizer);
+            }
         }
     }
 
@@ -277,6 +334,60 @@ mod imp {
                 if recognizer.is_null() {
                     return Err("initialize cached Paraformer model failed".to_string());
                 }
+                // 语音增强器严格可选:模型文件缺失或符号不可用都返回 None,
+                // transcribe_wav 会回退到原始音频,唤醒不依赖它。
+                let denoiser = (|| -> Option<DenoiserBundle> {
+                    let model_path = root.join(DENOISER_MODEL);
+                    if !model_path.exists() {
+                        log::info!(
+                            "[paraformer] GTCRN denoiser model absent; wake confirmation runs without speech enhancement"
+                        );
+                        return None;
+                    }
+                    let create: CreateDenoiser = *sherpa
+                        .get(b"SherpaOnnxCreateOfflineSpeechDenoiser\0")
+                        .ok()?;
+                    let destroy: DestroyDenoiser = *sherpa
+                        .get(b"SherpaOnnxDestroyOfflineSpeechDenoiser\0")
+                        .ok()?;
+                    let run: DenoiserRun = *sherpa
+                        .get(b"SherpaOnnxOfflineSpeechDenoiserRun\0")
+                        .ok()?;
+                    let destroy_audio: DestroyDenoisedAudio = *sherpa
+                        .get(b"SherpaOnnxDestroyDenoisedAudio\0")
+                        .ok()?;
+                    let model_c = CString::new(model_path.to_string_lossy().as_bytes()).ok()?;
+                    let provider_c = CString::new("cpu").expect("literal has no nul");
+                    let config = OfflineSpeechDenoiserConfig {
+                        model: OfflineSpeechDenoiserModelConfig {
+                            gtcrn: OfflineSpeechDenoiserGtcrnModelConfig {
+                                model: model_c.as_ptr(),
+                            },
+                            num_threads: 1,
+                            debug: 0,
+                            provider: provider_c.as_ptr(),
+                            dpdfnet: OfflineSpeechDenoiserDpdfNetModelConfig {
+                                model: std::ptr::null(),
+                            },
+                        },
+                    };
+                    let handle = create(&config);
+                    if handle.is_null() {
+                        log::warn!(
+                            "[paraformer] GTCRN denoiser failed to initialize; wake confirmation runs without speech enhancement"
+                        );
+                        return None;
+                    }
+                    log::info!(
+                        "[paraformer] GTCRN speech enhancer loaded for wake confirmation denoising"
+                    );
+                    Some(DenoiserBundle {
+                        handle,
+                        run,
+                        destroy,
+                        destroy_audio,
+                    })
+                })();
                 Ok(Self {
                     _onnx: onnx,
                     _providers: providers,
@@ -289,11 +400,40 @@ mod imp {
                     get_result_json,
                     destroy_result_json,
                     destroy_recognizer,
+                    denoiser,
                 })
             }
         }
 
-        pub fn transcribe_wav(&self, path: &Path) -> Result<String, String> {
+            // 候选整段离线降噪;任何环节失败都回退原始样本,绝不阻断转写。
+        fn denoise_samples(&self, samples: Vec<f32>) -> Vec<f32> {
+            let Some(denoiser) = self.denoiser.as_ref() else {
+                return samples;
+            };
+            let n = match i32::try_from(samples.len()) {
+                Ok(n) if n > 0 => n,
+                _ => return samples,
+            };
+            unsafe {
+                let audio = (denoiser.run)(denoiser.handle, samples.as_ptr(), n, SAMPLE_RATE);
+                if audio.is_null() {
+                    return samples;
+                }
+                let out = &*audio;
+                let count = out.n;
+                let ptr = out.samples;
+                // 必须在 destroy 之前把数据拷出来(它释放的就是这片内存)。
+                let denoised = if ptr.is_null() || count <= 0 {
+                    None
+                } else {
+                    Some(std::slice::from_raw_parts(ptr, count as usize).to_vec())
+                };
+                (denoiser.destroy_audio)(audio);
+                denoised.unwrap_or(samples)
+            }
+        }
+
+    pub fn transcribe_wav(&self, path: &Path) -> Result<String, String> {
             let wav = fs::read(path)
                 .map_err(|err| format!("read local wake confirmation WAV failed: {err}"))?;
             let pcm = denzic_audio_v1_core::read_wav_pcm16le(&wav)
@@ -302,6 +442,8 @@ mod imp {
                 .chunks_exact(2)
                 .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
                 .collect::<Vec<_>>();
+            // 候选降噪(见 denoise_samples),电视/底噪压下去 paraformer 才转得出唤醒词。
+            let samples = self.denoise_samples(samples);
             let sample_count =
                 i32::try_from(samples.len()).map_err(|_| "local wake candidate is too long")?;
 
@@ -333,6 +475,15 @@ mod imp {
         crate::speaker_verification::prepare_runtime_assets()?;
         let root = crate::persistence::speaker_verification_root()
             .map_err(|err| format!("resolve local speech model directory: {err}"))?;
+        // 降噪模型严格可选:下载/校验失败只记日志,不阻塞 Paraformer 资产就绪。
+        let denoiser_path = root.join(DENOISER_MODEL);
+        if !file_matches(&denoiser_path, DENOISER_SHA256) {
+            if let Err(err) = download_verified(DENOISER_URL, &denoiser_path, DENOISER_SHA256) {
+                log::warn!(
+                    "[paraformer] optional GTCRN denoiser model unavailable; wake confirmation will run without speech enhancement: {err}"
+                );
+            }
+        }
         let model_dir = root.join(MODEL_DIR);
         let model_path = model_dir.join("model.int8.onnx");
         let tokens_path = model_dir.join("tokens.txt");
@@ -456,8 +607,10 @@ mod imp {
     #[cfg(test)]
     mod tests {
         use super::{
-            prepare_assets, CohereConfig, FunAsrNanoConfig, OfflineModelConfig,
-            OfflineRecognizerConfig, ParaformerRuntime, Qwen3AsrConfig, WhisperConfig,
+            prepare_assets, CohereConfig, DenoisedAudio, FunAsrNanoConfig, OfflineModelConfig,
+            OfflineRecognizerConfig, OfflineSpeechDenoiserConfig,
+            OfflineSpeechDenoiserGtcrnModelConfig, OfflineSpeechDenoiserModelConfig,
+            ParaformerRuntime, Qwen3AsrConfig, WhisperConfig,
         };
 
         #[test]
@@ -483,6 +636,35 @@ mod imp {
                 528
             );
             assert_eq!(std::mem::offset_of!(OfflineRecognizerConfig, hr), 584);
+            // 离线语音增强 C API 布局(对齐 c-api.h v1.13.1,4015-4131)。
+            assert_eq!(std::mem::size_of::<OfflineSpeechDenoiserGtcrnModelConfig>(), 8);
+            assert_eq!(std::mem::size_of::<OfflineSpeechDenoiserModelConfig>(), 32);
+            assert_eq!(std::mem::size_of::<OfflineSpeechDenoiserConfig>(), 32);
+            assert_eq!(std::mem::size_of::<DenoisedAudio>(), 16);
+            assert_eq!(
+                std::mem::offset_of!(OfflineSpeechDenoiserModelConfig, gtcrn),
+                0
+            );
+            assert_eq!(
+                std::mem::offset_of!(OfflineSpeechDenoiserModelConfig, num_threads),
+                8
+            );
+            assert_eq!(
+                std::mem::offset_of!(OfflineSpeechDenoiserModelConfig, debug),
+                12
+            );
+            assert_eq!(
+                std::mem::offset_of!(OfflineSpeechDenoiserModelConfig, provider),
+                16
+            );
+            assert_eq!(
+                std::mem::offset_of!(OfflineSpeechDenoiserModelConfig, dpdfnet),
+                24
+            );
+            assert_eq!(std::mem::offset_of!(OfflineSpeechDenoiserConfig, model), 0);
+            assert_eq!(std::mem::offset_of!(DenoisedAudio, samples), 0);
+            assert_eq!(std::mem::offset_of!(DenoisedAudio, n), 8);
+            assert_eq!(std::mem::offset_of!(DenoisedAudio, sample_rate), 12);
         }
 
         #[test]

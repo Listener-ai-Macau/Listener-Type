@@ -209,10 +209,33 @@ pub(crate) struct TempWavFile {
 #[cfg(target_os = "windows")]
 impl TempWavFile {
     pub(crate) fn create(pcm: &[u8]) -> Result<Self> {
+        let wav = pcm_to_wav_with_foundry_context_padding(pcm);
+        Self::write_temp(wav)
+    }
+
+    /// Encode the candidate PCM as a plain 16 kHz / mono / 16-bit WAV **without**
+    /// the lead-silence / minimum-context padding used by the Foundry Whisper
+    /// path.
+    ///
+    /// The local wake confirmation transcribes with Paraformer (an offline
+    /// attention model). Prepending 250 ms of lead silence and padding short
+    /// utterances up to a 4 s context destabilises its transcript of short wake
+    /// phrases: an exact "开始录音" captured cleanly turns into near-misses such
+    /// as "拍始录音", which then fails the ExactStart/PhoneticStart gate. The
+    /// wake helper therefore must transcribe the raw candidate audio as-is.
+    pub(crate) fn create_without_context_padding(pcm: &[u8]) -> Result<Self> {
+        let samples: Vec<i16> = pcm
+            .chunks_exact(2)
+            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        let wav = encode_wav_16k_mono(&samples);
+        Self::write_temp(wav)
+    }
+
+    fn write_temp(wav: Vec<u8>) -> Result<Self> {
         let dir = foundry_temp_dir();
         fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
         let path = dir.join(format!("foundry-whisper-{}.wav", Uuid::new_v4()));
-        let wav = pcm_to_wav_with_foundry_context_padding(pcm);
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -356,6 +379,30 @@ mod tests {
         };
 
         assert!(!path.exists());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn foundry_provider_temp_wav_without_context_padding_keeps_raw_samples() {
+        // The local wake helper transcribes with Paraformer, which must receive
+        // the candidate PCM verbatim: no lead silence and no minimum-context
+        // padding. Padding the utterance destabilises Paraformer on short wake
+        // phrases (an exact "开始录音" degrades to near-misses such as "拍始录音"),
+        // so the padding-free writer has to round-trip the input samples exactly.
+        let samples = [1234i16, -5678, 9, -10];
+        let mut pcm = Vec::with_capacity(samples.len() * 2);
+        for sample in samples {
+            pcm.extend_from_slice(&sample.to_le_bytes());
+        }
+        let temp = super::TempWavFile::create_without_context_padding(&pcm).unwrap();
+        let wav = std::fs::read(temp.path()).unwrap();
+        let decoded = denzic_audio_v1_core::read_wav_pcm16le(&wav).unwrap();
+        let decoded_samples: Vec<i16> = decoded
+            .chunks_exact(2)
+            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+
+        assert_eq!(decoded_samples, samples);
     }
 
     #[test]

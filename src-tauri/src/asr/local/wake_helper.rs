@@ -181,7 +181,7 @@ mod imp {
             if pcm.is_empty() {
                 return Err("local wake helper received empty PCM".to_string());
             }
-            let wav = TempWavFile::create(pcm)
+            let wav = TempWavFile::create_without_context_padding(pcm)
                 .map_err(|err| format!("prepare local wake helper WAV: {err:#}"))?;
             let request_id = Uuid::new_v4().to_string();
             let request = HelperRequest::Confirm {
@@ -277,10 +277,17 @@ mod imp {
     }
 
     fn phrase_relation_matches(relation: crate::wake_phrase::LocalPhraseRelation) -> bool {
+        // KWS 的 3M zipformer 在噪声下会漏掉"开始录音",而本地确认转写的是整段候选
+        // (terminal 路径)或前 1.8~3s(bounded 路径)。连续环境音里唤醒词常出现在候选
+        // 中段而非开头,只认 ExactStart/PhoneticStart 会漏掉这些。这里放宽到也接受
+        // PresentLater:paraformer 在候选任意位置转出完整"开始录音"即视为命中。完整
+        // 4 字短语在环境台词里极少出现,且声纹门(owner_match)会挡掉非机主的声音,
+        // 误触发风险可控。
         matches!(
             relation,
             crate::wake_phrase::LocalPhraseRelation::ExactStart
                 | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
+                | crate::wake_phrase::LocalPhraseRelation::PresentLater
         )
     }
 
@@ -378,13 +385,13 @@ mod imp {
         }
 
         #[test]
-        fn helper_protocol_accepts_only_exact_or_phonetic_phrase_start() {
+        fn helper_protocol_accepts_phrase_present_anywhere_in_transcript() {
             use crate::wake_phrase::LocalPhraseRelation;
 
             for (relation, expected) in [
                 (LocalPhraseRelation::ExactStart, true),
                 (LocalPhraseRelation::PhoneticStart, true),
-                (LocalPhraseRelation::PresentLater, false),
+                (LocalPhraseRelation::PresentLater, true),
                 (LocalPhraseRelation::Absent, false),
             ] {
                 assert_eq!(phrase_relation_matches(relation), expected);

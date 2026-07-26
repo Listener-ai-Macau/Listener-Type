@@ -579,10 +579,7 @@ impl Coordinator {
 
         #[cfg(not(target_os = "windows"))]
         {
-            let history = HistoryStore::new().unwrap_or_else(|e| {
-                log::error!("[coord] HistoryStore init failed: {e}; falling back to empty");
-                HistoryStore::new().expect("history store init")
-            });
+            let history = HistoryStore::new_or_empty();
             let prefs = PreferencesStore::new().expect("preferences store init");
             let style_packs = StylePackStore::new(&prefs).expect("style pack store init");
             let vocab = DictionaryStore::new().expect("dictionary store init");
@@ -659,10 +656,7 @@ impl Coordinator {
 
     #[cfg(target_os = "windows")]
     pub fn new_with_foundry_runtime(foundry_local_runtime: Arc<FoundryLocalRuntime>) -> Self {
-        let history = HistoryStore::new().unwrap_or_else(|e| {
-            log::error!("[coord] HistoryStore init failed: {e}; falling back to empty");
-            HistoryStore::new().expect("history store init")
-        });
+        let history = HistoryStore::new_or_empty();
         let prefs = PreferencesStore::new().expect("preferences store init");
         crate::embedded_ble::set_configured_bluetooth_target_name(&prefs.get().device_ble_name);
         let style_packs = StylePackStore::new(&prefs).expect("style pack store init");
@@ -7147,7 +7141,12 @@ fn should_emit_embedded_ble_recovered_capsule_for_reason(
     let failure = crate::embedded_ble::classify_ble_failure(reason);
     let automatic_recovery = is_embedded_ble_link_loss_error(reason) || failure.automatic_recovery;
     let repeated_automatic_recovery = automatic_recovery && reconnect_attempts > 1;
-    !repeated_automatic_recovery
+    // 对齐 should_emit_embedded_ble_background_recovery_capsule：仅真正的链路恢复
+    // (link loss / automatic recovery) 才弹"已恢复"胶囊。所有权冲突等非链路原因
+    // (例如"当前已有听写会话在运行，暂不能提交嵌入式音频")并不是链路掉线后的恢复,
+    // 若每次 notify-ready 都弹,在重连循环里会变成胶囊刷屏——故对非链路原因一律不弹。
+    automatic_recovery
+        && !repeated_automatic_recovery
         && (!is_embedded_ble_low_power_idle_candidate(reason) || usb_powered == Some(true))
 }
 
@@ -7757,6 +7756,32 @@ async fn insert_with_windows_ime_first(
 
     let ime_status = match inner.windows_ime.submit_prepared(&prepared, request).await {
         Ok(status) => status,
+        Err(error) if error.is_session_not_active() => {
+            // session not active：录音起点 prepare_session 就没激活 Listener Type profile。
+            // 目标窗口仍是用户原 IME，会拦截 SendInput 的 Unicode 事件（insert_via_non_tsf_fallback
+            // 里 SendInput 假阳性返回 Inserted，实际没打字，永远到不了 clipboard 分支）。
+            // 剪贴板里此时已有原文，直接 Ctrl+V 走目标窗口 paste handler 绕开 IME。
+            log::warn!("[windows-ime] TSF submit failed: {error}");
+            inner.windows_ime.restore_session(prepared);
+            if allow_clipboard_fallback {
+                return WindowsInsertionResult {
+                    status: inner.inserter.insert_via_clipboard_fallback(
+                        polished,
+                        restore_clipboard,
+                        paste_shortcut,
+                    ),
+                    target_confirmed: false,
+                };
+            }
+            // 不允许 clipboard 兜底（用户关了剪贴板留存）：退回 SendInput，保持旧行为。
+            return insert_via_non_tsf_fallback(
+                inner,
+                polished,
+                restore_clipboard,
+                allow_clipboard_fallback,
+                paste_shortcut,
+            );
+        }
         Err(error) => {
             log::warn!("[windows-ime] TSF submit failed: {error}");
             InsertStatus::Failed
@@ -10675,6 +10700,60 @@ mod tests {
             "Windows BLE disconnected; reason=546; audio path returned transport_not_ready",
         );
         assert!(record_embedded_ble_notify_ready(&coordinator.inner));
+    }
+
+    #[test]
+    fn recovered_capsule_guard_suppresses_non_link_loss_and_repeated_reconnect() {
+        // 2026-07-25 日志里 reconnect_attempts=303 的重连循环,每次 notify-ready
+        // 都因为"当前已有听写会话在运行"这种所有权冲突(非链路掉线原因)弹了
+        // 录音胶囊,造成胶囊刷屏。守卫现在要求真正的链路恢复才弹,且反复重连不弹。
+        let ownership_conflict = "当前已有听写会话在运行，暂不能提交嵌入式音频";
+        assert!(
+            !should_emit_embedded_ble_recovered_capsule_for_reason(ownership_conflict, None, 0),
+            "ownership conflict is not a link-loss recovery and must not emit a capsule"
+        );
+        assert!(
+            !should_emit_embedded_ble_recovered_capsule_for_reason(
+                ownership_conflict,
+                Some(true),
+                1
+            ),
+            "ownership conflict must not emit even when usb-powered on attempt 1"
+        );
+
+        // refresh / shutdown 等内部原因永远不弹(与既有集成测试一致)
+        assert!(!should_emit_embedded_ble_recovered_capsule_for_reason(
+            "refresh",
+            Some(true),
+            0
+        ));
+        assert!(!should_emit_embedded_ble_recovered_capsule_for_reason(
+            "shutdown",
+            Some(true),
+            0
+        ));
+
+        // 真正的链路掉线(reason=546,通电)首次/单次重连应该弹
+        let link_loss =
+            "Windows BLE disconnected; reason=546; audio path returned transport_not_ready";
+        assert!(
+            should_emit_embedded_ble_recovered_capsule_for_reason(link_loss, Some(true), 0),
+            "genuine link-loss recovery on a fresh reconnect should emit the capsule"
+        );
+        assert!(
+            should_emit_embedded_ble_recovered_capsule_for_reason(link_loss, Some(true), 1),
+            "first reconnect attempt of a link-loss recovery should still emit"
+        );
+
+        // 但反复自动重连(>1)不再弹,避免重连循环刷屏——正是 303 次重连不再刷屏的关键
+        assert!(
+            !should_emit_embedded_ble_recovered_capsule_for_reason(link_loss, Some(true), 2),
+            "repeated automatic reconnect (>1) must not re-emit the recovered capsule"
+        );
+        assert!(
+            !should_emit_embedded_ble_recovered_capsule_for_reason(link_loss, Some(true), 303),
+            "a runaway reconnect loop (303 attempts) must not spam the recovered capsule"
+        );
     }
 
     #[test]

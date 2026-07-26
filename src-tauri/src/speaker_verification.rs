@@ -858,15 +858,27 @@ mod platform {
     }
 
     pub fn verify(pcm: &[u8]) -> Result<VerificationResult, String> {
-        let runtime = ensure_runtime()?;
+        // 小爱同学模式：未注册主人声纹 → 不做说话人校验，唤醒词命中即放行（任何人可唤醒）；
+        // 注册后才执行声纹匹配（仅主人能唤醒）。
+        // 兼带修复旧逻辑的坑：以前未注册时这里返回 Err，导致 gate 把"开始录音"判定为
+        // voiceprint_verification_failed 而拒唤醒——没录声纹反而完全唤醒不了。
+        // 未注册时直接短路返回，避免无谓加载 ONNX runtime/模型（省几百 ms 延迟 + 网络下载）。
         let template = {
             let mut state = STATE.lock();
             load_template_locked(&mut state);
-            state
-                .template
-                .clone()
-                .ok_or_else(|| "voiceprint is not enrolled".to_string())?
+            state.template.clone()
         };
+        let template = match template {
+            Some(template) => template,
+            None => {
+                log::info!(
+                    "[speaker-verification] owner not enrolled — open gate (any speaker may wake), pcm_ms={}",
+                    pcm.len() / 32
+                );
+                return Ok(VerificationResult { matched: true, score: 0.0 });
+            }
+        };
+        let runtime = ensure_runtime()?;
         let candidate_windows = verification_template_windows(pcm)?;
         let candidate_embeddings = candidate_windows
             .iter()

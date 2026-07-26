@@ -1234,8 +1234,8 @@ pub struct UserPreferences {
     pub restore_clipboard_after_paste: bool,
     /// 普通听写结束后把最终文本保留在剪贴板。默认开启；开启时覆盖剪贴板恢复设置。
     pub copy_dictation_to_clipboard: bool,
-    /// 从听写预览和最终文本中移除独立的中文犹豫语气词。默认关闭。
-    #[serde(default)]
+    /// 从听写预览和最终文本中移除独立的中文犹豫语气词。默认开启。
+    #[serde(default = "default_true")]
     pub remove_filler_words: bool,
     /// 普通听写成功插入后是否自动发送提交按键。默认关闭，避免升级后意外提交。
     pub send_key_after_dictation: bool,
@@ -1515,7 +1515,7 @@ struct UserPreferencesWire {
     restore_clipboard_after_paste: bool,
     #[serde(default)]
     copy_dictation_to_clipboard: Option<bool>,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     remove_filler_words: bool,
     send_key_after_dictation: bool,
     #[serde(default)]
@@ -2263,7 +2263,7 @@ impl Default for UserPreferences {
             llm_thinking_enabled: false,
             restore_clipboard_after_paste: true,
             copy_dictation_to_clipboard: true,
-            remove_filler_words: false,
+            remove_filler_words: true,
             send_key_after_dictation: false,
             post_dictation_key: PostDictationKey::default(),
             voice_wake_phrase: default_voice_wake_phrase(),
@@ -3046,14 +3046,14 @@ mod tests {
     fn post_dictation_actions_keep_upgrade_safe_defaults() {
         let prefs = UserPreferences::default();
         assert!(prefs.copy_dictation_to_clipboard);
-        assert!(!prefs.remove_filler_words);
+        assert!(prefs.remove_filler_words);
         assert!(!prefs.send_key_after_dictation);
         assert_eq!(prefs.post_dictation_key, PostDictationKey::Enter);
 
         let from_legacy: UserPreferences =
             serde_json::from_str(r#"{"restoreClipboardAfterPaste":true}"#).unwrap();
         assert!(from_legacy.copy_dictation_to_clipboard);
-        assert!(!from_legacy.remove_filler_words);
+        assert!(from_legacy.remove_filler_words);
         assert!(!from_legacy.send_key_after_dictation);
         assert_eq!(from_legacy.post_dictation_key, PostDictationKey::Enter);
 

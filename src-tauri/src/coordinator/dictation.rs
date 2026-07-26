@@ -50,8 +50,8 @@ const EMBEDDED_BLE_CONTROL_START_SIGNAL_ENV: &str =
     "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_START_SIGNAL";
 const EMBEDDED_BLE_CONTROL_STOP_SIGNAL_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_CONTROL_STOP_SIGNAL";
 const WAKE_DIAGNOSTIC_DIR_ENV: &str = "LISTENER_WAKE_DIAGNOSTIC_DIR";
-const WAKE_DIAGNOSTIC_MAX_CANDIDATES: usize = 5;
-const WAKE_DIAGNOSTIC_MAX_PCM_BYTES: usize = 5 * 16_000 * 2;
+const WAKE_DIAGNOSTIC_MAX_CANDIDATES: usize = 500;
+const WAKE_DIAGNOSTIC_MAX_PCM_BYTES: usize = 12 * 16_000 * 2;
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 
 fn should_restore_clipboard_after_dictation(
@@ -1581,12 +1581,20 @@ fn strip_bounded_wake_phrase_suffix_fragment(text: &str, phrase: &[char]) -> Opt
             }
             consumed_end = index + actual.len_utf8();
         }
-        if !matched
-            || !text[consumed_end..]
-                .chars()
-                .next()
-                .is_some_and(is_embedded_audio_partial_preview_decorative)
-        {
+        let matched_len = phrase.len() - suffix_start;
+        let next_char_is_decorative = text[consumed_end..]
+            .chars()
+            .next()
+            .is_some_and(is_embedded_audio_partial_preview_decorative);
+        // 唤醒过滤器只作用于唤醒后的音频,因此开头的唤醒词尾巴是唤醒词残留
+        // (KWS 的 end 时间戳经常偏早,"开始录音"的"录音"尾巴漏进听写)。后随标点
+        // 时一律剥;另外,≥2 字的尾巴片段(如"录音")即使后面直接接正文也要剥——
+        // 这正是修掉"录音今天…"泄漏的关键。单字尾巴(如"音频测试"的"音")仍要求
+        // 后随标点,避免把真词剪成"频测试"。
+        if !matched || matched_len == 0 {
+            continue;
+        }
+        if !next_char_is_decorative && matched_len < 2 {
             continue;
         }
         return Some(
@@ -1747,7 +1755,58 @@ fn remove_standalone_dictation_fillers(text: &str) -> String {
             output.push_str(&gap);
         }
     }
-    output.trim().to_string()
+    let trimmed = output.trim();
+    strip_inlined_chinese_filler_runs(trimmed)
+}
+
+/// 从连续中文文本里剥离被汉字夹住的犹豫语气词串(嗯/呃/唔)。
+///
+/// [`remove_standalone_dictation_fillers`] 只删被标点/空白分隔的"独立"语气词;
+/// 但中文 ASR 常输出无标点的连续文本(如"今天嗯去测试"),语气词粘连在正文中间,
+/// standalone 检测不到——开关看上去就"没用"。这里把被汉字夹住的嗯/呃/唔串删掉:
+/// 只要语气词串任一侧紧邻普通字(非标点/空白)即视为粘连,予以删除;两侧都是分隔
+/// 符的留给 standalone,避免重复处理。
+///
+/// 只针对嗯/呃/唔:它们在普通话里几乎只作语气词,不会出现在实义词内部。`额`
+/// 故意不在此剥离——它有"额外/金额/名额"等实义用法,粘连删除会误伤,只由
+/// standalone 路径(被标点分隔的独立"额")处理。
+const INLINE_CHINESE_FILLER_CHARS: &[char] = &['嗯', '呃', '唔'];
+
+fn strip_inlined_chinese_filler_runs(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return String::new();
+    }
+    let mut keep = vec![true; chars.len()];
+    let mut i = 0;
+    while i < chars.len() {
+        if !INLINE_CHINESE_FILLER_CHARS.contains(&chars[i]) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < chars.len() && INLINE_CHINESE_FILLER_CHARS.contains(&chars[i]) {
+            i += 1;
+        }
+        let end = i; // 语气词串占据 [start, end)
+        let left_is_word =
+            start > 0 && !is_embedded_audio_partial_preview_decorative(chars[start - 1]);
+        let right_is_word =
+            end < chars.len() && !is_embedded_audio_partial_preview_decorative(chars[end]);
+        // 任一侧紧邻普通字 → 粘连在正文里,删除;两侧都是分隔符 → 交给 standalone。
+        if left_is_word || right_is_word {
+            for j in start..end {
+                keep[j] = false;
+            }
+        }
+    }
+    let mut out = String::with_capacity(text.len());
+    for (idx, ch) in chars.iter().enumerate() {
+        if keep[idx] {
+            out.push(*ch);
+        }
+    }
+    out.trim().to_string()
 }
 
 fn filter_dictation_preview_text(inner: &Arc<Inner>, session_id: SessionId, text: &str) -> String {
@@ -2083,6 +2142,17 @@ struct EmbeddedAudioDictationSession {
     streaming_pcm_buffer: Vec<u8>,
     streaming_agc: EmbeddedStreamingAgcState,
     device_ai_processing_started: bool,
+    // Proactive trailing-silence stop (改A) state. See
+    // EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS and consume_prepared_streaming_pcm.
+    proactive_stop_body_started: bool,
+    proactive_stop_silence_ms: u64,
+    proactive_stop_dispatched: bool,
+    // A-desktop 诊断: 正式录音期常驻一个 KWS 监听唤醒词,命中只观测、不切分、
+    // 不影响转写。目的是在投入完整会话切分前,先实测噪声场景下"录音中误命中
+    // 唤醒词"的频率——这决定设备端式唤醒-续录方案是否可行。见 A-desktop 计划。
+    reactivation_detector: Option<crate::wake_phrase::StreamingDetector>,
+    reactivation_triggered: bool,
+    reactivation_hit_count: u32,
 }
 
 impl EmbeddedAudioDictationSession {
@@ -2162,6 +2232,21 @@ impl EmbeddedAudioDictationSession {
             self.streaming_agc
                 .first_voiced_pcm_ms
                 .get_or_insert(source_pcm_offset_ms);
+        }
+
+        // 改A: track sustained trailing silence AFTER the body has started so the
+        // caller can request a host-initiated device stop early. Leading silence
+        // (before the user speaks the dictation body) and post-stop tails never
+        // count toward the threshold.
+        let chunk_ms = (pcm.len() / 32) as u64;
+        let (signal_rms, signal_peak) = embedded_pcm_streaming_agc_signal_level(pcm);
+        if embedded_streaming_chunk_has_speech_energy(signal_rms, signal_peak) {
+            self.proactive_stop_body_started = true;
+            self.proactive_stop_silence_ms = 0;
+        } else if self.proactive_stop_body_started {
+            self.proactive_stop_silence_ms = self
+                .proactive_stop_silence_ms
+                .saturating_add(chunk_ms);
         }
 
         self.normalized_pcm_bytes += asr_pcm.len();
@@ -2336,13 +2421,30 @@ struct LocalWakeConfirmation {
 
 const MAX_BUFFERED_SPEAKER_CANDIDATE_BYTES: usize = 2_100_000;
 const STREAMING_KWS_FEED_BATCH_BYTES: usize = 1_600;
+/// Proactive trailing-silence stop (改A) — DISABLED. A fixed energy-silence
+/// threshold cannot distinguish a mid-sentence pause from a real
+/// end-of-utterance, so any value that beats the firmware `auto_stop_silence`
+/// timeout (observed 3-14s) truncates speech. User acceptance 2026-07-26:
+/// "话还没说完就结束了". Set well above the firmware's max auto_stop so the
+/// device's own endpointer always wins and this path stays dormant. The proper
+/// fix is a content-aware endpoint (ASR sentence boundary) and/or device-side
+/// wake word detection — see the 治本 plan. Do not lower this again until one of
+/// those gates the dispatch.
+const EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS: u64 = 30_000;
 const OWNER_VERIFICATION_START_MS: usize = 1_100;
 const OWNER_VERIFICATION_START_BYTES: usize = OWNER_VERIFICATION_START_MS * 32;
 const OWNER_VERIFICATION_SNAPSHOT_MS: [usize; 3] = [OWNER_VERIFICATION_START_MS, 1_800, 2_400];
 const LOCAL_CONFIRMATION_START_MS: usize =
     denzic_voice_activation_v1_core::DEFAULT_LOCAL_CONFIRMATION_START_MS as usize;
 const LOCAL_CONFIRMATION_START_BYTES: usize = LOCAL_CONFIRMATION_START_MS * 32;
-const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 3] = [LOCAL_CONFIRMATION_START_MS, 2_400, 3_000];
+const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
+    LOCAL_CONFIRMATION_START_MS,
+    2_400,
+    3_000,
+    5_000,
+    8_000,
+    12_000,
+];
 
 fn owner_verification_window_ready(pcm_bytes: usize) -> bool {
     pcm_bytes >= OWNER_VERIFICATION_START_BYTES
@@ -3911,6 +4013,87 @@ impl EmbeddedStreamingDictation {
         self.apply_ble_packet_actor_command(inner, event).await
     }
 
+    /// A-desktop 诊断: 正式录音期把 PCM 喂给一个常驻 KWS,命中唤醒词只记日志、
+    /// 不切分、不影响转写。目的是实测噪声中"录音内误命中唤醒词"的频率,
+    /// 据此决定完整续录方案(命中→提前停+缓存PCM灌入新会话)是否可行。
+    async fn feed_reactivation_detector(&mut self, inner: &Arc<Inner>, pcm: &[u8]) {
+        let (already_triggered, needs_create) = match self.session.as_ref() {
+            Some(session) => (
+                session.reactivation_triggered,
+                session.reactivation_detector.is_none(),
+            ),
+            None => return,
+        };
+        if already_triggered {
+            return;
+        }
+        if needs_create {
+            let phrase = inner.prefs.get().voice_wake_phrase.clone();
+            match tauri::async_runtime::spawn_blocking(move || {
+                // A-desktop 诊断:用严格 detector(不生成"去首字/去末字"前缀变体),
+                // 避免正式录音中"开始录像/录入"等近似音误命中。TTS 实测严格模式 0/10
+                // 误命中(宽松 4/10)。真人场景误命中率以本诊断版实测 [A-desktop-diag] 为准。
+                crate::wake_phrase::StreamingDetector::new_strict(&phrase)
+            })
+            .await
+            {
+                Ok(Ok(detector)) => {
+                    if let Some(session) = self.session.as_mut() {
+                        session.reactivation_detector = Some(detector);
+                    }
+                }
+                Ok(Err(err)) => {
+                    log::warn!("[A-desktop-diag] reactivation detector init failed: {err}");
+                    return;
+                }
+                Err(err) => {
+                    log::warn!("[A-desktop-diag] reactivation detector init task failed: {err}");
+                    return;
+                }
+            }
+        }
+        let Some(mut detector) = self
+            .session
+            .as_mut()
+            .and_then(|session| session.reactivation_detector.take())
+        else {
+            return;
+        };
+        let pcm_vec = pcm.to_vec();
+        let accepted = tauri::async_runtime::spawn_blocking(move || {
+            let result = detector.accept_pcm(&pcm_vec);
+            (detector, result)
+        })
+        .await;
+        match accepted {
+            Ok((detector, Ok(Some(_)))) => {
+                if let Some(session) = self.session.as_mut() {
+                    session.reactivation_triggered = true;
+                    session.reactivation_hit_count =
+                        session.reactivation_hit_count.saturating_add(1);
+                    log::info!(
+                        "[A-desktop-diag] reactivation wake hit session_id={:?} hit_count={} (diagnostic only, transcript untouched)",
+                        session.session_id,
+                        session.reactivation_hit_count
+                    );
+                }
+                drop(detector);
+            }
+            Ok((detector, Ok(None))) => {
+                if let Some(session) = self.session.as_mut() {
+                    session.reactivation_detector = Some(detector);
+                }
+            }
+            Ok((detector, Err(err))) => {
+                log::warn!("[A-desktop-diag] reactivation accept_pcm failed: {err}");
+                drop(detector);
+            }
+            Err(err) => {
+                log::warn!("[A-desktop-diag] reactivation accept_pcm task failed: {err}");
+            }
+        }
+    }
+
     async fn apply_ble_packet_actor_command(
         &mut self,
         inner: &Arc<Inner>,
@@ -3962,12 +4145,41 @@ impl EmbeddedStreamingDictation {
                 if embedded_streaming_chunk_is_asr_input(&chunk) {
                     self.begin_session_if_needed(inner, chunk.session_id)
                         .await?;
-                    let session = self
-                        .session
-                        .as_mut()
-                        .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
-                    crate::observability::record_embedded_audio_first_packet(session.session_id);
-                    session.consume_streaming_pcm(inner, &chunk.pcm)?;
+                    self.feed_reactivation_detector(inner, &chunk.pcm).await;
+                    let proactive_stop_due = {
+                        let session = self
+                            .session
+                            .as_mut()
+                            .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
+                        crate::observability::record_embedded_audio_first_packet(session.session_id);
+                        session.consume_streaming_pcm(inner, &chunk.pcm)?;
+                        // 改A: body started + sustained trailing silence + not yet dispatched.
+                        session.proactive_stop_body_started
+                            && session.proactive_stop_silence_ms
+                                >= EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS
+                            && !session.proactive_stop_dispatched
+                    };
+                    if proactive_stop_due {
+                        // Mirror stop_dictation: ask the firmware to cut the session
+                        // short. The device then emits Stopped, which drives the normal
+                        // finish_completed_streaming_session path — no bespoke finish.
+                        let stop_sent = request_embedded_ble_recording_stop_from_host(
+                            inner,
+                            "proactive_trailing_silence",
+                        )
+                        .await
+                        .unwrap_or(false);
+                        if stop_sent {
+                            if let Some(session) = self.session.as_mut() {
+                                session.proactive_stop_dispatched = true;
+                            }
+                            log::info!(
+                                "[coord] embedded audio proactive trailing-silence stop sent (session_id={}, silence_ms>={})",
+                                chunk.session_id,
+                                EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS
+                            );
+                        }
+                    }
                 } else {
                     log::info!(
                         "[coord] embedded audio streaming tail packet excluded from ASR after STOP (session_id={}, packet_sequence={}, pcm_bytes={})",
@@ -4109,7 +4321,11 @@ impl EmbeddedStreamingDictation {
             let wake_detector = if candidate_kind == BufferedSpeakerCandidateKind::Verification {
                 let phrase = inner.prefs.get().voice_wake_phrase;
                 match tauri::async_runtime::spawn_blocking(move || {
-                    crate::wake_phrase::StreamingDetector::new(&phrase)
+                    // 主唤醒用严格模式(去前缀变体),避免"开始录像/录入/路演"等近音误唤醒。
+                    // 此前误用宽松 new():生成 trailing 变体"开始录" + bootstrap 阈值 0.08,
+                    // 导致任何"开始XX"被低阈值误命中进录音。严格模式 TTS 实测 0/10 误命中
+                    // 且正样本(完整"开始录音")全命中,与诊断续唤路径(new_strict)一致。
+                    crate::wake_phrase::StreamingDetector::new_strict(&phrase)
                 })
                 .await
                 {
@@ -5272,6 +5488,12 @@ async fn begin_embedded_audio_dictation_session(
         streaming_pcm_buffer: Vec::new(),
         streaming_agc: EmbeddedStreamingAgcState::default(),
         device_ai_processing_started: false,
+        proactive_stop_body_started: false,
+        proactive_stop_silence_ms: 0,
+        proactive_stop_dispatched: false,
+        reactivation_detector: None,
+        reactivation_triggered: false,
+        reactivation_hit_count: 0,
     })
 }
 
@@ -6999,6 +7221,7 @@ mod tests {
         EmbeddedStreamingAgcState, EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
         DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
         EMBEDDED_AUDIO_MAX_GAIN, EMBEDDED_AUDIO_STREAMING_SPEECH_RMS, EMBEDDED_AUDIO_TARGET_RMS,
+        EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS,
         EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, LOCAL_CONFIRMATION_START_BYTES,
         LOCAL_CONFIRMATION_START_MS,
     };
@@ -7094,6 +7317,22 @@ mod tests {
             strip_wake_phrase_prefix("音频测试继续。", "开始录音", true),
             "音频测试继续。"
         );
+        // KWS end 时间戳偏早,"开始录音"的"录音"尾巴漏进听写,且后面直接接正文(无
+        // 标点)。旧的"必须后随标点才剥"会让"录音今天…"泄漏——这里验证 ≥2 字尾巴
+        // 片段不再需要标点也能剥掉。
+        assert_eq!(
+            strip_wake_phrase_prefix("录音今天天气不错", "开始录音", false),
+            "今天天气不错"
+        );
+        assert_eq!(
+            strip_wake_phrase_prefix("录音今天天气不错", "开始录音", true),
+            "今天天气不错"
+        );
+        // 拼音近似的尾巴残留(录因≈录音)同样要剥。
+        assert_eq!(
+            strip_wake_phrase_prefix("录因今天要开会", "开始录音", false),
+            "今天要开会"
+        );
         assert_eq!(
             strip_wake_phrase_prefix("今天要说开始录音这个词。", "开始录音", true),
             "今天要说开始录音这个词。"
@@ -7105,6 +7344,36 @@ mod tests {
         assert_eq!(
             remove_standalone_dictation_fillers("今天，嗯，我要测试。"),
             "今天，我要测试。"
+        );
+        assert_eq!(
+            remove_standalone_dictation_fillers("那个文件就是额外版本。"),
+            "那个文件就是额外版本。"
+        );
+    }
+
+    #[test]
+    fn remove_standalone_dictation_fillers_also_strips_inlined_chinese_fillers() {
+        // 中文 ASR 常输出无标点的连续文本,语气词粘连在正文里——standalone 删不掉,
+        // 这是用户觉得"开关没用"的根因。这里验证粘连的嗯/呃/唔会被剥离。
+        assert_eq!(
+            remove_standalone_dictation_fillers("今天嗯去测试"),
+            "今天去测试"
+        );
+        assert_eq!(
+            remove_standalone_dictation_fillers("那个嗯文件"),
+            "那个文件"
+        );
+        assert_eq!(remove_standalone_dictation_fillers("呃我不知道"), "我不知道");
+        assert_eq!(remove_standalone_dictation_fillers("今天嗯嗯去"), "今天去");
+        // 句首/句尾的粘连语气词也要去掉
+        assert_eq!(remove_standalone_dictation_fillers("嗯今天嗯去嗯"), "今天去");
+        // 额有实义(额外/金额/名额),不剥离——只删被标点分隔的独立"额"
+        assert_eq!(remove_standalone_dictation_fillers("金额是一百"), "金额是一百");
+        assert_eq!(remove_standalone_dictation_fillers("额外版本"), "额外版本");
+        // 被标点分隔的独立语气词仍由 standalone 正常删除,不回归
+        assert_eq!(
+            remove_standalone_dictation_fillers("嗯，呃，今天测试。"),
+            "今天测试。"
         );
         assert_eq!(
             remove_standalone_dictation_fillers("那个文件就是额外版本。"),
@@ -7301,6 +7570,12 @@ mod tests {
             streaming_pcm_buffer: Vec::new(),
             streaming_agc: EmbeddedStreamingAgcState::default(),
             device_ai_processing_started: false,
+            proactive_stop_body_started: false,
+            proactive_stop_silence_ms: 0,
+            proactive_stop_dispatched: false,
+            reactivation_detector: None,
+            reactivation_triggered: false,
+            reactivation_hit_count: 0,
         }
     }
 
@@ -7989,6 +8264,56 @@ mod tests {
     }
 
     #[test]
+    fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
+        let coordinator = Coordinator::new();
+        let session_id = new_session_id();
+        {
+            let mut state = coordinator.inner.state.lock();
+            state.session_id = session_id;
+            state.phase = SessionPhase::Listening;
+            state.cancelled = false;
+        }
+        let consumer = Arc::new(CountingConsumer::default());
+        let consumer_for_session: Arc<dyn crate::recorder::AudioConsumer> = consumer.clone();
+        let mut session = embedded_audio_test_session(session_id, consumer_for_session);
+
+        // Leading silence before the body must not arm the proactive stop.
+        let silence = pcm_from_samples(&samples_for_ms(200, 0));
+        session
+            .consume_streaming_pcm(&coordinator.inner, &silence)
+            .expect("leading silence accepted");
+        assert!(!session.proactive_stop_body_started);
+        assert_eq!(session.proactive_stop_silence_ms, 0);
+
+        // A voiced block starts the body and zeroes trailing silence.
+        let voiced = pcm_from_samples(&samples_for_ms(100, 3_000));
+        session
+            .consume_streaming_pcm(&coordinator.inner, &voiced)
+            .expect("voiced body accepted");
+        assert!(session.proactive_stop_body_started);
+        assert_eq!(session.proactive_stop_silence_ms, 0);
+
+        // Trailing silence accumulates only after the body has started, but a
+        // single short gap must not yet cross the proactive-stop threshold.
+        session
+            .consume_streaming_pcm(&coordinator.inner, &silence)
+            .expect("trailing silence accepted");
+        assert!(session.proactive_stop_silence_ms > 0);
+        assert!(
+            session.proactive_stop_silence_ms < EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS,
+            "a single 200ms gap should not yet cross the 1.2s threshold"
+        );
+
+        // Resuming speech resets the trailing-silence accumulator.
+        session
+            .consume_streaming_pcm(&coordinator.inner, &voiced)
+            .expect("resume body accepted");
+        assert_eq!(session.proactive_stop_silence_ms, 0);
+        // The dispatcher lives in the packet handler; the session only exposes readiness.
+        assert!(!session.proactive_stop_dispatched);
+    }
+
+    #[test]
     fn embedded_streaming_pcm_flushes_final_partial_block_once() {
         let coordinator = Coordinator::new();
         let session_id = new_session_id();
@@ -8350,7 +8675,19 @@ mod tests {
             super::next_local_confirmation_snapshot_bytes(2),
             Some(3_000 * 32)
         );
-        assert_eq!(super::next_local_confirmation_snapshot_bytes(3), None);
+        assert_eq!(
+            super::next_local_confirmation_snapshot_bytes(3),
+            Some(5_000 * 32)
+        );
+        assert_eq!(
+            super::next_local_confirmation_snapshot_bytes(4),
+            Some(8_000 * 32)
+        );
+        assert_eq!(
+            super::next_local_confirmation_snapshot_bytes(5),
+            Some(12_000 * 32)
+        );
+        assert_eq!(super::next_local_confirmation_snapshot_bytes(6), None);
     }
 
     #[test]

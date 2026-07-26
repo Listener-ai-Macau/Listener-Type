@@ -482,7 +482,7 @@ mod platform {
         ))
     }
 
-    fn keyword_tokens(phrase: &str, score: f32, threshold: f32) -> Result<String, String> {
+    fn keyword_tokens(phrase: &str, score: f32, threshold: f32, emit_variants: bool) -> Result<String, String> {
         let phrase = phrase.trim().replace(char::is_whitespace, "");
         if phrase.is_empty() || phrase.chars().count() > 16 {
             return Err("唤醒词应为 1 到 16 个汉字".into());
@@ -491,7 +491,7 @@ mod platform {
             keyword_entry(&phrase, &phrase, score, threshold, true)?,
             keyword_entry(&phrase, &phrase, score, threshold, false)?,
         ];
-        if phrase.chars().count() >= 4 {
+        if emit_variants && phrase.chars().count() >= 4 {
             let leading_trimmed = phrase.chars().skip(1).collect::<String>();
             let trailing_trimmed = phrase
                 .chars()
@@ -520,7 +520,7 @@ mod platform {
         CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "模型路径无效".into())
     }
 
-    fn load_with_config(phrase: &str, score: f32, threshold: f32) -> Result<Arc<Runtime>, String> {
+    fn load_with_config(phrase: &str, score: f32, threshold: f32, emit_variants: bool) -> Result<Arc<Runtime>, String> {
         if let Some((cached_phrase, cached_score, cached_threshold, runtime)) =
             CACHE.lock().as_ref()
         {
@@ -543,7 +543,7 @@ mod platform {
         let provider = CString::new("cpu").unwrap();
         let modeling_unit = CString::new("cjkchar").unwrap();
         let keyword =
-            CString::new(keyword_tokens(phrase, score, threshold)?).map_err(|_| "唤醒词无效")?;
+            CString::new(keyword_tokens(phrase, score, threshold, emit_variants)?).map_err(|_| "唤醒词无效")?;
         unsafe {
             let onnx = Library::new(dll_root.join("onnxruntime.dll")).map_err(|e| e.to_string())?;
             let providers = Library::new(dll_root.join("onnxruntime_providers_shared.dll"))
@@ -640,7 +640,7 @@ mod platform {
 
     fn load(phrase: &str) -> Result<Arc<Runtime>, String> {
         let (score, threshold) = configured_keyword_values(phrase);
-        load_with_config(phrase, score, threshold)
+        load_with_config(phrase, score, threshold, true)
     }
 
     fn normalization_gain(pcm: &[u8]) -> f32 {
@@ -754,8 +754,29 @@ mod platform {
             })
         }
 
-        fn new_with_config(phrase: &str, score: f32, threshold: f32) -> Result<Self, String> {
-            let runtime = load_with_config(phrase, score, threshold)?;
+        fn new_with_config(phrase: &str, score: f32, threshold: f32, emit_variants: bool) -> Result<Self, String> {
+            let runtime = load_with_config(phrase, score, threshold, emit_variants)?;
+            let stream = unsafe { (runtime.create_stream)(runtime.spotter) };
+            if stream.is_null() {
+                return Err("创建唤醒词流失败".into());
+            }
+            Ok(Self {
+                runtime,
+                stream,
+                normalizer: StreamingNormalizer::default(),
+                found: None,
+                finished: false,
+            })
+        }
+
+        /// 严格模式:不生成"去首字/去末字"前缀变体,只认完整唤醒词。
+        /// 用于 A-desktop 录音期续唤——前缀变体会让"开始录像/录入/路演"等近似音
+        /// 误命中(TTS 实测 4/10),严格模式 TTS 实测 0/10 且正样本仍命中。代价是
+        /// 对吞字/含糊的容忍度降低,故仅用于录音期续唤,唤醒候选阶段仍用 new()。
+        /// 注:0/10 是 TTS(机械声)数据,真人连读/方言可能不同,上线前需实测。
+        pub fn new_strict(phrase: &str) -> Result<Self, String> {
+            let (score, threshold) = configured_keyword_values(phrase);
+            let runtime = load_with_config(phrase, score, threshold, false)?;
             let stream = unsafe { (runtime.create_stream)(runtime.spotter) };
             if stream.is_null() {
                 return Err("创建唤醒词流失败".into());
@@ -878,7 +899,7 @@ mod platform {
             "[wake-phrase] normalized candidate pcm_bytes={} gain={gain:.2} score={score:.1} threshold={threshold:.2}",
             pcm.len(),
         );
-        let mut detector = StreamingDetector::new_with_config(phrase, score, threshold)?;
+        let mut detector = StreamingDetector::new_with_config(phrase, score, threshold, true)?;
         detector.accept_pcm(pcm)?;
         detector.finish()
     }
@@ -936,7 +957,7 @@ mod platform {
         fn chinese_phrase_is_tokenized_for_phone_pinyin_model() {
             assert_eq!(CONTINUOUS_SPEECH_TRAILING_BLANKS, 0);
             assert_eq!(
-                keyword_tokens("开始录音", KEYWORD_SCORE, KEYWORD_THRESHOLD).expect("tokens"),
+                keyword_tokens("开始录音", KEYWORD_SCORE, KEYWORD_THRESHOLD, true).expect("tokens"),
                 concat!(
                     "k āi sh ǐ l ù y īn :1.5 #0.25 @开始录音\n",
                     "k ai sh i l u y in :1.5 #0.25 @开始录音\n",
@@ -945,7 +966,7 @@ mod platform {
                 )
             );
             assert_eq!(
-                keyword_tokens("录音", KEYWORD_SCORE, KEYWORD_THRESHOLD).expect("tokens"),
+                keyword_tokens("录音", KEYWORD_SCORE, KEYWORD_THRESHOLD, true).expect("tokens"),
                 concat!("l ù y īn :1.5 #0.25 @录音\n", "l u y in :1.5 #0.25 @录音")
             );
         }
@@ -1118,6 +1139,116 @@ mod platform {
                 );
             }
             println!("streaming_wake_negative_matrix total_pcm_ms={total_pcm_ms}");
+        }
+
+        /// A-desktop 诊断闭环: 扫描 LISTENER_WAKE_DIAG_DIR 下 wake_*.wav(应命中)
+        /// 和 neg_*.wav(不应命中),逐个打印 streaming 命中。设 LISTENER_WAKE_THRESHOLD
+        /// 可测调高阈值能否在保正样本命中的前提下压下"开始+两字"类误命中。
+        #[test]
+        #[ignore = "diagnostic: scan LISTENER_WAKE_DIAG_DIR wake_/neg_ wavs"]
+        fn diagnostic_scan_negative_clips() {
+            let phrase = std::env::var("LISTENER_WAKE_PHRASE")
+                .unwrap_or_else(|_| "开始录音".to_string());
+            let dir = std::env::var("LISTENER_WAKE_DIAG_DIR")
+                .unwrap_or_else(|_| "target/wake_diag".to_string());
+            let threshold = std::env::var("LISTENER_WAKE_THRESHOLD")
+                .ok()
+                .and_then(|t| t.parse::<f32>().ok());
+            // score 固定为产品 BOOTSTRAP_KEYWORD_SCORE=3.0,只扫 threshold,保证数据点可比;
+            // baseline(threshold 未设)用 BOOTSTRAP_KEYWORD_THRESHOLD=0.08 对齐产品默认。
+            let effective_threshold = threshold.unwrap_or(0.08);
+            let make_detector = || -> Result<StreamingDetector, String> {
+                StreamingDetector::new_with_config(&phrase, 3.0, effective_threshold, false)
+            };
+            let mut wake_total = 0usize;
+            let mut wake_hit = 0usize;
+            let mut neg_total = 0usize;
+            let mut neg_hit = 0usize;
+            for entry in fs::read_dir(&dir).expect("diag dir") {
+                let path = entry.expect("entry").path();
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let is_wake = name.starts_with("wake_");
+                let is_neg = name.starts_with("neg_");
+                if (!is_wake && !is_neg) || path.extension().and_then(|e| e.to_str()) != Some("wav") {
+                    continue;
+                }
+                let wav = fs::read(&path).expect("wav");
+                let pcm = wav_pcm(&wav);
+                let mut streaming_hit = false;
+                let mut detector = make_detector().expect("detector");
+                for chunk in pcm.chunks(320) {
+                    if detector.accept_pcm(chunk).expect("accept").is_some() {
+                        streaming_hit = true;
+                        break;
+                    }
+                }
+                if is_wake {
+                    wake_total += 1;
+                    if streaming_hit {
+                        wake_hit += 1;
+                    }
+                } else {
+                    neg_total += 1;
+                    if streaming_hit {
+                        neg_hit += 1;
+                    }
+                }
+                println!(
+                    "diag {} kind={} streaming_hit={} pcm_ms={} threshold={:?}",
+                    name,
+                    if is_wake { "wake" } else { "neg" },
+                    streaming_hit,
+                    pcm.len() / 32,
+                    threshold
+                );
+            }
+            println!(
+                "summary wake_hit={}/{} neg_false_trigger={}/{} threshold={:?}",
+                wake_hit, wake_total, neg_hit, neg_total, threshold
+            );
+        }
+
+        /// A-desktop 可行性的代码级保证:new_strict 对完整唤醒词命中,
+        /// 对"开始录像/录入/路演"近似音不命中(TTS 数据,真人待实测)。
+        #[test]
+        #[ignore = "diagnostic: needs LISTENER_WAKE_DIAG_DIR wavs"]
+        fn strict_detector_suppresses_prefix_variant_false_triggers() {
+            let phrase = std::env::var("LISTENER_WAKE_PHRASE")
+                .unwrap_or_else(|_| "开始录音".to_string());
+            let dir = std::env::var("LISTENER_WAKE_DIAG_DIR")
+                .unwrap_or_else(|_| "target/wake_diag".to_string());
+            let wake_wav = fs::read(format!("{}/wake_huihui.wav", dir)).expect("wake wav");
+            let wake_pcm = wav_pcm(&wake_wav);
+            let mut wake_hit = false;
+            let mut wake_det = StreamingDetector::new_strict(&phrase).expect("strict detector");
+            for chunk in wake_pcm.chunks(320) {
+                if wake_det.accept_pcm(chunk).expect("accept").is_some() {
+                    wake_hit = true;
+                    break;
+                }
+            }
+            assert!(wake_hit, "new_strict 必须识别完整唤醒词 {}", phrase);
+            for name in &["neg_kaishi_luxiang", "neg_kaishi_luru", "neg_kaishi_luyan"] {
+                let path = format!("{}/{}.wav", dir, name);
+                if !std::path::Path::new(&path).exists() {
+                    continue;
+                }
+                let neg_wav = fs::read(&path).expect("neg wav");
+                let neg_pcm = wav_pcm(&neg_wav);
+                let mut det = StreamingDetector::new_strict(&phrase).expect("strict detector");
+                let mut hit = false;
+                for chunk in neg_pcm.chunks(320) {
+                    if det.accept_pcm(chunk).expect("accept").is_some() {
+                        hit = true;
+                        break;
+                    }
+                }
+                assert!(!hit, "new_strict 对近似音 {} 不应命中", name);
+            }
         }
     }
 }

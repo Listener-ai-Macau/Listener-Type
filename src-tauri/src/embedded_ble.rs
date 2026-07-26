@@ -7904,7 +7904,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
         let (dis_model, dis_hardware, dis_firmware, dis_battery) =
             read_dis_metadata_from_discovered_services(target.bluetooth_address);
         snapshot.hardware_revision =
-            normalize_optional_hardware_revision(dis_hardware).or(dis_model);
+            normalize_listener_ota_hardware_revision(dis_model, dis_hardware);
         snapshot.firmware_version = dis_firmware;
         snapshot.battery_percent = dis_battery;
         if let Some(device) = target.device.as_ref() {
@@ -7920,7 +7920,7 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                     DIS_HARDWARE_REVISION_UUID,
                 );
                 snapshot.hardware_revision =
-                    normalize_optional_hardware_revision(hardware).or(model);
+                    normalize_listener_ota_hardware_revision(model, hardware);
             }
             if snapshot.firmware_version.is_none() {
                 snapshot.firmware_version = read_optional_string_characteristic(
@@ -7972,11 +7972,11 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 crate::embedded_ble::format_bluetooth_address(value)
             )
         });
-        let (_, dis_hardware, dis_firmware, dis_battery) =
+        let (dis_model, dis_hardware, dis_firmware, dis_battery) =
             read_dis_metadata_from_discovered_services(target.bluetooth_address);
         let snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
             connected: true,
-            hardware_revision: dis_hardware,
+            hardware_revision: normalize_listener_ota_hardware_revision(dis_model, dis_hardware),
             firmware_version: dis_firmware,
             capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],
             battery_percent: dis_battery,
@@ -9643,6 +9643,14 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
     fn normalize_optional_hardware_revision(value: Option<String>) -> Option<String> {
         value.map(|raw| normalize_listener_hardware_revision(&raw).unwrap_or(raw))
+    }
+
+    fn normalize_listener_ota_hardware_revision(
+        model: Option<String>,
+        hardware: Option<String>,
+    ) -> Option<String> {
+        normalize_optional_hardware_revision(hardware)
+            .or_else(|| normalize_optional_hardware_revision(model))
     }
 
     fn normalize_listener_hardware_revision(value: &str) -> Option<String> {
@@ -13634,6 +13642,30 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
 
             drop(scope);
             assert!(!notify_capture_cancel_requested());
+        }
+
+        #[test]
+        fn listener_ota_v2_dis_aliases_share_one_package_revision() {
+            for revision in [
+                "keyboard-v2-n16r8",
+                "voice-keyboard-v2-n16r8",
+                "esp32s3-wroom-1-n16r8",
+            ] {
+                assert_eq!(
+                    normalize_listener_ota_hardware_revision(
+                        Some("keyboard-v2".to_string()),
+                        Some(revision.to_string()),
+                    ),
+                    Some("keyboard-v2-n16r8".to_string())
+                );
+            }
+            assert_eq!(
+                normalize_listener_ota_hardware_revision(
+                    Some("keyboard-v1".to_string()),
+                    Some("esp32s3-devkit".to_string()),
+                ),
+                Some("esp32s3-devkit".to_string())
+            );
         }
 
         #[test]

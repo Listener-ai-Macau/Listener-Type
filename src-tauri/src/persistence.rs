@@ -1055,6 +1055,24 @@ impl HistoryStore {
         })
     }
 
+    /// 与 `new()` 相同，但 IO 失败时优雅降级为空历史而不是 panic。
+    ///
+    /// 返回一个指向空路径的占位实例：读取走 `read_or_default`，对不存在的路径
+    /// 返回空 `Vec`；写入会失败，但所有调用方都已吞掉写入错误。用于让 Coordinator
+    /// 在 `data_dir` 不可写 / 磁盘满 / 被 EDR 拦截等情况下仍能启动，而不是崩溃。
+    pub fn new_or_empty() -> Self {
+        match Self::new() {
+            Ok(store) => store,
+            Err(e) => {
+                log::warn!("[history] init failed, running with empty in-memory history: {}", e);
+                Self {
+                    path: PathBuf::new(),
+                    lock: Mutex::new(()),
+                }
+            }
+        }
+    }
+
     pub fn list(&self) -> Result<Vec<DictationSession>> {
         let _guard = self.lock.lock();
         self.read_locked()

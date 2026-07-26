@@ -21,6 +21,20 @@ impl std::fmt::Display for WindowsImeSessionError {
 
 impl std::error::Error for WindowsImeSessionError {}
 
+impl WindowsImeSessionError {
+    /// submit_prepared 在 prepared session 未激活时报此错。根因是录音起点
+    /// prepare_session() 失败（capture active profile 失败 → unavailable；或 activate
+    /// Listener Type profile 失败 → activation_failed），但失败状态被无条件 store 进 slot。
+    /// 此时目标窗口仍挂着用户原 IME，会拦截 SendInput 的 Unicode 事件（假阳性 Inserted，
+    /// 实际没打字）。调用方命中此错时应改走 clipboard+Ctrl+V 绕开 IME。
+    pub fn is_session_not_active(&self) -> bool {
+        matches!(
+            self,
+            Self::Ipc(message) if message == "Listener Type IME session is not active"
+        )
+    }
+}
+
 pub fn map_ime_status_to_insert_status(status: ImeSubmitStatus) -> InsertStatus {
     match status {
         ImeSubmitStatus::Committed => InsertStatus::Inserted,
@@ -218,9 +232,20 @@ mod tests {
             )
             .await;
 
-        assert!(
-            matches!(result, Err(WindowsImeSessionError::Ipc(message)) if message == "Listener Type IME session is not active")
-        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().is_session_not_active());
+    }
+
+    #[test]
+    fn session_not_active_classifies_only_the_unavailable_ipc_error() {
+        assert!(WindowsImeSessionError::Ipc(
+            "Listener Type IME session is not active".to_string()
+        )
+        .is_session_not_active());
+        assert!(!WindowsImeSessionError::Ipc("some other ipc error".to_string())
+            .is_session_not_active());
+        assert!(!WindowsImeSessionError::Profile("profile error".to_string())
+            .is_session_not_active());
     }
 
     #[test]
