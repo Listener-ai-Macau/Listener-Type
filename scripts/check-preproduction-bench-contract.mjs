@@ -13,11 +13,15 @@ const totalReviewAdvanceScript = path.join(repoRoot, "scripts", "advance-preprod
 const scenarioManifestPath = path.join(repoRoot, "scripts", "listener-preproduction-scenarios.json");
 const deviceSectionPath = path.join(repoRoot, "src", "pages", "settings", "DeviceSection.tsx");
 const firmwareOtaPanelPath = path.join(repoRoot, "src", "pages", "settings", "FirmwareOtaPanel.tsx");
-const commandsPath = path.join(repoRoot, "src-tauri", "src", "commands.rs");
+const commandsDir = path.join(repoRoot, "src-tauri", "src", "commands");
 const coordinatorPath = path.join(repoRoot, "src-tauri", "src", "coordinator.rs");
 
 function readText(filePath) {
   return fs.readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
+}
+
+function readConcat(paths) {
+  return paths.map((p) => readText(p)).join("\n");
 }
 
 const bench = readText(benchScript);
@@ -32,8 +36,31 @@ const totalReviewAdvance = fs.existsSync(totalReviewAdvanceScript)
 const scenarioManifest = JSON.parse(readText(scenarioManifestPath));
 const deviceSection = readText(deviceSectionPath);
 const firmwareOtaPanel = readText(firmwareOtaPanelPath);
-const commands = readText(commandsPath);
-const coordinator = readText(coordinatorPath);
+const commands = readConcat([
+  path.join(commandsDir, "mod.rs"),
+  path.join(commandsDir, "style_pack_commands.rs"),
+  path.join(commandsDir, "local_asr_commands.rs"),
+  path.join(commandsDir, "diagnostics_export.rs"),
+  path.join(commandsDir, "marketplace.rs"),
+  path.join(commandsDir, "device", "mod.rs"),
+  path.join(commandsDir, "device", "settings.rs"),
+  path.join(commandsDir, "device", "ble.rs"),
+  path.join(commandsDir, "device", "firmware.rs"),
+  // regression coverage lives in path-separated tests
+  path.join(repoRoot, "src-tauri", "src", "commands_tests.rs"),
+]);
+const coordinator = readConcat([
+  coordinatorPath,
+  path.join(repoRoot, "src-tauri", "src", "coordinator", "hotkey_device_runtime.rs"),
+  path.join(repoRoot, "src-tauri", "src", "coordinator", "embedded_ble_runtime.rs"),
+  path.join(repoRoot, "src-tauri", "src", "coordinator", "dictation.rs"),
+  path.join(repoRoot, "src-tauri", "src", "coordinator", "dictation_preview.rs"),
+  path.join(repoRoot, "src-tauri", "src", "coordinator", "dictation_device_ai.rs"),
+  path.join(repoRoot, "src-tauri", "src", "coordinator", "dictation_wake_polish.rs"),
+  path.join(repoRoot, "src-tauri", "src", "coordinator", "dictation_session.rs"),
+  path.join(repoRoot, "src-tauri", "src", "coordinator", "dictation_embedded_submit.rs"),
+  path.join(repoRoot, "src-tauri", "src", "coordinator", "dictation_embedded_stream.rs"),
+]);
 
 const scenarios = Array.isArray(scenarioManifest.scenarios) ? scenarioManifest.scenarios : [];
 const requiredStepIds = scenarios.map((scenario) => scenario.id);

@@ -427,9 +427,22 @@ const embeddedBle = [
   readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble", "windows_ble", "unpair.rs"), "utf8"),
   readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble", "windows_ble", "ota_open.rs"), "utf8"),
   readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble", "windows_ble", "gatt_open.rs"), "utf8"),
-].join("
-");
-const commandsRs = readFileSync(join(repoRoot, "src-tauri", "src", "commands", "mod.rs"), "utf8");
+].join("\n");
+const commandsRs = [
+  "mod.rs",
+  "style_pack_commands.rs",
+  "local_asr_commands.rs",
+  "diagnostics_export.rs",
+  "marketplace.rs",
+  "device/mod.rs",
+  "device/settings.rs",
+  "device/ble.rs",
+  "device/firmware.rs",
+]
+  .map((name) =>
+    readFileSync(join(repoRoot, "src-tauri", "src", "commands", name), "utf8"),
+  )
+  .join("\n");
 const listenerOtaWindow = embeddedBle.match(
   /const\s+LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS:\s*usize\s*=\s*(\d+);/,
 );
@@ -465,7 +478,15 @@ for (const token of [
   "background listener deferred while firmware OTA is active",
 ]) {
   if (!embeddedBle.includes(token)) {
-    const coordinatorSource = readFileSync(join(repoRoot, "src-tauri", "src", "coordinator.rs"), "utf8");
+    const coordinatorSource = [
+      "coordinator.rs",
+      "coordinator/hotkey_device_runtime.rs",
+      "coordinator/embedded_ble_runtime.rs",
+    ]
+      .map((name) =>
+        readFileSync(join(repoRoot, "src-tauri", "src", name), "utf8"),
+      )
+      .join("\n");
     const haystack = `${embeddedBle}\n${coordinatorSource}`;
     if (!haystack.includes(token)) {
       fail(`Listener OTA v1 speed guard must keep cross-process BLE exclusivity token: ${token}`);

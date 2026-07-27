@@ -10,10 +10,20 @@ const transcript = readFileSync(
   join(root, "src-tauri", "src", "asr", "volcengine_transcript.rs"),
   "utf8",
 );
-const dictation = readFileSync(
-  join(root, "src-tauri", "src", "coordinator", "dictation.rs"),
-  "utf8",
-);
+const dictation = [
+  "dictation.rs",
+  "dictation_preview.rs",
+  "dictation_device_ai.rs",
+  "dictation_wake_polish.rs",
+  "dictation_session.rs",
+  "dictation_embedded_submit.rs",
+  "dictation_embedded_stream.rs",
+  "dictation_tests.rs",
+]
+  .map((name) =>
+    readFileSync(join(root, "src-tauri", "src", "coordinator", name), "utf8"),
+  )
+  .join("\n");
 
 function fail(message) {
   throw new Error(message);

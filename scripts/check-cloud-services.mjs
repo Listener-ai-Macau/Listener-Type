@@ -4,7 +4,8 @@ import process from 'node:process';
 
 const files = [
   'src-tauri/tauri.conf.json',
-  'src-tauri/src/commands.rs',
+  'src-tauri/src/commands/mod.rs',
+  'src-tauri/src/commands/marketplace.rs',
   'src/lib/ipc.ts',
   'scripts/write-updater-manifest.mjs',
 ];
@@ -43,12 +44,15 @@ for (const endpoint of endpoints) {
   }
 }
 
-const commands = readFileSync('src-tauri/src/commands.rs', 'utf8');
+const commands =
+  readFileSync('src-tauri/src/commands/mod.rs', 'utf8') +
+  '\n' +
+  readFileSync('src-tauri/src/commands/marketplace.rs', 'utf8');
 if (!/const GITHUB_OAUTH_CLIENT_ID:\s*&str\s*=\s*"";/.test(commands)) {
-  failures.push('src-tauri/src/commands.rs: GITHUB_OAUTH_CLIENT_ID must be empty by default.');
+  failures.push('src-tauri/src/commands/marketplace.rs: GITHUB_OAUTH_CLIENT_ID must be empty by default.');
 }
 if (!/LISTENER_TYPE_MARKETPLACE_BASE_URL/.test(commands)) {
-  failures.push('src-tauri/src/commands.rs: marketplace must be configurable through LISTENER_TYPE_MARKETPLACE_BASE_URL.');
+  failures.push('src-tauri/src/commands/marketplace.rs: marketplace must be configurable through LISTENER_TYPE_MARKETPLACE_BASE_URL.');
 }
 
 const ipc = readFileSync('src/lib/ipc.ts', 'utf8');

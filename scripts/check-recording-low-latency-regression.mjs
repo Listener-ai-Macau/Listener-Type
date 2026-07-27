@@ -5,12 +5,42 @@ import { spawnSync } from "node:child_process";
 import process from "node:process";
 
 const root = process.cwd();
-const embeddedBlePath = join(root, "src-tauri", "src", "embedded_ble.rs");
-const embeddedBle = readFileSync(embeddedBlePath, "utf8");
-const coordinatorPath = join(root, "src-tauri", "src", "coordinator.rs");
-const coordinator = readFileSync(coordinatorPath, "utf8");
-const dictationPath = join(root, "src-tauri", "src", "coordinator", "dictation.rs");
-const dictation = readFileSync(dictationPath, "utf8");
+function readConcat(paths) {
+  return paths.map((p) => readFileSync(p, "utf8")).join("\n");
+}
+const embeddedBleDir = join(root, "src-tauri", "src", "embedded_ble");
+const embeddedBle = readConcat([
+  join(embeddedBleDir, "mod.rs"),
+  join(embeddedBleDir, "windows_ble", "mod.rs"),
+  join(embeddedBleDir, "windows_ble", "ota_transfer.rs"),
+  join(embeddedBleDir, "windows_ble", "pairing.rs"),
+  join(embeddedBleDir, "windows_ble", "pnp_cache.rs"),
+  join(embeddedBleDir, "windows_ble", "recording_control.rs"),
+  join(embeddedBleDir, "windows_ble", "capture_events.rs"),
+  join(embeddedBleDir, "windows_ble", "notify_open.rs"),
+  join(embeddedBleDir, "windows_ble", "unpair.rs"),
+  join(embeddedBleDir, "windows_ble", "ota_open.rs"),
+  join(embeddedBleDir, "windows_ble", "gatt_open.rs"),
+]);
+const coordinatorDir = join(root, "src-tauri", "src", "coordinator");
+const coordinator = readConcat([
+  join(root, "src-tauri", "src", "coordinator.rs"),
+  join(coordinatorDir, "hotkey_device_runtime.rs"),
+  join(coordinatorDir, "embedded_ble_runtime.rs"),
+  join(coordinatorDir, "support.rs"),
+  join(coordinatorDir, "resources.rs"),
+  join(coordinatorDir, "qa.rs"),
+]);
+const dictation = readConcat([
+  join(coordinatorDir, "dictation.rs"),
+  join(coordinatorDir, "dictation_preview.rs"),
+  join(coordinatorDir, "dictation_device_ai.rs"),
+  join(coordinatorDir, "dictation_wake_polish.rs"),
+  join(coordinatorDir, "dictation_session.rs"),
+  join(coordinatorDir, "dictation_embedded_submit.rs"),
+  join(coordinatorDir, "dictation_embedded_stream.rs"),
+  join(coordinatorDir, "dictation_tests.rs"),
+]);
 const cliPath = join(root, "src-tauri", "src", "cli.rs");
 const cli = readFileSync(cliPath, "utf8");
 const libPath = join(root, "src-tauri", "src", "lib.rs");
@@ -78,12 +108,19 @@ requireExcludes(
   "Recording stop/control commands must stay off the notification FIFO",
 );
 
-const captureLoop = section(
-  embeddedBle,
-  "fn capture_notification_events_until_cancelled_impl",
-  "pub(super) fn collector_has_active_recoverable_session",
-  "active capture loop",
+// capture loop lives in windows_ble/capture_events.rs (include!); the impl is
+// the last function in that file, so slice from its start to EOF.
+const captureEventsOnly = readFileSync(
+  join(root, "src-tauri", "src", "embedded_ble", "windows_ble", "capture_events.rs"),
+  "utf8",
 );
+const captureLoopStart = captureEventsOnly.indexOf(
+  "fn capture_notification_events_until_cancelled_impl",
+);
+if (captureLoopStart < 0) {
+  fail("Could not locate active capture loop start token");
+}
+const captureLoop = captureEventsOnly.slice(captureLoopStart);
 for (const token of [
   "mpsc::channel::<AudioControlRequest>()",
   "ActiveAudioControlRegistration::install(",
