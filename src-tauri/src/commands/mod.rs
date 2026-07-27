@@ -1,23 +1,16 @@
 //! Tauri command surface — every IPC entry the React UI invokes lives here.
 
-use std::borrow::Cow;
 use std::collections::{hash_map::DefaultHasher, BTreeMap};
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
-use espflash::elf::RomSegment;
-use espflash::flasher::{FlashFrequency, FlashMode, FlashSize, Flasher, ProgressCallbacks};
-use espflash::targets::Chip;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serialport::{FlowControl, SerialPortType, UsbPortInfo};
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 
 use crate::asr::local::foundry::{
@@ -26,10 +19,9 @@ use crate::asr::local::foundry::{
 };
 use crate::asr::local::FoundryLocalRuntime;
 use crate::coordinator::{
-    Coordinator, EmbeddedBleNotifySubscriptionState, EmbeddedBleSessionActorDiagnosticRecord,
+    Coordinator, EmbeddedBleSessionActorDiagnosticRecord,
     EmbeddedBleWakeRecoverySnapshot, FirmwareWakePolicySnapshot,
 };
-use crate::coordinator_state::SessionPhase;
 use crate::github_oauth::{
     current_epoch_secs, refresh_token_is_expired, token_needs_refresh, GithubDevicePollStatus,
     GithubDeviceStartResponse, GithubOAuthClient, GithubOAuthError,
@@ -50,26 +42,23 @@ use crate::polish::{
 };
 use crate::recorder::{AudioConsumer, Recorder};
 use crate::types::{
-    builtin_style_pack_id, default_active_style_pack_id, device_ble_name_is_valid,
+    builtin_style_pack_id, default_active_style_pack_id,
     ChineseScriptPreference, ComboBinding, CorrectionRule, CredentialsStatus,
     DeviceCustomKeyAction, DeviceCustomKeyGesture, DeviceCustomKeyId, DeviceCustomKeyMapping,
-    DeviceCustomKeys, DeviceKnobRotationAction, DictationInputSource, DictationSession,
+    DeviceCustomKeys, DictationInputSource, DictationSession,
     DictionaryEntry, HotkeyCapability, HotkeyStatus, OutputLanguagePreference, PolishMode,
     ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics, StyleSystemPrompts,
     UserPreferences, VocabPresetStore, WindowsImeStatus,
-    DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES, DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
-    DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED, DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
-    MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES, MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
 };
 
 type CoordinatorState<'a> = State<'a, Arc<Coordinator>>;
 
 pub mod device;
 pub use device::{
-    DeviceSettingsSnapshot, DeviceSettingsUpdateRequest, EmbeddedBleRecoveryAction,
+    DeviceSettingsSnapshot, DeviceSettingsUpdateRequest,
     EmbeddedBleRepairResult, EmbeddedBleRuntimeStatus, FirmwareOtaBleTransferResult,
-    FirmwareOtaPackagePayload, FirmwareOtaPreflightSnapshot, WiredFirmwareArtifactInfo,
-    WiredFirmwareFlashResult, WiredFirmwarePackagePayload, WiredFirmwareProgressPayload,
+    FirmwareOtaPackagePayload, FirmwareOtaPreflightSnapshot,
+    WiredFirmwareFlashResult, WiredFirmwarePackagePayload,
     WiredFirmwareSerialPort,
 };
 pub(crate) use device::*;

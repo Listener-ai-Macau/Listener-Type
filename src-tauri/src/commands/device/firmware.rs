@@ -4,9 +4,9 @@ use super::super::CoordinatorState;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
@@ -17,12 +17,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serialport::{FlowControl, SerialPortType, UsbPortInfo};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::coordinator_state::SessionPhase;
-use crate::types::{
-    DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
-};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

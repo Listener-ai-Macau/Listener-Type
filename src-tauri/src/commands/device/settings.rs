@@ -7,29 +7,14 @@ use super::super::{
 use super::ble::{
     embedded_ble_windows_pairing_result, EmbeddedBleWindowsPairingPromptPolicy,
 };
-use std::borrow::Cow;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
-use espflash::elf::RomSegment;
-use espflash::flasher::{FlashFrequency, FlashMode, FlashSize, Flasher, ProgressCallbacks};
-use espflash::targets::Chip;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use serialport::{FlowControl, SerialPortType, UsbPortInfo};
-use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, Manager, State, Window};
+use tauri::AppHandle;
 
-use crate::coordinator::{
-    Coordinator, EmbeddedBleNotifySubscriptionState, EmbeddedBleSessionActorDiagnosticRecord,
-    EmbeddedBleWakeRecoverySnapshot, FirmwareWakePolicySnapshot,
-};
+use crate::coordinator::Coordinator;
 use crate::types::{
-    device_ble_name_is_valid, DeviceCustomKeyAction, DeviceCustomKeyGesture, DeviceCustomKeyId,
-    DeviceCustomKeyMapping, DeviceCustomKeys, DeviceKnobRotationAction, DictationInputSource,
+    device_ble_name_is_valid, DeviceCustomKeyAction, DeviceKnobRotationAction, DictationInputSource,
     UserPreferences, DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
     DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES, DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
     DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,

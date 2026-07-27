@@ -5,11 +5,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::AppHandle;
 
 use crate::coordinator::{
-    Coordinator, EmbeddedBleNotifySubscriptionState, EmbeddedBleSessionActorDiagnosticRecord,
-    EmbeddedBleWakeRecoverySnapshot, FirmwareWakePolicySnapshot,
+    Coordinator, EmbeddedBleNotifySubscriptionState,
+    EmbeddedBleWakeRecoverySnapshot,
 };
 
 pub async fn submit_embedded_audio_notifications(
