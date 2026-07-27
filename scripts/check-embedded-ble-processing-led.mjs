@@ -17,8 +17,18 @@ const source = [
   readFileSync(join(embeddedBleDir, "windows_ble", "gatt_open.rs"), "utf8"),
   readFileSync(join(embeddedBleDir, "mod.rs"), "utf8"),
 ].join("\n");
-const dictationPath = join(repoRoot, "src-tauri", "src", "coordinator", "dictation.rs");
-const dictationSource = readFileSync(dictationPath, "utf8");
+const dictationDir = join(repoRoot, "src-tauri", "src", "coordinator");
+const dictationSource = [
+  "dictation.rs",
+  "dictation_preview.rs",
+  "dictation_device_ai.rs",
+  "dictation_wake_polish.rs",
+  "dictation_session.rs",
+  "dictation_embedded_submit.rs",
+  "dictation_embedded_stream.rs",
+]
+  .map((name) => readFileSync(join(dictationDir, name), "utf8"))
+  .join("\n");
 
 const processingStart = source.indexOf("pub fn send_recording_processing_state");
 const processingEnd = source.indexOf("pub fn send_ec11_rotation_mode", processingStart);

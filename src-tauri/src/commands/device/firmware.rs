@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
 use espflash::elf::RomSegment;
 use espflash::flasher::{FlashFrequency, FlashMode, FlashSize, Flasher, ProgressCallbacks};
-use espflash::targets::Chip;
+pub use espflash::targets::Chip;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serialport::{FlowControl, SerialPortType, UsbPortInfo};
