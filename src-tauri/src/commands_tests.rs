@@ -2037,7 +2037,18 @@ fn ble_name_refresh_uses_silent_recovery_while_one_click_keeps_user_prompt() {
         "one-click recovery keeps the user-prompt-capable PairAsync path for computer switching"
     );
 
-    let coordinator = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/coordinator.rs"));
+    let coordinator = [
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/coordinator.rs")),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/coordinator/embedded_ble_runtime.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/coordinator/hotkey_device_runtime.rs"
+        )),
+    ]
+    .join("\n");
     let lib = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"));
     assert!(
         coordinator.contains("send_recording_control_recovery")
