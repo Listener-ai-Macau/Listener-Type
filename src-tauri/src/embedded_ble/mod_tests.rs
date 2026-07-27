@@ -110,7 +110,15 @@ fn ec11_hardware_recovery_notice_is_not_audio_terminal() {
 #[cfg(target_os = "windows")]
 #[test]
 fn ec11_recovery_pre_authorization_is_reversible_until_the_firmware_disconnects() {
-    let source = concat!(include_str!("mod.rs"), "\n", include_str!("windows_ble.rs"));
+    let source = concat!(
+        include_str!("mod.rs"),
+        "\n",
+        include_str!("windows_ble/mod.rs"),
+        "\n",
+        include_str!("windows_ble/ota_transfer.rs"),
+        "\n",
+        include_str!("windows_ble/pairing.rs")
+    );
     let prepare_start = source
         .find("if super::is_ec11_hardware_recovery_prepare_notice(&notification) {")
         .expect("EC11 recovery pre-authorization branch should exist");
@@ -142,7 +150,13 @@ fn ec11_recovery_pre_authorization_is_reversible_until_the_firmware_disconnects(
 #[cfg(target_os = "windows")]
 #[test]
 fn ec11_hardware_recovery_notice_requires_active_gatt_ack_before_pairasync_authorization() {
-    let source = concat!(include_str!("mod.rs"), "\n", include_str!("windows_ble.rs"));
+    let source = concat!(
+        include_str!("mod.rs"),
+        "\n",
+        include_str!("windows_ble/mod.rs"),
+        "\n",
+        include_str!("windows_ble/ota_transfer.rs")
+    );
     let notice_start = source
         .find("if super::is_ec11_hardware_recovery_notice(&notification) {")
         .expect("EC11 recovery notice branch should exist");
@@ -230,7 +244,13 @@ fn active_capture_link_recovery_timeout_stays_bounded() {
 #[cfg(target_os = "windows")]
 #[test]
 fn active_capture_recovery_advertisement_bypasses_link_timeout() {
-    let source = concat!(include_str!("mod.rs"), "\n", include_str!("windows_ble.rs"));
+    let source = concat!(
+        include_str!("mod.rs"),
+        "\n",
+        include_str!("windows_ble/mod.rs"),
+        "\n",
+        include_str!("windows_ble/ota_transfer.rs")
+    );
     let helper_start = source
         .find("fn active_capture_disconnect_recovery_pairing_error")
         .expect("active capture recovery helper should exist");
@@ -277,7 +297,13 @@ fn type_heartbeat_runs_only_for_background_capture() {
 #[cfg(target_os = "windows")]
 #[test]
 fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
-    let source = concat!(include_str!("mod.rs"), "\n", include_str!("windows_ble.rs"));
+    let source = concat!(
+        include_str!("mod.rs"),
+        "\n",
+        include_str!("windows_ble/mod.rs"),
+        "\n",
+        include_str!("windows_ble/ota_transfer.rs")
+    );
     assert!(
         source.contains("BLE_OTA_OPERATION_MUTEX_NAME")
             && source.contains("Local\\\\Denzic.Listener.Type.BleOtaOperation")
@@ -454,7 +480,13 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
 #[cfg(target_os = "windows")]
 #[test]
 fn listener_ota_handoff_preflight_uses_only_the_verified_fresh_gatt_path() {
-    let source = concat!(include_str!("mod.rs"), "\n", include_str!("windows_ble.rs"));
+    let source = concat!(
+        include_str!("mod.rs"),
+        "\n",
+        include_str!("windows_ble/mod.rs"),
+        "\n",
+        include_str!("windows_ble/ota_transfer.rs")
+    );
     // Skip thin mod.rs wrappers; lock onto the Windows implementation body.
     let probe_marker = "acquire_ble_ota_preparation_mutex(\"listener_ota_v1_preflight\")";
     let marker_at = source

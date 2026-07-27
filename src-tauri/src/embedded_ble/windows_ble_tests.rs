@@ -8,7 +8,11 @@ macro_rules! include_str {
         concat!(
             std::include_str!("mod.rs"),
             "\n",
-            std::include_str!("windows_ble.rs")
+            std::include_str!("windows_ble/mod.rs"),
+            "\n",
+            std::include_str!("windows_ble/ota_transfer.rs"),
+            "\n",
+            std::include_str!("windows_ble/pairing.rs")
         )
         .replace("\r\n", "\n")
     }};

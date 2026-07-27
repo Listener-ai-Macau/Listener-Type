@@ -220,7 +220,16 @@ mod tests {
     #[test]
     fn installed_takeover_evidence_stays_wired_to_real_ble_transition_points() {
         let lib = include_str!("lib.rs");
-        let embedded_ble = concat!(include_str!("embedded_ble/mod.rs"), "\n", include_str!("embedded_ble/windows_ble.rs")).replace("\r\n", "\n");
+        let embedded_ble = concat!(
+            include_str!("embedded_ble/mod.rs"),
+            "\n",
+            include_str!("embedded_ble/windows_ble/mod.rs"),
+            "\n",
+            include_str!("embedded_ble/windows_ble/ota_transfer.rs"),
+            "\n",
+            include_str!("embedded_ble/windows_ble/pairing.rs")
+        )
+        .replace("\r\n", "\n");
         let coordinator = include_str!("coordinator.rs");
 
         assert!(lib.contains("startup_evidence::begin_process_evidence()"));
