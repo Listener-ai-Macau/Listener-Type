@@ -9,7 +9,6 @@ import {
   listWiredFirmwarePorts,
   loadFirmwareOtaPackage,
   loadWiredFirmwarePackage,
-  repairWiredFirmwareBootloader,
   transferFirmwareOtaBle,
   type WiredFirmwareFlashResult,
   type WiredFirmwarePackagePayload,
@@ -610,7 +609,7 @@ interface WiredPackageSelection {
   payload: WiredFirmwarePackagePayload;
 }
 
-type WiredFlashStatus = 'idle' | 'checking' | 'ready' | 'flashing' | 'repairing' | 'ok' | 'err';
+type WiredFlashStatus = 'idle' | 'checking' | 'ready' | 'flashing' | 'ok' | 'err';
 
 interface FirmwareWiredFlashPanelProps {
   packagePath: string | null;
@@ -644,7 +643,7 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
   const activeWiredPort = port;
   const activeWiredBaud = parseBaud(baud) ?? 460800;
   const activePreserveOtaData = preserveOtaData;
-  const busy = status === 'checking' || status === 'flashing' || status === 'repairing';
+  const busy = status === 'checking' || status === 'flashing';
   const statusTone = wiredStatusTone(status);
   const statusLabel = wiredStatusLabel(status, t);
   const canFlash = !!selection && !busy && !disabled;
@@ -758,28 +757,6 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
     },
   }), [startWiredFlash]);
 
-  const startBootRepair = async () => {
-    if (!selection) return;
-    setStatus('repairing');
-    setMessage(null);
-    setResult(null);
-    try {
-      const nextResult = await runWiredOperationWithProgress('bootloaderRepair', () =>
-        repairWiredFirmwareBootloader({
-          path: selection.path,
-          port: activeWiredPort,
-          baud: null,
-        }),
-      );
-      setResult(nextResult);
-      setProgress(makeDoneWiredProgress('bootloaderRepair', nextResult.port, nextResult.version));
-      setStatus('ok');
-    } catch (error) {
-      setStatus('err');
-      setMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
   const artifacts = selectedPayload?.artifacts ?? [];
 
   return (
@@ -809,7 +786,7 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
       <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.55 }}>
         {t(
           'settings.recording.wiredFirmwareDesc',
-          '使用上方已选择的同一个固件发布包，通过 USB/串口读取其中的 factory 子包，写入 bootloader、分区表和 app；也可以单独执行 Boot 修复。',
+          '使用上方已选择的同一个固件发布包，通过 USB/串口读取 factory 子包。按下刷入时会自动检查 0x0 是否已有 bootloader：没有或损坏则随全量刷写一并修复，并写入分区表和 app。无需单独的 Boot 修复按钮。',
         )}
       </div>
 
@@ -905,23 +882,6 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
           </div>
         </div>
       )}
-
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <Btn
-          variant="ghost"
-          size="sm"
-          icon="bolt"
-          onClick={() => void startBootRepair()}
-          disabled={!selection || busy || disabled || !selectedPayload?.supportsBootRepair}
-        >
-          {status === 'repairing' ? t('settings.recording.wiredFirmwareRepairing', '修复中') : t('settings.recording.wiredFirmwareBootRepair', 'Boot 修复')}
-        </Btn>
-        {selectedPayload && !selectedPayload.supportsBootRepair && (
-          <span style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>
-            {t('settings.recording.wiredFirmwareBootRepairNeedsFactory', 'Boot 修复需要 factory 包。')}
-          </span>
-        )}
-      </div>
 
       {message && (
         <div style={{ fontSize: 11.5, color: status === 'err' ? 'var(--ol-err)' : 'var(--ol-ink-4)', lineHeight: 1.5 }}>
@@ -1230,7 +1190,6 @@ function wiredStatusTone(state: WiredFlashStatus): PillTone {
       return 'ok';
     case 'checking':
     case 'flashing':
-    case 'repairing':
       return 'blue';
     case 'err':
       return 'err';
@@ -1249,8 +1208,6 @@ function wiredStatusLabel(state: WiredFlashStatus, t: ReturnType<typeof useTrans
       return t('settings.recording.wiredFirmwareReady', '可刷入');
     case 'flashing':
       return t('settings.recording.wiredFirmwareFlashing', '刷入中');
-    case 'repairing':
-      return t('settings.recording.wiredFirmwareRepairing', '修复中');
     case 'ok':
       return t('settings.recording.wiredFirmwareOk', '完成');
     case 'err':

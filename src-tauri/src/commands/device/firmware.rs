@@ -179,7 +179,11 @@ pub const FIRMWARE_OTA_CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(18
 pub const FIRMWARE_OTA_FAST_SERVICE_CONFIRM_TIMEOUT: Duration = Duration::from_millis(1200);
 pub const FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
 pub const FIRMWARE_OTA_PRETRANSFER_READY_TIMEOUT: Duration = Duration::from_secs(8);
-pub const FIRMWARE_OTA_POST_READY_TIMEOUT: Duration = Duration::from_secs(8);
+/// Post-OTA Windows BLE re-enumeration often exceeds 8s (reboot + radio settle).
+/// Keep a longer first window so Type can reattach without a manual re-pair click.
+pub const FIRMWARE_OTA_POST_READY_TIMEOUT: Duration = Duration::from_secs(28);
+/// Second chance after a forced listener refresh when the first window times out.
+pub const FIRMWARE_OTA_POST_READY_RETRY_TIMEOUT: Duration = Duration::from_secs(20);
 pub const FIRMWARE_OTA_TARGET_PREPARE_TIMEOUT: Duration = Duration::from_secs(6);
 pub const FIRMWARE_OTA_PACKAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -1117,9 +1121,10 @@ pub fn loaded_factory_package_from_manifest(
             (
                 otadata_region,
                 vec![
-                    "Factory package: wired flash writes bootloader, partition table, and app."
+                    "Factory package: wired flash auto-checks boot at 0x0, then writes bootloader, partition table, and app."
                         .to_string(),
-                    "Boot repair is available and writes only bootloader.bin at 0x0.".to_string(),
+                    "No separate Boot repair button is required; missing/corrupt boot is repaired as part of 有线刷入."
+                        .to_string(),
                 ],
             )
         }
@@ -1369,6 +1374,35 @@ pub fn run_wired_firmware_flash_with_progress(
         "Flash config: mode={:?}, frequency={:?}, size={:?}\n",
         WIRED_FLASH_MODE, WIRED_FLASH_FREQUENCY, WIRED_FLASH_SIZE
     ));
+
+    // Auto boot health: owner should not need a separate "Boot 修复" button.
+    // Probe 0x0; full factory flash always rewrites bootloader when missing/corrupt.
+    match probe_wired_bootloader_magic(&mut flasher) {
+        Ok(WiredBootProbe::Present { magic }) => {
+            log.push_str(&format!(
+                "Boot check: present (magic=0x{magic:02x} at 0x0); full flash will still refresh bootloader/partition/app.\n"
+            ));
+        }
+        Ok(WiredBootProbe::MissingOrCorrupt { detail }) => {
+            log.push_str(&format!(
+                "Boot check: missing/corrupt ({detail}); full flash will auto-repair bootloader at 0x0 then write partition table + app.\n"
+            ));
+            emit_wired_firmware_stage(
+                progress_app_ref,
+                "flash",
+                "preparing",
+                Some(&loaded.version),
+                Some(&port),
+                20,
+                "Boot missing/corrupt — auto-repairing via full factory flash",
+            );
+        }
+        Err(err) => {
+            log.push_str(&format!(
+                "Boot check: probe skipped ({err}); full flash will still write bootloader.bin at 0x0.\n"
+            ));
+        }
+    }
 
     if !preserve_ota_data {
         if let Some((offset, size)) = loaded.otadata_region.as_ref() {
@@ -1657,6 +1691,61 @@ pub fn run_wired_bootloader_repair_with_progress(
     ))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WiredBootProbe {
+    Present { magic: u8 },
+    MissingOrCorrupt { detail: String },
+}
+
+const WIRED_BOOT_IMAGE_MAGIC: u8 = 0xe9;
+
+fn classify_wired_bootloader_bytes(bytes: &[u8]) -> WiredBootProbe {
+    if bytes.is_empty() {
+        return WiredBootProbe::MissingOrCorrupt {
+            detail: "empty read at 0x0".to_string(),
+        };
+    }
+    let magic = bytes[0];
+    if magic == WIRED_BOOT_IMAGE_MAGIC {
+        WiredBootProbe::Present { magic }
+    } else {
+        WiredBootProbe::MissingOrCorrupt {
+            detail: format!("magic=0x{magic:02x}, expected 0x{WIRED_BOOT_IMAGE_MAGIC:02x}"),
+        }
+    }
+}
+
+/// Read a few bytes at 0x0 and decide whether a usable ESP bootloader image is present.
+fn probe_wired_bootloader_magic(flasher: &mut Flasher) -> Result<WiredBootProbe, String> {
+    const BOOT_PROBE_BYTES: u32 = 16;
+    const BOOT_PROBE_BLOCK: u32 = 16;
+
+    let temp_path = std::env::temp_dir().join(format!(
+        "listener-boot-probe-{}-{}.bin",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    ));
+    let read_result = flasher.read_flash(
+        0,
+        BOOT_PROBE_BYTES,
+        BOOT_PROBE_BLOCK,
+        1,
+        temp_path.clone(),
+    );
+    let bytes = match read_result {
+        Ok(()) => std::fs::read(&temp_path).map_err(|err| {
+            let _ = std::fs::remove_file(&temp_path);
+            format!("boot probe read file failed: {err}")
+        }),
+        Err(err) => {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!("boot probe read_flash failed: {err}"));
+        }
+    };
+    let _ = std::fs::remove_file(&temp_path);
+    Ok(classify_wired_bootloader_bytes(&bytes?))
+}
+
 pub fn package_manifest_baud(package: &LoadedWiredFirmwarePackage) -> Option<u32> {
     let manifest = serde_json::from_str::<FactoryFirmwareManifest>(&package.manifest_text).ok()?;
     manifest
@@ -1664,6 +1753,33 @@ pub fn package_manifest_baud(package: &LoadedWiredFirmwarePackage) -> Option<u32
         .as_ref()
         .and_then(|flash| flash.baud.as_ref())
         .and_then(parse_baud_value)
+}
+
+#[cfg(test)]
+mod boot_probe_tests {
+    use super::{classify_wired_bootloader_bytes, WiredBootProbe, WIRED_BOOT_IMAGE_MAGIC};
+
+    #[test]
+    fn classifies_esp_image_magic_as_present() {
+        assert_eq!(
+            classify_wired_bootloader_bytes(&[WIRED_BOOT_IMAGE_MAGIC, 0, 1, 2]),
+            WiredBootProbe::Present {
+                magic: WIRED_BOOT_IMAGE_MAGIC
+            }
+        );
+    }
+
+    #[test]
+    fn classifies_empty_or_wrong_magic_as_missing() {
+        assert!(matches!(
+            classify_wired_bootloader_bytes(&[]),
+            WiredBootProbe::MissingOrCorrupt { .. }
+        ));
+        assert!(matches!(
+            classify_wired_bootloader_bytes(&[0xff, 0, 0]),
+            WiredBootProbe::MissingOrCorrupt { .. }
+        ));
+    }
 }
 
 pub fn parse_baud_value(value: &Value) -> Option<u32> {
@@ -2255,9 +2371,32 @@ pub async fn transfer_firmware_ota_ble(
     crate::embedded_ble::request_listener_ota_post_confirm_notify_fast_retry();
     coord.refresh_embedded_ble_listener_after_firmware_ota();
     let type_ready_started = Instant::now();
-    let type_ready = coord
+    let type_ready = match coord
         .wait_for_embedded_ble_listener_ready_after_firmware_ota(FIRMWARE_OTA_POST_READY_TIMEOUT)
-        .await?;
+        .await
+    {
+        Ok(ready) => ready,
+        Err(first_error) => {
+            // Common after OTA: first notify reopen races Windows cache / radio settle.
+            // Refresh once more and wait again before asking the owner to re-pair.
+            log::warn!(
+                "[firmware-ota] post-OTA Listener notify not ready within {} ms ({first_error}); refreshing listener and retrying",
+                FIRMWARE_OTA_POST_READY_TIMEOUT.as_millis()
+            );
+            crate::embedded_ble::request_listener_ota_post_confirm_notify_fast_retry();
+            coord.refresh_embedded_ble_listener_after_firmware_ota();
+            coord
+                .wait_for_embedded_ble_listener_ready_after_firmware_ota(
+                    FIRMWARE_OTA_POST_READY_RETRY_TIMEOUT,
+                )
+                .await
+                .map_err(|retry_error| {
+                    format!(
+                        "Listener did not reattach after OTA. First wait: {first_error}. Retry: {retry_error}. If Windows still shows the device as paired, use 一键修复; if pairing was lost, pair Listener again in Type."
+                    )
+                })?
+        }
+    };
     let type_ready_elapsed_ms = elapsed_ms_u64(type_ready_started);
     let non_transfer_fixed_elapsed_ms = target_prepare_elapsed_ms
         .saturating_add(confirm.elapsed_ms)
