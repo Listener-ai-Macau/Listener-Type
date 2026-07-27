@@ -199,8 +199,10 @@ mod platform {
     const CONTINUOUS_SPEECH_TRAILING_BLANKS: i32 = 0;
     const KEYWORD_SCORE: f32 = 1.5;
     const KEYWORD_THRESHOLD: f32 = 0.25;
-    const BOOTSTRAP_KEYWORD_SCORE: f32 = 3.0;
-    const BOOTSTRAP_KEYWORD_THRESHOLD: f32 = 0.08;
+    /// Product-sensitive live defaults. Raised for everyday recall after owner
+    /// reports misses at 3.0/0.08 on real device audio (2026-07-27).
+    const BOOTSTRAP_KEYWORD_SCORE: f32 = 3.5;
+    const BOOTSTRAP_KEYWORD_THRESHOLD: f32 = 0.05;
     const CALIBRATION_FILE: &str = "calibration.json";
     const CALIBRATION_CANDIDATES: &[(f32, f32)] = &[
         (KEYWORD_SCORE, KEYWORD_THRESHOLD),
@@ -210,6 +212,15 @@ mod platform {
         (2.5, 0.12),
         (3.0, 0.10),
         (3.0, 0.08),
+        (3.5, 0.05),
+        (4.0, 0.04),
+    ];
+    /// Offline second-pass cascade when streaming KWS misses (full-buffer gain).
+    const RECALL_CASCADE: &[(f32, f32)] = &[
+        (BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD),
+        (4.0, 0.04),
+        (4.0, 0.03),
+        (4.5, 0.03),
     ];
 
     #[repr(C)]
@@ -836,6 +847,32 @@ mod platform {
             Ok(self.found.clone())
         }
 
+        /// Offline path: feed already gain-normalized samples (full-buffer p95).
+        fn accept_pre_normalized_samples(&mut self, samples: &[f32]) {
+            if self.finished || self.found.is_some() || samples.is_empty() {
+                return;
+            }
+            // Keep boundary math consistent with streaming path (bytes of PCM16).
+            self.normalizer.accepted_bytes = self
+                .normalizer
+                .accepted_bytes
+                .saturating_add(samples.len().saturating_mul(2));
+            self.accept_samples(samples);
+            self.decode_ready();
+        }
+
+        fn finish_pre_normalized(&mut self) -> Result<Option<Match>, String> {
+            if self.finished {
+                return Ok(self.found.clone());
+            }
+            let padding = vec![0.0; FINAL_PADDING_SAMPLES];
+            self.accept_samples(&padding);
+            unsafe { (self.runtime.input_finished)(self.stream) };
+            self.finished = true;
+            self.decode_ready();
+            Ok(self.found.clone())
+        }
+
         pub fn finish(&mut self) -> Result<Option<Match>, String> {
             if self.finished {
                 return Ok(self.found.clone());
@@ -927,19 +964,56 @@ mod platform {
         score: f32,
         threshold: f32,
     ) -> Result<Option<Match>, String> {
-        let gain = normalization_gain(&pcm[..pcm.len().min(STREAM_GAIN_WARMUP_BYTES)]);
-        log::debug!(
-            "[wake-phrase] normalized candidate pcm_bytes={} gain={gain:.2} score={score:.1} threshold={threshold:.2}",
+        // Full-buffer gain: streaming warmup often locks on quiet pre-roll and
+        // under-amplifies the later wake phrase on device candidates.
+        let gain = normalization_gain(pcm);
+        log::info!(
+            "[wake-phrase] offline detect pcm_bytes={} gain={gain:.2} score={score:.1} threshold={threshold:.2}",
             pcm.len(),
         );
+        let samples = samples_with_gain(pcm, gain);
         let mut detector = StreamingDetector::new_with_config(phrase, score, threshold, true)?;
-        detector.accept_pcm(pcm)?;
-        detector.finish()
+        detector.accept_pre_normalized_samples(&samples);
+        detector.finish_pre_normalized()
     }
 
     pub fn detect(pcm: &[u8], phrase: &str) -> Result<Option<Match>, String> {
         let (score, threshold) = configured_keyword_values(phrase);
         detect_with_config(pcm, phrase, score, threshold)
+    }
+
+    /// When the live streaming detector misses, re-run offline over the whole
+    /// candidate with full-buffer gain and a short sensitive cascade.
+    pub fn detect_with_recall_cascade(pcm: &[u8], phrase: &str) -> Result<Option<Match>, String> {
+        if pcm.len() < SAMPLE_RATE as usize {
+            return Ok(None);
+        }
+        let mut tried = std::collections::BTreeSet::new();
+        for &(score, threshold) in RECALL_CASCADE {
+            let key = ((score * 100.0) as i32, (threshold * 1000.0) as i32);
+            if !tried.insert(key) {
+                continue;
+            }
+            match detect_with_config(pcm, phrase, score, threshold)? {
+                Some(found) => {
+                    log::info!(
+                        "[wake-phrase] offline recall cascade hit phrase={} score={score:.1} threshold={threshold:.2} end_s={:.3} pcm_ms={}",
+                        phrase,
+                        found.end_seconds,
+                        pcm.len() / 32
+                    );
+                    return Ok(Some(found));
+                }
+                None => {}
+            }
+        }
+        log::info!(
+            "[wake-phrase] offline recall cascade miss phrase={} pcm_ms={} configs={}",
+            phrase,
+            pcm.len() / 32,
+            RECALL_CASCADE.len()
+        );
+        Ok(None)
     }
 
     fn select_calibration<F>(mut detects: F) -> Result<Option<(f32, f32)>, String>
@@ -1035,12 +1109,16 @@ mod platform {
             let (score, threshold) = configured_keyword_values("开始录音");
             assert_eq!(score, BOOTSTRAP_KEYWORD_SCORE);
             assert_eq!(threshold, BOOTSTRAP_KEYWORD_THRESHOLD);
+            assert_eq!(BOOTSTRAP_KEYWORD_SCORE, 3.5);
+            assert!((BOOTSTRAP_KEYWORD_THRESHOLD - 0.05).abs() < f32::EPSILON);
             assert!(is_less_sensitive_than_bootstrap(1.5, 0.25));
             assert!(is_less_sensitive_than_bootstrap(3.0, 0.10));
+            assert!(is_less_sensitive_than_bootstrap(3.0, 0.08));
             assert!(!is_less_sensitive_than_bootstrap(
                 BOOTSTRAP_KEYWORD_SCORE,
                 BOOTSTRAP_KEYWORD_THRESHOLD
             ));
+            assert!(!RECALL_CASCADE.is_empty());
         }
 
         #[test]
@@ -1318,6 +1396,11 @@ pub use platform::*;
 
 #[cfg(not(target_os = "windows"))]
 pub fn detect(_pcm: &[u8], _phrase: &str) -> Result<Option<Match>, String> {
+    Err("当前平台暂不支持本地唤醒词".into())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn detect_with_recall_cascade(_pcm: &[u8], _phrase: &str) -> Result<Option<Match>, String> {
     Err("当前平台暂不支持本地唤醒词".into())
 }
 

@@ -123,9 +123,19 @@ static HIDDEN_AUTOMATIC_CANDIDATE_STATE: AtomicU8 = AtomicU8::new(HIDDEN_AUTOMAT
 static WAKE_DIAGNOSTIC_CAPTURE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str, pcm: &[u8]) {
-    let Ok(directory) = std::env::var(WAKE_DIAGNOSTIC_DIR_ENV) else {
-        return;
-    };
+    // Prefer explicit env; otherwise always keep a small rolling ring under LocalAppData
+    // so owner wake misses can be inspected without re-running with special flags.
+    let directory = std::env::var(WAKE_DIAGNOSTIC_DIR_ENV).unwrap_or_else(|_| {
+        let base = std::env::var("LOCALAPPDATA")
+            .or_else(|_| std::env::var("APPDATA"))
+            .unwrap_or_else(|_| ".".to_string());
+        std::path::Path::new(&base)
+            .join("Listener Type")
+            .join("Logs")
+            .join("wake-diag-live")
+            .to_string_lossy()
+            .into_owned()
+    });
     if directory.trim().is_empty() {
         return;
     }

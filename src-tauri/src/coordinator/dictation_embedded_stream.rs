@@ -616,74 +616,104 @@ impl EmbeddedStreamingDictation {
             let wake_match = match wake_match {
                 Ok(Some(found)) => Some(found),
                 Ok(None) => {
-                    #[cfg(target_os = "windows")]
-                    {
-                        let mut task = candidate.local_confirmation_task.take();
-                        let mut matched = None;
-                        loop {
-                            if task.is_none()
-                                && candidate.local_confirmation_attempts
-                                    < LOCAL_CONFIRMATION_SNAPSHOT_MS.len()
-                                && candidate.pcm.len() >= LOCAL_CONFIRMATION_START_BYTES
-                                && candidate.pcm.len()
-                                    > candidate.local_confirmation_last_snapshot_bytes
-                            {
-                                candidate.local_confirmation_attempts += 1;
-                                candidate.local_confirmation_last_snapshot_bytes =
-                                    candidate.pcm.len();
-                                task = Some(spawn_local_wake_confirmation(
-                                    inner,
-                                    candidate.pcm.clone(),
-                                    phrase.clone(),
-                                ));
-                                log::info!(
-                                    "[wake-phrase] terminal local confirmation started embedded_session_id={} attempt={} snapshot_pcm_ms={}",
-                                    embedded_session_id,
-                                    candidate.local_confirmation_attempts,
-                                    candidate.pcm.len() / 32
+                    // Streaming KWS missed — offline full-buffer gain + sensitive cascade
+                    // recovers many device candidates where pre-roll locked gain too low.
+                    let offline_pcm = candidate.pcm.clone();
+                    let offline_phrase = phrase.clone();
+                    let offline = tauri::async_runtime::spawn_blocking(move || {
+                        crate::wake_phrase::detect_with_recall_cascade(&offline_pcm, &offline_phrase)
+                    })
+                    .await;
+                    match offline {
+                        Ok(Ok(Some(found))) => {
+                            log::info!(
+                                "[wake-phrase] terminal offline recall recovered embedded_session_id={} end_s={:.3}",
+                                embedded_session_id,
+                                found.end_seconds
+                            );
+                            Some(found)
+                        }
+                        Ok(Ok(None)) | Ok(Err(_)) | Err(_) => {
+                            if let Ok(Err(err)) = &offline {
+                                log::warn!(
+                                    "[wake-phrase] terminal offline recall failed embedded_session_id={embedded_session_id}: {err}"
                                 );
                             }
-                            let Some(current_task) = task.take() else {
-                                break;
-                            };
-                            match current_task.await {
-                                Ok(Ok(result)) => {
-                                    local_confirmation_ms =
-                                        local_confirmation_ms.saturating_add(result.inference_ms);
-                                    log::info!(
-                                        "[wake-phrase] terminal local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
-                                        embedded_session_id,
-                                        result.matched,
-                                        result.phrase_relation,
-                                        result.snapshot_pcm_ms,
-                                        result.transcript_chars,
-                                        result.inference_ms
-                                    );
-                                    if result.matched {
-                                        phrase_signal =
-                                            denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                        matched =
-                                            Some(crate::wake_phrase::Match { end_seconds: 0.0 });
+                            if let Err(err) = &offline {
+                                log::warn!(
+                                    "[wake-phrase] terminal offline recall task failed embedded_session_id={embedded_session_id}: {err}"
+                                );
+                            }
+                            #[cfg(target_os = "windows")]
+                            {
+                                let mut task = candidate.local_confirmation_task.take();
+                                let mut matched = None;
+                                loop {
+                                    if task.is_none()
+                                        && candidate.local_confirmation_attempts
+                                            < LOCAL_CONFIRMATION_SNAPSHOT_MS.len()
+                                        && candidate.pcm.len() >= LOCAL_CONFIRMATION_START_BYTES
+                                        && candidate.pcm.len()
+                                            > candidate.local_confirmation_last_snapshot_bytes
+                                    {
+                                        candidate.local_confirmation_attempts += 1;
+                                        candidate.local_confirmation_last_snapshot_bytes =
+                                            candidate.pcm.len();
+                                        task = Some(spawn_local_wake_confirmation(
+                                            inner,
+                                            candidate.pcm.clone(),
+                                            phrase.clone(),
+                                        ));
+                                        log::info!(
+                                            "[wake-phrase] terminal local confirmation started embedded_session_id={} attempt={} snapshot_pcm_ms={}",
+                                            embedded_session_id,
+                                            candidate.local_confirmation_attempts,
+                                            candidate.pcm.len() / 32
+                                        );
+                                    }
+                                    let Some(current_task) = task.take() else {
                                         break;
+                                    };
+                                    match current_task.await {
+                                        Ok(Ok(result)) => {
+                                            local_confirmation_ms = local_confirmation_ms
+                                                .saturating_add(result.inference_ms);
+                                            log::info!(
+                                                "[wake-phrase] terminal local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
+                                                embedded_session_id,
+                                                result.matched,
+                                                result.phrase_relation,
+                                                result.snapshot_pcm_ms,
+                                                result.transcript_chars,
+                                                result.inference_ms
+                                            );
+                                            if result.matched {
+                                                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                                matched = Some(crate::wake_phrase::Match {
+                                                    end_seconds: 0.0,
+                                                });
+                                                break;
+                                            }
+                                        }
+                                        Ok(Err(err)) => {
+                                            log::warn!(
+                                                "[wake-phrase] terminal local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
+                                            );
+                                        }
+                                        Err(err) => {
+                                            log::warn!(
+                                                "[wake-phrase] terminal local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
+                                            );
+                                        }
                                     }
                                 }
-                                Ok(Err(err)) => {
-                                    log::warn!(
-                                        "[wake-phrase] terminal local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
-                                    );
-                                }
-                                Err(err) => {
-                                    log::warn!(
-                                        "[wake-phrase] terminal local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
-                                    );
-                                }
+                                matched
+                            }
+                            #[cfg(not(target_os = "windows"))]
+                            {
+                                None
                             }
                         }
-                        matched
-                    }
-                    #[cfg(not(target_os = "windows"))]
-                    {
-                        None
                     }
                 }
                 Err(err) => {
