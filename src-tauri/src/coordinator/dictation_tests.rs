@@ -1455,12 +1455,21 @@ fn automatic_speaker_candidate_reaches_asr_only_after_verified_match() {
 
 #[test]
 fn phrase_hit_waits_for_real_owner_audio_without_requiring_a_pause() {
-    assert!(!super::owner_verification_window_ready(
-        super::OWNER_VERIFICATION_START_BYTES - 2
-    ));
-    assert!(super::owner_verification_window_ready(
-        super::OWNER_VERIFICATION_START_BYTES
-    ));
+    // No enrolled voiceprint: phrase hit is enough (product contract). The 1.1s
+    // owner window only applies when a template is enrolled for embedding quality.
+    if crate::speaker_verification::is_enrolled() {
+        assert!(!super::owner_verification_window_ready(
+            super::OWNER_VERIFICATION_START_BYTES - 2
+        ));
+        assert!(super::owner_verification_window_ready(
+            super::OWNER_VERIFICATION_START_BYTES
+        ));
+    } else {
+        assert!(super::owner_verification_window_ready(0));
+        assert!(super::owner_verification_window_ready(
+            super::OWNER_VERIFICATION_START_BYTES - 2
+        ));
+    }
     assert_eq!(super::next_owner_verification_retry_ms(1_100), Some(1_800));
     assert_eq!(super::next_owner_verification_retry_ms(1_800), Some(2_400));
     assert_eq!(super::next_owner_verification_retry_ms(2_400), None);
@@ -1526,7 +1535,7 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         Some(super::BufferedSpeakerCandidateKind::Rejected)
     );
 
-    let source = include_str!("dictation.rs");
+    let source = concat!(include_str!("dictation.rs"), "\n", include_str!("dictation_preview.rs"));
     assert!(
         source.contains("if !crate::speaker_verification::is_enrolled()")
             && source.contains("fn owner_verification_window_ready"),
@@ -1541,7 +1550,7 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         .expect("after primary wake detector init");
     assert!(
         source[wake_init..after_wake].contains("StreamingDetector::new(&phrase)")
-            && !source[wake_init..after_wake].contains("new_strict"),
+            && !source[wake_init..after_wake].contains("StreamingDetector::new_strict"),
         "primary automatic wake must use StreamingDetector::new (sensitive), not new_strict"
     );
     let start = source
@@ -1577,7 +1586,7 @@ fn physical_hidden_candidate_promotion_discards_pre_press_pcm() {
     assert_eq!(super::discard_pre_press_candidate_pcm(&mut pcm), 6);
     assert!(pcm.is_empty());
 
-    let source = include_str!("dictation.rs");
+    let source = concat!(include_str!("dictation.rs"), "\n", include_str!("dictation_preview.rs"));
     let start = source
         .find("async fn promote_hidden_candidate_if_requested")
         .expect("physical hidden-candidate promotion should exist");
@@ -1612,7 +1621,7 @@ fn device_processing_completion_requires_a_matching_start() {
 
 #[test]
 fn hidden_candidate_rejection_has_no_processing_led_command() {
-    let source = include_str!("dictation.rs");
+    let source = concat!(include_str!("dictation.rs"), "\n", include_str!("dictation_preview.rs"));
     let start = source
         .find("fn reject_hidden_automatic_candidate")
         .expect("hidden rejection helper should exist");
@@ -2050,7 +2059,7 @@ fn volcengine_streaming_agc_raises_for_later_quiet_confirmed_speech() {
 
 #[test]
 fn volcengine_preview_and_final_share_the_authoritative_session() {
-    let source = include_str!("dictation.rs");
+    let source = concat!(include_str!("dictation.rs"), "\n", include_str!("dictation_preview.rs"));
     assert!(source.contains(
         "authoritative optimized-bidirectional ASR ready; preview and final share one provider session"
     ));

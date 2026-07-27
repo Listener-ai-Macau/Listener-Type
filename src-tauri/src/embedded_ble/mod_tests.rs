@@ -132,7 +132,13 @@ fn ec11_recovery_pre_authorization_is_reversible_until_the_firmware_disconnects(
         include_str!("windows_ble/capture_events.rs"),
         "
 ",
-        include_str!("windows_ble/notify_open.rs")
+        include_str!("windows_ble/notify_open.rs"),
+        "\n",
+        include_str!("windows_ble/unpair.rs"),
+        "\n",
+        include_str!("windows_ble/ota_open.rs"),
+        "\n",
+        include_str!("windows_ble/gatt_open.rs")
     );
     let prepare_start = source
         .find("if super::is_ec11_hardware_recovery_prepare_notice(&notification) {")
@@ -187,7 +193,13 @@ fn ec11_hardware_recovery_notice_requires_active_gatt_ack_before_pairasync_autho
         include_str!("windows_ble/capture_events.rs"),
         "
 ",
-        include_str!("windows_ble/notify_open.rs")
+        include_str!("windows_ble/notify_open.rs"),
+        "\n",
+        include_str!("windows_ble/unpair.rs"),
+        "\n",
+        include_str!("windows_ble/ota_open.rs"),
+        "\n",
+        include_str!("windows_ble/gatt_open.rs")
     );
     let notice_start = source
         .find("if super::is_ec11_hardware_recovery_notice(&notification) {")
@@ -298,7 +310,13 @@ fn active_capture_recovery_advertisement_bypasses_link_timeout() {
         include_str!("windows_ble/capture_events.rs"),
         "
 ",
-        include_str!("windows_ble/notify_open.rs")
+        include_str!("windows_ble/notify_open.rs"),
+        "\n",
+        include_str!("windows_ble/unpair.rs"),
+        "\n",
+        include_str!("windows_ble/ota_open.rs"),
+        "\n",
+        include_str!("windows_ble/gatt_open.rs")
     );
     let helper_start = source
         .find("fn active_capture_disconnect_recovery_pairing_error")
@@ -368,7 +386,13 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
         include_str!("windows_ble/capture_events.rs"),
         "
 ",
-        include_str!("windows_ble/notify_open.rs")
+        include_str!("windows_ble/notify_open.rs"),
+        "\n",
+        include_str!("windows_ble/unpair.rs"),
+        "\n",
+        include_str!("windows_ble/ota_open.rs"),
+        "\n",
+        include_str!("windows_ble/gatt_open.rs")
     );
     assert!(
         source.contains("BLE_OTA_OPERATION_MUTEX_NAME")
@@ -568,7 +592,13 @@ fn listener_ota_handoff_preflight_uses_only_the_verified_fresh_gatt_path() {
         include_str!("windows_ble/capture_events.rs"),
         "
 ",
-        include_str!("windows_ble/notify_open.rs")
+        include_str!("windows_ble/notify_open.rs"),
+        "\n",
+        include_str!("windows_ble/unpair.rs"),
+        "\n",
+        include_str!("windows_ble/ota_open.rs"),
+        "\n",
+        include_str!("windows_ble/gatt_open.rs")
     );
     // Skip thin mod.rs wrappers; lock onto the Windows implementation body.
     let probe_marker = "acquire_ble_ota_preparation_mutex(\"listener_ota_v1_preflight\")";

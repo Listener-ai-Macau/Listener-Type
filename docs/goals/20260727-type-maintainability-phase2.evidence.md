@@ -2,41 +2,38 @@
 
 日期：2026-07-27
 
-## 本轮交付
+## 本轮交付（续）
 
-### A–D. commands / embedded_ble / windows_ble include 拆分
+### F. dictation preview + windows_ble 再切
 
-见 commits：`cc5c404`、`89c6e36`、`6312788`。
-
-### E. coordinator free-function 拆分（本轮）
-
-| 路径 | 约行数 | 说明 |
-|---|---|---|
-| `coordinator.rs` | ~3709 | 主类型 + `impl Coordinator` + ASR/polish 尾部 |
-| `coordinator/hotkey_device_runtime.rs` | ~2009 | 热键 supervisor + device-key BLE pending |
-| `coordinator/embedded_ble_runtime.rs` | ~3485 | 背景 listener / 配对恢复 free functions |
-
-`include!("coordinator/…")` 保持同一 module 作用域。
+| 路径 | 约行数 |
+|---|---|
+| `coordinator/dictation.rs` | ~6153（~7.2k → ~6.2k） |
+| `coordinator/dictation_preview.rs` | ~1063 |
+| `embedded_ble/windows_ble/mod.rs` | **~4389**（已出 soft>4500） |
+| `windows_ble/ota_open.rs` | ~2108 |
+| `windows_ble/gatt_open.rs` | ~461 |
+| `windows_ble/unpair.rs` | ~668 |
 
 ## 机器结果
 
 | 检查 | 结果 |
 |---|---|
 | `node scripts/check-module-budgets.mjs` | **PASS** |
-| `cargo check --lib --tests` | **PASS** |
 | Goal 关键 5 测 | **PASS** |
-| `cargo test --lib coordinator::tests::` | **144 passed** |
-| `cargo test --lib embedded_ble::` | **114 passed** |
+| `embedded_ble::` | **114 passed** |
+| `coordinator::tests::` | **144 passed** |
+| `coordinator::dictation::` | **82 passed** |
+| processing-led 脚本 | **PASS** |
 
 ## soft>4500（仍 open）
 
-- `embedded_ble/windows_ble/mod.rs` ~7.6k
-- `coordinator/dictation.rs` ~7.2k
+- `coordinator/dictation.rs` ~6.2k
 - `commands/mod.rs` ~4.6k
 
-`coordinator.rs` 已从 soft 列表压下（~9.2k → ~3.7k）。
+已出 soft：`coordinator.rs`、`windows_ble/mod.rs`。
 
 ## 下一刀
 
-1. 压 `dictation.rs` 或 `windows_ble/mod.rs` 残余
-2. `commands/mod.rs` 再拆 marketplace/settings 段
+1. 再压 `dictation.rs`（session lifecycle / BLE stream submit）
+2. 压 `commands/mod.rs`（marketplace / settings 段）

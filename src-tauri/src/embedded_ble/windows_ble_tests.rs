@@ -20,7 +20,13 @@ macro_rules! include_str {
             "\n",
             std::include_str!("windows_ble/capture_events.rs"),
             "\n",
-            std::include_str!("windows_ble/notify_open.rs")
+            std::include_str!("windows_ble/notify_open.rs"),
+            "\n",
+            std::include_str!("windows_ble/unpair.rs"),
+            "\n",
+            std::include_str!("windows_ble/ota_open.rs"),
+            "\n",
+            std::include_str!("windows_ble/gatt_open.rs")
         )
         .replace("\r\n", "\n")
     }};

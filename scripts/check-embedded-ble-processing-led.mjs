@@ -12,6 +12,9 @@ const source = [
   readFileSync(join(embeddedBleDir, "windows_ble", "recording_control.rs"), "utf8"),
   readFileSync(join(embeddedBleDir, "windows_ble", "capture_events.rs"), "utf8"),
   readFileSync(join(embeddedBleDir, "windows_ble", "notify_open.rs"), "utf8"),
+  readFileSync(join(embeddedBleDir, "windows_ble", "unpair.rs"), "utf8"),
+  readFileSync(join(embeddedBleDir, "windows_ble", "ota_open.rs"), "utf8"),
+  readFileSync(join(embeddedBleDir, "windows_ble", "gatt_open.rs"), "utf8"),
   readFileSync(join(embeddedBleDir, "mod.rs"), "utf8"),
 ].join("\n");
 const dictationPath = join(repoRoot, "src-tauri", "src", "coordinator", "dictation.rs");

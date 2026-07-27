@@ -424,6 +424,9 @@ const embeddedBle = [
   readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble", "windows_ble", "recording_control.rs"), "utf8"),
   readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble", "windows_ble", "capture_events.rs"), "utf8"),
   readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble", "windows_ble", "notify_open.rs"), "utf8"),
+  readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble", "windows_ble", "unpair.rs"), "utf8"),
+  readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble", "windows_ble", "ota_open.rs"), "utf8"),
+  readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble", "windows_ble", "gatt_open.rs"), "utf8"),
 ].join("
 ");
 const commandsRs = readFileSync(join(repoRoot, "src-tauri", "src", "commands", "mod.rs"), "utf8");
