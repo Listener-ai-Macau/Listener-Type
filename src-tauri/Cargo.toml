@@ -130,3 +130,8 @@ window-vibrancy = "0.7"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# release 编译在这个 23GB 机器上单 rustc LLVM 阶段会 OOM（STATUS_STACK_BUFFER_OVERRUN）。
+# 提高 codegen-units 把单 crate 拆成更小的 LLVM 模块，降低峰值内存，代价是极小的跨单元优化损失。
+[profile.release]
+codegen-units = 32

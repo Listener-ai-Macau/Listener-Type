@@ -7262,18 +7262,13 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             // read verifies the acknowledged offset, so avoid the slower detailed
             // WinRT write-result path while retaining ATT write-with-response.
             let use_status_write = listener_ota_v1_sync_control_uses_status_write(packet);
-            let is_begin = packet[4] == denzic_ota_core::OP_BEGIN;
-            // BEGIN 第一次可能因 GATT session 还没完成加密/绑定而 ATT protocol_error=14
-            // (Insufficient Authentication)——设备 OTA control 特征值要求加密连接。短暂
-            // 等待加密完成后重试，避免用户第一次点 OTA 失败、第二次才成功。其他 control
-            // 操作不重试（finish 已有自己的 reboot handoff 处理）。
-            const BEGIN_AUTH_RETRIES: usize = 5;
-            const BEGIN_AUTH_RETRY_DELAY_MS: u64 = 1000;
-            let max_attempts: usize = if is_begin {
-                BEGIN_AUTH_RETRIES + 1
-            } else {
-                1
-            };
+            // 设备 OTA control 特征值要求加密连接。BEGIN / SYNC / FINISH 等控制写在 GATT
+            // session 还没完成加密/绑定、或长传输后加密丢失时都会 ATT protocol_error=14
+            // (Insufficient Authentication)。短暂等待加密恢复后重试，避免第一次点 OTA 失败、
+            // 或长传输结束 FINISH 失败（用户实测 FINISH 在 75s 传输后丢加密而失败）。
+            const CONTROL_AUTH_RETRIES: usize = 5;
+            const CONTROL_AUTH_RETRY_DELAY_MS: u64 = 1000;
+            let max_attempts: usize = CONTROL_AUTH_RETRIES + 1;
             for attempt in 0..max_attempts {
                 let result = if use_status_write {
                     write_gatt_value_status_with_timeout(
@@ -7295,19 +7290,18 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
                 match result {
                     Ok(_) => return Ok(()),
                     Err(err) => {
-                        let needs_auth_retry = is_begin
-                            && attempt + 1 < max_attempts
+                        let needs_auth_retry = attempt + 1 < max_attempts
                             && (err.contains("protocol_error") || err.contains("ProtocolError"));
                         if needs_auth_retry {
                             log::warn!(
-                                "[embedded-ble] Denzic OTA v1 #{}: begin write {} — GATT session 尚未完成加密/绑定，等待 {}ms 后重试 attempt={}",
+                                "[embedded-ble] Denzic OTA v1 #{}: {} — GATT session 加密/绑定未就绪，等待 {}ms 后重试 attempt={}",
                                 self.transfer_id,
-                                err,
-                                BEGIN_AUTH_RETRY_DELAY_MS,
+                                label,
+                                CONTROL_AUTH_RETRY_DELAY_MS,
                                 attempt + 1
                             );
                             std::thread::sleep(std::time::Duration::from_millis(
-                                BEGIN_AUTH_RETRY_DELAY_MS,
+                                CONTROL_AUTH_RETRY_DELAY_MS,
                             ));
                             continue;
                         }
@@ -7352,24 +7346,49 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             &mut self,
             packet: &[u8; denzic_ota_core::CONTROL_BYTES],
         ) -> Result<(), String> {
-            match write_gatt_value_with_timeout(
-                &self.target.control,
-                packet,
-                GattWriteOption::WriteWithResponse,
-                OTA_FINISH_WRITE_TIMEOUT,
-                "Denzic OTA v1 finish",
-            ) {
-                Ok(_) => Ok(()),
-                Err(error) if is_ota_finish_reboot_handoff_error(&error) => {
-                    log::info!(
-                        "[embedded-ble] Denzic OTA v1 #{}: finish completed through reboot handoff: {}",
-                        self.transfer_id,
-                        error
-                    );
-                    Ok(())
+            // FINISH 和 BEGIN 一样要求加密 GATT session。长传输(~75s)后 session 加密可能
+            // 丢失，FINISH 会 ATT protocol_error=14 (Insufficient Authentication)。等待加密
+            // 恢复后重试，避免长传输结束却提交失败。reboot handoff 错误（设备已重启）不算。
+            const FINISH_AUTH_RETRIES: usize = 5;
+            const FINISH_AUTH_RETRY_DELAY_MS: u64 = 1000;
+            for attempt in 0..(FINISH_AUTH_RETRIES + 1) {
+                match write_gatt_value_with_timeout(
+                    &self.target.control,
+                    packet,
+                    GattWriteOption::WriteWithResponse,
+                    OTA_FINISH_WRITE_TIMEOUT,
+                    "Denzic OTA v1 finish",
+                ) {
+                    Ok(_) => return Ok(()),
+                    Err(error) if is_ota_finish_reboot_handoff_error(&error) => {
+                        log::info!(
+                            "[embedded-ble] Denzic OTA v1 #{}: finish completed through reboot handoff: {}",
+                            self.transfer_id,
+                            error
+                        );
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        let needs_auth_retry = attempt < FINISH_AUTH_RETRIES
+                            && (error.contains("protocol_error") || error.contains("ProtocolError"));
+                        if needs_auth_retry {
+                            log::warn!(
+                                "[embedded-ble] Denzic OTA v1 #{}: finish write {} — GATT session 加密/绑定未就绪，等待 {}ms 后重试 attempt={}",
+                                self.transfer_id,
+                                error,
+                                FINISH_AUTH_RETRY_DELAY_MS,
+                                attempt + 1
+                            );
+                            std::thread::sleep(std::time::Duration::from_millis(
+                                FINISH_AUTH_RETRY_DELAY_MS,
+                            ));
+                            continue;
+                        }
+                        return Err(error);
+                    }
                 }
-                Err(error) => Err(error),
             }
+            unreachable!("write_finish retry loop must return inside the loop")
         }
     }
 
