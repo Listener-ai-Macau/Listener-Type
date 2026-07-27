@@ -318,7 +318,16 @@ mod platform {
     static CACHE: Lazy<Mutex<Option<(String, u32, u32, Arc<Runtime>)>>> =
         Lazy::new(|| Mutex::new(None));
 
+    /// Live KWS always uses the product-sensitive bootstrap (score 3.0 / threshold 0.08).
+    ///
+    /// Historical enrollment `calibrate()` walked candidates from *strictest* → most
+    /// sensitive and pinned the first match (often 1.5 / 0.25). That reduced false
+    /// starts on clean enrollment audio but **tanked everyday wake recall**. Owner
+    /// contract: primary automatic wake is the sensitive path; voiceprint (when
+    /// enrolled) and local confirmation remain the false-start gates — not a strict
+    /// KWS pin.
     fn configured_keyword_values(phrase: &str) -> (f32, f32) {
+        let _ = phrase;
         #[cfg(test)]
         if let (Ok(score), Ok(threshold)) = (
             std::env::var("LISTENER_KWS_SCORE"),
@@ -329,10 +338,16 @@ mod platform {
                 threshold.parse().expect("LISTENER_KWS_THRESHOLD float"),
             );
         }
-        if let Some(calibration) = read_calibration(phrase) {
-            return (calibration.score, calibration.threshold);
-        }
         (BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)
+    }
+
+    fn is_less_sensitive_than_bootstrap(score: f32, threshold: f32) -> bool {
+        score + f32::EPSILON < BOOTSTRAP_KEYWORD_SCORE
+            || threshold > BOOTSTRAP_KEYWORD_THRESHOLD + f32::EPSILON
+    }
+
+    fn clear_runtime_cache() {
+        *CACHE.lock() = None;
     }
 
     fn calibration_path() -> Result<PathBuf, String> {
@@ -369,12 +384,30 @@ mod platform {
             threshold,
         })
         .map_err(|err| err.to_string())?;
-        fs::write(calibration_path()?, value).map_err(|err| err.to_string())
+        fs::write(calibration_path()?, value).map_err(|err| err.to_string())?;
+        // Spotter embeds keywords_score/threshold; force rebuild on next prepare.
+        clear_runtime_cache();
+        Ok(())
     }
 
+    /// Ensure on-disk calibration matches product-sensitive bootstrap.
+    ///
+    /// Returns `true` when the file was created or upgraded (stale strict pins).
     pub fn persist_bootstrap_calibration_if_missing(phrase: &str) -> Result<bool, String> {
-        if read_calibration(phrase).is_some() {
-            return Ok(false);
+        if let Some(existing) = read_calibration(phrase) {
+            if !is_less_sensitive_than_bootstrap(existing.score, existing.threshold) {
+                return Ok(false);
+            }
+            save_calibration(phrase, BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)?;
+            log::info!(
+                "[wake-phrase] upgraded less-sensitive calibration to bootstrap phrase={} was_score={:.1} was_threshold={:.2} score={:.1} threshold={:.2}",
+                phrase,
+                existing.score,
+                existing.threshold,
+                BOOTSTRAP_KEYWORD_SCORE,
+                BOOTSTRAP_KEYWORD_THRESHOLD
+            );
+            return Ok(true);
         }
         save_calibration(phrase, BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)?;
         log::info!(
@@ -922,21 +955,34 @@ mod platform {
     }
 
     pub fn calibrate(pcm: &[u8], phrase: &str) -> Result<(), String> {
-        let selected = select_calibration(|score, threshold| {
+        // Prove the enrollment audio contains the configured phrase under *some*
+        // candidate (including strict). Runtime still pins product-sensitive bootstrap
+        // so everyday wake is not locked to the strictest enrollment match.
+        let detected_with = select_calibration(|score, threshold| {
             detect_with_config(pcm, phrase, score, threshold).map(|result| result.is_some())
         })?
         .ok_or_else(|| "没有在声纹样本中识别到唤醒词，请用自然语速清晰重复三遍".to_string())?;
-        save_calibration(phrase, selected.0, selected.1)?;
+        save_calibration(phrase, BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD)?;
         log::info!(
-            "[wake-phrase] local calibration saved phrase={} score={:.1} threshold={:.2}",
+            "[wake-phrase] enrollment phrase verified (matched_at score={:.1} threshold={:.2}); runtime calibration pinned to bootstrap phrase={} score={:.1} threshold={:.2}",
+            detected_with.0,
+            detected_with.1,
             phrase,
-            selected.0,
-            selected.1
+            BOOTSTRAP_KEYWORD_SCORE,
+            BOOTSTRAP_KEYWORD_THRESHOLD
         );
         Ok(())
     }
 
     pub fn prepare(phrase: &str) -> Result<(), String> {
+        let _ = persist_bootstrap_calibration_if_missing(phrase);
+        let (score, threshold) = configured_keyword_values(phrase);
+        log::info!(
+            "[wake-phrase] runtime KWS config phrase={} score={:.1} threshold={:.2}",
+            phrase,
+            score,
+            threshold
+        );
         load(phrase).map(|_| ())
     }
 
@@ -981,6 +1027,20 @@ mod platform {
                 (BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD),
                 *CALIBRATION_CANDIDATES.last().expect("bootstrap candidate")
             );
+        }
+
+        #[test]
+        fn runtime_keyword_values_use_product_sensitive_bootstrap() {
+            // Live path must not inherit a strict enrollment pin such as 1.5/0.25.
+            let (score, threshold) = configured_keyword_values("开始录音");
+            assert_eq!(score, BOOTSTRAP_KEYWORD_SCORE);
+            assert_eq!(threshold, BOOTSTRAP_KEYWORD_THRESHOLD);
+            assert!(is_less_sensitive_than_bootstrap(1.5, 0.25));
+            assert!(is_less_sensitive_than_bootstrap(3.0, 0.10));
+            assert!(!is_less_sensitive_than_bootstrap(
+                BOOTSTRAP_KEYWORD_SCORE,
+                BOOTSTRAP_KEYWORD_THRESHOLD
+            ));
         }
 
         #[test]
