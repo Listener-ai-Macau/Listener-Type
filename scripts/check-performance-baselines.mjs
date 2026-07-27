@@ -416,7 +416,7 @@ for (const token of [
 }
 
 const embeddedBle = readFileSync(join(repoRoot, "src-tauri", "src", "embedded_ble.rs"), "utf8");
-const commandsRs = readFileSync(join(repoRoot, "src-tauri", "src", "commands.rs"), "utf8");
+const commandsRs = readFileSync(join(repoRoot, "src-tauri", "src", "commands", "mod.rs"), "utf8");
 const listenerOtaWindow = embeddedBle.match(
   /const\s+LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS:\s*usize\s*=\s*(\d+);/,
 );

@@ -1,0 +1,180 @@
+MODULE BUDGET PASS
+{
+  "budgets": [
+    {
+      "path": "coordinator.rs",
+      "lines": 9198,
+      "maxLines": 9500,
+      "ok": true
+    },
+    {
+      "path": "commands/mod.rs",
+      "lines": 4589,
+      "maxLines": 9000,
+      "ok": true
+    },
+    {
+      "path": "commands/device/mod.rs",
+      "lines": 11,
+      "maxLines": 80,
+      "ok": true
+    },
+    {
+      "path": "commands/device/settings.rs",
+      "lines": 1943,
+      "maxLines": 2800,
+      "ok": true
+    },
+    {
+      "path": "commands/device/ble.rs",
+      "lines": 544,
+      "maxLines": 1200,
+      "ok": true
+    },
+    {
+      "path": "commands/device/firmware.rs",
+      "lines": 2306,
+      "maxLines": 2800,
+      "ok": true
+    },
+    {
+      "path": "coordinator/dictation.rs",
+      "lines": 7202,
+      "maxLines": 7500,
+      "ok": true
+    },
+    {
+      "path": "coordinator/support.rs",
+      "lines": 995,
+      "maxLines": 1500,
+      "ok": true
+    },
+    {
+      "path": "embedded_ble.rs",
+      "lines": 18015,
+      "maxLines": 18500,
+      "ok": true
+    },
+    {
+      "path": "types.rs",
+      "lines": 3622,
+      "maxLines": 4000,
+      "ok": true
+    },
+    {
+      "path": "polish.rs",
+      "lines": 3268,
+      "maxLines": 3500,
+      "ok": true
+    },
+    {
+      "path": "lib.rs",
+      "lines": 3104,
+      "maxLines": 3500,
+      "ok": true
+    }
+  ],
+  "separatedTests": [
+    {
+      "production": "coordinator.rs",
+      "testsFile": "coordinator_tests.rs",
+      "hasInlineBody": false,
+      "hasPathMod": true,
+      "ok": true
+    },
+    {
+      "production": "coordinator/dictation.rs",
+      "testsFile": "coordinator/dictation_tests.rs",
+      "hasInlineBody": false,
+      "hasPathMod": true,
+      "ok": true
+    },
+    {
+      "production": "commands/mod.rs",
+      "testsFile": "commands_tests.rs",
+      "hasInlineBody": false,
+      "hasPathMod": true,
+      "ok": true
+    }
+  ],
+  "largest": [
+    {
+      "path": "embedded_ble.rs",
+      "lines": 18015
+    },
+    {
+      "path": "coordinator.rs",
+      "lines": 9198
+    },
+    {
+      "path": "coordinator/dictation.rs",
+      "lines": 7202
+    },
+    {
+      "path": "commands/mod.rs",
+      "lines": 4589
+    },
+    {
+      "path": "types.rs",
+      "lines": 3622
+    },
+    {
+      "path": "polish.rs",
+      "lines": 3268
+    },
+    {
+      "path": "lib.rs",
+      "lines": 3104
+    },
+    {
+      "path": "persistence.rs",
+      "lines": 2969
+    },
+    {
+      "path": "commands/device/firmware.rs",
+      "lines": 2306
+    },
+    {
+      "path": "asr/volcengine_transcript.rs",
+      "lines": 2241
+    },
+    {
+      "path": "asr/volcengine.rs",
+      "lines": 2034
+    },
+    {
+      "path": "commands/device/settings.rs",
+      "lines": 1943
+    },
+    {
+      "path": "hotkey.rs",
+      "lines": 1721
+    },
+    {
+      "path": "wake_phrase.rs",
+      "lines": 1296
+    },
+    {
+      "path": "coordinator_state.rs",
+      "lines": 1288
+    }
+  ],
+  "softOver4500": [
+    {
+      "path": "embedded_ble.rs",
+      "lines": 18015
+    },
+    {
+      "path": "coordinator.rs",
+      "lines": 9198
+    },
+    {
+      "path": "coordinator/dictation.rs",
+      "lines": 7202
+    },
+    {
+      "path": "commands/mod.rs",
+      "lines": 4589
+    }
+  ]
+}

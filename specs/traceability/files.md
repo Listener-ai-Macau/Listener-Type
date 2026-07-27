@@ -76,15 +76,29 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/capsule_log.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/cli.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/combo_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
-| `src-tauri/src/commands.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/mod.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/device/mod.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/device/settings.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/device/ble.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/device/firmware.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands_tests.rs` | Core app | `cargo test --lib` |
+| `src-tauri/src/commands_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/qa.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/resources.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/support.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator_state.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/correction.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_audio.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/embedded_ble.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/mod.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/mod.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/tests.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/tests.rs` | Core app | Build and targeted tests |
+| `scripts/check-module-budgets.mjs` | Core app | `npm run check:module-budgets` |
+| `docs/goals/20260727-type-maintainability-excellent.md` | Core app | Goal contract |
 | `src-tauri/src/firmware_ota.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/github_oauth.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/global_hotkey_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |

@@ -29,10 +29,12 @@ flowchart TB
 ## Backend
 
 - `src-tauri/src/lib.rs` wires Tauri plugins, windows, tray, commands and platform setup.
-- `src-tauri/src/coordinator.rs` coordinates recording, ASR, polish, insertion and history.
+- `src-tauri/src/coordinator.rs` coordinates recording, ASR, polish, insertion and history; helpers in `coordinator/support.rs`; session logic in `coordinator/dictation.rs` / `qa.rs` / `resources.rs`; tests path-separated (`coordinator_tests.rs`, `dictation_tests.rs`).
 - `src-tauri/src/persistence.rs` stores settings, history, recordings, vocabulary, style packs and credentials.
-- `src-tauri/src/commands.rs` is the IPC command surface.
+- `src-tauri/src/commands/` is the IPC command surface: `mod.rs` (settings/style/ASR/marketplace + thin device Tauri wrappers) and `device/{mod,settings,ble,firmware}.rs` (device settings / BLE audio+pairing / OTA+wired flash). Unit tests live in `commands_tests.rs` when present.
+- `src-tauri/src/embedded_ble.rs` owns Windows BLE (still monolithic; recovered windows_ble draft under `tools/_recovered_modules/embedded_ble/` for a later extract).
 - Provider modules live under `src-tauri/src/asr/*` and `src-tauri/src/llm_*.rs`.
+- Maintainability gate: `npm run check:module-budgets` (Goals: `docs/goals/20260727-type-maintainability-excellent.md`, `docs/goals/20260727-type-maintainability-phase2.md`).
 
 ## Provider Network Policy
 

@@ -11,7 +11,7 @@ it, and which limits remain.
 | --- | --- | --- |
 | Dictation pipeline | `dictation-pipeline.md` | `src-tauri/src/coordinator/`, `src-tauri/src/asr/`, `src-tauri/src/insertion.rs`, `src/components/Capsule.tsx` |
 | Embedded BLE audio | `p13_embedded_audio_software_integration.md`, `embedded-ble-dictation-quality.md` | `src-tauri/src/embedded_audio.rs`, `src-tauri/src/embedded_ble.rs`, `tools/embedded_audio_replay/` |
-| Provider credentials and diagnostics | `provider-credentials-diagnostics.md` | `src-tauri/src/persistence.rs`, `src-tauri/src/commands.rs`, `src/pages/settings/ProvidersSection.tsx` |
+| Provider credentials and diagnostics | `provider-credentials-diagnostics.md` | `src-tauri/src/persistence.rs`, `src-tauri/src/commands/`, `src/pages/settings/ProvidersSection.tsx` |
 | Local ASR management | `local-asr-management.md` | `src-tauri/src/asr/local/`, `src/lib/localAsr.ts`, `tools/foundry_*` |
 | Windows IME insertion | `windows-ime-insertion.md` | `windows-ime/`, `src-tauri/src/windows_ime_*`, `src-tauri/nsis/listener-type-ime-cleanup-hooks.nsh`, optional `src-tauri/nsis/listener-type-ime-hooks.nsh` |
 | Updater and desktop shell | `updater-release.md` | `src/components/AutoUpdate*.tsx`, `src-tauri/src/lib.rs`, `src-tauri/tauri.conf.json` |

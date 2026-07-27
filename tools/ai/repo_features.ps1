@@ -58,7 +58,7 @@ function New-FeatureSnapshot {
             [ordered]@{ path = "src-tauri/src/embedded_ble.rs"; purpose = "Windows BLE discovery, connection, and subscription handling." },
             [ordered]@{ path = "src-tauri/src/embedded_audio.rs"; purpose = "Embedded audio framing and receive path." },
             [ordered]@{ path = "src-tauri/src/asr/"; purpose = "ASR provider implementations and local ASR engines." },
-            [ordered]@{ path = "src-tauri/src/commands.rs"; purpose = "Tauri command surface for settings, credentials, diagnostics, provider state, BLE, local ASR, and update helpers." },
+            [ordered]@{ path = "src-tauri/src/commands/"; purpose = "Tauri command surface for settings, credentials, diagnostics, provider state, BLE, local ASR, and update helpers." },
             [ordered]@{ path = "src-tauri/src/persistence.rs"; purpose = "Settings, history, dictionaries, provider credentials, and OS credential-vault persistence." },
             [ordered]@{ path = "src-tauri/src/windows_ime_*.rs"; purpose = "Windows IME IPC, profile, protocol, and session bridge." },
             [ordered]@{ path = "windows-ime/"; purpose = "Optional native TSF text service; default Windows packages do not register it." },

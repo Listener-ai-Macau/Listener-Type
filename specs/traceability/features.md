@@ -16,7 +16,7 @@
 | Capability | Source files | Verification |
 | --- | --- | --- |
 | Main shell and navigation | `src/components/FloatingShell.tsx`, `src/components/WindowChrome.tsx`, `src/pages/*` | `npm run build`, visual smoke |
-| Settings and credentials | `src/pages/Settings.tsx`, `src/components/SettingsModal.tsx`, `src-tauri/src/commands.rs`, `src-tauri/src/persistence.rs` | Settings save/load smoke, credential tests |
+| Settings and credentials | `src/pages/Settings.tsx`, `src/components/SettingsModal.tsx`, `src-tauri/src/commands/mod.rs`, `src-tauri/src/persistence.rs` | Settings save/load smoke, credential tests |
 | History | `src/pages/History.tsx`, `src-tauri/src/history.rs`, `src-tauri/src/persistence.rs` | Rust unit tests, retention smoke |
 | Vocabulary | `src/pages/Vocab.tsx`, `src-tauri/src/dictionary.rs` | Hotword injection tests, UI smoke |
 | Selection QA | `src/pages/QaPanel.tsx`, `src/pages/SelectionAsk.tsx`, `src-tauri/src/selection.rs`, `src-tauri/src/qa_hotkey.rs` | QA hotkey smoke |
@@ -25,7 +25,7 @@
 
 | Capability | Source files | Verification |
 | --- | --- | --- |
-| Marketplace local fallback | `src/pages/Marketplace.tsx`, `src/components/MarketplaceModal.tsx`, `src-tauri/src/commands.rs`, `src-tauri/src/style_packs.rs` | `npm run check:cloud`, local pack import/export smoke |
+| Marketplace local fallback | `src/pages/Marketplace.tsx`, `src/components/MarketplaceModal.tsx`, `src-tauri/src/commands/mod.rs`, `src-tauri/src/style_packs.rs` | `npm run check:cloud`, local pack import/export smoke |
 | Updater | `src-tauri/tauri.conf.json`, `scripts/write-updater-manifest.mjs` | `npm run check:cloud`, updater manifest tests |
 | Branding | `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `windows-ime/**` | `npm run check:brand`, Windows static checks |
 
