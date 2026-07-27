@@ -36,12 +36,18 @@ fn provider_models_cache_test_lock() -> &'static tokio::sync::Mutex<()> {
 }
 
 fn normalized_commands_source() -> String {
-    {
-        let mut s = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/mod.rs")).replace("\r\n", "\n");
+    let mut s = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/mod.rs")).replace("\r\n", "\n");
+    s.push('\n');
+    for part in [
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/mod.rs")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/settings.rs")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/ble.rs")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/firmware.rs")),
+    ] {
+        s.push_str(&part.replace("\r\n", "\n"));
         s.push('\n');
-        s.push_str(&include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/settings.rs")).replace("\r\n", "\n"));
-        s
     }
+    s
 }
 
 #[test]
@@ -191,9 +197,9 @@ fn firmware_ota_confirmation_uses_fast_service_probe_before_full_gatt_fallback()
         .find("async fn confirm_listener_ota_v1_reachable")
         .expect("OTA confirmation helper should exist");
     let end = source[start..]
-        .find("#[tauri::command]")
+        .find("pub fn load_firmware_ota_package")
         .map(|offset| start + offset)
-        .expect("OTA confirmation helper should end before the next command");
+        .expect("OTA confirmation helper should end before the next device-firmware helper");
     let body = &source[start..end];
     let fast_probe = body
         .find("listener_ota_v1_service_reachable_snapshot")
@@ -1959,10 +1965,12 @@ fn ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery() {
     );
 
     let one_click_start = source
-        .find("pub async fn recover_embedded_ble_device")
-        .expect("one-click recovery command should exist");
+        .match_indices("pub async fn recover_embedded_ble_device")
+        .nth(1)
+        .expect("one-click recovery device impl should exist")
+        .0;
     let one_click_end = source[one_click_start..]
-        .find("#[tauri::command]\npub async fn get_device_settings")
+        .find("pub fn get_embedded_ble_runtime_status")
         .map(|offset| one_click_start + offset)
         .expect("one-click recovery command boundary should exist");
     let one_click = &source[one_click_start..one_click_end];
@@ -2011,10 +2019,12 @@ fn ble_name_refresh_uses_silent_recovery_while_one_click_keeps_user_prompt() {
     );
 
     let one_click_start = source
-        .find("pub async fn recover_embedded_ble_device")
-        .expect("one-click recovery command should exist");
+        .match_indices("pub async fn recover_embedded_ble_device")
+        .nth(1)
+        .expect("one-click recovery device impl should exist")
+        .0;
     let one_click_end = source[one_click_start..]
-        .find("#[tauri::command]\npub async fn get_device_settings")
+        .find("pub fn get_embedded_ble_runtime_status")
         .map(|offset| one_click_start + offset)
         .expect("one-click recovery command boundary should exist");
     let one_click = &source[one_click_start..one_click_end];
