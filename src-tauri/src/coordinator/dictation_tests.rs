@@ -1535,7 +1535,27 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         Some(super::BufferedSpeakerCandidateKind::Rejected)
     );
 
-    let source = concat!(include_str!("dictation.rs"), "\n", include_str!("dictation_preview.rs"));
+    let source = concat!(
+        include_str!("dictation.rs"),
+        "
+",
+        include_str!("dictation_preview.rs"),
+        "
+",
+        include_str!("dictation_device_ai.rs"),
+        "
+",
+        include_str!("dictation_wake_polish.rs"),
+        "
+",
+        include_str!("dictation_session.rs"),
+        "
+",
+        include_str!("dictation_embedded_submit.rs"),
+        "
+",
+        include_str!("dictation_embedded_stream.rs")
+    );
     assert!(
         source.contains("if !crate::speaker_verification::is_enrolled()")
             && source.contains("fn owner_verification_window_ready"),
@@ -1586,7 +1606,27 @@ fn physical_hidden_candidate_promotion_discards_pre_press_pcm() {
     assert_eq!(super::discard_pre_press_candidate_pcm(&mut pcm), 6);
     assert!(pcm.is_empty());
 
-    let source = concat!(include_str!("dictation.rs"), "\n", include_str!("dictation_preview.rs"));
+    let source = concat!(
+        include_str!("dictation.rs"),
+        "
+",
+        include_str!("dictation_preview.rs"),
+        "
+",
+        include_str!("dictation_device_ai.rs"),
+        "
+",
+        include_str!("dictation_wake_polish.rs"),
+        "
+",
+        include_str!("dictation_session.rs"),
+        "
+",
+        include_str!("dictation_embedded_submit.rs"),
+        "
+",
+        include_str!("dictation_embedded_stream.rs")
+    );
     let start = source
         .find("async fn promote_hidden_candidate_if_requested")
         .expect("physical hidden-candidate promotion should exist");
@@ -1621,7 +1661,27 @@ fn device_processing_completion_requires_a_matching_start() {
 
 #[test]
 fn hidden_candidate_rejection_has_no_processing_led_command() {
-    let source = concat!(include_str!("dictation.rs"), "\n", include_str!("dictation_preview.rs"));
+    let source = concat!(
+        include_str!("dictation.rs"),
+        "
+",
+        include_str!("dictation_preview.rs"),
+        "
+",
+        include_str!("dictation_device_ai.rs"),
+        "
+",
+        include_str!("dictation_wake_polish.rs"),
+        "
+",
+        include_str!("dictation_session.rs"),
+        "
+",
+        include_str!("dictation_embedded_submit.rs"),
+        "
+",
+        include_str!("dictation_embedded_stream.rs")
+    );
     let start = source
         .find("fn reject_hidden_automatic_candidate")
         .expect("hidden rejection helper should exist");
@@ -2059,7 +2119,27 @@ fn volcengine_streaming_agc_raises_for_later_quiet_confirmed_speech() {
 
 #[test]
 fn volcengine_preview_and_final_share_the_authoritative_session() {
-    let source = concat!(include_str!("dictation.rs"), "\n", include_str!("dictation_preview.rs"));
+    let source = concat!(
+        include_str!("dictation.rs"),
+        "
+",
+        include_str!("dictation_preview.rs"),
+        "
+",
+        include_str!("dictation_device_ai.rs"),
+        "
+",
+        include_str!("dictation_wake_polish.rs"),
+        "
+",
+        include_str!("dictation_session.rs"),
+        "
+",
+        include_str!("dictation_embedded_submit.rs"),
+        "
+",
+        include_str!("dictation_embedded_stream.rs")
+    );
     assert!(source.contains(
         "authoritative optimized-bidirectional ASR ready; preview and final share one provider session"
     ));

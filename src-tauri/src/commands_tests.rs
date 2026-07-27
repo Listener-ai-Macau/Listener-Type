@@ -39,6 +39,10 @@ fn normalized_commands_source() -> String {
     let mut s = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/mod.rs")).replace("\r\n", "\n");
     s.push('\n');
     for part in [
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/style_pack_commands.rs")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/local_asr_commands.rs")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/diagnostics_export.rs")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/marketplace.rs")),
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/mod.rs")),
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/settings.rs")),
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/ble.rs")),
