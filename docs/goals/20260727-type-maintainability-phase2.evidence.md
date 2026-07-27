@@ -4,27 +4,19 @@
 
 ## 本轮交付
 
-### A–B. commands/device + embedded_ble 目录化
+### A–D. commands / embedded_ble / windows_ble include 拆分
 
-见 commit `cc5c404`。
+见 commits：`cc5c404`、`89c6e36`、`6312788`。
 
-### C. windows_ble OTA + pairing include
+### E. coordinator free-function 拆分（本轮）
 
-见 commit `89c6e36`。
+| 路径 | 约行数 | 说明 |
+|---|---|---|
+| `coordinator.rs` | ~3709 | 主类型 + `impl Coordinator` + ASR/polish 尾部 |
+| `coordinator/hotkey_device_runtime.rs` | ~2009 | 热键 supervisor + device-key BLE pending |
+| `coordinator/embedded_ble_runtime.rs` | ~3485 | 背景 listener / 配对恢复 free functions |
 
-### D. windows_ble 再切 capture / notify_open / pnp / recording（本轮）
-
-| 路径 | 约行数 |
-|---|---|
-| `windows_ble/mod.rs` | ~7614 |
-| `windows_ble/pairing.rs` | ~2447 |
-| `windows_ble/notify_open.rs` | ~1034 |
-| `windows_ble/capture_events.rs` | ~644 |
-| `windows_ble/ota_transfer.rs` | ~661 |
-| `windows_ble/pnp_cache.rs` | ~485 |
-| `windows_ble/recording_control.rs` | ~337 |
-
-均经 `include!` 并入同一 module，行为不变。
+`include!("coordinator/…")` 保持同一 module 作用域。
 
 ## 机器结果
 
@@ -33,17 +25,18 @@
 | `node scripts/check-module-budgets.mjs` | **PASS** |
 | `cargo check --lib --tests` | **PASS** |
 | Goal 关键 5 测 | **PASS** |
-| `cargo test --lib embedded_ble::` | **114 passed; 0 failed; 4 ignored** |
-| `node scripts/check-embedded-ble-processing-led.mjs` | **PASS** |
+| `cargo test --lib coordinator::tests::` | **144 passed** |
+| `cargo test --lib embedded_ble::` | **114 passed** |
 
 ## soft>4500（仍 open）
 
-- `coordinator.rs` ~9.2k
 - `embedded_ble/windows_ble/mod.rs` ~7.6k
 - `coordinator/dictation.rs` ~7.2k
 - `commands/mod.rs` ~4.6k
 
+`coordinator.rs` 已从 soft 列表压下（~9.2k → ~3.7k）。
+
 ## 下一刀
 
-1. 压 `coordinator.rs` free-function / 子模块
-2. 或继续削 `windows_ble/mod.rs`（settings/USB serial、OTA open 残余）
+1. 压 `dictation.rs` 或 `windows_ble/mod.rs` 残余
+2. `commands/mod.rs` 再拆 marketplace/settings 段

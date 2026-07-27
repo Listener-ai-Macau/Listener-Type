@@ -13,7 +13,9 @@ const srcRoot = join(repoRoot, "src-tauri", "src");
 
 /** @type {{ path: string, maxLines: number }[]} */
 const FILE_BUDGETS = [
-  { path: "coordinator.rs", maxLines: 9500 },
+  { path: "coordinator.rs", maxLines: 4500 },
+  { path: "coordinator/hotkey_device_runtime.rs", maxLines: 2500 },
+  { path: "coordinator/embedded_ble_runtime.rs", maxLines: 4000 },
   { path: "commands/mod.rs", maxLines: 9000 },
   { path: "commands/device/mod.rs", maxLines: 80 },
   { path: "commands/device/settings.rs", maxLines: 2800 },

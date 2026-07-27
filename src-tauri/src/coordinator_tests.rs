@@ -5,7 +5,14 @@ use once_cell::sync::Lazy;
 
 macro_rules! include_str {
     ("coordinator.rs") => {
-        std::include_str!("coordinator.rs").replace("\r\n", "\n")
+        concat!(
+            std::include_str!("coordinator.rs"),
+            "\n",
+            std::include_str!("coordinator/hotkey_device_runtime.rs"),
+            "\n",
+            std::include_str!("coordinator/embedded_ble_runtime.rs")
+        )
+        .replace("\r\n", "\n")
     };
     ("embedded_ble.rs") => {
         concat!(
@@ -2442,7 +2449,7 @@ fn ec11_type_controlled_recovery_capsule_waits_for_firmware_terminal_control_wri
     );
     assert!(
         embedded_ble_source
-            .contains("if !type_ready_confirmed {\n                            on_ready()?;")
+            .contains("if !type_ready_confirmed {\n                        on_ready()?;")
             && embedded_ble_source
                 .contains("Type ready terminal confirmation recovered through heartbeat"),
         "a retried TYPE:READY heartbeat must publish the terminal state exactly once"

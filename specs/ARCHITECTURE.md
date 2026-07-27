@@ -29,7 +29,7 @@ flowchart TB
 ## Backend
 
 - `src-tauri/src/lib.rs` wires Tauri plugins, windows, tray, commands and platform setup.
-- `src-tauri/src/coordinator.rs` coordinates recording, ASR, polish, insertion and history; helpers in `coordinator/support.rs`; session logic in `coordinator/dictation.rs` / `qa.rs` / `resources.rs`; tests path-separated (`coordinator_tests.rs`, `dictation_tests.rs`).
+- `src-tauri/src/coordinator.rs` coordinates recording, ASR, polish, insertion and history; helpers in `coordinator/support.rs`; session logic in `coordinator/dictation.rs` / `qa.rs` / `resources.rs`; large free-function domains via `include!` (`hotkey_device_runtime.rs`, `embedded_ble_runtime.rs`); tests path-separated (`coordinator_tests.rs`, `dictation_tests.rs`).
 - `src-tauri/src/persistence.rs` stores settings, history, recordings, vocabulary, style packs and credentials.
 - `src-tauri/src/commands/` is the IPC command surface: `mod.rs` (settings/style/ASR/marketplace + thin device Tauri wrappers) and `device/{mod,settings,ble,firmware}.rs` (device settings / BLE audio+pairing / OTA+wired flash). Unit tests live in `commands_tests.rs` when present.
 - `src-tauri/src/embedded_ble/` owns Windows BLE: `mod.rs` (shared types + public wrappers), `windows_ble/` (`mod.rs` + `include!` siblings: `pairing`, `pnp_cache`, `recording_control`, `capture_events`, `ota_transfer`, `notify_open`), path-separated tests in `mod_tests.rs` / `windows_ble_tests.rs`. Further soft cuts and coordinator/dictation remain later iterations.

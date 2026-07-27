@@ -238,7 +238,13 @@ mod tests {
             include_str!("embedded_ble/windows_ble/notify_open.rs")
         )
         .replace("\r\n", "\n");
-        let coordinator = include_str!("coordinator.rs");
+        let coordinator = concat!(
+            include_str!("coordinator.rs"),
+            "\n",
+            include_str!("coordinator/hotkey_device_runtime.rs"),
+            "\n",
+            include_str!("coordinator/embedded_ble_runtime.rs")
+        );
 
         assert!(lib.contains("startup_evidence::begin_process_evidence()"));
         assert!(embedded_ble.contains("record_startup_path(\"native_windows_hid\")"));
