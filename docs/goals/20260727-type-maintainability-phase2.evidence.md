@@ -2,18 +2,37 @@
 
 日期：2026-07-27
 
-## 本轮交付：commands/device 按符号迁回
+## 本轮交付
+
+### A. commands/device 按符号迁回（前序）
 
 | 路径 | 约行数 |
 |---|---|
-| `commands/mod.rs` | ~4588 |
-| `commands/device/mod.rs` | 10 |
-| `commands/device/settings.rs` | ~1942 |
-| `commands/device/ble.rs` | ~543 |
-| `commands/device/firmware.rs` | ~2305 |
-| `commands_tests.rs` | path 分离（`CARGO_MANIFEST_DIR` include） |
+| `commands/mod.rs` | ~4589 |
+| `commands/device/mod.rs` | 11 |
+| `commands/device/settings.rs` | ~1943 |
+| `commands/device/ble.rs` | ~544 |
+| `commands/device/firmware.rs` | ~2306 |
+| `commands_tests.rs` | path 分离 |
 
-脚本：`tools/_migrate_commands_device.py`（按符号剥离 + 迁走类型的 `impl` + thin Tauri wrappers）。
+### B. embedded_ble 拆目录 + 测试 path 分离（本轮续）
+
+| 路径 | 约行数 | 说明 |
+|---|---|---|
+| `embedded_ble/mod.rs` | ~1535 | 共享类型、公开包装、非 Windows stub |
+| `embedded_ble/windows_ble.rs` | ~13198 | Windows GATT/配对/OTA/采集生产代码 |
+| `embedded_ble/mod_tests.rs` | ~1113 | `#[path]` 从 `mod.rs` |
+| `embedded_ble/windows_ble_tests.rs` | ~2204 | `#[path]` 从 `windows_ble.rs` |
+| `embedded_ble.rs`（单文件） | 删除 | 备份 `embedded_ble.rs.bak-split` |
+
+脚本：
+
+- `tools/_split_embedded_ble.py`
+- `tools/_fix_embedded_ble_include_paths.py`
+- `tools/_extract_windows_ble_tests.py`
+- `tools/_extract_embedded_ble_mod_tests.py`
+
+预算门禁已登记：`embedded_ble/mod.rs` ≤2000、`windows_ble.rs` ≤14000；`SEPARATED_TESTS` 含两者。
 
 ## 机器结果
 
@@ -21,20 +40,20 @@
 |---|---|
 | `node scripts/check-module-budgets.mjs` | **PASS** |
 | `cargo check --lib --tests` | **PASS** |
-| `cargo test --lib installed_takeover_evidence` | ok |
-| `cargo test --lib is_valid_local_pack_id` | ok (2) |
-| `cargo test --lib embedded_ble_pcm_capsule_trace` | ok |
-| `cargo test --lib crc32_matches_standard_vector` | ok |
+| Goal 关键单测（5） | **5 passed** |
+| `cargo test --lib embedded_ble::` | **114 passed; 0 failed; 4 ignored** |
+
+结构测试已按拆分后布局对齐：path 分离后不再依赖同文件 `mod tests {` 边界；wrapper 层用 Windows 实现体锁定；嵌套模块去缩进后的空白契约已更新。
 
 ## soft>4500（仍 open）
 
-- `embedded_ble.rs` ~18k
+- `embedded_ble/windows_ble.rs` ~13.2k（已从单体 ~18k 降；下一步可按 OTA / capture / pairing 再切）
 - `coordinator.rs` ~9.2k
 - `coordinator/dictation.rs` ~7.2k
-- `commands/mod.rs` ~4.6k（已从 ~12.9k 压下；可再拆 marketplace/settings 段）
+- `commands/mod.rs` ~4.6k
 
 ## 下一刀
 
-1. **请先 commit 本批**（防 reset 再丢）
-2. 拆 `embedded_ble`（`tools/_recovered_modules/embedded_ble/`）
-3. 再拆 coordinator free-function 区
+1. **请先 commit 本批**（含 embedded_ble 目录拆分 + 测试分离 + budget/ARCHITECTURE/evidence）
+2. 再拆 `windows_ble` 职责域（OTA write_control / notify capture / pairing）
+3. coordinator free-function 区 / dictation 子模块压 soft

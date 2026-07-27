@@ -51,3 +51,21 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
 For Windows IME edits, also run the static scripts under `scripts/windows-*.test.mjs` and document any Windows runtime gap if you are not on Windows.
+
+## Shared agent rules (Grok / Claude / Codex)
+
+Also follow `C:\Users\Billy\Desktop\Denzic\ai-collaboration-workflow\docs\shared_product_engineering_rules.md`
+(or `$env:AI_WORKFLOW_REPO\docs\shared_product_engineering_rules.md`): fix-before-acceptance,
+fresh test binary, anti-regression contracts.
+
+### Voice wake / voiceprint (anti-regression)
+
+- Deleting the voiceprint must **not** disable automatic wake. No-template path open-gates
+  on phrase hit (`speaker_verification::verify` returns match when unenrolled).
+- `buffered_speaker_candidate_kind(VoiceActivation, _, enrolled=false)` must still be
+  `Verification`, never `Rejected`.
+- Primary automatic wake uses `StreamingDetector::new` (sensitive). Reserve `new_strict`
+  for in-session diagnostic reactivation only.
+- Without enrollment, do not stall on the 1.1s owner-speech window.
+- Firmware `voiceAutoStartEnabled` must be on for device VAD auto-start; settings UI:
+  「检测到人声后自动开始」.

@@ -2,8 +2,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const repoRoot = process.cwd();
-const embeddedBlePath = join(repoRoot, "src-tauri", "src", "embedded_ble.rs");
-const source = readFileSync(embeddedBlePath, "utf8");
+// Implementations live in windows_ble.rs; thin wrappers in mod.rs must not win indexOf.
+const embeddedBleDir = join(repoRoot, "src-tauri", "src", "embedded_ble");
+const source = [
+  readFileSync(join(embeddedBleDir, "windows_ble.rs"), "utf8"),
+  readFileSync(join(embeddedBleDir, "mod.rs"), "utf8"),
+].join("\n");
 const dictationPath = join(repoRoot, "src-tauri", "src", "coordinator", "dictation.rs");
 const dictationSource = readFileSync(dictationPath, "utf8");
 

@@ -29,8 +29,9 @@ mod platform {
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     use denzic_speaker_verification_v1_core::{
         Action, CandidateOrigin, Input, Machine, Verdict, DEFAULT_MAX_CANDIDATE_MS,
-        DEFAULT_SCORE_MILLI,
     };
+    #[cfg(test)]
+    use denzic_speaker_verification_v1_core::DEFAULT_SCORE_MILLI;
     use libloading::Library;
     use once_cell::sync::Lazy;
     use parking_lot::Mutex;
@@ -61,7 +62,10 @@ mod platform {
     const ENROLLMENT_FRAME_MS: usize = 100;
     const ENROLLMENT_MIN_ACTIVE_FRAMES: usize = 18;
     const TEMPLATE_WINDOW_MS: usize = 1_600;
-    const VERIFICATION_THRESHOLD: f32 = DEFAULT_SCORE_MILLI as f32 / 1000.0;
+    // Product sensitivity: platform DEFAULT_SCORE_MILLI is 500 (0.50). Real-owner
+    // wake in mild noise often scores ~0.43–0.55; 0.50 cut too many true hits.
+    // Keep below same-speaker unit-test floor and well above typical non-owner.
+    const VERIFICATION_THRESHOLD: f32 = 0.42;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum CaptureState {
@@ -1044,7 +1048,9 @@ mod platform {
             let pcm = vec![32u8; SAMPLE_RATE as usize * 2 * 1_100 / 1000];
             let samples = prepare_embedding_samples(&pcm).expect("1.1 second continuous speech");
             assert_eq!(samples.len(), SAMPLE_RATE as usize * 1_100 / 1000);
-            assert_eq!(VERIFICATION_THRESHOLD, DEFAULT_SCORE_MILLI as f32 / 1000.0);
+            // Product threshold may be looser than platform default for recall.
+            assert!(VERIFICATION_THRESHOLD <= DEFAULT_SCORE_MILLI as f32 / 1000.0);
+            assert!(VERIFICATION_THRESHOLD >= 0.35);
             let short_pcm = vec![32u8; SAMPLE_RATE as usize * 2 * 955 / 1000];
             assert!(prepare_embedding_samples(&short_pcm).is_err());
         }

@@ -7,6 +7,14 @@ macro_rules! include_str {
     ("coordinator.rs") => {
         std::include_str!("coordinator.rs").replace("\r\n", "\n")
     };
+    ("embedded_ble.rs") => {
+        concat!(
+            std::include_str!("embedded_ble/mod.rs"),
+            "\n",
+            std::include_str!("embedded_ble/windows_ble.rs")
+        )
+        .replace("\r\n", "\n")
+    };
 }
 
 static ENV_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
@@ -2404,7 +2412,7 @@ fn ec11_type_controlled_recovery_capsule_waits_for_firmware_terminal_control_wri
         "the notify-reopen path must retain the same terminal-only UI boundary"
     );
 
-    let embedded_ble_source = std::include_str!("embedded_ble.rs").replace("\r\n", "\n");
+    let embedded_ble_source = include_str!("embedded_ble.rs");
     let cccd_enabled = embedded_ble_source
         .find("capture #{capture_id}: notify CCCD enabled")
         .expect("background capture must log notify CCCD enablement");

@@ -1511,13 +1511,15 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         ),
         Some(super::BufferedSpeakerCandidateKind::Verification)
     );
+    // Deleting the voiceprint must not disable automatic wake: still enter the
+    // verification gate path; speaker_verification::verify open-gates when empty.
     assert_eq!(
         super::buffered_speaker_candidate_kind(
             SessionStartOrigin::VoiceActivation,
             false,
             false
         ),
-        Some(super::BufferedSpeakerCandidateKind::Rejected)
+        Some(super::BufferedSpeakerCandidateKind::Verification)
     );
     assert_eq!(
         super::buffered_speaker_candidate_kind(SessionStartOrigin::Unknown(9), false, true),
@@ -1525,6 +1527,23 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
     );
 
     let source = include_str!("dictation.rs");
+    assert!(
+        source.contains("if !crate::speaker_verification::is_enrolled()")
+            && source.contains("fn owner_verification_window_ready"),
+        "no-voiceprint path must skip the owner speech window delay"
+    );
+    let wake_init = source
+        .find("let wake_detector = if candidate_kind")
+        .expect("wake detector init");
+    let after_wake = source[wake_init..]
+        .find("mark_hidden_automatic_candidate_active()")
+        .map(|offset| wake_init + offset)
+        .expect("after primary wake detector init");
+    assert!(
+        source[wake_init..after_wake].contains("StreamingDetector::new(&phrase)")
+            && !source[wake_init..after_wake].contains("new_strict"),
+        "primary automatic wake must use StreamingDetector::new (sensitive), not new_strict"
+    );
     let start = source
         .find("async fn try_release_automatic_candidate")
         .expect("live automatic gate should exist");

@@ -894,26 +894,22 @@ impl Coordinator {
             tauri::async_runtime::spawn(async move {
                 let prefs = inner.prefs.get();
                 let active_foundry = foundry::is_foundry_local_whisper(&prefs.active_asr_provider);
-                let wake_confirmation = crate::speaker_verification::is_enrolled();
-                if !active_foundry && !wake_confirmation {
-                    return;
-                }
-                if wake_confirmation {
-                    let helper_result = tauri::async_runtime::spawn_blocking(
-                        crate::asr::local::wake_helper::preload,
-                    )
-                    .await;
-                    match helper_result {
-                        Ok(Ok(())) => log::info!(
-                            "[wake-phrase] isolated local confirmation helper ready reason={reason}"
-                        ),
-                        Ok(Err(error)) => log::warn!(
-                            "[wake-phrase] isolated local confirmation helper unavailable reason={reason}: {error}"
-                        ),
-                        Err(error) => log::warn!(
-                            "[wake-phrase] isolated local confirmation helper task failed reason={reason}: {error}"
-                        ),
-                    }
+                // Local confirmation helper is needed for automatic wake whether or not
+                // a voiceprint is enrolled (phrase-only open gate after delete voiceprint).
+                let helper_result = tauri::async_runtime::spawn_blocking(
+                    crate::asr::local::wake_helper::preload,
+                )
+                .await;
+                match helper_result {
+                    Ok(Ok(())) => log::info!(
+                        "[wake-phrase] isolated local confirmation helper ready reason={reason}"
+                    ),
+                    Ok(Err(error)) => log::warn!(
+                        "[wake-phrase] isolated local confirmation helper unavailable reason={reason}: {error}"
+                    ),
+                    Err(error) => log::warn!(
+                        "[wake-phrase] isolated local confirmation helper task failed reason={reason}: {error}"
+                    ),
                 }
                 if !active_foundry {
                     return;

@@ -21,7 +21,8 @@ const FILE_BUDGETS = [
   { path: "commands/device/firmware.rs", maxLines: 2800 },
   { path: "coordinator/dictation.rs", maxLines: 7500 },
   { path: "coordinator/support.rs", maxLines: 1500 },
-  { path: "embedded_ble.rs", maxLines: 18500 },
+  { path: "embedded_ble/mod.rs", maxLines: 2000 },
+  { path: "embedded_ble/windows_ble.rs", maxLines: 14000 },
   { path: "types.rs", maxLines: 4000 },
   { path: "polish.rs", maxLines: 3500 },
   { path: "lib.rs", maxLines: 3500 },
@@ -41,6 +42,16 @@ const SEPARATED_TESTS = [
   {
     production: "commands/mod.rs",
     testsFile: "commands_tests.rs",
+    forbidden: /^\s*mod tests\s*\{/m,
+  },
+  {
+    production: "embedded_ble/mod.rs",
+    testsFile: "embedded_ble/mod_tests.rs",
+    forbidden: /^\s*mod tests\s*\{/m,
+  },
+  {
+    production: "embedded_ble/windows_ble.rs",
+    testsFile: "embedded_ble/windows_ble_tests.rs",
     forbidden: /^\s*mod tests\s*\{/m,
   },
 ];

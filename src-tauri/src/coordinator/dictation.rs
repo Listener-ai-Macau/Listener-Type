@@ -2377,11 +2377,15 @@ fn buffered_speaker_candidate_kind(
     }
     match start_origin {
         crate::embedded_audio::SessionStartOrigin::User => None,
-        crate::embedded_audio::SessionStartOrigin::VoiceActivation if enrolled => {
+        // Automatic wake always enters the Verification gate path.
+        // `speaker_verification::verify` already open-gates when no voiceprint is
+        // enrolled (phrase hit alone accepts). Rejecting here when !enrolled made
+        // "delete voiceprint" permanently disable wake — opposite of product intent.
+        crate::embedded_audio::SessionStartOrigin::VoiceActivation => {
+            let _ = enrolled;
             Some(BufferedSpeakerCandidateKind::Verification)
         }
-        crate::embedded_audio::SessionStartOrigin::VoiceActivation
-        | crate::embedded_audio::SessionStartOrigin::Unknown(_) => {
+        crate::embedded_audio::SessionStartOrigin::Unknown(_) => {
             Some(BufferedSpeakerCandidateKind::Rejected)
         }
     }
@@ -2447,6 +2451,11 @@ const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
 ];
 
 fn owner_verification_window_ready(pcm_bytes: usize) -> bool {
+    // No enrolled voiceprint → phrase hit alone is enough; do not stall for the
+    // 1.1s owner speech window (that delay only exists for embedding quality).
+    if !crate::speaker_verification::is_enrolled() {
+        return true;
+    }
     pcm_bytes >= OWNER_VERIFICATION_START_BYTES
 }
 
@@ -4321,11 +4330,12 @@ impl EmbeddedStreamingDictation {
             let wake_detector = if candidate_kind == BufferedSpeakerCandidateKind::Verification {
                 let phrase = inner.prefs.get().voice_wake_phrase;
                 match tauri::async_runtime::spawn_blocking(move || {
-                    // 主唤醒用严格模式(去前缀变体),避免"开始录像/录入/路演"等近音误唤醒。
-                    // 此前误用宽松 new():生成 trailing 变体"开始录" + bootstrap 阈值 0.08,
-                    // 导致任何"开始XX"被低阈值误命中进录音。严格模式 TTS 实测 0/10 误命中
-                    // 且正样本(完整"开始录音")全命中,与诊断续唤路径(new_strict)一致。
-                    crate::wake_phrase::StreamingDetector::new_strict(&phrase)
+                    // Primary wake uses StreamingDetector::new() (short-prefix variants
+                    // + bootstrap threshold 0.08) for recall in noise / light slur.
+                    // False starts are gated by owner voiceprint when enrolled, and by
+                    // local paraformer confirmation (PresentLater allowed). new_strict
+                    // is not used on this path — it was cutting real wake hits.
+                    crate::wake_phrase::StreamingDetector::new(&phrase)
                 })
                 .await
                 {

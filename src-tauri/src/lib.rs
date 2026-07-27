@@ -397,23 +397,27 @@ pub fn run() {
             std::thread::Builder::new()
                 .name("voice-activation-preload".to_string())
                 .spawn(move || {
-                    if !crate::speaker_verification::is_enrolled() {
-                        return;
-                    }
                     let started = std::time::Instant::now();
-                    let speaker_prepare =
-                        std::thread::spawn(crate::speaker_verification::prepare);
+                    // Always warm KWS for automatic wake. Voiceprint prepare only when enrolled.
+                    let enrolled = crate::speaker_verification::is_enrolled();
+                    let speaker_prepare = enrolled.then(|| {
+                        std::thread::spawn(crate::speaker_verification::prepare)
+                    });
                     let wake_result = crate::wake_phrase::prepare(&wake_phrase);
-                    let speaker_result = speaker_prepare
-                        .join()
-                        .unwrap_or_else(|_| Err("声纹预热线程异常退出".to_string()));
+                    let speaker_result = match speaker_prepare {
+                        Some(handle) => handle
+                            .join()
+                            .unwrap_or_else(|_| Err("声纹预热线程异常退出".to_string())),
+                        None => Ok(()),
+                    };
                     match (wake_result, speaker_result) {
                         (Ok(()), Ok(())) => log::info!(
-                            "[wake-phrase] automatic owner gate prepared elapsed_ms={}",
+                            "[wake-phrase] automatic wake prepared enrolled={} elapsed_ms={}",
+                            enrolled,
                             started.elapsed().as_millis()
                         ),
                         (wake, speaker) => log::warn!(
-                            "[wake-phrase] automatic owner gate prepare incomplete wake={wake:?} speaker={speaker:?}"
+                            "[wake-phrase] automatic wake prepare incomplete enrolled={enrolled} wake={wake:?} speaker={speaker:?}"
                         ),
                     }
                 })
