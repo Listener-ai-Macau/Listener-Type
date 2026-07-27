@@ -66,10 +66,11 @@ mod qa;
 mod resources;
 mod support;
 
-const EMBEDDED_BLE_RETRY_FAST_DELAY: Duration = Duration::from_millis(500);
-const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
+const EMBEDDED_BLE_RETRY_FAST_DELAY: Duration = Duration::from_millis(200);
+// After device reboot / brief link loss, retry notify quickly (was 1s floor).
+const EMBEDDED_BLE_RETRY_BASE_DELAY: Duration = Duration::from_millis(200);
 const EMBEDDED_BLE_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
-const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(3);
+const EMBEDDED_BLE_RETRY_LONG_DELAY: Duration = Duration::from_secs(2);
 const EMBEDDED_BLE_RETRY_OFFLINE_DELAY: Duration = Duration::from_secs(180);
 const EMBEDDED_BLE_RETRY_NOISY_CCCD_DELAY: Duration = Duration::from_secs(3);
 const EMBEDDED_BLE_RETRY_OTA_DEFER_DELAY: Duration = Duration::from_secs(10);
@@ -965,15 +966,20 @@ impl Coordinator {
         if prefs.dictation_input_source == DictationInputSource::EmbeddedBle {
             let inner = Arc::clone(&self.inner);
             log::info!(
-                "[embedded-ble] startup BLE name/power sync running for existing embedded BLE source user_overridden={}",
+                "[embedded-ble] startup BLE reconnect fast-path for existing embedded BLE source user_overridden={}",
                 prefs.dictation_input_source_user_overridden
             );
             async_runtime::spawn_blocking(move || {
-                sync_device_ble_name_from_firmware_settings(
+                // Critical path for restart reconnect: do NOT wait on device-settings
+                // GATT (up to 2s) before opening notify. Open the name-sync gate and
+                // arm the background listener immediately on the persisted target;
+                // polish power/name in a short parallel-ish follow-up.
+                mark_startup_ble_name_sync_done(&inner, "startup_embedded_ble_power_probe");
+                refresh_embedded_ble_listener(&inner);
+                polish_startup_ble_settings_after_fast_open(
                     &inner,
                     "startup_embedded_ble_power_probe",
                 );
-                refresh_embedded_ble_listener(&inner);
             });
             return;
         }

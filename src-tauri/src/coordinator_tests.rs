@@ -1212,7 +1212,8 @@ fn embedded_ble_background_retry_caps_generic_errors() {
             "BLE embedded audio notification wait failed: channel closed unexpectedly",
             EMBEDDED_BLE_RETRY_BASE_DELAY,
         ),
-        Duration::from_secs(2)
+        // Base is 200ms; generic backoff doubles once → 400ms (capped later at MAX).
+        Duration::from_millis(400)
     );
     assert_eq!(
         next_embedded_ble_background_retry_delay(

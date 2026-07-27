@@ -888,8 +888,63 @@ fn mark_startup_ble_name_sync_done(inner: &Arc<Inner>, reason: &'static str) {
     }
 }
 
+/// After notify is already armed, best-effort settings/power polish only.
+/// Must not re-close the startup gate or cancel an active capture.
+fn polish_startup_ble_settings_after_fast_open(inner: &Arc<Inner>, reason: &'static str) {
+    const STARTUP_SETTINGS_POLISH_TIMEOUT: Duration = Duration::from_millis(450);
+    match crate::embedded_ble::read_device_settings_status(STARTUP_SETTINGS_POLISH_TIMEOUT) {
+        Ok(status) => {
+            record_embedded_ble_device_settings_power_status(inner, &status, reason);
+            let firmware_name = status.ble_name.trim();
+            let valid = crate::types::device_ble_name_is_valid(firmware_name);
+            if status.ble_name_pending_restart || !valid {
+                log::info!(
+                    "[embedded-ble] startup BLE settings polish skipped name reason={reason} firmware_name={firmware_name:?} pending={} valid={valid}",
+                    status.ble_name_pending_restart
+                );
+                return;
+            }
+            let mut prefs = inner.prefs.get();
+            if prefs.device_ble_name == firmware_name {
+                crate::embedded_ble::set_configured_bluetooth_target_name(firmware_name);
+                return;
+            }
+            let previous = prefs.device_ble_name.clone();
+            prefs.device_ble_name = firmware_name.to_string();
+            match inner.prefs.set(prefs.clone()) {
+                Ok(()) => {
+                    crate::embedded_ble::set_configured_bluetooth_target_name(firmware_name);
+                    log::warn!(
+                        "[embedded-ble] startup BLE settings polish updated Type target from {previous:?} to firmware name {firmware_name:?} reason={reason}"
+                    );
+                    if let Some(app) = inner.app.lock().clone() {
+                        let _ = app.emit("prefs:changed", &prefs);
+                        let _ = app.emit_to("main", "prefs:changed", &prefs);
+                    }
+                    // Name changed after first open — re-arm listener on new target.
+                    refresh_embedded_ble_listener(inner);
+                }
+                Err(err) => log::warn!(
+                    "[embedded-ble] startup BLE settings polish persist failed previous={previous:?} firmware_name={firmware_name:?} reason={reason}: {err}"
+                ),
+            }
+        }
+        Err(err) => log::info!(
+            "[embedded-ble] startup BLE settings polish skipped reason={reason} device settings unavailable: {}",
+            embedded_ble_log_preview(&err)
+        ),
+    }
+}
+
 fn sync_device_ble_name_from_firmware_settings(inner: &Arc<Inner>, reason: &'static str) -> bool {
-    let synced = match crate::embedded_ble::read_device_settings_status(Duration::from_secs(2)) {
+    // Auto input-source probe still needs settings before choosing EmbeddedBle;
+    // keep a 2s ceiling there. Already-selected EmbeddedBle uses the fast path.
+    let timeout = if reason == "auto_input_source_probe" {
+        Duration::from_secs(2)
+    } else {
+        Duration::from_millis(800)
+    };
+    let synced = match crate::embedded_ble::read_device_settings_status(timeout) {
         Ok(status) => {
             record_embedded_ble_device_settings_power_status(inner, &status, reason);
             let firmware_name = status.ble_name.trim();
