@@ -227,7 +227,15 @@ mod tests {
             "\n",
             include_str!("embedded_ble/windows_ble/ota_transfer.rs"),
             "\n",
-            include_str!("embedded_ble/windows_ble/pairing.rs")
+            include_str!("embedded_ble/windows_ble/pairing.rs"),
+            "\n",
+            include_str!("embedded_ble/windows_ble/pnp_cache.rs"),
+            "\n",
+            include_str!("embedded_ble/windows_ble/recording_control.rs"),
+            "\n",
+            include_str!("embedded_ble/windows_ble/capture_events.rs"),
+            "\n",
+            include_str!("embedded_ble/windows_ble/notify_open.rs")
         )
         .replace("\r\n", "\n");
         let coordinator = include_str!("coordinator.rs");

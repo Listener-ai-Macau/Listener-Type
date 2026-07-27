@@ -15,7 +15,15 @@ macro_rules! include_str {
             "\n",
             std::include_str!("embedded_ble/windows_ble/ota_transfer.rs"),
             "\n",
-            std::include_str!("embedded_ble/windows_ble/pairing.rs")
+            std::include_str!("embedded_ble/windows_ble/pairing.rs"),
+            "\n",
+            std::include_str!("embedded_ble/windows_ble/pnp_cache.rs"),
+            "\n",
+            std::include_str!("embedded_ble/windows_ble/recording_control.rs"),
+            "\n",
+            std::include_str!("embedded_ble/windows_ble/capture_events.rs"),
+            "\n",
+            std::include_str!("embedded_ble/windows_ble/notify_open.rs")
         )
         .replace("\r\n", "\n")
     };

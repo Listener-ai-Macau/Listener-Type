@@ -12,7 +12,15 @@ macro_rules! include_str {
             "\n",
             std::include_str!("windows_ble/ota_transfer.rs"),
             "\n",
-            std::include_str!("windows_ble/pairing.rs")
+            std::include_str!("windows_ble/pairing.rs"),
+            "\n",
+            std::include_str!("windows_ble/pnp_cache.rs"),
+            "\n",
+            std::include_str!("windows_ble/recording_control.rs"),
+            "\n",
+            std::include_str!("windows_ble/capture_events.rs"),
+            "\n",
+            std::include_str!("windows_ble/notify_open.rs")
         )
         .replace("\r\n", "\n")
     }};
@@ -1436,8 +1444,10 @@ fn persisted_notify_fast_path_validates_gatt_before_recovery_advertising() {
     let capture_start = source
         .find("fn capture_notification_events_until_cancelled_impl")
         .expect("notify capture helper should exist");
+    // After include! split, capture lives in capture_events.rs and later siblings are
+    // concatenated after it (type_heartbeat stays earlier in windows_ble/mod.rs).
     let capture_end = source[capture_start..]
-        .find("fn type_heartbeat_enabled_for_terminal_behavior")
+        .find("fn open_notify_target_for_startup_cached_address")
         .map(|offset| capture_start + offset)
         .expect("notify capture helper boundary should exist");
     let capture_body = &source[capture_start..capture_end];

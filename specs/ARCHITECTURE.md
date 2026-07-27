@@ -32,7 +32,7 @@ flowchart TB
 - `src-tauri/src/coordinator.rs` coordinates recording, ASR, polish, insertion and history; helpers in `coordinator/support.rs`; session logic in `coordinator/dictation.rs` / `qa.rs` / `resources.rs`; tests path-separated (`coordinator_tests.rs`, `dictation_tests.rs`).
 - `src-tauri/src/persistence.rs` stores settings, history, recordings, vocabulary, style packs and credentials.
 - `src-tauri/src/commands/` is the IPC command surface: `mod.rs` (settings/style/ASR/marketplace + thin device Tauri wrappers) and `device/{mod,settings,ble,firmware}.rs` (device settings / BLE audio+pairing / OTA+wired flash). Unit tests live in `commands_tests.rs` when present.
-- `src-tauri/src/embedded_ble/` owns Windows BLE: `mod.rs` (shared types + public wrappers), `windows_ble/` (`mod.rs` GATT/notify/capture + `include!("pairing.rs")` + `include!("ota_transfer.rs")`), path-separated tests in `mod_tests.rs` / `windows_ble_tests.rs`. Further soft-budget splits (notify capture / open_target) are later iterations.
+- `src-tauri/src/embedded_ble/` owns Windows BLE: `mod.rs` (shared types + public wrappers), `windows_ble/` (`mod.rs` + `include!` siblings: `pairing`, `pnp_cache`, `recording_control`, `capture_events`, `ota_transfer`, `notify_open`), path-separated tests in `mod_tests.rs` / `windows_ble_tests.rs`. Further soft cuts and coordinator/dictation remain later iterations.
 - Provider modules live under `src-tauri/src/asr/*` and `src-tauri/src/llm_*.rs`.
 - Maintainability gate: `npm run check:module-budgets` (Goals: `docs/goals/20260727-type-maintainability-excellent.md`, `docs/goals/20260727-type-maintainability-phase2.md`).
 
