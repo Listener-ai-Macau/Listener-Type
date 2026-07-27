@@ -662,7 +662,13 @@ assert.ok(
   'manual Listener OTA v1 refresh must not use stale protocol-name strings',
 );
 
-const commandsSource = readFileSync('src-tauri/src/commands.rs', 'utf8').replace(/\r\n?/g, '\n');
+const commandsSource = [
+  'src-tauri/src/commands/mod.rs',
+  'src-tauri/src/commands/device/firmware.rs',
+  'src-tauri/src/commands/device/ble.rs',
+]
+  .map((p) => readFileSync(p, 'utf8').replace(/\r\n?/g, '\n'))
+  .join('\n');
 assert.ok(
   commandsSource.includes('FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT'),
   'firmware OTA preflight IPC must keep an outer timeout around Windows BLE snapshot probing',
@@ -735,7 +741,14 @@ assert.ok(
   'Listener OTA v1 headless transfer confirmation must have a bounded short timeout separate from version polling',
 );
 
-const embeddedBleSource = readFileSync('src-tauri/src/embedded_ble.rs', 'utf8');
+const embeddedBleSource = [
+  'src-tauri/src/embedded_ble/mod.rs',
+  'src-tauri/src/embedded_ble/windows_ble/mod.rs',
+  'src-tauri/src/embedded_ble/windows_ble/ota_transfer.rs',
+  'src-tauri/src/embedded_ble/windows_ble/ota_open.rs',
+]
+  .map((p) => readFileSync(p, 'utf8'))
+  .join('\n');
 assert.ok(
   embeddedBleSource.includes('LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 100'),
   'Listener OTA v1 must keep the measured 100-chunk default needed for the under-60-second UI transfer target',

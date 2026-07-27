@@ -203,7 +203,14 @@ assert.ok(
 );
 
 const ipcSource = readFileSync('src/lib/ipc.ts', 'utf8');
-const commandsSource = readFileSync('src-tauri/src/commands.rs', 'utf8');
+const commandsSource = [
+  'src-tauri/src/commands/mod.rs',
+  'src-tauri/src/commands/device/settings.rs',
+  'src-tauri/src/commands/device/ble.rs',
+  'src-tauri/src/commands/device/firmware.rs',
+]
+  .map((p) => readFileSync(p, 'utf8'))
+  .join('\n');
 assert.ok(
   ipcSource.includes('LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT'),
   'Type IPC normalization must recognize the old status/key LED 50 default',
