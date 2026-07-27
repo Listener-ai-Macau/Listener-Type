@@ -7261,24 +7261,61 @@ $after = Get-PnpDevice -InstanceId $adapter.InstanceId -ErrorAction Stop
             // SYNC has no state transition on Firmware. Its following uncached status
             // read verifies the acknowledged offset, so avoid the slower detailed
             // WinRT write-result path while retaining ATT write-with-response.
-            if listener_ota_v1_sync_control_uses_status_write(packet) {
-                write_gatt_value_status_with_timeout(
-                    &self.target.control,
-                    packet,
-                    GattWriteOption::WriteWithResponse,
-                    OTA_WRITE_TIMEOUT,
-                    label,
-                )
+            let use_status_write = listener_ota_v1_sync_control_uses_status_write(packet);
+            let is_begin = packet[4] == denzic_ota_core::OP_BEGIN;
+            // BEGIN 第一次可能因 GATT session 还没完成加密/绑定而 ATT protocol_error=14
+            // (Insufficient Authentication)——设备 OTA control 特征值要求加密连接。短暂
+            // 等待加密完成后重试，避免用户第一次点 OTA 失败、第二次才成功。其他 control
+            // 操作不重试（finish 已有自己的 reboot handoff 处理）。
+            const BEGIN_AUTH_RETRIES: usize = 5;
+            const BEGIN_AUTH_RETRY_DELAY_MS: u64 = 1000;
+            let max_attempts: usize = if is_begin {
+                BEGIN_AUTH_RETRIES + 1
             } else {
-                write_gatt_value_with_timeout(
-                    &self.target.control,
-                    packet,
-                    GattWriteOption::WriteWithResponse,
-                    OTA_WRITE_TIMEOUT,
-                    label,
-                )
+                1
+            };
+            for attempt in 0..max_attempts {
+                let result = if use_status_write {
+                    write_gatt_value_status_with_timeout(
+                        &self.target.control,
+                        packet,
+                        GattWriteOption::WriteWithResponse,
+                        OTA_WRITE_TIMEOUT,
+                        label,
+                    )
+                } else {
+                    write_gatt_value_with_timeout(
+                        &self.target.control,
+                        packet,
+                        GattWriteOption::WriteWithResponse,
+                        OTA_WRITE_TIMEOUT,
+                        label,
+                    )
+                };
+                match result {
+                    Ok(_) => return Ok(()),
+                    Err(err) => {
+                        let needs_auth_retry = is_begin
+                            && attempt + 1 < max_attempts
+                            && (err.contains("protocol_error") || err.contains("ProtocolError"));
+                        if needs_auth_retry {
+                            log::warn!(
+                                "[embedded-ble] Denzic OTA v1 #{}: begin write {} — GATT session 尚未完成加密/绑定，等待 {}ms 后重试 attempt={}",
+                                self.transfer_id,
+                                err,
+                                BEGIN_AUTH_RETRY_DELAY_MS,
+                                attempt + 1
+                            );
+                            std::thread::sleep(std::time::Duration::from_millis(
+                                BEGIN_AUTH_RETRY_DELAY_MS,
+                            ));
+                            continue;
+                        }
+                        return Err(err);
+                    }
+                }
             }
-            .map(|_| ())
+            unreachable!("write_control retry loop must return inside the loop")
         }
 
         fn write_data(&mut self, packet: &[u8]) -> Result<(), String> {
