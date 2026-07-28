@@ -499,6 +499,13 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
     assert!(ota_lock < capture,
         "staged Listener OTA must take the actual OTA mutex and capture gate only in its post-pause transfer branch"
     );
+    assert!(
+        prepared_transfer.contains("drop(target)")
+            && prepared_transfer.contains("SECURE_REOPEN_ROUNDS")
+            && prepared_transfer.contains("reopened secure OTA target after exclusive handoff")
+            && !prepared_transfer.contains("using prepare-time target"),
+        "staged Listener OTA must drop the prepare-time handle and only BEGIN on a reopened secure target (no stale-target fallback)"
+    );
 
     let ota_handoff_start = source
         .find("fn open_listener_ota_v1_target_after_active_link_handoff")

@@ -2193,73 +2193,79 @@ impl PreparedListenerOtaV1Transfer {
             PreparedListenerOtaV1TransferOwnership::Staged => {
                 let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v1")?;
                 let transfer_guard = BleCaptureGuard::enter(None)?;
-                // Staged prepare opened OTA GATT while the audio notify capture was still
-                // alive. Pausing that capture for exclusive OTA often drops Windows link
-                // encryption; BEGIN then fails with ATT protocol_error=14 (Insufficient
-                // Authentication) and firmware OTA error LED (yellow) may latch.
-                // Re-open OTA characteristics after exclusive ownership so BEGIN runs on a
-                // fresh encrypted session.
+                // Staged prepare opened OTA GATT while audio notify was still live.
+                // Pausing notify for exclusive OTA drops Windows link encryption;
+                // BEGIN on the prepare-time handle then fails with ATT protocol_error=14
+                // (Insufficient Authentication) and latches the firmware OTA yellow LED.
+                // Never reuse the prepare-time target after exclusive ownership.
                 (transfer_guard, ota_process_guard, true)
             }
         };
-        let transfer_target = if reopen_secure_target {
-            // Brief settle after capture-gate handoff before reopening OTA service.
-            std::thread::sleep(Duration::from_millis(250));
-            match open_listener_ota_v1_target_after_active_link_handoff() {
+
+        if !reopen_secure_target {
+            return transfer_denzic_ota_v1_to_target(
+                &target,
+                transfer_guard.session_id(),
+                firmware_bytes,
+                manifest_chunk_bytes,
+                on_progress,
+            );
+        }
+
+        // Drop the staged (likely unencrypted) prepare handle before any BEGIN.
+        drop(target);
+
+        const SECURE_REOPEN_ROUNDS: usize = 3;
+        let mut last_error: Option<String> = None;
+        for round in 1..=SECURE_REOPEN_ROUNDS {
+            // First round needs settle after capture-gate handoff; later rounds wait longer
+            // for Windows to re-establish the encrypted GATT session.
+            let settle_ms = if round == 1 { 750 } else { 1_200 };
+            std::thread::sleep(Duration::from_millis(settle_ms));
+            let fresh = match open_listener_ota_v1_target_after_active_link_handoff() {
                 Ok(fresh) => {
                     log::info!(
-                        "[embedded-ble] Listener OTA v1: reopened secure OTA target after exclusive handoff before BEGIN (avoids protocol_error=14)"
+                        "[embedded-ble] Listener OTA v1: reopened secure OTA target after exclusive handoff before BEGIN round={round}/{SECURE_REOPEN_ROUNDS} (avoids protocol_error=14)"
                     );
-                    drop(target);
                     fresh
                 }
                 Err(err) => {
                     log::warn!(
-                        "[embedded-ble] Listener OTA v1: secure reopen after exclusive handoff failed ({err}); using prepare-time target"
+                        "[embedded-ble] Listener OTA v1: secure reopen after exclusive handoff failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
                     );
-                    target
+                    last_error = Some(err);
+                    continue;
                 }
-            }
-        } else {
-            target
-        };
-        let result = transfer_denzic_ota_v1_to_target(
-            &transfer_target,
-            transfer_guard.session_id(),
-            firmware_bytes,
-            manifest_chunk_bytes,
-            on_progress,
-        );
-        // If BEGIN still hit auth errors, one more full reopen+retry before surfacing FAIL.
-        match result {
-            Ok(stats) => Ok(stats),
-            Err(err)
-                if reopen_secure_target
-                    && (err.contains("protocol_error")
+            };
+            match transfer_denzic_ota_v1_to_target(
+                &fresh,
+                transfer_guard.session_id(),
+                firmware_bytes,
+                manifest_chunk_bytes,
+                on_progress,
+            ) {
+                Ok(stats) => return Ok(stats),
+                Err(err)
+                    if err.contains("protocol_error")
                         || err.contains("ProtocolError")
                         || err.contains("Insufficient")
-                        || err.to_ascii_lowercase().contains("authentication")) =>
-            {
-                log::warn!(
-                    "[embedded-ble] Listener OTA v1: transfer failed with auth/encryption error ({err}); reopening target and retrying once"
-                );
-                std::thread::sleep(Duration::from_millis(500));
-                let retry_target = open_listener_ota_v1_target_after_active_link_handoff()
-                    .map_err(|reopen_err| {
-                        format!(
-                            "Listener OTA v1 failed after encryption errors ({err}); reopen also failed: {reopen_err}"
-                        )
-                    })?;
-                transfer_denzic_ota_v1_to_target(
-                    &retry_target,
-                    transfer_guard.session_id(),
-                    firmware_bytes,
-                    manifest_chunk_bytes,
-                    on_progress,
-                )
+                        || err.to_ascii_lowercase().contains("authentication") =>
+                {
+                    log::warn!(
+                        "[embedded-ble] Listener OTA v1: transfer auth/encryption error round={round}/{SECURE_REOPEN_ROUNDS}: {err}; will reopen secure target and retry"
+                    );
+                    last_error = Some(err);
+                    // Drop fresh target before next reopen attempt.
+                    drop(fresh);
+                    continue;
+                }
+                Err(err) => return Err(err),
             }
-            Err(err) => Err(err),
         }
+        Err(last_error.unwrap_or_else(|| {
+            "Listener OTA v1 failed: could not open a secure OTA GATT target after exclusive handoff"
+                .to_string()
+        }))
     }
 }
 
