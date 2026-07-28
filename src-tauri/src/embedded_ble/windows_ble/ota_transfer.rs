@@ -84,11 +84,15 @@ pub(super) fn request_listener_ota_v1_active_link(
             );
         }
     }
+    // After exclusive OTA begin, the audio notify capture may already be
+    // cancelled/suppressed (or busy with VA PCM). Active-capture writes then
+    // time out and the host surfaces "device rejected OTA" before BEGIN.
+    // Fall back to a fresh GATT control path so handoff still reaches firmware.
     send_recording_control_command(
         b"TYPE:OTA\n",
         Duration::from_secs(3),
         "Listener OTA v1 reconnect handoff",
-        ActiveControlTransientFallback::ReturnError,
+        ActiveControlTransientFallback::TryFreshGatt,
     )
 }
 
