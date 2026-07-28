@@ -780,6 +780,8 @@ fn device_key_idle_wake_preflight_bypass_is_generation_scoped() {
 fn end_firmware_ota_transfer_restores_background_listener_for_type_ready() {
     // Source contract: ending any OTA reservation must re-arm notify/TYPE:READY so the
     // device leaves STATUS_LED_BLE_CONNECTED ("找 Type" breathing) after preflight or fail.
+    // Successful transfer may defer restore to post-confirm settle via
+    // end_firmware_ota_transfer_with_listener_restore(false).
     let source = include_str!("coordinator.rs");
     let start = source
         .find("pub fn end_firmware_ota_transfer")
@@ -790,11 +792,12 @@ fn end_firmware_ota_transfer_restores_background_listener_for_type_ready() {
         .expect("end_firmware_ota_transfer boundary");
     let body = &source[start..end];
     assert!(
-        body.contains("embedded_ble_ota_active")
+        body.contains("end_firmware_ota_transfer_with_listener_restore")
+            && body.contains("embedded_ble_ota_active")
             && body.contains("store(false")
             && body.contains("refresh_embedded_ble_listener")
             && body.contains("embedded_ble_background_listener_expected"),
-        "end_firmware_ota_transfer must clear OTA active then restore background listener/TYPE:READY"
+        "end_firmware_ota_transfer must clear OTA active then restore background listener/TYPE:READY by default"
     );
 }
 

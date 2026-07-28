@@ -194,6 +194,10 @@ pub const FIRMWARE_OTA_PRETRANSFER_READY_TIMEOUT: Duration = Duration::from_secs
 pub const FIRMWARE_OTA_POST_READY_TIMEOUT: Duration = Duration::from_secs(28);
 /// Second chance after a forced listener refresh when the first window times out.
 pub const FIRMWARE_OTA_POST_READY_RETRY_TIMEOUT: Duration = Duration::from_secs(20);
+/// After OTA service is reachable, wait before notify/CCCD so reboot handoff and
+/// Windows radio settle finish. Opening CCCD too early races disconnect (25s CCCD
+/// timeouts, then TYPE:READY drops — owner must restart Type).
+pub const FIRMWARE_OTA_POST_CONFIRM_SETTLE: Duration = Duration::from_millis(1500);
 pub const FIRMWARE_OTA_TARGET_PREPARE_TIMEOUT: Duration = Duration::from_secs(6);
 pub const FIRMWARE_OTA_PACKAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -2363,13 +2367,15 @@ pub async fn transfer_firmware_ota_ble(
             matched: false,
         }
     };
-    coord.end_firmware_ota_transfer();
     if transfer.is_ok() {
+        // Success path: clear OTA exclusive gate only. Do not start a first listener
+        // here — it races reboot/CCCD settle, burns gen N, then after-ota refresh
+        // cancels it and the owner sees "must restart Type".
+        coord.end_firmware_ota_transfer_with_listener_restore(false);
         observability.record_reconnect_confirmation(confirm.matched);
     } else {
-        // The OTA handoff paused the continuous capture after staging its fresh GATT path.
-        // A failed BEGIN/data/finish must restore that listener instead of leaving Type attached
-        // at the Windows level but unable to receive audio notifications.
+        // Failed BEGIN/data/finish: restore paused listener immediately.
+        coord.end_firmware_ota_transfer();
         coord.refresh_embedded_ble_listener();
     }
 
@@ -2381,6 +2387,11 @@ pub async fn transfer_firmware_ota_ble(
             version
         ));
     }
+    log::info!(
+        "[firmware-ota] post-confirm settle {} ms before TYPE:READY notify reopen",
+        FIRMWARE_OTA_POST_CONFIRM_SETTLE.as_millis()
+    );
+    tokio::time::sleep(FIRMWARE_OTA_POST_CONFIRM_SETTLE).await;
     crate::embedded_ble::request_listener_ota_post_confirm_notify_fast_retry();
     coord.refresh_embedded_ble_listener_after_firmware_ota();
     let type_ready_started = Instant::now();

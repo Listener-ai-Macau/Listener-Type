@@ -162,8 +162,9 @@ fn ota_preflight_reports_handoff_and_target_probe_timing_without_transfer() {
 #[test]
 fn ota_transfer_failure_restores_the_background_listener() {
     let source = normalized_commands_source();
+    // Prefer the device/firmware implementation, not the thin commands/mod.rs re-export.
     let transfer_start = source
-        .find("pub async fn transfer_firmware_ota_ble")
+        .rfind("pub async fn transfer_firmware_ota_ble")
         .expect("firmware OTA command should exist");
     let transfer_end = source[transfer_start..]
         .find("Ok(FirmwareOtaBleTransferResult")
@@ -171,31 +172,38 @@ fn ota_transfer_failure_restores_the_background_listener() {
         .expect("firmware OTA command should return its result");
     let transfer = &source[transfer_start..transfer_end];
     let success = transfer
-        .find("if transfer.is_ok() {\n        observability.record_reconnect_confirmation")
-        .expect("successful OTA confirmation branch should exist");
+        .find("end_firmware_ota_transfer_with_listener_restore(false)")
+        .expect("successful OTA must clear gate without a racing first listener restore");
     let result = transfer
         .find("let stats = transfer?;")
         .expect("OTA transfer should propagate its result after cleanup");
-    let end = transfer[..result]
+    let end_fail = transfer[..result]
         .rfind("coord.end_firmware_ota_transfer();")
-        .expect("OTA transfer must always clear its active guard");
-    let refresh = success
-        + transfer[success..]
-            .find("coord.refresh_embedded_ble_listener();")
-            .expect("failed OTA transfer must restore the paused listener");
+        .expect("failed OTA transfer must clear its active guard with listener restore");
+    let refresh = transfer[..result]
+        .rfind("coord.refresh_embedded_ble_listener();")
+        .expect("failed OTA transfer must restore the paused listener");
+    let settle = transfer
+        .find("FIRMWARE_OTA_POST_CONFIRM_SETTLE")
+        .expect("successful OTA must settle Windows radio before TYPE:READY notify reopen");
+    let after_ota = transfer
+        .find("refresh_embedded_ble_listener_after_firmware_ota")
+        .expect("successful OTA must use post-confirm listener restore");
     let target_ready = transfer
         .find("Listener OTA v1 target prepared before listener pause")
         .expect("OTA target must be prepared before listener pause");
     let pause = transfer
         .find("coord.pause_embedded_ble_listener_for_ota()")
         .expect("OTA must pause the listener only after target preparation");
-    let transfer_start = transfer
+    let transfer_timer = transfer
         .find("let transfer_started = Instant::now();")
         .expect("OTA transfer timing must start after the listener is paused");
 
-    assert!(end < refresh && refresh < result);
-    assert!(success < refresh);
-    assert!(target_ready < pause && pause < transfer_start);
+    // Success: clear gate → propagate result → settle → single after-ota restore.
+    assert!(success < result && result < settle && settle < after_ota);
+    // Failure: end with restore + explicit refresh before result.
+    assert!(end_fail < refresh && refresh < result);
+    assert!(target_ready < pause && pause < transfer_timer);
 }
 
 fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {

@@ -3362,6 +3362,69 @@ async fn wait_for_embedded_ble_listener_ready(
     }
 }
 
+/// Like [`wait_for_embedded_ble_listener_ready`], but requires ready to hold so a
+/// one-shot edge (post-OTA CCCD race / immediate disconnect) does not report success.
+async fn wait_for_embedded_ble_listener_ready_stable(
+    inner: &Arc<Inner>,
+    timeout: Duration,
+    stable_for: Duration,
+) -> Result<(), String> {
+    if !embedded_ble_background_listener_expected(inner)
+        && !embedded_ble_listener_capture_active(inner)
+    {
+        return Ok(());
+    }
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining_for_edge = deadline.saturating_duration_since(Instant::now());
+        if remaining_for_edge.is_zero() {
+            let last_error = inner.embedded_ble_listener_last_error.lock().clone();
+            let suffix = last_error
+                .as_deref()
+                .map(|err| format!("; last error: {err}"))
+                .unwrap_or_default();
+            return Err(format!(
+                "Listener BLE notify subscription did not stay ready within {} ms after OTA{suffix}",
+                timeout.as_millis()
+            ));
+        }
+        wait_for_embedded_ble_listener_ready(inner, remaining_for_edge).await?;
+        let hold_deadline = Instant::now() + stable_for;
+        let mut held = true;
+        while Instant::now() < hold_deadline {
+            if !embedded_ble_listener_capture_ready(inner) {
+                held = false;
+                log::info!(
+                    "[embedded-ble] post-OTA TYPE:READY edge lost during {} ms hold; waiting again",
+                    stable_for.as_millis()
+                );
+                break;
+            }
+            let slice = hold_deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(50));
+            if slice.is_zero() {
+                break;
+            }
+            tokio::time::sleep(slice).await;
+        }
+        if held && embedded_ble_listener_capture_ready(inner) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            let last_error = inner.embedded_ble_listener_last_error.lock().clone();
+            let suffix = last_error
+                .as_deref()
+                .map(|err| format!("; last error: {err}"))
+                .unwrap_or_default();
+            return Err(format!(
+                "Listener BLE notify subscription did not stay ready within {} ms after OTA{suffix}",
+                timeout.as_millis()
+            ));
+        }
+    }
+}
+
 async fn wait_for_embedded_ble_listener_inactive(inner: &Arc<Inner>, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
@@ -3431,7 +3494,26 @@ fn maybe_prune_listener_ghost_pairings_after_notify_ready(inner: &Arc<Inner>) {
         return;
     };
     let expected_name = inner.prefs.get().device_ble_name;
+    // OTA recovery generation is sticky until consumed by preflight bypass. After
+    // post-OTA notify ready, defer ghost prune: same-millisecond PnP/BTHPORT work
+    // has bounced the fresh TYPE:READY link (owner needed Type restart).
+    let ota_recovery_pending = inner
+        .embedded_ble_ota_recovery_generation
+        .load(Ordering::SeqCst)
+        != 0;
+    let defer = if ota_recovery_pending {
+        Duration::from_secs(4)
+    } else {
+        Duration::from_millis(0)
+    };
     tauri::async_runtime::spawn_blocking(move || {
+        if !defer.is_zero() {
+            log::info!(
+                "[embedded-ble] deferring ghost pairing prune {} ms after post-OTA TYPE:READY keep={keep:012X}",
+                defer.as_millis()
+            );
+            std::thread::sleep(defer);
+        }
         let mut names = vec![expected_name];
         for fallback in ["listener", "Blistener"] {
             if !names.iter().any(|n| n.eq_ignore_ascii_case(fallback)) {

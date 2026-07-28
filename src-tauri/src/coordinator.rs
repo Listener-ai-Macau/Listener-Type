@@ -1785,6 +1785,12 @@ impl Coordinator {
     }
 
     pub fn end_firmware_ota_transfer(&self) {
+        self.end_firmware_ota_transfer_with_listener_restore(true);
+    }
+
+    /// Clear the exclusive OTA gate. When `restore_listener` is false, the caller owns
+    /// post-OTA notify reattach (avoids a doomed first refresh racing reboot settle).
+    pub fn end_firmware_ota_transfer_with_listener_restore(&self, restore_listener: bool) {
         self.inner
             .embedded_ble_ota_active
             .store(false, Ordering::SeqCst);
@@ -1792,11 +1798,15 @@ impl Coordinator {
         // Without re-arming here the device stays in BLE CONNECTED "找 Type" breathing LED
         // instead of TYPE_READY steady blue. Clear the OTA flag first so RecordingGate allows
         // BackgroundListener refresh.
-        if embedded_ble_background_listener_expected(&self.inner) {
+        if restore_listener && embedded_ble_background_listener_expected(&self.inner) {
             log::info!(
                 "[firmware-ota] restoring background listener after OTA session (reassert TYPE:READY)"
             );
             refresh_embedded_ble_listener(&self.inner);
+        } else if !restore_listener {
+            log::info!(
+                "[firmware-ota] OTA gate cleared; deferred post-confirm listener restore owns TYPE:READY"
+            );
         }
     }
 
@@ -1810,7 +1820,14 @@ impl Coordinator {
             );
             return Ok(false);
         }
-        wait_for_embedded_ble_listener_ready(&self.inner, timeout).await?;
+        // Owner: after OTA, a one-shot ready edge can race Windows disconnect/ghost-prune
+        // and look "stuck until Type restart". Require a short hold so TYPE:READY sticks.
+        wait_for_embedded_ble_listener_ready_stable(
+            &self.inner,
+            timeout,
+            Duration::from_millis(800),
+        )
+        .await?;
         Ok(true)
     }
 
