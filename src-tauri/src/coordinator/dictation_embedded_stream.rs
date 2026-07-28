@@ -349,6 +349,8 @@ impl EmbeddedStreamingDictation {
             return Ok(());
         }
 
+        // User-origin full session: do not auto-promote a later unrelated VA candidate.
+        clear_device_key_dictation_takeover_pending();
         self.embedded_session_id = Some(embedded_session_id);
         let session = begin_embedded_audio_dictation_session(inner).await?;
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {

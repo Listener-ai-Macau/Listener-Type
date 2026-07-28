@@ -123,8 +123,9 @@ use dictation::dictation_error_code;
 use dictation::{
     begin_session, cancel_session, current_embedded_audio_partial_preview, end_session,
     handle_pressed, handle_pressed_edge, handle_released_edge, hidden_automatic_candidate_active,
-    request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
-    request_hidden_automatic_candidate_promotion, request_stop_during_starting,
+    note_device_key_dictation_start_intent, request_embedded_audio_stop_feedback,
+    request_embedded_ble_recording_stop_from_host, request_hidden_automatic_candidate_promotion,
+    request_stop_during_starting,
     submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
     submit_embedded_audio_ble_stream_background, submit_embedded_audio_file,
     submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,

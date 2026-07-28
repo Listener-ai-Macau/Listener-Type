@@ -120,6 +120,9 @@ const HIDDEN_AUTOMATIC_CANDIDATE_NONE: u8 = 0;
 const HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE: u8 = 1;
 const HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED: u8 = 2;
 static HIDDEN_AUTOMATIC_CANDIDATE_STATE: AtomicU8 = AtomicU8::new(HIDDEN_AUTOMATIC_CANDIDATE_NONE);
+/// Device-key Start pressed while a hidden VA candidate was not ACTIVE yet (KWS init
+/// race or host lag). When the candidate becomes ACTIVE, auto-request promotion.
+static DEVICE_KEY_DICTATION_TAKEOVER_PENDING: AtomicBool = AtomicBool::new(false);
 static WAKE_DIAGNOSTIC_CAPTURE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str, pcm: &[u8]) {
@@ -184,15 +187,56 @@ fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str,
 }
 
 fn mark_hidden_automatic_candidate_active() {
+    // Device key may have already asked to take over before ACTIVE was set.
+    if DEVICE_KEY_DICTATION_TAKEOVER_PENDING.swap(false, Ordering::SeqCst) {
+        HIDDEN_AUTOMATIC_CANDIDATE_STATE.store(
+            HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED,
+            Ordering::SeqCst,
+        );
+        log::info!(
+            "[speaker-verification] device-key takeover pending applied as promotion on hidden candidate start"
+        );
+        return;
+    }
     HIDDEN_AUTOMATIC_CANDIDATE_STATE.store(HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE, Ordering::SeqCst);
 }
 
 fn clear_hidden_automatic_candidate() {
     HIDDEN_AUTOMATIC_CANDIDATE_STATE.store(HIDDEN_AUTOMATIC_CANDIDATE_NONE, Ordering::SeqCst);
+    DEVICE_KEY_DICTATION_TAKEOVER_PENDING.store(false, Ordering::SeqCst);
+}
+
+fn clear_device_key_dictation_takeover_pending() {
+    DEVICE_KEY_DICTATION_TAKEOVER_PENDING.store(false, Ordering::SeqCst);
 }
 
 pub(super) fn hidden_automatic_candidate_active() -> bool {
     HIDDEN_AUTOMATIC_CANDIDATE_STATE.load(Ordering::SeqCst) == HIDDEN_AUTOMATIC_CANDIDATE_ACTIVE
+}
+
+/// Device-key Dictation Start: prefer promote/ACTIVATE over TOGGLE-stop of a live
+/// hidden automatic session. Returns true when the host should send VREC:ACTIVATE.
+pub(super) fn note_device_key_dictation_start_intent() -> bool {
+    DEVICE_KEY_DICTATION_TAKEOVER_PENDING.store(true, Ordering::SeqCst);
+    if request_hidden_automatic_candidate_promotion() {
+        log::info!(
+            "[speaker-verification] device-key start promotes active hidden automatic candidate"
+        );
+        return true;
+    }
+    let state = HIDDEN_AUTOMATIC_CANDIDATE_STATE.load(Ordering::SeqCst);
+    if state == HIDDEN_AUTOMATIC_CANDIDATE_PROMOTION_REQUESTED {
+        log::info!(
+            "[speaker-verification] device-key start reuses already-requested hidden promotion"
+        );
+        return true;
+    }
+    // Candidate not host-visible yet (KWS init / notify lag). Keep takeover pending;
+    // firmware also maps TOGGLE→activate for hidden automatic sessions.
+    log::info!(
+        "[speaker-verification] device-key start takeover pending until hidden candidate is ready"
+    );
+    false
 }
 
 pub(super) fn request_hidden_automatic_candidate_promotion() -> bool {

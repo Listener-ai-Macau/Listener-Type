@@ -1002,10 +1002,22 @@ async fn handle_device_dictation_action(
         }
 
         let control_decision = device_key_ble_recording_control_decision(&inner);
-        let promote_hidden_candidate = should_promote_hidden_automatic_candidate(
-            control_decision,
-            hidden_automatic_candidate_active(),
-        );
+        // Idle Start: sticky takeover so we never TOGGLE-stop a live hidden VA stream
+        // (including the ~2s window before host marks the candidate ACTIVE). Firmware
+        // also promotes hidden automatic sessions on TOGGLE as a safety net.
+        let promote_hidden_candidate =
+            if matches!(
+                control_decision,
+                DeviceKeyBleRecordingControlDecision::Start
+            ) {
+                note_device_key_dictation_start_intent()
+                    || should_promote_hidden_automatic_candidate(
+                        control_decision,
+                        hidden_automatic_candidate_active(),
+                    )
+            } else {
+                false
+            };
         if let DeviceKeyBleRecordingControlDecision::IgnoreStarting {
             session_id,
             elapsed_ms,

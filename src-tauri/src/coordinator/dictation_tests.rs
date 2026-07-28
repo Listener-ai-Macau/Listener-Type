@@ -1505,6 +1505,22 @@ fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
 }
 
 #[test]
+fn device_key_start_takeover_pending_before_hidden_active() {
+    let polish = include_str!("dictation_wake_polish.rs");
+    assert!(
+        polish.contains("DEVICE_KEY_DICTATION_TAKEOVER_PENDING")
+            && polish.contains("note_device_key_dictation_start_intent")
+            && polish.contains("device-key takeover pending applied as promotion"),
+        "device-key Start must sticky-promote when the hidden VA candidate is not ACTIVE yet"
+    );
+    let hotkey = include_str!("hotkey_device_runtime.rs");
+    assert!(
+        hotkey.contains("note_device_key_dictation_start_intent()"),
+        "device-key dictation Start must call note_device_key_dictation_start_intent"
+    );
+}
+
+#[test]
 fn hidden_candidate_marked_active_before_detector_init() {
     // Device-key promote depends on ACTIVE during StreamingDetector::new (~2s).
     let stream = include_str!("dictation_embedded_stream.rs");
