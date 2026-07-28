@@ -1695,6 +1695,12 @@ impl Coordinator {
         timeout_ms: Option<u64>,
     ) -> Result<EmbeddedBleWakeRecoverySnapshot, String> {
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(12_000).clamp(1_000, 45_000));
+        // Owner bug: after a false "manual Windows pairing removal" hold, refresh is
+        // skipped forever while passively awaiting re-pair. Customer repair / 一键修复
+        // and EC11 double-click recovery must force Type to leave that dead-end and
+        // re-open notify / PairAsync.
+        clear_embedded_ble_passive_local_reattach(&self.inner, "customer repair action");
+        clear_embedded_ble_pairing_confirmation_hold(&self.inner, "customer repair action");
         pause_embedded_ble_listener_capture(&self.inner, "customer repair action");
         clear_embedded_ble_listener_last_error(&self.inner);
         record_embedded_ble_reconnect_attempt(&self.inner, "customer_repair");

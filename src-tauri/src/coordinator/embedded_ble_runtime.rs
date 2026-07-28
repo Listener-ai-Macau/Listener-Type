@@ -519,6 +519,7 @@ fn start_embedded_ble_passive_local_reattach_watch(
 
     let inner = Arc::clone(inner);
     async_runtime::spawn(async move {
+        let monitor_started = Instant::now();
         let baseline_native_hid_addresses = match async_runtime::spawn_blocking(|| {
             // The present-only CIM query is ~3x cheaper than the full Get-PnpDevice
             // enumeration and is the correct evidence class here: a fresh local
@@ -679,6 +680,53 @@ fn start_embedded_ble_passive_local_reattach_watch(
                     native_hid_addresses.len(),
                     baseline_native_hid_addresses.as_ref().map_or(0, Vec::len)
                 );
+            }
+
+            // Escape hatch: after ~45s still no HID evidence, force listener rebuild /
+            // PairAsync path. Device EC11 recovery + Windows toast never unblocked a
+            // monitor that requires "new HID after empty baseline", so owners stayed
+            // on "等待手动配对" forever.
+            if monitor_started.elapsed() >= Duration::from_secs(45) {
+                log::warn!(
+                    "[embedded-ble] passive local Windows reattach timed out after {} ms without HID evidence target={expected_ble_name:?}; forcing Type recovery PairAsync + listener rebuild",
+                    monitor_started.elapsed().as_millis()
+                );
+                clear_embedded_ble_passive_local_reattach(
+                    &inner,
+                    "passive reattach timeout forces Type recovery",
+                );
+                clear_embedded_ble_pairing_confirmation_hold(
+                    &inner,
+                    "passive reattach timeout forces Type recovery",
+                );
+                let expected_for_pair = expected_ble_name.clone();
+                let pairing = async_runtime::spawn_blocking(move || {
+                    crate::embedded_ble::prompt_listener_pairing_for_recovery(Some(
+                        &expected_for_pair,
+                    ))
+                })
+                .await;
+                match pairing {
+                    Ok(result) => log::info!(
+                        "[embedded-ble] passive reattach timeout PairAsync status={:?} matched={} already_paired={} failed={} open_settings={}",
+                        result.status,
+                        result.matched_devices,
+                        result.already_paired_devices,
+                        result.failed_devices,
+                        result.open_bluetooth_settings
+                    ),
+                    Err(err) => log::warn!(
+                        "[embedded-ble] passive reattach timeout PairAsync task failed: {err}"
+                    ),
+                }
+                arm_embedded_ble_type_pairasync_startup_guard(&inner);
+                resume_embedded_ble_listener_after_pairing_recovery(
+                    &inner,
+                    "passive reattach timeout forced Type recovery",
+                    EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
+                    true,
+                );
+                break;
             }
 
             tokio::time::sleep(EMBEDDED_BLE_PASSIVE_LOCAL_REATTACH_POLL).await;
@@ -1062,15 +1110,20 @@ fn refresh_embedded_ble_listener_with_options(
         .embedded_ble_passive_local_reattach_active
         .load(Ordering::SeqCst)
     {
-        cancel_embedded_ble_listener_capture(
+        // Do not hard-block refresh forever. Owner EC11 double-click / 一键修复 needs
+        // a real listener restart even when an earlier startup preflight parked us in
+        // passive reattach (HID Unknown while BLE root still shows OK).
+        log::warn!(
+            "[embedded-ble] background listener refresh clearing passive local reattach so notify can rebuild"
+        );
+        clear_embedded_ble_passive_local_reattach(
             inner,
-            "passively awaiting explicit local Windows re-pair",
-            false,
+            "background listener refresh supersedes passive reattach",
         );
-        log::info!(
-            "[embedded-ble] background listener refresh skipped while passively awaiting explicit local Windows re-pair"
+        clear_embedded_ble_pairing_confirmation_hold(
+            inner,
+            "background listener refresh supersedes passive reattach",
         );
-        return;
     }
     if let Some(remaining) = embedded_ble_pairing_confirmation_hold_remaining(inner, Instant::now())
     {
