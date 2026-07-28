@@ -1787,6 +1787,16 @@ impl Coordinator {
         self.inner
             .embedded_ble_ota_active
             .store(false, Ordering::SeqCst);
+        // Preflight, failed BEGIN, and exclusive handoff all send TYPE:BYE / tear notify.
+        // Without re-arming here the device stays in BLE CONNECTED "找 Type" breathing LED
+        // instead of TYPE_READY steady blue. Clear the OTA flag first so RecordingGate allows
+        // BackgroundListener refresh.
+        if embedded_ble_background_listener_expected(&self.inner) {
+            log::info!(
+                "[firmware-ota] restoring background listener after OTA session (reassert TYPE:READY)"
+            );
+            refresh_embedded_ble_listener(&self.inner);
+        }
     }
 
     pub async fn wait_for_embedded_ble_listener_ready_after_firmware_ota(

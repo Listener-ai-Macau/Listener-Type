@@ -106,6 +106,11 @@ fn ota_preflight_reuses_active_link_handoff_without_interrupting_notify() {
         .expect("preflight must release its OTA operation reservation");
     assert!(recording_guard < begin);
     assert!(begin < handoff && handoff < probe && probe < end_guard);
+    // Listener restore is owned by end_firmware_ota_transfer (TYPE:READY after BYE).
+    assert!(
+        preflight.contains("end_firmware_ota_transfer"),
+        "preflight must end OTA so the coordinator can restore TYPE:READY / leave find-Type LED"
+    );
 }
 
 #[test]
