@@ -2559,6 +2559,48 @@ fn embedded_ble_passive_local_reattach_stops_the_failed_background_retry_loop() 
 }
 
 #[test]
+fn embedded_ble_matched_pairing_without_already_paired_is_not_manual_unpair() {
+    // Owner 2026-07-28: startup log status=NeedsUserAction matched=2 already_paired=0
+    // failed=2 with empty HID present list must NOT block persisted GATT reopen.
+    let incomplete_aep = crate::embedded_ble::BleDevicePairingPromptResult {
+        status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+        attempted: true,
+        matched_devices: 2,
+        prompted_devices: 0,
+        already_paired_devices: 0,
+        failed_devices: 2,
+        open_bluetooth_settings: true,
+        details: Vec::new(),
+    };
+    assert!(
+        !embedded_ble_current_native_pairing_is_missing(&[], &incomplete_aep),
+        "matched Windows pairing entries mean the bond cache is not fully gone"
+    );
+    assert!(
+        !embedded_ble_lost_current_native_pairing_should_pause(
+            "BLE device connection status changed to Disconnected; transport_not_ready",
+            &[],
+            &incomplete_aep,
+        ),
+        "matched-but-not-already-paired must not enter the 180s manual-unpair hold"
+    );
+    let truly_missing = crate::embedded_ble::BleDevicePairingPromptResult {
+        status: crate::embedded_ble::BleDevicePairingPromptStatus::NotFound,
+        attempted: true,
+        matched_devices: 0,
+        prompted_devices: 0,
+        already_paired_devices: 0,
+        failed_devices: 0,
+        open_bluetooth_settings: true,
+        details: Vec::new(),
+    };
+    assert!(embedded_ble_current_native_pairing_is_missing(
+        &[],
+        &truly_missing
+    ));
+}
+
+#[test]
 fn embedded_ble_lost_native_pairing_pauses_before_stale_gatt_retry() {
     let missing_pairing = crate::embedded_ble::BleDevicePairingPromptResult {
         status: crate::embedded_ble::BleDevicePairingPromptStatus::NotFound,

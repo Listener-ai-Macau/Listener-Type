@@ -2751,7 +2751,15 @@ fn embedded_ble_current_native_pairing_is_missing(
     native_hid_addresses: &[u64],
     pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
 ) -> bool {
-    native_hid_addresses.is_empty() && pairing.already_paired_devices == 0
+    // Owner 2026-07-28 machine gate: after Type restart / ghost dual-address state,
+    // Windows AEP often returns NeedsUserAction with matched_devices>0 and
+    // already_paired=0 while HID present probe is still empty. Treating that as
+    // "user deleted pairing" holds the background listener for 180s and surfaces
+    // as 接不上 Type. Only hold when HID present evidence AND any matched pairing
+    // entry are both gone.
+    native_hid_addresses.is_empty()
+        && pairing.already_paired_devices == 0
+        && pairing.matched_devices == 0
 }
 
 fn hold_embedded_ble_for_missing_native_pairing(inner: &Arc<Inner>, reason: &str) {
@@ -3125,6 +3133,13 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
         return true;
     }
     if !embedded_ble_current_native_pairing_is_missing(&native_hid_addresses, &pairing) {
+        if pairing.matched_devices > 0 && pairing.already_paired_devices == 0 {
+            log::info!(
+                "[embedded-ble] startup Windows pairing enumeration matched={} already_paired=0 status={:?}; allowing persisted GATT reopen (not a manual unpair)",
+                pairing.matched_devices,
+                pairing.status
+            );
+        }
         return false;
     }
     log::warn!(
