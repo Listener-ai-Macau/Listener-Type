@@ -74,9 +74,9 @@ const LISTENER_OTA_V1_SERVICE_UUID: GUID = OTA_SERVICE_UUID;
 const LISTENER_OTA_V1_CONTROL_UUID: GUID =
     GUID::from_u128(denzic_ota_core::GATT_CONTROL_UUID_U128);
 const LISTENER_OTA_V1_DATA_UUID: GUID = GUID::from_u128(denzic_ota_core::GATT_DATA_UUID_U128);
-/// Second OTA data lane (device advertises same access as DATA). Optional dual-WWR.
+/// Second OTA data lane (platform dual-lane contract / DATA_B).
 const LISTENER_OTA_V1_DATA_B_UUID: GUID =
-    GUID::from_u128(0xfbc4b0fb_6102_4bd1_abe4_e5e90a9a7e13);
+    GUID::from_u128(denzic_ota_core::GATT_DATA_B_UUID_U128);
 const LISTENER_OTA_V1_STATUS_UUID: GUID =
     GUID::from_u128(denzic_ota_core::GATT_STATUS_UUID_U128);
 const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
@@ -2285,8 +2285,6 @@ struct ListenerOtaV1Transport<'a> {
     data_write_option: GattWriteOption,
     pending_wwr: Vec<IAsyncOperation<GattCommunicationStatus>>,
     pending_wwr_b: Vec<IAsyncOperation<GattCommunicationStatus>>,
-    /// Alternates DATA / DATA_B when dual-lane is available.
-    next_lane_b: bool,
 }
 
 impl ListenerOtaV1Transport<'_> {
@@ -2379,27 +2377,22 @@ impl ListenerOtaV1Transport<'_> {
         Ok(())
     }
 
-    fn enqueue_wwr_data_write(&mut self, packet: &[u8]) -> Result<(), String> {
+    /// Enqueue one WWR on DATA (`lane_b=false`) or DATA_B (`lane_b=true`).
+    /// Lane selection is owned by denzic_ota_core dual-lane alternation.
+    fn enqueue_wwr_data_write(&mut self, packet: &[u8], lane_b: bool) -> Result<(), String> {
         let dual = self.target.data_b.is_some();
-        let use_b = dual && self.next_lane_b;
-        if dual {
-            self.next_lane_b = !self.next_lane_b;
-        }
-
-        // Best dual bulk so far: ~16 in-flight per lane (half of PIPELINE_DEPTH).
-        // Deeper soft-caps (32/lane, 96 total) regressed airtime on this radio.
         let depth_per_lane = if dual {
             (LISTENER_OTA_V1_WWR_PIPELINE_DEPTH + 1) / 2
         } else {
             LISTENER_OTA_V1_WWR_PIPELINE_DEPTH
         };
 
-        if use_b {
+        if lane_b {
             let characteristic = self
                 .target
                 .data_b
                 .as_ref()
-                .expect("dual-lane checked data_b");
+                .ok_or_else(|| "Denzic OTA v1 data_b lane requested but characteristic missing".to_string())?;
             let operation = start_gatt_write_with_option_async(
                 characteristic,
                 packet,
@@ -2518,9 +2511,42 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         unreachable!("write_control retry loop must return inside the loop")
     }
 
+    fn dual_lane_available(&self) -> bool {
+        self.target.data_b.is_some()
+    }
+
+    fn write_data_b(&mut self, packet: &[u8]) -> Result<(), String> {
+        if self.data_write_option == GattWriteOption::WriteWithoutResponse {
+            match self.enqueue_wwr_data_write(packet, true) {
+                Ok(()) => return Ok(()),
+                Err(primary_err) => {
+                    log::warn!(
+                        "[embedded-ble] Denzic OTA v1 data_b WWR pipeline failed: {primary_err}; falling back to blocking write"
+                    );
+                    let _ = self.flush_pending_wwr();
+                }
+            }
+        } else {
+            self.flush_pending_wwr()?;
+        }
+        let characteristic = self
+            .target
+            .data_b
+            .as_ref()
+            .ok_or_else(|| "Denzic OTA v1 data_b characteristic missing".to_string())?;
+        write_gatt_value_with_timeout(
+            characteristic,
+            packet,
+            GattWriteOption::WriteWithoutResponse,
+            OTA_WRITE_TIMEOUT,
+            "Denzic OTA v1 data_b",
+        )
+        .map(|_| ())
+    }
+
     fn write_data(&mut self, packet: &[u8]) -> Result<(), String> {
         if self.data_write_option == GattWriteOption::WriteWithoutResponse {
-            match self.enqueue_wwr_data_write(packet) {
+            match self.enqueue_wwr_data_write(packet, false) {
                 Ok(()) => return Ok(()),
                 Err(primary_err) => {
                     log::warn!(

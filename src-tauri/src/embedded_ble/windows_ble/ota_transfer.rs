@@ -25,7 +25,6 @@ fn transfer_denzic_ota_v1_to_target(
         data_write_option: target.data_write_option,
         pending_wwr: Vec::with_capacity(LISTENER_OTA_V1_WWR_PIPELINE_DEPTH),
         pending_wwr_b: Vec::with_capacity(LISTENER_OTA_V1_WWR_PIPELINE_DEPTH),
-        next_lane_b: false,
     };
     if target.data_b.is_some() {
         log::info!(
@@ -48,6 +47,8 @@ fn transfer_denzic_ota_v1_to_target(
             inactive_link_window_chunks: Some(
                 LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS as u16,
             ),
+            // Platform dual-lane: engine alternates DATA/DATA_B when DATA_B is open.
+            prefer_dual_lane: true,
         },
         |completed, total| {
             if let Some(callback) = on_progress {
