@@ -1505,6 +1505,26 @@ fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
 }
 
 #[test]
+fn hidden_candidate_marked_active_before_detector_init() {
+    // Device-key promote depends on ACTIVE during StreamingDetector::new (~2s).
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let begin = stream
+        .find("async fn begin_candidate_or_session")
+        .expect("begin_candidate_or_session");
+    let body = &stream[begin..];
+    let mark = body
+        .find("mark_hidden_automatic_candidate_active()")
+        .expect("must mark hidden ACTIVE for Verification");
+    let detector = body
+        .find("StreamingDetector::new(&phrase)")
+        .expect("detector init");
+    assert!(
+        mark < detector,
+        "mark_hidden_automatic_candidate_active must run before StreamingDetector::new so EC11 Start can promote instead of toggle-stop"
+    );
+}
+
+#[test]
 fn orphan_pcm_without_explicit_start_must_not_open_dictation() {
     // Type restart / notify reopen can receive mid-stream PCM (no SessionStart).
     // That must not open a Recording capsule (phantom dictation).

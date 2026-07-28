@@ -395,6 +395,14 @@ impl EmbeddedStreamingDictation {
             crate::speaker_verification::is_enrolled(),
         );
         if let Some(mut candidate_kind) = kind.take() {
+            // Mark hidden ACTIVE before StreamingDetector::new (~1–2s). Device-key
+            // Start during that window must promote (VREC:ACTIVATE) instead of
+            // VREC:TOGGLE — toggle stops an in-flight VoiceActivation session, so
+            // the first physical press looks like "recording failed" and only the
+            // next press starts a clean User session.
+            if candidate_kind == BufferedSpeakerCandidateKind::Verification {
+                mark_hidden_automatic_candidate_active();
+            }
             let wake_detector = if candidate_kind == BufferedSpeakerCandidateKind::Verification {
                 let phrase = inner.prefs.get().voice_wake_phrase;
                 match tauri::async_runtime::spawn_blocking(move || {
@@ -427,7 +435,7 @@ impl EmbeddedStreamingDictation {
                 None
             };
             if candidate_kind == BufferedSpeakerCandidateKind::Verification {
-                mark_hidden_automatic_candidate_active();
+                // Keep ACTIVE (already marked). Detector ready.
             } else {
                 clear_hidden_automatic_candidate();
             }
