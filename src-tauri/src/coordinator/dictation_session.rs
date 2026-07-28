@@ -41,8 +41,7 @@ pub(super) async fn handle_pressed_edge(inner: &Arc<Inner>) {
 }
 
 pub(super) async fn handle_pressed(inner: &Arc<Inner>) {
-    if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
-        log::info!("[firmware-ota] hotkey press ignored during OTA transfer");
+    if !recording_gate::try_admit_arc(inner, RecordIntent::HotkeyPress, "hotkey press") {
         return;
     }
     let prefs = inner.prefs.get();

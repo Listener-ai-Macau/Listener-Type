@@ -17,6 +17,7 @@ use crate::types::{CapsulePayload, CapsuleState};
 use crate::windows_ime_ipc::ImeSubmitTarget;
 
 use super::qa::QaPhase;
+use super::recording_gate::{self, RecordIntent};
 use super::{extra_asr_hotword_phrases, Inner};
 pub(super) fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
     let mut phrases: Vec<String> = inner
@@ -614,20 +615,12 @@ pub(super) fn emit_capsule_with_session(
     message: Option<String>,
     inserted_chars: Option<u32>,
 ) {
-    // Firmware OTA owns BLE exclusively: never surface recording/transcript capsules
-    // while an upgrade is in flight (owner saw Recording capsule mid-OTA).
-    if inner.embedded_ble_ota_active.load(Ordering::SeqCst)
-        && matches!(
-            state,
-            CapsuleState::Recording
-                | CapsuleState::Transcribing
-                | CapsuleState::Polishing
-                | CapsuleState::Done
-        )
-    {
-        log::info!(
-            "[firmware-ota] suppress capsule state={state:?} during OTA transfer session={event_session_id:?}"
-        );
+    // Single door: recording-related capsules during OTA (and future policies).
+    if !recording_gate::try_admit_arc(
+        inner,
+        RecordIntent::ShowCapsule { state },
+        &format!("emit_capsule session={event_session_id:?} state={state:?}"),
+    ) {
         return;
     }
     let app_opt = inner.app.lock().clone();

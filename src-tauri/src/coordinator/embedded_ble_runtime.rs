@@ -1051,8 +1051,11 @@ fn refresh_embedded_ble_listener_with_options(
         );
         return;
     }
-    if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
-        log::info!("[embedded-ble] background listener refresh skipped during firmware OTA");
+    if !recording_gate::try_admit_arc(
+        inner,
+        recording_gate::RecordIntent::BackgroundListener,
+        "background listener refresh",
+    ) {
         return;
     }
     if inner
@@ -1539,7 +1542,8 @@ fn embedded_ble_listener_generation_is_current(inner: &Arc<Inner>, generation: u
             .embedded_ble_listener_generation
             .load(Ordering::SeqCst)
             == generation
-        && !inner.embedded_ble_ota_active.load(Ordering::SeqCst)
+        && recording_gate::admit_arc(inner, recording_gate::RecordIntent::BackgroundListener)
+            .is_allow()
         && inner.prefs.get().dictation_input_source == DictationInputSource::EmbeddedBle
 }
 
@@ -1624,7 +1628,11 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                         .embedded_ble_listener_generation
                         .load(Ordering::SeqCst)
                         != generation
-                    || inner.embedded_ble_ota_active.load(Ordering::SeqCst)
+                    || recording_gate::admit_arc(
+                        &inner,
+                        recording_gate::RecordIntent::BackgroundListener,
+                    )
+                    .is_deny()
                     || inner.prefs.get().dictation_input_source != DictationInputSource::EmbeddedBle
                 {
                     break;

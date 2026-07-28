@@ -63,6 +63,7 @@ use crate::windows_ime_session::{PreparedWindowsImeSession, WindowsImeSessionCon
 
 mod dictation;
 mod qa;
+mod recording_gate;
 mod resources;
 mod support;
 

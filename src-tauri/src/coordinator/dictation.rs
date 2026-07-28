@@ -14,6 +14,7 @@ use crate::types::{
 };
 
 use super::qa::handle_qa_option_edge;
+use super::recording_gate::{self, RecordIntent};
 use super::resources::*;
 use super::*;
 

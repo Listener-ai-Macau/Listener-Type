@@ -892,12 +892,15 @@ async fn handle_device_dictation_action(
     key: DeviceCustomKeyId,
     gesture: DeviceCustomKeyGesture,
 ) {
-    if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
-        log::info!(
-            "[firmware-ota] device-key dictation ignored during OTA key={} gesture={}",
+    if !recording_gate::try_admit_arc(
+        &inner,
+        recording_gate::RecordIntent::DeviceKeyDictation,
+        &format!(
+            "device-key dictation key={} gesture={}",
             key.label(),
             gesture.label()
-        );
+        ),
+    ) {
         crate::timeline::mark(
             "backend.device_key",
             "dictation_action_blocked_ota",
