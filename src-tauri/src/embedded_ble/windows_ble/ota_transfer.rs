@@ -84,6 +84,10 @@ pub(super) fn request_listener_ota_v1_active_link(
             );
         }
     }
+    // Kick WinRT ThroughputOptimized on the live address before exclusive
+    // capture so CI can settle during target prepare (Companion re-asserts
+    // the same preference before bulk STREAM_ALL).
+    request_ota_ble_throughput_for_runtime_address();
     // After exclusive OTA begin, the audio notify capture may already be
     // cancelled/suppressed (or busy with VA PCM). Active-capture writes then
     // time out and the host surfaces "device rejected OTA" before BEGIN.
@@ -93,7 +97,11 @@ pub(super) fn request_listener_ota_v1_active_link(
         Duration::from_secs(3),
         "Listener OTA v1 reconnect handoff",
         ActiveControlTransientFallback::TryFreshGatt,
-    )
+    )?;
+    // Second assert after TYPE:OTA (Companion dual-assert pattern) without a
+    // multi-second settle — OTA prep already uses the connection.
+    request_ota_ble_throughput_for_runtime_address();
+    Ok(())
 }
 
 pub(super) fn request_listener_ota_post_confirm_notify_fast_retry() {

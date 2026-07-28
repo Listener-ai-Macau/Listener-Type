@@ -428,6 +428,10 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("open_ble_device_by_address(address)")
             && source.contains("[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]")
             && source.contains("reconnect handoff accepted")
+            && source.contains("ThroughputOptimized")
+            && source.contains("request_ota_ble_throughput_optimized")
+            && source.contains("request_ota_ble_throughput_for_runtime_address")
+            && source.contains("let settle_ms = if round == 1 { 350 } else { 700 }")
             && prepare.contains("open_listener_ota_v1_target_after_active_link_handoff")
             && prepare.find("acquire_ble_ota_process_mutex").unwrap()
                 < prepare

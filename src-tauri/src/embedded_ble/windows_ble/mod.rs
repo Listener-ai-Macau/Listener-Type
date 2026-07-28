@@ -45,6 +45,7 @@ use windows::Devices::Bluetooth::GenericAttributeProfile::{
 };
 use windows::Devices::Bluetooth::{
     BluetoothAddressType, BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
+    BluetoothLEPreferredConnectionParameters,
 };
 use windows::Devices::Enumeration::{
     DeviceAccessStatus, DeviceClass, DeviceInformation, DeviceInformationCustomPairing,
@@ -2220,7 +2221,9 @@ impl PreparedListenerOtaV1Transfer {
         for round in 1..=SECURE_REOPEN_ROUNDS {
             // First round needs settle after capture-gate handoff; later rounds wait longer
             // for Windows to re-establish the encrypted GATT session.
-            let settle_ms = if round == 1 { 750 } else { 1_200 };
+            // TYPE:OTA is now sent while notify is still live; exclusive settle
+            // only needs a short capture-gate quiet window (was 750/1200ms).
+            let settle_ms = if round == 1 { 350 } else { 700 };
             std::thread::sleep(Duration::from_millis(settle_ms));
             let fresh = match open_listener_ota_v1_target_after_active_link_handoff() {
                 Ok(fresh) => {

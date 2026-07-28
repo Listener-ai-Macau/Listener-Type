@@ -57,8 +57,9 @@ fn normalized_commands_source() -> String {
 #[test]
 fn ota_observability_handoff_precedes_background_listener_pause() {
     let source = normalized_commands_source();
+    // mod.rs may re-export the symbol; use the real implementation body in firmware.rs.
     let transfer_start = source
-        .find("pub async fn transfer_firmware_ota_ble")
+        .rfind("pub async fn transfer_firmware_ota_ble")
         .expect("firmware OTA command should exist");
     let transfer_end = source[transfer_start..]
         .find("Ok(FirmwareOtaBleTransferResult")
@@ -68,13 +69,16 @@ fn ota_observability_handoff_precedes_background_listener_pause() {
     let handoff = transfer
         .find("request_listener_ota_v1_active_link(Some(")
         .expect("OTA should hand off its observability context on the active link");
+    let begin = transfer
+        .find("coord.try_begin_firmware_ota_transfer()")
+        .expect("OTA transfer must reserve exclusive OTA after TYPE:OTA handoff");
     let pause = transfer
         .find("coord.pause_embedded_ble_listener_for_ota()")
         .expect("OTA should pause the listener before opening its GATT transfer");
 
     assert!(
-        handoff < pause,
-        "OTA observability context must reach Firmware before the active listener is paused"
+        handoff < begin && begin < pause,
+        "TYPE:OTA must reach firmware while notify is still live (before try_begin/pause) so LED stays Type-ready"
     );
 }
 

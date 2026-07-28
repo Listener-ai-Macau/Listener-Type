@@ -2260,20 +2260,23 @@ pub async fn transfer_firmware_ota_ble(
         pretransfer_type_ready,
         pretransfer_type_ready_elapsed_ms
     );
-    if !coord.try_begin_firmware_ota_transfer() {
-        return Err("Firmware OTA is already in progress.".to_string());
-    }
+    // Send TYPE:OTA while audio notify is still live so firmware latches the
+    // Type OTA lease (LED stays Type-ready; TYPE:BYE during pause is ignored).
+    // Doing this after try_begin/suppress used to BYE first → find-Type LED and
+    // flaky handoff timeouts.
     let mut observability = crate::observability::begin_ota_transfer();
     if let Err(error) = crate::embedded_ble::request_listener_ota_v1_active_link(Some(
         observability.correlation_id(),
     )) {
         observability.record_control_handoff_failed(&error);
-        coord.end_firmware_ota_transfer();
         return Err(error);
     }
     log::info!(
-        "[firmware-ota] Listener OTA v1 reconnect handoff accepted before preparing the exclusive GATT target"
+        "[firmware-ota] Listener OTA v1 reconnect handoff accepted while notify still live"
     );
+    if !coord.try_begin_firmware_ota_transfer() {
+        return Err("Firmware OTA is already in progress.".to_string());
+    }
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_sha256 = expected_sha256.clone();

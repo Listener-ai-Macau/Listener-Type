@@ -762,6 +762,40 @@ fn open_listener_ota_v1_target_for_verified_active_handoff(
     open_listener_ota_v1_target_for_device_with_options(address, true)
 }
 
+fn request_ota_ble_throughput_optimized(device: &BluetoothLEDevice) {
+    // Companion recording pull hits ~50–90 KB/s on notify flood by preferring
+    // ThroughputOptimized (~15 ms CI; device may go 7.5 ms). OTA is the reverse
+    // direction (host WriteWithoutResponse bursts) but the same host CI preference
+    // still improves bulk ATT write packing.
+    let Ok(params) = BluetoothLEPreferredConnectionParameters::ThroughputOptimized() else {
+        log::debug!("[embedded-ble] Listener OTA ThroughputOptimized params unavailable");
+        return;
+    };
+    match device.RequestPreferredConnectionParameters(&params) {
+        Ok(status) => log::info!(
+            "[embedded-ble] Listener OTA requested WinRT ThroughputOptimized status={status:?}"
+        ),
+        Err(err) => log::info!(
+            "[embedded-ble] Listener OTA ThroughputOptimized request skipped: {err}"
+        ),
+    }
+}
+
+fn request_ota_ble_throughput_for_runtime_address() {
+    let Some(address) = runtime_bluetooth_target_address() else {
+        log::debug!(
+            "[embedded-ble] Listener OTA ThroughputOptimized: no runtime address yet"
+        );
+        return;
+    };
+    match open_ble_device_by_address(address) {
+        Ok(device) => request_ota_ble_throughput_optimized(&device),
+        Err(err) => log::debug!(
+            "[embedded-ble] Listener OTA ThroughputOptimized open {address:012X} skipped: {err}"
+        ),
+    }
+}
+
 fn open_listener_ota_v1_target_for_device_with_options(
     address: u64,
     verified_active_handoff: bool,
@@ -771,6 +805,7 @@ fn open_listener_ota_v1_target_for_device_with_options(
     } else {
         open_ble_device(address)?
     };
+    request_ota_ble_throughput_optimized(&device);
     if !verified_active_handoff {
         if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
             wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v1 device access")
