@@ -75,6 +75,15 @@ mod embedded_ble {
     pub fn listener_ota_v1_gatt_probe_snapshot(_timeout: Duration) -> FirmwareOtaDeviceSnapshot {
         listener_ota_v1_device_snapshot()
     }
+
+    pub fn request_listener_ota_post_confirm_notify_fast_retry() {}
+
+    pub fn probe_notify_subscription(_timeout: Duration) -> Result<(), String> {
+        Err(
+            "Standalone headless validation cannot probe Windows BLE notify subscription."
+                .to_string(),
+        )
+    }
 }
 
 #[path = "../../../src-tauri/src/firmware_ota.rs"]
