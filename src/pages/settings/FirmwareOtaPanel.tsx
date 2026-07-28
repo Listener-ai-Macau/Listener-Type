@@ -567,7 +567,11 @@ export function FirmwareOtaPanel({
                     </div>
                   )}
                   <div style={{ fontSize: 11.5, color: 'var(--ol-ink-4)', lineHeight: 1.5 }}>
-                    {formatFirmwareOtaFailureNextStep(state.failureCode, i18n.resolvedLanguage ?? i18n.language)}
+                    {formatFirmwareOtaFailureNextStep(
+                      state.failureCode,
+                      i18n.resolvedLanguage ?? i18n.language,
+                      state.message,
+                    )}
                   </div>
                 </>
               )}
@@ -1246,7 +1250,9 @@ function formatFirmwareOtaBlocker(
 function formatFirmwareOtaFailureNextStep(
   code: NonNullable<ReturnType<typeof firmwareOtaReducer>['failureCode']>,
   language: string,
+  detailMessage = '',
 ): string {
+  const detail = detailMessage.toLowerCase();
   switch (code) {
     case 'bleDisconnected':
       return localizeOtaText(language, '请重新连接 Listener，查询设备状态后再试。', 'Reconnect Listener, query device status, then retry.');
@@ -1255,6 +1261,38 @@ function formatFirmwareOtaFailureNextStep(
     case 'hashFailure':
       return localizeOtaText(language, '升级包校验失败，请重新生成或下载 OTA 包。', 'OTA package verification failed. Rebuild or download the package again.');
     case 'deviceRejected':
+      // Catch-all bucket: many transport failures (timeout / begin / WWR) land here.
+      // Prefer actionable copy from the real host error; keep raw message above.
+      if (
+        detail.includes('timed out')
+        || detail.includes('timeout')
+        || detail.includes('超时')
+      ) {
+        return localizeOtaText(
+          language,
+          '传输超时：请保持设备唤醒与 USB 供电，暂停说话/录音后重试。完整原因见上方英文错误与 Type 日志 [firmware-ota] transfer failed。',
+          'Transfer timed out. Keep the device awake on USB power, stop speech/recording, then retry. Full reason is above and in Type log [firmware-ota] transfer failed.',
+        );
+      }
+      if (
+        detail.includes('begin')
+        || detail.includes('protocol_error')
+        || detail.includes('authentication')
+        || detail.includes('insufficient')
+      ) {
+        return localizeOtaText(
+          language,
+          'BEGIN/加密会话失败：可先断电复位设备，确认 Type 已接上后再试；串口看 firmware_ota / ble_firmware_ota 是否出现 begin rejected。',
+          'BEGIN/encryption session failed. Power-cycle the device, ensure Type is ready, then retry. Check serial for firmware_ota / ble_firmware_ota begin rejected.',
+        );
+      }
+      if (detail.trim().length > 0) {
+        return localizeOtaText(
+          language,
+          '上方为 Type 返回的完整错误。请对照 %LOCALAPPDATA%\\Listener Type\\Logs\\listener-type.log 中 [firmware-ota] transfer failed 与设备串口 OTA 日志。',
+          'The full host error is shown above. Cross-check %LOCALAPPDATA%\\Listener Type\\Logs\\listener-type.log ([firmware-ota] transfer failed) and device serial OTA logs.',
+        );
+      }
       return localizeOtaText(language, '设备拒绝升级，请导出诊断包并检查设备状态。', 'The device rejected the update. Export diagnostics and check device status.');
     case 'versionNotConfirmed':
       return localizeOtaText(language, '等待设备重新连接后查询固件版本；如果仍未变化，请重试或导出诊断包。', 'Wait for the device to reconnect, then query firmware version. Retry or export diagnostics if it did not change.');

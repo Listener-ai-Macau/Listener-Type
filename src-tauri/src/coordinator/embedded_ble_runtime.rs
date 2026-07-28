@@ -3649,6 +3649,7 @@ fn maybe_prune_listener_ghost_pairings_after_notify_ready(inner: &Arc<Inner>) {
     const GHOST_PRUNE_SETTLE: Duration = Duration::from_secs(8);
     const GHOST_PRUNE_COOLDOWN: Duration = Duration::from_secs(180);
     static LAST_GHOST_PRUNE_AT: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+    let inner = Arc::clone(inner);
     tauri::async_runtime::spawn_blocking(move || {
         if let Ok(last) = LAST_GHOST_PRUNE_AT.lock() {
             if let Some(at) = *last {
@@ -3668,6 +3669,15 @@ fn maybe_prune_listener_ghost_pairings_after_notify_ready(inner: &Arc<Inner>) {
             GHOST_PRUNE_SETTLE.as_millis()
         );
         std::thread::sleep(GHOST_PRUNE_SETTLE);
+        // OTA exclusive transfer can start during the settle window. Pruning
+        // PnP/BTHPORT mid-transfer races GATT BEGIN/WWR (logs: dual-lane start →
+        // ghost-prune → ota_gatt_transfer_failed ~10s). Skip while OTA owns BLE.
+        if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+            log::info!(
+                "[embedded-ble] skipping ghost pairing prune keep={keep:012X}: firmware OTA exclusive transfer active"
+            );
+            return;
+        }
         let mut names = vec![expected_name];
         for fallback in ["listener", "Blistener"] {
             if !names.iter().any(|n| n.eq_ignore_ascii_case(fallback)) {

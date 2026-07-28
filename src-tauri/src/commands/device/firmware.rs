@@ -2331,6 +2331,9 @@ pub async fn transfer_firmware_ota_ble(
     if let Err(error) = target_prepare {
         drop(start_transfer_tx);
         let _ = transfer_task.await;
+        log::error!(
+            "[firmware-ota] transfer prepare failed elapsed_ms={target_prepare_elapsed_ms}: {error}"
+        );
         observability.record_transfer_failed(target_prepare_elapsed_ms, &error);
         coord.end_firmware_ota_transfer();
         return Err(error);
@@ -2342,6 +2345,9 @@ pub async fn transfer_firmware_ota_ble(
     if start_transfer_tx.send(()).is_err() {
         let error = "Listener BLE OTA target closed before transfer start.".to_string();
         let _ = transfer_task.await;
+        log::error!(
+            "[firmware-ota] transfer start failed elapsed_ms={target_prepare_elapsed_ms}: {error}"
+        );
         observability.record_transfer_failed(target_prepare_elapsed_ms, &error);
         coord.end_firmware_ota_transfer();
         coord.refresh_embedded_ble_listener();
@@ -2354,8 +2360,23 @@ pub async fn transfer_firmware_ota_ble(
         .and_then(|result| result);
     let transfer_elapsed_ms = elapsed_ms_u64(transfer_started);
     match &transfer {
-        Ok(_) => observability.record_transfer_completed(transfer_elapsed_ms),
-        Err(error) => observability.record_transfer_failed(transfer_elapsed_ms, error),
+        Ok(stats) => {
+            log::info!(
+                "[firmware-ota] transfer ok elapsed_ms={transfer_elapsed_ms} bytes={} transport={}",
+                stats.bytes_transferred,
+                stats.transport
+            );
+            observability.record_transfer_completed(transfer_elapsed_ms);
+        }
+        Err(error) => {
+            // Always keep the full host error string in listener-type.log. UI maps
+            // unknown failures to "设备拒绝升级"; without this line operators only see
+            // obs-v1 category=transport and cannot tell timeout vs ATT protocol_error.
+            log::error!(
+                "[firmware-ota] transfer failed elapsed_ms={transfer_elapsed_ms}: {error}"
+            );
+            observability.record_transfer_failed(transfer_elapsed_ms, error);
+        }
     }
     let confirm = if transfer.is_ok() {
         confirm_listener_ota_v1_reachable(&version).await
@@ -2382,10 +2403,12 @@ pub async fn transfer_firmware_ota_ble(
     let stats = transfer?;
     if !confirm.matched {
         coord.refresh_embedded_ble_listener();
-        return Err(format!(
+        let error = format!(
             "Listener firmware version {} was not confirmed after OTA.",
             version
-        ));
+        );
+        log::error!("[firmware-ota] post-transfer version confirm failed: {error}");
+        return Err(error);
     }
     log::info!(
         "[firmware-ota] post-confirm settle {} ms before TYPE:READY notify reopen",

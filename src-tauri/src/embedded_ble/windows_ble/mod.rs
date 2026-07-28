@@ -2256,26 +2256,43 @@ impl PreparedListenerOtaV1Transfer {
             ) {
                 Ok(stats) => return Ok(stats),
                 Err(err)
-                    if err.contains("protocol_error")
-                        || err.contains("ProtocolError")
-                        || err.contains("Insufficient")
-                        || err.to_ascii_lowercase().contains("authentication") =>
+                    if {
+                        let lowered = err.to_ascii_lowercase();
+                        err.contains("protocol_error")
+                            || err.contains("ProtocolError")
+                            || err.contains("Insufficient")
+                            || lowered.contains("authentication")
+                            // Owner 2026-07-28: first SYNC WriteWithResponse hung 8s with no
+                            // ATT code. Reopen secure OTA target and retry whole transfer.
+                            || lowered.contains("timed out")
+                            || lowered.contains("timeout")
+                    } =>
                 {
                     log::warn!(
-                        "[embedded-ble] Listener OTA v1: transfer auth/encryption error round={round}/{SECURE_REOPEN_ROUNDS}: {err}; will reopen secure target and retry"
+                        "[embedded-ble] Listener OTA v1: transfer auth/timeout error round={round}/{SECURE_REOPEN_ROUNDS}: {err}; will reopen secure target and retry"
                     );
                     last_error = Some(err);
                     // Drop fresh target before next reopen attempt.
                     drop(fresh);
                     continue;
                 }
-                Err(err) => return Err(err),
+                Err(err) => {
+                    // Non-retryable path — always keep the full host error in Type logs.
+                    log::error!(
+                        "[embedded-ble] Listener OTA v1: transfer failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
+                    );
+                    return Err(err);
+                }
             }
         }
-        Err(last_error.unwrap_or_else(|| {
+        let final_error = last_error.unwrap_or_else(|| {
             "Listener OTA v1 failed: could not open a secure OTA GATT target after exclusive handoff"
                 .to_string()
-        }))
+        });
+        log::error!(
+            "[embedded-ble] Listener OTA v1: secure reopen/transfer exhausted after {SECURE_REOPEN_ROUNDS} rounds: {final_error}"
+        );
+        Err(final_error)
     }
 }
 
@@ -2450,23 +2467,37 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         // (Insufficient Authentication)。短暂等待加密恢复后重试，避免第一次点 OTA 失败、
         // 或长传输结束 FINISH 失败（用户实测 FINISH 在 75s 传输后丢加密而失败）。
         // BEGIN 在 exclusive handoff 后尤其容易 14：多给几次 + 稍长间隔。
+        // 2026-07-28 owner log: first-window SYNC hung for full OTA_WRITE_TIMEOUT (8s)
+        // with no protocol_error. Device drains dual-lane flash queue under lock before
+        // ATT-acking SYNC (ble_firmware_ota_drain_queued_data_locked) — large windows
+        // can exceed 8s on ESP32 flash erase/write. Retry timeouts, not only ATT 14.
         let is_begin = packet[4] == denzic_ota_core::OP_BEGIN;
         let is_sync = packet[4] == denzic_ota_core::OP_SYNC;
-        // SYNC sits on the bulk hot path (every window). Long auth sleeps here
-        // dominated prior runs (control_write_ms ≈ 30s). Keep BEGIN/FINISH
-        // generous; keep SYNC retries short.
+        // After dual-lane WWR flush: controller + device queue still settling.
+        // Quiet window before SYNC WriteWithResponse reduces false hangs.
+        if is_sync {
+            std::thread::sleep(Duration::from_millis(150));
+        }
         const CONTROL_AUTH_RETRIES: usize = 5;
-        let control_auth_retry_delay_ms: u64 = if is_begin {
+        let control_retry_delay_ms: u64 = if is_begin {
             1500
         } else if is_sync {
-            80
+            300
         } else {
             1000
         };
+        // SYNC: more attempts for timeout/auth (was 2, auth-only → one 8s hang = hard fail).
         let max_attempts: usize = if is_sync {
-            2
+            4
         } else {
             CONTROL_AUTH_RETRIES + 1
+        };
+        // SYNC must outlive device-side flash drain of a dual-lane window (~200KB).
+        // 8s was too short; 25s covers erase-heavy first windows without stalling UI forever.
+        let write_timeout = if is_sync {
+            Duration::from_secs(25)
+        } else {
+            OTA_WRITE_TIMEOUT
         };
         for attempt in 0..max_attempts {
             let result = if use_status_write {
@@ -2474,7 +2505,7 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
                     &self.target.control,
                     packet,
                     GattWriteOption::WriteWithResponse,
-                    OTA_WRITE_TIMEOUT,
+                    write_timeout,
                     label,
                 )
             } else {
@@ -2482,25 +2513,35 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
                     &self.target.control,
                     packet,
                     GattWriteOption::WriteWithResponse,
-                    OTA_WRITE_TIMEOUT,
+                    write_timeout,
                     label,
                 )
             };
             match result {
                 Ok(_) => return Ok(()),
                 Err(err) => {
-                    let needs_auth_retry = attempt + 1 < max_attempts
-                        && (err.contains("protocol_error") || err.contains("ProtocolError"));
-                    if needs_auth_retry {
+                    let lowered = err.to_ascii_lowercase();
+                    let is_auth = err.contains("protocol_error")
+                        || err.contains("ProtocolError")
+                        || lowered.contains("authentication")
+                        || lowered.contains("insufficient");
+                    let is_timeout =
+                        lowered.contains("timed out") || lowered.contains("timeout");
+                    let needs_retry = attempt + 1 < max_attempts && (is_auth || is_timeout);
+                    if needs_retry {
                         log::warn!(
-                            "[embedded-ble] Denzic OTA v1 #{}: {} — GATT session 加密/绑定未就绪，等待 {}ms 后重试 attempt={}",
+                            "[embedded-ble] Denzic OTA v1 #{}: {} failed ({}); waiting {}ms then retry attempt={}/{}",
                             self.transfer_id,
                             label,
-                            control_auth_retry_delay_ms,
-                            attempt + 1
+                            if is_timeout { "timeout" } else { "auth/encryption" },
+                            control_retry_delay_ms,
+                            attempt + 1,
+                            max_attempts - 1
                         );
+                        // Re-drain in case a late WWR completion arrived during the hang.
+                        let _ = self.flush_pending_wwr();
                         std::thread::sleep(std::time::Duration::from_millis(
-                            control_auth_retry_delay_ms,
+                            control_retry_delay_ms,
                         ));
                         continue;
                     }

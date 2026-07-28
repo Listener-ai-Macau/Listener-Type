@@ -195,6 +195,11 @@ fn ota_transfer_failure_restores_the_background_listener() {
     let pause = transfer
         .find("coord.pause_embedded_ble_listener_for_ota()")
         .expect("OTA must pause the listener only after target preparation");
+    assert!(
+        transfer.contains("log::error!")
+            && transfer.contains("[firmware-ota] transfer failed"),
+        "OTA transfer failures must log the full host error string for operator diagnostics"
+    );
     let transfer_timer = transfer
         .find("let transfer_started = Instant::now();")
         .expect("OTA transfer timing must start after the listener is paused");

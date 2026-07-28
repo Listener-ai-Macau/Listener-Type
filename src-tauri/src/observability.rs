@@ -472,6 +472,10 @@ impl OtaObservation {
 
     pub(crate) fn record_transfer_failed(&mut self, transfer_elapsed_ms: u64, message: &str) {
         let error = classify_error(message);
+        // Category-only obs events drop the diagnostic string; always log it too.
+        log::error!(
+            "[obs-v1] ota_gatt_transfer_failed category={error:?} elapsed_ms={transfer_elapsed_ms} detail={message}"
+        );
         let event = self.next_event(
             Instant::now(),
             source_for_error(error),
@@ -485,6 +489,9 @@ impl OtaObservation {
 
     pub(crate) fn record_control_handoff_failed(&mut self, message: &str) {
         let error = classify_error(message);
+        log::error!(
+            "[obs-v1] ota_control_handoff_failed category={error:?} detail={message}"
+        );
         let event = self.next_event(
             Instant::now(),
             source_for_error(error),
