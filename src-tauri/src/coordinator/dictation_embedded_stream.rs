@@ -1077,11 +1077,13 @@ impl EmbeddedStreamingDictation {
                     }
                 }
             };
-            let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+            // Sensitive KWS is for recall only. Accept requires local paraformer
+            // confirmation (Present/PresentLater). KeywordModel alone was accepting
+            // ambient speech as 开始录音 (owner false wake ~09:49, no key/no intent).
+            let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::None;
             let mut local_confirmation_ms = 0u64;
-            let wake_match = if wake_match.is_some() {
-                wake_match
-            } else {
+            let kws_hit = wake_match.clone();
+            let wake_match = {
                 #[cfg(target_os = "windows")]
                 {
                     let completed_task = {
@@ -1105,11 +1107,12 @@ impl EmbeddedStreamingDictation {
                                         phrase.clone(),
                                     ));
                                 log::info!(
-                                        "[wake-phrase] bounded local confirmation started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={}",
+                                        "[wake-phrase] bounded local confirmation started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} kws_hit={}",
                                         embedded_session_id,
                                         candidate.local_confirmation_attempts,
                                         snapshot_bytes / 32,
-                                        candidate.pcm.len() / 32
+                                        candidate.pcm.len() / 32,
+                                        kws_hit.is_some()
                                     );
                             }
                         }
@@ -1128,17 +1131,28 @@ impl EmbeddedStreamingDictation {
                             Ok(Ok(result)) => {
                                 local_confirmation_ms = result.inference_ms;
                                 log::info!(
-                                        "[wake-phrase] bounded local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
+                                        "[wake-phrase] bounded local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={} kws_hit={}",
                                         embedded_session_id,
                                         result.matched,
                                         result.phrase_relation,
                                         result.snapshot_pcm_ms,
                                         result.transcript_chars,
-                                        result.inference_ms
+                                        result.inference_ms,
+                                        kws_hit.is_some()
                                     );
                                 if result.matched {
                                     phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                    Some(crate::wake_phrase::Match { end_seconds: 0.0 })
+                                    // Prefer KWS timing when available; local match alone still wakes.
+                                    kws_hit.or(Some(crate::wake_phrase::Match {
+                                        end_seconds: 0.0,
+                                    }))
+                                } else if kws_hit.is_some() {
+                                    // KWS false-positive: do not Accept on KeywordModel alone.
+                                    log::info!(
+                                        "[wake-phrase] KWS hit held: local confirmation Absent embedded_session_id={} (anti false-wake)",
+                                        embedded_session_id
+                                    );
+                                    None
                                 } else {
                                     None
                                 }
@@ -1147,6 +1161,8 @@ impl EmbeddedStreamingDictation {
                                 log::warn!(
                                         "[wake-phrase] bounded local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
                                     );
+                                // Without local ASR, keep provisional KWS only as Pending
+                                // (do not Accept yet) by returning None this tick.
                                 None
                             }
                             Err(err) => {
@@ -1157,12 +1173,18 @@ impl EmbeddedStreamingDictation {
                             }
                         }
                     } else {
+                        // Waiting on local confirmation (and optionally KWS).
                         None
                     }
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
-                    None
+                    // Non-Windows: keep prior KWS-only path.
+                    if kws_hit.is_some() {
+                        phrase_signal =
+                            denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                    }
+                    kws_hit
                 }
             };
             let Some(wake_match) = wake_match else {
