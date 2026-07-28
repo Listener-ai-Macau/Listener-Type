@@ -4433,7 +4433,19 @@ impl NotifyCleanup {
             return;
         }
         if self.type_heartbeat_open {
-            let _ = self.write_type_heartbeat(b"TYPE:BYE\n", "Type heartbeat bye");
+            // Exclusive OTA already sent TYPE:OTA to latch the Type-ready LED lease.
+            // A BYE here races firmware OTA-hold handling and can drop the lease early
+            // (owner 2026-07-28: find-Type LED during bulk transfer / pause handoff).
+            if ble_ota_process_mutex_busy()
+                || matches!(teardown, NotifyCccdTeardown::LeaveEnabled)
+            {
+                log::info!(
+                    "[embedded-ble] capture #{}: skipping TYPE:BYE during OTA/controlled handoff (preserve Type OTA LED lease)",
+                    self.capture_id
+                );
+            } else {
+                let _ = self.write_type_heartbeat(b"TYPE:BYE\n", "Type heartbeat bye");
+            }
             self.type_heartbeat_open = false;
         }
         self.remove_status_handlers();

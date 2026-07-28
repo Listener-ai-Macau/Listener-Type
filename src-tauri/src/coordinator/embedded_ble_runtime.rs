@@ -3079,6 +3079,19 @@ async fn maybe_hold_embedded_ble_startup_without_current_native_pairing(
             );
             return false;
         }
+        // Owner 2026-07-28: after failed OTA, Windows often reports NeedsUserAction
+        // with matched>0/already_paired=0 while HID is still present. Treating that as
+        // "stale HID wait for recovery ad" holds notify 180s and shows find-Type LED.
+        // Matched AEP + present HID means bond cache is not gone — reopen GATT.
+        if pairing.matched_devices > 0 {
+            log::info!(
+                "[embedded-ble] startup native Windows HID present with matched={} already_paired=0 status={:?}; allowing persisted GATT reopen (incomplete AEP, not stale unpair) addresses={labels:?} elapsed_ms={}",
+                pairing.matched_devices,
+                pairing.status,
+                started_at.elapsed().as_millis(),
+            );
+            return false;
+        }
         let expected_for_scan = expected_ble_name.clone();
         let recovery_pairing_probe = async_runtime::spawn_blocking(move || {
             crate::embedded_ble::listener_recovery_pairing_advertisement_probe(
