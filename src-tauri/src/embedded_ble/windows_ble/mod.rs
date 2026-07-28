@@ -2185,24 +2185,81 @@ impl PreparedListenerOtaV1Transfer {
             _preparation_guard,
             ownership,
         } = self;
-        let (transfer_guard, _ota_process_guard) = match ownership {
+        let (transfer_guard, _ota_process_guard, reopen_secure_target) = match ownership {
             PreparedListenerOtaV1TransferOwnership::Exclusive {
                 transfer_guard,
                 _ota_process_guard,
-            } => (transfer_guard, _ota_process_guard),
+            } => (transfer_guard, _ota_process_guard, false),
             PreparedListenerOtaV1TransferOwnership::Staged => {
                 let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v1")?;
                 let transfer_guard = BleCaptureGuard::enter(None)?;
-                (transfer_guard, ota_process_guard)
+                // Staged prepare opened OTA GATT while the audio notify capture was still
+                // alive. Pausing that capture for exclusive OTA often drops Windows link
+                // encryption; BEGIN then fails with ATT protocol_error=14 (Insufficient
+                // Authentication) and firmware OTA error LED (yellow) may latch.
+                // Re-open OTA characteristics after exclusive ownership so BEGIN runs on a
+                // fresh encrypted session.
+                (transfer_guard, ota_process_guard, true)
             }
         };
-        transfer_denzic_ota_v1_to_target(
-            &target,
+        let transfer_target = if reopen_secure_target {
+            // Brief settle after capture-gate handoff before reopening OTA service.
+            std::thread::sleep(Duration::from_millis(250));
+            match open_listener_ota_v1_target_after_active_link_handoff() {
+                Ok(fresh) => {
+                    log::info!(
+                        "[embedded-ble] Listener OTA v1: reopened secure OTA target after exclusive handoff before BEGIN (avoids protocol_error=14)"
+                    );
+                    drop(target);
+                    fresh
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] Listener OTA v1: secure reopen after exclusive handoff failed ({err}); using prepare-time target"
+                    );
+                    target
+                }
+            }
+        } else {
+            target
+        };
+        let result = transfer_denzic_ota_v1_to_target(
+            &transfer_target,
             transfer_guard.session_id(),
             firmware_bytes,
             manifest_chunk_bytes,
             on_progress,
-        )
+        );
+        // If BEGIN still hit auth errors, one more full reopen+retry before surfacing FAIL.
+        match result {
+            Ok(stats) => Ok(stats),
+            Err(err)
+                if reopen_secure_target
+                    && (err.contains("protocol_error")
+                        || err.contains("ProtocolError")
+                        || err.contains("Insufficient")
+                        || err.to_ascii_lowercase().contains("authentication")) =>
+            {
+                log::warn!(
+                    "[embedded-ble] Listener OTA v1: transfer failed with auth/encryption error ({err}); reopening target and retrying once"
+                );
+                std::thread::sleep(Duration::from_millis(500));
+                let retry_target = open_listener_ota_v1_target_after_active_link_handoff()
+                    .map_err(|reopen_err| {
+                        format!(
+                            "Listener OTA v1 failed after encryption errors ({err}); reopen also failed: {reopen_err}"
+                        )
+                    })?;
+                transfer_denzic_ota_v1_to_target(
+                    &retry_target,
+                    transfer_guard.session_id(),
+                    firmware_bytes,
+                    manifest_chunk_bytes,
+                    on_progress,
+                )
+            }
+            Err(err) => Err(err),
+        }
     }
 }
 
@@ -2231,8 +2288,10 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         // session 还没完成加密/绑定、或长传输后加密丢失时都会 ATT protocol_error=14
         // (Insufficient Authentication)。短暂等待加密恢复后重试，避免第一次点 OTA 失败、
         // 或长传输结束 FINISH 失败（用户实测 FINISH 在 75s 传输后丢加密而失败）。
+        // BEGIN 在 exclusive handoff 后尤其容易 14：多给几次 + 稍长间隔。
+        let is_begin = packet[4] == denzic_ota_core::OP_BEGIN;
         const CONTROL_AUTH_RETRIES: usize = 5;
-        const CONTROL_AUTH_RETRY_DELAY_MS: u64 = 1000;
+        let control_auth_retry_delay_ms: u64 = if is_begin { 1500 } else { 1000 };
         let max_attempts: usize = CONTROL_AUTH_RETRIES + 1;
         for attempt in 0..max_attempts {
             let result = if use_status_write {
@@ -2262,11 +2321,11 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
                             "[embedded-ble] Denzic OTA v1 #{}: {} — GATT session 加密/绑定未就绪，等待 {}ms 后重试 attempt={}",
                             self.transfer_id,
                             label,
-                            CONTROL_AUTH_RETRY_DELAY_MS,
+                            control_auth_retry_delay_ms,
                             attempt + 1
                         );
                         std::thread::sleep(std::time::Duration::from_millis(
-                            CONTROL_AUTH_RETRY_DELAY_MS,
+                            control_auth_retry_delay_ms,
                         ));
                         continue;
                     }
