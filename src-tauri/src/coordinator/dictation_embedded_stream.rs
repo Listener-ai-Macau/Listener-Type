@@ -196,6 +196,20 @@ impl EmbeddedStreamingDictation {
                     }
                     return Ok(false);
                 }
+                // Explicit SessionStart (User / VoiceActivation) must create
+                // `session` or `speaker_candidate` first. Mid-stream PCM after Type
+                // restart / notify reopen used to call begin_session_if_needed here
+                // and open a full Recording capsule with no wake/key intent (owner
+                // saw phantom dictation; stop origin was still VoiceActivation).
+                if self.session.is_none() {
+                    log::info!(
+                        "[coord] ignoring orphan embedded PCM without explicit start embedded_session_id={} packet_sequence={} pcm_bytes={} (no phantom recording on reconnect)",
+                        chunk.session_id,
+                        chunk.packet_sequence,
+                        chunk.pcm.len()
+                    );
+                    return Ok(false);
+                }
                 if embedded_streaming_chunk_is_asr_input(&chunk) {
                     self.begin_session_if_needed(inner, chunk.session_id)
                         .await?;

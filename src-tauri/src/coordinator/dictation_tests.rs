@@ -1505,6 +1505,35 @@ fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
 }
 
 #[test]
+fn orphan_pcm_without_explicit_start_must_not_open_dictation() {
+    // Type restart / notify reopen can receive mid-stream PCM (no SessionStart).
+    // That must not open a Recording capsule (phantom dictation).
+    let stream = include_str!("dictation_embedded_stream.rs");
+    assert!(
+        stream.contains("ignoring orphan embedded PCM without explicit start")
+            && stream.contains("if self.session.is_none()")
+            && stream.contains("no phantom recording on reconnect"),
+        "PcmChunk path must drop orphan audio until explicit SessionStart creates session/candidate"
+    );
+    // The guard must sit before begin_session_if_needed on the no-candidate branch.
+    let pcm_arm = stream
+        .find("StreamingSessionEvent::PcmChunk(chunk)")
+        .expect("pcm arm");
+    let orphan = stream[pcm_arm..]
+        .find("ignoring orphan embedded PCM without explicit start")
+        .expect("orphan guard")
+        + pcm_arm;
+    let begin = stream[pcm_arm..]
+        .find("self.begin_session_if_needed(inner, chunk.session_id)")
+        .expect("begin_session_if_needed on pcm path")
+        + pcm_arm;
+    assert!(
+        orphan < begin,
+        "orphan PCM guard must run before begin_session_if_needed"
+    );
+}
+
+#[test]
 fn automatic_start_never_bypasses_hidden_candidate_gate() {
     use crate::embedded_audio::SessionStartOrigin;
 
