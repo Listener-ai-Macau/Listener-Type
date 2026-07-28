@@ -614,6 +614,22 @@ pub(super) fn emit_capsule_with_session(
     message: Option<String>,
     inserted_chars: Option<u32>,
 ) {
+    // Firmware OTA owns BLE exclusively: never surface recording/transcript capsules
+    // while an upgrade is in flight (owner saw Recording capsule mid-OTA).
+    if inner.embedded_ble_ota_active.load(Ordering::SeqCst)
+        && matches!(
+            state,
+            CapsuleState::Recording
+                | CapsuleState::Transcribing
+                | CapsuleState::Polishing
+                | CapsuleState::Done
+        )
+    {
+        log::info!(
+            "[firmware-ota] suppress capsule state={state:?} during OTA transfer session={event_session_id:?}"
+        );
+        return;
+    }
     let app_opt = inner.app.lock().clone();
     let Some(app) = app_opt else { return };
     let session_id = event_session_id.map(|id| id.to_string());

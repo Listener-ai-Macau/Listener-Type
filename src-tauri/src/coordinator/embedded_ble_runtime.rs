@@ -3528,6 +3528,8 @@ fn pause_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
     cancel_embedded_ble_listener_capture(inner, reason, false);
 }
 
+
+
 fn pause_embedded_ble_listener_capture_for_ble_name_apply_handoff(inner: &Arc<Inner>) {
     let generation = inner
         .embedded_ble_listener_generation

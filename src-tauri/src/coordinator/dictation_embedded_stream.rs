@@ -127,11 +127,32 @@ impl EmbeddedStreamingDictation {
     ) -> Result<bool, String> {
         match event {
             crate::embedded_audio::StreamingSessionEvent::Started { session_id, origin } => {
+                if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+                    log::info!(
+                        "[firmware-ota] ignoring embedded start during OTA transfer embedded_session_id={session_id} origin={origin:?}"
+                    );
+                    return Ok(false);
+                }
                 self.begin_candidate_or_session(inner, session_id, origin)
                     .await?;
                 Ok(false)
             }
             crate::embedded_audio::StreamingSessionEvent::PcmChunk(chunk) => {
+                if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+                    // Drop any late packets from a session that started before OTA pause.
+                    if self.session.is_some() || self.speaker_candidate.is_some() {
+                        log::info!(
+                            "[firmware-ota] dropping in-flight embedded session during OTA transfer embedded_session_id={}",
+                            chunk.session_id
+                        );
+                        self.session = None;
+                        self.speaker_candidate = None;
+                        self.embedded_session_id = None;
+                        self.pending_stop_expected_packet_count = None;
+                        clear_hidden_automatic_candidate();
+                    }
+                    return Ok(false);
+                }
                 let chunk_session_id = chunk.session_id;
                 if let Some(candidate) = self.speaker_candidate.as_mut() {
                     if candidate.kind == BufferedSpeakerCandidateKind::Rejected {
@@ -328,6 +349,12 @@ impl EmbeddedStreamingDictation {
         embedded_session_id: u32,
         start_origin: crate::embedded_audio::SessionStartOrigin,
     ) -> Result<(), String> {
+        if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+            log::info!(
+                "[firmware-ota] blocking embedded candidate/session during OTA transfer embedded_session_id={embedded_session_id} origin={start_origin:?}"
+            );
+            return Ok(());
+        }
         if self.session.is_some() || self.speaker_candidate.is_some() {
             if self.embedded_session_id != Some(embedded_session_id) {
                 return Err(format!(

@@ -1754,14 +1754,24 @@ impl Coordinator {
     }
 
     pub fn pause_embedded_ble_listener_for_ota(&self) {
+        // Belt-and-suspenders: OTA may have been marked active already, but any
+        // in-flight session must die before exclusive GATT transfer.
+        dictation::suppress_dictation_pipeline_for_firmware_ota(&self.inner);
         pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
     }
 
     pub fn try_begin_firmware_ota_transfer(&self) -> bool {
-        self.inner
+        let started = self
+            .inner
             .embedded_ble_ota_active
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
+            .is_ok();
+        if started {
+            // OTA owns the BLE link exclusively: kill any live dictation/wake path and
+            // hide recording capsules so voice-activation cannot pop UI mid-upgrade.
+            dictation::suppress_dictation_pipeline_for_firmware_ota(&self.inner);
+        }
+        started
     }
 
     pub fn begin_firmware_ota_transfer(&self) {

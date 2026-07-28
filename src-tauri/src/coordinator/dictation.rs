@@ -2118,6 +2118,15 @@ pub(super) fn cancel_session(inner: &Arc<Inner>) {
     cancel_session_direct(inner);
 }
 
+/// OTA owns BLE exclusively — cancel any dictation/wake path and force capsule idle.
+pub(super) fn suppress_dictation_pipeline_for_firmware_ota(inner: &Arc<Inner>) {
+    log::info!("[firmware-ota] suppressing dictation/capsule pipeline for exclusive OTA transfer");
+    clear_hidden_automatic_candidate();
+    cancel_session(inner);
+    // Force hide even when cancel is a no-op (Idle with no capture flag).
+    emit_capsule(inner, CapsuleState::Idle, 0.0, 0, None, None);
+}
+
 fn cancel_embedded_ble_session_through_actor(inner: &Arc<Inner>) {
     let session_id = inner.state.lock().session_id;
     record_embedded_ble_session_actor_command(
