@@ -238,9 +238,12 @@ const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 500;
 // Dual-lane DATA+DATA_B + device reorder. Window 400 cuts SYNC rounds vs 200;
 // pipeline 32 with ~16/lane was the best dual bulk (~46 KB/s). Full 32/lane
 // regressed airtime — keep half-depth per lane.
-const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400;
+// Dual-lane throughput still ramps via adaptive window; start smaller so first
+// SYNC is not behind ~200KB of flash drain (owner SYNC hang mid-bulk).
+const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 128;
 const LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 32;
-const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 400;
+// Until active-link is confirmed, keep windows small so SYNC returns sooner.
+const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64;
 const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
 const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
 const LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS: [Duration; 3] = [
@@ -2255,21 +2258,9 @@ impl PreparedListenerOtaV1Transfer {
                 on_progress,
             ) {
                 Ok(stats) => return Ok(stats),
-                Err(err)
-                    if {
-                        let lowered = err.to_ascii_lowercase();
-                        err.contains("protocol_error")
-                            || err.contains("ProtocolError")
-                            || err.contains("Insufficient")
-                            || lowered.contains("authentication")
-                            // Owner 2026-07-28: first SYNC WriteWithResponse hung 8s with no
-                            // ATT code. Reopen secure OTA target and retry whole transfer.
-                            || lowered.contains("timed out")
-                            || lowered.contains("timeout")
-                    } =>
-                {
+                Err(err) if is_retryable_listener_ota_v1_transfer_error(&err) => {
                     log::warn!(
-                        "[embedded-ble] Listener OTA v1: transfer auth/timeout error round={round}/{SECURE_REOPEN_ROUNDS}: {err}; will reopen secure target and retry"
+                        "[embedded-ble] Listener OTA v1: transfer retryable error round={round}/{SECURE_REOPEN_ROUNDS}: {err}; will reopen secure target and retry"
                     );
                     last_error = Some(err);
                     // Drop fresh target before next reopen attempt.
@@ -2294,6 +2285,25 @@ impl PreparedListenerOtaV1Transfer {
         );
         Err(final_error)
     }
+}
+
+/// Host/link flakiness that should reopen the secure OTA target and retry transfer.
+/// Owner 2026-07-28: mid-bulk SYNC failed with HRESULT 0x800704C7 (async cancel) and
+/// was treated as hard fail after one round, freezing UI progress while device still
+/// held ota_in_progress.
+fn is_retryable_listener_ota_v1_transfer_error(err: &str) -> bool {
+    let lowered = err.to_ascii_lowercase();
+    err.contains("protocol_error")
+        || err.contains("ProtocolError")
+        || err.contains("Insufficient")
+        || lowered.contains("authentication")
+        || lowered.contains("timed out")
+        || lowered.contains("timeout")
+        || lowered.contains("0x800704c7")
+        || lowered.contains("async error")
+        || lowered.contains("canceled")
+        || lowered.contains("cancelled")
+        || lowered.contains("gattcommunicationstatus")
 }
 
 struct ListenerOtaV1Transport<'a> {
@@ -2527,13 +2537,25 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
                         || lowered.contains("insufficient");
                     let is_timeout =
                         lowered.contains("timed out") || lowered.contains("timeout");
-                    let needs_retry = attempt + 1 < max_attempts && (is_auth || is_timeout);
+                    let is_cancel = lowered.contains("0x800704c7")
+                        || lowered.contains("async error")
+                        || lowered.contains("canceled")
+                        || lowered.contains("cancelled");
+                    let needs_retry =
+                        attempt + 1 < max_attempts && (is_auth || is_timeout || is_cancel);
                     if needs_retry {
+                        let kind = if is_timeout {
+                            "timeout"
+                        } else if is_cancel {
+                            "cancel/async"
+                        } else {
+                            "auth/encryption"
+                        };
                         log::warn!(
                             "[embedded-ble] Denzic OTA v1 #{}: {} failed ({}); waiting {}ms then retry attempt={}/{}",
                             self.transfer_id,
                             label,
-                            if is_timeout { "timeout" } else { "auth/encryption" },
+                            kind,
                             control_retry_delay_ms,
                             attempt + 1,
                             max_attempts - 1
