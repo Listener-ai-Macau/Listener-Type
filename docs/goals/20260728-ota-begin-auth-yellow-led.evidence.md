@@ -28,5 +28,12 @@
 ## Owner
 
 用当前 debug 二进制再试一次同版本 OTA；成功日志应含  
-`reopened secure OTA target after exclusive handoff before BEGIN`。  
-黄灯若仍亮：点一下设备或等 TYPE:READY 清 retryable OTA error。  
+`reopened secure OTA target after exclusive handoff before BEGIN round=1/3`。  
+不得再出现「using prepare-time target」回退。  
+黄灯若仍亮：点一下设备或等 TYPE:READY 清 retryable OTA error。
+
+## Follow-up (2026-07-28 09:24)
+
+一键升级仍失败的根因：secure reopen 失败时**回退到 prepare 句柄**，BEGIN 仍 14。  
+已改为：exclusive 后 `drop(prepare target)`，最多 3 轮 reopen+transfer，**绝不**用旧句柄。  
+debug exe `target/debug/listener-type.exe` mtime 2026-07-28 9:24。  
