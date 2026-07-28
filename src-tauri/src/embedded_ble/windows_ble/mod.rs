@@ -238,11 +238,12 @@ const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 500;
 // Dual-lane DATA+DATA_B + device reorder. Window 400 cuts SYNC rounds vs 200;
 // pipeline 32 with ~16/lane was the best dual bulk (~46 KB/s). Full 32/lane
 // regressed airtime — keep half-depth per lane.
-// Dual-lane throughput still ramps via adaptive window; start smaller so first
-// SYNC is not behind ~200KB of flash drain (owner SYNC hang mid-bulk).
-const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 128;
+// Throughput contract: dual-lane ~50 KB/s needs full 400-chunk windows (owner
+// 2026-07-28: 128 regressed bulk_kb_s 48.9 → 18.8). SYNC cancel/timeout retries
+// handle mid-bulk flakiness without shrinking the hot path.
+const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400;
 const LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 32;
-// Until active-link is confirmed, keep windows small so SYNC returns sooner.
+// Cold link only: first windows stay small until active_link_confirmed.
 const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64;
 const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
 const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);

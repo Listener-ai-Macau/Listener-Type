@@ -433,6 +433,7 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("request_ota_ble_throughput_optimized")
             && source.contains("request_ota_ble_throughput_for_runtime_address")
             && source.contains("let settle_ms = if round == 1 { 350 } else { 700 }")
+            && source.contains("LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400")
             && source.contains("LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64")
             && source.contains("LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 32")
             && source.contains("LISTENER_OTA_V1_DATA_B_UUID")

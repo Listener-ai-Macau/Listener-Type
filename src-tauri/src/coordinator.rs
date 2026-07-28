@@ -1839,10 +1839,13 @@ impl Coordinator {
         }
         // Owner: after OTA, a one-shot ready edge can race Windows disconnect/ghost-prune
         // and look "stuck until Type restart". Require a short hold so TYPE:READY sticks.
+        // 800 ms hold after OTA caused "edge lost; waiting again" double reopen
+        // that owners read as two boot lights. 250 ms still rejects one-shot CCCD
+        // flukes without a second reconnect cycle.
         wait_for_embedded_ble_listener_ready_stable(
             &self.inner,
             timeout,
-            Duration::from_millis(800),
+            Duration::from_millis(250),
         )
         .await?;
         Ok(true)
