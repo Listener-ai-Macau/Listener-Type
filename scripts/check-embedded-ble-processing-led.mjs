@@ -150,13 +150,29 @@ for (const token of [
   "const DEVICE_AI_PROCESSING_MAX_VISIBLE_MS: u64 = 5_000;",
   "fn schedule_device_ai_processing_max_visible_timeout",
   "dictation_processing_max_visible_timeout",
-  "send_recording_processing_done(Duration::from_secs(2))",
-  "device AI processing LED max-visible timeout completed",
+  "send_recording_processing_state(false, Duration::from_secs(2))",
+  "device AI processing LED max-visible timeout stopped",
   "cancel_max_visible_timeout",
 ]) {
   if (!dictationSource.includes(token)) {
     throw new Error(`Processing LED sync lost max-visible watchdog token: ${token}`);
   }
+}
+// Max-visible must cap purple AI only; DONE is reserved for real completion (green OK once).
+if (dictationSource.includes("device AI processing LED max-visible timeout completed")) {
+  throw new Error(
+    "Max-visible timeout must not complete with PROCESSING:DONE (double green OK flash)",
+  );
+}
+const maxVisibleFn = dictationSource.indexOf("fn schedule_device_ai_processing_max_visible_timeout");
+const maxVisibleBody = dictationSource.slice(
+  maxVisibleFn,
+  dictationSource.indexOf("\nfn ", maxVisibleFn + 1),
+);
+if (maxVisibleBody.includes("send_recording_processing_done")) {
+  throw new Error(
+    "Max-visible timeout must STOP processing LED, not send PROCESSING:DONE",
+  );
 }
 
 const recoveryStart = source.indexOf("fn listener_recovery_pairing_candidates");

@@ -3,6 +3,9 @@ import type { CapsuleState } from './types';
 const RECORDING_STARTUP_MESSAGES = new Set([
   '正在启动 Listener 录音...',
   '正在启动 Listener 录音',
+  // Legacy promote-path copy (backend no longer emits; keep suppressed if stale).
+  '正在接管当前录音...',
+  '正在接管当前录音',
   'Listener 录音已启动，正在接收音频...',
   'Listener 录音已启动，正在接收音频',
   '录音已启动',

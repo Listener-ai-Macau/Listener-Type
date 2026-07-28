@@ -1,6 +1,33 @@
 // Notify / audio-control target open helpers (Windows).
 // Included into `windows_ble` via `include!`.
 
+/// Prefer verified Listener identities among multi-root Windows HID matches.
+/// Ghost nodes from EC11/OTA identity rotation stay in the set but are tried last,
+/// so post-reboot reconnect does not spend seconds timing out dead addresses first.
+fn prioritize_native_hid_notify_addresses(addresses: Vec<u64>) -> Vec<u64> {
+    if addresses.len() <= 1 {
+        return addresses;
+    }
+    let mut ordered = Vec::with_capacity(addresses.len());
+    let mut push_if_present = |address: Option<u64>| {
+        let Some(address) = address else {
+            return;
+        };
+        if addresses.contains(&address) && !ordered.contains(&address) {
+            ordered.push(address);
+        }
+    };
+    push_if_present(runtime_bluetooth_target_address());
+    push_if_present(persisted_successful_notify_target_address_for_current());
+    push_if_present(peek_listener_ota_post_confirm_notify_target_address());
+    for address in addresses {
+        if !ordered.contains(&address) {
+            ordered.push(address);
+        }
+    }
+    ordered
+}
+
 fn open_notify_target_for_startup_cached_address(
     address: u64,
     gatt_ready_timeout: Duration,
@@ -195,7 +222,12 @@ fn open_notify_target() -> Result<OpenNotifyTarget, String> {
 
     let native_windows_hid_addresses =
         if recent_pairing.is_none() && native_windows_hid_pairing_visible_for_startup() {
-            native_windows_hid_pairing_addresses_for_startup()
+            // Multiple same-name HID roots (EC11 identity rotation ghosts) must not
+            // burn 600 ms each before the last-successful / runtime address. Prefer
+            // verified identities that still appear in the current HID set first.
+            prioritize_native_hid_notify_addresses(
+                native_windows_hid_pairing_addresses_for_startup(),
+            )
         } else {
             Vec::new()
         };
@@ -560,6 +592,14 @@ fn notify_target_open_retry_delays(ota_post_confirm: bool) -> &'static [Duration
     } else {
         &NOTIFY_TARGET_OPEN_RETRY_DELAYS
     }
+}
+
+fn peek_listener_ota_post_confirm_notify_target_address() -> Option<u64> {
+    OTA_POST_CONFIRM_NOTIFY_TARGET_ADDRESS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .ok()
+        .and_then(|slot| *slot)
 }
 
 fn take_listener_ota_post_confirm_notify_target_address() -> Option<u64> {

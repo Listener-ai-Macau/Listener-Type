@@ -3419,7 +3419,27 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
         }
         flush_pending_device_key_ble_action(inner, "notify_ready");
         log::info!("[embedded-ble] background listener notify ready");
+        // After a live notify identity is proven, prune same-name Windows ghosts
+        // so the next OTA/reboot reconnect does not time out dead HID roots first.
+        maybe_prune_listener_ghost_pairings_after_notify_ready(inner);
     }
+}
+
+fn maybe_prune_listener_ghost_pairings_after_notify_ready(inner: &Arc<Inner>) {
+    let keep = crate::embedded_ble::current_notify_keep_address();
+    let Some(keep) = keep else {
+        return;
+    };
+    let expected_name = inner.prefs.get().device_ble_name;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut names = vec![expected_name];
+        for fallback in ["listener", "Blistener"] {
+            if !names.iter().any(|n| n.eq_ignore_ascii_case(fallback)) {
+                names.push(fallback.to_string());
+            }
+        }
+        let _ = crate::embedded_ble::prune_listener_ghost_pairings_keeping(&names, &[keep]);
+    });
 }
 
 fn install_embedded_ble_listener_cancel(inner: &Arc<Inner>, generation: u64) -> Arc<AtomicBool> {

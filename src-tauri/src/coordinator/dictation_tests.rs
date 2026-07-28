@@ -138,9 +138,20 @@ fn provider_preview_change_keeps_authoritative_early_rewrite_visible() {
         strip_wake_phrase_prefix("录因今天要开会", "开始录音", false),
         "今天要开会"
     );
+    // Pre-wake context before the activation phrase must not stay in the capsule
+    // ("好贵啊…不用了。开始录音，帮我看…" → only post-wake dictation).
+    assert_eq!(
+        strip_wake_phrase_prefix(
+            "好贵啊！我搞了6000块钱。不用了。开始录音，帮我看下这个东西是刷进了还是没",
+            "开始录音",
+            false,
+        ),
+        "帮我看下这个东西是刷进了还是没"
+    );
+    // First full phrase hit is the automatic-wake boundary even mid-string.
     assert_eq!(
         strip_wake_phrase_prefix("今天要说开始录音这个词。", "开始录音", true),
-        "今天要说开始录音这个词。"
+        "这个词。"
     );
     assert_eq!(
         remove_standalone_dictation_fillers("嗯，呃，今天自动唤醒测试正常。"),
@@ -1518,6 +1529,16 @@ fn device_key_start_takeover_pending_before_hidden_active() {
         hotkey.contains("note_device_key_dictation_start_intent()"),
         "device-key dictation Start must call note_device_key_dictation_start_intent"
     );
+    // Promote stays internal (ACTIVATE vs TOGGLE). Capsule copy must not say "接管"
+    // — owners treat that as a product bug when voice-auto-start only had a hidden buffer.
+    assert!(
+        !hotkey.contains("\"正在接管当前录音...\""),
+        "device-key Start capsule must not emit the legacy taking-over status string"
+    );
+    assert!(
+        hotkey.contains("\"正在启动 Listener 录音...\""),
+        "device-key Start capsule must use normal start copy even when promoting hidden VA"
+    );
 }
 
 #[test]
@@ -1537,6 +1558,17 @@ fn hidden_candidate_marked_active_before_detector_init() {
     assert!(
         mark < detector,
         "mark_hidden_automatic_candidate_active must run before StreamingDetector::new so EC11 Start can promote instead of toggle-stop"
+    );
+    assert!(
+        body.contains("detector_deferred") && body.contains("wake_detector_init"),
+        "detector init must be deferred so PCM buffers during StreamingDetector::new"
+    );
+    let stream_all = include_str!("dictation_embedded_stream.rs");
+    let dictation = include_str!("dictation.rs");
+    assert!(
+        stream_all.contains("show_early_wake_recording_capsule")
+            && dictation.contains("early recording capsule shown"),
+        "KWS hit must show early Recording capsule before local ExactStart completes"
     );
 }
 
@@ -1989,6 +2021,71 @@ fn device_processing_max_visible_timeout_is_bounded() {
     assert!(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS > DEVICE_AI_PROCESSING_MIN_VISIBLE_MS);
     assert!(
         Duration::from_millis(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS) <= Duration::from_secs(5)
+    );
+}
+
+#[test]
+fn kws_hit_schedules_immediate_local_confirmation() {
+    let stream = include_str!("dictation_embedded_stream.rs");
+    assert!(
+        stream.contains("kws_prompted_local_confirm")
+            && stream.contains("kws_immediate")
+            && stream.contains("kws_retry")
+            && stream.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_BYTES")
+            && stream.contains("anti false-wake; full phrase required")
+            && stream.contains("kws_local_absent_count")
+            && !stream.contains("KWS provisional accept after local Absent"),
+        "KWS must prompt fast local confirm but must NOT KeywordModel-accept on local Absent"
+    );
+    let polish = include_str!("dictation_wake_polish.rs");
+    assert!(
+        polish.contains("kws_prompted_local_confirm")
+            && polish.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 800")
+            && polish.contains("KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400")
+            && polish.contains("gain_normalized_pcm16"),
+        "KWS-immediate confirm must use 800ms floor + 400ms retry + gain-boosted local ASR"
+    );
+}
+
+#[test]
+fn automatic_wake_discards_pre_wake_pcm_for_local_transcript() {
+    // Regression: LocalTranscript forced post_wake_offset=0 and kept pre-wake speech.
+    assert_eq!(super::post_wake_pcm_offset_bytes(0.0, 32_000), 0);
+    assert_eq!(
+        super::post_wake_pcm_offset_bytes(10.24, 400_000),
+        ((10.24_f32 + 0.12) * 32_000.0) as usize
+    );
+    let stream = include_str!("dictation_embedded_stream.rs");
+    assert!(
+        stream.contains("post_wake_pcm_offset_bytes(wake_match.end_seconds")
+            && !stream.contains(
+                "phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {\n                    ((wake_match.end_seconds"
+            ),
+        "LocalTranscript and KeywordModel must share post-wake PCM drain"
+    );
+}
+
+#[test]
+fn device_processing_max_visible_timeout_stops_without_done() {
+    // Long ASR/polish: max-visible must only clear purple AI. PROCESSING:DONE is the
+    // green OK flash and must fire once at real completion — not again at the 5s cap.
+    let source = include_str!("dictation_device_ai.rs");
+    let begin = source
+        .find("fn schedule_device_ai_processing_max_visible_timeout")
+        .expect("max-visible scheduler");
+    let body = &source[begin..];
+    let end = body[1..]
+        .find("\nfn ")
+        .map(|i| i + 1)
+        .unwrap_or(body.len());
+    let body = &body[..end];
+    assert!(
+        body.contains("send_recording_processing_state(false"),
+        "max-visible must STOP AI LED"
+    );
+    assert!(
+        !body.contains("send_recording_processing_done"),
+        "max-visible must not send DONE (avoids intermittent double green OK)"
     );
 }
 

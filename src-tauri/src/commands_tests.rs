@@ -96,20 +96,27 @@ fn ota_preflight_reuses_active_link_handoff_without_interrupting_notify() {
     let recording_guard = preflight
         .find("if phase != SessionPhase::Idle")
         .expect("preflight must reject active dictation before changing the BLE link");
-    let begin = preflight
-        .find("coord.try_begin_firmware_ota_transfer()")
-        .expect("preflight must reserve the OTA operation before handoff");
     let handoff = preflight
         .find("request_listener_ota_v1_active_link(None)")
         .expect("preflight must request the firmware OTA active-link handoff");
+    let begin = preflight
+        .find("coord.try_begin_firmware_ota_transfer()")
+        .expect("preflight must reserve the OTA operation after live handoff");
     let probe = preflight
         .find("listener_ota_v1_gatt_probe_after_active_link_hint")
         .expect("preflight must probe through the verified active-link handoff path");
+    let soft_fail_probe = preflight
+        .find("listener_ota_v1_gatt_probe_snapshot")
+        .expect("preflight must soft-fail TYPE:OTA and still probe OTA GATT for firmware info");
     let end_guard = preflight
         .find("coord.end_firmware_ota_transfer();")
         .expect("preflight must release its OTA operation reservation");
-    assert!(recording_guard < begin);
-    assert!(begin < handoff && handoff < probe && probe < end_guard);
+    assert!(recording_guard < handoff);
+    // Live notify TYPE:OTA first; try_begin suppresses capture and must not run earlier.
+    assert!(
+        handoff < begin && begin < probe && probe < end_guard && soft_fail_probe < end_guard,
+        "preflight must TYPE:OTA on live notify before try_begin, then always GATT-probe"
+    );
     // Listener restore is owned by end_firmware_ota_transfer (TYPE:READY after BYE).
     assert!(
         preflight.contains("end_firmware_ota_transfer"),

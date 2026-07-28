@@ -666,14 +666,15 @@ fn strip_bounded_wake_phrase_suffix_fragment(text: &str, phrase: &[char]) -> Opt
 
 fn strip_wake_phrase_prefix(text: &str, phrase: &str, suppress_partial: bool) -> String {
     let text = text.trim();
-    let phrase = phrase
+    let phrase_chars = phrase
         .chars()
         .filter(|ch| !is_embedded_audio_partial_preview_decorative(*ch))
         .collect::<Vec<_>>();
-    if text.is_empty() || phrase.is_empty() {
+    if text.is_empty() || phrase_chars.is_empty() {
         return text.to_string();
     }
 
+    // Prefer prefix strip (normal wake at start of transcript).
     let mut phrase_index = 0usize;
     let mut consumed_end = 0usize;
     for (index, ch) in text.char_indices() {
@@ -682,27 +683,73 @@ fn strip_wake_phrase_prefix(text: &str, phrase: &str, suppress_partial: bool) ->
             consumed_end = next;
             continue;
         }
-        if phrase_index == phrase.len() {
+        if phrase_index == phrase_chars.len() {
             break;
         }
-        if !wake_phrase_character_matches(ch, phrase[phrase_index]) {
-            return strip_bounded_wake_phrase_suffix_fragment(text, &phrase)
+        if !wake_phrase_character_matches(ch, phrase_chars[phrase_index]) {
+            // Not a clean prefix — try first full phrase occurrence later in the
+            // string (pre-wake speech + "开始录音" + dictation in one ASR result).
+            if let Some(after) = strip_through_first_wake_phrase_occurrence(text, &phrase_chars) {
+                return after;
+            }
+            return strip_bounded_wake_phrase_suffix_fragment(text, &phrase_chars)
                 .unwrap_or_else(|| text.to_string());
         }
         phrase_index += 1;
         consumed_end = next;
     }
 
-    if phrase_index == phrase.len() {
+    if phrase_index == phrase_chars.len() {
         text[consumed_end..]
             .trim_start_matches(is_embedded_audio_partial_preview_decorative)
             .trim()
             .to_string()
     } else if suppress_partial && phrase_index > 0 {
         String::new()
+    } else if let Some(after) = strip_through_first_wake_phrase_occurrence(text, &phrase_chars) {
+        after
     } else {
         text.to_string()
     }
+}
+
+/// Drop leading context through the first complete wake-phrase hit.
+/// Automatic wake can buffer ambient speech before "开始录音"; when that audio
+/// still reaches ASR, the phrase is mid-transcript — keep only post-wake text.
+fn strip_through_first_wake_phrase_occurrence(text: &str, phrase: &[char]) -> Option<String> {
+    if phrase.is_empty() {
+        return None;
+    }
+    let chars: Vec<(usize, char)> = text
+        .char_indices()
+        .filter(|(_, ch)| !is_embedded_audio_partial_preview_decorative(*ch))
+        .collect();
+    if chars.len() < phrase.len() {
+        return None;
+    }
+    'search: for start in 0..=(chars.len() - phrase.len()) {
+        for (offset, expected) in phrase.iter().enumerate() {
+            if !wake_phrase_character_matches(chars[start + offset].1, *expected) {
+                continue 'search;
+            }
+        }
+        // Phrase starts at `start` in non-decorative chars. Consume through last
+        // matched character's byte end in the original string.
+        let last = &chars[start + phrase.len() - 1];
+        let consumed_end = last.0 + last.1.len_utf8();
+        // Only treat as wake boundary when there was leading content (otherwise
+        // prefix strip already handled ExactStart).
+        if start == 0 {
+            return None;
+        }
+        return Some(
+            text[consumed_end..]
+                .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+                .trim()
+                .to_string(),
+        );
+    }
+    None
 }
 
 fn filter_automatic_wake_phrase_text(

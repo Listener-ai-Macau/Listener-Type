@@ -1566,6 +1566,10 @@ fn persisted_startup_notify_address_is_named_bounded_and_after_recent_pairing() 
             && persisted_index < service_selector_index,
         "recent-pairing recovery stays first; a current native HID identity must win over runtime and persisted cache addresses before service discovery"
     );
+    assert!(
+        notify_body.contains("prioritize_native_hid_notify_addresses"),
+        "multi-root HID ghosts must prefer last-successful/runtime identities before timing out dead addresses"
+    );
     assert!(notify_body.contains("if recent_pairing.is_none()"));
     assert!(notify_body.contains("if native_windows_hid_addresses.is_empty()"));
     assert!(source.contains(

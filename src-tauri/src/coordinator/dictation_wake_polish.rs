@@ -295,12 +295,26 @@ struct BufferedSpeakerCandidate {
     kind: BufferedSpeakerCandidateKind,
     pcm: Vec<u8>,
     wake_detector: Option<crate::wake_phrase::StreamingDetector>,
+    /// Non-blocking detector init: begin buffers PCM immediately while this runs
+    /// (~0.5–1s). Awaiting StreamingDetector::new before buffering made the
+    /// capsule wait an extra second after the user already said 开始录音.
+    wake_detector_init: Option<
+        tauri::async_runtime::JoinHandle<Result<crate::wake_phrase::StreamingDetector, String>>,
+    >,
     pending_phrase_match: Option<PendingAutomaticPhraseMatch>,
     #[cfg(target_os = "windows")]
     local_confirmation_task:
         Option<tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>>>,
     local_confirmation_attempts: usize,
     local_confirmation_last_snapshot_bytes: usize,
+    /// First KWS hit schedules an immediate local confirm instead of waiting for
+    /// the next 5s/8s ladder rung (owner saw ~5–7s wake delay before accept).
+    kws_prompted_local_confirm: bool,
+    /// Local ASR returned Absent while KWS still hot (telemetry / retry pacing).
+    kws_local_absent_count: u8,
+    /// Recording capsule shown at first KWS hit (before local ExactStart) so the
+    /// user is not left waiting with no UI while post-wake speech is already buffered.
+    early_capsule_session_id: Option<SessionId>,
     kws_fed_bytes: usize,
     kws_total_ms: u64,
     started_at: Instant,
@@ -349,6 +363,15 @@ const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
     8_000,
     12_000,
 ];
+/// Once KWS already heard the phrase, do not wait for the 1.8s ladder floor.
+/// ~0.8s covers a full "开始录音" plus a small pad; logs showed wake_end≈0.8s
+/// but accept delayed to 1.65s solely for LOCAL_CONFIRMATION_START_MS.
+const KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 800;
+const KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_BYTES: usize = KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS * 32;
+/// After a failed immediate confirm, re-try every 400ms of new audio while KWS
+/// stays hot — avoids sitting on the 2.4/3.0/5.0s ladder rungs.
+const KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400;
+const KWS_LOCAL_CONFIRM_RETRY_BYTES: usize = KWS_LOCAL_CONFIRM_RETRY_MS * 32;
 
 fn owner_verification_window_ready(pcm_bytes: usize) -> bool {
     // No enrolled voiceprint → phrase hit alone is enough; do not stall for the
@@ -372,6 +395,19 @@ fn next_local_confirmation_snapshot_bytes(attempts: usize) -> Option<usize> {
         .map(|milliseconds| milliseconds * 32)
 }
 
+/// Bytes of candidate PCM to discard before ASR for an automatic wake accept.
+/// Uses KWS/local end time when available; LocalTranscript must not force 0 —
+/// that shipped pre-wake speech ("好贵啊…开始录音，帮我看…") into the capsule.
+fn post_wake_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
+    if !wake_end_seconds.is_finite() || wake_end_seconds <= 0.0 || pcm_len < 2 {
+        return 0;
+    }
+    // Small pad so the last syllable of the wake phrase does not leak into ASR.
+    const WAKE_END_PAD_SECONDS: f32 = 0.12;
+    let offset = ((wake_end_seconds + WAKE_END_PAD_SECONDS) * 32_000.0) as usize;
+    offset.min(pcm_len) & !1usize
+}
+
 #[cfg(target_os = "windows")]
 fn spawn_local_wake_confirmation(
     _inner: &Arc<Inner>,
@@ -381,8 +417,12 @@ fn spawn_local_wake_confirmation(
     tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
         let snapshot_pcm_ms = pcm.len() / 32;
-        let result = crate::asr::local::wake_helper::confirm(&pcm, &phrase, Duration::from_secs(4))
-            .map_err(|err| format!("local wake confirmation failed: {err}"))?;
+        // Same full-buffer gain path as offline KWS — raw device VA is often too
+        // quiet for ExactStart without it (intermittent local Absent with KWS hot).
+        let boosted = crate::wake_phrase::gain_normalized_pcm16(&pcm);
+        let result =
+            crate::asr::local::wake_helper::confirm(&boosted, &phrase, Duration::from_secs(4))
+                .map_err(|err| format!("local wake confirmation failed: {err}"))?;
         Ok(LocalWakeConfirmation {
             matched: result.matched,
             phrase_relation: result.phrase_relation,

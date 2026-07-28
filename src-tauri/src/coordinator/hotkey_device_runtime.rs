@@ -1048,9 +1048,11 @@ async fn handle_device_dictation_action(
         }
 
         let control_session = control_decision.control_session();
-        let waiting_message = if promote_hidden_candidate {
-            "正在接管当前录音..."
-        } else if control_session.is_some() {
+        // Promote/ACTIVATE is an internal control choice when a hidden VA verification
+        // buffer is already running (voice-auto-start). Owners never see that buffer,
+        // so the capsule must use the normal start copy — a "taking over" status looked
+        // like a product bug on an ordinary press.
+        let waiting_message = if control_session.is_some() {
             "正在发送设备录音停止控制..."
         } else {
             "正在启动 Listener 录音..."

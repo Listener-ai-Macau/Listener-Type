@@ -14,6 +14,12 @@ assert.equal(
 );
 
 assert.equal(
+  getCapsuleDisplayMessage('recording', '正在接管当前录音...'),
+  undefined,
+  'legacy hidden-VA promote copy must not surface on ordinary press',
+);
+
+assert.equal(
   getCapsuleDisplayMessage('recording', '今天下午三点开会'),
   '今天下午三点开会',
   'real recording preview text should remain visible',

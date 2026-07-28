@@ -56,8 +56,10 @@ fn transfer_denzic_ota_v1_to_target(
             }
         },
     )?;
+    let total_ms = report.timings.total.as_millis().max(1) as f64;
+    let bulk_kb_s = (report.firmware_bytes as f64) / 1024.0 / (total_ms / 1000.0);
     log::info!(
-        "[embedded-ble] Denzic OTA v1 #{transfer_id}: transferred {}/{} bytes in {} data writes, {} status reads, {} offset recoveries, resumed_bytes={}, active_link_confirmed={}, elapsed_ms={}, data_write_ms={}, control_write_ms={}, status_read_ms={}, non_transfer_ms={}",
+        "[embedded-ble] Denzic OTA v1 #{transfer_id}: transferred {}/{} bytes in {} data writes, {} status reads, {} offset recoveries, resumed_bytes={}, active_link_confirmed={}, elapsed_ms={}, bulk_kb_s={bulk_kb_s:.1}, data_write_ms={}, control_write_ms={}, status_read_ms={}, non_transfer_ms={}",
         report.firmware_bytes,
         firmware_bytes.len(),
         report.data_writes,

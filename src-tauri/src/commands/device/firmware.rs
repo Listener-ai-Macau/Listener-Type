@@ -77,54 +77,64 @@ pub async fn get_firmware_ota_preflight_snapshot(
         });
     }
     let cached_power = coord.embedded_ble_wake_recovery_snapshot();
+    let preflight_started = Instant::now();
+    /*
+     * TYPE:OTA must go out on the live notify capture before try_begin()
+     * suppresses dictation (which cancels that capture). The old order was:
+     * try_begin → cancel notify → TYPE:OTA write times out 800 ms →
+     * connected=false and the UI cannot read firmware info on step 1.
+     * Match the real transfer path: handoff while notify is still live first.
+     */
+    let handoff_started = Instant::now();
+    let handoff = crate::embedded_ble::request_listener_ota_v1_active_link(None);
+    let handoff_elapsed_ms = elapsed_ms_u64(handoff_started);
+    if let Err(err) = &handoff {
+        log::warn!(
+            "[ota] preflight TYPE:OTA handoff soft-failed; continuing OTA GATT probe: {err}"
+        );
+    }
     if !coord.try_begin_firmware_ota_transfer() {
         return Ok(FirmwareOtaPreflightSnapshot {
             recording_active: false,
             dictation_phase: format!("{phase:?}"),
             device: firmware_ota_active_preflight_snapshot(),
-            handoff_elapsed_ms: None,
+            handoff_elapsed_ms: Some(handoff_elapsed_ms),
             target_probe_elapsed_ms: None,
-            total_elapsed_ms: 0,
+            total_elapsed_ms: elapsed_ms_u64(preflight_started),
         });
     }
-    let preflight_started = Instant::now();
-    let handoff_started = Instant::now();
-    let handoff = crate::embedded_ble::request_listener_ota_v1_active_link(None);
-    let handoff_elapsed_ms = elapsed_ms_u64(handoff_started);
-    let (mut device, target_probe_elapsed_ms) = match handoff {
-        Ok(()) => {
-            let target_probe_started = Instant::now();
-            let snapshot_task = tauri::async_runtime::spawn_blocking(move || {
-                crate::embedded_ble::listener_ota_v1_gatt_probe_after_active_link_hint(
-                    FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT,
-                )
-            });
-            let device = match tokio::time::timeout(
-                FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,
-                snapshot_task,
+    let target_probe_started = Instant::now();
+    let snapshot_task = tauri::async_runtime::spawn_blocking(move || {
+        if handoff.is_ok() {
+            crate::embedded_ble::listener_ota_v1_gatt_probe_after_active_link_hint(
+                FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT,
             )
-            .await
-            {
-                Ok(joined) => match joined {
-                    Ok(snapshot) => snapshot,
-                    Err(err) => firmware_ota_preflight_unavailable_snapshot(format!(
-                        "Listener BLE OTA preflight task failed: {err}"
-                    )),
-                },
-                Err(_) => firmware_ota_preflight_unavailable_snapshot(format!(
-                    "Listener BLE OTA preflight timed out after {} ms; retry after reconnecting Listener or resetting Windows Bluetooth.",
-                    FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT.as_millis()
-                )),
-            };
-            (device, Some(elapsed_ms_u64(target_probe_started)))
+        } else {
+            // Soft-fail handoff: still open denzic_ota_v1 so step-1 firmware
+            // identity can populate (same soft-fail policy as bulk prepare).
+            crate::embedded_ble::listener_ota_v1_gatt_probe_snapshot(
+                FIRMWARE_OTA_LISTENER_V1_GATT_PROBE_TIMEOUT,
+            )
         }
-        Err(err) => (
-            firmware_ota_preflight_unavailable_snapshot(format!(
-                "Listener BLE OTA preflight could not hand off the active Type link: {err}"
+    });
+    let mut device = match tokio::time::timeout(
+        FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT,
+        snapshot_task,
+    )
+    .await
+    {
+        Ok(joined) => match joined {
+            Ok(snapshot) => snapshot,
+            Err(err) => firmware_ota_preflight_unavailable_snapshot(format!(
+                "Listener BLE OTA preflight task failed: {err}"
             )),
-            None,
-        ),
+        },
+        Err(_) => firmware_ota_preflight_unavailable_snapshot(format!(
+            "Listener BLE OTA preflight timed out after {} ms; retry after reconnecting Listener or resetting Windows Bluetooth.",
+            FIRMWARE_OTA_LISTENER_V1_PREFLIGHT_TIMEOUT.as_millis()
+        )),
     };
+    let target_probe_elapsed_ms = Some(elapsed_ms_u64(target_probe_started));
     coord.end_firmware_ota_transfer();
     if device.usb_powered.is_none() {
         device.usb_powered = cached_power.usb_powered;

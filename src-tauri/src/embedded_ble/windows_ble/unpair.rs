@@ -5,6 +5,80 @@ pub fn unpair_listener_devices() -> crate::embedded_ble::BleDeviceUnpairResult {
     unpair_listener_devices_for_names(&[])
 }
 
+/// Remove same-name Listener Windows pairing/PnP/BTHPORT ghosts, keeping the
+/// currently working identity. Used after notify-ready / OTA / EC11 reconnect so
+/// multi-root HID lists stop burning seconds on dead addresses.
+pub fn prune_listener_ghost_pairings_keeping(
+    extra_names: &[String],
+    keep_addresses: &[u64],
+) -> crate::embedded_ble::BleDeviceUnpairResult {
+    let target_name = extra_names
+        .iter()
+        .find_map(|name| {
+            let trimmed = name.trim();
+            (!trimmed.is_empty()).then_some(trimmed)
+        })
+        .map(ToString::to_string)
+        .unwrap_or_else(|| effective_bluetooth_target_name(None));
+    if keep_addresses.is_empty() {
+        return crate::embedded_ble::BleDeviceUnpairResult {
+            status: crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean,
+            attempted: false,
+            matched_devices: 0,
+            unpaired_devices: 0,
+            already_unpaired_devices: 0,
+            failed_devices: 0,
+            needs_user_action: false,
+            details: vec![
+                "Ghost pairing prune skipped: no keep address (would risk deleting the live bond)."
+                    .to_string(),
+            ],
+        };
+    }
+    let Some(_maintenance) =
+        try_begin_listener_pairing_maintenance("ghost-prune", &target_name, Instant::now())
+    else {
+        return crate::embedded_ble::BleDeviceUnpairResult {
+            status: crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean,
+            attempted: false,
+            matched_devices: 0,
+            unpaired_devices: 0,
+            already_unpaired_devices: 0,
+            failed_devices: 0,
+            needs_user_action: false,
+            details: vec![format!(
+                "Listener pairing/cache maintenance is already running for {target_name}; deferring ghost prune."
+            )],
+        };
+    };
+    match prune_listener_ghost_pairings_keeping_inner(extra_names, keep_addresses) {
+        Ok(result) => {
+            log::info!(
+                "[embedded-ble] ghost pairing prune keep={keep_addresses:?} status={:?} matched={} removed={} already_clean={} failed={}",
+                result.status,
+                result.matched_devices,
+                result.unpaired_devices,
+                result.already_unpaired_devices,
+                result.failed_devices,
+            );
+            result
+        }
+        Err(err) => {
+            log::warn!("[embedded-ble] ghost pairing prune unavailable: {err}");
+            crate::embedded_ble::BleDeviceUnpairResult {
+                status: crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction,
+                attempted: false,
+                matched_devices: 0,
+                unpaired_devices: 0,
+                already_unpaired_devices: 0,
+                failed_devices: 0,
+                needs_user_action: false,
+                details: vec![err],
+            }
+        }
+    }
+}
+
 pub fn unpair_listener_devices_for_names(
     extra_names: &[String],
 ) -> crate::embedded_ble::BleDeviceUnpairResult {
@@ -188,6 +262,157 @@ pub fn clear_listener_bthport_cache_for_known_addresses(
             }
         }
     }
+}
+
+fn prune_listener_ghost_pairings_keeping_inner(
+    extra_names: &[String],
+    keep_addresses: &[u64],
+) -> Result<crate::embedded_ble::BleDeviceUnpairResult, String> {
+    let target_names = listener_target_names(extra_names);
+    let mut target_addresses = listener_recovery_target_addresses();
+    let candidates = listener_unpair_candidates(&target_names, &mut target_addresses)?;
+    push_listener_recovery_target_addresses_from_candidates(&mut target_addresses, &candidates);
+    if target_addresses.is_empty() {
+        push_listener_recovery_advertised_addresses(&mut target_addresses, &target_names);
+    }
+
+    let keep = |address: Option<u64>| -> bool {
+        address.is_some_and(|addr| keep_addresses.contains(&addr))
+    };
+
+    let mut result = crate::embedded_ble::BleDeviceUnpairResult {
+        status: crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean,
+        attempted: true,
+        matched_devices: 0,
+        unpaired_devices: 0,
+        already_unpaired_devices: 0,
+        failed_devices: 0,
+        needs_user_action: false,
+        details: Vec::new(),
+    };
+
+    for candidate in candidates {
+        let address = candidate
+            .info
+            .Id()
+            .ok()
+            .and_then(|id| parse_bluetooth_address_from_device_id(&id.to_string_lossy()));
+        if keep(address) {
+            result.already_unpaired_devices = result.already_unpaired_devices.saturating_add(1);
+            result.details.push(format!(
+                "Kept live Listener pairing: {}",
+                candidate.label
+            ));
+            continue;
+        }
+        result.matched_devices = result.matched_devices.saturating_add(1);
+        match unpair_listener_candidate(&candidate) {
+            Ok(DeviceUnpairOutcome::Unpaired) => {
+                result.unpaired_devices = result.unpaired_devices.saturating_add(1);
+                result.details.push(format!(
+                    "Pruned ghost Listener pairing: {}",
+                    candidate.label
+                ));
+            }
+            Ok(DeviceUnpairOutcome::AlreadyUnpaired) => {
+                result.already_unpaired_devices =
+                    result.already_unpaired_devices.saturating_add(1);
+            }
+            Err(err) => {
+                result.failed_devices = result.failed_devices.saturating_add(1);
+                result
+                    .details
+                    .push(format!("Could not prune {}: {err}", candidate.label));
+            }
+        }
+    }
+
+    // Only remove PnP/BTHPORT for non-keep addresses (ghost roots).
+    let ghost_addresses: Vec<u64> = target_addresses
+        .iter()
+        .copied()
+        .filter(|addr| !keep_addresses.contains(addr))
+        .collect();
+    if !ghost_addresses.is_empty() {
+        match listener_pnp_remove_candidates(&ghost_addresses, &target_names, false) {
+            Ok(pnp_candidates) => {
+                for candidate in pnp_candidates {
+                    let address = parse_bluetooth_address_from_device_id(&candidate.instance_id);
+                    if keep(address) {
+                        continue;
+                    }
+                    result.matched_devices = result.matched_devices.saturating_add(1);
+                    match remove_pnp_device_candidate(&candidate) {
+                        Ok(DeviceUnpairOutcome::Unpaired) => {
+                            result.unpaired_devices = result.unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Pruned ghost Listener device node: {}",
+                                candidate.label
+                            ));
+                        }
+                        Ok(DeviceUnpairOutcome::AlreadyUnpaired) => {
+                            result.already_unpaired_devices =
+                                result.already_unpaired_devices.saturating_add(1);
+                        }
+                        Err(err) => {
+                            result.failed_devices = result.failed_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Could not prune ghost device node {}: {err}",
+                                candidate.label
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                log::warn!("[embedded-ble] ghost PnP prune unavailable: {err}");
+            }
+        }
+
+        match bthport_listener_cache_candidates(&ghost_addresses, &target_names, false) {
+            Ok(cache_candidates) => {
+                for candidate in cache_candidates {
+                    if keep(candidate.address) {
+                        continue;
+                    }
+                    result.matched_devices = result.matched_devices.saturating_add(1);
+                    match delete_bthport_cache_candidate(&candidate) {
+                        Ok(DeviceUnpairOutcome::Unpaired) => {
+                            result.unpaired_devices = result.unpaired_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Pruned ghost Windows Bluetooth cache: {}",
+                                candidate.label
+                            ));
+                        }
+                        Ok(DeviceUnpairOutcome::AlreadyUnpaired) => {
+                            result.already_unpaired_devices =
+                                result.already_unpaired_devices.saturating_add(1);
+                        }
+                        Err(err) => {
+                            result.failed_devices = result.failed_devices.saturating_add(1);
+                            result.details.push(format!(
+                                "Could not prune ghost BTHPORT {}: {err}",
+                                candidate.label
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                log::warn!("[embedded-ble] ghost BTHPORT prune unavailable: {err}");
+            }
+        }
+    }
+
+    result.status = if result.unpaired_devices > 0 && result.failed_devices == 0 {
+        crate::embedded_ble::BleDeviceUnpairStatus::Removed
+    } else if result.failed_devices == 0 {
+        crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
+    } else {
+        crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction
+    };
+    result.needs_user_action = false;
+    Ok(result)
 }
 
 fn unpair_listener_devices_inner(

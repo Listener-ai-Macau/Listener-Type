@@ -354,12 +354,16 @@ fn schedule_device_ai_processing_max_visible_timeout(
             );
             return;
         }
-        match crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2)) {
+        // Cap purple AI only. Do NOT send PROCESSING:DONE here — DONE flashes green OK.
+        // Long ASR/polish used to fire DONE at 5s and again at real completion → intermittent
+        // double green flash after a recording finishes.
+        match crate::embedded_ble::send_recording_processing_state(false, Duration::from_secs(2))
+        {
             Ok(()) => log::warn!(
-                "[embedded-ble] device AI processing LED max-visible timeout completed reason={reason} session_id={session_id} max_visible_ms={DEVICE_AI_PROCESSING_MAX_VISIBLE_MS}"
+                "[embedded-ble] device AI processing LED max-visible timeout stopped reason={reason} session_id={session_id} max_visible_ms={DEVICE_AI_PROCESSING_MAX_VISIBLE_MS}"
             ),
             Err(err) => log::warn!(
-                "[embedded-ble] device AI processing LED max-visible timeout completion failed reason={reason} session_id={session_id}: {err}"
+                "[embedded-ble] device AI processing LED max-visible timeout stop failed reason={reason} session_id={session_id}: {err}"
             ),
         }
     });

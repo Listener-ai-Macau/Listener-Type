@@ -699,6 +699,69 @@ fn reject_hidden_automatic_candidate(reason: &'static str) {
     );
 }
 
+/// Show Recording capsule as soon as KWS hears the wake phrase (local ExactStart may
+/// still be pending). Audio is already buffered; only the UI was late.
+fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut BufferedSpeakerCandidate) {
+    if candidate.early_capsule_session_id.is_some() {
+        return;
+    }
+    let session_id = {
+        let mut state = inner.state.lock();
+        if matches!(
+            state.phase,
+            SessionPhase::Starting | SessionPhase::Listening
+        ) {
+            candidate.early_capsule_session_id = Some(state.session_id);
+            return;
+        }
+        if state.phase != SessionPhase::Idle {
+            return;
+        }
+        match crate::coordinator_state::begin_session_state(
+            &mut state,
+            capture_focus_target(),
+            capture_frontmost_app(),
+        ) {
+            Some(id) => id,
+            None => return,
+        }
+    };
+    publish_dictation_capsule(
+        inner,
+        session_id,
+        DictationUiState::Recording,
+        0.0,
+        None,
+        None,
+    );
+    candidate.early_capsule_session_id = Some(session_id);
+    log::info!(
+        "[wake-phrase] early recording capsule shown session_id={session_id} (KWS hit, local confirm pending)"
+    );
+}
+
+fn dismiss_early_wake_recording_capsule(inner: &Arc<Inner>, session_id: SessionId) {
+    {
+        let mut state = inner.state.lock();
+        if state.session_id == session_id
+            && matches!(
+                state.phase,
+                SessionPhase::Starting | SessionPhase::Listening
+            )
+        {
+            state.phase = SessionPhase::Idle;
+        }
+    }
+    schedule_capsule_idle(inner, 0, Some(session_id));
+    log::info!(
+        "[wake-phrase] early recording capsule dismissed session_id={session_id} (wake not confirmed)"
+    );
+}
+
+fn take_early_capsule_session_id(candidate: &mut BufferedSpeakerCandidate) -> Option<SessionId> {
+    candidate.early_capsule_session_id.take()
+}
+
 fn complete_voiceprint_enrollment_candidate(reason: &'static str) {
     tauri::async_runtime::spawn_blocking(move || {
         match crate::embedded_ble::send_recording_processing_done(Duration::from_secs(2)) {

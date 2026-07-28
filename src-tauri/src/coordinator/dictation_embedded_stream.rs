@@ -405,54 +405,40 @@ impl EmbeddedStreamingDictation {
             if candidate_kind == BufferedSpeakerCandidateKind::Verification {
                 mark_hidden_automatic_candidate_active();
             }
-            let wake_detector = if candidate_kind == BufferedSpeakerCandidateKind::Verification {
-                let phrase = inner.prefs.get().voice_wake_phrase;
-                match tauri::async_runtime::spawn_blocking(move || {
-                    // Primary wake uses StreamingDetector::new() (short-prefix variants
-                    // + bootstrap threshold 0.08) for recall in noise / light slur.
-                    // False starts are gated by owner voiceprint when enrolled, and by
-                    // local paraformer confirmation (PresentLater allowed). new_strict
-                    // is not used on this path — it was cutting real wake hits.
-                    crate::wake_phrase::StreamingDetector::new(&phrase)
-                })
-                .await
-                {
-                    Ok(Ok(detector)) => Some(detector),
-                    Ok(Err(err)) => {
-                        log::warn!(
-                            "[wake-phrase] hidden candidate rejected because streaming detector initialization failed embedded_session_id={embedded_session_id}: {err}"
-                        );
-                        candidate_kind = BufferedSpeakerCandidateKind::Rejected;
-                        None
-                    }
-                    Err(err) => {
-                        log::warn!(
-                            "[wake-phrase] hidden candidate rejected because streaming detector task failed embedded_session_id={embedded_session_id}: {err}"
-                        );
-                        candidate_kind = BufferedSpeakerCandidateKind::Rejected;
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-            if candidate_kind == BufferedSpeakerCandidateKind::Verification {
-                // Keep ACTIVE (already marked). Detector ready.
-            } else {
+            // Do NOT await StreamingDetector::new here — it costs ~0.5–1s wall time and
+            // delayed the first PCM into the buffer until after the user finished 开始录音.
+            // Spawn init in the background; PCM appends immediately; KWS starts when ready.
+            let wake_detector_init =
+                if candidate_kind == BufferedSpeakerCandidateKind::Verification {
+                    let phrase = inner.prefs.get().voice_wake_phrase;
+                    Some(tauri::async_runtime::spawn_blocking(move || {
+                        // Primary wake uses StreamingDetector::new() (short-prefix variants
+                        // + bootstrap threshold 0.08) for recall in noise / light slur.
+                        crate::wake_phrase::StreamingDetector::new(&phrase)
+                    }))
+                } else {
+                    None
+                };
+            if candidate_kind != BufferedSpeakerCandidateKind::Verification {
                 clear_hidden_automatic_candidate();
             }
             log::info!(
-                "[speaker-verification] buffering embedded candidate kind={candidate_kind:?} embedded_session_id={embedded_session_id}"
+                "[speaker-verification] buffering embedded candidate kind={candidate_kind:?} embedded_session_id={embedded_session_id} detector_deferred={}",
+                wake_detector_init.is_some()
             );
             self.speaker_candidate = Some(BufferedSpeakerCandidate {
                 kind: candidate_kind,
                 pcm: Vec::new(),
-                wake_detector,
+                wake_detector: None,
+                wake_detector_init,
                 pending_phrase_match: None,
                 #[cfg(target_os = "windows")]
                 local_confirmation_task: None,
                 local_confirmation_attempts: 0,
                 local_confirmation_last_snapshot_bytes: 0,
+                kws_prompted_local_confirm: false,
+                kws_local_absent_count: 0,
+                early_capsule_session_id: None,
                 kws_fed_bytes: 0,
                 kws_total_ms: 0,
                 started_at: Instant::now(),
@@ -578,6 +564,62 @@ impl EmbeddedStreamingDictation {
         end_result
     }
 
+    /// Complete deferred StreamingDetector::new if the init task has finished.
+    /// Returns false while still loading (PCM continues to buffer).
+    async fn poll_wake_detector_init(
+        &mut self,
+        inner: &Arc<Inner>,
+        embedded_session_id: u32,
+    ) -> Result<bool, String> {
+        let candidate = match self.speaker_candidate.as_mut() {
+            Some(candidate) => candidate,
+            None => return Ok(false),
+        };
+        if candidate.wake_detector.is_some() {
+            return Ok(true);
+        }
+        let Some(handle) = candidate.wake_detector_init.as_ref() else {
+            return Ok(false);
+        };
+        if !handle.inner().is_finished() {
+            return Ok(false);
+        }
+        let handle = candidate
+            .wake_detector_init
+            .take()
+            .expect("wake_detector_init present");
+        match handle.await {
+            Ok(Ok(detector)) => {
+                candidate.wake_detector = Some(detector);
+                log::info!(
+                    "[wake-phrase] deferred streaming detector ready embedded_session_id={embedded_session_id} buffered_pcm_ms={}",
+                    candidate.pcm.len() / 32
+                );
+                Ok(true)
+            }
+            Ok(Err(err)) => {
+                log::warn!(
+                    "[wake-phrase] deferred streaming detector init failed embedded_session_id={embedded_session_id}: {err}"
+                );
+                candidate.kind = BufferedSpeakerCandidateKind::Rejected;
+                if let Some(sid) = take_early_capsule_session_id(candidate) {
+                    dismiss_early_wake_recording_capsule(inner, sid);
+                }
+                Ok(false)
+            }
+            Err(err) => {
+                log::warn!(
+                    "[wake-phrase] deferred streaming detector task failed embedded_session_id={embedded_session_id}: {err}"
+                );
+                candidate.kind = BufferedSpeakerCandidateKind::Rejected;
+                if let Some(sid) = take_early_capsule_session_id(candidate) {
+                    dismiss_early_wake_recording_capsule(inner, sid);
+                }
+                Ok(false)
+            }
+        }
+    }
+
     async fn finish_buffered_speaker_candidate(
         &mut self,
         inner: &Arc<Inner>,
@@ -588,6 +630,9 @@ impl EmbeddedStreamingDictation {
         };
         clear_hidden_automatic_candidate();
         if candidate.kind == BufferedSpeakerCandidateKind::Rejected {
+            if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
+                dismiss_early_wake_recording_capsule(inner, sid);
+            }
             reject_hidden_automatic_candidate("automatic_candidate_rejected");
             return Ok(true);
         }
@@ -639,7 +684,33 @@ impl EmbeddedStreamingDictation {
         let mut automatic_wake_phrase = None;
         if automatic {
             let phrase = inner.prefs.get().voice_wake_phrase;
+            // Finish deferred detector init before terminal KWS/offline pass.
+            if candidate.wake_detector.is_none() {
+                if let Some(handle) = candidate.wake_detector_init.take() {
+                    match handle.await {
+                        Ok(Ok(detector)) => {
+                            candidate.wake_detector = Some(detector);
+                            log::info!(
+                                "[wake-phrase] deferred streaming detector ready at terminal embedded_session_id={embedded_session_id}"
+                            );
+                        }
+                        Ok(Err(err)) => {
+                            log::warn!(
+                                "[wake-phrase] deferred streaming detector init failed embedded_session_id={embedded_session_id}: {err}"
+                            );
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "[wake-phrase] deferred streaming detector task failed embedded_session_id={embedded_session_id}: {err}"
+                            );
+                        }
+                    }
+                }
+            }
             let Some(mut detector) = candidate.wake_detector.take() else {
+                if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
+                    dismiss_early_wake_recording_capsule(inner, sid);
+                }
                 save_bounded_wake_diagnostic(
                     embedded_session_id,
                     "detector-unavailable",
@@ -837,6 +908,9 @@ impl EmbeddedStreamingDictation {
                     embedded_session_id,
                     phrase
                 );
+                if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
+                    dismiss_early_wake_recording_capsule(inner, sid);
+                }
                 save_bounded_wake_diagnostic(
                     embedded_session_id,
                     "phrase-non-match",
@@ -862,6 +936,9 @@ impl EmbeddedStreamingDictation {
                         "voiceprint_verification_failed"
                     }
                 };
+                if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
+                    dismiss_early_wake_recording_capsule(inner, sid);
+                }
                 save_bounded_wake_diagnostic(embedded_session_id, reason, &candidate.pcm);
                 reject_hidden_automatic_candidate(reason);
                 return Ok(true);
@@ -884,18 +961,18 @@ impl EmbeddedStreamingDictation {
             if phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {
                 persist_verified_wake_phrase_calibration(phrase.clone()).await;
             }
+            // LocalTranscript used to force offset=0 and feed pre-wake speech to ASR.
             let post_wake_offset =
-                if phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {
-                    ((wake_match.end_seconds + 0.12) * 32_000.0) as usize
-                } else {
-                    0
-                };
-            let post_wake_offset = post_wake_offset.min(candidate.pcm.len()) & !1usize;
+                post_wake_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
             candidate.pcm.drain(..post_wake_offset);
             if candidate.pcm.is_empty() {
+                if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
+                    dismiss_early_wake_recording_capsule(inner, sid);
+                }
                 reject_hidden_automatic_candidate("wake_phrase_without_dictation");
                 return Ok(true);
             }
+            // Keep early_capsule_session_id so begin_session reuses Starting.
             automatic_wake_phrase = Some(phrase);
         } else {
             log::info!(
@@ -1014,6 +1091,13 @@ impl EmbeddedStreamingDictation {
                 0,
             )
         } else {
+            if !self
+                .poll_wake_detector_init(inner, embedded_session_id)
+                .await?
+            {
+                // Detector still loading — PCM is already buffered; try again next chunk.
+                return Ok(false);
+            }
             let (mut detector, new_pcm) = {
                 let candidate = self
                     .speaker_candidate
@@ -1092,12 +1176,39 @@ impl EmbeddedStreamingDictation {
                             .as_mut()
                             .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
                         if candidate.local_confirmation_task.is_none() {
-                            if let Some(snapshot_bytes) = next_local_confirmation_snapshot_bytes(
+                            let ladder_snapshot = next_local_confirmation_snapshot_bytes(
                                 candidate.local_confirmation_attempts,
                             )
-                            .filter(|snapshot_bytes| candidate.pcm.len() >= *snapshot_bytes)
-                            {
-                                candidate.local_confirmation_attempts += 1;
+                            .filter(|snapshot_bytes| candidate.pcm.len() >= *snapshot_bytes);
+                            // KWS already heard the phrase: confirm ASAP (0.8s floor),
+                            // not the 1.8s ladder start. Owner wake_to_capsule was
+                            // ~1.65s solely waiting for LOCAL_CONFIRMATION_START_MS.
+                            let new_audio_since_last = candidate
+                                .pcm
+                                .len()
+                                .saturating_sub(candidate.local_confirmation_last_snapshot_bytes);
+                            let kws_immediate = kws_hit.is_some()
+                                && !candidate.kws_prompted_local_confirm
+                                && candidate.pcm.len() >= KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_BYTES
+                                && new_audio_since_last > 0;
+                            let kws_retry = kws_hit.is_some()
+                                && candidate.kws_prompted_local_confirm
+                                && new_audio_since_last >= KWS_LOCAL_CONFIRM_RETRY_BYTES;
+                            if ladder_snapshot.is_some() || kws_immediate || kws_retry {
+                                if ladder_snapshot.is_some() {
+                                    candidate.local_confirmation_attempts += 1;
+                                }
+                                if kws_immediate || kws_retry {
+                                    candidate.kws_prompted_local_confirm = true;
+                                    // Show Recording capsule as soon as KWS hears the phrase so
+                                    // the user is not left waiting while local ExactStart finishes
+                                    // (audio is already buffered; capsule was the late UI).
+                                    show_early_wake_recording_capsule(inner, candidate);
+                                }
+                                let snapshot_pcm_ms = candidate.pcm.len() / 32;
+                                let threshold_pcm_ms = ladder_snapshot
+                                    .map(|bytes| bytes / 32)
+                                    .unwrap_or(snapshot_pcm_ms);
                                 candidate.local_confirmation_last_snapshot_bytes =
                                     candidate.pcm.len();
                                 candidate.local_confirmation_task =
@@ -1107,12 +1218,14 @@ impl EmbeddedStreamingDictation {
                                         phrase.clone(),
                                     ));
                                 log::info!(
-                                        "[wake-phrase] bounded local confirmation started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} kws_hit={}",
+                                        "[wake-phrase] bounded local confirmation started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} kws_hit={} kws_immediate={} kws_retry={}",
                                         embedded_session_id,
                                         candidate.local_confirmation_attempts,
-                                        snapshot_bytes / 32,
-                                        candidate.pcm.len() / 32,
-                                        kws_hit.is_some()
+                                        threshold_pcm_ms,
+                                        snapshot_pcm_ms,
+                                        kws_hit.is_some(),
+                                        kws_immediate,
+                                        kws_retry
                                     );
                             }
                         }
@@ -1147,10 +1260,22 @@ impl EmbeddedStreamingDictation {
                                         end_seconds: 0.0,
                                     }))
                                 } else if kws_hit.is_some() {
-                                    // KWS false-positive: do not Accept on KeywordModel alone.
+                                    // Owner: "开始啥的" must not wake. KWS short-prefix is for
+                                    // recall only — local must confirm full 开始录音. Provisional
+                                    // KeywordModel accept after Absent caused false wakes.
+                                    let absent_count = {
+                                        let candidate = self
+                                            .speaker_candidate
+                                            .as_mut()
+                                            .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
+                                        candidate.kws_local_absent_count =
+                                            candidate.kws_local_absent_count.saturating_add(1);
+                                        candidate.kws_local_absent_count
+                                    };
                                     log::info!(
-                                        "[wake-phrase] KWS hit held: local confirmation Absent embedded_session_id={} (anti false-wake)",
-                                        embedded_session_id
+                                        "[wake-phrase] KWS hit held: local confirmation Absent embedded_session_id={} count={} (anti false-wake; full phrase required)",
+                                        embedded_session_id,
+                                        absent_count
                                     );
                                     None
                                 } else {
@@ -1319,13 +1444,10 @@ impl EmbeddedStreamingDictation {
             .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
         save_bounded_wake_diagnostic(embedded_session_id, "accepted", &candidate.pcm);
         clear_hidden_automatic_candidate();
+        // Same boundary for LocalTranscript and KeywordModel — drop audio through
+        // the wake phrase end so pre-wake words never reach the capsule/ASR.
         let post_wake_offset =
-            if phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {
-                (wake_match.end_seconds * 32_000.0) as usize
-            } else {
-                0
-            };
-        let post_wake_offset = post_wake_offset.min(candidate.pcm.len()) & !1usize;
+            post_wake_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
         candidate.pcm.drain(..post_wake_offset);
         let capsule_request_ms = candidate.started_at.elapsed().as_millis() as u64;
         let latency_target_pass = capsule_request_ms <= 1_200;

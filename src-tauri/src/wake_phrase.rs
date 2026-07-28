@@ -194,7 +194,12 @@ mod platform {
     const JOINER: &str = "joiner-epoch-13-avg-2-chunk-8-left-64.int8.onnx";
     const TOKENS: &str = "tokens.txt";
     const SAMPLE_RATE: i32 = 16_000;
-    const STREAM_GAIN_WARMUP_BYTES: usize = SAMPLE_RATE as usize * 2 * 4 / 5;
+    // 0.4s warmup (was 0.8s): short "开始录音" often finishes near 0.8s; long
+    // warmup delayed first KWS feed and locked gain on quiet pre-roll only.
+    const STREAM_GAIN_WARMUP_BYTES: usize = SAMPLE_RATE as usize * 2 * 2 / 5;
+    /// Floor so a transient loud spike in warmup cannot pin gain too low for the
+    /// later wake phrase (owner intermittent miss on device candidates).
+    const STREAM_MIN_GAIN: f32 = 8.0;
     const FINAL_PADDING_SAMPLES: usize = SAMPLE_RATE as usize;
     const CONTINUOUS_SPEECH_TRAILING_BLANKS: i32 = 0;
     const KEYWORD_SCORE: f32 = 1.5;
@@ -706,6 +711,18 @@ mod platform {
         gain
     }
 
+    /// PCM16 with full-buffer gain for local paraformer wake confirmation.
+    /// Streaming candidates are often too quiet for ExactStart without this.
+    pub fn gain_normalized_pcm16(pcm: &[u8]) -> Vec<u8> {
+        let gain = normalization_gain(pcm).max(STREAM_MIN_GAIN);
+        let mut out = Vec::with_capacity(pcm.len());
+        for sample in samples_with_gain(pcm, gain) {
+            let q = (sample * 32767.0).clamp(-32768.0, 32767.0) as i16;
+            out.extend_from_slice(&q.to_le_bytes());
+        }
+        out
+    }
+
     fn samples_with_gain(pcm: &[u8], gain: f32) -> Vec<f32> {
         pcm.chunks_exact(2)
             .map(|value| {
@@ -733,7 +750,14 @@ mod platform {
                 return Err("唤醒词 PCM16 数据长度无效".into());
             }
             self.accepted_bytes = self.accepted_bytes.saturating_add(pcm.len());
-            if let Some(gain) = self.gain {
+            if let Some(mut gain) = self.gain {
+                // Re-raise gain if later speech is quieter than the warmup window
+                // (device VA often has a loud click / breath before the phrase).
+                let needed = normalization_gain(pcm).max(STREAM_MIN_GAIN);
+                if needed > gain + 0.5 {
+                    gain = needed.min(48.0);
+                    self.gain = Some(gain);
+                }
                 self.emitted_bytes = self.emitted_bytes.saturating_add(pcm.len());
                 return Ok(samples_with_gain(pcm, gain));
             }
@@ -745,7 +769,7 @@ mod platform {
                 return Ok(Vec::new());
             }
 
-            let gain = normalization_gain(&self.warmup);
+            let gain = normalization_gain(&self.warmup).max(STREAM_MIN_GAIN);
             self.gain = Some(gain);
             let mut samples = samples_with_gain(&self.warmup, gain);
             self.emitted_bytes = self.emitted_bytes.saturating_add(self.warmup.len());
@@ -763,7 +787,7 @@ mod platform {
             if self.warmup.is_empty() {
                 return Vec::new();
             }
-            let gain = normalization_gain(&self.warmup);
+            let gain = normalization_gain(&self.warmup).max(STREAM_MIN_GAIN);
             self.gain = Some(gain);
             self.emitted_bytes = self.emitted_bytes.saturating_add(self.warmup.len());
             let samples = samples_with_gain(&self.warmup, gain);

@@ -3494,6 +3494,12 @@ fn configured_bluetooth_address() -> Option<u64> {
     configured_bluetooth_address_from_env().or_else(runtime_bluetooth_target_address)
 }
 
+pub(super) fn current_notify_keep_address() -> Option<u64> {
+    runtime_bluetooth_target_address()
+        .or_else(persisted_successful_notify_target_address_for_current)
+        .or_else(peek_listener_ota_post_confirm_notify_target_address)
+}
+
 fn runtime_bluetooth_target_address() -> Option<u64> {
     let target_name = effective_bluetooth_target_name(None);
     let now = Instant::now();
