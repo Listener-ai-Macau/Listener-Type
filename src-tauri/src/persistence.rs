@@ -757,7 +757,10 @@ fn load_keyring_credentials() -> Result<Option<CredsRoot>> {
         json.push_str(&chunk);
     }
 
-    serde_json::from_str::<CredsRoot>(&json)
+    // Windows Credential Manager blobs sometimes carry a trailing NUL that
+    // serde rejects as "trailing characters". Strip before parse.
+    let json = json.trim_end_matches(['\0', '\u{0}']).trim();
+    serde_json::from_str::<CredsRoot>(json)
         .map(Some)
         .context("decode system credential vault payload")
 }

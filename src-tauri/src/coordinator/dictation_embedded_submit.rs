@@ -281,6 +281,9 @@ fn start_embedded_ble_control_signal_worker_if_configured() {
 async fn submit_embedded_audio_ble_stats_only(
     timeout: Duration,
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
+    // Headless machine path: optional VREC start/stop signal files drive the
+    // device while we only collect PCM stats (no ASR vault / dictation).
+    start_embedded_ble_control_signal_worker_if_configured();
     let notifications = tauri::async_runtime::spawn_blocking(move || {
         crate::embedded_ble::capture_notifications_once(timeout)
     })
