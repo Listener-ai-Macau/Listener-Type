@@ -227,10 +227,14 @@ const LISTENER_SERVICE_UUID_TEXTS: [&str; 3] = [
     OTA_SERVICE_UUID_TEXT,
     crate::embedded_ble::DIAGNOSTIC_SERVICE_UUID_TEXT,
 ];
-const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(80);
 const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 500;
 const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 100;
-const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 4;
+// Was 4 (~2 KB/window): SYNC+status after every 2 KB ≈ 18 KB/s when active-link
+// flag lags. Exclusive TYPE:OTA already owns the link; allow a large inactive
+// window so throughput is not capped while CI/2M PHY promotion settles.
+// Device worker queue backpressures NimBLE if host outruns flash.
+const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 48;
 const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
 const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
 const LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS: [Duration; 3] = [
@@ -2223,13 +2227,21 @@ impl PreparedListenerOtaV1Transfer {
             // for Windows to re-establish the encrypted GATT session.
             // TYPE:OTA is now sent while notify is still live; exclusive settle
             // only needs a short capture-gate quiet window (was 750/1200ms).
-            let settle_ms = if round == 1 { 350 } else { 700 };
+            // Round 1: give WinRT ThroughputOptimized a brief moment to land
+            // (Companion uses multi-second settle for notify flood; OTA only
+            // needs enough for CI update before bulk WWR).
+            let settle_ms = if round == 1 { 450 } else { 700 };
             std::thread::sleep(Duration::from_millis(settle_ms));
             let fresh = match open_listener_ota_v1_target_after_active_link_handoff() {
                 Ok(fresh) => {
                     log::info!(
                         "[embedded-ble] Listener OTA v1: reopened secure OTA target after exclusive handoff before BEGIN round={round}/{SECURE_REOPEN_ROUNDS} (avoids protocol_error=14)"
                     );
+                    // Companion re-asserts throughput immediately before bulk;
+                    // do the same once the secure OTA GATT session is open.
+                    if let Some(device) = fresh.device.as_ref() {
+                        request_ota_ble_throughput_optimized(device);
+                    }
                     fresh
                 }
                 Err(err) => {
