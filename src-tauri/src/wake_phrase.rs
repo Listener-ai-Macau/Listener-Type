@@ -221,11 +221,11 @@ mod platform {
         (4.0, 0.04),
     ];
     /// Offline second-pass cascade when streaming KWS misses (full-buffer gain).
+    /// Keep within product-sensitive bounds — 4.5/0.03 recovered ambient speech as
+    ///「开始录音」and opened dead 0.6s host dictation sessions (owner: unusable).
     const RECALL_CASCADE: &[(f32, f32)] = &[
         (BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD),
-        (4.0, 0.04),
-        (4.0, 0.03),
-        (4.5, 0.03),
+        (4.0, 0.05),
     ];
 
     #[repr(C)]

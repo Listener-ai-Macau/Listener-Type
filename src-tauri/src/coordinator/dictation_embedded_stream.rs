@@ -202,12 +202,16 @@ impl EmbeddedStreamingDictation {
                 // and open a full Recording capsule with no wake/key intent (owner
                 // saw phantom dictation; stop origin was still VoiceActivation).
                 if self.session.is_none() {
-                    log::info!(
-                        "[coord] ignoring orphan embedded PCM without explicit start embedded_session_id={} packet_sequence={} pcm_bytes={} (no phantom recording on reconnect)",
-                        chunk.session_id,
-                        chunk.packet_sequence,
-                        chunk.pcm.len()
-                    );
+                    // High-rate orphan tails after notify reopen can flood the log
+                    // and stall the stream actor; keep first packets only.
+                    if chunk.packet_sequence < 3 || chunk.packet_sequence % 500 == 0 {
+                        log::info!(
+                            "[coord] ignoring orphan embedded PCM without explicit start embedded_session_id={} packet_sequence={} pcm_bytes={} (no phantom recording on reconnect)",
+                            chunk.session_id,
+                            chunk.packet_sequence,
+                            chunk.pcm.len()
+                        );
+                    }
                     return Ok(false);
                 }
                 if embedded_streaming_chunk_is_asr_input(&chunk) {
@@ -275,12 +279,24 @@ impl EmbeddedStreamingDictation {
                 expected_packet_count,
                 ..
             } => {
+                // Mid-reopen / orphan VoiceActivation streams often deliver STOP with no
+                // host session and no wake candidate. Finishing that path used to enter
+                // the full dictation pipeline (or error-and-kill notify). Reset and keep
+                // TYPE:READY so heartbeats are not starved by a dead-end finish.
+                if self.session.is_none() && self.speaker_candidate.is_none() {
+                    log::info!(
+                        "[coord] embedded audio stop without active host session or wake candidate embedded_session_id={session_id}; resetting stream state and keeping notify open"
+                    );
+                    self.reset_for_next_session();
+                    return Ok(true);
+                }
                 if let Some(session) = self.session.as_ref() {
                     crate::observability::record_embedded_audio_stop(session.session_id);
                 }
                 self.pending_stop_expected_packet_count = Some(expected_packet_count);
                 self.show_transcribing_after_stop(inner);
                 if self.collector.inner().has_successful_complete_session() {
+                    self.pending_stop_force_after = None;
                     self.finish_completed_streaming_session(
                         inner,
                         session_id,
@@ -296,6 +312,13 @@ impl EmbeddedStreamingDictation {
                         stats.received_packet_count,
                         stats.missing_packet_count
                     );
+                    // Continuous notify must not wait forever for missing packets —
+                    // capture stop-drain is 1s and now keeps the link open; force
+                    // finish slightly after that so TYPE:READY is not starved.
+                    if self.keep_listening_after_pipeline_errors {
+                        self.pending_stop_force_after =
+                            Some(Instant::now() + Duration::from_millis(1_200));
+                    }
                     Ok(false)
                 }
             }
@@ -311,9 +334,19 @@ impl EmbeddedStreamingDictation {
                         } else {
                             reject_hidden_automatic_candidate("hidden_candidate_cancelled");
                         }
-                        self.terminal_received = true;
+                        self.reset_for_next_session();
                         return Ok(true);
                     }
+                    // No host session and no candidate: keep notify (continuous path).
+                    log::info!(
+                        "[coord] embedded audio cancel without active stream work embedded_session_id={session_id}; keeping notify open"
+                    );
+                    self.reset_for_next_session();
+                    return Ok(true);
+                }
+                if self.keep_listening_after_pipeline_errors {
+                    self.discard_active_session_after_user_cancel(inner);
+                    return Ok(true);
                 }
                 self.abort_streaming_session(inner, session_id, "嵌入式音频会话已取消");
                 Err("嵌入式音频会话已取消".to_string())
@@ -324,6 +357,10 @@ impl EmbeddedStreamingDictation {
                 ..
             } => {
                 let message = format!("嵌入式音频会话错误: {error_code:?}");
+                if self.keep_listening_after_pipeline_errors {
+                    self.discard_active_session_after_stream_error(inner, &message);
+                    return Ok(true);
+                }
                 self.abort_streaming_session(inner, session_id, &message);
                 Err(message)
             }
@@ -745,73 +782,64 @@ impl EmbeddedStreamingDictation {
             candidate.kws_total_ms = candidate.kws_total_ms.saturating_add(final_kws_ms);
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
             let mut local_confirmation_ms = 0u64;
+            // 16 kHz mono s16le → 32 bytes/ms. Terminal offline must not block the
+            // BLE stream actor for multi-second cascades on ambient VA spam.
+            const MIN_TERMINAL_OFFLINE_PCM_BYTES: usize = 16_000 * 2 * 2; // 2.0 s
             let wake_match = match wake_match {
                 Ok(Some(found)) => Some(found),
                 Ok(None) => {
-                    // Streaming KWS missed — offline full-buffer gain + sensitive cascade
-                    // recovers many device candidates where pre-roll locked gain too low.
-                    let offline_pcm = candidate.pcm.clone();
-                    let offline_phrase = phrase.clone();
-                    let offline = tauri::async_runtime::spawn_blocking(move || {
-                        crate::wake_phrase::detect_with_recall_cascade(&offline_pcm, &offline_phrase)
-                    })
-                    .await;
-                    match offline {
-                        Ok(Ok(Some(found))) => {
-                            log::info!(
-                                "[wake-phrase] terminal offline recall recovered embedded_session_id={} end_s={:.3}",
-                                embedded_session_id,
-                                found.end_seconds
-                            );
-                            Some(found)
-                        }
-                        Ok(Ok(None)) | Ok(Err(_)) | Err(_) => {
-                            if let Ok(Err(err)) = &offline {
-                                log::warn!(
-                                    "[wake-phrase] terminal offline recall failed embedded_session_id={embedded_session_id}: {err}"
+                    // Streaming KWS missed. Fast-reject before expensive offline work
+                    // when midstream local already said Absent, or the candidate is short.
+                    if candidate.kws_local_absent_count > 0 {
+                        log::info!(
+                            "[wake-phrase] terminal skip offline cascade: midstream local Absent count={} embedded_session_id={} pcm_ms={}",
+                            candidate.kws_local_absent_count,
+                            embedded_session_id,
+                            candidate.pcm.len() / 32
+                        );
+                        None
+                    } else if candidate.pcm.len() < MIN_TERMINAL_OFFLINE_PCM_BYTES {
+                        log::info!(
+                            "[wake-phrase] terminal skip offline cascade: candidate too short embedded_session_id={} pcm_ms={} min_ms={}",
+                            embedded_session_id,
+                            candidate.pcm.len() / 32,
+                            MIN_TERMINAL_OFFLINE_PCM_BYTES / 32
+                        );
+                        None
+                    } else {
+                        // Offline full-buffer gain + bounded cascade may recover gain-starved
+                        // device candidates — but only as a provisional KeywordModel. Local
+                        // transcript must still confirm the full wake phrase.
+                        let offline_pcm = candidate.pcm.clone();
+                        let offline_phrase = phrase.clone();
+                        let offline = tauri::async_runtime::spawn_blocking(move || {
+                            crate::wake_phrase::detect_with_recall_cascade(
+                                &offline_pcm,
+                                &offline_phrase,
+                            )
+                        })
+                        .await;
+                        match offline {
+                            Ok(Ok(Some(found))) => {
+                                log::info!(
+                                    "[wake-phrase] terminal offline recall provisional hit embedded_session_id={} end_s={:.3}; requiring local full-phrase confirm",
+                                    embedded_session_id,
+                                    found.end_seconds
                                 );
-                            }
-                            if let Err(err) = &offline {
-                                log::warn!(
-                                    "[wake-phrase] terminal offline recall task failed embedded_session_id={embedded_session_id}: {err}"
-                                );
-                            }
-                            #[cfg(target_os = "windows")]
-                            {
-                                let mut task = candidate.local_confirmation_task.take();
-                                let mut matched = None;
-                                loop {
-                                    if task.is_none()
-                                        && candidate.local_confirmation_attempts
-                                            < LOCAL_CONFIRMATION_SNAPSHOT_MS.len()
-                                        && candidate.pcm.len() >= LOCAL_CONFIRMATION_START_BYTES
-                                        && candidate.pcm.len()
-                                            > candidate.local_confirmation_last_snapshot_bytes
-                                    {
-                                        candidate.local_confirmation_attempts += 1;
-                                        candidate.local_confirmation_last_snapshot_bytes =
-                                            candidate.pcm.len();
-                                        task = Some(spawn_local_wake_confirmation(
-                                            inner,
-                                            candidate.pcm.clone(),
-                                            phrase.clone(),
-                                        ));
-                                        log::info!(
-                                            "[wake-phrase] terminal local confirmation started embedded_session_id={} attempt={} snapshot_pcm_ms={}",
-                                            embedded_session_id,
-                                            candidate.local_confirmation_attempts,
-                                            candidate.pcm.len() / 32
-                                        );
-                                    }
-                                    let Some(current_task) = task.take() else {
-                                        break;
-                                    };
-                                    match current_task.await {
+                                #[cfg(target_os = "windows")]
+                                {
+                                    let confirm = spawn_local_wake_confirmation(
+                                        inner,
+                                        candidate.pcm.clone(),
+                                        phrase.clone(),
+                                    )
+                                    .await;
+                                    match confirm {
                                         Ok(Ok(result)) => {
                                             local_confirmation_ms = local_confirmation_ms
                                                 .saturating_add(result.inference_ms);
                                             log::info!(
-                                                "[wake-phrase] terminal local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
+                                                "[wake-phrase] terminal offline→local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
                                                 embedded_session_id,
                                                 result.matched,
                                                 result.phrase_relation,
@@ -821,29 +849,99 @@ impl EmbeddedStreamingDictation {
                                             );
                                             if result.matched {
                                                 phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                                matched = Some(crate::wake_phrase::Match {
-                                                    end_seconds: 0.0,
-                                                });
-                                                break;
+                                                Some(found)
+                                            } else {
+                                                log::info!(
+                                                    "[wake-phrase] terminal offline hit rejected by local Absent embedded_session_id={} (anti false-wake)",
+                                                    embedded_session_id
+                                                );
+                                                None
                                             }
                                         }
                                         Ok(Err(err)) => {
                                             log::warn!(
-                                                "[wake-phrase] terminal local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
+                                                "[wake-phrase] terminal offline local confirmation unavailable embedded_session_id={embedded_session_id}: {err}; rejecting offline-only hit"
                                             );
+                                            None
                                         }
                                         Err(err) => {
                                             log::warn!(
-                                                "[wake-phrase] terminal local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
+                                                "[wake-phrase] terminal offline local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
                                             );
+                                            None
                                         }
                                     }
                                 }
-                                matched
+                                #[cfg(not(target_os = "windows"))]
+                                {
+                                    Some(found)
+                                }
                             }
-                            #[cfg(not(target_os = "windows"))]
-                            {
-                                None
+                            Ok(Ok(None)) | Ok(Err(_)) | Err(_) => {
+                                if let Ok(Err(err)) = &offline {
+                                    log::warn!(
+                                        "[wake-phrase] terminal offline recall failed embedded_session_id={embedded_session_id}: {err}"
+                                    );
+                                }
+                                if let Err(err) = &offline {
+                                    log::warn!(
+                                        "[wake-phrase] terminal offline recall task failed embedded_session_id={embedded_session_id}: {err}"
+                                    );
+                                }
+                                // One local confirmation pass only (no multi-attempt terminal
+                                // loop). Midstream already had multiple chances.
+                                #[cfg(target_os = "windows")]
+                                {
+                                    if candidate.pcm.len() >= LOCAL_CONFIRMATION_START_BYTES {
+                                        let result = spawn_local_wake_confirmation(
+                                            inner,
+                                            candidate.pcm.clone(),
+                                            phrase.clone(),
+                                        )
+                                        .await;
+                                        match result {
+                                            Ok(Ok(result)) => {
+                                                local_confirmation_ms = local_confirmation_ms
+                                                    .saturating_add(result.inference_ms);
+                                                log::info!(
+                                                    "[wake-phrase] terminal local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
+                                                    embedded_session_id,
+                                                    result.matched,
+                                                    result.phrase_relation,
+                                                    result.snapshot_pcm_ms,
+                                                    result.transcript_chars,
+                                                    result.inference_ms
+                                                );
+                                                if result.matched {
+                                                    phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                                    Some(crate::wake_phrase::Match {
+                                                        end_seconds: 0.0,
+                                                    })
+                                                } else {
+                                                    None
+                                                }
+                                            }
+                                            Ok(Err(err)) => {
+                                                log::warn!(
+                                                    "[wake-phrase] terminal local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
+                                                );
+                                                None
+                                            }
+                                            Err(err) => {
+                                                log::warn!(
+                                                    "[wake-phrase] terminal local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
+                                                );
+                                                None
+                                            }
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                                #[cfg(not(target_os = "windows"))]
+                                {
+                                    None
+                                }
                             }
                         }
                     }
@@ -965,11 +1063,26 @@ impl EmbeddedStreamingDictation {
             let post_wake_offset =
                 post_wake_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
             candidate.pcm.drain(..post_wake_offset);
-            if candidate.pcm.is_empty() {
+            // Terminal accept often happens after the device already auto-stopped.
+            // Opening a host dictation session with <1s post-wake scrap produces
+            // empty ASR + Error capsule (owner: completely unusable).
+            const MIN_POST_WAKE_DICTATION_PCM_BYTES: usize = 16_000 * 2; // 1.0 s
+            if candidate.pcm.len() < MIN_POST_WAKE_DICTATION_PCM_BYTES {
+                log::info!(
+                    "[wake-phrase] terminal accept dropped: post-wake pcm too short for host dictation embedded_session_id={} post_wake_pcm_ms={} min_ms={}",
+                    embedded_session_id,
+                    candidate.pcm.len() / 32,
+                    MIN_POST_WAKE_DICTATION_PCM_BYTES / 32
+                );
                 if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
                     dismiss_early_wake_recording_capsule(inner, sid);
                 }
-                reject_hidden_automatic_candidate("wake_phrase_without_dictation");
+                save_bounded_wake_diagnostic(
+                    embedded_session_id,
+                    "wake-without-usable-dictation",
+                    &[],
+                );
+                reject_hidden_automatic_candidate("wake_phrase_without_usable_dictation");
                 return Ok(true);
             }
             // Keep early_capsule_session_id so begin_session reuses Starting.
@@ -1611,6 +1724,64 @@ impl EmbeddedStreamingDictation {
         self.terminal_received = true;
     }
 
+    /// User/capsule cancel while the continuous background notify must stay open.
+    /// Dictation state is already cancelled by `cancel_session`; only clear stream-
+    /// local buffers so the next START/PCM can form a new session without TYPE:BYE.
+    fn discard_active_session_after_user_cancel(&mut self, inner: &Arc<Inner>) -> bool {
+        let had_work = self.session.is_some()
+            || self.speaker_candidate.is_some()
+            || self.embedded_session_id.is_some();
+        if !had_work {
+            return false;
+        }
+        clear_hidden_automatic_candidate();
+        set_device_ai_processing_async(inner, false, "embedded_stream_user_cancel");
+        if matches!(
+            self.speaker_candidate
+                .as_ref()
+                .map(|candidate| candidate.kind),
+            Some(BufferedSpeakerCandidateKind::Enrollment)
+        ) {
+            crate::speaker_verification::fail_enrollment("用户取消录音");
+        }
+        if let Some(session) = self.session.take() {
+            cancel_asr_for_session(inner, session.session_id);
+            restore_prepared_windows_ime_session(inner, session.session_id);
+        }
+        self.reset_for_next_session();
+        log::info!(
+            "[embedded-ble] discarded in-flight background stream session after user cancel; notify kept open"
+        );
+        true
+    }
+
+    /// Logical stream error on continuous background: drop local session state but
+    /// keep the GATT notify subscription alive for the next attempt.
+    fn discard_active_session_after_stream_error(&mut self, inner: &Arc<Inner>, message: &str) {
+        clear_hidden_automatic_candidate();
+        set_device_ai_processing_async(inner, false, "embedded_stream_soft_error");
+        if matches!(
+            self.speaker_candidate
+                .as_ref()
+                .map(|candidate| candidate.kind),
+            Some(BufferedSpeakerCandidateKind::Enrollment)
+        ) {
+            crate::speaker_verification::fail_enrollment(message);
+        }
+        if let Some(session) = self.session.take() {
+            crate::observability::record_embedded_audio_failure(session.session_id, message);
+            cancel_asr_for_session(inner, session.session_id);
+            restore_prepared_windows_ime_session(inner, session.session_id);
+            // Only surface error UI when a host session was live; candidate-only
+            // wake rejections should not bounce the BLE link.
+            publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
+        }
+        self.reset_for_next_session();
+        log::warn!(
+            "[embedded-ble] discarded background stream session after error while keeping notify open: {message}"
+        );
+    }
+
     fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
         if let Some(session) = self.session.as_ref() {
             let already_latched = embedded_audio_stop_feedback_latched(inner);
@@ -1643,7 +1814,50 @@ impl EmbeddedStreamingDictation {
         self.embedded_session_id = None;
         self.transcript = None;
         self.pending_stop_expected_packet_count = None;
+        self.pending_stop_force_after = None;
         self.terminal_received = false;
+    }
+
+    /// Continuous background: force-finish a STOP that never recovered missing
+    /// packets, without tearing down the notify subscription.
+    async fn force_finish_pending_stop_if_due(
+        &mut self,
+        inner: &Arc<Inner>,
+    ) -> Result<bool, String> {
+        let Some(deadline) = self.pending_stop_force_after else {
+            return Ok(false);
+        };
+        if Instant::now() < deadline {
+            return Ok(false);
+        }
+        let Some(expected) = self.pending_stop_expected_packet_count else {
+            self.pending_stop_force_after = None;
+            return Ok(false);
+        };
+        let Some(embedded_session_id) = self.embedded_session_id else {
+            self.pending_stop_force_after = None;
+            return Ok(false);
+        };
+        self.pending_stop_force_after = None;
+        log::warn!(
+            "[coord] continuous background forcing stop finish after drain wait embedded_session_id={embedded_session_id} expected={expected} received={} missing={}",
+            self.collector.inner().stats().received_packet_count,
+            self.collector.inner().stats().missing_packet_count
+        );
+        // Prefer the candidate/session finish path even with missing packets.
+        match self
+            .finish_completed_streaming_session(inner, embedded_session_id, expected)
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(err) => {
+                log::warn!(
+                    "[coord] continuous background forced stop finish failed; discarding session while keeping notify: {err}"
+                );
+                self.discard_active_session_after_stream_error(inner, &err);
+                Ok(true)
+            }
+        }
     }
 
     fn into_submission_result(

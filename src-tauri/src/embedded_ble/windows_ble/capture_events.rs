@@ -382,6 +382,19 @@ fn capture_notification_events_until_cancelled_impl(
             let stats = collector.stats();
             let reason = super::stop_drain_timeout_reason(&stats);
             log::warn!("[embedded-ble] {reason}");
+            // Continuous background: a short post-STOP drain miss must not TYPE:BYE /
+            // CCCD-off. Finalize the local collector and keep the notify subscription.
+            if terminal_behavior == CaptureTerminalBehavior::ContinueListening {
+                log::warn!(
+                    "[embedded-ble] capture #{capture_id}: stop-drain timeout while continuous listening; keeping notify open (session_id={:?}, received={}, missing={})",
+                    stats.session_id,
+                    stats.received_packet_count,
+                    stats.missing_packet_count
+                );
+                collector.reset();
+                stop_drain_deadline = None;
+                continue;
+            }
             cleanup.disable_notify();
             return if crate::embedded_audio::transport_v1::stop_drain_expired_finalizes(
                 &collector,
@@ -457,6 +470,17 @@ fn capture_notification_events_until_cancelled_impl(
                     let stats = collector.stats();
                     let reason = super::stop_drain_timeout_reason(&stats);
                     log::warn!("[embedded-ble] {reason}");
+                    if terminal_behavior == CaptureTerminalBehavior::ContinueListening {
+                        log::warn!(
+                            "[embedded-ble] capture #{capture_id}: stop-drain timeout while continuous listening; keeping notify open (session_id={:?}, received={}, missing={})",
+                            stats.session_id,
+                            stats.received_packet_count,
+                            stats.missing_packet_count
+                        );
+                        collector.reset();
+                        stop_drain_deadline = None;
+                        continue;
+                    }
                     cleanup.disable_notify();
                     return if crate::embedded_audio::transport_v1::stop_drain_expired_finalizes(
                         &collector,
@@ -611,6 +635,14 @@ fn capture_notification_events_until_cancelled_impl(
             Some(crate::embedded_audio::SessionEvent::Cancelled { .. })
                 | Some(crate::embedded_audio::SessionEvent::Error { .. })
         ) {
+            if terminal_behavior == CaptureTerminalBehavior::ContinueListening {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: terminal cancel/error while continuous listening; keeping notify open for the next session"
+                );
+                collector.reset();
+                stop_drain_deadline = None;
+                continue;
+            }
             cleanup.disable_notify();
             return Ok(());
         }

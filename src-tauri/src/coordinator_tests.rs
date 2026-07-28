@@ -1059,7 +1059,7 @@ fn embedded_ble_pairing_ready_requires_confirmed_windows_pairing() {
 }
 
 #[test]
-fn embedded_ble_foreground_probe_routes_ready_background_capture_to_refresh() {
+fn embedded_ble_foreground_probe_reuses_ready_background_without_refresh() {
     let coordinator = Coordinator::new();
     open_startup_ble_name_sync_gate_for_test(&coordinator);
     let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
@@ -1067,13 +1067,45 @@ fn embedded_ble_foreground_probe_routes_ready_background_capture_to_refresh() {
 
     assert_eq!(
         embedded_ble_foreground_probe_mode(&coordinator.inner),
-        EmbeddedBleForegroundProbeMode::RefreshBackgroundListener
+        EmbeddedBleForegroundProbeMode::ReuseReadyBackground
     );
 
-    // Full-library tests must not enqueue real Windows GATT work. Locked
-    // installed-MSI machine evidence owns the actual refresh verification.
+    // Full-library tests must not enqueue real Windows GATT work. Ready
+    // health probes must keep the live notify session intact.
     cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup", false);
     assert!(active.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn embedded_ble_foreground_probe_ready_path_does_not_refresh_generation() {
+    let coordinator = Coordinator::new();
+    open_startup_ble_name_sync_gate_for_test(&coordinator);
+    let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+    mark_embedded_ble_listener_ready(&coordinator.inner, &active);
+    let generation_before = coordinator.embedded_ble_listener_generation();
+
+    coordinator
+        .probe_embedded_audio_ble_subscription(Some(1_000))
+        .await
+        .expect("ready background probe must succeed without GATT work");
+
+    assert_eq!(
+        coordinator.embedded_ble_listener_generation(),
+        generation_before,
+        "ready TYPE:READY probe must not restart the background listener"
+    );
+    assert!(
+        coordinator
+            .inner
+            .embedded_ble_listener_cancel
+            .lock()
+            .as_ref()
+            .is_some_and(|cancel| Arc::ptr_eq(cancel, &active)),
+        "ready probe must keep the existing capture cancel handle"
+    );
+    assert!(embedded_ble_listener_capture_ready(&coordinator.inner));
+
+    cancel_embedded_ble_listener_capture(&coordinator.inner, "test cleanup", false);
 }
 
 #[tokio::test]

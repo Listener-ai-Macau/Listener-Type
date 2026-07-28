@@ -331,7 +331,18 @@ async fn submit_embedded_audio_ble_stream_impl(
     }
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<EmbeddedBleStreamSignal>();
-    register_embedded_ble_cancel_flag(inner, &cancel_capture);
+    // Continuous background notify must not share its capture-cancel flag with
+    // dictation cancel. Capsule/Esc cancel used to set that flag, close CCCD,
+    // send TYPE:BYE, and force a full GATT reopen — the main stability thrash.
+    // One-shot foreground still cancels capture via the same flag.
+    let session_abort = if emit_idle_capture_errors {
+        register_embedded_ble_cancel_flag(inner, &cancel_capture);
+        None
+    } else {
+        let session_abort = Arc::new(AtomicBool::new(false));
+        register_embedded_ble_cancel_flag(inner, &session_abort);
+        Some(session_abort)
+    };
     let cancel_capture_for_task = Arc::clone(&cancel_capture);
     let leave_notify_cccd_enabled_on_cancel_for_task =
         leave_notify_cccd_enabled_on_cancel.map(|handoff| Arc::clone(&handoff));
@@ -382,7 +393,59 @@ async fn submit_embedded_audio_ble_stream_impl(
     };
     let mut ready_capsule_shown = false;
     let mut control_signal_worker_started = false;
-    while let Some(signal) = rx.recv().await {
+    loop {
+        // Soft session abort (continuous only): wake without waiting for more PCM.
+        if let Some(session_abort) = session_abort.as_ref() {
+            if session_abort.swap(false, Ordering::SeqCst) {
+                let _ = streaming.discard_active_session_after_user_cancel(inner);
+                record_embedded_ble_session_actor_command(
+                    inner,
+                    EmbeddedBleSessionActorCommand::ActorRestart,
+                    None,
+                    "background listener kept notify open after user session cancel",
+                );
+            }
+        }
+        // Continuous: finalize STOP with missing packets so capture can keep
+        // TYPE:READY instead of waiting forever for a perfect drain.
+        if !emit_idle_capture_errors {
+            match streaming.force_finish_pending_stop_if_due(inner).await {
+                Ok(true) => {
+                    streaming.reset_for_next_session();
+                    record_embedded_ble_session_actor_command(
+                        inner,
+                        EmbeddedBleSessionActorCommand::ActorRestart,
+                        None,
+                        "background listener ready after forced stop finish without reopening notify",
+                    );
+                    continue;
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    log::warn!(
+                        "[embedded-ble] continuous forced stop finish error while keeping notify: {err}"
+                    );
+                    streaming.discard_active_session_after_stream_error(inner, &err);
+                    continue;
+                }
+            }
+        }
+
+        let maybe_signal = if session_abort.is_some() || !emit_idle_capture_errors {
+            tokio::select! {
+                signal = rx.recv() => signal,
+                _ = tokio::time::sleep(Duration::from_millis(40)) => {
+                    // Poll soft-cancel / forced stop finish promptly when quiet.
+                    continue;
+                }
+            }
+        } else {
+            rx.recv().await
+        };
+
+        let Some(signal) = maybe_signal else {
+            break;
+        };
         let notification = match signal {
             EmbeddedBleStreamSignal::Ready => {
                 if emit_idle_capture_errors && !control_signal_worker_started {
@@ -404,6 +467,12 @@ async fn submit_embedded_audio_ble_stream_impl(
             }
             EmbeddedBleStreamSignal::Notification(notification) => notification,
         };
+        // Re-check soft cancel before applying a packet that may race the cancel.
+        if let Some(session_abort) = session_abort.as_ref() {
+            if session_abort.swap(false, Ordering::SeqCst) {
+                let _ = streaming.discard_active_session_after_user_cancel(inner);
+            }
+        }
         match streaming.handle_notification(inner, &notification).await {
             Ok(true) => {
                 if emit_idle_capture_errors {
@@ -419,9 +488,14 @@ async fn submit_embedded_audio_ble_stream_impl(
                         );
                     }
                     Err(err) => {
-                        cancel_capture.store(true, Ordering::SeqCst);
-                        clear_embedded_ble_cancel_flag(inner, &cancel_capture);
-                        return Err(err);
+                        // Continuous path: logical post-stop failure must not tear
+                        // down TYPE:READY; reset and keep listening.
+                        log::warn!(
+                            "[embedded-ble] background session submission incomplete while keeping notify open: {err}"
+                        );
+                        streaming.discard_active_session_after_stream_error(inner, &err);
+                        streaming.reset_for_next_session();
+                        continue;
                     }
                 }
                 streaming.reset_for_next_session();
@@ -434,6 +508,16 @@ async fn submit_embedded_audio_ble_stream_impl(
             }
             Ok(false) => {}
             Err(err) => {
+                if !emit_idle_capture_errors {
+                    streaming.discard_active_session_after_stream_error(inner, &err);
+                    record_embedded_ble_session_actor_command(
+                        inner,
+                        EmbeddedBleSessionActorCommand::ActorRestart,
+                        None,
+                        format!("background listener kept notify open after stream error: {err}"),
+                    );
+                    continue;
+                }
                 streaming.abort_active_session(inner, &err);
                 cancel_capture.store(true, Ordering::SeqCst);
                 clear_embedded_ble_cancel_flag(inner, &cancel_capture);
@@ -448,7 +532,11 @@ async fn submit_embedded_audio_ble_stream_impl(
         .await
         .map_err(|err| format!("嵌入式 BLE 流式抓音任务失败: {err}"))
         .and_then(|result| result);
-    clear_embedded_ble_cancel_flag(inner, &cancel_capture);
+    if let Some(session_abort) = session_abort.as_ref() {
+        clear_embedded_ble_cancel_flag(inner, session_abort);
+    } else {
+        clear_embedded_ble_cancel_flag(inner, &cancel_capture);
+    }
     if let Err(err) = &capture_result {
         if !emit_idle_capture_errors
             && crate::embedded_ble::is_background_listener_deferred_for_ota_error(err)
@@ -460,6 +548,8 @@ async fn submit_embedded_audio_ble_stream_impl(
         && (streaming.session.is_some() || streaming.embedded_session_id.is_some())
         && inner.state.lock().cancelled;
     if capture_result.is_ok() && cancelled_by_caller {
+        // Continuous path should soft-cancel before capture ends; if capture still
+        // ends with leftover session state (refresh during cancel), treat as cancel.
         log::info!("[embedded-ble] streaming capture stopped after dictation cancel");
         return Ok(streaming.into_cancelled_submission_result());
     }

@@ -435,7 +435,6 @@ fn spawn_local_wake_confirmation(
     })
 }
 
-#[derive(Default)]
 struct EmbeddedStreamingDictation {
     collector: crate::embedded_audio::StreamingSessionCollector,
     session: Option<EmbeddedAudioDictationSession>,
@@ -443,8 +442,27 @@ struct EmbeddedStreamingDictation {
     embedded_session_id: Option<u32>,
     transcript: Option<crate::embedded_audio::EmbeddedAudioTranscriptResult>,
     pending_stop_expected_packet_count: Option<u16>,
+    /// When set, continuous background will force-finish a STOP that never
+    /// recovered missing packets so capture can keep TYPE:READY open.
+    pending_stop_force_after: Option<Instant>,
     terminal_received: bool,
     keep_listening_after_pipeline_errors: bool,
+}
+
+impl Default for EmbeddedStreamingDictation {
+    fn default() -> Self {
+        Self {
+            collector: crate::embedded_audio::StreamingSessionCollector::default(),
+            session: None,
+            speaker_candidate: None,
+            embedded_session_id: None,
+            transcript: None,
+            pending_stop_expected_packet_count: None,
+            pending_stop_force_after: None,
+            terminal_received: false,
+            keep_listening_after_pipeline_errors: false,
+        }
+    }
 }
 
 /// 跑流式润色路径（opt-in，跨平台）。

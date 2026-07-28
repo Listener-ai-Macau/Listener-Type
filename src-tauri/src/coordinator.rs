@@ -1619,8 +1619,19 @@ impl Coordinator {
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(10_000).clamp(1_000, 30_000));
         let background_recovery_timeout = timeout.max(Duration::from_secs(20));
         match embedded_ble_foreground_probe_mode(&self.inner) {
+            // Owner bug: Overview/settings BLE probe used to tear down a live TYPE:READY
+            // notify and often failed the 20s reopen race (CCCD disable timeout +
+            // generation contention). Health check must not kill a working path.
+            EmbeddedBleForegroundProbeMode::ReuseReadyBackground => {
+                log::info!(
+                    "[embedded-ble] foreground BLE path probe reusing ready background listener without refresh"
+                );
+                clear_embedded_ble_listener_last_error(&self.inner);
+                record_embedded_ble_notify_ready(&self.inner);
+                return Ok(());
+            }
             EmbeddedBleForegroundProbeMode::RefreshBackgroundListener => {
-                log::info!("[embedded-ble] foreground BLE path probe refreshing active background listener");
+                log::info!("[embedded-ble] foreground BLE path probe refreshing unready background listener");
                 self.refresh_embedded_ble_listener();
                 record_embedded_ble_reconnect_attempt(&self.inner, "foreground_probe_refresh");
                 let result =

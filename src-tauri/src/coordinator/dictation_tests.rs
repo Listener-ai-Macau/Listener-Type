@@ -510,6 +510,48 @@ fn cancel_session_requests_registered_embedded_ble_capture_cancel() {
 }
 
 #[test]
+fn cancel_session_does_not_stop_background_listener_cancel_handle() {
+    // Owner stability bug: capsule cancel used the continuous capture cancel flag,
+    // so TYPE:READY was torn down (TYPE:BYE + CCCD off) on every Esc/cancel click.
+    // Continuous background registers a separate session-abort flag; the listener
+    // cancel handle must stay clear so notify remains open.
+    let coordinator = Coordinator::new();
+    let listener_cancel = Arc::new(AtomicBool::new(false));
+    let session_abort = Arc::new(AtomicBool::new(false));
+    {
+        *coordinator.inner.embedded_ble_listener_cancel.lock() = Some(Arc::clone(&listener_cancel));
+        coordinator
+            .inner
+            .embedded_ble_listener_ready
+            .store(true, Ordering::SeqCst);
+    }
+    register_embedded_ble_cancel_flag(&coordinator.inner, &session_abort);
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.phase = SessionPhase::Listening;
+        state.cancelled = false;
+    }
+
+    cancel_session(&coordinator.inner);
+
+    assert!(
+        session_abort.load(Ordering::SeqCst),
+        "session soft-abort must still be requested for in-flight stream cleanup"
+    );
+    assert!(
+        !listener_cancel.load(Ordering::SeqCst),
+        "continuous background notify cancel handle must not be set by dictation cancel"
+    );
+    assert!(
+        coordinator
+            .inner
+            .embedded_ble_listener_ready
+            .load(Ordering::SeqCst),
+        "cancel must not clear TYPE:READY flag; stream soft-abort keeps notify live"
+    );
+}
+
+#[test]
 fn cancel_session_requests_embedded_ble_capture_cancel_even_when_idle() {
     let coordinator = Coordinator::new();
     let cancel_flag = Arc::new(AtomicBool::new(false));

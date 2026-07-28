@@ -682,13 +682,15 @@ fn start_embedded_ble_passive_local_reattach_watch(
                 );
             }
 
-            // Escape hatch: after ~45s still no HID evidence, force listener rebuild /
-            // PairAsync path. Device EC11 recovery + Windows toast never unblocked a
-            // monitor that requires "new HID after empty baseline", so owners stayed
-            // on "等待手动配对" forever.
+            // Escape hatch: after ~45s still no strict "new HID after baseline"
+            // evidence. Prefer any present Listener HID (even if baseline-matched /
+            // PnP lagged) and reopen notify without another silent PairAsync.
+            // Only when HID is still absent do we force Type PairAsync — and when
+            // that returns NeedsUserAction / Failed(19) with no toast, keep the
+            // waiting-manual capsule instead of pretending audio is restoring.
             if monitor_started.elapsed() >= Duration::from_secs(45) {
                 log::warn!(
-                    "[embedded-ble] passive local Windows reattach timed out after {} ms without HID evidence target={expected_ble_name:?}; forcing Type recovery PairAsync + listener rebuild",
+                    "[embedded-ble] passive local Windows reattach timed out after {} ms without strict HID evidence target={expected_ble_name:?}; checking present HID before PairAsync",
                     monitor_started.elapsed().as_millis()
                 );
                 clear_embedded_ble_passive_local_reattach(
@@ -699,6 +701,48 @@ fn start_embedded_ble_passive_local_reattach_watch(
                     &inner,
                     "passive reattach timeout forces Type recovery",
                 );
+
+                let present_hid = async_runtime::spawn_blocking(|| {
+                    crate::embedded_ble::native_windows_hid_present_pairing_addresses()
+                })
+                .await;
+                let present_hid_addresses = match present_hid {
+                    Ok(Ok(addresses)) => addresses,
+                    Ok(Err(err)) => {
+                        log::warn!(
+                            "[embedded-ble] passive reattach timeout present HID check failed: {err}"
+                        );
+                        Vec::new()
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[embedded-ble] passive reattach timeout present HID task failed: {err}"
+                        );
+                        Vec::new()
+                    }
+                };
+                if let Some(address) = present_hid_addresses.first().copied() {
+                    *inner.embedded_ble_power_cycle_hid_observed_at.lock() = Some(Instant::now());
+                    log::info!(
+                        "[embedded-ble] passive reattach timeout found present Listener HID address={address:012X}; reopening notify without PairAsync native_hid_addresses={:?}",
+                        present_hid_addresses
+                            .iter()
+                            .map(|value| format!("{value:012X}"))
+                            .collect::<Vec<_>>()
+                    );
+                    arm_embedded_ble_type_pairasync_startup_guard(&inner);
+                    resume_embedded_ble_listener_after_pairing_recovery(
+                        &inner,
+                        "passive reattach timeout present HID reopen",
+                        EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
+                        true,
+                    );
+                    break;
+                }
+
+                log::warn!(
+                    "[embedded-ble] passive reattach timeout still has no present Listener HID target={expected_ble_name:?}; forcing Type recovery PairAsync"
+                );
                 let expected_for_pair = expected_ble_name.clone();
                 let pairing = async_runtime::spawn_blocking(move || {
                     crate::embedded_ble::prompt_listener_pairing_for_recovery(Some(
@@ -706,18 +750,64 @@ fn start_embedded_ble_passive_local_reattach_watch(
                     ))
                 })
                 .await;
+                let mut keep_waiting_manual = false;
                 match pairing {
-                    Ok(result) => log::info!(
-                        "[embedded-ble] passive reattach timeout PairAsync status={:?} matched={} already_paired={} failed={} open_settings={}",
-                        result.status,
-                        result.matched_devices,
-                        result.already_paired_devices,
-                        result.failed_devices,
-                        result.open_bluetooth_settings
-                    ),
-                    Err(err) => log::warn!(
-                        "[embedded-ble] passive reattach timeout PairAsync task failed: {err}"
-                    ),
+                    Ok(result) => {
+                        log::info!(
+                            "[embedded-ble] passive reattach timeout PairAsync status={:?} matched={} already_paired={} failed={} open_settings={}",
+                            result.status,
+                            result.matched_devices,
+                            result.already_paired_devices,
+                            result.failed_devices,
+                            result.open_bluetooth_settings
+                        );
+                        let paired_ok = result.already_paired_devices > 0
+                            || matches!(
+                                result.status,
+                                crate::embedded_ble::BleDevicePairingPromptStatus::Paired
+                                    | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
+                            );
+                        if !paired_ok {
+                            keep_waiting_manual = true;
+                            if result.open_bluetooth_settings {
+                                open_windows_bluetooth_settings_for_embedded_ble_pairing(
+                                    "passive reattach timeout PairAsync NeedsUserAction",
+                                );
+                            }
+                            emit_embedded_ble_recovery_capsule(
+                                &inner,
+                                "reconnecting",
+                                EmbeddedBleRecoveryCapsuleMessage::WaitingManualPairing,
+                                None,
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[embedded-ble] passive reattach timeout PairAsync task failed: {err}"
+                        );
+                        keep_waiting_manual = true;
+                        emit_embedded_ble_recovery_capsule(
+                            &inner,
+                            "reconnecting",
+                            EmbeddedBleRecoveryCapsuleMessage::WaitingManualPairing,
+                            None,
+                        );
+                    }
+                }
+                if keep_waiting_manual {
+                    // Stay held for another user/Windows pair attempt rather than
+                    // spinning notify opens against a missing bond.
+                    hold_embedded_ble_listener_for_pairing_confirmation(
+                        &inner,
+                        "passive reattach timeout PairAsync still needs user pairing",
+                    );
+                    start_embedded_ble_passive_local_reattach_watch(
+                        &inner,
+                        expected_ble_name.clone(),
+                        "passive reattach timeout PairAsync still needs user pairing",
+                    );
+                    break;
                 }
                 arm_embedded_ble_type_pairasync_startup_guard(&inner);
                 resume_embedded_ble_listener_after_pairing_recovery(
@@ -3341,13 +3431,18 @@ fn embedded_ble_listener_capture_ready(inner: &Arc<Inner>) -> bool {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EmbeddedBleForegroundProbeMode {
+    /// Capture is live and TYPE:READY — never tear it down for a UI/health probe.
+    ReuseReadyBackground,
+    /// Capture exists but is not ready yet — refresh may unstick a hung open.
     RefreshBackgroundListener,
     StartBackgroundListener,
     ForegroundProbe,
 }
 
 fn embedded_ble_foreground_probe_mode(inner: &Arc<Inner>) -> EmbeddedBleForegroundProbeMode {
-    if embedded_ble_listener_capture_active(inner) {
+    if embedded_ble_listener_capture_ready(inner) {
+        EmbeddedBleForegroundProbeMode::ReuseReadyBackground
+    } else if embedded_ble_listener_capture_active(inner) {
         EmbeddedBleForegroundProbeMode::RefreshBackgroundListener
     } else if embedded_ble_background_listener_expected(inner) {
         EmbeddedBleForegroundProbeMode::StartBackgroundListener
