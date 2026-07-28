@@ -98,16 +98,25 @@ fn embedded_ble_startup_syncs_firmware_name_before_listener_refresh() {
         .map(|offset| existing_source_start + offset)
         .expect("existing embedded BLE source branch should return after refresh");
     let existing_source_body = &body[existing_source_start..existing_source_end];
-    let sync_index = body
-        .find("sync_device_ble_name_from_firmware_settings")
-        .expect("startup BLE helper must sync firmware BLE name");
-    let refresh_index = body
+    // Existing EmbeddedBle source uses a reconnect fast-path: open notify on the
+    // persisted target first, then polish power/name. Full firmware name sync
+    // still runs on the auto-select probe path (non-overridden other sources).
+    let mark_done_index = existing_source_body
+        .find("mark_startup_ble_name_sync_done")
+        .expect("existing EmbeddedBle startup must open the name-sync gate");
+    let refresh_index = existing_source_body
         .find("refresh_embedded_ble_listener")
-        .expect("startup BLE helper must start listener after sync");
-
+        .expect("existing EmbeddedBle startup must refresh listener");
+    let polish_index = existing_source_body
+        .find("polish_startup_ble_settings_after_fast_open")
+        .expect("existing EmbeddedBle startup must polish settings after fast open");
     assert!(
-        sync_index < refresh_index,
-        "startup must not start background BLE listener with a stale local target name"
+        mark_done_index < refresh_index && refresh_index < polish_index,
+        "startup EmbeddedBle reconnect must mark name-sync done, open listener, then polish"
+    );
+    assert!(
+        body.contains("sync_device_ble_name_from_firmware_settings"),
+        "startup BLE helper must still have a firmware BLE name sync path for auto-select probe"
     );
     assert!(
         !existing_source_body.contains("firmware_ota_device_snapshot"),

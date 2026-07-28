@@ -1097,9 +1097,14 @@ mod platform {
                 select_calibration(|score, threshold| Ok(score >= 2.0 && threshold <= 0.15))
                     .expect("calibration");
             assert_eq!(selected, Some((2.0, 0.15)));
-            assert_eq!(
-                (BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD),
-                *CALIBRATION_CANDIDATES.last().expect("bootstrap candidate")
+            // Product bootstrap (3.5/0.05) sits mid-ladder; stricter recall
+            // candidates (4.0/0.04+) remain available after it.
+            assert!(
+                CALIBRATION_CANDIDATES.iter().any(|&(score, threshold)| {
+                    (score - BOOTSTRAP_KEYWORD_SCORE).abs() < f32::EPSILON
+                        && (threshold - BOOTSTRAP_KEYWORD_THRESHOLD).abs() < f32::EPSILON
+                }),
+                "bootstrap keyword values must appear in calibration candidates"
             );
         }
 

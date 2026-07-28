@@ -1626,16 +1626,19 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
             && source.contains("fn owner_verification_window_ready"),
         "no-voiceprint path must skip the owner speech window delay"
     );
-    let wake_init = source
-        .find("let wake_detector = if candidate_kind")
-        .expect("wake detector init");
-    let after_wake = source[wake_init..]
+    // Hidden ACTIVE must be marked before StreamingDetector::new (~1–2s init)
+    // so device-key Start promotes instead of toggle-stop during that window.
+    let mark_hidden = source
         .find("mark_hidden_automatic_candidate_active()")
-        .map(|offset| wake_init + offset)
-        .expect("after primary wake detector init");
+        .expect("hidden automatic candidate must be marked active");
+    let wake_init = source[mark_hidden..]
+        .find("let wake_detector = if candidate_kind")
+        .map(|offset| mark_hidden + offset)
+        .expect("wake detector init after hidden ACTIVE mark");
+    let wake_window = &source[wake_init..wake_init + 1200.min(source.len() - wake_init)];
     assert!(
-        source[wake_init..after_wake].contains("StreamingDetector::new(&phrase)")
-            && !source[wake_init..after_wake].contains("StreamingDetector::new_strict"),
+        wake_window.contains("StreamingDetector::new(&phrase)")
+            && !wake_window.contains("StreamingDetector::new_strict"),
         "primary automatic wake must use StreamingDetector::new (sensitive), not new_strict"
     );
     let start = source
