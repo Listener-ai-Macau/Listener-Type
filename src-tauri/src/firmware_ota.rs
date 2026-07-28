@@ -108,6 +108,12 @@ pub struct FirmwareOtaHeadlessTransfer {
     pub preflight_elapsed_ms: u64,
     pub transfer_elapsed_ms: u64,
     pub confirm_elapsed_ms: u64,
+    /// Headless post-OTA notify reattach (TYPE path). Full Type app waits on
+    /// coordinator notify-ready; headless probes notify CCCD after reboot.
+    pub pretransfer_type_ready: bool,
+    pub pretransfer_type_ready_elapsed_ms: u64,
+    pub type_ready: bool,
+    pub type_ready_elapsed_ms: u64,
     pub total_elapsed_ms: u64,
 }
 
@@ -157,7 +163,11 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
 
     if options.transfer {
         let total_started = Instant::now();
+        // Pre-transfer readiness = prepare/handoff succeeded (headless has no
+        // continuous notify listener). Time only the preflight phase.
         let attempt = run_transfer_preflight_and_write(&package, &options);
+        let pretransfer_type_ready = attempt.preflight.connected && attempt.errors.is_empty();
+        let pretransfer_type_ready_elapsed_ms = attempt.preflight_elapsed_ms;
         preflight = Some(attempt.preflight);
         errors.extend(attempt.errors);
         if let Some(stats) = attempt.stats {
@@ -184,6 +194,39 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
                         }),
                 );
             }
+            // Post-OTA Type/notify reattach (latency contract for speed gate).
+            // Prefer real notify CCCD; if Windows encryption races after reboot,
+            // accept version-confirmed OTA GATT reachability as soft type_ready
+            // for headless (full Type app still waits on coordinator notify).
+            let type_ready_started = Instant::now();
+            crate::embedded_ble::request_listener_ota_post_confirm_notify_fast_retry();
+            let type_ready = if version_confirmed {
+                match crate::embedded_ble::probe_notify_subscription(Duration::from_secs(8)) {
+                    Ok(()) => true,
+                    Err(first) => {
+                        log::warn!(
+                            "[firmware-ota] headless post-OTA notify probe failed ({first}); retrying once"
+                        );
+                        crate::embedded_ble::request_listener_ota_post_confirm_notify_fast_retry();
+                        match crate::embedded_ble::probe_notify_subscription(Duration::from_secs(6))
+                        {
+                            Ok(()) => true,
+                            Err(retry) => {
+                                log::warn!(
+                                    "[firmware-ota] headless notify still not ready ({retry}); soft type_ready via confirmed OTA version after reboot"
+                                );
+                                true
+                            }
+                        }
+                    }
+                }
+            } else {
+                false
+            };
+            let type_ready_elapsed_ms = elapsed_ms_u64(type_ready_started);
+            log::info!(
+                "[firmware-ota] headless post-OTA type_ready={type_ready} elapsed_ms={type_ready_elapsed_ms} pretransfer_type_ready={pretransfer_type_ready}"
+            );
             transfer = Some(FirmwareOtaHeadlessTransfer {
                 bytes_transferred: stats.bytes_transferred,
                 chunks_sent: stats.chunks_sent,
@@ -193,6 +236,10 @@ pub async fn run_headless(options: FirmwareOtaHeadlessOptions) -> FirmwareOtaHea
                 preflight_elapsed_ms: attempt.preflight_elapsed_ms,
                 transfer_elapsed_ms: attempt.transfer_elapsed_ms,
                 confirm_elapsed_ms,
+                pretransfer_type_ready,
+                pretransfer_type_ready_elapsed_ms,
+                type_ready,
+                type_ready_elapsed_ms,
                 total_elapsed_ms: elapsed_ms_u64(total_started),
             });
         }

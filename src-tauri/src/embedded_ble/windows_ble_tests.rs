@@ -1327,8 +1327,10 @@ fn advertisement_gatt_pairing_check_accepts_pnp_service_signature_cache_only_aft
     assert!(source.contains(
         "ensure_paired_listener_for_advertisement_gatt(\"audio notify\", &addresses, false)"
     ));
+    // Audio control (TYPE:OTA handoff) allows PnP signature while AEP pairing
+    // cache lags after re-pair/full flash — same evidence model as recent PairAsync notify.
     assert!(source.contains(
-        "ensure_paired_listener_for_advertisement_gatt(\"audio control\", &addresses, false)"
+        "ensure_paired_listener_for_advertisement_gatt(\"audio control\", &addresses, true)"
     ));
     assert!(source.contains(
         "ensure_paired_listener_for_advertisement_gatt(\n        \"recent pairing audio notify\",\n        &addresses,\n        true,\n    )"

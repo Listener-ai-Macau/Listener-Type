@@ -762,11 +762,30 @@ fn open_listener_ota_v1_target_for_verified_active_handoff(
     open_listener_ota_v1_target_for_device_with_options(address, true)
 }
 
+fn listener_ota_winrt_throughput_skip() -> bool {
+    // A/B only: LISTENER_OTA_SKIP_WINRT_THROUGHPUT=1. Default keeps Companion-style
+    // ThroughputOptimized; measured skip-to-prefer-7.5ms regressed ~39→25 KB/s.
+    std::env::var("LISTENER_OTA_SKIP_WINRT_THROUGHPUT")
+        .map(|value| {
+            let value = value.trim();
+            value == "1"
+                || value.eq_ignore_ascii_case("true")
+                || value.eq_ignore_ascii_case("on")
+                || value.eq_ignore_ascii_case("yes")
+        })
+        .unwrap_or(false)
+}
+
 fn request_ota_ble_throughput_optimized(device: &BluetoothLEDevice) {
-    // Companion recording pull hits ~50–90 KB/s on notify flood by preferring
-    // ThroughputOptimized (~15 ms CI; device may go 7.5 ms). OTA is the reverse
-    // direction (host WriteWithoutResponse bursts) but the same host CI preference
-    // still improves bulk ATT write packing.
+    // Companion recording ~97 KB/s is dual-lane *notify* (device→host). OTA is
+    // host→device WWR. WinRT ThroughputOptimized (~15 ms CI) still improved
+    // measured bulk vs leaving CI unconstrained on this Windows stack.
+    if listener_ota_winrt_throughput_skip() {
+        log::info!(
+            "[embedded-ble] Listener OTA skips WinRT ThroughputOptimized (LISTENER_OTA_SKIP_WINRT_THROUGHPUT=1)"
+        );
+        return;
+    }
     let Ok(params) = BluetoothLEPreferredConnectionParameters::ThroughputOptimized() else {
         log::debug!("[embedded-ble] Listener OTA ThroughputOptimized params unavailable");
         return;
@@ -894,6 +913,7 @@ fn open_listener_ota_v1_target_for_device_with_options(
                     return Ok(OpenListenerOtaV1Target {
                         control: prepared.control,
                         data: prepared.data,
+                        data_b: prepared.data_b,
                         status: prepared.status,
                         data_write_option: prepared.data_write_option,
                         data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
@@ -1044,6 +1064,7 @@ fn open_listener_ota_v1_target_for_device_with_deadline_options(
                     return Ok(OpenListenerOtaV1Target {
                         control: prepared.control,
                         data: prepared.data,
+                        data_b: prepared.data_b,
                         status: prepared.status,
                         data_write_option: prepared.data_write_option,
                         data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
@@ -1584,6 +1605,7 @@ fn open_listener_ota_v1_target_for_service_with_cache_policy(
                 return Ok(OpenListenerOtaV1Target {
                     control: prepared.control,
                     data: prepared.data,
+                    data_b: prepared.data_b,
                     status: prepared.status,
                     data_write_option: prepared.data_write_option,
                     data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
@@ -1651,6 +1673,7 @@ fn open_listener_ota_v1_target_for_service_with_deadline(
                 return Ok(OpenListenerOtaV1Target {
                     control: prepared.control,
                     data: prepared.data,
+                    data_b: prepared.data_b,
                     status: prepared.status,
                     data_write_option: prepared.data_write_option,
                     data_chunk_payload_bytes: prepared.data_chunk_payload_bytes,
@@ -1803,6 +1826,13 @@ fn open_listener_ota_v1_characteristics_from_service(
         "Listener OTA v1 data",
         cache_mode,
     )?;
+    let data_b = open_write_characteristic_from_service(
+        service,
+        LISTENER_OTA_V1_DATA_B_UUID,
+        "Listener OTA v1 data_b",
+        cache_mode,
+    )
+    .ok();
     let status = if LISTENER_OTA_V1_STATUS_UUID == LISTENER_OTA_V1_CONTROL_UUID {
         control.clone()
     } else {
@@ -1820,11 +1850,13 @@ fn open_listener_ota_v1_characteristics_from_service(
     let payload_bytes =
         listener_ota_v1_data_chunk_payload_bytes(session.as_ref(), data_write_option);
     log::info!(
-        "[embedded-ble] Listener OTA v1 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes}"
+        "[embedded-ble] Listener OTA v1 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes} dual_lane={}",
+        data_b.is_some()
     );
     Ok(PreparedListenerOtaV1Characteristics {
         control,
         data,
+        data_b,
         status,
         data_write_option,
         data_chunk_payload_bytes: payload_bytes,
@@ -1882,6 +1914,22 @@ fn open_listener_ota_v1_characteristics_from_service_with_deadline(
             "Listener OTA v1 data characteristic",
         )?,
     )?;
+    let data_b = remaining_ble_timeout(
+        deadline,
+        BLE_DISCOVERY_TIMEOUT,
+        "Listener OTA v1 data_b characteristic",
+    )
+    .ok()
+    .and_then(|timeout| {
+        open_write_characteristic_from_service_with_timeout(
+            service,
+            LISTENER_OTA_V1_DATA_B_UUID,
+            "Listener OTA v1 data_b",
+            cache_mode,
+            timeout,
+        )
+        .ok()
+    });
     let status = if LISTENER_OTA_V1_STATUS_UUID == LISTENER_OTA_V1_CONTROL_UUID {
         control.clone()
     } else {
@@ -1904,11 +1952,13 @@ fn open_listener_ota_v1_characteristics_from_service_with_deadline(
     let payload_bytes =
         listener_ota_v1_data_chunk_payload_bytes(session.as_ref(), data_write_option);
     log::info!(
-        "[embedded-ble] Listener OTA v1 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes}"
+        "[embedded-ble] Listener OTA v1 data write option={data_write_option:?} chunk_payload_bytes={payload_bytes} dual_lane={}",
+        data_b.is_some()
     );
     Ok(PreparedListenerOtaV1Characteristics {
         control,
         data,
+        data_b,
         status,
         data_write_option,
         data_chunk_payload_bytes: payload_bytes,
@@ -2105,9 +2155,12 @@ fn listener_ota_v1_data_chunk_payload_bytes(
 
     if write_option == GattWriteOption::WriteWithoutResponse && payload_bytes < desired_payload
     {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        // Wait for Windows ATT MTU / MaxPduSize to climb after encryption + DLE.
+        // Forcing 500-byte WWR while MaxPdu is still ~23 causes protocol_error=3
+        // (Write Not Permitted) and never reaches the device OTA handler.
+        let deadline = Instant::now() + Duration::from_secs(12);
         while Instant::now() < deadline && payload_bytes < desired_payload {
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(150));
             if let Some(next_payload) = session
                 .and_then(|session| session.MaxPduSize().ok())
                 .map(|max_pdu_size| {
@@ -2115,14 +2168,24 @@ fn listener_ota_v1_data_chunk_payload_bytes(
                 })
                 .filter(|payload_bytes| *payload_bytes > denzic_ota_core::DATA_HEADER_BYTES)
             {
+                if next_payload > payload_bytes {
+                    log::info!(
+                        "[embedded-ble] Listener OTA v1 MaxPdu payload grew {payload_bytes} -> {next_payload}"
+                    );
+                }
                 payload_bytes = payload_bytes.max(next_payload);
             }
         }
         if payload_bytes < desired_payload {
             log::warn!(
-                "[embedded-ble] Listener OTA v1 MaxPduSize stayed at payload_bytes={payload_bytes}; using {LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES} byte payload for WriteWithoutResponse and relying on WinRT write status"
+                "[embedded-ble] Listener OTA v1 MaxPduSize stayed at payload_bytes={payload_bytes} (need {desired_payload}); clamping WWR chunk to link MTU instead of forcing 500"
             );
-            return LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES;
+            // Use what the link actually allows (minus data header). Bulk will be
+            // slower until MTU rises, but BEGIN/data writes stay legal.
+            return payload_bytes
+                .saturating_sub(denzic_ota_core::DATA_HEADER_BYTES)
+                .max(1)
+                .min(LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES);
         }
     }
 

@@ -23,7 +23,19 @@ fn transfer_denzic_ota_v1_to_target(
         target,
         transfer_id,
         data_write_option: target.data_write_option,
+        pending_wwr: Vec::with_capacity(LISTENER_OTA_V1_WWR_PIPELINE_DEPTH),
+        pending_wwr_b: Vec::with_capacity(LISTENER_OTA_V1_WWR_PIPELINE_DEPTH),
+        next_lane_b: false,
     };
+    if target.data_b.is_some() {
+        log::info!(
+            "[embedded-ble] Denzic OTA v1 #{transfer_id}: dual-lane WWR DATA+DATA_B (device reorder)"
+        );
+    } else {
+        log::info!(
+            "[embedded-ble] Denzic OTA v1 #{transfer_id}: single-lane WWR (no DATA_B on device)"
+        );
+    }
 
     let report = denzic_ota_core::transfer(
         &mut transport,
@@ -88,20 +100,36 @@ pub(super) fn request_listener_ota_v1_active_link(
     // capture so CI can settle during target prepare (Companion re-asserts
     // the same preference before bulk STREAM_ALL).
     request_ota_ble_throughput_for_runtime_address();
-    // After exclusive OTA begin, the audio notify capture may already be
-    // cancelled/suppressed (or busy with VA PCM). Active-capture writes then
-    // time out and the host surfaces "device rejected OTA" before BEGIN.
-    // Fall back to a fresh GATT control path so handoff still reaches firmware.
-    send_recording_control_command(
+    // Prefer the live notify capture when present. Do NOT fall into the full
+    // open_audio_control advertisement/retry path here: after re-pair that
+    // path can burn ~12–20s on a missing audio-service index and inflate
+    // preflight while OTA GATT itself is already reachable.
+    if let Some(result) = send_audio_control_via_active_capture(
         b"TYPE:OTA\n",
-        Duration::from_secs(3),
+        Duration::from_millis(800),
         "Listener OTA v1 reconnect handoff",
-        ActiveControlTransientFallback::TryFreshGatt,
-    )?;
-    // Second assert after TYPE:OTA (Companion dual-assert pattern) without a
-    // multi-second settle — OTA prep already uses the connection.
-    request_ota_ble_throughput_for_runtime_address();
-    Ok(())
+    ) {
+        match result {
+            Ok(()) => {
+                log::info!("[embedded-ble] Listener OTA v1 reconnect handoff sent via active capture");
+                request_ota_ble_throughput_for_runtime_address();
+                return Ok(());
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] active Listener OTA v1 reconnect handoff failed; skipping long audio-control discovery: {err}"
+                );
+            }
+        }
+    } else {
+        log::info!(
+            "[embedded-ble] Listener OTA v1 reconnect handoff: no active capture; skipping long audio-control discovery"
+        );
+    }
+    Err(
+        "Listener OTA v1 reconnect handoff skipped: no active audio capture (prepare continues on OTA GATT)"
+            .to_string(),
+    )
 }
 
 pub(super) fn request_listener_ota_post_confirm_notify_fast_retry() {
@@ -149,8 +177,20 @@ fn prepare_listener_ota_v1_transfer_impl(
         None
     };
     if send_active_link_hint {
-        request_listener_ota_v1_active_link(None)?;
-        log::info!("[embedded-ble] Listener OTA v1 reconnect handoff accepted");
+        // TYPE:OTA prefers BLE audio control. After re-pair / partial Windows
+        // service index, that char may be missing while OTA GATT still works
+        // (preflight already opens denzic_ota_v1). Soft-fail handoff so bulk
+        // transfer can still run without inflating non-transfer latency.
+        match request_listener_ota_v1_active_link(None) {
+            Ok(()) => {
+                log::info!("[embedded-ble] Listener OTA v1 reconnect handoff accepted");
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] Listener OTA v1 reconnect handoff unavailable; continuing OTA GATT prepare: {err}"
+                );
+            }
+        }
     } else {
         log::info!(
             "[embedded-ble] Listener OTA v1 prepare: reusing reconnect handoff sent before background pause"
@@ -301,10 +341,10 @@ fn listener_ota_v1_window_chunks() -> Result<usize, String> {
         Some(value) => value
             .parse::<usize>()
             .ok()
-            .filter(|window| (1..=100).contains(window))
+            .filter(|window| (1..=512).contains(window))
             .ok_or_else(|| {
                 format!(
-                    "Unsupported {LISTENER_OTA_V1_WINDOW_ENV}={value}; use a window from 1 to 100 chunks."
+                    "Unsupported {LISTENER_OTA_V1_WINDOW_ENV}={value}; use a window from 1 to 512 chunks."
                 )
             }),
     }

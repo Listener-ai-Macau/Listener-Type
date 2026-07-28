@@ -10,11 +10,12 @@ use denzic_ble_windows::{
     configret_detail, device_information_bluetooth_address, device_information_display_name,
     device_information_property_bool, device_information_property_string, hidden_command,
     push_unique_address, run_hidden_pwsh_script, scan_ble_advertisements_by_name,
-    wait_gatt_write_result, write_cccd_with_timeout, write_gatt_value_status_with_timeout,
-    write_gatt_value_with_timeout, WINDOWS_AEP_BLE_IS_CONNECTABLE_PROPERTY,
-    WINDOWS_AEP_DEVICE_ADDRESS_PROPERTY, WINDOWS_AEP_IS_CONNECTED_PROPERTY,
-    WINDOWS_AEP_IS_PAIRED_PROPERTY, WINDOWS_AEP_IS_PRESENT_PROPERTY,
-    WINDOWS_BLE_AEP_CONNECTABLE_SELECTOR, WINDOWS_BLE_AEP_SELECTOR,
+    start_gatt_write_with_option_async, wait_gatt_write_result,
+    write_cccd_with_timeout, write_gatt_value_status_with_timeout, write_gatt_value_with_timeout,
+    WINDOWS_AEP_BLE_IS_CONNECTABLE_PROPERTY, WINDOWS_AEP_DEVICE_ADDRESS_PROPERTY,
+    WINDOWS_AEP_IS_CONNECTED_PROPERTY, WINDOWS_AEP_IS_PAIRED_PROPERTY,
+    WINDOWS_AEP_IS_PRESENT_PROPERTY, WINDOWS_BLE_AEP_CONNECTABLE_SELECTOR,
+    WINDOWS_BLE_AEP_SELECTOR,
 };
 pub(super) use denzic_ble_windows::{
     decode_bthport_device_name, normalize_pnp_device_instance_id,
@@ -73,6 +74,9 @@ const LISTENER_OTA_V1_SERVICE_UUID: GUID = OTA_SERVICE_UUID;
 const LISTENER_OTA_V1_CONTROL_UUID: GUID =
     GUID::from_u128(denzic_ota_core::GATT_CONTROL_UUID_U128);
 const LISTENER_OTA_V1_DATA_UUID: GUID = GUID::from_u128(denzic_ota_core::GATT_DATA_UUID_U128);
+/// Second OTA data lane (device advertises same access as DATA). Optional dual-WWR.
+const LISTENER_OTA_V1_DATA_B_UUID: GUID =
+    GUID::from_u128(0xfbc4b0fb_6102_4bd1_abe4_e5e90a9a7e13);
 const LISTENER_OTA_V1_STATUS_UUID: GUID =
     GUID::from_u128(denzic_ota_core::GATT_STATUS_UUID_U128);
 const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
@@ -227,14 +231,16 @@ const LISTENER_SERVICE_UUID_TEXTS: [&str; 3] = [
     OTA_SERVICE_UUID_TEXT,
     crate::embedded_ble::DIAGNOSTIC_SERVICE_UUID_TEXT,
 ];
-const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(80);
+// Catch-up status after each SYNC: short interval so flash lag resolves without
+// counting a full-window recovery.
+const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(8);
 const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 500;
-const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 100;
-// Was 4 (~2 KB/window): SYNC+status after every 2 KB ≈ 18 KB/s when active-link
-// flag lags. Exclusive TYPE:OTA already owns the link; allow a large inactive
-// window so throughput is not capped while CI/2M PHY promotion settles.
-// Device worker queue backpressures NimBLE if host outruns flash.
-const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 48;
+// Dual-lane DATA+DATA_B + device reorder. Window 400 cuts SYNC rounds vs 200;
+// pipeline 32 with ~16/lane was the best dual bulk (~46 KB/s). Full 32/lane
+// regressed airtime — keep half-depth per lane.
+const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400;
+const LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 32;
+const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 400;
 const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
 const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
 const LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS: [Duration; 3] = [
@@ -2139,6 +2145,8 @@ fn register_gatt_session_status_handler(
 struct OpenListenerOtaV1Target {
     control: GattCharacteristic,
     data: GattCharacteristic,
+    /// Optional dual-lane data char; None on older firmware without DATA_B.
+    data_b: Option<GattCharacteristic>,
     status: GattCharacteristic,
     data_write_option: GattWriteOption,
     data_chunk_payload_bytes: usize,
@@ -2151,6 +2159,7 @@ struct OpenListenerOtaV1Target {
 struct PreparedListenerOtaV1Characteristics {
     control: GattCharacteristic,
     data: GattCharacteristic,
+    data_b: Option<GattCharacteristic>,
     status: GattCharacteristic,
     data_write_option: GattWriteOption,
     data_chunk_payload_bytes: usize,
@@ -2190,34 +2199,22 @@ impl PreparedListenerOtaV1Transfer {
             _preparation_guard,
             ownership,
         } = self;
-        let (transfer_guard, _ota_process_guard, reopen_secure_target) = match ownership {
+        let (transfer_guard, _ota_process_guard) = match ownership {
             PreparedListenerOtaV1TransferOwnership::Exclusive {
                 transfer_guard,
                 _ota_process_guard,
-            } => (transfer_guard, _ota_process_guard, false),
+            } => (transfer_guard, _ota_process_guard),
             PreparedListenerOtaV1TransferOwnership::Staged => {
                 let ota_process_guard = acquire_ble_ota_process_mutex("listener_ota_v1")?;
                 let transfer_guard = BleCaptureGuard::enter(None)?;
-                // Staged prepare opened OTA GATT while audio notify was still live.
-                // Pausing notify for exclusive OTA drops Windows link encryption;
-                // BEGIN on the prepare-time handle then fails with ATT protocol_error=14
-                // (Insufficient Authentication) and latches the firmware OTA yellow LED.
-                // Never reuse the prepare-time target after exclusive ownership.
-                (transfer_guard, ota_process_guard, true)
+                (transfer_guard, ota_process_guard)
             }
         };
 
-        if !reopen_secure_target {
-            return transfer_denzic_ota_v1_to_target(
-                &target,
-                transfer_guard.session_id(),
-                firmware_bytes,
-                manifest_chunk_bytes,
-                on_progress,
-            );
-        }
-
-        // Drop the staged (likely unencrypted) prepare handle before any BEGIN.
+        // Always drop the prepare-time OTA GATT and reopen a secure target before
+        // BEGIN. Exclusive capture / TYPE:OTA handoff commonly drops Windows
+        // link encryption on the prepare handle (protocol_error=3/14); reusing it
+        // fails BEGIN and never reaches the bulk WWR path.
         drop(target);
 
         const SECURE_REOPEN_ROUNDS: usize = 3;
@@ -2227,18 +2224,16 @@ impl PreparedListenerOtaV1Transfer {
             // for Windows to re-establish the encrypted GATT session.
             // TYPE:OTA is now sent while notify is still live; exclusive settle
             // only needs a short capture-gate quiet window (was 750/1200ms).
-            // Round 1: give WinRT ThroughputOptimized a brief moment to land
-            // (Companion uses multi-second settle for notify flood; OTA only
-            // needs enough for CI update before bulk WWR).
-            let settle_ms = if round == 1 { 450 } else { 700 };
+            // Round 1: short settle after exclusive handoff so encryption is up
+            // before BEGIN. Prefer device 7.5 ms CI over WinRT 15 ms pin.
+            let settle_ms = if round == 1 { 350 } else { 700 };
             std::thread::sleep(Duration::from_millis(settle_ms));
             let fresh = match open_listener_ota_v1_target_after_active_link_handoff() {
                 Ok(fresh) => {
                     log::info!(
                         "[embedded-ble] Listener OTA v1: reopened secure OTA target after exclusive handoff before BEGIN round={round}/{SECURE_REOPEN_ROUNDS} (avoids protocol_error=14)"
                     );
-                    // Companion re-asserts throughput immediately before bulk;
-                    // do the same once the secure OTA GATT session is open.
+                    // Optional A/B only (LISTENER_OTA_WINRT_THROUGHPUT=1).
                     if let Some(device) = fresh.device.as_ref() {
                         request_ota_ble_throughput_optimized(device);
                     }
@@ -2288,6 +2283,155 @@ struct ListenerOtaV1Transport<'a> {
     target: &'a OpenListenerOtaV1Target,
     transfer_id: u64,
     data_write_option: GattWriteOption,
+    pending_wwr: Vec<IAsyncOperation<GattCommunicationStatus>>,
+    pending_wwr_b: Vec<IAsyncOperation<GattCommunicationStatus>>,
+    /// Alternates DATA / DATA_B when dual-lane is available.
+    next_lane_b: bool,
+}
+
+impl ListenerOtaV1Transport<'_> {
+    /// Complete all in-flight WWR ops on both lanes.
+    fn flush_pending_wwr(&mut self) -> Result<(), String> {
+        self.drain_pending_wwr_until(0, 0)
+    }
+
+    /// Poll both lanes together so dual-lane WWR completes in parallel.
+    fn drain_pending_wwr_until(
+        &mut self,
+        max_a: usize,
+        max_b: usize,
+    ) -> Result<(), String> {
+        let timeout = OTA_WRITE_TIMEOUT;
+        if self.pending_wwr.len() <= max_a && self.pending_wwr_b.len() <= max_b {
+            return Ok(());
+        }
+        let deadline = std::time::Instant::now() + timeout;
+        while self.pending_wwr.len() > max_a || self.pending_wwr_b.len() > max_b {
+            let mut progressed = false;
+            for (pending, label) in [
+                (&mut self.pending_wwr, "Denzic OTA v1 data pipeline"),
+                (&mut self.pending_wwr_b, "Denzic OTA v1 data_b pipeline"),
+            ] {
+                let mut index = 0usize;
+                while index < pending.len() {
+                    let operation = &pending[index];
+                    match operation.Status().map_err(|err| {
+                        format!("BLE {label} write async status failed: {err}")
+                    })? {
+                        windows::Foundation::AsyncStatus::Completed => {
+                            let operation = pending.remove(index);
+                            let status = operation.GetResults().map_err(|err| {
+                                format!("BLE {label} write result failed: {err}")
+                            })?;
+                            let _ = operation.Close();
+                            if status != GattCommunicationStatus::Success {
+                                return Err(format!(
+                                    "BLE Denzic OTA v1 data pipeline write returned status={status:?}"
+                                ));
+                            }
+                            progressed = true;
+                        }
+                        windows::Foundation::AsyncStatus::Error => {
+                            let code = operation.ErrorCode().ok();
+                            let _ = operation.Close();
+                            pending.remove(index);
+                            return Err(format!("BLE {label} write async error: {code:?}"));
+                        }
+                        windows::Foundation::AsyncStatus::Canceled => {
+                            let _ = operation.Close();
+                            pending.remove(index);
+                            return Err(format!("BLE {label} write async canceled"));
+                        }
+                        windows::Foundation::AsyncStatus::Started => {
+                            index += 1;
+                        }
+                        status => {
+                            let _ = operation.Close();
+                            pending.remove(index);
+                            return Err(format!(
+                                "BLE {label} write unknown async status={status:?}"
+                            ));
+                        }
+                    }
+                }
+            }
+            if self.pending_wwr.len() <= max_a && self.pending_wwr_b.len() <= max_b {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                for pending in [&mut self.pending_wwr, &mut self.pending_wwr_b] {
+                    for operation in pending.drain(..) {
+                        let _ = operation.Cancel();
+                        let _ = operation.Close();
+                    }
+                }
+                return Err(format!(
+                    "BLE Denzic OTA v1 dual-lane WWR timed out after {} ms",
+                    timeout.as_millis()
+                ));
+            }
+            if !progressed {
+                std::thread::sleep(Duration::from_millis(
+                    denzic_ble_windows::ASYNC_POLL_INTERVAL_MS,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn enqueue_wwr_data_write(&mut self, packet: &[u8]) -> Result<(), String> {
+        let dual = self.target.data_b.is_some();
+        let use_b = dual && self.next_lane_b;
+        if dual {
+            self.next_lane_b = !self.next_lane_b;
+        }
+
+        // Best dual bulk so far: ~16 in-flight per lane (half of PIPELINE_DEPTH).
+        // Deeper soft-caps (32/lane, 96 total) regressed airtime on this radio.
+        let depth_per_lane = if dual {
+            (LISTENER_OTA_V1_WWR_PIPELINE_DEPTH + 1) / 2
+        } else {
+            LISTENER_OTA_V1_WWR_PIPELINE_DEPTH
+        };
+
+        if use_b {
+            let characteristic = self
+                .target
+                .data_b
+                .as_ref()
+                .expect("dual-lane checked data_b");
+            let operation = start_gatt_write_with_option_async(
+                characteristic,
+                packet,
+                GattWriteOption::WriteWithoutResponse,
+                "Denzic OTA v1 data_b",
+            )?;
+            self.pending_wwr_b.push(operation);
+        } else {
+            let operation = start_gatt_write_with_option_async(
+                &self.target.data,
+                packet,
+                GattWriteOption::WriteWithoutResponse,
+                "Denzic OTA v1 data",
+            )?;
+            self.pending_wwr.push(operation);
+        }
+
+        let max_a = depth_per_lane.saturating_sub(1);
+        let max_b = if dual {
+            depth_per_lane.saturating_sub(1)
+        } else {
+            0
+        };
+        let total = self.pending_wwr.len() + self.pending_wwr_b.len();
+        if self.pending_wwr.len() > max_a
+            || self.pending_wwr_b.len() > max_b
+            || total >= LISTENER_OTA_V1_WWR_PIPELINE_DEPTH
+        {
+            self.drain_pending_wwr_until(max_a, max_b)?;
+        }
+        Ok(())
+    }
 }
 
 impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
@@ -2295,6 +2439,9 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         &mut self,
         packet: &[u8; denzic_ota_core::CONTROL_BYTES],
     ) -> Result<(), String> {
+        // Drain in-flight WWR before control so SYNC/status observe a settled
+        // offset (skipping flush before SYNC caused HRESULT cancel mid-window).
+        self.flush_pending_wwr()?;
         let label = match packet[4] {
             denzic_ota_core::OP_BEGIN => "Denzic OTA v1 begin",
             denzic_ota_core::OP_SYNC => "Denzic OTA v1 sync",
@@ -2311,9 +2458,23 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         // 或长传输结束 FINISH 失败（用户实测 FINISH 在 75s 传输后丢加密而失败）。
         // BEGIN 在 exclusive handoff 后尤其容易 14：多给几次 + 稍长间隔。
         let is_begin = packet[4] == denzic_ota_core::OP_BEGIN;
+        let is_sync = packet[4] == denzic_ota_core::OP_SYNC;
+        // SYNC sits on the bulk hot path (every window). Long auth sleeps here
+        // dominated prior runs (control_write_ms ≈ 30s). Keep BEGIN/FINISH
+        // generous; keep SYNC retries short.
         const CONTROL_AUTH_RETRIES: usize = 5;
-        let control_auth_retry_delay_ms: u64 = if is_begin { 1500 } else { 1000 };
-        let max_attempts: usize = CONTROL_AUTH_RETRIES + 1;
+        let control_auth_retry_delay_ms: u64 = if is_begin {
+            1500
+        } else if is_sync {
+            80
+        } else {
+            1000
+        };
+        let max_attempts: usize = if is_sync {
+            2
+        } else {
+            CONTROL_AUTH_RETRIES + 1
+        };
         for attempt in 0..max_attempts {
             let result = if use_status_write {
                 write_gatt_value_status_with_timeout(
@@ -2358,6 +2519,20 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
     }
 
     fn write_data(&mut self, packet: &[u8]) -> Result<(), String> {
+        if self.data_write_option == GattWriteOption::WriteWithoutResponse {
+            match self.enqueue_wwr_data_write(packet) {
+                Ok(()) => return Ok(()),
+                Err(primary_err) => {
+                    log::warn!(
+                        "[embedded-ble] Denzic OTA v1 data WWR pipeline failed: {primary_err}; falling back to blocking write"
+                    );
+                    let _ = self.flush_pending_wwr();
+                    // fall through to blocking path / option fallback
+                }
+            }
+        } else {
+            self.flush_pending_wwr()?;
+        }
         let result = write_listener_ota_v1_value_with_fallback(
             &self.target.data,
             packet,
@@ -2370,6 +2545,7 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
     }
 
     fn read_status(&mut self) -> Result<Vec<u8>, String> {
+        self.flush_pending_wwr()?;
         read_characteristic_bytes_with_timeout(
             &self.target.status,
             BluetoothCacheMode::Uncached,
@@ -2391,6 +2567,7 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         &mut self,
         packet: &[u8; denzic_ota_core::CONTROL_BYTES],
     ) -> Result<(), String> {
+        self.flush_pending_wwr()?;
         // FINISH 和 BEGIN 一样要求加密 GATT session。长传输(~75s)后 session 加密可能
         // 丢失，FINISH 会 ATT protocol_error=14 (Insufficient Authentication)。等待加密
         // 恢复后重试，避免长传输结束却提交失败。reboot handoff 错误（设备已重启）不算。
@@ -2794,7 +2971,11 @@ fn open_notify_target_from_recent_pairing_advertisement(
 
 fn open_audio_control_target_from_advertisement() -> Result<OpenAudioControlTarget, String> {
     let addresses = audio_target_advertisement_addresses("audio control")?;
-    ensure_paired_listener_for_advertisement_gatt("audio control", &addresses, false)?;
+    // After re-pair / full flash, AEP pairing store can lag while PnP already
+    // shows HID/Listener nodes for the advertised address. Allow PnP signature
+    // so TYPE:OTA handoff (and other control) can open GATT during that window
+    // instead of failing OTA prepare with "no paired BLE device".
+    ensure_paired_listener_for_advertisement_gatt("audio control", &addresses, true)?;
     let mut last_error = None;
     for address in addresses {
         match open_audio_control_target_for_device(address) {
