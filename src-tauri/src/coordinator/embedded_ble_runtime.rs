@@ -3494,26 +3494,32 @@ fn maybe_prune_listener_ghost_pairings_after_notify_ready(inner: &Arc<Inner>) {
         return;
     };
     let expected_name = inner.prefs.get().device_ble_name;
-    // OTA recovery generation is sticky until consumed by preflight bypass. After
-    // post-OTA notify ready, defer ghost prune: same-millisecond PnP/BTHPORT work
-    // has bounced the fresh TYPE:READY link (owner needed Type restart).
-    let ota_recovery_pending = inner
-        .embedded_ble_ota_recovery_generation
-        .load(Ordering::SeqCst)
-        != 0;
-    let defer = if ota_recovery_pending {
-        Duration::from_secs(4)
-    } else {
-        Duration::from_millis(0)
-    };
+    // Immediate PnP/BTHPORT ghost prune after TYPE:READY has bounced the live GATT
+    // link (logs: notify ready → prune removes old "listener" root → Disconnected →
+    // capsule "接不上 Type" while firmware LED still shows type_ready). Always settle
+    // first, and cooldown so reconnect flaps do not prune every generation.
+    const GHOST_PRUNE_SETTLE: Duration = Duration::from_secs(8);
+    const GHOST_PRUNE_COOLDOWN: Duration = Duration::from_secs(180);
+    static LAST_GHOST_PRUNE_AT: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
     tauri::async_runtime::spawn_blocking(move || {
-        if !defer.is_zero() {
-            log::info!(
-                "[embedded-ble] deferring ghost pairing prune {} ms after post-OTA TYPE:READY keep={keep:012X}",
-                defer.as_millis()
-            );
-            std::thread::sleep(defer);
+        if let Ok(last) = LAST_GHOST_PRUNE_AT.lock() {
+            if let Some(at) = *last {
+                if at.elapsed() < GHOST_PRUNE_COOLDOWN {
+                    log::info!(
+                        "[embedded-ble] skipping ghost pairing prune keep={keep:012X}: cooldown {} ms remaining",
+                        GHOST_PRUNE_COOLDOWN
+                            .saturating_sub(at.elapsed())
+                            .as_millis()
+                    );
+                    return;
+                }
+            }
         }
+        log::info!(
+            "[embedded-ble] deferring ghost pairing prune {} ms after TYPE:READY keep={keep:012X}",
+            GHOST_PRUNE_SETTLE.as_millis()
+        );
+        std::thread::sleep(GHOST_PRUNE_SETTLE);
         let mut names = vec![expected_name];
         for fallback in ["listener", "Blistener"] {
             if !names.iter().any(|n| n.eq_ignore_ascii_case(fallback)) {
@@ -3521,6 +3527,9 @@ fn maybe_prune_listener_ghost_pairings_after_notify_ready(inner: &Arc<Inner>) {
             }
         }
         let _ = crate::embedded_ble::prune_listener_ghost_pairings_keeping(&names, &[keep]);
+        if let Ok(mut last) = LAST_GHOST_PRUNE_AT.lock() {
+            *last = Some(Instant::now());
+        }
     });
 }
 
