@@ -317,9 +317,12 @@ pub(crate) fn apply_dictation_event(
                 SessionPhase::Starting | SessionPhase::Listening | SessionPhase::Processing => {
                     state.cancelled = true;
                     state.focus_target = None;
-                    if state.phase != SessionPhase::Processing {
-                        state.phase = SessionPhase::Idle;
-                    }
+                    // Owner 2026-07-28 post-OTA: leaving Processing on cancel raced with
+                    // empty AsrFinal (ignored while cancelled) and stuck phase=Processing
+                    // forever → EC11 dictation showed "session already running" and
+                    // recording appeared broken. Always Idle on cancel; ASR path still
+                    // discards results when cancelled=true.
+                    state.phase = SessionPhase::Idle;
                     DictationTransition::Applied {
                         session_id: Some(session_id),
                         snapshot: Some(dictation_snapshot(state, DictationUiState::Cancelled)),

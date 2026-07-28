@@ -575,6 +575,18 @@ fn begin_embedded_audio_dictation_session_id(inner: &Arc<Inner>) -> Result<Sessi
     if attach_host_start && state.phase == SessionPhase::Starting {
         return Ok(state.session_id);
     }
+    // Recover stuck Processing (post-cancel/empty-ASR race, common after OTA churn)
+    // so the next EC11 / BLE start is not permanently blocked.
+    if state.phase == SessionPhase::Processing {
+        log::warn!(
+            "[coord] clearing stuck Processing phase before embedded dictation start session_id={} cancelled={}",
+            state.session_id,
+            state.cancelled
+        );
+        state.phase = SessionPhase::Idle;
+        state.focus_target = None;
+        state.cancelled = false;
+    }
     begin_session_state(&mut state, capture_focus_target(), capture_frontmost_app())
         .ok_or_else(|| "当前已有听写会话在运行，暂不能提交嵌入式音频".to_string())
 }
@@ -1616,12 +1628,30 @@ async fn finish_end_session_after_stop_transition(
         device_ai_processing
             .complete_warning("dictation_empty_transcript")
             .await;
-        publish_embedded_ble_asr_final(
+        let published = publish_embedded_ble_asr_final(
             inner,
             current_session_id,
             true,
             Some("没有识别到语音".to_string()),
         );
+        // Cancel-during-Processing used to leave phase=Processing; AsrFinal then
+        // Ignored(CancelledSession) never cleared it. Force Idle either way.
+        if !published {
+            let _ = cleanup_cancelled_processing_session(inner, current_session_id);
+        }
+        {
+            let mut state = inner.state.lock();
+            if state.session_id == current_session_id
+                && state.phase == SessionPhase::Processing
+            {
+                log::warn!(
+                    "[coord] empty transcript force-idle stuck Processing session_id={current_session_id} cancelled={}",
+                    state.cancelled
+                );
+                state.phase = SessionPhase::Idle;
+                state.focus_target = None;
+            }
+        }
         restore_prepared_windows_ime_session(inner, current_session_id);
         schedule_empty_transcript_capsule_idle(inner, current_session_id);
         return Err("ASR returned empty transcript".to_string());
