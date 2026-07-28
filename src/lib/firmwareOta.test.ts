@@ -750,8 +750,8 @@ const embeddedBleSource = [
   .map((p) => readFileSync(p, 'utf8'))
   .join('\n');
 assert.ok(
-  embeddedBleSource.includes('LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 100'),
-  'Listener OTA v1 must keep the measured 100-chunk default needed for the under-60-second UI transfer target',
+  embeddedBleSource.includes('LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400'),
+  'Listener OTA v1 must keep the dual-lane measured 400-chunk default (fewer SYNC rounds; bulk under 60s)',
 );
 for (const expected of [
   'denzic_ota_core::GATT_SERVICE_UUID_U128',
