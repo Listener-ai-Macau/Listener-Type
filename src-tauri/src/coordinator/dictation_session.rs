@@ -41,6 +41,10 @@ pub(super) async fn handle_pressed_edge(inner: &Arc<Inner>) {
 }
 
 pub(super) async fn handle_pressed(inner: &Arc<Inner>) {
+    if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+        log::info!("[firmware-ota] hotkey press ignored during OTA transfer");
+        return;
+    }
     let prefs = inner.prefs.get();
     let mode = prefs.hotkey.mode;
     if prefs.dictation_input_source == DictationInputSource::EmbeddedBle {

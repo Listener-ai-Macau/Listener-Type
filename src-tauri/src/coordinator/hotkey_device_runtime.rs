@@ -892,6 +892,19 @@ async fn handle_device_dictation_action(
     key: DeviceCustomKeyId,
     gesture: DeviceCustomKeyGesture,
 ) {
+    if inner.embedded_ble_ota_active.load(Ordering::SeqCst) {
+        log::info!(
+            "[firmware-ota] device-key dictation ignored during OTA key={} gesture={}",
+            key.label(),
+            gesture.label()
+        );
+        crate::timeline::mark(
+            "backend.device_key",
+            "dictation_action_blocked_ota",
+            format!("key={} gesture={}", key.label(), gesture.label()),
+        );
+        return;
+    }
     let input_source = inner.prefs.get().dictation_input_source;
     let phase = inner.state.lock().phase;
     let wake_started_at = (!embedded_ble_listener_capture_ready(&inner)).then(Instant::now);
