@@ -39,87 +39,6 @@ impl EmbeddedStreamingDictation {
         self.apply_ble_packet_actor_command(inner, event).await
     }
 
-    /// A-desktop 诊断: 正式录音期把 PCM 喂给一个常驻 KWS,命中唤醒词只记日志、
-    /// 不切分、不影响转写。目的是实测噪声中"录音内误命中唤醒词"的频率,
-    /// 据此决定完整续录方案(命中→提前停+缓存PCM灌入新会话)是否可行。
-    async fn feed_reactivation_detector(&mut self, inner: &Arc<Inner>, pcm: &[u8]) {
-        let (already_triggered, needs_create) = match self.session.as_ref() {
-            Some(session) => (
-                session.reactivation_triggered,
-                session.reactivation_detector.is_none(),
-            ),
-            None => return,
-        };
-        if already_triggered {
-            return;
-        }
-        if needs_create {
-            let phrase = inner.prefs.get().voice_wake_phrase.clone();
-            match tauri::async_runtime::spawn_blocking(move || {
-                // A-desktop 诊断:用严格 detector(不生成"去首字/去末字"前缀变体),
-                // 避免正式录音中"开始录像/录入"等近似音误命中。TTS 实测严格模式 0/10
-                // 误命中(宽松 4/10)。真人场景误命中率以本诊断版实测 [A-desktop-diag] 为准。
-                crate::wake_phrase::StreamingDetector::new_strict(&phrase)
-            })
-            .await
-            {
-                Ok(Ok(detector)) => {
-                    if let Some(session) = self.session.as_mut() {
-                        session.reactivation_detector = Some(detector);
-                    }
-                }
-                Ok(Err(err)) => {
-                    log::warn!("[A-desktop-diag] reactivation detector init failed: {err}");
-                    return;
-                }
-                Err(err) => {
-                    log::warn!("[A-desktop-diag] reactivation detector init task failed: {err}");
-                    return;
-                }
-            }
-        }
-        let Some(mut detector) = self
-            .session
-            .as_mut()
-            .and_then(|session| session.reactivation_detector.take())
-        else {
-            return;
-        };
-        let pcm_vec = pcm.to_vec();
-        let accepted = tauri::async_runtime::spawn_blocking(move || {
-            let result = detector.accept_pcm(&pcm_vec);
-            (detector, result)
-        })
-        .await;
-        match accepted {
-            Ok((detector, Ok(Some(_)))) => {
-                if let Some(session) = self.session.as_mut() {
-                    session.reactivation_triggered = true;
-                    session.reactivation_hit_count =
-                        session.reactivation_hit_count.saturating_add(1);
-                    log::info!(
-                        "[A-desktop-diag] reactivation wake hit session_id={:?} hit_count={} (diagnostic only, transcript untouched)",
-                        session.session_id,
-                        session.reactivation_hit_count
-                    );
-                }
-                drop(detector);
-            }
-            Ok((detector, Ok(None))) => {
-                if let Some(session) = self.session.as_mut() {
-                    session.reactivation_detector = Some(detector);
-                }
-            }
-            Ok((detector, Err(err))) => {
-                log::warn!("[A-desktop-diag] reactivation accept_pcm failed: {err}");
-                drop(detector);
-            }
-            Err(err) => {
-                log::warn!("[A-desktop-diag] reactivation accept_pcm task failed: {err}");
-            }
-        }
-    }
-
     async fn apply_ble_packet_actor_command(
         &mut self,
         inner: &Arc<Inner>,
@@ -217,7 +136,6 @@ impl EmbeddedStreamingDictation {
                 if embedded_streaming_chunk_is_asr_input(&chunk) {
                     self.begin_session_if_needed(inner, chunk.session_id)
                         .await?;
-                    self.feed_reactivation_detector(inner, &chunk.pcm).await;
                     let proactive_stop_due = {
                         let session = self
                             .session
@@ -718,7 +636,6 @@ impl EmbeddedStreamingDictation {
         }
 
         let automatic = candidate.kind == BufferedSpeakerCandidateKind::Verification;
-        let mut automatic_wake_phrase = None;
         if automatic {
             let phrase = inner.prefs.get().voice_wake_phrase;
             // Finish deferred detector init before terminal KWS/offline pass.
@@ -786,7 +703,69 @@ impl EmbeddedStreamingDictation {
             // BLE stream actor for multi-second cascades on ambient VA spam.
             const MIN_TERMINAL_OFFLINE_PCM_BYTES: usize = 16_000 * 2 * 2; // 2.0 s
             let wake_match = match wake_match {
-                Ok(Some(found)) => Some(found),
+                Ok(Some(found)) => {
+                    #[cfg(target_os = "windows")]
+                    {
+                        let confirm = spawn_local_wake_confirmation(
+                            inner,
+                            candidate.pcm.clone(),
+                            phrase.clone(),
+                        )
+                        .await;
+                        match confirm {
+                            Ok(Ok(result)) => {
+                                local_confirmation_ms = local_confirmation_ms
+                                    .saturating_add(result.inference_ms);
+                                log::info!(
+                                    "[wake-phrase] terminal KWS local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={}",
+                                    embedded_session_id,
+                                    result.matched,
+                                    result.phrase_relation,
+                                    result.snapshot_pcm_ms,
+                                    result.transcript_chars,
+                                    result.inference_ms
+                                );
+                                if result.matched {
+                                    phrase_signal =
+                                        denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                    Some(found)
+                                } else {
+                                    // Owner 2026-07-30: local Absent must not veto sensitive KWS
+                                    // (StreamingDetector::new). KeywordModel accept restores wake
+                                    // recall after the anti-false-wake gate over-tightened.
+                                    log::info!(
+                                        "[wake-phrase] terminal KWS accepted as KeywordModel after local Absent embedded_session_id={} prior_absent_count={} (sensitivity restore)",
+                                        embedded_session_id,
+                                        candidate.kws_local_absent_count
+                                    );
+                                    phrase_signal =
+                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                    Some(found)
+                                }
+                            }
+                            Ok(Err(err)) => {
+                                log::warn!(
+                                    "[wake-phrase] terminal KWS local confirmation unavailable embedded_session_id={embedded_session_id}: {err}; accepting KWS KeywordModel"
+                                );
+                                phrase_signal =
+                                    denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                Some(found)
+                            }
+                            Err(err) => {
+                                log::warn!(
+                                    "[wake-phrase] terminal KWS local confirmation task failed embedded_session_id={embedded_session_id}: {err}; accepting KWS KeywordModel"
+                                );
+                                phrase_signal =
+                                    denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                Some(found)
+                            }
+                        }
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        Some(found)
+                    }
+                }
                 Ok(None) => {
                     // Streaming KWS missed. Fast-reject before expensive offline work
                     // when midstream local already said Absent, or the candidate is short.
@@ -852,23 +831,26 @@ impl EmbeddedStreamingDictation {
                                                 Some(found)
                                             } else {
                                                 log::info!(
-                                                    "[wake-phrase] terminal offline hit rejected by local Absent embedded_session_id={} (anti false-wake)",
+                                                    "[wake-phrase] terminal offline hit accepted as KeywordModel after local Absent embedded_session_id={} (sensitivity restore)",
                                                     embedded_session_id
                                                 );
-                                                None
+                                                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                                Some(found)
                                             }
                                         }
                                         Ok(Err(err)) => {
                                             log::warn!(
-                                                "[wake-phrase] terminal offline local confirmation unavailable embedded_session_id={embedded_session_id}: {err}; rejecting offline-only hit"
+                                                "[wake-phrase] terminal offline local confirmation unavailable embedded_session_id={embedded_session_id}: {err}; accepting offline KeywordModel"
                                             );
-                                            None
+                                            phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                            Some(found)
                                         }
                                         Err(err) => {
                                             log::warn!(
-                                                "[wake-phrase] terminal offline local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
+                                                "[wake-phrase] terminal offline local confirmation task failed embedded_session_id={embedded_session_id}: {err}; accepting offline KeywordModel"
                                             );
-                                            None
+                                            phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                            Some(found)
                                         }
                                     }
                                 }
@@ -1085,8 +1067,6 @@ impl EmbeddedStreamingDictation {
                 reject_hidden_automatic_candidate("wake_phrase_without_usable_dictation");
                 return Ok(true);
             }
-            // Keep early_capsule_session_id so begin_session reuses Starting.
-            automatic_wake_phrase = Some(phrase);
         } else {
             log::info!(
                 "[speaker-verification] physical recording bypass embedded_session_id={embedded_session_id}"
@@ -1096,9 +1076,6 @@ impl EmbeddedStreamingDictation {
         let session = begin_embedded_audio_dictation_session(inner).await?;
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
             return Err("嵌入式音频听写会话已被取消".to_string());
-        }
-        if let Some(phrase) = automatic_wake_phrase {
-            set_embedded_audio_wake_phrase_filter(inner, session.session_id, phrase);
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);
@@ -1274,9 +1251,11 @@ impl EmbeddedStreamingDictation {
                     }
                 }
             };
-            // Sensitive KWS is for recall only. Accept requires local paraformer
-            // confirmation (Present/PresentLater). KeywordModel alone was accepting
-            // ambient speech as 开始录音 (owner false wake ~09:49, no key/no intent).
+            // Product contract: main wake is sensitive StreamingDetector::new.
+            // Owner 2026-07-30: local paraformer must not veto a live KWS hit
+            // (that gate caused 开始录音 recall regression). Local Present still
+            // upgrades to LocalTranscript + early capsule; Absent only blocks
+            // local-only (no KWS) candidates.
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::None;
             let mut local_confirmation_ms = 0u64;
             let kws_hit = wake_match.clone();
@@ -1293,9 +1272,8 @@ impl EmbeddedStreamingDictation {
                                 candidate.local_confirmation_attempts,
                             )
                             .filter(|snapshot_bytes| candidate.pcm.len() >= *snapshot_bytes);
-                            // KWS already heard the phrase: confirm ASAP (0.8s floor),
-                            // not the 1.8s ladder start. Owner wake_to_capsule was
-                            // ~1.65s solely waiting for LOCAL_CONFIRMATION_START_MS.
+                            // KWS already heard the phrase: confirm ASAP (0.8s floor)
+                            // for LocalTranscript upgrade / early capsule only.
                             let new_audio_since_last = candidate
                                 .pcm
                                 .len()
@@ -1313,10 +1291,6 @@ impl EmbeddedStreamingDictation {
                                 }
                                 if kws_immediate || kws_retry {
                                     candidate.kws_prompted_local_confirm = true;
-                                    // Show Recording capsule as soon as KWS hears the phrase so
-                                    // the user is not left waiting while local ExactStart finishes
-                                    // (audio is already buffered; capsule was the late UI).
-                                    show_early_wake_recording_capsule(inner, candidate);
                                 }
                                 let snapshot_pcm_ms = candidate.pcm.len() / 32;
                                 let threshold_pcm_ms = ladder_snapshot
@@ -1368,14 +1342,14 @@ impl EmbeddedStreamingDictation {
                                     );
                                 if result.matched {
                                     phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
-                                    // Prefer KWS timing when available; local match alone still wakes.
+                                    if let Some(candidate) = self.speaker_candidate.as_mut() {
+                                        show_early_wake_recording_capsule(inner, candidate);
+                                    }
                                     kws_hit.or(Some(crate::wake_phrase::Match {
                                         end_seconds: 0.0,
                                     }))
-                                } else if kws_hit.is_some() {
-                                    // Owner: "开始啥的" must not wake. KWS short-prefix is for
-                                    // recall only — local must confirm full 开始录音. Provisional
-                                    // KeywordModel accept after Absent caused false wakes.
+                                } else if let Some(kws) = kws_hit {
+                                    // KWS provisional accept after local Absent — sensitivity restore.
                                     let absent_count = {
                                         let candidate = self
                                             .speaker_candidate
@@ -1385,12 +1359,14 @@ impl EmbeddedStreamingDictation {
                                             candidate.kws_local_absent_count.saturating_add(1);
                                         candidate.kws_local_absent_count
                                     };
+                                    phrase_signal =
+                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
                                     log::info!(
-                                        "[wake-phrase] KWS hit held: local confirmation Absent embedded_session_id={} count={} (anti false-wake; full phrase required)",
+                                        "[wake-phrase] KWS provisional accept after local Absent embedded_session_id={} count={} (sensitivity restore; StreamingDetector::new)",
                                         embedded_session_id,
                                         absent_count
                                     );
-                                    None
+                                    Some(kws)
                                 } else {
                                     None
                                 }
@@ -1399,25 +1375,39 @@ impl EmbeddedStreamingDictation {
                                 log::warn!(
                                         "[wake-phrase] bounded local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
                                     );
-                                // Without local ASR, keep provisional KWS only as Pending
-                                // (do not Accept yet) by returning None this tick.
-                                None
+                                if let Some(kws) = kws_hit {
+                                    phrase_signal =
+                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                    Some(kws)
+                                } else {
+                                    None
+                                }
                             }
                             Err(err) => {
                                 log::warn!(
                                         "[wake-phrase] bounded local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
                                     );
-                                None
+                                if let Some(kws) = kws_hit {
+                                    phrase_signal =
+                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                    Some(kws)
+                                } else {
+                                    None
+                                }
                             }
                         }
+                    } else if let Some(kws) = kws_hit {
+                        // Do not wait for local before Accept — KWS is the primary gate.
+                        phrase_signal =
+                            denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                        Some(kws)
                     } else {
-                        // Waiting on local confirmation (and optionally KWS).
+                        // No KWS yet: wait for local-only ladder.
                         None
                     }
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
-                    // Non-Windows: keep prior KWS-only path.
                     if kws_hit.is_some() {
                         phrase_signal =
                             denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
@@ -1569,7 +1559,6 @@ impl EmbeddedStreamingDictation {
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
             return Err("嵌入式音频听写会话已被取消".to_string());
         }
-        set_embedded_audio_wake_phrase_filter(inner, session.session_id, phrase.clone());
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);
         let session = self

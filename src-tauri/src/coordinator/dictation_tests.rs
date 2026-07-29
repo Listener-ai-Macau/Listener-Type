@@ -1,11 +1,10 @@
 use super::{
     append_typed_prefix, begin_embedded_audio_dictation_session_id,
     cancel_embedded_ble_listener_capture, cancel_session, claim_post_dictation_key,
-    clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview,
-    default_done_message, device_ai_processing_completion_delay,
-    device_ai_processing_io_allowed, device_processing_final_succeeded,
-    dictation_asr_engine_backend_id, dictation_asr_quality_warning,
-    dictation_asr_uses_core_accurate_engine, dictation_error_code,
+    clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview, default_done_message,
+    device_ai_processing_completion_delay, device_ai_processing_io_allowed,
+    device_processing_final_succeeded, dictation_asr_engine_backend_id,
+    dictation_asr_quality_warning, dictation_asr_uses_core_accurate_engine, dictation_error_code,
     embedded_audio_stop_feedback_latched, embedded_audio_stop_is_user_initiated,
     embedded_ble_listener_capture_ready, embedded_ble_processing_sync_disabled,
     embedded_ble_session_actor_history, embedded_ble_session_event_should_trace,
@@ -14,21 +13,20 @@ use super::{
     end_embedded_ble_session, finalize_polished_text, finish_dictation_pipeline_error,
     finish_dictation_timeout, install_embedded_ble_listener_cancel,
     mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
-    normalize_embedded_streaming_pcm_for_asr, provider_preview_change,
-    publish_embedded_ble_asr_final, record_embedded_ble_session_actor_command,
-    register_embedded_ble_cancel_flag, remove_standalone_dictation_fillers,
-    request_embedded_audio_stop_feedback, request_embedded_ble_recording_stop_from_host,
-    should_restore_clipboard_after_dictation, should_send_post_dictation_key,
-    stabilize_embedded_audio_final_supplemental_preview,
+    normalize_embedded_streaming_pcm_for_asr, preserve_recording_transcript,
+    provider_preview_change, publish_embedded_ble_asr_final,
+    record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
+    remove_standalone_dictation_fillers, request_embedded_audio_stop_feedback,
+    request_embedded_ble_recording_stop_from_host, should_restore_clipboard_after_dictation,
+    should_send_post_dictation_key, stabilize_embedded_audio_final_supplemental_preview,
     stabilize_embedded_audio_partial_preview, store_embedded_audio_stats,
-    streaming_insert_eligible, strip_wake_phrase_prefix, update_embedded_audio_partial_preview,
-    wayland_done_message, EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand,
-    EmbeddedStreamingAgcState, EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
-    DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
-    EMBEDDED_AUDIO_MAX_GAIN, EMBEDDED_AUDIO_STREAMING_SPEECH_RMS, EMBEDDED_AUDIO_TARGET_RMS,
-    EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS,
-    EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, LOCAL_CONFIRMATION_START_BYTES,
-    LOCAL_CONFIRMATION_START_MS,
+    streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
+    EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingAgcState,
+    EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
+    DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES, EMBEDDED_AUDIO_MAX_GAIN,
+    EMBEDDED_AUDIO_STREAMING_SPEECH_RMS, EMBEDDED_AUDIO_TARGET_RMS,
+    EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS,
+    LOCAL_CONFIRMATION_START_BYTES, LOCAL_CONFIRMATION_START_MS,
 };
 use crate::coordinator::Coordinator;
 use crate::coordinator_state::{new_session_id, SessionPhase};
@@ -93,66 +91,6 @@ fn provider_preview_change_keeps_authoritative_early_rewrite_visible() {
         provider_preview_change(Some("明天下午4:15提醒我"), "明天下午4:15提醒我"),
         None
     );
-    assert_eq!(strip_wake_phrase_prefix("开始。", "开始录音", true), "");
-    assert_eq!(
-        strip_wake_phrase_prefix("开始录音，今天自动唤醒测试正常。", "开始录音", true),
-        "今天自动唤醒测试正常。"
-    );
-    assert_eq!(
-        strip_wake_phrase_prefix("开始录音，今天自动唤醒测试正常。", "开始录音", false),
-        "今天自动唤醒测试正常。"
-    );
-    assert_eq!(
-        strip_wake_phrase_prefix("开使录因，今天自动唤醒测试正常。", "开始录音", false),
-        "今天自动唤醒测试正常。"
-    );
-    assert_eq!(
-        strip_wake_phrase_prefix("开始录像，今天测试。", "开始录音", false),
-        "开始录像，今天测试。"
-    );
-    assert_eq!(
-        strip_wake_phrase_prefix("音，你帮我看这个东西行不行。", "开始录音", true),
-        "你帮我看这个东西行不行。"
-    );
-    assert_eq!(
-        strip_wake_phrase_prefix("录因，你帮我看这个东西行不行。", "开始录音", false),
-        "你帮我看这个东西行不行。"
-    );
-    assert_eq!(
-        strip_wake_phrase_prefix("音频测试继续。", "开始录音", true),
-        "音频测试继续。"
-    );
-    // KWS end 时间戳偏早,"开始录音"的"录音"尾巴漏进听写,且后面直接接正文(无
-    // 标点)。旧的"必须后随标点才剥"会让"录音今天…"泄漏——这里验证 ≥2 字尾巴
-    // 片段不再需要标点也能剥掉。
-    assert_eq!(
-        strip_wake_phrase_prefix("录音今天天气不错", "开始录音", false),
-        "今天天气不错"
-    );
-    assert_eq!(
-        strip_wake_phrase_prefix("录音今天天气不错", "开始录音", true),
-        "今天天气不错"
-    );
-    // 拼音近似的尾巴残留(录因≈录音)同样要剥。
-    assert_eq!(
-        strip_wake_phrase_prefix("录因今天要开会", "开始录音", false),
-        "今天要开会"
-    );
-    // Pre-wake context before the activation phrase must not stay in the capsule
-    // ("好贵啊…不用了。开始录音，帮我看…" → only post-wake dictation).
-    assert_eq!(
-        strip_wake_phrase_prefix(
-            "好贵啊！我搞了6000块钱。不用了。开始录音，帮我看下这个东西是刷进了还是没",
-            "开始录音",
-            false,
-        ),
-        "帮我看下这个东西是刷进了还是没"
-    );
-    // First full phrase hit is the automatic-wake boundary even mid-string.
-    assert_eq!(
-        strip_wake_phrase_prefix("今天要说开始录音这个词。", "开始录音", true),
-        "这个词。"
-    );
     assert_eq!(
         remove_standalone_dictation_fillers("嗯，呃，今天自动唤醒测试正常。"),
         "今天自动唤醒测试正常。"
@@ -168,6 +106,18 @@ fn provider_preview_change_keeps_authoritative_early_rewrite_visible() {
 }
 
 #[test]
+fn recording_transcript_preserves_wake_phrase_as_ordinary_speech() {
+    assert_eq!(
+        preserve_recording_transcript("开始录音，今天要说的是正文。"),
+        "开始录音，今天要说的是正文。"
+    );
+    assert_eq!(
+        preserve_recording_transcript("正常语句里开始录音只是普通内容。"),
+        "正常语句里开始录音只是普通内容。"
+    );
+}
+
+#[test]
 fn remove_standalone_dictation_fillers_also_strips_inlined_chinese_fillers() {
     // 中文 ASR 常输出无标点的连续文本,语气词粘连在正文里——standalone 删不掉,
     // 这是用户觉得"开关没用"的根因。这里验证粘连的嗯/呃/唔会被剥离。
@@ -179,12 +129,21 @@ fn remove_standalone_dictation_fillers_also_strips_inlined_chinese_fillers() {
         remove_standalone_dictation_fillers("那个嗯文件"),
         "那个文件"
     );
-    assert_eq!(remove_standalone_dictation_fillers("呃我不知道"), "我不知道");
+    assert_eq!(
+        remove_standalone_dictation_fillers("呃我不知道"),
+        "我不知道"
+    );
     assert_eq!(remove_standalone_dictation_fillers("今天嗯嗯去"), "今天去");
     // 句首/句尾的粘连语气词也要去掉
-    assert_eq!(remove_standalone_dictation_fillers("嗯今天嗯去嗯"), "今天去");
+    assert_eq!(
+        remove_standalone_dictation_fillers("嗯今天嗯去嗯"),
+        "今天去"
+    );
     // 额有实义(额外/金额/名额),不剥离——只删被标点分隔的独立"额"
-    assert_eq!(remove_standalone_dictation_fillers("金额是一百"), "金额是一百");
+    assert_eq!(
+        remove_standalone_dictation_fillers("金额是一百"),
+        "金额是一百"
+    );
     assert_eq!(remove_standalone_dictation_fillers("额外版本"), "额外版本");
     // 被标点分隔的独立语气词仍由 standalone 正常删除,不回归
     assert_eq!(
@@ -284,10 +243,7 @@ fn embedded_audio_final_supplement_seeds_short_prefix_extends_or_repairs() {
         Some("这个预览被截断了，需要更准确".to_string())
     );
     assert_eq!(
-        stabilize_embedded_audio_final_supplemental_preview(
-            Some("灵敏"),
-            "预览灵敏稳定才算通过"
-        ),
+        stabilize_embedded_audio_final_supplemental_preview(Some("灵敏"), "预览灵敏稳定才算通过"),
         Some("预览灵敏稳定才算通过".to_string())
     );
     assert_eq!(
@@ -300,8 +256,7 @@ fn embedded_audio_final_supplement_seeds_short_prefix_extends_or_repairs() {
 }
 
 #[test]
-fn embedded_audio_final_supplement_repairs_observed_early_cjk_rewrite_without_unrelated_takeover(
-) {
+fn embedded_audio_final_supplement_repairs_observed_early_cjk_rewrite_without_unrelated_takeover() {
     let current = "请把3下午2点客户沟通安排近日历资料你先";
     assert_eq!(
         stabilize_embedded_audio_final_supplemental_preview(
@@ -389,9 +344,6 @@ fn embedded_audio_test_session(
         proactive_stop_body_started: false,
         proactive_stop_silence_ms: 0,
         proactive_stop_dispatched: false,
-        reactivation_detector: None,
-        reactivation_triggered: false,
-        reactivation_hit_count: 0,
     }
 }
 
@@ -834,12 +786,10 @@ async fn host_stop_request_to_firmware_latches_feedback_without_local_finish() {
         state.cancelled = false;
     }
 
-    let handled = request_embedded_ble_recording_stop_from_host(
-        &coordinator.inner,
-        "unit_test_host_stop",
-    )
-    .await
-    .expect("test stop request does not touch BLE transport");
+    let handled =
+        request_embedded_ble_recording_stop_from_host(&coordinator.inner, "unit_test_host_stop")
+            .await
+            .expect("test stop request does not touch BLE transport");
 
     assert!(handled);
     assert!(!cancel_flag.load(Ordering::SeqCst));
@@ -966,11 +916,7 @@ fn notify_cleanup_delay_records_listener_actor_command() {
     let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
     mark_embedded_ble_listener_ready(&coordinator.inner, &active);
 
-    cancel_embedded_ble_listener_capture(
-        &coordinator.inner,
-        "notify cleanup delay test",
-        false,
-    );
+    cancel_embedded_ble_listener_capture(&coordinator.inner, "notify cleanup delay test", false);
 
     assert!(active.load(Ordering::SeqCst));
     let history = embedded_ble_session_actor_history(&coordinator.inner);
@@ -1609,8 +1555,12 @@ fn hidden_candidate_marked_active_before_detector_init() {
     let dictation = include_str!("dictation.rs");
     assert!(
         stream_all.contains("show_early_wake_recording_capsule")
-            && dictation.contains("early recording capsule shown"),
-        "KWS hit must show early Recording capsule before local ExactStart completes"
+            && dictation.contains("local full-phrase confirmed")
+            && stream_all.contains(
+                "terminal KWS accepted as KeywordModel after local Absent"
+            )
+            && stream_all.contains("KWS provisional accept after local Absent"),
+        "Local Present still upgrades capsule; sensitive KWS must Accept as KeywordModel without local veto"
     );
 }
 
@@ -1652,21 +1602,13 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         None
     );
     assert_eq!(
-        super::buffered_speaker_candidate_kind(
-            SessionStartOrigin::VoiceActivation,
-            false,
-            true
-        ),
+        super::buffered_speaker_candidate_kind(SessionStartOrigin::VoiceActivation, false, true),
         Some(super::BufferedSpeakerCandidateKind::Verification)
     );
     // Deleting the voiceprint must not disable automatic wake: still enter the
     // verification gate path; speaker_verification::verify open-gates when empty.
     assert_eq!(
-        super::buffered_speaker_candidate_kind(
-            SessionStartOrigin::VoiceActivation,
-            false,
-            false
-        ),
+        super::buffered_speaker_candidate_kind(SessionStartOrigin::VoiceActivation, false, false),
         Some(super::BufferedSpeakerCandidateKind::Verification)
     );
     assert_eq!(
@@ -1706,7 +1648,7 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         .find("mark_hidden_automatic_candidate_active()")
         .expect("hidden automatic candidate must be marked active");
     let wake_init = source[mark_hidden..]
-        .find("let wake_detector = if candidate_kind")
+        .find("let wake_detector_init =")
         .map(|offset| mark_hidden + offset)
         .expect("wake detector init after hidden ACTIVE mark");
     let wake_window = &source[wake_init..wake_init + 1200.min(source.len() - wake_init)];
@@ -2061,9 +2003,7 @@ fn device_processing_completion_delay_keeps_ai_led_visible() {
 fn device_processing_max_visible_timeout_is_bounded() {
     assert_eq!(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS, 5_000);
     assert!(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS > DEVICE_AI_PROCESSING_MIN_VISIBLE_MS);
-    assert!(
-        Duration::from_millis(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS) <= Duration::from_secs(5)
-    );
+    assert!(Duration::from_millis(DEVICE_AI_PROCESSING_MAX_VISIBLE_MS) <= Duration::from_secs(5));
 }
 
 #[test]
@@ -2074,10 +2014,10 @@ fn kws_hit_schedules_immediate_local_confirmation() {
             && stream.contains("kws_immediate")
             && stream.contains("kws_retry")
             && stream.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_BYTES")
-            && stream.contains("anti false-wake; full phrase required")
             && stream.contains("kws_local_absent_count")
-            && !stream.contains("KWS provisional accept after local Absent"),
-        "KWS must prompt fast local confirm but must NOT KeywordModel-accept on local Absent"
+            && stream.contains("KWS provisional accept after local Absent")
+            && stream.contains("sensitivity restore"),
+        "KWS must Accept as KeywordModel without waiting for local; local Present only upgrades signal/capsule"
     );
     let polish = include_str!("dictation_wake_polish.rs");
     assert!(
@@ -2116,10 +2056,7 @@ fn device_processing_max_visible_timeout_stops_without_done() {
         .find("fn schedule_device_ai_processing_max_visible_timeout")
         .expect("max-visible scheduler");
     let body = &source[begin..];
-    let end = body[1..]
-        .find("\nfn ")
-        .map(|i| i + 1)
-        .unwrap_or(body.len());
+    let end = body[1..].find("\nfn ").map(|i| i + 1).unwrap_or(body.len());
     let body = &body[..end];
     assert!(
         body.contains("send_recording_processing_state(false"),
@@ -2202,15 +2139,12 @@ fn volcengine_streaming_agc_ignores_quiet_start_and_boosts_first_voice_immediate
     let mut agc = EmbeddedStreamingAgcState::default();
 
     let (quiet_forwarded, _) = normalize_embedded_streaming_pcm_for_asr(&quiet, &mut agc);
-    let (voice_forwarded, voice_stats) =
-        normalize_embedded_streaming_pcm_for_asr(&voice, &mut agc);
+    let (voice_forwarded, voice_stats) = normalize_embedded_streaming_pcm_for_asr(&voice, &mut agc);
 
     assert_eq!(quiet_forwarded, quiet);
     assert_eq!(voice_forwarded.len(), voice.len());
     assert!(voice_stats.gain > 1.0, "gain={}", voice_stats.gain);
-    assert!(
-        embedded_pcm_rms_and_peak(&voice_forwarded).0 > embedded_pcm_rms_and_peak(&voice).0
-    );
+    assert!(embedded_pcm_rms_and_peak(&voice_forwarded).0 > embedded_pcm_rms_and_peak(&voice).0);
     assert_eq!(agc.quiet_chunks, 1);
     assert_eq!(agc.voiced_chunks, 1);
     assert_eq!(agc.first_gain, Some(voice_stats.gain));
@@ -2288,13 +2222,11 @@ fn volcengine_streaming_agc_limits_only_the_later_over_peak_block() {
     let later_moderate_voice = pcm_from_samples(&vec![600i16; 1_600]);
     let mut agc = EmbeddedStreamingAgcState::default();
 
-    let (_, first_stats) =
-        normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
+    let (_, first_stats) = normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
     let calibrated_gain = first_stats.gain;
     assert!(calibrated_gain > 1.0);
 
-    let (_, ordinary_stats) =
-        normalize_embedded_streaming_pcm_for_asr(&ordinary_voice, &mut agc);
+    let (_, ordinary_stats) = normalize_embedded_streaming_pcm_for_asr(&ordinary_voice, &mut agc);
     assert_eq!(ordinary_stats.gain, calibrated_gain);
 
     let (_, loud_stats) = normalize_embedded_streaming_pcm_for_asr(&loud_voice, &mut agc);
@@ -2314,10 +2246,8 @@ fn volcengine_streaming_agc_raises_for_later_quiet_confirmed_speech() {
     let later_quiet_voice = pcm_from_samples(&vec![180i16; 1_600]);
     let mut agc = EmbeddedStreamingAgcState::default();
 
-    let (_, first_stats) =
-        normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
-    let (_, later_stats) =
-        normalize_embedded_streaming_pcm_for_asr(&later_quiet_voice, &mut agc);
+    let (_, first_stats) = normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
+    let (_, later_stats) = normalize_embedded_streaming_pcm_for_asr(&later_quiet_voice, &mut agc);
 
     assert!(later_stats.gain > first_stats.gain);
     assert_eq!(agc.gain, later_stats.gain);
