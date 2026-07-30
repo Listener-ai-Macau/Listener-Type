@@ -1,0 +1,7 @@
+{
+  "selected": "失败",
+  "text": "这个弹窗到底是哪里来的",
+  "spoken_text": null,
+  "scope": "canonical AIW operator prompt after rollback installation",
+  "disposition": "tooling_clarification_no_product_trial"
+}

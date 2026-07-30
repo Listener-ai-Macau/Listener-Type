@@ -2292,6 +2292,27 @@ fn local_only_second_chance_requires_a_start_aligned_phrase() {
     ));
 }
 
+#[test]
+fn kws_local_confirmation_uses_only_an_aligned_five_second_tail() {
+    let short = vec![7u8; super::KWS_LOCAL_CONFIRM_MAX_PCM_BYTES - 2];
+    assert_eq!(super::local_confirmation_pcm(&short, true), short);
+
+    let long: Vec<u8> = (0..super::KWS_LOCAL_CONFIRM_MAX_PCM_BYTES + 102)
+        .map(|index| (index % 251) as u8)
+        .collect();
+    let bounded = super::local_confirmation_pcm(&long, true);
+    assert_eq!(bounded.len(), super::KWS_LOCAL_CONFIRM_MAX_PCM_BYTES);
+    assert_eq!(
+        bounded,
+        long[long.len() - super::KWS_LOCAL_CONFIRM_MAX_PCM_BYTES..]
+    );
+    assert_eq!(
+        super::local_confirmation_pcm(&long, false),
+        long,
+        "exploratory local confirmation keeps the full candidate"
+    );
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn local_only_start_phrase_has_a_bounded_nonzero_audio_endpoint() {

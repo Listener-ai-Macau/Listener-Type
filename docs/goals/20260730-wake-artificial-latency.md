@@ -21,9 +21,11 @@ firmware, OTA, pairing, UI layout, ASR models, phrases or product thresholds.
 1. Reproduce and identify the queueing and terminal actor stalls from installed logs.
 2. Make local helper confirmation single-flight and non-queueing; retry transient busy.
 3. Bound terminal cleanup while retaining the evidence-poor offline recovery chance.
-4. Run focused and complete Type release gates.
-5. Rebuild, install and identify the final MSI; preserve the accepted firmware ZIP.
-6. Run an installed ambient-backlog-to-real-wake loop and collect owner acceptance.
+4. Bound KWS-confirmation audio to its recent 5-second phrase window so a late hit
+   does not re-run stage-2 over the full ambient prefix.
+5. Run focused and complete Type release gates.
+6. Rebuild, install and identify the final MSI; preserve the accepted firmware ZIP.
+7. Run an installed ambient-backlog-to-real-wake loop and collect owner acceptance.
 
 The final human boundary is the canonical Chinese operator review on the installed
 Program Files build. A separate priority helper lane is explicitly excluded after its

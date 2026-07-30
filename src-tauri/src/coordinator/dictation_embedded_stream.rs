@@ -707,7 +707,7 @@ impl EmbeddedStreamingDictation {
                     {
                         let confirm = spawn_local_wake_confirmation(
                             inner,
-                            candidate.pcm.clone(),
+                            local_confirmation_pcm(&candidate.pcm, true),
                             phrase.clone(),
                             false,
                         )
@@ -1378,7 +1378,10 @@ impl EmbeddedStreamingDictation {
                                 candidate.local_confirmation_task =
                                     Some(spawn_local_wake_confirmation(
                                         inner,
-                                        candidate.pcm.clone(),
+                                        local_confirmation_pcm(
+                                            &candidate.pcm,
+                                            kws_hit.is_some(),
+                                        ),
                                         phrase.clone(),
                                         kws_hit.is_none(),
                                     ));

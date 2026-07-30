@@ -20,4 +20,13 @@ Date: 2026-07-30
   non-queueing single helper and bounded terminal cleanup. Require a fresh installed
   positive review before final acceptance.
 
-No firmware, OTA, pairing, LED or transcript defect is opened by either note.
+## Prompt clarification
+
+- Selected result: `失败`.
+- Operator note: `这个弹窗到底是哪里来的`
+- Classification: the note asks about the canonical `aiw operator-prompt` window and
+  contains no spoken wake trial.
+- Resolution: explain that the window belongs to the workflow, not Listener Type.
+  Do not classify it as a product failure or acceptance.
+
+No firmware, OTA, pairing, LED or transcript defect is opened by these notes.

@@ -528,6 +528,11 @@ const KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_BYTES: usize = KWS_IMMEDIATE_LOCAL_CONFIRM
 /// stays hot — avoids sitting on the 2.4/3.0/5.0s ladder rungs.
 const KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400;
 const KWS_LOCAL_CONFIRM_RETRY_BYTES: usize = KWS_LOCAL_CONFIRM_RETRY_MS * 32;
+/// Streaming KWS already supplies an absolute phrase boundary. Stage-2 only
+/// needs nearby speech for precision; sending a long ambient prefix makes
+/// Paraformer latency scale with unrelated audio.
+const KWS_LOCAL_CONFIRM_MAX_PCM_MS: usize = 5_000;
+const KWS_LOCAL_CONFIRM_MAX_PCM_BYTES: usize = KWS_LOCAL_CONFIRM_MAX_PCM_MS * 32;
 /// XiaoAi-style cascade after sensitive KWS hit:
 ///   stage-1 KWS (high recall) → stage-2 local wake verifier (precision)
 /// Wait up to this budget for stage-2; then fail-open as KeywordModel so a
@@ -566,6 +571,15 @@ fn next_local_confirmation_snapshot_bytes(attempts: usize) -> Option<usize> {
         &LOCAL_CONFIRMATION_SNAPSHOT_MS,
     )
     .map(|milliseconds| milliseconds * 32)
+}
+
+fn local_confirmation_pcm(pcm: &[u8], has_keyword_model_hit: bool) -> Vec<u8> {
+    if !has_keyword_model_hit || pcm.len() <= KWS_LOCAL_CONFIRM_MAX_PCM_BYTES {
+        return pcm.to_vec();
+    }
+    let start = pcm.len() - KWS_LOCAL_CONFIRM_MAX_PCM_BYTES;
+    let aligned_start = start + start % 2;
+    pcm[aligned_start..].to_vec()
 }
 
 fn should_run_terminal_offline_recall(pcm_bytes: usize, local_absent_count: u8) -> bool {
