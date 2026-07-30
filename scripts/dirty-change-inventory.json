@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-25",
+  "updated_at": "2026-07-30",
   "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.3 release consolidation is in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
   "entries": [
     {
@@ -247,6 +247,24 @@
         "tools/package_factory_firmware.ps1",
         "tools/package_ota_firmware.ps1",
         "tools/verify_voice_recording_control_fsm.py"
+      ]
+    },
+    {
+      "id": "listener_wake_sensitivity_false_wake_refinement_20260730",
+      "repo": "both",
+      "item": "Two-stage wake sensitivity, local-only false-wake fusion, activation endpoint, and owner review evidence",
+      "state": "focused_machine_validated_pending_installed_review",
+      "evidence": [
+        "LST-WAKE-003 and LST-WAKE-004 in Listener-Firmware/docs/listener_product_requirements.md",
+        "Focused local_confirmation, local_only, and automatic_wake Rust tests PASS",
+        "docs/goals/20260730-wake-sensitivity-boundary.evidence.md"
+      ],
+      "patterns": [
+        "docs/listener_product_requirements.md",
+        "docs/goals/20260730-wake-sensitivity-boundary.*",
+        "src-tauri/src/coordinator/dictation_embedded_stream.rs",
+        "src-tauri/src/coordinator/dictation_tests.rs",
+        "src-tauri/src/coordinator/dictation_wake_polish.rs"
       ]
     }
   ]

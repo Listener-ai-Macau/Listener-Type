@@ -338,6 +338,7 @@ struct LocalWakeConfirmation {
     transcript_chars: usize,
     inference_ms: u64,
     snapshot_pcm_ms: usize,
+    recovered_keyword_end_seconds: Option<f32>,
 }
 
 const MAX_BUFFERED_SPEAKER_CANDIDATE_BYTES: usize = 2_100_000;
@@ -355,16 +356,18 @@ const EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS: u64 = 30_000;
 const OWNER_VERIFICATION_START_MS: usize = 1_100;
 const OWNER_VERIFICATION_START_BYTES: usize = OWNER_VERIFICATION_START_MS * 32;
 const OWNER_VERIFICATION_SNAPSHOT_MS: [usize; 3] = [OWNER_VERIFICATION_START_MS, 1_800, 2_400];
-const LOCAL_CONFIRMATION_START_MS: usize =
-    denzic_voice_activation_v1_core::DEFAULT_LOCAL_CONFIRMATION_START_MS as usize;
+// The generic protocol default is 1.8 s. Listener's four-character Mandarin
+// phrase is already complete around 0.8-1.0 s in real captures, so start the
+// local second chance here instead of making a streaming-KWS miss feel broken.
+const LOCAL_CONFIRMATION_START_MS: usize = 1_000;
 const LOCAL_CONFIRMATION_START_BYTES: usize = LOCAL_CONFIRMATION_START_MS * 32;
 const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
     LOCAL_CONFIRMATION_START_MS,
+    1_400,
+    1_800,
     2_400,
     3_000,
     5_000,
-    8_000,
-    12_000,
 ];
 /// Once KWS already heard the phrase, do not wait for the 1.8s ladder floor.
 /// ~0.8s covers a full "开始录音" plus a small pad; logs showed wake_end≈0.8s
@@ -384,6 +387,7 @@ const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 900;
 /// prefix false wakes like "开始啥的"; one retry for noisy short clips).
 const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
 const WAKE_END_PAD_SECONDS: f32 = 0.12;
+const LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS: f32 = 1.20;
 
 fn owner_verification_window_ready(pcm_bytes: usize) -> bool {
     // No enrolled voiceprint → phrase hit alone is enough; do not stall for the
@@ -425,13 +429,44 @@ fn refined_wake_end_seconds(
     confirmation: &LocalWakeConfirmation,
     phrase_chars: usize,
 ) -> f32 {
+    let model_boundary = confirmation
+        .recovered_keyword_end_seconds
+        .filter(|seconds| {
+            seconds.is_finite()
+                && *seconds > 0.0
+                && *seconds <= LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS
+        })
+        .unwrap_or_default();
+    let detected_boundary = keyword_end_seconds.max(model_boundary);
     let exact_phrase_only = matches!(
         confirmation.phrase_relation,
         crate::wake_phrase::LocalPhraseRelation::ExactStart
             | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
     ) && confirmation.transcript_chars <= phrase_chars;
     if !exact_phrase_only {
-        return keyword_end_seconds;
+        if detected_boundary > 0.0 {
+            return detected_boundary;
+        }
+        if !matches!(
+            confirmation.phrase_relation,
+            crate::wake_phrase::LocalPhraseRelation::ExactStart
+                | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
+        ) || phrase_chars == 0
+            || confirmation.transcript_chars <= phrase_chars
+        {
+            return 0.0;
+        }
+
+        // Paraformer supplies tokens but no timestamps for this model. For the
+        // local-only, start-aligned fallback, estimate just the phrase share of
+        // the observed utterance. The clamp is deliberately narrower than a
+        // Mandarin four-character wake phrase and never applies to PresentLater.
+        let snapshot_seconds = confirmation.snapshot_pcm_ms as f32 / 1_000.0;
+        let proportional = snapshot_seconds * phrase_chars as f32
+            / confirmation.transcript_chars as f32;
+        return proportional
+            .clamp(0.55, LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS)
+            .min((snapshot_seconds - WAKE_END_PAD_SECONDS).max(0.0));
     }
 
     // Sherpa's streaming token timestamp can lag the actual detection boundary
@@ -439,7 +474,27 @@ fn refined_wake_end_seconds(
     // in this snapshot, cutting through the snapshot cannot remove dictated body.
     let local_phrase_end =
         confirmation.snapshot_pcm_ms as f32 / 1_000.0 - WAKE_END_PAD_SECONDS;
-    keyword_end_seconds.max(local_phrase_end.max(0.0))
+    detected_boundary.max(local_phrase_end.max(0.0))
+}
+
+#[cfg(target_os = "windows")]
+fn local_confirmation_can_activate(
+    has_keyword_model_hit: bool,
+    relation: crate::wake_phrase::LocalPhraseRelation,
+) -> bool {
+    if has_keyword_model_hit {
+        return matches!(
+            relation,
+            crate::wake_phrase::LocalPhraseRelation::ExactStart
+                | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
+                | crate::wake_phrase::LocalPhraseRelation::PresentLater
+        );
+    }
+    matches!(
+        relation,
+        crate::wake_phrase::LocalPhraseRelation::ExactStart
+            | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -447,6 +502,7 @@ fn spawn_local_wake_confirmation(
     _inner: &Arc<Inner>,
     pcm: Vec<u8>,
     phrase: String,
+    recover_keyword_boundary: bool,
 ) -> tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>> {
     tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
@@ -457,6 +513,21 @@ fn spawn_local_wake_confirmation(
         let result =
             crate::asr::local::wake_helper::confirm(&boosted, &phrase, Duration::from_secs(4))
                 .map_err(|err| format!("local wake confirmation failed: {err}"))?;
+        let recovered_keyword_end_seconds = if recover_keyword_boundary
+            && result.matched
+            && matches!(
+                result.phrase_relation,
+                crate::wake_phrase::LocalPhraseRelation::ExactStart
+                    | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
+            )
+            && result.transcript_chars <= phrase.chars().count()
+        {
+            crate::wake_phrase::detect(&pcm, &phrase)
+                .map_err(|err| format!("recover local wake boundary: {err}"))?
+                .map(|found| found.end_seconds)
+        } else {
+            None
+        };
         Ok(LocalWakeConfirmation {
             matched: result.matched,
             phrase_relation: result.phrase_relation,
@@ -465,6 +536,7 @@ fn spawn_local_wake_confirmation(
                 .inference_ms
                 .max(started.elapsed().as_millis() as u64),
             snapshot_pcm_ms,
+            recovered_keyword_end_seconds,
         })
     })
 }

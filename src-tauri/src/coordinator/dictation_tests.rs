@@ -43,8 +43,8 @@ use std::sync::{Arc, Mutex};
 
 #[test]
 fn local_confirmation_waits_for_pre_roll_plus_speech_observation() {
-    assert_eq!(LOCAL_CONFIRMATION_START_MS, 1_800);
-    assert_eq!(LOCAL_CONFIRMATION_START_BYTES / 32, 1_800);
+    assert_eq!(LOCAL_CONFIRMATION_START_MS, 1_000);
+    assert_eq!(LOCAL_CONFIRMATION_START_BYTES / 32, 1_000);
 }
 use std::time::{Duration, Instant};
 
@@ -1514,27 +1514,27 @@ fn phrase_hit_waits_for_real_owner_audio_without_requiring_a_pause() {
 fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(0),
-        Some(1_800 * 32)
+        Some(1_000 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(1),
-        Some(2_400 * 32)
+        Some(1_400 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(2),
-        Some(3_000 * 32)
+        Some(1_800 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(3),
-        Some(5_000 * 32)
+        Some(2_400 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(4),
-        Some(8_000 * 32)
+        Some(3_000 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(5),
-        Some(12_000 * 32)
+        Some(5_000 * 32)
     );
     assert_eq!(super::next_local_confirmation_snapshot_bytes(6), None);
 }
@@ -2096,6 +2096,7 @@ fn exact_phrase_only_local_confirmation_refines_late_keyword_boundary() {
         transcript_chars: 4,
         inference_ms: 100,
         snapshot_pcm_ms: 2_775,
+        recovered_keyword_end_seconds: None,
     };
     let refined = super::refined_wake_end_seconds(1.915, &confirmation, 4);
     assert!((refined - 2.655).abs() < 0.001);
@@ -2106,6 +2107,65 @@ fn exact_phrase_only_local_confirmation_refines_late_keyword_boundary() {
         ..confirmation
     };
     assert_eq!(super::refined_wake_end_seconds(0.685, &with_body, 4), 0.685);
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn local_only_second_chance_requires_a_start_aligned_phrase() {
+    use crate::wake_phrase::LocalPhraseRelation;
+
+    assert!(super::local_confirmation_can_activate(
+        false,
+        LocalPhraseRelation::ExactStart
+    ));
+    assert!(super::local_confirmation_can_activate(
+        false,
+        LocalPhraseRelation::PhoneticStart
+    ));
+    assert!(!super::local_confirmation_can_activate(
+        false,
+        LocalPhraseRelation::PresentLater
+    ));
+    assert!(super::local_confirmation_can_activate(
+        true,
+        LocalPhraseRelation::PresentLater
+    ));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn local_only_start_phrase_has_a_bounded_nonzero_audio_endpoint() {
+    let confirmation = super::LocalWakeConfirmation {
+        matched: true,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
+        transcript_chars: 9,
+        inference_ms: 100,
+        snapshot_pcm_ms: 1_800,
+        recovered_keyword_end_seconds: None,
+    };
+    let estimated = super::refined_wake_end_seconds(0.0, &confirmation, 4);
+    assert!((estimated - 0.8).abs() < 0.001);
+
+    let recovered = super::LocalWakeConfirmation {
+        recovered_keyword_end_seconds: Some(0.72),
+        ..confirmation
+    };
+    assert!((super::refined_wake_end_seconds(0.0, &recovered, 4) - 0.72).abs() < 0.001);
+
+    let later_keyword_occurrence = super::LocalWakeConfirmation {
+        recovered_keyword_end_seconds: Some(1.84),
+        ..confirmation
+    };
+    assert!(
+        (super::refined_wake_end_seconds(0.0, &later_keyword_occurrence, 4) - 0.8).abs() < 0.001
+    );
+
+    let later = super::LocalWakeConfirmation {
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::PresentLater,
+        recovered_keyword_end_seconds: None,
+        ..confirmation
+    };
+    assert_eq!(super::refined_wake_end_seconds(0.0, &later, 4), 0.0);
 }
 
 #[test]

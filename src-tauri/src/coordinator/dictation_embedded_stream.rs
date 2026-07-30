@@ -711,6 +711,7 @@ impl EmbeddedStreamingDictation {
                             inner,
                             candidate.pcm.clone(),
                             phrase.clone(),
+                            false,
                         )
                         .await;
                         match confirm {
@@ -809,6 +810,7 @@ impl EmbeddedStreamingDictation {
                                         inner,
                                         candidate.pcm.clone(),
                                         phrase.clone(),
+                                        false,
                                     )
                                     .await;
                                     match confirm {
@@ -877,6 +879,7 @@ impl EmbeddedStreamingDictation {
                                             inner,
                                             candidate.pcm.clone(),
                                             phrase.clone(),
+                                            false,
                                         )
                                         .await;
                                         match result {
@@ -892,10 +895,21 @@ impl EmbeddedStreamingDictation {
                                                     result.transcript_chars,
                                                     result.inference_ms
                                                 );
-                                                if result.matched {
+                                                if result.matched
+                                                    && local_confirmation_can_activate(
+                                                        false,
+                                                        result.phrase_relation,
+                                                    )
+                                                {
                                                     phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
+                                                    let end_seconds =
+                                                        refined_wake_end_seconds(
+                                                            0.0,
+                                                            &result,
+                                                            phrase.chars().count(),
+                                                        );
                                                     Some(crate::wake_phrase::Match {
-                                                        end_seconds: 0.0,
+                                                        end_seconds,
                                                     })
                                                 } else {
                                                     None
@@ -1325,6 +1339,7 @@ impl EmbeddedStreamingDictation {
                                         inner,
                                         candidate.pcm.clone(),
                                         phrase.clone(),
+                                        kws_hit.is_none(),
                                     ));
                                 log::info!(
                                         "[wake-phrase] stage2 local confirm started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} kws_hit={} kws_immediate={} kws_retry={}",
@@ -1362,7 +1377,19 @@ impl EmbeddedStreamingDictation {
                                         result.inference_ms,
                                         kws_hit.is_some()
                                 );
-                                if result.matched {
+                                let fusion_matched = result.matched
+                                    && local_confirmation_can_activate(
+                                        kws_hit.is_some(),
+                                        result.phrase_relation,
+                                    );
+                                if result.matched && !fusion_matched {
+                                    log::info!(
+                                        "[wake-phrase] local-only PresentLater held for stage1 embedded_session_id={} phrase_relation={:?}",
+                                        embedded_session_id,
+                                        result.phrase_relation
+                                    );
+                                }
+                                if fusion_matched {
                                     let refined_end = kws_hit
                                         .as_ref()
                                         .map(|found| found.end_seconds)
@@ -1379,7 +1406,7 @@ impl EmbeddedStreamingDictation {
                                     Some(crate::wake_phrase::Match {
                                         end_seconds: refined_end,
                                     })
-                                } else if kws_hit.is_some() {
+                                } else if !result.matched && kws_hit.is_some() {
                                     // Explicit Absent: precision reject (retry once).
                                     let absent_count = {
                                         let candidate = self

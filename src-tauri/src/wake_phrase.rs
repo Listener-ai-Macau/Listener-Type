@@ -1390,6 +1390,25 @@ mod platform {
             );
         }
 
+        #[test]
+        #[ignore = "diagnostic: inspect full-buffer recall boundary for one WAV"]
+        fn diagnostic_full_buffer_recall_clip() {
+            let path = std::env::var("LISTENER_WAKE_DIAG_CLIP").expect("LISTENER_WAKE_DIAG_CLIP");
+            let phrase =
+                std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
+            let wav = fs::read(&path).expect("wake diagnostic wav");
+            let pcm = wav_pcm(&wav);
+            let default_found = detect(pcm, &phrase).expect("default full-buffer detect");
+            let found = detect_with_recall_cascade(pcm, &phrase).expect("recall cascade");
+            println!(
+                "full_buffer_recall path={} pcm_ms={} default_end_seconds={:?} cascade_end_seconds={:?}",
+                path,
+                pcm.len() / 32,
+                default_found.map(|value| value.end_seconds),
+                found.map(|value| value.end_seconds)
+            );
+        }
+
         /// A-desktop 可行性的代码级保证:new_strict 对完整唤醒词命中,
         /// 对"开始录像/录入/路演"近似音不命中(TTS 数据,真人待实测)。
         #[test]
