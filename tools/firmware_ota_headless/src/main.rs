@@ -335,7 +335,7 @@ mod tests {
         .expect("args");
 
         assert_eq!(args.desktop_version, repository_desktop_version().unwrap());
-        assert_eq!(args.desktop_version, "1.0.3");
+        assert_eq!(args.desktop_version, "1.0.4");
     }
 
     #[test]
