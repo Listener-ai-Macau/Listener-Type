@@ -172,6 +172,7 @@ mod imp {
 
     impl WakeHelperClient {
         fn preload(&self) -> Result<(), String> {
+            super::super::paraformer::prepare_assets()?;
             let mut process = self.process.lock();
             Self::ensure_process(&mut process)?;
             Ok(())
@@ -266,22 +267,8 @@ mod imp {
         CLIENT.get_or_init(WakeHelperClient::default)
     }
 
-    fn priority_client() -> &'static WakeHelperClient {
-        static CLIENT: OnceLock<WakeHelperClient> = OnceLock::new();
-        CLIENT.get_or_init(WakeHelperClient::default)
-    }
-
     pub fn preload() -> Result<(), String> {
-        super::super::paraformer::prepare_assets()?;
-        std::thread::scope(|scope| {
-            let exploratory = scope.spawn(|| client().preload());
-            let priority = priority_client().preload();
-            let exploratory = exploratory
-                .join()
-                .map_err(|_| "exploratory local wake helper preload panicked".to_string())?;
-            priority?;
-            exploratory
-        })
+        client().preload()
     }
 
     pub fn confirm(
@@ -290,14 +277,6 @@ mod imp {
         timeout: Duration,
     ) -> Result<WakeHelperResult, String> {
         client().confirm(pcm, phrase, timeout)
-    }
-
-    pub fn confirm_priority(
-        pcm: &[u8],
-        phrase: &str,
-        timeout: Duration,
-    ) -> Result<WakeHelperResult, String> {
-        priority_client().confirm(pcm, phrase, timeout)
     }
 
     fn emit_response(response: &HelperResponse) -> Result<(), String> {
@@ -447,7 +426,7 @@ mod imp {
 
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
-pub use imp::{confirm, confirm_priority, preload, run_helper, WakeHelperResult};
+pub use imp::{confirm, preload, run_helper, WakeHelperResult};
 
 #[cfg(not(target_os = "windows"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -465,15 +444,6 @@ pub fn preload() -> Result<(), String> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn confirm(
-    _pcm: &[u8],
-    _phrase: &str,
-    _timeout: std::time::Duration,
-) -> Result<WakeHelperResult, String> {
-    Err("local wake helper is only available on Windows".to_string())
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn confirm_priority(
     _pcm: &[u8],
     _phrase: &str,
     _timeout: std::time::Duration,

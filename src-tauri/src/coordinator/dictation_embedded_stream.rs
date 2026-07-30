@@ -389,8 +389,6 @@ impl EmbeddedStreamingDictation {
                 pending_phrase_match: None,
                 #[cfg(target_os = "windows")]
                 local_confirmation_task: None,
-                #[cfg(target_os = "windows")]
-                local_confirmation_task_kws_priority: false,
                 local_confirmation_attempts: 0,
                 local_confirmation_last_snapshot_bytes: 0,
                 kws_prompted_local_confirm: false,
@@ -712,7 +710,6 @@ impl EmbeddedStreamingDictation {
                             candidate.pcm.clone(),
                             phrase.clone(),
                             false,
-                            true,
                         )
                         .await;
                         match confirm {
@@ -860,7 +857,6 @@ impl EmbeddedStreamingDictation {
                                         candidate.pcm.clone(),
                                         phrase.clone(),
                                         false,
-                                        true,
                                     )
                                     .await;
                                     match confirm {
@@ -924,7 +920,6 @@ impl EmbeddedStreamingDictation {
                                             inner,
                                             candidate.pcm.clone(),
                                             phrase.clone(),
-                                            false,
                                             false,
                                         )
                                         .await;
@@ -1348,16 +1343,6 @@ impl EmbeddedStreamingDictation {
                             .speaker_candidate
                             .as_mut()
                             .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
-                        if should_preempt_exploratory_confirmation(
-                            kws_hit.is_some(),
-                            candidate.local_confirmation_task.is_some(),
-                            candidate.local_confirmation_task_kws_priority,
-                        ) {
-                            candidate.local_confirmation_task.take();
-                            log::info!(
-                                "[wake-phrase] stage2 KWS preempted exploratory local confirm embedded_session_id={embedded_session_id}"
-                            );
-                        }
                         if candidate.local_confirmation_task.is_none() {
                             let ladder_snapshot = next_local_confirmation_snapshot_bytes(
                                 candidate.local_confirmation_attempts,
@@ -1396,10 +1381,7 @@ impl EmbeddedStreamingDictation {
                                         candidate.pcm.clone(),
                                         phrase.clone(),
                                         kws_hit.is_none(),
-                                        kws_hit.is_some(),
                                     ));
-                                candidate.local_confirmation_task_kws_priority =
-                                    kws_hit.is_some();
                                 log::info!(
                                         "[wake-phrase] stage2 local confirm started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} kws_hit={} kws_immediate={} kws_retry={}",
                                         embedded_session_id,
@@ -1417,7 +1399,6 @@ impl EmbeddedStreamingDictation {
                             .as_ref()
                             .is_some_and(|task| task.inner().is_finished())
                         {
-                            candidate.local_confirmation_task_kws_priority = false;
                             candidate.local_confirmation_task.take()
                         } else {
                             None
