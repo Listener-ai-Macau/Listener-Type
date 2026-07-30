@@ -1,0 +1,8 @@
+{
+  "selected": "失败",
+  "text": "现在唤醒不了了蟑螂出现后出现开始录音，这个东西现在还能用吗？开始录音，哈喽哈喽，有没有什么问题？",
+  "spoken_text": "开始录音",
+  "scope": "rejected separate KWS-priority helper installed build",
+  "machine_session": 212,
+  "disposition": "rejected_sensitivity_regression"
+}
