@@ -1461,32 +1461,41 @@ impl EmbeddedStreamingDictation {
                                 }
                             }
                             Ok(Err(err)) => {
-                                log::warn!(
-                                        "[wake-phrase] stage2 local confirm unavailable embedded_session_id={embedded_session_id}: {err}"
-                                    );
-                                let explicit_absent_count = self
-                                    .speaker_candidate
-                                    .as_ref()
-                                    .map(|candidate| candidate.kws_local_absent_count)
-                                    .unwrap_or(0);
-                                if secondary_fallback_can_accept_keyword(
-                                    kws_hit.is_some(),
-                                    explicit_absent_count,
-                                ) {
-                                    let kws = kws_hit.expect("fallback requires keyword hit");
-                                    phrase_signal =
-                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                if crate::asr::local::wake_helper::is_busy_error(&err) {
                                     log::info!(
-                                        "[wake-phrase] stage2 unavailable fail-open KeywordModel embedded_session_id={embedded_session_id}"
-                                    );
-                                    Some(kws)
-                                } else {
-                                    log::info!(
-                                        "[wake-phrase] stage2 unavailable held after explicit Absent embedded_session_id={} absent_count={}",
+                                        "[wake-phrase] stage2 local confirm busy; retrying without queue embedded_session_id={} kws_hit={}",
                                         embedded_session_id,
-                                        explicit_absent_count
+                                        kws_hit.is_some()
                                     );
                                     None
+                                } else {
+                                    log::warn!(
+                                        "[wake-phrase] stage2 local confirm unavailable embedded_session_id={embedded_session_id}: {err}"
+                                    );
+                                    let explicit_absent_count = self
+                                        .speaker_candidate
+                                        .as_ref()
+                                        .map(|candidate| candidate.kws_local_absent_count)
+                                        .unwrap_or(0);
+                                    if secondary_fallback_can_accept_keyword(
+                                        kws_hit.is_some(),
+                                        explicit_absent_count,
+                                    ) {
+                                        let kws = kws_hit.expect("fallback requires keyword hit");
+                                        phrase_signal =
+                                            denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                        log::info!(
+                                            "[wake-phrase] stage2 unavailable fail-open KeywordModel embedded_session_id={embedded_session_id}"
+                                        );
+                                        Some(kws)
+                                    } else {
+                                        log::info!(
+                                            "[wake-phrase] stage2 unavailable held after explicit Absent embedded_session_id={} absent_count={}",
+                                            embedded_session_id,
+                                            explicit_absent_count
+                                        );
+                                        None
+                                    }
                                 }
                             }
                             Err(err) => {

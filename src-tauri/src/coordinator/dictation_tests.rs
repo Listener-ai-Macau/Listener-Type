@@ -2167,6 +2167,39 @@ fn explicit_absent_blocks_keyword_only_secondary_fallback() {
     assert!(!super::secondary_fallback_can_accept_keyword(false, 0));
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn busy_local_wake_helper_is_retried_without_queue_or_keyword_fallback() {
+    assert!(crate::asr::local::wake_helper::is_busy_error(
+        "local wake confirmation failed: local_wake_helper_busy"
+    ));
+    assert!(!crate::asr::local::wake_helper::is_busy_error(
+        "local wake helper did not start"
+    ));
+
+    let helper = include_str!("../asr/local/wake_helper.rs");
+    assert!(
+        helper.contains(".process\n                .try_lock()")
+            && !helper.contains("let mut process_slot = self.process.lock();"),
+        "local confirmations must be single-flight and non-queueing"
+    );
+
+    let stream = include_str!("dictation_embedded_stream.rs");
+    let busy_branch = stream
+        .find("is_busy_error(&err)")
+        .expect("busy helper branch must exist");
+    let unavailable_fallback = stream[busy_branch..]
+        .find("secondary_fallback_can_accept_keyword(")
+        .expect("ordinary helper failure fallback must remain");
+    let busy_retry = stream[busy_branch..]
+        .find("stage2 local confirm busy; retrying without queue")
+        .expect("busy helper retry log must exist");
+    assert!(
+        busy_retry < unavailable_fallback,
+        "busy backpressure must return before keyword-only fallback"
+    );
+}
+
 #[test]
 fn automatic_wake_discards_pre_wake_pcm_for_local_transcript() {
     // Regression: LocalTranscript forced post_wake_offset=0 and kept pre-wake speech.

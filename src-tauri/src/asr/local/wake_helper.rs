@@ -1,3 +1,9 @@
+const WAKE_HELPER_BUSY_ERROR_CODE: &str = "local_wake_helper_busy";
+
+pub fn is_busy_error(error: &str) -> bool {
+    error.contains(WAKE_HELPER_BUSY_ERROR_CODE)
+}
+
 #[cfg(target_os = "windows")]
 mod imp {
     use std::io::{BufRead, BufReader, Write};
@@ -181,6 +187,13 @@ mod imp {
             if pcm.is_empty() {
                 return Err("local wake helper received empty PCM".to_string());
             }
+            // A discarded candidate cannot cancel spawn_blocking work. Never let
+            // those requests queue behind the single helper process: the live
+            // candidate will retry from newer PCM through its bounded ladder.
+            let mut process_slot = self
+                .process
+                .try_lock()
+                .ok_or_else(|| super::WAKE_HELPER_BUSY_ERROR_CODE.to_string())?;
             let wav = TempWavFile::create_without_context_padding(pcm)
                 .map_err(|err| format!("prepare local wake helper WAV: {err:#}"))?;
             let request_id = Uuid::new_v4().to_string();
@@ -190,7 +203,6 @@ mod imp {
                 phrase: phrase.to_string(),
             };
 
-            let mut process_slot = self.process.lock();
             let process = Self::ensure_process(&mut process_slot)?;
             if let Err(err) = process.send(&request) {
                 *process_slot = None;
@@ -359,7 +371,21 @@ mod imp {
 
     #[cfg(test)]
     mod tests {
-        use super::{phrase_relation_matches, HelperRequest, HelperResponse};
+        use std::time::Duration;
+
+        use super::{
+            phrase_relation_matches, HelperRequest, HelperResponse, WakeHelperClient,
+        };
+
+        #[test]
+        fn confirmation_returns_busy_instead_of_queueing_on_the_helper() {
+            let client = WakeHelperClient::default();
+            let _active_request = client.process.lock();
+            let error = client
+                .confirm(&[0, 0], "开始录音", Duration::from_millis(1))
+                .expect_err("a second confirmation must not queue");
+            assert!(super::super::is_busy_error(&error));
+        }
 
         #[test]
         fn helper_protocol_exposes_match_metadata_without_transcript_text() {
