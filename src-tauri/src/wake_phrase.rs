@@ -27,9 +27,9 @@ fn absolute_keyword_end_seconds(
     native_end.max(recent_detection_floor).min(accepted_seconds)
 }
 
-pub use denzic_voice_activation_v1_core::{
-    local_transcript_matches_phrase, local_transcript_phrase_relation, LocalPhraseRelation,
-};
+#[cfg(test)]
+pub use denzic_voice_activation_v1_core::local_transcript_matches_phrase;
+pub use denzic_voice_activation_v1_core::{local_transcript_phrase_relation, LocalPhraseRelation};
 
 #[cfg(test)]
 mod phrase_confirmation_tests {
@@ -275,8 +275,35 @@ mod platform {
         threshold: f32,
     }
 
-    static CACHE: Lazy<Mutex<Option<(String, u32, u32, Arc<Runtime>)>>> =
-        Lazy::new(|| Mutex::new(None));
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct RuntimeCacheKey {
+        phrase: String,
+        score_bits: u32,
+        threshold_bits: u32,
+        emit_variants: bool,
+    }
+
+    impl RuntimeCacheKey {
+        fn new(phrase: &str, score: f32, threshold: f32, emit_variants: bool) -> Self {
+            Self {
+                phrase: phrase.to_string(),
+                score_bits: score.to_bits(),
+                threshold_bits: threshold.to_bits(),
+                emit_variants,
+            }
+        }
+    }
+
+    struct RuntimeCacheEntry {
+        key: RuntimeCacheKey,
+        runtime: Arc<Runtime>,
+    }
+
+    // Offline recall and strict in-session checks use different spotter
+    // configurations. A single cache slot made those checks evict the sensitive
+    // live runtime, so the next idle wake intermittently paid a 1-2s model load.
+    static LIVE_CACHE: Lazy<Mutex<Option<RuntimeCacheEntry>>> = Lazy::new(|| Mutex::new(None));
+    static AUXILIARY_CACHE: Lazy<Mutex<Option<RuntimeCacheEntry>>> = Lazy::new(|| Mutex::new(None));
 
     /// Live KWS always uses the product-sensitive bootstrap (score 3.0 / threshold 0.08).
     ///
@@ -307,7 +334,8 @@ mod platform {
     }
 
     fn clear_runtime_cache() {
-        *CACHE.lock() = None;
+        *LIVE_CACHE.lock() = None;
+        *AUXILIARY_CACHE.lock() = None;
     }
 
     fn calibration_path() -> Result<PathBuf, String> {
@@ -524,14 +552,20 @@ mod platform {
         threshold: f32,
         emit_variants: bool,
     ) -> Result<Arc<Runtime>, String> {
-        if let Some((cached_phrase, cached_score, cached_threshold, runtime)) =
-            CACHE.lock().as_ref()
-        {
-            if cached_phrase == phrase
-                && *cached_score == score.to_bits()
-                && *cached_threshold == threshold.to_bits()
-            {
-                return Ok(Arc::clone(runtime));
+        load_cached_runtime(&AUXILIARY_CACHE, phrase, score, threshold, emit_variants)
+    }
+
+    fn load_cached_runtime(
+        cache: &Mutex<Option<RuntimeCacheEntry>>,
+        phrase: &str,
+        score: f32,
+        threshold: f32,
+        emit_variants: bool,
+    ) -> Result<Arc<Runtime>, String> {
+        let key = RuntimeCacheKey::new(phrase, score, threshold, emit_variants);
+        if let Some(entry) = cache.lock().as_ref() {
+            if entry.key == key {
+                return Ok(Arc::clone(&entry.runtime));
             }
         }
         let model = model_root()?;
@@ -631,19 +665,17 @@ mod platform {
                 destroy_stream,
                 destroy_spotter,
             });
-            *CACHE.lock() = Some((
-                phrase.to_string(),
-                score.to_bits(),
-                threshold.to_bits(),
-                Arc::clone(&runtime),
-            ));
+            *cache.lock() = Some(RuntimeCacheEntry {
+                key,
+                runtime: Arc::clone(&runtime),
+            });
             Ok(runtime)
         }
     }
 
     fn load(phrase: &str) -> Result<Arc<Runtime>, String> {
         let (score, threshold) = configured_keyword_values(phrase);
-        load_with_config(phrase, score, threshold, true)
+        load_cached_runtime(&LIVE_CACHE, phrase, score, threshold, true)
     }
 
     fn normalization_gain(pcm: &[u8]) -> f32 {
@@ -1351,6 +1383,17 @@ mod platform {
                 default_found.map(|value| value.end_seconds),
                 found.map(|value| value.end_seconds)
             );
+        }
+
+        #[test]
+        fn runtime_cache_key_includes_prefix_variant_behavior() {
+            let live = RuntimeCacheKey::new("开始录音", 3.5, 0.05, true);
+            let strict = RuntimeCacheKey::new("开始录音", 3.5, 0.05, false);
+            let other_threshold = RuntimeCacheKey::new("开始录音", 3.5, 0.08, true);
+
+            assert_ne!(live, strict);
+            assert_ne!(live, other_threshold);
+            assert_eq!(live, RuntimeCacheKey::new("开始录音", 3.5, 0.05, true));
         }
 
         /// A-desktop 可行性的代码级保证:new_strict 对完整唤醒词命中,

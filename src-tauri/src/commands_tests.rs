@@ -2241,7 +2241,7 @@ fn load_firmware_ota_package_reads_directory() {
         .expect("write manifest");
     std::fs::write(root.join("firmware_ota.bin"), [1u8, 2, 3]).expect("write firmware");
 
-    let payload = load_firmware_ota_package(root.to_string_lossy().to_string())
+    let payload = super::device::load_firmware_ota_package(root.to_string_lossy().to_string())
         .expect("load directory OTA package");
     assert_eq!(payload.manifest_text, "{\"schema_version\":2}");
     assert_eq!(payload.firmware_bytes, vec![1, 2, 3]);
@@ -2268,7 +2268,7 @@ fn load_firmware_ota_package_reads_zip() {
         zip.finish().expect("finish zip");
     }
 
-    let payload = load_firmware_ota_package(zip_path.to_string_lossy().to_string())
+    let payload = super::device::load_firmware_ota_package(zip_path.to_string_lossy().to_string())
         .expect("load zip OTA package");
     assert_eq!(payload.manifest_text, "{\"schema_version\":2}");
     assert_eq!(payload.firmware_bytes, vec![4, 5, 6]);
@@ -2323,8 +2323,9 @@ fn combined_firmware_release_zip_supports_ota_and_wired_factory() {
         zip.finish().expect("finish combined zip");
     }
 
-    let ota_payload = load_firmware_ota_package(zip_path.to_string_lossy().to_string())
-        .expect("load OTA files from combined release zip");
+    let ota_payload =
+        super::device::load_firmware_ota_package(zip_path.to_string_lossy().to_string())
+            .expect("load OTA files from combined release zip");
     assert_eq!(ota_payload.manifest_text, "{\"schema_version\":2}");
     assert_eq!(ota_payload.firmware_bytes, vec![4, 5, 6]);
 

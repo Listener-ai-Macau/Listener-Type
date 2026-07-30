@@ -46,6 +46,91 @@ fn local_confirmation_waits_for_pre_roll_plus_speech_observation() {
     assert_eq!(LOCAL_CONFIRMATION_START_MS, 1_000);
     assert_eq!(LOCAL_CONFIRMATION_START_BYTES / 32, 1_000);
 }
+
+#[test]
+fn wake_phrase_tail_latency_excludes_deliberate_phrase_duration() {
+    assert_eq!(super::wake_phrase_tail_to_capsule_ms(3.040, 3_216), 176);
+    assert_eq!(super::wake_phrase_tail_to_capsule_ms(0.900, 1_032), 132);
+    assert_eq!(super::wake_phrase_tail_to_capsule_ms(3.500, 3_200), 0);
+    assert_eq!(super::wake_phrase_tail_to_capsule_ms(f32::NAN, 900), 900);
+}
+
+#[test]
+fn wake_diagnostic_retention_removes_expired_then_oldest_for_bytes() {
+    let now = std::time::UNIX_EPOCH + Duration::from_secs(10 * 24 * 60 * 60);
+    let entries = vec![
+        super::WakeDiagnosticRetentionEntry {
+            path: "expired.wav".into(),
+            modified: std::time::UNIX_EPOCH,
+            bytes: 1,
+        },
+        super::WakeDiagnosticRetentionEntry {
+            path: "older.wav".into(),
+            modified: now - Duration::from_secs(60),
+            bytes: 20 * 1024 * 1024,
+        },
+        super::WakeDiagnosticRetentionEntry {
+            path: "newer.wav".into(),
+            modified: now - Duration::from_secs(30),
+            bytes: 20 * 1024 * 1024,
+        },
+    ];
+
+    let removals = super::wake_diagnostic_retention_plan(
+        entries,
+        now,
+        Duration::from_secs(7 * 24 * 60 * 60),
+        128,
+        32 * 1024 * 1024,
+    );
+    assert_eq!(
+        removals,
+        vec![
+            std::path::PathBuf::from("expired.wav"),
+            std::path::PathBuf::from("older.wav")
+        ]
+    );
+}
+
+#[test]
+fn wake_diagnostic_cleanup_caps_matching_files_and_keeps_unrelated_files() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!(
+        "listener-wake-retention-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create retention fixture");
+    for index in 0..130 {
+        std::fs::write(
+            directory.join(format!("wake-candidate-{index:03}.wav")),
+            [index as u8],
+        )
+        .expect("write matching fixture");
+    }
+    let unrelated = directory.join("operator-note.txt");
+    std::fs::write(&unrelated, b"keep").expect("write unrelated fixture");
+
+    let removed = super::prune_default_wake_diagnostics(&directory).expect("prune fixtures");
+    let remaining_wavs = std::fs::read_dir(&directory)
+        .expect("read retention fixture")
+        .filter_map(Result::ok)
+        .filter(|item| {
+            item.path()
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("wav"))
+        })
+        .count();
+    assert_eq!(removed, 2);
+    assert_eq!(remaining_wavs, 128);
+    assert!(unrelated.exists());
+
+    std::fs::remove_dir_all(&directory).expect("remove retention fixture");
+}
+
 use std::time::{Duration, Instant};
 
 #[derive(Default)]

@@ -124,11 +124,148 @@ static HIDDEN_AUTOMATIC_CANDIDATE_STATE: AtomicU8 = AtomicU8::new(HIDDEN_AUTOMAT
 /// race or host lag). When the candidate becomes ACTIVE, auto-request promotion.
 static DEVICE_KEY_DICTATION_TAKEOVER_PENDING: AtomicBool = AtomicBool::new(false);
 static WAKE_DIAGNOSTIC_CAPTURE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static WAKE_DIAGNOSTIC_CLEANUP_RUNNING: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Clone)]
+struct WakeDiagnosticRetentionEntry {
+    path: std::path::PathBuf,
+    modified: std::time::SystemTime,
+    bytes: u64,
+}
+
+fn wake_diagnostic_retention_plan(
+    mut entries: Vec<WakeDiagnosticRetentionEntry>,
+    now: std::time::SystemTime,
+    max_age: Duration,
+    max_files: usize,
+    max_bytes: u64,
+) -> Vec<std::path::PathBuf> {
+    entries.sort_by_key(|entry| {
+        entry
+            .modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+    });
+
+    let mut remove = Vec::new();
+    let mut retained = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let expired = now
+            .duration_since(entry.modified)
+            .is_ok_and(|age| age > max_age);
+        if expired {
+            remove.push(entry.path);
+        } else {
+            retained.push(entry);
+        }
+    }
+
+    let mut retained_bytes = retained.iter().map(|entry| entry.bytes).sum::<u64>();
+    let mut remove_count = 0usize;
+    while retained.len().saturating_sub(remove_count) > max_files
+        || retained_bytes > max_bytes
+    {
+        let Some(entry) = retained.get(remove_count) else {
+            break;
+        };
+        retained_bytes = retained_bytes.saturating_sub(entry.bytes);
+        remove.push(entry.path.clone());
+        remove_count += 1;
+    }
+    remove
+}
+
+fn prune_default_wake_diagnostics(directory: &std::path::Path) -> Result<usize, String> {
+    let mut entries = Vec::new();
+    let read_dir = fs::read_dir(directory)
+        .map_err(|err| format!("read {}: {err}", directory.display()))?;
+    for item in read_dir {
+        let Ok(item) = item else {
+            continue;
+        };
+        let path = item.path();
+        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let is_matching_wav = file_name.starts_with("wake-candidate-")
+            && path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("wav"));
+        if !is_matching_wav {
+            continue;
+        }
+        let Ok(metadata) = item.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        entries.push(WakeDiagnosticRetentionEntry {
+            path,
+            modified: metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
+            bytes: metadata.len(),
+        });
+    }
+
+    let removals = wake_diagnostic_retention_plan(
+        entries,
+        std::time::SystemTime::now(),
+        WAKE_DIAGNOSTIC_RETENTION_MAX_AGE,
+        WAKE_DIAGNOSTIC_RETENTION_MAX_FILES,
+        WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES,
+    );
+    let mut removed = 0usize;
+    for path in removals {
+        match fs::remove_file(&path) {
+            Ok(()) => removed += 1,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                log::warn!(
+                    "[wake-phrase] diagnostic retention could not remove {}: {}",
+                    path.display(),
+                    err
+                );
+            }
+        }
+    }
+    Ok(removed)
+}
+
+fn schedule_default_wake_diagnostic_cleanup(directory: std::path::PathBuf) {
+    if WAKE_DIAGNOSTIC_CLEANUP_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    let spawn = std::thread::Builder::new()
+        .name("wake-diag-retention".to_string())
+        .spawn(move || {
+            match prune_default_wake_diagnostics(&directory) {
+                Ok(removed) if removed > 0 => log::info!(
+                    "[wake-phrase] diagnostic rolling cleanup removed={} max_files={} max_bytes={} max_age_days=7",
+                    removed,
+                    WAKE_DIAGNOSTIC_RETENTION_MAX_FILES,
+                    WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES
+                ),
+                Ok(_) => {}
+                Err(err) => log::warn!("[wake-phrase] diagnostic rolling cleanup failed: {err}"),
+            }
+            WAKE_DIAGNOSTIC_CLEANUP_RUNNING.store(false, Ordering::SeqCst);
+        });
+    if let Err(err) = spawn {
+        WAKE_DIAGNOSTIC_CLEANUP_RUNNING.store(false, Ordering::SeqCst);
+        log::warn!("[wake-phrase] diagnostic cleanup thread unavailable: {err}");
+    }
+}
 
 fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str, pcm: &[u8]) {
     // Prefer explicit env; otherwise always keep a small rolling ring under LocalAppData
     // so owner wake misses can be inspected without re-running with special flags.
-    let directory = std::env::var(WAKE_DIAGNOSTIC_DIR_ENV).unwrap_or_else(|_| {
+    let explicit_directory = std::env::var(WAKE_DIAGNOSTIC_DIR_ENV).ok();
+    let is_default_directory = explicit_directory.is_none();
+    let directory = explicit_directory.unwrap_or_else(|| {
         let base = std::env::var("LOCALAPPDATA")
             .or_else(|_| std::env::var("APPDATA"))
             .unwrap_or_else(|_| ".".to_string());
@@ -171,17 +308,27 @@ fn save_bounded_wake_diagnostic(embedded_session_id: u32, outcome: &'static str,
     wav.extend_from_slice(b"data");
     wav.extend_from_slice(&data_size.to_le_bytes());
     wav.extend_from_slice(pcm);
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
     let path = directory.join(format!(
-        "wake-candidate-{index:02}-session-{embedded_session_id}-{outcome}.wav"
+        "wake-candidate-{timestamp_ms}-{}-{index:03}-session-{embedded_session_id}-{outcome}.wav",
+        std::process::id()
     ));
     match fs::write(&path, wav) {
-        Ok(()) => log::info!(
-            "[wake-phrase] bounded local diagnostic saved index={} embedded_session_id={} outcome={} pcm_ms={}",
-            index,
-            embedded_session_id,
-            outcome,
-            pcm.len() / 32
-        ),
+        Ok(()) => {
+            log::info!(
+                "[wake-phrase] bounded local diagnostic saved index={} embedded_session_id={} outcome={} pcm_ms={}",
+                index,
+                embedded_session_id,
+                outcome,
+                pcm.len() / 32
+            );
+            if is_default_directory {
+                schedule_default_wake_diagnostic_cleanup(directory);
+            }
+        }
         Err(err) => log::warn!("[wake-phrase] diagnostic WAV write failed: {err}"),
     }
 }
@@ -424,6 +571,14 @@ fn post_wake_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
         pcm_len,
         2,
     )
+}
+
+fn wake_phrase_tail_to_capsule_ms(wake_end_seconds: f32, capsule_request_ms: u64) -> u64 {
+    if !wake_end_seconds.is_finite() || wake_end_seconds <= 0.0 {
+        return capsule_request_ms;
+    }
+    let wake_end_ms = (wake_end_seconds * 1_000.0).round().max(0.0) as u64;
+    capsule_request_ms.saturating_sub(wake_end_ms)
 }
 
 #[cfg(target_os = "windows")]

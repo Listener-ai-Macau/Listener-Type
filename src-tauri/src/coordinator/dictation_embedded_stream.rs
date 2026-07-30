@@ -351,7 +351,7 @@ impl EmbeddedStreamingDictation {
             crate::speaker_verification::take_enrollment_arm(),
             crate::speaker_verification::is_enrolled(),
         );
-        if let Some(mut candidate_kind) = kind.take() {
+        if let Some(candidate_kind) = kind.take() {
             // Mark hidden ACTIVE before StreamingDetector::new (~1–2s). Device-key
             // Start during that window must promote (VREC:ACTIVATE) instead of
             // VREC:TOGGLE — toggle stops an in-flight VoiceActivation session, so
@@ -1724,6 +1724,15 @@ impl EmbeddedStreamingDictation {
         );
         let latency_target_pass = latency.target_pass;
         let latency_ceiling_pass = latency.ceiling_pass;
+        let phrase_tail_to_capsule_ms =
+            wake_phrase_tail_to_capsule_ms(wake_match.end_seconds, capsule_request_ms);
+        let phrase_tail_latency = denzic_observability_v1_core::assess_duration_ms(
+            phrase_tail_to_capsule_ms,
+            denzic_observability_v1_core::PerformanceBudget {
+                target_ms: 350,
+                ceiling_ms: 500,
+            },
+        );
         let session = begin_embedded_audio_dictation_session(inner).await?;
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
             return Err("嵌入式音频听写会话已被取消".to_string());
@@ -1758,7 +1767,7 @@ impl EmbeddedStreamingDictation {
             }
         };
         log::info!(
-            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control_ms={} wake_to_capsule_request_ms={} latency_target_ms=1200 latency_target_pass={} latency_ceiling_ms=1500 latency_ceiling_pass={}",
+            "[wake-phrase] live automatic session activated and released embedded_session_id={} phrase={} phrase_signal={:?} wake_end_s={:.3} post_wake_pcm_bytes={} kws_ms={} local_confirmation_ms={} voiceprint_ms={} gate_total_ms={} recording_control_ms={} wake_to_capsule_request_ms={} latency_target_ms=1200 latency_target_pass={} latency_ceiling_ms=1500 latency_ceiling_pass={} phrase_tail_to_capsule_ms={} phrase_tail_target_ms=350 phrase_tail_target_pass={} phrase_tail_ceiling_ms=500 phrase_tail_ceiling_pass={}",
             embedded_session_id,
             phrase,
             phrase_signal,
@@ -1771,7 +1780,10 @@ impl EmbeddedStreamingDictation {
             recording_control_ms,
             capsule_request_ms,
             latency_target_pass,
-            latency_ceiling_pass
+            latency_ceiling_pass,
+            phrase_tail_to_capsule_ms,
+            phrase_tail_latency.target_pass,
+            phrase_tail_latency.ceiling_pass
         );
         Ok(true)
     }
