@@ -1075,6 +1075,13 @@ impl EmbeddedStreamingDictation {
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
             return Err("嵌入式音频听写会话已被取消".to_string());
         }
+        if automatic {
+            arm_automatic_wake_text_guard(
+                inner,
+                session.session_id,
+                inner.prefs.get().voice_wake_phrase,
+            );
+        }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);
         let session = self
@@ -1354,15 +1361,24 @@ impl EmbeddedStreamingDictation {
                                         result.transcript_chars,
                                         result.inference_ms,
                                         kws_hit.is_some()
-                                    );
+                                );
                                 if result.matched {
+                                    let refined_end = kws_hit
+                                        .as_ref()
+                                        .map(|found| found.end_seconds)
+                                        .unwrap_or(0.0);
+                                    let refined_end = refined_wake_end_seconds(
+                                        refined_end,
+                                        &result,
+                                        phrase.chars().count(),
+                                    );
                                     phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                     if let Some(candidate) = self.speaker_candidate.as_mut() {
                                         show_early_wake_recording_capsule(inner, candidate);
                                     }
-                                    kws_hit.or(Some(crate::wake_phrase::Match {
-                                        end_seconds: 0.0,
-                                    }))
+                                    Some(crate::wake_phrase::Match {
+                                        end_seconds: refined_end,
+                                    })
                                 } else if kws_hit.is_some() {
                                     // Explicit Absent: precision reject (retry once).
                                     let absent_count = {
@@ -1615,6 +1631,7 @@ impl EmbeddedStreamingDictation {
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
             return Err("嵌入式音频听写会话已被取消".to_string());
         }
+        arm_automatic_wake_text_guard(inner, session.session_id, phrase.clone());
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         self.session = Some(session);
         let session = self

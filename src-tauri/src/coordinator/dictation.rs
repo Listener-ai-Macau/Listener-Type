@@ -495,6 +495,7 @@ async fn begin_embedded_audio_dictation_session(
     let current_session_id = begin_embedded_audio_dictation_session_id(inner)?;
     clear_embedded_audio_stats(inner);
     clear_embedded_audio_partial_preview(inner);
+    clear_automatic_wake_text_guard(inner);
     clear_embedded_audio_stop_feedback(inner);
     #[cfg(target_os = "windows")]
     {
@@ -1556,7 +1557,16 @@ async fn finish_end_session_after_stop_transition(
         }
     }
 
-    raw.text = preserve_recording_transcript(&raw.text);
+    let unfiltered_text = raw.text.clone();
+    raw.text = filter_automatic_wake_text(inner, current_session_id, &raw.text, false);
+    if raw.text != unfiltered_text.trim() {
+        log::info!(
+            "[wake-phrase] removed automatic activation prefix from final transcript session_id={} before_chars={} after_chars={}",
+            current_session_id,
+            unfiltered_text.chars().count(),
+            raw.text.chars().count()
+        );
+    }
     if inner.prefs.get().remove_filler_words {
         let before = raw.text.clone();
         raw.text = remove_standalone_dictation_fillers(&raw.text);

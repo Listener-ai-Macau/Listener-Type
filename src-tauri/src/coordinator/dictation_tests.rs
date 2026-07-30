@@ -118,6 +118,42 @@ fn recording_transcript_preserves_wake_phrase_as_ordinary_speech() {
 }
 
 #[test]
+fn automatic_wake_guard_removes_only_the_activation_prefix() {
+    assert_eq!(
+        super::strip_automatic_activation_prefix(
+            "开始录音。现在开始录音又开始不灵敏。",
+            "开始录音",
+            false,
+        ),
+        "现在开始录音又开始不灵敏。"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix(
+            "正常语句里开始录音只是普通内容。",
+            "开始录音",
+            false,
+        ),
+        "正常语句里开始录音只是普通内容。"
+    );
+}
+
+#[test]
+fn automatic_wake_guard_hides_partial_prefix_and_bounded_tail() {
+    assert_eq!(
+        super::strip_automatic_activation_prefix("开始录", "开始录音", true),
+        ""
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("录音，正文开始。", "开始录音", false),
+        "正文开始。"
+    );
+    assert_eq!(
+        super::strip_automatic_activation_prefix("音频测试", "开始录音", false),
+        "音频测试"
+    );
+}
+
+#[test]
 fn remove_standalone_dictation_fillers_also_strips_inlined_chinese_fillers() {
     // 中文 ASR 常输出无标点的连续文本,语气词粘连在正文里——standalone 删不掉,
     // 这是用户觉得"开关没用"的根因。这里验证粘连的嗯/呃/唔会被剥离。
@@ -2049,6 +2085,27 @@ fn automatic_wake_discards_pre_wake_pcm_for_local_transcript() {
             ),
         "LocalTranscript and KeywordModel must share post-wake PCM drain"
     );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn exact_phrase_only_local_confirmation_refines_late_keyword_boundary() {
+    let confirmation = super::LocalWakeConfirmation {
+        matched: true,
+        phrase_relation: crate::wake_phrase::LocalPhraseRelation::ExactStart,
+        transcript_chars: 4,
+        inference_ms: 100,
+        snapshot_pcm_ms: 2_775,
+    };
+    let refined = super::refined_wake_end_seconds(1.915, &confirmation, 4);
+    assert!((refined - 2.655).abs() < 0.001);
+    assert_eq!(super::post_wake_pcm_offset_bytes(refined, 98_400), 88_800);
+
+    let with_body = super::LocalWakeConfirmation {
+        transcript_chars: 11,
+        ..confirmation
+    };
+    assert_eq!(super::refined_wake_end_seconds(0.685, &with_body, 4), 0.685);
 }
 
 #[test]

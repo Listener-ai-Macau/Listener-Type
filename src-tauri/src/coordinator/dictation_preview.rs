@@ -606,10 +606,123 @@ fn is_embedded_audio_partial_preview_decorative(ch: char) -> bool {
 }
 
 fn preserve_recording_transcript(text: &str) -> String {
-    // The automatic-wake PCM path already drains audio through the detected
-    // keyword boundary before ASR. Any wake phrase ASR still emits belongs to
-    // the active recording and must remain ordinary dictated text.
     text.trim().to_string()
+}
+
+fn wake_phrase_character_matches(actual: char, expected: char) -> bool {
+    if actual == expected {
+        return true;
+    }
+    use pinyin::ToPinyin;
+    actual
+        .to_pinyin()
+        .zip(expected.to_pinyin())
+        .is_some_and(|(actual, expected)| actual.plain() == expected.plain())
+}
+
+fn strip_bounded_activation_suffix(text: &str, phrase: &[char]) -> Option<String> {
+    if phrase.len() < 2 {
+        return None;
+    }
+    for suffix_start in 1..phrase.len() {
+        let mut text_chars = text.char_indices();
+        let mut consumed_end = 0usize;
+        let mut matched = true;
+        for expected in &phrase[suffix_start..] {
+            let Some((index, actual)) = text_chars.next() else {
+                matched = false;
+                break;
+            };
+            if is_embedded_audio_partial_preview_decorative(actual)
+                || !wake_phrase_character_matches(actual, *expected)
+            {
+                matched = false;
+                break;
+            }
+            consumed_end = index + actual.len_utf8();
+        }
+        let matched_len = phrase.len() - suffix_start;
+        let followed_by_boundary = text[consumed_end..]
+            .chars()
+            .next()
+            .is_some_and(is_embedded_audio_partial_preview_decorative);
+        if matched && matched_len > 0 && (matched_len >= 2 || followed_by_boundary) {
+            return Some(
+                text[consumed_end..]
+                    .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+                    .trim()
+                    .to_string(),
+            );
+        }
+    }
+    None
+}
+
+fn strip_automatic_activation_prefix(text: &str, phrase: &str, partial: bool) -> String {
+    let text = text.trim();
+    let phrase = phrase
+        .chars()
+        .filter(|ch| !is_embedded_audio_partial_preview_decorative(*ch))
+        .collect::<Vec<_>>();
+    if text.is_empty() || phrase.is_empty() {
+        return text.to_string();
+    }
+
+    let mut phrase_index = 0usize;
+    let mut consumed_end = 0usize;
+    for (index, ch) in text.char_indices() {
+        let next = index + ch.len_utf8();
+        if is_embedded_audio_partial_preview_decorative(ch) {
+            consumed_end = next;
+            continue;
+        }
+        if phrase_index == phrase.len() {
+            break;
+        }
+        if !wake_phrase_character_matches(ch, phrase[phrase_index]) {
+            return strip_bounded_activation_suffix(text, &phrase)
+                .unwrap_or_else(|| text.to_string());
+        }
+        phrase_index += 1;
+        consumed_end = next;
+    }
+
+    if phrase_index == phrase.len() {
+        text[consumed_end..]
+            .trim_start_matches(is_embedded_audio_partial_preview_decorative)
+            .trim()
+            .to_string()
+    } else if partial && phrase_index > 0 {
+        String::new()
+    } else {
+        text.to_string()
+    }
+}
+
+fn clear_automatic_wake_text_guard(inner: &Arc<Inner>) {
+    *inner.embedded_audio_automatic_wake_guard.lock() = None;
+}
+
+fn arm_automatic_wake_text_guard(inner: &Arc<Inner>, session_id: SessionId, phrase: String) {
+    *inner.embedded_audio_automatic_wake_guard.lock() = Some((session_id, phrase));
+}
+
+fn filter_automatic_wake_text(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    text: &str,
+    partial: bool,
+) -> String {
+    let phrase = inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .filter(|(guard_session_id, _)| *guard_session_id == session_id)
+        .map(|(_, phrase)| phrase.clone());
+    phrase.map_or_else(
+        || preserve_recording_transcript(text),
+        |phrase| strip_automatic_activation_prefix(text, &phrase, partial),
+    )
 }
 
 fn is_dictation_filler_word(word: &str) -> bool {
@@ -755,8 +868,8 @@ fn strip_inlined_chinese_filler_runs(text: &str) -> String {
     out.trim().to_string()
 }
 
-fn filter_dictation_preview_text(inner: &Arc<Inner>, _session_id: SessionId, text: &str) -> String {
-    let text = preserve_recording_transcript(text);
+fn filter_dictation_preview_text(inner: &Arc<Inner>, session_id: SessionId, text: &str) -> String {
+    let text = filter_automatic_wake_text(inner, session_id, text, true);
     if inner.prefs.get().remove_filler_words {
         remove_standalone_dictation_fillers(&text)
     } else {

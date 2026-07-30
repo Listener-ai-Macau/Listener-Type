@@ -383,6 +383,7 @@ const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 900;
 /// Explicit local Absent count before midstream hard-reject (blocks short
 /// prefix false wakes like "开始啥的"; one retry for noisy short clips).
 const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
+const WAKE_END_PAD_SECONDS: f32 = 0.12;
 
 fn owner_verification_window_ready(pcm_bytes: usize) -> bool {
     // No enrolled voiceprint → phrase hit alone is enough; do not stall for the
@@ -414,9 +415,31 @@ fn post_wake_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
         return 0;
     }
     // Small pad so the last syllable of the wake phrase does not leak into ASR.
-    const WAKE_END_PAD_SECONDS: f32 = 0.12;
     let offset = ((wake_end_seconds + WAKE_END_PAD_SECONDS) * 32_000.0) as usize;
     offset.min(pcm_len) & !1usize
+}
+
+#[cfg(target_os = "windows")]
+fn refined_wake_end_seconds(
+    keyword_end_seconds: f32,
+    confirmation: &LocalWakeConfirmation,
+    phrase_chars: usize,
+) -> f32 {
+    let exact_phrase_only = matches!(
+        confirmation.phrase_relation,
+        crate::wake_phrase::LocalPhraseRelation::ExactStart
+            | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
+    ) && confirmation.transcript_chars <= phrase_chars;
+    if !exact_phrase_only {
+        return keyword_end_seconds;
+    }
+
+    // Sherpa's streaming token timestamp can lag the actual detection boundary
+    // by up to the 800 ms lookback window. If local ASR saw only the wake phrase
+    // in this snapshot, cutting through the snapshot cannot remove dictated body.
+    let local_phrase_end =
+        confirmation.snapshot_pcm_ms as f32 / 1_000.0 - WAKE_END_PAD_SECONDS;
+    keyword_end_seconds.max(local_phrase_end.max(0.0))
 }
 
 #[cfg(target_os = "windows")]
