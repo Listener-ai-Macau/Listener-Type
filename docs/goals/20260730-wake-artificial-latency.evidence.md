@@ -48,9 +48,9 @@ Date: 2026-07-30
   skip offline work, while the remaining path is capped at 500 ms.
 - Complete restored-code Rust run after the late-hit correction: 926 passed,
   19 ignored, 0 failed.
-- Restored-code `npm run release:check`: PASS, including frontend, release packaging,
+- Final `npm run release:check`: PASS, including frontend, release packaging,
   recording latency, BLE recovery and OTA contracts; its Rust run also reported
-  925 passed, 19 ignored and 0 failed.
+  926 passed, 19 ignored and 0 failed.
 - Final installed ambient `session 165`: five local `Absent` results; terminal stop and
   rejection occurred in the same logged millisecond with no offline cascade.
 - Final installed ambient `session 167`: six local `Absent` results; terminal handling
@@ -62,12 +62,14 @@ Date: 2026-07-30
 
 - Root Type MSI: `ListenerType_1.0.3_x64_en-US.msi`
   - bytes: 15,265,792
-  - SHA-256: `14A3251189AA6E3C02A5041191147F7ADA912A979B8AE8003B2171701521FD4E`
+  - SHA-256: `F3582510D3FA7B954A54C55F906947D3277B246CAE178B8902E4E3D484F7B531`
 - Installed Program Files executable SHA-256:
-  `6E1D2F1F4EC91428D8EA88D161F5FFEADD0276A663191591C3BCAFEFA162C1CD`
+  `EEFC1331A07ABB5E6BC1DA82F9E753EB58FD023FF8E644FBBECEF359B4EE56BA`
 - Root firmware ZIP is unchanged:
   `51F6E00DDBAC07F7238C7D4884CCE60D1DED12B5F0CFAC6F8A586FA22A7D4355`
 - Root release-artifact identity check: PASS.
+- Final installed Type BLE status probe: PASS in 248 ms with firmware 1.0.3 and
+  audio/OTA readiness present.
 
 ## Human boundary
 
