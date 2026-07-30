@@ -57,4 +57,21 @@ firmware/OTA/BLE/LED untouched.
 
 ## Package identity
 
-Filled after MSI install identity check.
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `ListenerType_1.0.4_x64_en-US.msi` (root + `.artifacts`) | 14,082,048 | `342DB5AEEFD207746D5C9AB44CA243093FF4C34442DCDCB0C9E6FD2A947DBA36` |
+| Installed `C:\Program Files\Listener Type\listener-type.exe` | 38,962,688 | `D0D4A37A1B2F7CED4863D7842F4FD6739C64DCB98A93D25E973CBD591CBDD630` |
+| `ListenerFirmware_1.0.3_ota.zip` (unchanged) | 1,545,390 | `51F6E00DDBAC07F7238C7D4884CCE60D1DED12B5F0CFAC6F8A586FA22A7D4355` |
+
+Installed identity check: MSI payload EXE hash matches Program Files EXE.
+Installed process logs: `runtime KWS config phrase=开始录音 score=3.5 threshold=0.05`,
+`isolated local confirmation helper ready reason=startup`, `background listener notify ready`.
+Binary contains `stage2 early Absent held (phrase horizon)`.
+
+Type commits on master (not tag): `c7d82bc` wake fix + `ff88bf2` OTA headless version assert.
+Firmware remains tagged source `0f085bb` (no firmware code change for 1.0.4 wake).
+
+## Live positive/negative matrix
+
+Owner voice + screen acceptance still required for P1–P5 / N1–N5 / I1.
+Agent machine path complete through install + ready + helper; live spoken matrix is the owner gate.
