@@ -40,4 +40,12 @@ Date: 2026-07-30
   remains failed. Do not declare sensitivity and false-wake accuracy accepted until a
   fixed owner positive/near-phrase/ambient matrix passes.
 
+## Release decision
+
+- Owner decision: submit the current build as 1.0.3 and move further wake sensitivity
+  work to 1.0.4 if it is not a simple, low-risk correction.
+- Resolution: accept the current package as the 1.0.3 release boundary. Keep the
+  overall wake-accuracy claim open and schedule its fixed positive/near-phrase/ambient
+  matrix for 1.0.4. Do not retune 1.0.3.
+
 No firmware, OTA, pairing, LED or transcript defect is opened by these notes.

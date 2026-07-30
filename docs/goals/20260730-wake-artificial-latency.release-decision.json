@@ -1,0 +1,8 @@
+{
+  "date": "2026-07-30",
+  "owner_note": "就先这样吧，你看一下，提交一下1.0.3。这个唤醒度你觉得好修吗？不好修，放到1.0.4修吧。",
+  "release": "1.0.3",
+  "disposition": "accept_current_release_defer_wake_accuracy_tuning_to_1.0.4",
+  "known_follow_up": "fixed positive, near-phrase and ambient wake matrix",
+  "accuracy_claim": "not_yet_accepted"
+}

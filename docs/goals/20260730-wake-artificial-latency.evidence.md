@@ -83,5 +83,6 @@ stored separately. A later prompt result asking where the prompt came from is tr
 tooling clarification without a product trial. Final acceptance remains pending on the
 installed bounded-tail single-helper build: its latest canonical review selected
 `失败` without a note even though matching machine session 264 passed the latency gate.
-Do not claim overall sensitivity/false-wake acceptance until a positive/negative owner
-matrix resolves that human-machine contradiction.
+The owner's later release decision accepts this exact build for 1.0.3 and defers the
+remaining sensitivity/false-wake matrix and tuning to 1.0.4. This closes the 1.0.3
+release boundary but does not relabel overall wake accuracy as machine- or human-passed.
