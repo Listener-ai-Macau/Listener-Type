@@ -452,6 +452,8 @@ struct BufferedSpeakerCandidate {
     #[cfg(target_os = "windows")]
     local_confirmation_task:
         Option<tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>>>,
+    #[cfg(target_os = "windows")]
+    local_confirmation_task_kws_priority: bool,
     local_confirmation_attempts: usize,
     local_confirmation_last_snapshot_bytes: usize,
     /// First KWS hit schedules an immediate local confirm instead of waiting for
@@ -573,6 +575,14 @@ fn should_run_terminal_offline_recall(pcm_bytes: usize, local_absent_count: u8) 
         && local_absent_count < TERMINAL_OFFLINE_SKIP_ABSENT_COUNT
 }
 
+fn should_preempt_exploratory_confirmation(
+    kws_hit: bool,
+    task_present: bool,
+    task_kws_priority: bool,
+) -> bool {
+    kws_hit && task_present && !task_kws_priority
+}
+
 /// Bytes of candidate PCM to discard before ASR for an automatic wake accept.
 /// Uses KWS/local end time when available; LocalTranscript must not force 0 —
 /// that shipped pre-wake speech ("好贵啊…开始录音，帮我看…") into the capsule.
@@ -648,6 +658,7 @@ fn spawn_local_wake_confirmation(
     pcm: Vec<u8>,
     phrase: String,
     recover_keyword_boundary: bool,
+    kws_priority: bool,
 ) -> tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>> {
     tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
@@ -655,9 +666,20 @@ fn spawn_local_wake_confirmation(
         // Same full-buffer gain path as offline KWS — raw device VA is often too
         // quiet for ExactStart without it (intermittent local Absent with KWS hot).
         let boosted = crate::wake_phrase::gain_normalized_pcm16(&pcm);
-        let result =
-            crate::asr::local::wake_helper::confirm(&boosted, &phrase, Duration::from_secs(4))
-                .map_err(|err| format!("local wake confirmation failed: {err}"))?;
+        let result = if kws_priority {
+            crate::asr::local::wake_helper::confirm_priority(
+                &boosted,
+                &phrase,
+                Duration::from_secs(4),
+            )
+        } else {
+            crate::asr::local::wake_helper::confirm(
+                &boosted,
+                &phrase,
+                Duration::from_secs(4),
+            )
+        }
+        .map_err(|err| format!("local wake confirmation failed: {err}"))?;
         let recovered_keyword_end_seconds = if recover_keyword_boundary
             && result.matched
             && matches!(

@@ -2230,6 +2230,36 @@ fn terminal_offline_recall_releases_the_actor_after_repeated_local_absence() {
 }
 
 #[test]
+fn kws_preempts_only_an_exploratory_local_confirmation() {
+    assert!(super::should_preempt_exploratory_confirmation(
+        true, true, false
+    ));
+    assert!(!super::should_preempt_exploratory_confirmation(
+        false, true, false
+    ));
+    assert!(!super::should_preempt_exploratory_confirmation(
+        true, false, false
+    ));
+    assert!(!super::should_preempt_exploratory_confirmation(
+        true, true, true
+    ));
+
+    let helper = include_str!("../asr/local/wake_helper.rs");
+    assert!(
+        helper.contains("fn priority_client()")
+            && helper.contains("priority_client().confirm(pcm, phrase, timeout)")
+            && helper.contains("scope.spawn(|| client().preload())"),
+        "exploratory and KWS-priority helper lanes must be separate and prewarmed"
+    );
+    let stream = include_str!("dictation_embedded_stream.rs");
+    assert!(
+        stream.contains("stage2 KWS preempted exploratory local confirm")
+            && stream.contains("candidate.local_confirmation_task.take();"),
+        "KWS must detach the exploratory task before starting priority confirmation"
+    );
+}
+
+#[test]
 fn automatic_wake_discards_pre_wake_pcm_for_local_transcript() {
     // Regression: LocalTranscript forced post_wake_offset=0 and kept pre-wake speech.
     assert_eq!(super::post_wake_pcm_offset_bytes(0.0, 32_000), 0);
