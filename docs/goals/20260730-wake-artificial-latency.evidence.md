@@ -38,12 +38,27 @@ Date: 2026-07-30
 - Focused coordinator busy/fallback test: PASS; busy returns before keyword fallback.
 - Focused terminal policy test: PASS; short candidates and two local `Absent` results
   skip offline work, while the remaining path is capped at 500 ms.
-- Complete clean-instance Rust run before the rejected experiment: 925 passed,
-  19 ignored, 0 failed.
+- Complete restored-code Rust run: 925 passed, 19 ignored, 0 failed.
+- Restored-code `npm run release:check`: PASS, including frontend, release packaging,
+  recording latency, BLE recovery and OTA contracts; its Rust run also reported
+  925 passed, 19 ignored and 0 failed.
 - Final installed ambient `session 165`: five local `Absent` results; terminal stop and
   rejection occurred in the same logged millisecond with no offline cascade.
 - Final installed ambient `session 167`: six local `Absent` results; terminal handling
   completed in 45 ms and did not open a capsule.
+- Restored installed Type BLE status probe: PASS in 334 ms, connected to `Blistener`
+  with firmware 1.0.3 and audio/OTA readiness present.
+
+## Restored package identity
+
+- Root Type MSI: `ListenerType_1.0.3_x64_en-US.msi`
+  - bytes: 15,265,792
+  - SHA-256: `14A3251189AA6E3C02A5041191147F7ADA912A979B8AE8003B2171701521FD4E`
+- Installed Program Files executable SHA-256:
+  `6E1D2F1F4EC91428D8EA88D161F5FFEADD0276A663191591C3BCAFEFA162C1CD`
+- Root firmware ZIP is unchanged:
+  `51F6E00DDBAC07F7238C7D4884CCE60D1DED12B5F0CFAC6F8A586FA22A7D4355`
+- Root release-artifact identity check: PASS.
 
 ## Human boundary
 
