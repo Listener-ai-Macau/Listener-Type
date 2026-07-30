@@ -43,6 +43,21 @@ rejected because retained quiet true-positive candidates overlap the incident sa
 - Shared Platform implementation commit:
   `ad2cc2ee6381ec0cdefe93a8cc2341c2c4f0e733`.
 
+## Installed build
+
+- Type source commit: `e3cff98b855e1794ee529628491008f32f4fd10b`.
+- Formal MSI:
+  `C:\Users\Billy\Desktop\Denzic\Listener\ListenerType_1.0.3_x64_en-US.msi`.
+- MSI SHA-256:
+  `9CD5080A8E6CDD0F3F8352A398ED14DB348B5EB783B272303D0429F7B7215532`.
+- Installed executable:
+  `C:\Program Files\Listener Type\listener-type.exe`.
+- Installed executable/MSI payload SHA-256:
+  `CA7B62FC9BA9265E68A4D7A94E5BEEFE503059CC38EF61097EB0FDC25170180E`.
+- Installed process identity: PID 5820, Program Files executable.
+- Startup trace: background BLE `notify ready` and response-bearing `TYPE:READY`,
+  followed by the isolated local confirmation helper becoming ready.
+
 ## Human boundary
 
 Listen to:
@@ -50,4 +65,6 @@ Listen to:
 `C:\Users\Billy\AppData\Local\Listener Type\Logs\wake-diag-live\wake-candidate-133-session-151-accepted.wav`
 
 Record whether the activation phrase is audibly present. Energy statistics alone are not
-accepted evidence for changing wake sensitivity.
+accepted evidence for changing wake sensitivity. The canonical Chinese operator window
+was opened as `唤醒触发录音判断 1/1`; no selection artifact had been returned at the time
+this machine evidence was finalized, so acoustic classification remains pending.
