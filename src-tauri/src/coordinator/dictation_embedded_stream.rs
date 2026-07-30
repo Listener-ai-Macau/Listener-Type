@@ -395,6 +395,7 @@ impl EmbeddedStreamingDictation {
                 kws_local_absent_count: 0,
                 local_absent_count: 0,
                 kws_first_hit_at: None,
+                kws_first_hit_pcm_ms: None,
                 early_capsule_session_id: None,
                 kws_fed_bytes: 0,
                 kws_total_ms: 0,
@@ -707,7 +708,7 @@ impl EmbeddedStreamingDictation {
                     {
                         let confirm = spawn_local_wake_confirmation(
                             inner,
-                            local_confirmation_pcm(&candidate.pcm, true),
+                            candidate.pcm.clone(),
                             phrase.clone(),
                             false,
                         )
@@ -1326,6 +1327,7 @@ impl EmbeddedStreamingDictation {
                 if let Some(candidate) = self.speaker_candidate.as_mut() {
                     if candidate.kws_first_hit_at.is_none() {
                         candidate.kws_first_hit_at = Some(Instant::now());
+                        candidate.kws_first_hit_pcm_ms = Some(candidate.pcm.len() / 32);
                         log::info!(
                             "[wake-phrase] stage1 KWS hit embedded_session_id={} pcm_ms={} secondary_budget_ms={}",
                             embedded_session_id,
@@ -1375,13 +1377,12 @@ impl EmbeddedStreamingDictation {
                                     .unwrap_or(snapshot_pcm_ms);
                                 candidate.local_confirmation_last_snapshot_bytes =
                                     candidate.pcm.len();
+                                // Pass full candidate PCM: spawn crops the KWS
+                                // 5 s tail and optional phrase-focus retry.
                                 candidate.local_confirmation_task =
                                     Some(spawn_local_wake_confirmation(
                                         inner,
-                                        local_confirmation_pcm(
-                                            &candidate.pcm,
-                                            kws_hit.is_some(),
-                                        ),
+                                        candidate.pcm.clone(),
                                         phrase.clone(),
                                         kws_hit.is_none(),
                                     ));
@@ -1451,20 +1452,37 @@ impl EmbeddedStreamingDictation {
                                         end_seconds: refined_end,
                                     })
                                 } else if !result.matched {
-                                    let (local_absent_count, kws_absent_count) = {
+                                    let (local_absent_count, kws_absent_count, counted_kws_absent) = {
                                         let candidate = self
                                             .speaker_candidate
                                             .as_mut()
                                             .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
                                         candidate.local_absent_count =
                                             candidate.local_absent_count.saturating_add(1);
+                                        let mut counted_kws_absent = false;
                                         if kws_hit.is_some() {
-                                            candidate.kws_local_absent_count =
-                                                candidate.kws_local_absent_count.saturating_add(1);
+                                            if kws_absent_counts_toward_reject(
+                                                candidate.kws_first_hit_pcm_ms,
+                                                result.snapshot_pcm_ms,
+                                            ) {
+                                                candidate.kws_local_absent_count = candidate
+                                                    .kws_local_absent_count
+                                                    .saturating_add(1);
+                                                counted_kws_absent = true;
+                                            } else {
+                                                log::info!(
+                                                    "[wake-phrase] stage2 early Absent held (phrase horizon) embedded_session_id={} snapshot_pcm_ms={} first_hit_pcm_ms={:?} min_post_hit_ms={}",
+                                                    embedded_session_id,
+                                                    result.snapshot_pcm_ms,
+                                                    candidate.kws_first_hit_pcm_ms,
+                                                    KWS_ABSENT_COUNT_MIN_POST_HIT_MS
+                                                );
+                                            }
                                         }
                                         (
                                             candidate.local_absent_count,
                                             candidate.kws_local_absent_count,
+                                            counted_kws_absent,
                                         )
                                     };
                                     if kws_hit.is_none() {
@@ -1473,15 +1491,15 @@ impl EmbeddedStreamingDictation {
                                             embedded_session_id,
                                             local_absent_count
                                         );
-                                    } else if kws_absent_count
-                                        >= KWS_SECONDARY_ABSENT_REJECT_COUNT
+                                    } else if counted_kws_absent
+                                        && kws_absent_count >= KWS_SECONDARY_ABSENT_REJECT_COUNT
                                     {
                                         log::info!(
                                             "[wake-phrase] stage2 Absent reject embedded_session_id={} count={} (anti half-phrase false wake)",
                                             embedded_session_id,
                                             kws_absent_count
                                         );
-                                    } else {
+                                    } else if counted_kws_absent {
                                         log::info!(
                                             "[wake-phrase] stage2 Absent retry embedded_session_id={} count={}/{}",
                                             embedded_session_id,

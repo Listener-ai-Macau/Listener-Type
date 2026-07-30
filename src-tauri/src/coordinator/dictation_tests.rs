@@ -2313,6 +2313,37 @@ fn kws_local_confirmation_uses_only_an_aligned_five_second_tail() {
     );
 }
 
+#[test]
+fn kws_phrase_focus_tail_is_shorter_than_five_second_cap() {
+    let long: Vec<u8> = (0..super::KWS_LOCAL_CONFIRM_MAX_PCM_BYTES + 200)
+        .map(|index| (index % 251) as u8)
+        .collect();
+    let focus = super::kws_phrase_focus_pcm(&long);
+    assert_eq!(focus.len(), super::KWS_LOCAL_CONFIRM_FOCUS_PCM_BYTES);
+    assert!(focus.len() < super::KWS_LOCAL_CONFIRM_MAX_PCM_BYTES);
+    assert_eq!(
+        focus,
+        long[long.len() - super::KWS_LOCAL_CONFIRM_FOCUS_PCM_BYTES..]
+    );
+    let short = vec![9u8; 800];
+    assert_eq!(super::kws_phrase_focus_pcm(&short), short);
+}
+
+#[test]
+fn kws_absent_hard_reject_waits_for_post_hit_phrase_horizon() {
+    // First hit at 1920 ms (session-288 style): Absents before +1 s must not
+    // burn the two-Absent reject budget; later Absents remain authoritative.
+    assert!(!super::kws_absent_counts_toward_reject(Some(1_920), 1_800));
+    assert!(!super::kws_absent_counts_toward_reject(Some(1_920), 2_040));
+    assert!(!super::kws_absent_counts_toward_reject(Some(1_920), 2_900));
+    assert!(super::kws_absent_counts_toward_reject(Some(1_920), 2_920));
+    assert!(super::kws_absent_counts_toward_reject(Some(1_920), 3_900));
+    assert!(
+        super::kws_absent_counts_toward_reject(None, 800),
+        "without a recorded hit, Absent evidence stays authoritative"
+    );
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn local_only_start_phrase_has_a_bounded_nonzero_audio_endpoint() {

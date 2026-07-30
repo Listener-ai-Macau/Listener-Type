@@ -465,6 +465,9 @@ struct BufferedSpeakerCandidate {
     /// Wall clock of first live KWS hit — drives secondary-confirm budget
     /// (XiaoAi-style stage-2 timeout fail-open).
     kws_first_hit_at: Option<Instant>,
+    /// Candidate PCM length (ms) at first live KWS hit — gates when an Absent
+    /// may count toward hard-reject (phrase must have had time to finish).
+    kws_first_hit_pcm_ms: Option<usize>,
     /// Recording capsule shown at first KWS hit (before local ExactStart) so the
     /// user is not left waiting with no UI while post-wake speech is already buffered.
     early_capsule_session_id: Option<SessionId>,
@@ -530,9 +533,21 @@ const KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400;
 const KWS_LOCAL_CONFIRM_RETRY_BYTES: usize = KWS_LOCAL_CONFIRM_RETRY_MS * 32;
 /// Streaming KWS already supplies an absolute phrase boundary. Stage-2 only
 /// needs nearby speech for precision; sending a long ambient prefix makes
-/// Paraformer latency scale with unrelated audio.
+/// Paraformer latency scale with unrelated audio. Cap remains 5_000 ms
+/// (LST-WAKE-009); a shorter focus tail is tried on Absent before counting
+/// hard-reject evidence.
 const KWS_LOCAL_CONFIRM_MAX_PCM_MS: usize = 5_000;
 const KWS_LOCAL_CONFIRM_MAX_PCM_BYTES: usize = KWS_LOCAL_CONFIRM_MAX_PCM_MS * 32;
+/// Phrase-focused retry after a 5 s tail Absent. Real quiet miss session 288
+/// ends the wake near 3.1 s inside a ~3.9 s candidate; a 1.6 s tail isolates
+/// the phrase better than ambient-polluted full-candidate Paraformer ASR.
+const KWS_LOCAL_CONFIRM_FOCUS_PCM_MS: usize = 1_600;
+const KWS_LOCAL_CONFIRM_FOCUS_PCM_BYTES: usize = KWS_LOCAL_CONFIRM_FOCUS_PCM_MS * 32;
+/// Do not spend the two-Absent hard-reject budget until the candidate has
+/// continued ~one full Mandarin wake phrase after the first KWS hit. Session
+/// 288 evidence: streaming KWS at 1.92 s with offline full-phrase end at
+/// 3.1 s — two early Absents killed the candidate before the phrase finished.
+const KWS_ABSENT_COUNT_MIN_POST_HIT_MS: usize = 1_000;
 /// XiaoAi-style cascade after sensitive KWS hit:
 ///   stage-1 KWS (high recall) → stage-2 local wake verifier (precision)
 /// Wait up to this budget for stage-2; then fail-open as KeywordModel so a
@@ -574,12 +589,36 @@ fn next_local_confirmation_snapshot_bytes(attempts: usize) -> Option<usize> {
 }
 
 fn local_confirmation_pcm(pcm: &[u8], has_keyword_model_hit: bool) -> Vec<u8> {
-    if !has_keyword_model_hit || pcm.len() <= KWS_LOCAL_CONFIRM_MAX_PCM_BYTES {
+    tail_pcm_window(pcm, if has_keyword_model_hit {
+        KWS_LOCAL_CONFIRM_MAX_PCM_BYTES
+    } else {
+        pcm.len()
+    })
+}
+
+fn tail_pcm_window(pcm: &[u8], max_bytes: usize) -> Vec<u8> {
+    if max_bytes == 0 || pcm.len() <= max_bytes {
         return pcm.to_vec();
     }
-    let start = pcm.len() - KWS_LOCAL_CONFIRM_MAX_PCM_BYTES;
+    let start = pcm.len() - max_bytes;
     let aligned_start = start + start % 2;
     pcm[aligned_start..].to_vec()
+}
+
+fn kws_phrase_focus_pcm(pcm: &[u8]) -> Vec<u8> {
+    tail_pcm_window(pcm, KWS_LOCAL_CONFIRM_FOCUS_PCM_BYTES)
+}
+
+/// An explicit KWS-path Absent only hard-rejects after the candidate has grown
+/// by about one full phrase past the first hit. Earlier Absents still retry.
+fn kws_absent_counts_toward_reject(
+    first_hit_pcm_ms: Option<usize>,
+    snapshot_pcm_ms: usize,
+) -> bool {
+    match first_hit_pcm_ms {
+        None => true,
+        Some(hit_ms) => snapshot_pcm_ms >= hit_ms.saturating_add(KWS_ABSENT_COUNT_MIN_POST_HIT_MS),
+    }
 }
 
 fn should_run_terminal_offline_recall(pcm_bytes: usize, local_absent_count: u8) -> bool {
@@ -657,6 +696,27 @@ fn secondary_fallback_can_accept_keyword(
 }
 
 #[cfg(target_os = "windows")]
+fn run_local_wake_confirmation_once(
+    pcm: &[u8],
+    phrase: &str,
+) -> Result<LocalWakeConfirmation, String> {
+    let snapshot_pcm_ms = pcm.len() / 32;
+    // Same full-buffer gain path as offline KWS — raw device VA is often too
+    // quiet for ExactStart without it (intermittent local Absent with KWS hot).
+    let boosted = crate::wake_phrase::gain_normalized_pcm16(pcm);
+    let result = crate::asr::local::wake_helper::confirm(&boosted, phrase, Duration::from_secs(4))
+        .map_err(|err| format!("local wake confirmation failed: {err}"))?;
+    Ok(LocalWakeConfirmation {
+        matched: result.matched,
+        phrase_relation: result.phrase_relation,
+        transcript_chars: result.transcript_chars,
+        inference_ms: result.inference_ms,
+        snapshot_pcm_ms,
+        recovered_keyword_end_seconds: None,
+    })
+}
+
+#[cfg(target_os = "windows")]
 fn spawn_local_wake_confirmation(
     _inner: &Arc<Inner>,
     pcm: Vec<u8>,
@@ -665,13 +725,27 @@ fn spawn_local_wake_confirmation(
 ) -> tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>> {
     tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
-        let snapshot_pcm_ms = pcm.len() / 32;
-        // Same full-buffer gain path as offline KWS — raw device VA is often too
-        // quiet for ExactStart without it (intermittent local Absent with KWS hot).
-        let boosted = crate::wake_phrase::gain_normalized_pcm16(&pcm);
-        let result =
-            crate::asr::local::wake_helper::confirm(&boosted, &phrase, Duration::from_secs(4))
-                .map_err(|err| format!("local wake confirmation failed: {err}"))?;
+        // Exploratory (no KWS yet) keeps the provided snapshot as-is.
+        // KWS path: primary is the LST-WAKE-009 5 s tail; on Absent, retry a
+        // short phrase-focus tail before counting hard-reject evidence.
+        let primary = if recover_keyword_boundary {
+            pcm.clone()
+        } else {
+            local_confirmation_pcm(&pcm, true)
+        };
+        let mut result = run_local_wake_confirmation_once(&primary, &phrase)?;
+        if !recover_keyword_boundary && !result.matched {
+            let focus = kws_phrase_focus_pcm(&pcm);
+            // Skip duplicate work when primary already was the short focus tail.
+            if focus.len() < primary.len() {
+                let focused = run_local_wake_confirmation_once(&focus, &phrase)?;
+                if focused.matched {
+                    result = focused;
+                } else {
+                    result.inference_ms = result.inference_ms.saturating_add(focused.inference_ms);
+                }
+            }
+        }
         let recovered_keyword_end_seconds = if recover_keyword_boundary
             && result.matched
             && matches!(
@@ -687,16 +761,11 @@ fn spawn_local_wake_confirmation(
         } else {
             None
         };
-        Ok(LocalWakeConfirmation {
-            matched: result.matched,
-            phrase_relation: result.phrase_relation,
-            transcript_chars: result.transcript_chars,
-            inference_ms: result
-                .inference_ms
-                .max(started.elapsed().as_millis() as u64),
-            snapshot_pcm_ms,
-            recovered_keyword_end_seconds,
-        })
+        result.recovered_keyword_end_seconds = recovered_keyword_end_seconds;
+        result.inference_ms = result
+            .inference_ms
+            .max(started.elapsed().as_millis() as u64);
+        Ok(result)
     })
 }
 
