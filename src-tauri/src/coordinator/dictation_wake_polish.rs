@@ -459,6 +459,9 @@ struct BufferedSpeakerCandidate {
     kws_prompted_local_confirm: bool,
     /// Local ASR returned Absent while KWS still hot (telemetry / retry pacing).
     kws_local_absent_count: u8,
+    /// All completed midstream local Absent results. Terminal handling uses
+    /// repeated evidence to skip an expensive ambient-only offline cascade.
+    local_absent_count: u8,
     /// Wall clock of first live KWS hit — drives secondary-confirm budget
     /// (XiaoAi-style stage-2 timeout fail-open).
     kws_first_hit_at: Option<Instant>,
@@ -533,6 +536,11 @@ const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 900;
 /// Explicit local Absent count before midstream hard-reject (blocks short
 /// prefix false wakes like "开始啥的"; one retry for noisy short clips).
 const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
+/// Do not serialize the BLE actor behind multi-second auxiliary recall after
+/// repeated local evidence already rejected an ambient candidate.
+const TERMINAL_OFFLINE_SKIP_ABSENT_COUNT: u8 = 2;
+const MIN_TERMINAL_OFFLINE_PCM_BYTES: usize = 16_000 * 2 * 2;
+const TERMINAL_OFFLINE_RECALL_BUDGET_MS: u64 = 500;
 const WAKE_END_PAD_SECONDS: f32 = 0.12;
 const LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS: f32 = 1.20;
 
@@ -558,6 +566,11 @@ fn next_local_confirmation_snapshot_bytes(attempts: usize) -> Option<usize> {
         &LOCAL_CONFIRMATION_SNAPSHOT_MS,
     )
     .map(|milliseconds| milliseconds * 32)
+}
+
+fn should_run_terminal_offline_recall(pcm_bytes: usize, local_absent_count: u8) -> bool {
+    pcm_bytes >= MIN_TERMINAL_OFFLINE_PCM_BYTES
+        && local_absent_count < TERMINAL_OFFLINE_SKIP_ABSENT_COUNT
 }
 
 /// Bytes of candidate PCM to discard before ASR for an automatic wake accept.

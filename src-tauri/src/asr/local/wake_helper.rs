@@ -373,9 +373,7 @@ mod imp {
     mod tests {
         use std::time::Duration;
 
-        use super::{
-            phrase_relation_matches, HelperRequest, HelperResponse, WakeHelperClient,
-        };
+        use super::{phrase_relation_matches, HelperRequest, HelperResponse, WakeHelperClient};
 
         #[test]
         fn confirmation_returns_busy_instead_of_queueing_on_the_helper() {

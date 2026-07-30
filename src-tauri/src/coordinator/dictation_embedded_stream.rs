@@ -393,6 +393,7 @@ impl EmbeddedStreamingDictation {
                 local_confirmation_last_snapshot_bytes: 0,
                 kws_prompted_local_confirm: false,
                 kws_local_absent_count: 0,
+                local_absent_count: 0,
                 kws_first_hit_at: None,
                 early_capsule_session_id: None,
                 kws_fed_bytes: 0,
@@ -700,9 +701,6 @@ impl EmbeddedStreamingDictation {
             candidate.kws_total_ms = candidate.kws_total_ms.saturating_add(final_kws_ms);
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
             let mut local_confirmation_ms = 0u64;
-            // 16 kHz mono s16le → 32 bytes/ms. Terminal offline must not block the
-            // BLE stream actor for multi-second cascades on ambient VA spam.
-            const MIN_TERMINAL_OFFLINE_PCM_BYTES: usize = 16_000 * 2 * 2; // 2.0 s
             let wake_match = match wake_match {
                 Ok(Some(found)) => {
                     #[cfg(target_os = "windows")]
@@ -792,15 +790,18 @@ impl EmbeddedStreamingDictation {
                 Ok(None) => {
                     // Streaming KWS missed. Fast-reject before expensive offline work
                     // when midstream local already said Absent, or the candidate is short.
-                    if candidate.kws_local_absent_count > 0 {
+                    if candidate.local_absent_count >= TERMINAL_OFFLINE_SKIP_ABSENT_COUNT {
                         log::info!(
-                            "[wake-phrase] terminal skip offline cascade: midstream local Absent count={} embedded_session_id={} pcm_ms={}",
-                            candidate.kws_local_absent_count,
+                            "[wake-phrase] terminal skip offline cascade: repeated midstream local Absent count={} embedded_session_id={} pcm_ms={}",
+                            candidate.local_absent_count,
                             embedded_session_id,
                             candidate.pcm.len() / 32
                         );
                         None
-                    } else if candidate.pcm.len() < MIN_TERMINAL_OFFLINE_PCM_BYTES {
+                    } else if !should_run_terminal_offline_recall(
+                        candidate.pcm.len(),
+                        candidate.local_absent_count,
+                    ) {
                         log::info!(
                             "[wake-phrase] terminal skip offline cascade: candidate too short embedded_session_id={} pcm_ms={} min_ms={}",
                             embedded_session_id,
@@ -814,15 +815,36 @@ impl EmbeddedStreamingDictation {
                         // transcript must still confirm the full wake phrase.
                         let offline_pcm = candidate.pcm.clone();
                         let offline_phrase = phrase.clone();
-                        let offline = tauri::async_runtime::spawn_blocking(move || {
+                        let offline_task = tauri::async_runtime::spawn_blocking(move || {
                             crate::wake_phrase::detect_with_recall_cascade(
                                 &offline_pcm,
                                 &offline_phrase,
                             )
-                        })
-                        .await;
+                        });
+                        let offline = match tokio::time::timeout(
+                            Duration::from_millis(TERMINAL_OFFLINE_RECALL_BUDGET_MS),
+                            offline_task,
+                        )
+                        .await
+                        {
+                            Ok(Ok(result)) => result,
+                            Ok(Err(err)) => {
+                                log::warn!(
+                                    "[wake-phrase] terminal offline recall task failed embedded_session_id={embedded_session_id}: {err}"
+                                );
+                                Ok(None)
+                            }
+                            Err(_) => {
+                                log::info!(
+                                    "[wake-phrase] terminal offline recall released actor after bounded wait embedded_session_id={} budget_ms={}",
+                                    embedded_session_id,
+                                    TERMINAL_OFFLINE_RECALL_BUDGET_MS
+                                );
+                                Ok(None)
+                            }
+                        };
                         match offline {
-                            Ok(Ok(Some(found))) => {
+                            Ok(Some(found)) => {
                                 log::info!(
                                     "[wake-phrase] terminal offline recall provisional hit embedded_session_id={} end_s={:.3}; requiring local full-phrase confirm",
                                     embedded_session_id,
@@ -883,15 +905,10 @@ impl EmbeddedStreamingDictation {
                                     Some(found)
                                 }
                             }
-                            Ok(Ok(None)) | Ok(Err(_)) | Err(_) => {
-                                if let Ok(Err(err)) = &offline {
-                                    log::warn!(
-                                        "[wake-phrase] terminal offline recall failed embedded_session_id={embedded_session_id}: {err}"
-                                    );
-                                }
+                            Ok(None) | Err(_) => {
                                 if let Err(err) = &offline {
                                     log::warn!(
-                                        "[wake-phrase] terminal offline recall task failed embedded_session_id={embedded_session_id}: {err}"
+                                        "[wake-phrase] terminal offline recall failed embedded_session_id={embedded_session_id}: {err}"
                                     );
                                 }
                                 // One local confirmation pass only (no multi-attempt terminal
@@ -1430,28 +1447,42 @@ impl EmbeddedStreamingDictation {
                                     Some(crate::wake_phrase::Match {
                                         end_seconds: refined_end,
                                     })
-                                } else if !result.matched && kws_hit.is_some() {
-                                    // Explicit Absent: precision reject (retry once).
-                                    let absent_count = {
+                                } else if !result.matched {
+                                    let (local_absent_count, kws_absent_count) = {
                                         let candidate = self
                                             .speaker_candidate
                                             .as_mut()
                                             .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
-                                        candidate.kws_local_absent_count =
-                                            candidate.kws_local_absent_count.saturating_add(1);
-                                        candidate.kws_local_absent_count
+                                        candidate.local_absent_count =
+                                            candidate.local_absent_count.saturating_add(1);
+                                        if kws_hit.is_some() {
+                                            candidate.kws_local_absent_count =
+                                                candidate.kws_local_absent_count.saturating_add(1);
+                                        }
+                                        (
+                                            candidate.local_absent_count,
+                                            candidate.kws_local_absent_count,
+                                        )
                                     };
-                                    if absent_count >= KWS_SECONDARY_ABSENT_REJECT_COUNT {
+                                    if kws_hit.is_none() {
+                                        log::debug!(
+                                            "[wake-phrase] local-only Absent recorded embedded_session_id={} count={}",
+                                            embedded_session_id,
+                                            local_absent_count
+                                        );
+                                    } else if kws_absent_count
+                                        >= KWS_SECONDARY_ABSENT_REJECT_COUNT
+                                    {
                                         log::info!(
                                             "[wake-phrase] stage2 Absent reject embedded_session_id={} count={} (anti half-phrase false wake)",
                                             embedded_session_id,
-                                            absent_count
+                                            kws_absent_count
                                         );
                                     } else {
                                         log::info!(
                                             "[wake-phrase] stage2 Absent retry embedded_session_id={} count={}/{}",
                                             embedded_session_id,
-                                            absent_count,
+                                            kws_absent_count,
                                             KWS_SECONDARY_ABSENT_REJECT_COUNT
                                         );
                                     }

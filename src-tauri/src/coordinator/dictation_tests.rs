@@ -2201,6 +2201,35 @@ fn busy_local_wake_helper_is_retried_without_queue_or_keyword_fallback() {
 }
 
 #[test]
+fn terminal_offline_recall_releases_the_actor_after_repeated_local_absence() {
+    assert!(!super::should_run_terminal_offline_recall(
+        super::MIN_TERMINAL_OFFLINE_PCM_BYTES - 2,
+        0
+    ));
+    assert!(super::should_run_terminal_offline_recall(
+        super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
+        0
+    ));
+    assert!(super::should_run_terminal_offline_recall(
+        super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
+        1
+    ));
+    assert!(!super::should_run_terminal_offline_recall(
+        super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
+        super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT
+    ));
+
+    let stream = include_str!("dictation_embedded_stream.rs");
+    assert!(
+        stream.contains("Duration::from_millis(TERMINAL_OFFLINE_RECALL_BUDGET_MS)")
+            && stream.contains("terminal offline recall released actor after bounded wait")
+            && stream.contains("candidate.local_absent_count.saturating_add(1)"),
+        "terminal offline recovery must retain a bounded fallback without blocking later BLE input"
+    );
+    assert_eq!(super::TERMINAL_OFFLINE_RECALL_BUDGET_MS, 500);
+}
+
+#[test]
 fn automatic_wake_discards_pre_wake_pcm_for_local_transcript() {
     // Regression: LocalTranscript forced post_wake_offset=0 and kept pre-wake speech.
     assert_eq!(super::post_wake_pcm_offset_bytes(0.0, 32_000), 0);
