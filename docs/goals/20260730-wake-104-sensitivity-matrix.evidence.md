@@ -59,19 +59,27 @@ firmware/OTA/BLE/LED untouched.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ListenerType_1.0.4_x64_en-US.msi` (root + `.artifacts`) | 14,082,048 | `342DB5AEEFD207746D5C9AB44CA243093FF4C34442DCDCB0C9E6FD2A947DBA36` |
-| Installed `C:\Program Files\Listener Type\listener-type.exe` | 38,962,688 | `D0D4A37A1B2F7CED4863D7842F4FD6739C64DCB98A93D25E973CBD591CBDD630` |
+| `ListenerType_1.0.4_x64_en-US.msi` (root + `.artifacts`) | 14,057,472 | `E89EADF058360739F0493B9E6E70AAD2A1942B07BDFE1A81687CE8A91D5078B5` |
+| Installed `C:\Program Files\Listener Type\listener-type.exe` | (payload) | `2F2C5337C8D615D53A231E1E4C7E4ED22393F70E91D3DB5506CF6911FF7BE059` |
 | `ListenerFirmware_1.0.3_ota.zip` (unchanged) | 1,545,390 | `51F6E00DDBAC07F7238C7D4884CCE60D1DED12B5F0CFAC6F8A586FA22A7D4355` |
 
 Installed identity check: MSI payload EXE hash matches Program Files EXE.
+Rebuilt after discarding unrelated dirty BLE worktree edits so the MSI is wake-only.
 Installed process logs: `runtime KWS config phrase=开始录音 score=3.5 threshold=0.05`,
 `isolated local confirmation helper ready reason=startup`, `background listener notify ready`.
-Binary contains `stage2 early Absent held (phrase horizon)`.
+Binary contains `stage2 early Absent held (phrase horizon)` and does **not** contain the discarded BLE strings.
 
-Type commits on master (not tag): `c7d82bc` wake fix + `ff88bf2` OTA headless version assert.
-Firmware remains tagged source `0f085bb` (no firmware code change for 1.0.4 wake).
+Type commits on master (no v1.0.4 tag yet; v1.0.3 tags untouched):
+`c7d82bc` wake fix, `ff88bf2` OTA headless assert, `f096053` evidence.
+Firmware remains `0f085bb` (no firmware code/package change for 1.0.4 wake).
 
 ## Live positive/negative matrix
 
-Owner voice + screen acceptance still required for P1–P5 / N1–N5 / I1.
-Agent machine path complete through install + ready + helper; live spoken matrix is the owner gate.
+| ID | Result so far |
+| --- | --- |
+| Ambient candidate on installed 1.0.4 (session 47-like) | Reject / no capsule (good N-side) |
+| P1–P5 spoken positives | **Owner gate** — not claimed PASS |
+| N1–N5 / I1 | **Owner gate** — not claimed PASS |
+
+Agent machine path: unit tests + release:check + clean MSI install + TYPE:READY + helper ready.
+Do **not** claim wake accuracy accepted until owner screen/voice matrix completes.
