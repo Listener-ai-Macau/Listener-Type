@@ -65,6 +65,19 @@ Listen to:
 `C:\Users\Billy\AppData\Local\Listener Type\Logs\wake-diag-live\wake-candidate-133-session-151-accepted.wav`
 
 Record whether the activation phrase is audibly present. Energy statistics alone are not
-accepted evidence for changing wake sensitivity. The canonical Chinese operator window
-was opened as `唤醒触发录音判断 1/1`; no selection artifact had been returned at the time
-this machine evidence was finalized, so acoustic classification remains pending.
+accepted evidence for changing wake sensitivity.
+
+## Final human acceptance
+
+The owner exercised the installed build and accepted the combined sensitivity/false-wake
+behavior in the canonical Chinese review window:
+
+- Selected result: `通过`.
+- Operator note: `足够灵敏，未开始时没有主动观察到录音胶囊。还行吧。`
+- Artifact:
+  `docs/goals/20260730-wake-sensitivity-boundary.origin-fallback.review.json`.
+
+The note is triaged as acceptance of the current installed behavior with no new defect or
+follow-up requirement. It does not classify the older session 151 WAV by listening, so
+that historical acoustic ambiguity remains explicitly separate from final product
+acceptance.

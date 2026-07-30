@@ -253,12 +253,13 @@
       "id": "listener_wake_sensitivity_false_wake_refinement_20260730",
       "repo": "both",
       "item": "Two-stage wake sensitivity, local-only false-wake fusion, activation endpoint, and owner review evidence",
-      "state": "focused_machine_validated_pending_installed_review",
+      "state": "human_accepted_with_machine_validation",
       "evidence": [
         "LST-WAKE-003 through LST-WAKE-005 in Listener-Firmware/docs/listener_product_requirements.md",
         "Focused local_confirmation, local_only, and automatic_wake Rust tests PASS",
         "docs/goals/20260730-wake-sensitivity-boundary.evidence.md",
-        "docs/goals/20260730-wake-sensitivity-boundary.origin-fallback.evidence.md"
+        "docs/goals/20260730-wake-sensitivity-boundary.origin-fallback.evidence.md",
+        "docs/goals/20260730-wake-sensitivity-boundary.origin-fallback.review.json"
       ],
       "patterns": [
         "docs/listener_product_requirements.md",
