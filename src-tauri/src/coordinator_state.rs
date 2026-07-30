@@ -1064,7 +1064,7 @@ mod tests {
                         session_id: session_id(2),
                     },
                 ],
-                SessionPhase::Processing,
+                SessionPhase::Idle,
                 true,
                 vec![
                     Some(DictationUiState::Transcribing),

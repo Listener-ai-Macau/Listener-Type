@@ -154,8 +154,7 @@ fn ec11_recovery_pre_authorization_is_reversible_until_the_firmware_disconnects(
         "the first click must only establish a bounded active-GATT pre-authorization"
     );
     assert!(
-        source
-            .contains("EC11 recovery pre-authorization expired without a firmware disconnect"),
+        source.contains("EC11 recovery pre-authorization expired without a firmware disconnect"),
         "a single click or long press must let the pre-authorization expire silently"
     );
     assert!(
@@ -355,8 +354,7 @@ fn active_capture_recovery_advertisement_bypasses_link_timeout() {
 #[cfg(target_os = "windows")]
 #[test]
 fn type_heartbeat_runs_only_for_background_capture() {
-    let (one_shot, background) =
-        windows_ble::type_heartbeat_terminal_behavior_matrix_for_test();
+    let (one_shot, background) = windows_ble::type_heartbeat_terminal_behavior_matrix_for_test();
     assert!(!one_shot);
     assert!(background);
 }
@@ -428,14 +426,13 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("open_ble_device_by_address(address)")
             && source.contains("[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]")
             && source.contains("reconnect handoff accepted")
-            && source.contains("ThroughputOptimized")
-            && source.contains("LISTENER_OTA_SKIP_WINRT_THROUGHPUT")
-            && source.contains("request_ota_ble_throughput_optimized")
-            && source.contains("request_ota_ble_throughput_for_runtime_address")
             && source.contains("let settle_ms = if round == 1 { 350 } else { 700 }")
             && source.contains("LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400")
             && source.contains("LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64")
             && source.contains("LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 32")
+            && source.contains("\"Listener OTA v1 target open\"")
+            && source.contains("\"Listener OTA v1 deadline target open\"")
+            && source.contains("remember_runtime_bluetooth_target_address_for_current(")
             && source.contains("LISTENER_OTA_V1_DATA_B_UUID")
             && prepare.contains("open_listener_ota_v1_target_after_active_link_handoff")
             && prepare.find("acquire_ble_ota_process_mutex").unwrap()
@@ -446,7 +443,7 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
                 .find("request_listener_ota_v1_active_link")
                 .unwrap()
                 < prepare.find("BleCaptureGuard::enter").unwrap(),
-        "direct Listener OTA must reserve preparation, acquire the cross-process transfer lock, send TYPE:OTA, then own capture before opening BLE GATT"
+        "direct Listener OTA must reserve preparation, retain the verified target address for fast reboot recovery, acquire the cross-process transfer lock, send TYPE:OTA, then own capture before opening BLE GATT"
     );
 
     let staged_prepare_start = source
@@ -463,7 +460,8 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
     );
 
     // Prefer the Windows impl body (mod.rs only has a thin wrapper).
-    let staged_marker = "let prepared = match prepare_listener_ota_v1_transfer_staged_after_active_link_hint(";
+    let staged_marker =
+        "let prepared = match prepare_listener_ota_v1_transfer_staged_after_active_link_hint(";
     let staged_marker_at = source
         .find(staged_marker)
         .expect("staged Listener OTA transfer helper should exist");
@@ -575,11 +573,117 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
         .expect("Listener OTA v1 reconnect handoff helper boundary should exist");
     let handoff = &source[handoff_start..handoff_end];
     assert!(
-        handoff.contains("send_recording_control_command(")
+        handoff.contains("send_audio_control_via_active_capture(")
             && handoff.contains("TYPE:OBS:OTA:{correlation_id:016X}")
             && handoff.contains("Duration::from_millis(300)")
-            && handoff.contains("ActiveControlTransientFallback::ReturnError"),
-        "OTA must use a bounded optional observability context handoff before the compatible active-link command"
+            && handoff.contains("observability context handoff skipped: no active capture"),
+        "OTA observability handoff must stay bounded to the active capture before the compatible active-link command"
+    );
+    assert!(
+        source.contains("fn wait_post_ota_notify_target_connected(")
+            && source.contains("POST_OTA_NOTIFY_LINK_READY_TIMEOUT")
+            && source.contains("POST_OTA_NOTIFY_LINK_STABLE_FOR")
+            && source.contains("post-OTA notify target stable before TYPE:READY")
+            && source.contains("wait_post_ota_notify_target_connected(capture_id, &target)?;"),
+        "post-OTA notify reuse must wait for the selected target to be connected before TYPE:READY"
+    );
+    assert!(
+        source.contains(
+            "POST_OTA_TYPE_READY_WRITE_TIMEOUT: Duration = Duration::from_millis(500)"
+        )
+            && source.contains("post-OTA TYPE:READY writability probe failed")
+            && source.contains("cleanup.abandon_poisoned_post_ota_target();")
+            && source.contains("dropping poisoned post-OTA target without synchronous WinRT Close"),
+        "post-OTA recovery must promptly abandon a stable-looking target whose ATT control path is not writable"
+    );
+    assert!(
+        source.contains("hold_listener_ota_post_confirm_device(&device);")
+            && source.contains("retained post-OTA confirmation device handle until TYPE:READY takeover")
+            && source.contains("release_listener_ota_post_confirm_device();")
+            && source.contains("released post-OTA confirmation device handle after TYPE:READY takeover"),
+        "the successful OTA service probe must keep the device-wide GATT link alive until notify TYPE:READY takes over"
+    );
+    assert!(
+        source.contains(
+            "POST_OTA_UNCACHED_GATT_TIMEOUT: Duration = Duration::from_millis(2000)"
+        )
+            && source.contains(
+                "POST_OTA_UNCACHED_CACHE_MODES: [BluetoothCacheMode; 1]"
+            )
+            && source.contains("for &cache_mode in &POST_OTA_UNCACHED_CACHE_MODES")
+            && source.contains(
+                "POST_OTA_VERIFIED_CACHED_CACHE_MODES: [BluetoothCacheMode; 1]"
+            )
+            && source.contains(
+                "&POST_OTA_VERIFIED_CACHED_CACHE_MODES,\n        POST_OTA_VERIFIED_CACHED_GATT_TIMEOUT,"
+            ),
+        "post-OTA confirmation stays uncached while challenge-proven audio takeover reuses verified cached handles"
+    );
+    assert!(
+        source.contains(
+            "OTA_REBOOT_GENERATION_BOUNDARY_TIMEOUT: Duration = Duration::from_millis(4000)"
+        )
+            && source.contains("OtaRebootDisconnectObserver::arm(&fresh")
+            && source.contains(
+                "armed reboot disconnect observer before FINISH"
+            )
+            && source.contains("observed new-generation device reconnect after OTA reboot")
+            && source.contains("observer.wait_for_new_generation(transfer_guard.session_id())")
+            && source.contains("old-to-new connected generation boundary confirmed")
+            && source.contains("OTA_REBOOT_NEW_GENERATION_CONNECTED.swap(false")
+            && source.contains(
+                "complete generation boundary retained; final response-bearing TYPE:READY owns ATT proof"
+            )
+            && !source.contains("request_new_generation_audio_control_ready")
+            && source.contains("OTA_REBOOT_NEW_GENERATION_ATT_READY.swap(false")
+            && source.contains("fresh.handoff_new_generation_to_post_confirm(")
+            && source.contains("self.device.take()")
+            && source.contains("self.session.take()")
+            && source.contains("self.service.take()")
+            && source.contains("hold_listener_ota_post_confirm_session(&session)")
+            && source.contains(
+                "handed new-generation device connection to post-confirm ownership without explicit Close"
+            )
+            && !source.contains("BluetoothDeviceId::FromId(&device_id)")
+            && !source.contains("GattSession::FromDeviceIdAsync(&device_id)")
+            && !source.contains("observed fresh new-generation ATT PDU readiness"),
+        "OTA must retain the complete connected WinRT generation and require the final response-bearing TYPE:READY for ATT proof"
+    );
+    assert!(
+        !source.contains("BluetoothLEPreferredConnectionParameters")
+            && !source.contains("RequestPreferredConnectionParameters")
+            && !source.contains("ThroughputOptimized"),
+        "the rejected WinRT throughput lease must stay out of the shipping OTA path"
+    );
+    let retain = source
+        .find("OtaPreBulkMaintainHandoff::take_from(&mut target)")
+        .expect("prepare GATT maintain state should be retained before target drop");
+    let old_target_drop = source[retain..]
+        .find("drop(target)")
+        .map(|offset| retain + offset)
+        .expect("prepare target should still close before secure reopen");
+    let secure_reopen = source[old_target_drop..]
+        .find("open_listener_ota_v1_target_after_active_link_handoff()")
+        .map(|offset| old_target_drop + offset)
+        .expect("secure target should reopen after retained handoff");
+    let transfer = source[secure_reopen..]
+        .find("pre_bulk_maintain_handoff.transfer_to_fresh_target(&fresh, round)")
+        .map(|offset| secure_reopen + offset)
+        .expect("fresh secure session should assume maintain ownership");
+    assert!(
+        retain < old_target_drop && old_target_drop < secure_reopen && secure_reopen < transfer,
+        "maintain ownership must span old-target drop and transfer only after secure reopen"
+    );
+    assert!(
+        source.contains("fresh.session.is_none()")
+            && source.contains(
+                "\"Listener OTA pre-bulk maintain handoff failure\","
+            )
+            && source.contains("let _ = session.Close();")
+            && source.contains(
+                "superseded wrapper released without false/Close"
+            ),
+        "failed handoff must balance false+Close while successful overlapping ownership must avoid collapsing shared session state"
     );
 }
 
@@ -826,8 +930,7 @@ fn bthport_device_name_decoder_accepts_ascii_and_utf16() {
     );
     assert_eq!(
         windows_ble::decode_bthport_device_name(&[
-            b'l', 0, b'i', 0, b's', 0, b't', 0, b'e', 0, b'n', 0, b'e', 0, b'r', 0, b'B', 0, 0,
-            0,
+            b'l', 0, b'i', 0, b's', 0, b't', 0, b'e', 0, b'n', 0, b'e', 0, b'r', 0, b'B', 0, 0, 0,
         ]),
         "listenerB"
     );
@@ -953,6 +1056,43 @@ fn ota_sync_uses_lightweight_response_status_path_only() {
             "only SYNC may use the lightweight OTA control response path"
         );
     }
+
+    let source = include_str!("windows_ble/mod.rs");
+    let write_control_start = source
+        .find("impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport")
+        .expect("Listener OTA transport implementation should exist");
+    let write_control_end = source[write_control_start..]
+        .find("fn dual_lane_available")
+        .map(|offset| write_control_start + offset)
+        .expect("Listener OTA write_control boundary should exist");
+    let write_control = &source[write_control_start..write_control_end];
+    assert!(
+        write_control.contains("The response-bearing SYNC is the ordered air/link drain")
+            && !write_control.contains(
+                "if is_sync {\n            std::thread::sleep(Duration::from_millis(150))"
+            ),
+        "SYNC must immediately follow submitted WWR operations; a fixed quiet delay consumes the strict OTA throughput budget"
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn ota_progress_watchdog_is_ten_seconds_and_never_reopens_the_transfer() {
+    assert_eq!(
+        super::windows_ble::LISTENER_OTA_V1_PROGRESS_TIMEOUT,
+        std::time::Duration::from_secs(10)
+    );
+    assert!(
+        !super::windows_ble::is_retryable_listener_ota_v1_transfer_error(
+            "OTA transfer progress stalled for 10000 ms at offset 200000/800000"
+        )
+    );
+    assert!(
+        super::windows_ble::is_listener_ota_v1_progress_stall_error(
+            "OTA transfer progress stalled for 10000 ms while draining the BLE data pipeline"
+        ),
+        "a drained WWR pipeline stall must return immediately instead of spending another write timeout on fallback"
+    );
 }
 
 #[cfg(target_os = "windows")]
@@ -1108,12 +1248,11 @@ fn ble_name_apply_hardware_roundtrip() {
         .expect("set LISTENER_BLE_NAME_RENAME_TARGET to the desired BLE name");
 
     super::windows_ble::set_configured_bluetooth_target_name(&old_name);
-    let learned_address =
-        super::windows_ble::remember_current_bluetooth_target_address_for_name(
-            &target_name,
-            Duration::from_secs(4),
-            "BLE name hardware test",
-        );
+    let learned_address = super::windows_ble::remember_current_bluetooth_target_address_for_name(
+        &target_name,
+        Duration::from_secs(4),
+        "BLE name hardware test",
+    );
     assert!(
         learned_address.is_some(),
         "hardware test should learn current Listener address before renaming old={old_name} target={target_name}"

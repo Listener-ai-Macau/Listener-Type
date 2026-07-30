@@ -35,6 +35,68 @@ fn send_audio_control_via_active_capture(
     Some(result)
 }
 
+fn wait_post_ota_notify_target_connected(
+    capture_id: u64,
+    target: &OpenNotifyTarget,
+) -> Result<(), String> {
+    wait_post_ota_notify_target_connected_with_timeout(
+        capture_id,
+        target,
+        POST_OTA_NOTIFY_LINK_READY_TIMEOUT,
+    )
+}
+
+fn wait_post_ota_notify_target_connected_with_timeout(
+    capture_id: u64,
+    target: &OpenNotifyTarget,
+    timeout: Duration,
+) -> Result<(), String> {
+    if !target.post_ota_preserved_cccd {
+        return Ok(());
+    }
+
+    let started = Instant::now();
+    let deadline = started + timeout;
+    let mut connected_since = None;
+    loop {
+        if notify_capture_cancel_requested() {
+            return Err(notify_capture_cancelled_error(
+                "post-OTA notify link settle",
+            ));
+        }
+        let device_connected = target.device.as_ref().is_none_or(|device| {
+            device
+                .ConnectionStatus()
+                .is_ok_and(|status| status == BluetoothConnectionStatus::Connected)
+        });
+        let session_active = target.session.as_ref().is_none_or(|session| {
+            session
+                .SessionStatus()
+                .is_ok_and(|status| status == GattSessionStatus::Active)
+        });
+        if device_connected && session_active {
+            let stable_started = connected_since.get_or_insert_with(Instant::now);
+            if stable_started.elapsed() >= POST_OTA_NOTIFY_LINK_STABLE_FOR {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: post-OTA notify target stable before TYPE:READY elapsed_ms={} stable_ms={}",
+                    started.elapsed().as_millis(),
+                    stable_started.elapsed().as_millis()
+                );
+                return Ok(());
+            }
+        } else {
+            connected_since = None;
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "post-OTA notify target did not become connected/active within {} ms",
+                timeout.as_millis()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 pub fn capture_notification_events(
     timeout: Duration,
     on_event: &mut crate::embedded_ble::BleNotificationHandler<'_>,
@@ -120,6 +182,7 @@ fn capture_notification_events_until_cancelled_impl(
         return Err(background_listener_deferred_for_ota_error());
     }
     let target = open_notify_target_with_retry(capture_id)?;
+    wait_post_ota_notify_target_connected(capture_id, &target)?;
     let characteristic = target.characteristic.clone();
     let (tx, rx) = mpsc::channel::<BleCaptureSignal>();
     let (control_tx, control_rx) = mpsc::channel::<AudioControlRequest>();
@@ -217,13 +280,25 @@ fn capture_notification_events_until_cancelled_impl(
         );
     }
     log::info!("[embedded-ble] capture #{capture_id}: enabling notify CCCD");
-    let status = write_cccd_notify_with_retry(
-        capture_id,
-        "capture",
-        &characteristic,
-        CCCD_ENABLE_TIMEOUT,
-        cleanup.target.bluetooth_address,
-    )?;
+    let status = if cleanup.target.post_ota_preserved_cccd {
+        // The controlled OTA handoff deliberately leaves CCCD enabled. Windows
+        // restores that subscription during the bonded reconnect before it
+        // exposes the post-boot GATT service. Rewriting the already-enabled
+        // descriptor queues behind Windows' stale pre-reboot ATT request and
+        // can block for its native ~30 s deadline.
+        log::info!(
+            "[embedded-ble] capture #{capture_id}: reusing Windows-restored notify CCCD after verified OTA reconnect"
+        );
+        GattCommunicationStatus::Success
+    } else {
+        write_cccd_notify_with_retry(
+            capture_id,
+            "capture",
+            &characteristic,
+            CCCD_ENABLE_TIMEOUT,
+            cleanup.target.bluetooth_address,
+        )?
+    };
     if status != GattCommunicationStatus::Success {
         return Err(format!("BLE CCCD notify write returned status={status:?}"));
     }
@@ -248,6 +323,7 @@ fn capture_notification_events_until_cancelled_impl(
         Ok(()) => {
             crate::startup_evidence::record_startup_stage("type_ready_written");
             cleanup.mark_type_heartbeat_open();
+            release_listener_ota_post_confirm_device();
             if let Some(address) = cleanup.target.bluetooth_address {
                 persist_successful_notify_target_address(address, "Type heartbeat ready");
             }
@@ -270,6 +346,15 @@ fn capture_notification_events_until_cancelled_impl(
             }
         }
         Err(err) => {
+            if cleanup.target.post_ota_preserved_cccd {
+                log::warn!(
+                    "[embedded-ble] capture #{capture_id}: post-OTA TYPE:READY writability probe failed; abandoning poisoned target for a fresh retry: {err}"
+                );
+                cleanup.abandon_poisoned_post_ota_target();
+                return Err(format!(
+                    "post-OTA TYPE:READY target was connected but not ATT-writable: {err}"
+                ));
+            }
             if type_heartbeat_enabled {
                 log::warn!(
                     "[embedded-ble] capture #{capture_id}: Type heartbeat ready failed; keeping notify open for retry: {err}"

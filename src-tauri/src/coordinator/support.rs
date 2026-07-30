@@ -99,7 +99,11 @@ pub(super) fn listening_session_has_no_current_asr(inner: &Arc<Inner>) -> bool {
             .unwrap_or(true)
 }
 
-pub(super) fn schedule_capsule_idle(inner: &Arc<Inner>, delay_ms: u64, session_id: Option<SessionId>) {
+pub(super) fn schedule_capsule_idle(
+    inner: &Arc<Inner>,
+    delay_ms: u64,
+    session_id: Option<SessionId>,
+) {
     let inner_clone = Arc::clone(inner);
     async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;

@@ -6,12 +6,12 @@
 use super::DeviceSettingsCommandTransport;
 use denzic_ble_windows::{
     advertisement_manufacturer_data_summary, advertisement_swift_pair_display_name,
-    bluetooth_name_matches_any, bluetooth_name_matches_expected, buffer_to_vec,
-    configret_detail, device_information_bluetooth_address, device_information_display_name,
+    bluetooth_name_matches_any, bluetooth_name_matches_expected, buffer_to_vec, configret_detail,
+    device_information_bluetooth_address, device_information_display_name,
     device_information_property_bool, device_information_property_string, hidden_command,
     push_unique_address, run_hidden_pwsh_script, scan_ble_advertisements_by_name,
-    start_gatt_write_with_option_async, wait_gatt_write_result,
-    write_cccd_with_timeout, write_gatt_value_status_with_timeout, write_gatt_value_with_timeout,
+    start_gatt_write_with_option_async, wait_gatt_write_result, write_cccd_with_timeout,
+    write_gatt_value_status_with_timeout, write_gatt_value_with_timeout,
     WINDOWS_AEP_BLE_IS_CONNECTABLE_PROPERTY, WINDOWS_AEP_DEVICE_ADDRESS_PROPERTY,
     WINDOWS_AEP_IS_CONNECTED_PROPERTY, WINDOWS_AEP_IS_PAIRED_PROPERTY,
     WINDOWS_AEP_IS_PRESENT_PROPERTY, WINDOWS_BLE_AEP_CONNECTABLE_SELECTOR,
@@ -46,7 +46,6 @@ use windows::Devices::Bluetooth::GenericAttributeProfile::{
 };
 use windows::Devices::Bluetooth::{
     BluetoothAddressType, BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
-    BluetoothLEPreferredConnectionParameters,
 };
 use windows::Devices::Enumeration::{
     DeviceAccessStatus, DeviceClass, DeviceInformation, DeviceInformationCustomPairing,
@@ -71,14 +70,11 @@ const NOTIFY_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091b
 const AUDIO_CONTROL_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091e);
 const OTA_SERVICE_UUID: GUID = GUID::from_u128(denzic_ota_core::GATT_SERVICE_UUID_U128);
 const LISTENER_OTA_V1_SERVICE_UUID: GUID = OTA_SERVICE_UUID;
-const LISTENER_OTA_V1_CONTROL_UUID: GUID =
-    GUID::from_u128(denzic_ota_core::GATT_CONTROL_UUID_U128);
+const LISTENER_OTA_V1_CONTROL_UUID: GUID = GUID::from_u128(denzic_ota_core::GATT_CONTROL_UUID_U128);
 const LISTENER_OTA_V1_DATA_UUID: GUID = GUID::from_u128(denzic_ota_core::GATT_DATA_UUID_U128);
 /// Second OTA data lane (platform dual-lane contract / DATA_B).
-const LISTENER_OTA_V1_DATA_B_UUID: GUID =
-    GUID::from_u128(denzic_ota_core::GATT_DATA_B_UUID_U128);
-const LISTENER_OTA_V1_STATUS_UUID: GUID =
-    GUID::from_u128(denzic_ota_core::GATT_STATUS_UUID_U128);
+const LISTENER_OTA_V1_DATA_B_UUID: GUID = GUID::from_u128(denzic_ota_core::GATT_DATA_B_UUID_U128);
+const LISTENER_OTA_V1_STATUS_UUID: GUID = GUID::from_u128(denzic_ota_core::GATT_STATUS_UUID_U128);
 const OTA_READINESS_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091c);
 const OTA_CAPABILITIES_UUID: GUID = GUID::from_u128(0x710af845_6d9f_6583_0c4d_9e5b3bc3091d);
 const DEVICE_SETTINGS_REVISION_UUID: GUID =
@@ -94,16 +90,15 @@ const DIAGNOSTIC_COUNT_UUID: GUID =
     GUID::from_u128(denzic_observability_v1_core::DIAG_LOG_GATT_COUNT_UUID_U128);
 const DIS_SERVICE_UUID: GUID = GUID::from_u128(0x0000180a_0000_1000_8000_00805f9b34fb);
 const DIS_MODEL_NUMBER_UUID: GUID = GUID::from_u128(0x00002a24_0000_1000_8000_00805f9b34fb);
-const DIS_FIRMWARE_REVISION_UUID: GUID =
-    GUID::from_u128(0x00002a26_0000_1000_8000_00805f9b34fb);
-const DIS_HARDWARE_REVISION_UUID: GUID =
-    GUID::from_u128(0x00002a27_0000_1000_8000_00805f9b34fb);
+const DIS_FIRMWARE_REVISION_UUID: GUID = GUID::from_u128(0x00002a26_0000_1000_8000_00805f9b34fb);
+const DIS_HARDWARE_REVISION_UUID: GUID = GUID::from_u128(0x00002a27_0000_1000_8000_00805f9b34fb);
 const BATTERY_SERVICE_UUID: GUID = GUID::from_u128(0x0000180f_0000_1000_8000_00805f9b34fb);
 const BATTERY_LEVEL_UUID: GUID = GUID::from_u128(0x00002a19_0000_1000_8000_00805f9b34fb);
 const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
 const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TYPE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(8);
 const TYPE_HEARTBEAT_WRITE_TIMEOUT: Duration = Duration::from_millis(3000);
+const POST_OTA_TYPE_READY_WRITE_TIMEOUT: Duration = Duration::from_millis(500);
 const TYPE_READY_RECOVERY_PAIRING_ADV_PROBE_TIMEOUT: Duration = Duration::from_millis(900);
 const CAPTURE_NOTIFICATION_INFO_LOG_LIMIT: usize = 4;
 const GATT_READY_TIMEOUT: Duration = Duration::from_secs(8);
@@ -125,6 +120,8 @@ const NOTIFY_TARGET_OPEN_RETRY_DELAYS: [Duration; 7] = [
 ];
 const NOTIFY_TARGET_OPEN_OTA_POST_CONFIRM_RETRY_DELAYS: [Duration; 2] =
     [Duration::from_millis(250), Duration::from_millis(500)];
+const POST_OTA_NOTIFY_LINK_READY_TIMEOUT: Duration = Duration::from_millis(1500);
+const POST_OTA_NOTIFY_LINK_STABLE_FOR: Duration = Duration::from_millis(250);
 const AUDIO_CONTROL_DISCOVERY_RETRY_DELAYS: [Duration; 4] = [
     Duration::from_millis(150),
     Duration::from_millis(350),
@@ -136,7 +133,10 @@ const EC11_HARDWARE_RECOVERY_ACK_WRITE_TIMEOUT: Duration = Duration::from_millis
 const EC11_HARDWARE_RECOVERY_PREPARE_TIMEOUT: Duration = Duration::from_millis(1500);
 const EC11_HARDWARE_RECOVERY_DISCONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 const DIAGNOSTIC_PULL_CANDIDATE_DELAY: Duration = Duration::from_millis(350);
-const OTA_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
+pub(super) const LISTENER_OTA_V1_PROGRESS_TIMEOUT: Duration = Duration::from_secs(10);
+const OTA_WRITE_TIMEOUT: Duration = LISTENER_OTA_V1_PROGRESS_TIMEOUT;
+const OTA_SYNC_WRITE_TIMEOUT: Duration = Duration::from_secs(25);
+const OTA_ABORT_WRITE_TIMEOUT: Duration = Duration::from_millis(500);
 const OTA_FINISH_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
 const TYPE_READY_COMMAND_ENV: &str = "LISTENER_TYPE_EMBEDDED_BLE_READY_COMMAND";
 const AUDIO_ADVERTISEMENT_SCAN_TIMEOUT: Duration = Duration::from_secs(12);
@@ -206,10 +206,9 @@ fn notify_capture_cancelled_error(label: &str) -> String {
 
 fn ble_wait_cancel() -> denzic_ble_windows::BleCancel {
     ACTIVE_NOTIFY_CAPTURE_CANCEL.with(|slot| match slot.borrow().as_ref() {
-        Some(token) => denzic_ble_windows::BleCancel::new(
-            Arc::clone(token),
-            "background listener recovery",
-        ),
+        Some(token) => {
+            denzic_ble_windows::BleCancel::new(Arc::clone(token), "background listener recovery")
+        }
         None => denzic_ble_windows::BleCancel::NONE,
     })
 }
@@ -236,8 +235,8 @@ const LISTENER_SERVICE_UUID_TEXTS: [&str; 3] = [
 const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(8);
 const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 500;
 // Dual-lane DATA+DATA_B + device reorder. Window 400 cuts SYNC rounds vs 200;
-// pipeline 32 with ~16/lane was the best dual bulk (~46 KB/s). Full 32/lane
-// regressed airtime — keep half-depth per lane.
+// pipeline 32 with ~16/lane is the proven host shape. Deeper 24/lane and
+// 32/lane WinRT queues both regressed airtime.
 // Throughput contract: dual-lane ~50 KB/s needs full 400-chunk windows (owner
 // 2026-07-28: 128 regressed bulk_kb_s 48.9 → 18.8). SYNC cancel/timeout retries
 // handle mid-bulk flakiness without shrinking the hot path.
@@ -261,20 +260,79 @@ const STARTUP_NOTIFY_FAST_PATH_TIMEOUT: Duration = Duration::from_millis(2500);
 const STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT: Duration = Duration::from_millis(1200);
 const STARTUP_NOTIFY_FAST_PATH_GATT_TIMEOUT: Duration = Duration::from_millis(1800);
 const STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT: Duration = Duration::from_millis(600);
+const POST_OTA_UNCACHED_GATT_TIMEOUT: Duration = Duration::from_millis(2000);
+const POST_OTA_UNCACHED_CACHE_MODES: [BluetoothCacheMode; 1] = [BluetoothCacheMode::Uncached];
+const POST_OTA_VERIFIED_CACHED_GATT_TIMEOUT: Duration = Duration::from_millis(1000);
+const POST_OTA_VERIFIED_CACHED_CACHE_MODES: [BluetoothCacheMode; 1] = [BluetoothCacheMode::Cached];
+const OTA_REBOOT_GENERATION_BOUNDARY_TIMEOUT: Duration = Duration::from_millis(4000);
+static OTA_REBOOT_NEW_GENERATION_CONNECTED: AtomicBool = AtomicBool::new(false);
+static OTA_REBOOT_NEW_GENERATION_ATT_READY: AtomicBool = AtomicBool::new(false);
 static RUNTIME_BLUETOOTH_TARGET_NAME: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-static RUNTIME_BLUETOOTH_TARGET_ADDRESS: OnceLock<
-    Mutex<Option<RuntimeBluetoothTargetAddress>>,
-> = OnceLock::new();
+static RUNTIME_BLUETOOTH_TARGET_ADDRESS: OnceLock<Mutex<Option<RuntimeBluetoothTargetAddress>>> =
+    OnceLock::new();
 static NATIVE_WINDOWS_HID_PAIRING_VISIBLE: AtomicBool = AtomicBool::new(false);
 static OTA_POST_CONFIRM_NOTIFY_TARGET_ADDRESS: OnceLock<Mutex<Option<u64>>> = OnceLock::new();
+static OTA_POST_CONFIRM_DEVICE_HOLD: OnceLock<Mutex<Option<BluetoothLEDevice>>> = OnceLock::new();
+static OTA_POST_CONFIRM_SESSION_HOLD: OnceLock<Mutex<Option<GattSession>>> = OnceLock::new();
 static NATIVE_WINDOWS_HID_PAIRING_ADDRESSES: OnceLock<Mutex<Vec<u64>>> = OnceLock::new();
 static NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RUNNING: AtomicBool = AtomicBool::new(false);
 static NATIVE_WINDOWS_HID_PRESENT_PREFETCH_RESULT: OnceLock<
     Mutex<Option<Result<Vec<u64>, String>>>,
 > = OnceLock::new();
-static LAST_PAIRING_PROMPT: OnceLock<Mutex<Option<PairingPromptThrottleState>>> =
-    OnceLock::new();
+static LAST_PAIRING_PROMPT: OnceLock<Mutex<Option<PairingPromptThrottleState>>> = OnceLock::new();
 static LISTENER_PAIRING_MAINTENANCE_TOKEN: AtomicUsize = AtomicUsize::new(1);
+
+fn hold_listener_ota_post_confirm_device(device: &BluetoothLEDevice) {
+    let Ok(mut slot) = OTA_POST_CONFIRM_DEVICE_HOLD
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    else {
+        log::warn!("[embedded-ble] OTA post-confirm device hold slot is poisoned");
+        return;
+    };
+    *slot = Some(device.clone());
+    log::info!(
+        "[embedded-ble] retained post-OTA confirmation device handle until TYPE:READY takeover"
+    );
+}
+
+fn hold_listener_ota_post_confirm_session(session: &GattSession) {
+    let Ok(mut slot) = OTA_POST_CONFIRM_SESSION_HOLD
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    else {
+        log::warn!("[embedded-ble] OTA post-confirm GATT session hold slot is poisoned");
+        return;
+    };
+    if let Some(previous) = slot.replace(session.clone()) {
+        release_gatt_maintain_request(&previous, "replaced stale post-OTA confirmation hold");
+    }
+    log::info!("[embedded-ble] retained post-OTA GATT session until TYPE:READY takeover");
+}
+
+fn release_listener_ota_post_confirm_device() {
+    let Ok(mut slot) = OTA_POST_CONFIRM_DEVICE_HOLD
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    else {
+        return;
+    };
+    if slot.take().is_some() {
+        log::info!(
+            "[embedded-ble] released post-OTA confirmation device handle after TYPE:READY takeover"
+        );
+    }
+    drop(slot);
+    if let Ok(mut session_slot) = OTA_POST_CONFIRM_SESSION_HOLD
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    {
+        if let Some(session) = session_slot.take() {
+            release_gatt_maintain_request(&session, "post-OTA TYPE:READY ownership takeover");
+            log::info!("[embedded-ble] released post-OTA GATT session after TYPE:READY takeover");
+        }
+    }
+}
 
 enum BleCaptureSignal {
     Notification(Vec<u8>),
@@ -502,9 +560,9 @@ fn diagnostic_service_entries(
         .map_err(|err| format!("BLE diagnostic {label} collection size failed: {err}"))?;
     let mut entries = Vec::new();
     for index in 0..count {
-        let info = devices.GetAt(index).map_err(|err| {
-            format!("BLE diagnostic {label} entry {index} read failed: {err}")
-        })?;
+        let info = devices
+            .GetAt(index)
+            .map_err(|err| format!("BLE diagnostic {label} entry {index} read failed: {err}"))?;
         let name = info
             .Name()
             .map(|value| value.to_string_lossy())
@@ -750,9 +808,7 @@ fn try_acquire_listener_pairing_process_mutex(
 fn try_acquire_ble_ota_process_mutex(owner: &'static str) -> Option<BleOtaProcessGuard> {
     let handle = unsafe { CreateMutexW(None, false, BLE_OTA_OPERATION_MUTEX_NAME) }
         .map_err(|err| {
-            log::warn!(
-                "[embedded-ble] create BLE OTA operation mutex failed owner={owner}: {err}"
-            );
+            log::warn!("[embedded-ble] create BLE OTA operation mutex failed owner={owner}: {err}");
             err
         })
         .ok()?;
@@ -761,9 +817,7 @@ fn try_acquire_ble_ota_process_mutex(owner: &'static str) -> Option<BleOtaProces
         return Some(BleOtaProcessGuard { handle, owner });
     }
     if wait != WAIT_TIMEOUT {
-        log::warn!(
-            "[embedded-ble] BLE OTA operation mutex wait returned {wait:?} owner={owner}"
-        );
+        log::warn!("[embedded-ble] BLE OTA operation mutex wait returned {wait:?} owner={owner}");
     }
     if let Err(err) = unsafe { CloseHandle(handle) } {
         log::warn!(
@@ -779,9 +833,7 @@ fn acquire_ble_ota_process_mutex(owner: &'static str) -> Result<BleOtaProcessGua
     })
 }
 
-fn try_acquire_ble_ota_preparation_mutex(
-    owner: &'static str,
-) -> Option<BleOtaPreparationGuard> {
+fn try_acquire_ble_ota_preparation_mutex(owner: &'static str) -> Option<BleOtaPreparationGuard> {
     let handle = unsafe { CreateMutexW(None, false, BLE_OTA_PREPARATION_MUTEX_NAME) }
         .map_err(|err| {
             log::warn!(
@@ -795,9 +847,7 @@ fn try_acquire_ble_ota_preparation_mutex(
         return Some(BleOtaPreparationGuard { handle, owner });
     }
     if wait != WAIT_TIMEOUT {
-        log::warn!(
-            "[embedded-ble] BLE OTA preparation mutex wait returned {wait:?} owner={owner}"
-        );
+        log::warn!("[embedded-ble] BLE OTA preparation mutex wait returned {wait:?} owner={owner}");
     }
     if let Err(err) = unsafe { CloseHandle(handle) } {
         log::warn!(
@@ -811,9 +861,7 @@ fn acquire_ble_ota_preparation_mutex(
     owner: &'static str,
 ) -> Result<BleOtaPreparationGuard, String> {
     try_acquire_ble_ota_preparation_mutex(owner).ok_or_else(|| {
-        format!(
-            "BLE OTA preparation is already active in another Listener Type process ({owner})."
-        )
+        format!("BLE OTA preparation is already active in another Listener Type process ({owner}).")
     })
 }
 
@@ -1032,16 +1080,12 @@ fn send_device_settings_command_with_transport(
     }
 
     if payload_len < 64 && device_settings_command_allows_active_capture(command) {
-        if let Some(result) = send_audio_control_via_active_capture(
-            payload.as_bytes(),
-            timeout,
-            "device settings",
-        ) {
+        if let Some(result) =
+            send_audio_control_via_active_capture(payload.as_bytes(), timeout, "device settings")
+        {
             match result {
                 Ok(()) => {
-                    log::info!(
-                        "[embedded-ble] device settings command sent via active capture"
-                    );
+                    log::info!("[embedded-ble] device settings command sent via active capture");
                     return Ok(DeviceSettingsCommandTransport::ActiveCapture);
                 }
                 Err(err) if is_transient_audio_control_write_error(&err) => {
@@ -1124,9 +1168,7 @@ pub fn send_device_settings_command(command: &str, timeout: Duration) -> Result<
     send_device_settings_command_with_transport(command, timeout).map(|_| ())
 }
 
-pub fn apply_pending_ble_name(
-    timeout: Duration,
-) -> Result<DeviceSettingsCommandTransport, String> {
+pub fn apply_pending_ble_name(timeout: Duration) -> Result<DeviceSettingsCommandTransport, String> {
     if !has_active_runtime_bluetooth_target_address(Instant::now()) {
         let target_name = effective_bluetooth_target_name(None);
         let _ = remember_current_bluetooth_target_address_for_name(
@@ -1310,9 +1352,7 @@ fn send_control_command_via_usb_serial(
     timeout: Duration,
 ) -> Result<(), DeviceSettingsSerialError> {
     let ports = serialport::available_ports().map_err(|err| {
-        DeviceSettingsSerialError::Unavailable(format!(
-            "USB serial port enumeration failed: {err}"
-        ))
+        DeviceSettingsSerialError::Unavailable(format!("USB serial port enumeration failed: {err}"))
     })?;
     let candidates = listener_usb_serial_candidates(&ports);
     if candidates.is_empty() {
@@ -1340,9 +1380,7 @@ fn send_recovery_control_command_via_usb_serial(
     timeout: Duration,
 ) -> Result<(), DeviceSettingsSerialError> {
     let ports = serialport::available_ports().map_err(|err| {
-        DeviceSettingsSerialError::Unavailable(format!(
-            "USB serial port enumeration failed: {err}"
-        ))
+        DeviceSettingsSerialError::Unavailable(format!("USB serial port enumeration failed: {err}"))
     })?;
     let candidates = listener_usb_serial_candidates(&ports);
     if candidates.is_empty() {
@@ -1372,9 +1410,7 @@ fn exchange_status_led_via_usb_serial(
     timeout: Duration,
 ) -> Result<String, DeviceSettingsSerialError> {
     let ports = serialport::available_ports().map_err(|err| {
-        DeviceSettingsSerialError::Unavailable(format!(
-            "USB serial port enumeration failed: {err}"
-        ))
+        DeviceSettingsSerialError::Unavailable(format!("USB serial port enumeration failed: {err}"))
     })?;
     let candidates = listener_usb_serial_candidates(&ports);
     if candidates.is_empty() {
@@ -1408,9 +1444,7 @@ fn exchange_device_settings_via_usb_serial(
     timeout: Duration,
 ) -> Result<String, DeviceSettingsSerialError> {
     let ports = serialport::available_ports().map_err(|err| {
-        DeviceSettingsSerialError::Unavailable(format!(
-            "USB serial port enumeration failed: {err}"
-        ))
+        DeviceSettingsSerialError::Unavailable(format!("USB serial port enumeration failed: {err}"))
     })?;
     let candidates = listener_usb_serial_candidates(&ports);
     if candidates.is_empty() {
@@ -1526,8 +1560,7 @@ fn exchange_device_settings_via_serial_port(
         match port.read(&mut read_buf) {
             Ok(count) if count > 0 => {
                 response.push_str(&String::from_utf8_lossy(&read_buf[..count]));
-                if let Some(line) = response.lines().find(|line| line.contains("~DEVICE:ERROR"))
-                {
+                if let Some(line) = response.lines().find(|line| line.contains("~DEVICE:ERROR")) {
                     return Err(DeviceSettingsSerialError::FirmwareRejected(format!(
                         "firmware rejected device settings command: {line}"
                     )));
@@ -1689,9 +1722,7 @@ fn drain_serial_input_until_quiet(
         }
     }
     if drained_bytes > 0 {
-        log::debug!(
-            "[embedded-ble] drained {drained_bytes} stale USB serial bytes before command"
-        );
+        log::debug!("[embedded-ble] drained {drained_bytes} stale USB serial bytes before command");
     }
 }
 
@@ -1740,14 +1771,13 @@ pub(super) fn parse_device_settings_status_line(
         optional_u8_field(&fields, "plugged_brightness").unwrap_or(default_brightness);
     let battery_brightness_percent =
         optional_u8_field(&fields, "battery_brightness").unwrap_or(plugged_brightness_percent);
-    let brightness_percent =
-        optional_u8_field(&fields, "active_brightness").unwrap_or_else(|| {
-            if require_field(&fields, "active_power").unwrap_or("battery") == "external" {
-                plugged_brightness_percent
-            } else {
-                battery_brightness_percent
-            }
-        });
+    let brightness_percent = optional_u8_field(&fields, "active_brightness").unwrap_or_else(|| {
+        if require_field(&fields, "active_power").unwrap_or("battery") == "external" {
+            plugged_brightness_percent
+        } else {
+            battery_brightness_percent
+        }
+    });
     let led_zone_brightness_supported = fields.contains_key("led_status")
         || fields.contains_key("led_key")
         || fields.contains_key("led_ec11")
@@ -1766,22 +1796,20 @@ pub(super) fn parse_device_settings_status_line(
         optional_u8_field(&fields, "led_edge").unwrap_or(default_zone_brightness);
     let legacy_low_power_idle_minutes =
         optional_u32_field(&fields, "low_power_idle_ms").map(low_power_minutes_from_ms);
-    let plugged_low_power_idle_minutes =
-        optional_u32_field(&fields, "plugged_low_power_idle_ms")
-            .or_else(|| optional_minutes_field(&fields, "plugged_low_power_idle_minutes"))
-            .map(low_power_minutes_from_ms)
-            .unwrap_or_else(|| {
-                legacy_low_power_idle_minutes
-                    .unwrap_or(crate::types::DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES)
-            });
-    let battery_low_power_idle_minutes =
-        optional_u32_field(&fields, "battery_low_power_idle_ms")
-            .or_else(|| optional_minutes_field(&fields, "battery_low_power_idle_minutes"))
-            .map(low_power_minutes_from_ms)
-            .unwrap_or_else(|| {
-                legacy_low_power_idle_minutes
-                    .unwrap_or(crate::types::DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES)
-            });
+    let plugged_low_power_idle_minutes = optional_u32_field(&fields, "plugged_low_power_idle_ms")
+        .or_else(|| optional_minutes_field(&fields, "plugged_low_power_idle_minutes"))
+        .map(low_power_minutes_from_ms)
+        .unwrap_or_else(|| {
+            legacy_low_power_idle_minutes
+                .unwrap_or(crate::types::DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES)
+        });
+    let battery_low_power_idle_minutes = optional_u32_field(&fields, "battery_low_power_idle_ms")
+        .or_else(|| optional_minutes_field(&fields, "battery_low_power_idle_minutes"))
+        .map(low_power_minutes_from_ms)
+        .unwrap_or_else(|| {
+            legacy_low_power_idle_minutes
+                .unwrap_or(crate::types::DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES)
+        });
     let plugged_low_power_enabled = optional_bool_field(&fields, "plugged_low_power_enabled")
         .unwrap_or_else(|| {
             if legacy_low_power_idle_minutes.is_some()
@@ -1797,8 +1825,7 @@ pub(super) fn parse_device_settings_status_line(
         });
     let voice_auto_start_enabled =
         optional_bool_field(&fields, "voice_auto_start").unwrap_or(false);
-    let voice_auto_stop_enabled =
-        optional_bool_field(&fields, "voice_auto_stop").unwrap_or(false);
+    let voice_auto_stop_enabled = optional_bool_field(&fields, "voice_auto_stop").unwrap_or(false);
     let legacy_auto_shutdown_minutes = optional_u32_field(&fields, "auto_shutdown_ms")
         .map(auto_shutdown_minutes_from_ms)
         .unwrap_or(crate::types::DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES);
@@ -1908,10 +1935,7 @@ fn parse_u32_field(
         .map_err(|err| format!("device settings field {key} is not u32: {err}"))
 }
 
-fn optional_u8_field(
-    fields: &std::collections::HashMap<String, String>,
-    key: &str,
-) -> Option<u8> {
+fn optional_u8_field(fields: &std::collections::HashMap<String, String>, key: &str) -> Option<u8> {
     fields.get(key)?.parse::<u8>().ok()
 }
 
@@ -2000,9 +2024,7 @@ pub(super) fn active_capture_recovery_timing_for_test() -> (Duration, Duration) 
 pub(super) fn type_heartbeat_terminal_behavior_matrix_for_test() -> (bool, bool) {
     (
         type_heartbeat_enabled_for_terminal_behavior(CaptureTerminalBehavior::StopCapture),
-        type_heartbeat_enabled_for_terminal_behavior(
-            CaptureTerminalBehavior::ContinueListening,
-        ),
+        type_heartbeat_enabled_for_terminal_behavior(CaptureTerminalBehavior::ContinueListening),
     )
 }
 
@@ -2160,6 +2182,55 @@ struct OpenListenerOtaV1Target {
     bluetooth_address: Option<u64>,
 }
 
+struct OtaPreBulkMaintainHandoff {
+    session: Option<GattSession>,
+}
+
+impl OtaPreBulkMaintainHandoff {
+    fn take_from(target: &mut OpenListenerOtaV1Target) -> Self {
+        let session = target.session.take();
+        if session.is_some() {
+            log::info!(
+                "[embedded-ble] Listener OTA v1: retained prepare GATT maintain state across secure bulk handoff"
+            );
+        }
+        Self { session }
+    }
+
+    fn transfer_to_fresh_target(&mut self, fresh: &OpenListenerOtaV1Target, round: usize) {
+        if fresh.session.is_none() {
+            log::warn!(
+                "[embedded-ble] Listener OTA v1: fresh secure target has no maintained GATT session round={round}; keeping prepare session through transfer"
+            );
+            return;
+        }
+        if self.session.take().is_some() {
+            // SetMaintainConnection is shared device-session state, not a
+            // reference-counted lease. The fresh target already asserted true,
+            // so false/Close on the superseded wrapper here can collapse the
+            // radio schedule immediately before bulk.
+            log::info!(
+                "[embedded-ble] Listener OTA v1: fresh secure target assumed GATT maintain ownership round={round}; superseded wrapper released without false/Close"
+            );
+        }
+    }
+}
+
+impl Drop for OtaPreBulkMaintainHandoff {
+    fn drop(&mut self) {
+        if let Some(session) = self.session.take() {
+            release_gatt_maintain_request(
+                &session,
+                "Listener OTA pre-bulk maintain handoff failure",
+            );
+            let _ = session.Close();
+            log::info!(
+                "[embedded-ble] Listener OTA v1: unreplaced prepare GATT maintain state released after handoff failure"
+            );
+        }
+    }
+}
+
 struct PreparedListenerOtaV1Characteristics {
     control: GattCharacteristic,
     data: GattCharacteristic,
@@ -2198,7 +2269,7 @@ impl PreparedListenerOtaV1Transfer {
         on_progress: Option<&dyn Fn(usize, usize)>,
     ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
         let Self {
-            target,
+            mut target,
             snapshot: _,
             _preparation_guard,
             ownership,
@@ -2219,6 +2290,7 @@ impl PreparedListenerOtaV1Transfer {
         // BEGIN. Exclusive capture / TYPE:OTA handoff commonly drops Windows
         // link encryption on the prepare handle (protocol_error=3/14); reusing it
         // fails BEGIN and never reaches the bulk WWR path.
+        let mut pre_bulk_maintain_handoff = OtaPreBulkMaintainHandoff::take_from(&mut target);
         drop(target);
 
         const SECURE_REOPEN_ROUNDS: usize = 3;
@@ -2232,15 +2304,12 @@ impl PreparedListenerOtaV1Transfer {
             // before BEGIN. Prefer device 7.5 ms CI over WinRT 15 ms pin.
             let settle_ms = if round == 1 { 350 } else { 700 };
             std::thread::sleep(Duration::from_millis(settle_ms));
-            let fresh = match open_listener_ota_v1_target_after_active_link_handoff() {
+            let mut fresh = match open_listener_ota_v1_target_after_active_link_handoff() {
                 Ok(fresh) => {
                     log::info!(
                         "[embedded-ble] Listener OTA v1: reopened secure OTA target after exclusive handoff before BEGIN round={round}/{SECURE_REOPEN_ROUNDS} (avoids protocol_error=14)"
                     );
-                    // Optional A/B only (LISTENER_OTA_WINRT_THROUGHPUT=1).
-                    if let Some(device) = fresh.device.as_ref() {
-                        request_ota_ble_throughput_optimized(device);
-                    }
+                    pre_bulk_maintain_handoff.transfer_to_fresh_target(&fresh, round);
                     fresh
                 }
                 Err(err) => {
@@ -2251,6 +2320,8 @@ impl PreparedListenerOtaV1Transfer {
                     continue;
                 }
             };
+            let reboot_disconnect_observer =
+                OtaRebootDisconnectObserver::arm(&fresh, transfer_guard.session_id());
             match transfer_denzic_ota_v1_to_target(
                 &fresh,
                 transfer_guard.session_id(),
@@ -2258,7 +2329,28 @@ impl PreparedListenerOtaV1Transfer {
                 manifest_chunk_bytes,
                 on_progress,
             ) {
-                Ok(stats) => return Ok(stats),
+                Ok(stats) => {
+                    let new_generation_boundary = reboot_disconnect_observer
+                        .as_ref()
+                        .map(|observer| {
+                            observer.wait_for_new_generation(transfer_guard.session_id())
+                        })
+                        .unwrap_or(OtaRebootGenerationBoundary {
+                            connected: false,
+                            att_ready: false,
+                        });
+                    drop(reboot_disconnect_observer);
+                    if new_generation_boundary.connected {
+                        fresh.handoff_new_generation_to_post_confirm(transfer_guard.session_id());
+                    }
+                    if new_generation_boundary.att_ready {
+                        log::info!(
+                            "[embedded-ble] Denzic OTA v1 #{}: new-generation protocol target retained with ATT proof",
+                            transfer_guard.session_id()
+                        );
+                    }
+                    return Ok(stats);
+                }
                 Err(err) if is_retryable_listener_ota_v1_transfer_error(&err) => {
                     log::warn!(
                         "[embedded-ble] Listener OTA v1: transfer retryable error round={round}/{SECURE_REOPEN_ROUNDS}: {err}; will reopen secure target and retry"
@@ -2292,8 +2384,11 @@ impl PreparedListenerOtaV1Transfer {
 /// Owner 2026-07-28: mid-bulk SYNC failed with HRESULT 0x800704C7 (async cancel) and
 /// was treated as hard fail after one round, freezing UI progress while device still
 /// held ota_in_progress.
-fn is_retryable_listener_ota_v1_transfer_error(err: &str) -> bool {
+pub(super) fn is_retryable_listener_ota_v1_transfer_error(err: &str) -> bool {
     let lowered = err.to_ascii_lowercase();
+    if is_listener_ota_v1_progress_stall_error(err) {
+        return false;
+    }
     err.contains("protocol_error")
         || err.contains("ProtocolError")
         || err.contains("Insufficient")
@@ -2307,26 +2402,38 @@ fn is_retryable_listener_ota_v1_transfer_error(err: &str) -> bool {
         || lowered.contains("gattcommunicationstatus")
 }
 
+pub(super) fn is_listener_ota_v1_progress_stall_error(err: &str) -> bool {
+    err.to_ascii_lowercase()
+        .contains("ota transfer progress stalled")
+}
+
 struct ListenerOtaV1Transport<'a> {
     target: &'a OpenListenerOtaV1Target,
     transfer_id: u64,
     data_write_option: GattWriteOption,
     pending_wwr: Vec<IAsyncOperation<GattCommunicationStatus>>,
     pending_wwr_b: Vec<IAsyncOperation<GattCommunicationStatus>>,
+    status_error_started: Option<std::time::Instant>,
+    control_sequence: u32,
 }
 
 impl ListenerOtaV1Transport<'_> {
+    fn cancel_pending_wwr(&mut self) {
+        for pending in [&mut self.pending_wwr, &mut self.pending_wwr_b] {
+            for operation in pending.drain(..) {
+                let _ = operation.Cancel();
+                let _ = operation.Close();
+            }
+        }
+    }
+
     /// Complete all in-flight WWR ops on both lanes.
     fn flush_pending_wwr(&mut self) -> Result<(), String> {
         self.drain_pending_wwr_until(0, 0)
     }
 
     /// Poll both lanes together so dual-lane WWR completes in parallel.
-    fn drain_pending_wwr_until(
-        &mut self,
-        max_a: usize,
-        max_b: usize,
-    ) -> Result<(), String> {
+    fn drain_pending_wwr_until(&mut self, max_a: usize, max_b: usize) -> Result<(), String> {
         let timeout = OTA_WRITE_TIMEOUT;
         if self.pending_wwr.len() <= max_a && self.pending_wwr_b.len() <= max_b {
             return Ok(());
@@ -2341,14 +2448,15 @@ impl ListenerOtaV1Transport<'_> {
                 let mut index = 0usize;
                 while index < pending.len() {
                     let operation = &pending[index];
-                    match operation.Status().map_err(|err| {
-                        format!("BLE {label} write async status failed: {err}")
-                    })? {
+                    match operation
+                        .Status()
+                        .map_err(|err| format!("BLE {label} write async status failed: {err}"))?
+                    {
                         windows::Foundation::AsyncStatus::Completed => {
                             let operation = pending.remove(index);
-                            let status = operation.GetResults().map_err(|err| {
-                                format!("BLE {label} write result failed: {err}")
-                            })?;
+                            let status = operation
+                                .GetResults()
+                                .map_err(|err| format!("BLE {label} write result failed: {err}"))?;
                             let _ = operation.Close();
                             if status != GattCommunicationStatus::Success {
                                 return Err(format!(
@@ -2385,14 +2493,9 @@ impl ListenerOtaV1Transport<'_> {
                 break;
             }
             if std::time::Instant::now() >= deadline {
-                for pending in [&mut self.pending_wwr, &mut self.pending_wwr_b] {
-                    for operation in pending.drain(..) {
-                        let _ = operation.Cancel();
-                        let _ = operation.Close();
-                    }
-                }
+                self.cancel_pending_wwr();
                 return Err(format!(
-                    "BLE Denzic OTA v1 dual-lane WWR timed out after {} ms",
+                    "OTA transfer progress stalled for {} ms while draining the BLE data pipeline",
                     timeout.as_millis()
                 ));
             }
@@ -2416,11 +2519,9 @@ impl ListenerOtaV1Transport<'_> {
         };
 
         if lane_b {
-            let characteristic = self
-                .target
-                .data_b
-                .as_ref()
-                .ok_or_else(|| "Denzic OTA v1 data_b lane requested but characteristic missing".to_string())?;
+            let characteristic = self.target.data_b.as_ref().ok_or_else(|| {
+                "Denzic OTA v1 data_b lane requested but characteristic missing".to_string()
+            })?;
             let operation = start_gatt_write_with_option_async(
                 characteristic,
                 packet,
@@ -2460,9 +2561,29 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         &mut self,
         packet: &[u8; denzic_ota_core::CONTROL_BYTES],
     ) -> Result<(), String> {
+        if packet[4] == denzic_ota_core::OP_ABORT {
+            // A failed link may leave WWR operations permanently pending. ABORT
+            // is best effort: cancel those handles and make one short write so
+            // failure cleanup cannot hold the OTA gate for another minute.
+            self.cancel_pending_wwr();
+            return write_gatt_value_with_timeout(
+                &self.target.control,
+                packet,
+                GattWriteOption::WriteWithResponse,
+                OTA_ABORT_WRITE_TIMEOUT,
+                "Denzic OTA v1 abort",
+            )
+            .map(|_| ());
+        }
         // Drain in-flight WWR before control so SYNC/status observe a settled
         // offset (skipping flush before SYNC caused HRESULT cancel mid-window).
+        self.control_sequence = self.control_sequence.saturating_add(1);
+        let control_sequence = self.control_sequence;
+        let flush_pending_a = self.pending_wwr.len();
+        let flush_pending_b = self.pending_wwr_b.len();
+        let flush_started = std::time::Instant::now();
         self.flush_pending_wwr()?;
+        let flush_elapsed = flush_started.elapsed();
         let label = match packet[4] {
             denzic_ota_core::OP_BEGIN => "Denzic OTA v1 begin",
             denzic_ota_core::OP_SYNC => "Denzic OTA v1 sync",
@@ -2478,17 +2599,15 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         // (Insufficient Authentication)。短暂等待加密恢复后重试，避免第一次点 OTA 失败、
         // 或长传输结束 FINISH 失败（用户实测 FINISH 在 75s 传输后丢加密而失败）。
         // BEGIN 在 exclusive handoff 后尤其容易 14：多给几次 + 稍长间隔。
-        // 2026-07-28 owner log: first-window SYNC hung for full OTA_WRITE_TIMEOUT (8s)
+        // 2026-07-28 owner log: first-window SYNC hung for the old 8s write timeout
         // with no protocol_error. Device drains dual-lane flash queue under lock before
         // ATT-acking SYNC (ble_firmware_ota_drain_queued_data_locked) — large windows
         // can exceed 8s on ESP32 flash erase/write. Retry timeouts, not only ATT 14.
         let is_begin = packet[4] == denzic_ota_core::OP_BEGIN;
         let is_sync = packet[4] == denzic_ota_core::OP_SYNC;
-        // After dual-lane WWR flush: controller + device queue still settling.
-        // Quiet window before SYNC WriteWithResponse reduces false hangs.
-        if is_sync {
-            std::thread::sleep(Duration::from_millis(150));
-        }
+        // The response-bearing SYNC is the ordered air/link drain after WWR
+        // submission. A fixed quiet delay here only removes useful airtime;
+        // the following status read remains the confirmed-offset proof.
         const CONTROL_AUTH_RETRIES: usize = 5;
         let control_retry_delay_ms: u64 = if is_begin {
             1500
@@ -2497,20 +2616,26 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         } else {
             1000
         };
-        // SYNC: more attempts for timeout/auth (was 2, auth-only → one 8s hang = hard fail).
-        let max_attempts: usize = if is_sync {
-            4
-        } else {
-            CONTROL_AUTH_RETRIES + 1
-        };
-        // SYNC must outlive device-side flash drain of a dual-lane window (~200KB).
-        // 8s was too short; 25s covers erase-heavy first windows without stalling UI forever.
-        let write_timeout = if is_sync {
-            Duration::from_secs(25)
-        } else {
-            OTA_WRITE_TIMEOUT
-        };
-        for attempt in 0..max_attempts {
+        let mut attempt = 0usize;
+        let mut sync_error_started: Option<std::time::Instant> = None;
+        loop {
+            // The first SYNC may legitimately wait while Firmware drains a 400
+            // chunk flash queue. Only after WinRT reports a retryable BLE error
+            // does the rolling 10-second recovery budget begin.
+            let write_timeout = if let Some(started) = sync_error_started {
+                let remaining = LISTENER_OTA_V1_PROGRESS_TIMEOUT.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(format!(
+                        "OTA transfer progress stalled for {} ms after a BLE SYNC error",
+                        LISTENER_OTA_V1_PROGRESS_TIMEOUT.as_millis()
+                    ));
+                }
+                remaining
+            } else if is_sync {
+                OTA_SYNC_WRITE_TIMEOUT
+            } else {
+                OTA_WRITE_TIMEOUT
+            };
             let result = if use_status_write {
                 write_gatt_value_status_with_timeout(
                     &self.target.control,
@@ -2529,21 +2654,65 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
                 )
             };
             match result {
-                Ok(_) => return Ok(()),
+                Ok(_) => {
+                    log::info!(
+                        "[embedded-ble] Denzic OTA v1 #{}: control boundary seq={} op={} pending_a={} pending_b={} flush_ms={} control_after_flush_ms={}",
+                        self.transfer_id,
+                        control_sequence,
+                        packet[4],
+                        flush_pending_a,
+                        flush_pending_b,
+                        flush_elapsed.as_millis(),
+                        flush_started.elapsed().saturating_sub(flush_elapsed).as_millis()
+                    );
+                    return Ok(());
+                }
                 Err(err) => {
                     let lowered = err.to_ascii_lowercase();
                     let is_auth = err.contains("protocol_error")
                         || err.contains("ProtocolError")
                         || lowered.contains("authentication")
                         || lowered.contains("insufficient");
-                    let is_timeout =
-                        lowered.contains("timed out") || lowered.contains("timeout");
+                    let is_timeout = lowered.contains("timed out") || lowered.contains("timeout");
                     let is_cancel = lowered.contains("0x800704c7")
                         || lowered.contains("async error")
                         || lowered.contains("canceled")
                         || lowered.contains("cancelled");
-                    let needs_retry =
-                        attempt + 1 < max_attempts && (is_auth || is_timeout || is_cancel);
+                    let retryable = is_auth || is_timeout || is_cancel;
+                    if is_sync && retryable {
+                        let started =
+                            *sync_error_started.get_or_insert_with(std::time::Instant::now);
+                        let elapsed = started.elapsed();
+                        if elapsed >= LISTENER_OTA_V1_PROGRESS_TIMEOUT {
+                            return Err(format!(
+                                "OTA transfer progress stalled for {} ms after a BLE SYNC error: {err}",
+                                LISTENER_OTA_V1_PROGRESS_TIMEOUT.as_millis()
+                            ));
+                        }
+                        let kind = if is_timeout {
+                            "timeout"
+                        } else if is_cancel {
+                            "cancel/async"
+                        } else {
+                            "auth/encryption"
+                        };
+                        log::warn!(
+                            "[embedded-ble] Denzic OTA v1 #{}: {} failed ({}); retrying within {}ms recovery budget attempt={}",
+                            self.transfer_id,
+                            label,
+                            kind,
+                            LISTENER_OTA_V1_PROGRESS_TIMEOUT.as_millis(),
+                            attempt + 1
+                        );
+                        let remaining =
+                            LISTENER_OTA_V1_PROGRESS_TIMEOUT.saturating_sub(started.elapsed());
+                        std::thread::sleep(
+                            Duration::from_millis(control_retry_delay_ms).min(remaining),
+                        );
+                        attempt = attempt.saturating_add(1);
+                        continue;
+                    }
+                    let needs_retry = attempt < CONTROL_AUTH_RETRIES && retryable;
                     if needs_retry {
                         let kind = if is_timeout {
                             "timeout"
@@ -2559,20 +2728,17 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
                             kind,
                             control_retry_delay_ms,
                             attempt + 1,
-                            max_attempts - 1
+                            CONTROL_AUTH_RETRIES
                         );
-                        // Re-drain in case a late WWR completion arrived during the hang.
                         let _ = self.flush_pending_wwr();
-                        std::thread::sleep(std::time::Duration::from_millis(
-                            control_retry_delay_ms,
-                        ));
+                        std::thread::sleep(Duration::from_millis(control_retry_delay_ms));
+                        attempt = attempt.saturating_add(1);
                         continue;
                     }
                     return Err(err);
                 }
             }
         }
-        unreachable!("write_control retry loop must return inside the loop")
     }
 
     fn dual_lane_available(&self) -> bool {
@@ -2584,6 +2750,9 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
             match self.enqueue_wwr_data_write(packet, true) {
                 Ok(()) => return Ok(()),
                 Err(primary_err) => {
+                    if is_listener_ota_v1_progress_stall_error(&primary_err) {
+                        return Err(primary_err);
+                    }
                     log::warn!(
                         "[embedded-ble] Denzic OTA v1 data_b WWR pipeline failed: {primary_err}; falling back to blocking write"
                     );
@@ -2613,6 +2782,9 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
             match self.enqueue_wwr_data_write(packet, false) {
                 Ok(()) => return Ok(()),
                 Err(primary_err) => {
+                    if is_listener_ota_v1_progress_stall_error(&primary_err) {
+                        return Err(primary_err);
+                    }
                     log::warn!(
                         "[embedded-ble] Denzic OTA v1 data WWR pipeline failed: {primary_err}; falling back to blocking write"
                     );
@@ -2635,13 +2807,47 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
     }
 
     fn read_status(&mut self) -> Result<Vec<u8>, String> {
-        self.flush_pending_wwr()?;
-        read_characteristic_bytes_with_timeout(
-            &self.target.status,
-            BluetoothCacheMode::Uncached,
-            "Denzic OTA v1 status",
-            LISTENER_OTA_V1_STATUS_READ_TIMEOUT,
-        )
+        let timeout = self
+            .status_error_started
+            .map(|started| {
+                LISTENER_OTA_V1_PROGRESS_TIMEOUT
+                    .saturating_sub(started.elapsed())
+                    .min(LISTENER_OTA_V1_STATUS_READ_TIMEOUT)
+            })
+            .unwrap_or(LISTENER_OTA_V1_STATUS_READ_TIMEOUT);
+        if timeout.is_zero() {
+            return Err(format!(
+                "OTA transfer progress stalled for {} ms after a BLE status error",
+                LISTENER_OTA_V1_PROGRESS_TIMEOUT.as_millis()
+            ));
+        }
+        let result = self.flush_pending_wwr().and_then(|_| {
+            read_characteristic_bytes_with_timeout(
+                &self.target.status,
+                BluetoothCacheMode::Uncached,
+                "Denzic OTA v1 status",
+                timeout,
+            )
+        });
+        match result {
+            Ok(bytes) => {
+                self.status_error_started = None;
+                Ok(bytes)
+            }
+            Err(error) => {
+                let started = *self
+                    .status_error_started
+                    .get_or_insert_with(std::time::Instant::now);
+                if started.elapsed() >= LISTENER_OTA_V1_PROGRESS_TIMEOUT {
+                    Err(format!(
+                        "OTA transfer progress stalled for {} ms after a BLE status error: {error}",
+                        LISTENER_OTA_V1_PROGRESS_TIMEOUT.as_millis()
+                    ))
+                } else {
+                    Err(error)
+                }
+            }
+        }
     }
 
     fn status_retry_wait(&mut self, attempt: u8) {
@@ -2782,12 +2988,9 @@ fn paired_listener_device_visible_for_addresses(
 ) -> Result<bool, String> {
     let target_name = effective_bluetooth_target_name(None);
     let target_addresses = listener_recovery_target_addresses();
-    let selector =
-        BluetoothLEDevice::GetDeviceSelectorFromPairingState(true).map_err(|err| {
-            format!(
-                "paired BLE device selector failed before advertisement GATT fallback: {err}"
-            )
-        })?;
+    let selector = BluetoothLEDevice::GetDeviceSelectorFromPairingState(true).map_err(|err| {
+        format!("paired BLE device selector failed before advertisement GATT fallback: {err}")
+    })?;
     let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)
         .map_err(|err| {
             format!("paired BLE device query failed before advertisement GATT fallback: {err}")
@@ -2800,7 +3003,9 @@ fn paired_listener_device_visible_for_addresses(
             )
         })?;
     let count = devices.Size().map_err(|err| {
-        format!("paired BLE device collection size failed before advertisement GATT fallback: {err}")
+        format!(
+            "paired BLE device collection size failed before advertisement GATT fallback: {err}"
+        )
     })?;
 
     for index in 0..count {
@@ -2818,9 +3023,8 @@ fn paired_listener_device_visible_for_addresses(
             .map(|value| value.to_string_lossy())
             .unwrap_or_default();
         let address = parse_bluetooth_address_from_device_id(&id);
-        let address_matches = address.is_some_and(|value| {
-            addresses.contains(&value) || target_addresses.contains(&value)
-        });
+        let address_matches = address
+            .is_some_and(|value| addresses.contains(&value) || target_addresses.contains(&value));
         let name_matches = bluetooth_name_matches_expected(&name, &target_name);
         if !address_matches && !name_matches {
             continue;
@@ -3026,11 +3230,7 @@ fn open_notify_target_from_recent_pairing_advertisement(
             state.target_name
         ));
     }
-    ensure_paired_listener_for_advertisement_gatt(
-        "recent pairing audio notify",
-        &addresses,
-        true,
-    )?;
+    ensure_paired_listener_for_advertisement_gatt("recent pairing audio notify", &addresses, true)?;
     let mut last_error = None;
     for address in addresses {
         match open_notify_target_for_device(address) {
@@ -3054,8 +3254,7 @@ fn open_notify_target_from_recent_pairing_advertisement(
     }
 
     Err(last_error.unwrap_or_else(|| {
-        "recent pairing audio notify advertisement scan returned no usable addresses"
-            .to_string()
+        "recent pairing audio notify advertisement scan returned no usable addresses".to_string()
     }))
 }
 
@@ -3145,9 +3344,9 @@ fn audio_target_advertisement_addresses(kind: &str) -> Result<Vec<u64>, String> 
     }
 
     if addresses.is_empty() {
-        return Err(errors.pop().unwrap_or_else(|| {
-            format!("{kind} address discovery returned no usable address")
-        }));
+        return Err(errors
+            .pop()
+            .unwrap_or_else(|| format!("{kind} address discovery returned no usable address")));
     }
     Ok(addresses)
 }
@@ -3759,10 +3958,7 @@ fn remember_runtime_bluetooth_target_address_for_candidate(
     ) {
         (Some(configured), Some(candidate))
             if bluetooth_name_matches_expected(&configured, DEFAULT_BLUETOOTH_TARGET_NAME)
-                && !bluetooth_name_matches_expected(
-                    &candidate,
-                    DEFAULT_BLUETOOTH_TARGET_NAME,
-                ) =>
+                && !bluetooth_name_matches_expected(&candidate, DEFAULT_BLUETOOTH_TARGET_NAME) =>
         {
             set_configured_bluetooth_target_name(&candidate);
             candidate
@@ -4169,6 +4365,7 @@ struct OpenNotifyTarget {
     session: Option<GattSession>,
     device: Option<BluetoothLEDevice>,
     bluetooth_address: Option<u64>,
+    post_ota_preserved_cccd: bool,
 }
 
 struct OpenAudioControlTarget {
@@ -4221,9 +4418,7 @@ impl DiagnosticTargetCandidate {
             DiagnosticTargetCandidate::Device { address, .. } => {
                 open_diagnostic_target_for_device(*address)
             }
-            DiagnosticTargetCandidate::Service { id, .. } => {
-                open_diagnostic_target_for_service(id)
-            }
+            DiagnosticTargetCandidate::Service { id, .. } => open_diagnostic_target_for_service(id),
         }
     }
 }
@@ -4238,6 +4433,7 @@ struct PreparedDiagnosticCharacteristics {
 impl Drop for OpenListenerOtaV1Target {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
+            release_gatt_maintain_request(&session, "Listener OTA target drop");
             let _ = session.Close();
         }
         if let Some(service) = self.service.take() {
@@ -4252,6 +4448,7 @@ impl Drop for OpenListenerOtaV1Target {
 impl Drop for OpenAudioControlTarget {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
+            release_gatt_maintain_request(&session, "audio control target drop");
             let _ = session.Close();
         }
         if let Some(service) = self.service.take() {
@@ -4266,6 +4463,7 @@ impl Drop for OpenAudioControlTarget {
 impl Drop for OpenDiagnosticTarget {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
+            release_gatt_maintain_request(&session, "diagnostic target drop");
             let _ = session.Close();
         }
         if let Some(service) = self.service.take() {
@@ -4345,6 +4543,7 @@ struct NotifyCleanup {
     audio_control_registration: Option<ActiveAudioControlRegistration>,
     type_heartbeat_open: bool,
     notify_disabled: bool,
+    skip_explicit_target_close: bool,
 }
 
 impl NotifyCleanup {
@@ -4358,6 +4557,7 @@ impl NotifyCleanup {
             audio_control_registration: None,
             type_heartbeat_open: false,
             notify_disabled: false,
+            skip_explicit_target_close: false,
         }
     }
 
@@ -4385,19 +4585,23 @@ impl NotifyCleanup {
         self.type_heartbeat_open = false;
     }
 
+    fn abandon_poisoned_post_ota_target(&mut self) {
+        self.skip_explicit_target_close = true;
+        self.finish(NotifyCccdTeardown::LeaveEnabled);
+    }
+
     fn write_type_heartbeat(&self, command: &[u8], label: &str) -> Result<(), String> {
         let Some(control) = self.target.control.as_ref() else {
             return Err("audio control unavailable".to_string());
         };
         let write_option = type_heartbeat_write_option(control, label);
 
-        match write_gatt_value_with_timeout(
-            control,
-            command,
-            write_option,
-            TYPE_HEARTBEAT_WRITE_TIMEOUT,
-            label,
-        ) {
+        let timeout = if self.target.post_ota_preserved_cccd && label == "Type heartbeat ready" {
+            POST_OTA_TYPE_READY_WRITE_TIMEOUT
+        } else {
+            TYPE_HEARTBEAT_WRITE_TIMEOUT
+        };
+        match write_gatt_value_with_timeout(control, command, write_option, timeout, label) {
             Ok(_) => {
                 if label == "Type heartbeat" {
                     log::debug!("[embedded-ble] capture #{}: {label} sent", self.capture_id);
@@ -4459,8 +4663,7 @@ impl NotifyCleanup {
             // Exclusive OTA already sent TYPE:OTA to latch the Type-ready LED lease.
             // A BYE here races firmware OTA-hold handling and can drop the lease early
             // (owner 2026-07-28: find-Type LED during bulk transfer / pause handoff).
-            if ble_ota_process_mutex_busy()
-                || matches!(teardown, NotifyCccdTeardown::LeaveEnabled)
+            if ble_ota_process_mutex_busy() || matches!(teardown, NotifyCccdTeardown::LeaveEnabled)
             {
                 log::info!(
                     "[embedded-ble] capture #{}: skipping TYPE:BYE during OTA/controlled handoff (preserve Type OTA LED lease)",
@@ -4533,9 +4736,9 @@ impl NotifyCleanup {
                 request.timeout,
                 &request.label,
             ),
-            None => Err(
-                "active Listener BLE capture has no audio control characteristic".to_string(),
-            ),
+            None => {
+                Err("active Listener BLE capture has no audio control characteristic".to_string())
+            }
         };
         let _ = request.result_tx.send(result);
     }
@@ -4741,7 +4944,21 @@ impl NotifyCccdTeardown {
 impl Drop for NotifyCleanup {
     fn drop(&mut self) {
         self.disable_notify();
+        if self.skip_explicit_target_close {
+            if let Some(session) = self.target.session.take() {
+                release_gatt_maintain_request(
+                    &session,
+                    "poisoned notify target drop without Close",
+                );
+            }
+            log::info!(
+                "[embedded-ble] capture #{}: dropping poisoned post-OTA target without synchronous WinRT Close",
+                self.capture_id
+            );
+            return;
+        }
         if let Some(session) = self.target.session.take() {
+            release_gatt_maintain_request(&session, "notify target drop");
             let _ = session.Close();
         }
         if let Some(service) = self.target.service.take() {

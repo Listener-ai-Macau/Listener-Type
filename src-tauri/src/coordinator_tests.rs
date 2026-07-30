@@ -615,9 +615,7 @@ fn device_key_ble_pending_start_expires() {
         kind: PendingDeviceKeyBleActionKind::Start,
         key: DeviceCustomKeyId::Key1,
         gesture: DeviceCustomKeyGesture::SingleClick,
-        queued_at: Instant::now()
-            - DEVICE_KEY_BLE_PENDING_ACTION_TTL
-            - Duration::from_millis(1),
+        queued_at: Instant::now() - DEVICE_KEY_BLE_PENDING_ACTION_TTL - Duration::from_millis(1),
     });
 
     assert!(take_pending_device_key_ble_start(&coordinator.inner, "test").is_none());
@@ -635,9 +633,7 @@ fn device_key_ble_terminal_ttl_clears_only_its_own_pending_action() {
         kind: PendingDeviceKeyBleActionKind::Start,
         key: DeviceCustomKeyId::Key1,
         gesture: DeviceCustomKeyGesture::SingleClick,
-        queued_at: Instant::now()
-            - DEVICE_KEY_BLE_PENDING_ACTION_TTL
-            - Duration::from_millis(1),
+        queued_at: Instant::now() - DEVICE_KEY_BLE_PENDING_ACTION_TTL - Duration::from_millis(1),
     };
     *coordinator.inner.device_key_pending_ble_action.lock() = Some(expired);
 
@@ -824,6 +820,46 @@ fn firmware_ota_recovery_preflight_bypass_is_generation_scoped() {
 }
 
 #[test]
+fn failed_firmware_ota_recovery_is_non_destructive_and_has_no_success_capsule() {
+    let runtime = include_str!("coordinator.rs");
+    let loop_start = runtime
+        .find("async fn embedded_ble_background_listener_loop")
+        .expect("background listener loop should exist");
+    let cleanup_start = runtime[loop_start..]
+        .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+        .map(|offset| loop_start + offset)
+        .expect("stale cleanup boundary should exist");
+    let listener_loop = &runtime[loop_start..cleanup_start];
+    assert!(
+        listener_loop.contains("let mut firmware_ota_recovery = false;")
+            && listener_loop.contains("firmware_ota_recovery = true;")
+            && listener_loop.contains("if !firmware_ota_recovery")
+            && listener_loop.contains("if firmware_ota_recovery")
+            && listener_loop.contains("EmbeddedBleStalePairingCleanupOutcome::RetrySoon"),
+        "OTA recovery generation must bypass lost-pair holds and stale-pair cleanup"
+    );
+
+    let coordinator = include_str!("coordinator.rs");
+    let failure_start = coordinator
+        .find("pub fn end_failed_firmware_ota_transfer")
+        .expect("failed OTA recovery helper should exist");
+    let failure_end = coordinator[failure_start..]
+        .find("pub async fn wait_for_embedded_ble_listener_ready_after_firmware_ota")
+        .map(|offset| failure_start + offset)
+        .expect("failed OTA recovery helper boundary should exist");
+    let failure = &coordinator[failure_start..failure_end];
+    assert!(
+        failure.contains("end_firmware_ota_transfer_with_listener_restore(false)")
+            && failure.contains("refresh_embedded_ble_listener_after_failed_firmware_ota"),
+        "failed OTA must clear the gate and start one bonded recovery generation"
+    );
+    assert!(
+        runtime.contains("refresh_embedded_ble_listener_with_options(inner, false, true, false)"),
+        "failed OTA recovery must not arm the success-only audio-restored capsule"
+    );
+}
+
+#[test]
 fn device_key_idle_wake_joins_an_active_notify_recovery() {
     let coordinator = Coordinator::new();
     let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
@@ -937,9 +973,7 @@ async fn firmware_ota_pretransfer_wait_requires_notify_subscription_for_embedded
     let err = coordinator
         .wait_for_embedded_ble_listener_ready_before_firmware_ota(Duration::from_millis(1))
         .await
-        .expect_err(
-            "an OTA may not take over a cold EmbeddedBle listener before notify is ready",
-        );
+        .expect_err("an OTA may not take over a cold EmbeddedBle listener before notify is ready");
     assert!(err.contains("notify subscription did not recover"));
 
     let cancel = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
@@ -976,6 +1010,21 @@ fn ble_name_apply_handoff_marks_only_the_active_capture_for_disconnect_handoff()
             .as_ref()
             .is_some_and(|(active_cancel, _)| Arc::ptr_eq(active_cancel, &active)),
         "the active capture keeps its handoff marker until its cleanup finishes"
+    );
+}
+
+#[test]
+fn firmware_ota_handoff_preserves_the_active_capture_cccd_and_type_lease() {
+    let coordinator = Coordinator::new();
+    let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);
+    let handoff = embedded_ble_listener_cccd_handoff_flag(&coordinator.inner, &active);
+
+    pause_embedded_ble_listener_capture_for_ota(&coordinator.inner);
+
+    assert!(active.load(Ordering::SeqCst));
+    assert!(
+        handoff.load(Ordering::SeqCst),
+        "OTA must leave the bonded CCCD enabled so notify teardown skips TYPE:BYE"
     );
 }
 
@@ -1021,11 +1070,10 @@ fn embedded_ble_pairing_hold_blocks_background_refresh() {
     assert!(!embedded_ble_listener_capture_active(&coordinator.inner));
 
     clear_embedded_ble_pairing_confirmation_hold(&coordinator.inner, "test clear");
-    assert!(embedded_ble_pairing_confirmation_hold_remaining(
-        &coordinator.inner,
-        Instant::now()
-    )
-    .is_none());
+    assert!(
+        embedded_ble_pairing_confirmation_hold_remaining(&coordinator.inner, Instant::now())
+            .is_none()
+    );
 }
 
 #[test]
@@ -1474,9 +1522,7 @@ fn startup_active_native_connection_bypasses_incomplete_pairing_enumeration() {
         .expect("startup must collect native Windows HID evidence");
     let active_connection_index = body
         .find("native_windows_hid_pairing_active_connection")
-        .expect(
-            "startup must distinguish an active local HID connection from stale pairing rows",
-        );
+        .expect("startup must distinguish an active local HID connection from stale pairing rows");
     let pairing_query_index = body.find("query_listener_pairing").expect(
         "startup must still use the paired-device query when no local connection is active",
     );
@@ -1647,11 +1693,7 @@ fn recovered_capsule_guard_suppresses_non_link_loss_and_repeated_reconnect() {
         "ownership conflict is not a link-loss recovery and must not emit a capsule"
     );
     assert!(
-        !should_emit_embedded_ble_recovered_capsule_for_reason(
-            ownership_conflict,
-            Some(true),
-            1
-        ),
+        !should_emit_embedded_ble_recovered_capsule_for_reason(ownership_conflict, Some(true), 1),
         "ownership conflict must not emit even when usb-powered on attempt 1"
     );
 
@@ -1668,8 +1710,7 @@ fn recovered_capsule_guard_suppresses_non_link_loss_and_repeated_reconnect() {
     ));
 
     // 真正的链路掉线(reason=546,通电)首次/单次重连应该弹
-    let link_loss =
-        "Windows BLE disconnected; reason=546; audio path returned transport_not_ready";
+    let link_loss = "Windows BLE disconnected; reason=546; audio path returned transport_not_ready";
     assert!(
         should_emit_embedded_ble_recovered_capsule_for_reason(link_loss, Some(true), 0),
         "genuine link-loss recovery on a fresh reconnect should emit the capsule"
@@ -1687,6 +1728,37 @@ fn recovered_capsule_guard_suppresses_non_link_loss_and_repeated_reconnect() {
     assert!(
         !should_emit_embedded_ble_recovered_capsule_for_reason(link_loss, Some(true), 303),
         "a runaway reconnect loop (303 attempts) must not spam the recovered capsule"
+    );
+}
+
+#[test]
+fn ota_recovery_capsule_is_consumed_once_for_the_matching_generation() {
+    let coordinator = Coordinator::new();
+    coordinator
+        .inner
+        .embedded_ble_listener_generation
+        .store(42, Ordering::SeqCst);
+    coordinator
+        .inner
+        .embedded_ble_ota_recovery_capsule_generation
+        .store(42, Ordering::SeqCst);
+
+    assert!(take_embedded_ble_ota_recovery_capsule(
+        &coordinator.inner,
+        42
+    ));
+    assert!(
+        !take_embedded_ble_ota_recovery_capsule(&coordinator.inner, 42),
+        "the same OTA recovery must not emit the grey capsule twice"
+    );
+
+    coordinator
+        .inner
+        .embedded_ble_ota_recovery_capsule_generation
+        .store(42, Ordering::SeqCst);
+    assert!(
+        !take_embedded_ble_ota_recovery_capsule(&coordinator.inner, 43),
+        "an unrelated later listener generation must not consume stale OTA recovery"
     );
 }
 
@@ -1847,8 +1919,7 @@ fn embedded_ble_background_stale_cleanup_handles_gatt_and_cccd_pairing_cache_fai
 
     let too_early = EmbeddedBleWakeRecoverySnapshot {
         reconnect_attempts: EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD - 1,
-        consecutive_reconnect_failures: EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD
-            - 1,
+        consecutive_reconnect_failures: EMBEDDED_BLE_BACKGROUND_STALE_CLEANUP_ATTEMPT_THRESHOLD - 1,
         ..snapshot.clone()
     };
     assert!(
@@ -1981,8 +2052,9 @@ fn embedded_ble_background_stale_cleanup_respects_manual_windows_unpair() {
         .expect("manual Windows hold helper boundary should exist");
     let manual_helper = &source[manual_helper_start..manual_helper_end];
     assert!(
-        manual_helper
-            .contains("suppressed automatic PairAsync because Windows no longer reports a paired Listener"),
+        manual_helper.contains(
+            "suppressed automatic PairAsync because Windows no longer reports a paired Listener"
+        ),
         "manual Windows device removal must stop Type from immediately pairing the device back"
     );
     assert!(
@@ -2024,9 +2096,7 @@ fn embedded_ble_background_stale_cleanup_respects_manual_windows_unpair() {
         .find("query_listener_pairing")
         .expect("background stale cleanup must query Windows pairing state");
     let hardware_hold_index = body
-        .find(
-            "if recovery_pairing_window_visible\n        && !direct_gatt_instability_recovery",
-        )
+        .find("if recovery_pairing_window_visible\n        && !direct_gatt_instability_recovery")
         .expect("hardware recovery hold branch should exist");
     assert!(
         query_index < hardware_hold_index,
@@ -2067,7 +2137,9 @@ fn embedded_ble_background_stale_cleanup_respects_manual_windows_unpair() {
         .expect("generic stale-cache recovery branch should exist");
     let direct_gatt_retry_index = body
         .find("retrying direct audio GATT before clearing Windows pairing cache")
-        .expect("generic stale-cache recovery may retain its direct GATT retry for non-manual failures");
+        .expect(
+            "generic stale-cache recovery may retain its direct GATT retry for non-manual failures",
+        );
     let cleanup_index = body
         .find("prompt_listener_pairing_after_type_recovery")
         .expect("automatic Type recovery branch should still exist");
@@ -2146,15 +2218,14 @@ fn embedded_ble_background_stale_cleanup_respects_manual_windows_unpair() {
     let active_gate_index = body
         .find("listener_pairing_maintenance_active")
         .expect("background cleanup must check for an active pairing/cache owner");
-    let recovery_guard_index = body.find("try_begin_embedded_ble_pairing_recovery").expect(
-        "background cleanup must keep a recovery guard through link reachability checks",
-    );
+    let recovery_guard_index = body
+        .find("try_begin_embedded_ble_pairing_recovery")
+        .expect("background cleanup must keep a recovery guard through link reachability checks");
     let type_pairasync_index = body
         .find("prompt_listener_pairing_after_type_recovery")
         .expect("background cleanup should use Type's bounded recovery PairAsync path");
     assert!(
-        active_gate_index < recovery_guard_index
-            && recovery_guard_index < type_pairasync_index,
+        active_gate_index < recovery_guard_index && recovery_guard_index < type_pairasync_index,
         "background cleanup must hold a recovery guard before Type automatic PairAsync recovery"
     );
     assert!(
@@ -2233,14 +2304,10 @@ fn embedded_ble_manual_windows_unpair_suppresses_background_pairasync() {
         details: vec![],
     };
     assert!(
-        should_hold_embedded_ble_background_recovery_after_manual_unpair(
-            &removed, false, false,
-        )
+        should_hold_embedded_ble_background_recovery_after_manual_unpair(&removed, false, false,)
     );
     assert!(
-        !should_hold_embedded_ble_background_recovery_after_manual_unpair(
-            &removed, true, false,
-        ),
+        !should_hold_embedded_ble_background_recovery_after_manual_unpair(&removed, true, false,),
         "Type-confirmed direct GATT instability recovery may still rebuild pairing"
     );
 
@@ -2255,9 +2322,7 @@ fn embedded_ble_manual_windows_unpair_suppresses_background_pairasync() {
         details: vec![],
     };
     assert!(
-        !should_hold_embedded_ble_background_recovery_after_manual_unpair(
-            &paired, false, false,
-        )
+        !should_hold_embedded_ble_background_recovery_after_manual_unpair(&paired, false, false,)
     );
 
     let manual_delete_failed_node = crate::embedded_ble::BleDevicePairingPromptResult {
@@ -2287,9 +2352,7 @@ fn embedded_ble_manual_windows_unpair_suppresses_background_pairasync() {
         "EC11/Type-owned recovery advertisement must not be swallowed by the manual-delete no-steal branch"
     );
     assert!(
-        !embedded_ble_background_pairasync_is_authorized(
-            true, true, true, true, true, true, true,
-        ),
+        !embedded_ble_background_pairasync_is_authorized(true, true, true, true, true, true, true,),
         "manual Windows delete must override every background PairAsync heuristic"
     );
     assert!(
@@ -2438,9 +2501,7 @@ fn embedded_ble_ec11_recovery_enters_type_controlled_pairing_path() {
     let probe = source[start..]
         .find("let recovery_pairing_probe")
         .map(|offset| start + offset)
-        .expect(
-            "BLE recovery advertisement probe should precede Type ownership classification",
-        );
+        .expect("BLE recovery advertisement probe should precede Type ownership classification");
     let type_controlled = source[start..]
         .find("let type_observed_recovery_advertisement")
         .map(|offset| start + offset)
@@ -2640,9 +2701,7 @@ fn embedded_ble_lost_native_pairing_pauses_before_stale_gatt_retry() {
     let listener_loop = &source[loop_start..loop_end];
     let lost_pairing_hold = listener_loop
         .find("maybe_hold_embedded_ble_after_lost_native_pairing")
-        .expect(
-            "link loss must recheck current native Windows pairing before stale GATT retry",
-        );
+        .expect("link loss must recheck current native Windows pairing before stale GATT retry");
     let stale_cleanup = listener_loop
         .find("maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
         .expect("background stale cleanup should remain after the missing-pairing guard");
@@ -2799,10 +2858,10 @@ fn embedded_ble_passive_local_reattach_requires_windows_evidence_before_gatt_res
         "a proven local reattach must protect the notify restart from the startup stale-HID preflight while Windows rebuilds services"
     );
     for forbidden in [
-        "PairAsync",
         "UnpairAsync",
         "listener_recovery_pairing_advertisement_probe",
         "prompt_listener_pairing",
+        "restart_windows_bluetooth_adapter_after_pairing_failure",
     ] {
         assert!(
             !body.contains(forbidden),
@@ -2812,7 +2871,7 @@ fn embedded_ble_passive_local_reattach_requires_windows_evidence_before_gatt_res
 }
 
 #[test]
-fn embedded_ble_passive_local_reattach_blocks_generic_listener_refresh() {
+fn embedded_ble_generic_listener_refresh_clears_stale_passive_reattach() {
     let source = include_str!("coordinator.rs");
     let start = source
         .find("fn refresh_embedded_ble_listener_with_options")
@@ -2824,14 +2883,15 @@ fn embedded_ble_passive_local_reattach_blocks_generic_listener_refresh() {
     let body = &source[start..end];
     assert!(
         body.contains("embedded_ble_passive_local_reattach_active")
-            && body.contains("passively awaiting explicit local Windows re-pair"),
-        "ordinary refreshes must stay paused until the passive monitor proves a local Windows re-pair"
+            && body.contains("background listener refresh clearing passive local reattach")
+            && body.contains("background listener refresh supersedes passive reattach"),
+        "an explicit listener refresh must clear a stale passive-reattach hold before rebuilding notify"
     );
 }
 
 #[test]
-fn embedded_ble_missing_pairing_can_probe_recovery_pairing_advertisement_before_cleanup_threshold(
-) {
+fn embedded_ble_missing_pairing_can_probe_recovery_pairing_advertisement_before_cleanup_threshold()
+{
     let now = Instant::now();
     let snapshot = EmbeddedBleWakeRecoverySnapshot {
         reconnect_attempts: 1,
@@ -3019,8 +3079,7 @@ fn embedded_ble_observed_recovery_extracts_known_address_for_fast_cleanup() {
 }
 
 #[test]
-fn embedded_ble_device_missing_can_probe_recovery_pairing_advertisement_before_cleanup_threshold(
-) {
+fn embedded_ble_device_missing_can_probe_recovery_pairing_advertisement_before_cleanup_threshold() {
     let now = Instant::now();
     let snapshot = EmbeddedBleWakeRecoverySnapshot {
         reconnect_attempts: 1,
@@ -3095,9 +3154,7 @@ fn embedded_ble_notify_advertisement_evidence_skips_only_the_duplicate_scan() {
     let manual_windows_unpair_error = "No paired BLE device found in Windows Bluetooth pairing store for advertised Listener address(es) F1CFEC3F0E5E";
 
     assert!(
-        recovery_pairing_advertisement_already_observed_during_notify_open(
-            known_recovery_error
-        ),
+        recovery_pairing_advertisement_already_observed_during_notify_open(known_recovery_error),
         "a notify-open recovery-advertisement observation should not be scanned again"
     );
     assert!(
@@ -3303,12 +3360,11 @@ fn startup_stale_native_hid_requires_visible_recovery_before_type_pairasync() {
         open_bluetooth_settings: true,
         details: Vec::new(),
     };
-    let recovery_advertisement =
-        crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
-            visible: true,
-            has_random_identity: true,
-            addresses: vec![0xDCC2_3A61_9576],
-        };
+    let recovery_advertisement = crate::embedded_ble::ListenerRecoveryPairingAdvertisementProbe {
+        visible: true,
+        has_random_identity: true,
+        addresses: vec![0xDCC2_3A61_9576],
+    };
     assert!(startup_stale_native_hid_recovery_is_authorized(
         &[0xDCC2_3A61_9576],
         &stale_pairing,
@@ -3474,10 +3530,13 @@ fn embedded_ble_manual_unpair_requires_windows_pairing_before_gatt() {
         EMBEDDED_BLE_STALE_PAIRING_CLEANUP_REASON,
         false,
     ));
-    assert!(!embedded_ble_pairing_recovery_accepts_link_reachable(
-        EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON,
-        false,
-    ), "a manual Windows delete must not let stale readable GATT clear the user-controlled hold");
+    assert!(
+        !embedded_ble_pairing_recovery_accepts_link_reachable(
+            EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON,
+            false,
+        ),
+        "a manual Windows delete must not let stale readable GATT clear the user-controlled hold"
+    );
     assert!(!embedded_ble_pairing_recovery_accepts_link_reachable(
         EMBEDDED_BLE_HARDWARE_RECOVERY_PAIRING_HOLD_REASON,
         false,
@@ -3925,7 +3984,7 @@ fn cancel_session_state_machine_is_table_driven() {
         (SessionPhase::Idle, SessionPhase::Idle, false),
         (SessionPhase::Starting, SessionPhase::Idle, true),
         (SessionPhase::Listening, SessionPhase::Idle, true),
-        (SessionPhase::Processing, SessionPhase::Processing, true),
+        (SessionPhase::Processing, SessionPhase::Idle, true),
         (SessionPhase::Inserting, SessionPhase::Inserting, false),
     ];
 
@@ -4395,9 +4454,7 @@ fn capsule_recording_diagnostics_are_sampled_but_state_and_text_are_retained() {
     };
 
     assert!(throttle.should_record_backend_emit(&recording, start));
-    assert!(
-        !throttle.should_record_backend_emit(&recording, start + Duration::from_millis(950),)
-    );
+    assert!(!throttle.should_record_backend_emit(&recording, start + Duration::from_millis(950),));
     assert!(throttle.should_record_backend_emit(&recording, start + Duration::from_secs(1),));
 
     let preview = CapsulePayload {
@@ -4426,12 +4483,8 @@ fn capsule_recording_level_ticks_continue_after_preview_payload() {
     };
 
     assert!(throttle.should_emit_frontend(preview, start));
-    assert!(
-        throttle.should_emit_frontend(level_tick.clone(), start + Duration::from_millis(10),)
-    );
-    assert!(
-        !throttle.should_emit_frontend(level_tick.clone(), start + Duration::from_millis(40),)
-    );
+    assert!(throttle.should_emit_frontend(level_tick.clone(), start + Duration::from_millis(10),));
+    assert!(!throttle.should_emit_frontend(level_tick.clone(), start + Duration::from_millis(40),));
     assert!(throttle.should_emit_frontend(level_tick, start + Duration::from_millis(60),));
 }
 

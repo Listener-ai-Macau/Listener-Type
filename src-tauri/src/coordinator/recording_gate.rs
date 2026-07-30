@@ -284,8 +284,7 @@ mod tests {
             "embedded BLE start/pcm/begin must admit via RecordingGate"
         );
         assert!(
-            ble.contains("RecordIntent::BackgroundListener")
-                && ble.contains("recording_gate::"),
+            ble.contains("RecordIntent::BackgroundListener") && ble.contains("recording_gate::"),
             "background listener must admit via RecordingGate"
         );
 

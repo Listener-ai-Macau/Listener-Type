@@ -433,6 +433,7 @@ fn prepare_gatt_session(
             initial_status,
             current_status
         );
+        release_gatt_maintain_request(&session, "GATT readiness timeout");
         let _ = session.Close();
         return Err(format!(
             "BLE GATT session did not become active after {} ms initial={:?} current={:?}; stale GATT/cache or paired device disconnected",
@@ -442,6 +443,26 @@ fn prepare_gatt_session(
         ));
     }
     Ok(Some(session))
+}
+
+fn release_gatt_maintain_request(session: &GattSession, context: &str) {
+    match session.CanMaintainConnection() {
+        Ok(true) => {
+            if let Err(err) = session.SetMaintainConnection(false) {
+                log::warn!(
+                    "[embedded-ble] GATT maintain release failed context={context}: {err}"
+                );
+            } else {
+                log::info!(
+                    "[embedded-ble] GATT maintain request released context={context}"
+                );
+            }
+        }
+        Ok(false) => {}
+        Err(err) => log::warn!(
+            "[embedded-ble] GATT maintain release capability read failed context={context}: {err}"
+        ),
+    }
 }
 
 fn wait_gatt_session_ready(session: &GattSession, timeout: Duration) -> bool {

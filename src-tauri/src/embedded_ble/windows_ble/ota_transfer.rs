@@ -1,6 +1,142 @@
 // Listener OTA v1 transfer / prepare / probe helpers (Windows).
 // Included into `windows_ble` via `include!` to keep private helper visibility.
 
+struct OtaRebootDisconnectObserver {
+    device: BluetoothLEDevice,
+    address: u64,
+    device_token: EventRegistrationToken,
+    phase: Arc<AtomicUsize>,
+}
+
+struct OtaRebootGenerationBoundary {
+    connected: bool,
+    att_ready: bool,
+}
+
+impl OtaRebootDisconnectObserver {
+    fn arm(target: &OpenListenerOtaV1Target, transfer_id: u64) -> Option<Self> {
+        let device = target.device.as_ref()?.clone();
+        let address = target.bluetooth_address?;
+        OTA_REBOOT_NEW_GENERATION_CONNECTED.store(false, Ordering::SeqCst);
+        OTA_REBOOT_NEW_GENERATION_ATT_READY.store(false, Ordering::SeqCst);
+        let phase = Arc::new(AtomicUsize::new(0));
+        let phase_for_handler = Arc::clone(&phase);
+        let handler = TypedEventHandler::<BluetoothLEDevice, IInspectable>::new(
+            move |sender, _args| {
+                if let Some(device) = sender {
+                    match device.ConnectionStatus().ok() {
+                        Some(BluetoothConnectionStatus::Disconnected) => {
+                            phase_for_handler.store(1, Ordering::SeqCst);
+                            log::info!(
+                                "[embedded-ble] Denzic OTA v1 #{transfer_id}: observed old-generation device disconnect after FINISH"
+                            );
+                        }
+                        Some(BluetoothConnectionStatus::Connected)
+                            if phase_for_handler.load(Ordering::SeqCst) >= 1 =>
+                        {
+                            phase_for_handler.store(2, Ordering::SeqCst);
+                            log::info!(
+                                "[embedded-ble] Denzic OTA v1 #{transfer_id}: observed new-generation device reconnect after OTA reboot"
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(())
+            },
+        );
+        match device.ConnectionStatusChanged(&handler) {
+            Ok(device_token) => {
+                log::info!(
+                    "[embedded-ble] Denzic OTA v1 #{transfer_id}: armed reboot disconnect observer before FINISH"
+                );
+                Some(Self {
+                    device,
+                    address,
+                    device_token,
+                    phase,
+                })
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] Denzic OTA v1 #{transfer_id}: could not arm reboot disconnect observer: {err}"
+                );
+                None
+            }
+        }
+    }
+
+    fn wait_for_new_generation(&self, transfer_id: u64) -> OtaRebootGenerationBoundary {
+        let started = Instant::now();
+        while started.elapsed() < OTA_REBOOT_GENERATION_BOUNDARY_TIMEOUT {
+            let status = self.device.ConnectionStatus().ok();
+            if status == Some(BluetoothConnectionStatus::Disconnected) {
+                self.phase.fetch_max(1, Ordering::SeqCst);
+            } else if status == Some(BluetoothConnectionStatus::Connected)
+                && self.phase.load(Ordering::SeqCst) >= 1
+            {
+                self.phase.store(2, Ordering::SeqCst);
+            }
+            if self.phase.load(Ordering::SeqCst) >= 2 {
+                OTA_REBOOT_NEW_GENERATION_CONNECTED.store(true, Ordering::SeqCst);
+                log::info!(
+                    "[embedded-ble] Denzic OTA v1 #{transfer_id}: old-to-new connected generation boundary confirmed elapsed_ms={}",
+                    started.elapsed().as_millis()
+                );
+                OTA_REBOOT_NEW_GENERATION_ATT_READY.store(true, Ordering::SeqCst);
+                log::info!(
+                    "[embedded-ble] Denzic OTA v1 #{transfer_id}: complete generation boundary retained; final response-bearing TYPE:READY owns ATT proof"
+                );
+                return OtaRebootGenerationBoundary {
+                    connected: true,
+                    att_ready: true,
+                };
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        log::warn!(
+            "[embedded-ble] Denzic OTA v1 #{transfer_id}: complete old-to-new connected generation boundary was not observed within {} ms phase={}",
+            OTA_REBOOT_GENERATION_BOUNDARY_TIMEOUT.as_millis(),
+            self.phase.load(Ordering::SeqCst)
+        );
+        OtaRebootGenerationBoundary {
+            connected: self.phase.load(Ordering::SeqCst) >= 2,
+            att_ready: false,
+        }
+    }
+}
+
+impl Drop for OtaRebootDisconnectObserver {
+    fn drop(&mut self) {
+        let _ = self
+            .device
+            .RemoveConnectionStatusChanged(self.device_token);
+    }
+}
+
+pub fn take_listener_ota_v1_reboot_generation_connected() -> bool {
+    OTA_REBOOT_NEW_GENERATION_CONNECTED.swap(false, Ordering::SeqCst)
+}
+
+pub fn take_listener_ota_v1_reboot_att_ready() -> bool {
+    OTA_REBOOT_NEW_GENERATION_ATT_READY.swap(false, Ordering::SeqCst)
+}
+
+impl OpenListenerOtaV1Target {
+    fn handoff_new_generation_to_post_confirm(&mut self, transfer_id: u64) {
+        if let Some(device) = self.device.take() {
+            hold_listener_ota_post_confirm_device(&device);
+        }
+        if let Some(session) = self.session.take() {
+            hold_listener_ota_post_confirm_session(&session);
+        }
+        let _ = self.service.take();
+        log::info!(
+            "[embedded-ble] Denzic OTA v1 #{transfer_id}: handed new-generation device connection to post-confirm ownership without explicit Close"
+        );
+    }
+}
+
 fn transfer_denzic_ota_v1_to_target(
     target: &OpenListenerOtaV1Target,
     transfer_id: u64,
@@ -25,6 +161,8 @@ fn transfer_denzic_ota_v1_to_target(
         data_write_option: target.data_write_option,
         pending_wwr: Vec::with_capacity(LISTENER_OTA_V1_WWR_PIPELINE_DEPTH),
         pending_wwr_b: Vec::with_capacity(LISTENER_OTA_V1_WWR_PIPELINE_DEPTH),
+        status_error_started: None,
+        control_sequence: 0,
     };
     if target.data_b.is_some() {
         log::info!(
@@ -44,9 +182,8 @@ fn transfer_denzic_ota_v1_to_target(
             window_chunks,
             status_read_attempts: 5,
             max_stalled_windows: 3,
-            inactive_link_window_chunks: Some(
-                LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS as u16,
-            ),
+            progress_timeout: Some(LISTENER_OTA_V1_PROGRESS_TIMEOUT),
+            inactive_link_window_chunks: Some(LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS as u16),
             // Platform dual-lane: engine alternates DATA/DATA_B when DATA_B is open.
             prefer_dual_lane: true,
         },
@@ -77,6 +214,7 @@ fn transfer_denzic_ota_v1_to_target(
         bytes_transferred: report.firmware_bytes,
         chunks_sent: report.data_writes as usize,
         transport: denzic_ota_core::PROTOCOL_NAME,
+        protocol_transfer_elapsed_ms: report.timings.total.as_millis() as u64,
         data_write_elapsed_ms: report.timings.data_write.as_millis() as u64,
         control_write_elapsed_ms: report.timings.control_write.as_millis() as u64,
         status_read_elapsed_ms: report.timings.status_read.as_millis() as u64,
@@ -88,21 +226,24 @@ pub(super) fn request_listener_ota_v1_active_link(
 ) -> Result<(), String> {
     if let Some(correlation_id) = observability_correlation_id {
         let context = format!("TYPE:OBS:OTA:{correlation_id:016X}\n");
-        if let Err(error) = send_recording_control_command(
+        match send_audio_control_via_active_capture(
             context.as_bytes(),
             Duration::from_millis(300),
             "Listener OTA observability context handoff",
-            ActiveControlTransientFallback::ReturnError,
         ) {
-            log::info!(
-                "[embedded-ble] Listener OTA observability context handoff unavailable; continuing with compatible OTA handoff: {error}"
-            );
+            Some(Ok(())) => {}
+            Some(Err(error)) => {
+                log::info!(
+                    "[embedded-ble] Listener OTA observability context handoff unavailable; continuing with compatible OTA handoff: {error}"
+                );
+            }
+            None => {
+                log::info!(
+                    "[embedded-ble] Listener OTA observability context handoff skipped: no active capture"
+                );
+            }
         }
     }
-    // Kick WinRT ThroughputOptimized on the live address before exclusive
-    // capture so CI can settle during target prepare (Companion re-asserts
-    // the same preference before bulk STREAM_ALL).
-    request_ota_ble_throughput_for_runtime_address();
     // Prefer the live notify capture when present. Do NOT fall into the full
     // open_audio_control advertisement/retry path here: after re-pair that
     // path can burn ~12–20s on a missing audio-service index and inflate
@@ -114,8 +255,9 @@ pub(super) fn request_listener_ota_v1_active_link(
     ) {
         match result {
             Ok(()) => {
-                log::info!("[embedded-ble] Listener OTA v1 reconnect handoff sent via active capture");
-                request_ota_ble_throughput_for_runtime_address();
+                log::info!(
+                    "[embedded-ble] Listener OTA v1 reconnect handoff sent via active capture"
+                );
                 return Ok(());
             }
             Err(err) => {
@@ -152,8 +294,7 @@ pub(super) fn request_listener_ota_post_confirm_notify_fast_retry() {
     *slot = Some(address);
 }
 
-pub(super) fn prepare_listener_ota_v1_transfer() -> Result<PreparedListenerOtaV1Transfer, String>
-{
+pub(super) fn prepare_listener_ota_v1_transfer() -> Result<PreparedListenerOtaV1Transfer, String> {
     prepare_listener_ota_v1_transfer_impl(true, true, None)
 }
 
@@ -459,11 +600,10 @@ pub fn listener_ota_v1_gatt_probe_after_active_link_hint(
         usb_powered: None,
         detail: Some(detail),
     };
-    let _preparation_guard =
-        match acquire_ble_ota_preparation_mutex("listener_ota_v1_preflight") {
-            Ok(guard) => guard,
-            Err(err) => return unavailable(err),
-        };
+    let _preparation_guard = match acquire_ble_ota_preparation_mutex("listener_ota_v1_preflight") {
+        Ok(guard) => guard,
+        Err(err) => return unavailable(err),
+    };
     let _fresh_guard = match BleFreshGattGuard::enter("Listener OTA v1 handoff preflight") {
         Ok(guard) => guard,
         Err(err) => return unavailable(err),
@@ -496,8 +636,7 @@ pub fn listener_ota_v1_service_reachable_snapshot(
         Some(address) => address,
         None => {
             return unavailable(
-                "Listener OTA v1 fast service probe has no cached Bluetooth address"
-                    .to_string(),
+                "Listener OTA v1 fast service probe has no cached Bluetooth address".to_string(),
             );
         }
     };
@@ -514,9 +653,7 @@ pub fn listener_ota_v1_service_reachable_snapshot(
         Err(err) => return unavailable(err),
     };
     let mut last_error = None;
-    for &cache_mode in bluetooth_cache_modes_for_policy(
-        denzic_ble_pairing::SERVICE_REACHABILITY_PROBE_CACHE_POLICY,
-    ) {
+    for &cache_mode in &POST_OTA_UNCACHED_CACHE_MODES {
         let discovery_timeout = match remaining_ble_timeout(
             deadline,
             BLE_DISCOVERY_TIMEOUT,
@@ -571,6 +708,7 @@ pub fn listener_ota_v1_service_reachable_snapshot(
             }
         };
         if status == GattCommunicationStatus::Success && count > 0 {
+            hold_listener_ota_post_confirm_device(&device);
             let snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
                 connected: true,
                 hardware_revision: None,
@@ -623,8 +761,7 @@ fn listener_ota_v1_device_snapshot_from_target(
     }
     let (dis_model, dis_hardware, dis_firmware, dis_battery) =
         read_dis_metadata_from_discovered_services(target.bluetooth_address);
-    snapshot.hardware_revision =
-        normalize_listener_ota_hardware_revision(dis_model, dis_hardware);
+    snapshot.hardware_revision = normalize_listener_ota_hardware_revision(dis_model, dis_hardware);
     snapshot.firmware_version = dis_firmware;
     snapshot.battery_percent = dis_battery;
     if let Some(device) = target.device.as_ref() {
@@ -639,8 +776,7 @@ fn listener_ota_v1_device_snapshot_from_target(
                 DIS_SERVICE_UUID,
                 DIS_HARDWARE_REVISION_UUID,
             );
-            snapshot.hardware_revision =
-                normalize_listener_ota_hardware_revision(model, hardware);
+            snapshot.hardware_revision = normalize_listener_ota_hardware_revision(model, hardware);
         }
         if snapshot.firmware_version.is_none() {
             snapshot.firmware_version = read_optional_string_characteristic(
@@ -650,11 +786,8 @@ fn listener_ota_v1_device_snapshot_from_target(
             );
         }
         if snapshot.battery_percent.is_none() {
-            snapshot.battery_percent = read_optional_u8_characteristic(
-                device,
-                BATTERY_SERVICE_UUID,
-                BATTERY_LEVEL_UUID,
-            );
+            snapshot.battery_percent =
+                read_optional_u8_characteristic(device, BATTERY_SERVICE_UUID, BATTERY_LEVEL_UUID);
         }
     }
     if snapshot.hardware_revision.is_none() && snapshot.firmware_version.is_none() {
@@ -669,7 +802,10 @@ fn listener_ota_v1_device_snapshot_from_target(
             address.as_deref().unwrap_or("")
         ));
     } else {
-        snapshot.detail = Some("Listener OTA v1 service is reachable; DIS metadata was read when Windows exposed it.".to_string());
+        snapshot.detail = Some(
+            "Listener OTA v1 service is reachable; DIS metadata was read when Windows exposed it."
+                .to_string(),
+        );
     }
     log::info!(
         "[embedded-ble] Listener OTA v1 snapshot connected={} hardware={:?} firmware={:?} battery={:?} usb_powered={:?} detail={:?}",

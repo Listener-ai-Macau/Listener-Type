@@ -1076,7 +1076,10 @@ impl HistoryStore {
         match Self::new() {
             Ok(store) => store,
             Err(e) => {
-                log::warn!("[history] init failed, running with empty in-memory history: {}", e);
+                log::warn!(
+                    "[history] init failed, running with empty in-memory history: {}",
+                    e
+                );
                 Self {
                     path: PathBuf::new(),
                     lock: Mutex::new(()),
@@ -2559,9 +2562,9 @@ impl CredentialsVault {
 #[cfg(test)]
 mod tests {
     use super::{
-        chunk_json_payload, list_vocab_presets, read_preferences, save_vocab_presets,
-        sync_style_pack_preferences, validate_correction_rule_syntax,
-        HistoryStore, KEYRING_CHUNK_MAX_UTF16_UNITS, recording_path_for_session, recordings_root,
+        chunk_json_payload, list_vocab_presets, read_preferences, recording_path_for_session,
+        recordings_root, save_vocab_presets, sync_style_pack_preferences,
+        validate_correction_rule_syntax, HistoryStore, KEYRING_CHUNK_MAX_UTF16_UNITS,
     };
     use crate::types::DictationSession;
     use crate::types::{builtin_style_packs, CustomStylePrompts, VocabPreset, VocabPresetStore};
@@ -2586,12 +2589,17 @@ mod tests {
         }
     }
     fn scoped_data_dir() -> DataDirGuard {
-        let lock = DATA_DIR_TEST_LOCK.lock().expect("data dir test lock poisoned");
-        let tmp: PathBuf = std::env::temp_dir()
-            .join(format!("listener-type-data-test-{}", uuid::Uuid::new_v4()));
+        let lock = DATA_DIR_TEST_LOCK
+            .lock()
+            .expect("data dir test lock poisoned");
+        let tmp: PathBuf =
+            std::env::temp_dir().join(format!("listener-type-data-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&tmp).expect("create temp data dir");
         std::env::set_var("LISTENER_TYPE_DATA_DIR", &tmp);
-        DataDirGuard { _lock: lock, path: tmp }
+        DataDirGuard {
+            _lock: lock,
+            path: tmp,
+        }
     }
 
     fn make_session(id: &str) -> DictationSession {
@@ -2644,7 +2652,10 @@ mod tests {
 
         store.clear().expect("clear");
 
-        assert!(store.list().expect("list").is_empty(), "history should be empty");
+        assert!(
+            store.list().expect("list").is_empty(),
+            "history should be empty"
+        );
         let remaining: Vec<_> = fs::read_dir(&recordings)
             .expect("read dir after")
             .flatten()

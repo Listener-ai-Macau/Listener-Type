@@ -135,7 +135,7 @@ pub async fn get_firmware_ota_preflight_snapshot(
         )),
     };
     let target_probe_elapsed_ms = Some(elapsed_ms_u64(target_probe_started));
-    coord.end_firmware_ota_transfer();
+    coord.end_failed_firmware_ota_transfer();
     if device.usb_powered.is_none() {
         device.usb_powered = cached_power.usb_powered;
     }
@@ -186,9 +186,15 @@ pub struct FirmwareOtaPackagePayload {
 
 pub const FIRMWARE_OTA_CONFIRM_INTERVAL: Duration = Duration::from_secs(2);
 pub const FIRMWARE_OTA_CONFIRM_REBOOT_GRACE: Duration = Duration::from_millis(1800);
-pub const FIRMWARE_OTA_FAST_SERVICE_CONFIRM_TIMEOUT: Duration = Duration::from_millis(1200);
+pub const FIRMWARE_OTA_FAST_SERVICE_CONFIRM_TIMEOUT: Duration = Duration::from_millis(2000);
 pub const FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(12);
 pub const FIRMWARE_OTA_PRETRANSFER_READY_TIMEOUT: Duration = Duration::from_secs(8);
+pub const FIRMWARE_OTA_LISTENER_RELEASE_TIMEOUT: Duration = Duration::from_secs(3);
+/// The verified post-confirm CCCD reuse path should become stable quickly.
+/// If it disconnects immediately, refresh instead of hiding the failure inside
+/// the long re-enumeration window.
+pub const FIRMWARE_OTA_POST_READY_FAST_PATH_TIMEOUT: Duration = Duration::from_millis(3000);
+pub const FIRMWARE_OTA_HANDOFF_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
 /// Post-OTA Windows BLE re-enumeration often exceeds 8s (reboot + radio settle).
 /// Keep a longer first window so Type can reattach without a manual re-pair click.
 pub const FIRMWARE_OTA_POST_READY_TIMEOUT: Duration = Duration::from_secs(28);
@@ -197,7 +203,6 @@ pub const FIRMWARE_OTA_POST_READY_RETRY_TIMEOUT: Duration = Duration::from_secs(
 /// After OTA service is reachable, wait before notify/CCCD so reboot handoff and
 /// Windows radio settle finish. Opening CCCD too early races disconnect (25s CCCD
 /// timeouts, then TYPE:READY drops — owner must restart Type).
-pub const FIRMWARE_OTA_POST_CONFIRM_SETTLE: Duration = Duration::from_millis(1500);
 pub const FIRMWARE_OTA_TARGET_PREPARE_TIMEOUT: Duration = Duration::from_secs(6);
 pub const FIRMWARE_OTA_PACKAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -249,7 +254,9 @@ pub struct FirmwareOtaConfirmOutcome {
     pub matched: bool,
 }
 
-pub async fn confirm_listener_ota_v1_reachable(expected_version: &str) -> FirmwareOtaConfirmOutcome {
+pub async fn confirm_listener_ota_v1_reachable(
+    expected_version: &str,
+) -> FirmwareOtaConfirmOutcome {
     let started = Instant::now();
     if normalize_firmware_ota_version(expected_version).is_empty() || expected_version == "unknown"
     {
@@ -261,7 +268,27 @@ pub async fn confirm_listener_ota_v1_reachable(expected_version: &str) -> Firmwa
         };
     }
 
-    tokio::time::sleep(FIRMWARE_OTA_CONFIRM_REBOOT_GRACE).await;
+    let reboot_att_ready = crate::embedded_ble::take_listener_ota_v1_reboot_att_ready();
+    let reboot_generation_connected =
+        crate::embedded_ble::take_listener_ota_v1_reboot_generation_connected();
+    if reboot_att_ready {
+        log::info!(
+            "[firmware-ota] complete post-disconnect device generation retained; final response-bearing TYPE:READY remains required"
+        );
+        return FirmwareOtaConfirmOutcome {
+            confirmed_version: Some(expected_version.to_string()),
+            elapsed_ms: elapsed_ms_u64(started),
+            attempts: 1,
+            matched: true,
+        };
+    }
+    if reboot_generation_connected {
+        log::info!(
+            "[firmware-ota] new OTA device generation retained after reconnect; starting uncached ATT service confirmation without fixed reboot grace"
+        );
+    } else {
+        tokio::time::sleep(FIRMWARE_OTA_CONFIRM_REBOOT_GRACE).await;
+    }
 
     let deadline = Instant::now() + FIRMWARE_OTA_LISTENER_V1_REACHABLE_CONFIRM_TIMEOUT;
     let mut attempts = 0usize;
@@ -810,7 +837,10 @@ impl ProgressCallbacks for WiredFlashProgressCallbacks {
     }
 }
 
-pub fn emit_wired_firmware_progress(app: Option<&AppHandle>, payload: WiredFirmwareProgressPayload) {
+pub fn emit_wired_firmware_progress(
+    app: Option<&AppHandle>,
+    payload: WiredFirmwareProgressPayload,
+) {
     if let Some(app) = app {
         let _ = app.emit("wired-firmware:progress", payload);
     }
@@ -984,7 +1014,9 @@ pub fn resolve_wired_flash_port(requested: Option<&str>) -> Result<String, Strin
     ))
 }
 
-pub fn load_wired_firmware_package_internal(path: &Path) -> Result<LoadedWiredFirmwarePackage, String> {
+pub fn load_wired_firmware_package_internal(
+    path: &Path,
+) -> Result<LoadedWiredFirmwarePackage, String> {
     if path.is_dir() {
         if path.join("manifest.json").is_file() {
             return load_factory_firmware_package_dir(path);
@@ -1040,7 +1072,9 @@ pub fn source_label_for_path(path: &Path, fallback: &str) -> String {
         .to_string()
 }
 
-pub fn load_factory_firmware_package_dir(path: &Path) -> Result<LoadedWiredFirmwarePackage, String> {
+pub fn load_factory_firmware_package_dir(
+    path: &Path,
+) -> Result<LoadedWiredFirmwarePackage, String> {
     let manifest_path = path.join("manifest.json");
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .map_err(|err| format!("Failed to read {}: {err}", manifest_path.display()))?;
@@ -1060,7 +1094,9 @@ pub fn load_factory_firmware_package_dir(path: &Path) -> Result<LoadedWiredFirmw
     )
 }
 
-pub fn load_factory_firmware_package_zip(path: &Path) -> Result<LoadedWiredFirmwarePackage, String> {
+pub fn load_factory_firmware_package_zip(
+    path: &Path,
+) -> Result<LoadedWiredFirmwarePackage, String> {
     let manifest_bytes = read_zip_entry_by_basename_limited(path, "manifest.json")?
         .ok_or_else(|| "Factory firmware zip is missing manifest.json.".to_string())?;
     let manifest_text = String::from_utf8(manifest_bytes)
@@ -1739,13 +1775,8 @@ fn probe_wired_bootloader_magic(flasher: &mut Flasher) -> Result<WiredBootProbe,
         std::process::id(),
         Instant::now().elapsed().as_nanos()
     ));
-    let read_result = flasher.read_flash(
-        0,
-        BOOT_PROBE_BYTES,
-        BOOT_PROBE_BLOCK,
-        1,
-        temp_path.clone(),
-    );
+    let read_result =
+        flasher.read_flash(0, BOOT_PROBE_BYTES, BOOT_PROBE_BLOCK, 1, temp_path.clone());
     let bytes = match read_result {
         Ok(()) => std::fs::read(&temp_path).map_err(|err| {
             let _ = std::fs::remove_file(&temp_path);
@@ -1771,7 +1802,10 @@ pub fn package_manifest_baud(package: &LoadedWiredFirmwarePackage) -> Option<u32
 
 #[cfg(test)]
 mod boot_probe_tests {
-    use super::{classify_wired_bootloader_bytes, WiredBootProbe, WIRED_BOOT_IMAGE_MAGIC};
+    use super::{
+        classify_wired_bootloader_bytes, WiredBootProbe, FIRMWARE_OTA_POST_READY_FAST_PATH_TIMEOUT,
+        FIRMWARE_OTA_POST_READY_TIMEOUT, WIRED_BOOT_IMAGE_MAGIC,
+    };
 
     #[test]
     fn classifies_esp_image_magic_as_present() {
@@ -1793,6 +1827,15 @@ mod boot_probe_tests {
             classify_wired_bootloader_bytes(&[0xff, 0, 0]),
             WiredBootProbe::MissingOrCorrupt { .. }
         ));
+    }
+
+    #[test]
+    fn post_ota_notify_reuse_has_a_short_failure_budget_before_long_recovery() {
+        assert_eq!(
+            FIRMWARE_OTA_POST_READY_FAST_PATH_TIMEOUT,
+            std::time::Duration::from_millis(3000)
+        );
+        assert!(FIRMWARE_OTA_POST_READY_FAST_PATH_TIMEOUT < FIRMWARE_OTA_POST_READY_TIMEOUT);
     }
 }
 
@@ -2279,18 +2322,50 @@ pub async fn transfer_firmware_ota_ble(
     // Doing this after try_begin/suppress used to BYE first → find-Type LED and
     // flaky handoff timeouts.
     let mut observability = crate::observability::begin_ota_transfer();
-    if let Err(error) = crate::embedded_ble::request_listener_ota_v1_active_link(Some(
+    if let Err(first_error) = crate::embedded_ble::request_listener_ota_v1_active_link(Some(
         observability.correlation_id(),
     )) {
-        observability.record_control_handoff_failed(&error);
-        return Err(error);
+        log::warn!(
+            "[firmware-ota] Listener OTA handoff lost the ready capture; waiting once for notify recovery: {first_error}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let retry_result = coord
+            .wait_for_embedded_ble_listener_ready_before_firmware_ota(
+                FIRMWARE_OTA_HANDOFF_RETRY_TIMEOUT,
+            )
+            .await
+            .and_then(|_| crate::embedded_ble::request_listener_ota_v1_active_link(None));
+        if let Err(retry_error) = retry_result {
+            let error = format!(
+                "Listener OTA control handoff failed after one notify-ready retry: first={first_error}; retry={retry_error}"
+            );
+            observability.record_control_handoff_failed(&error);
+            return Err(error);
+        }
+        log::info!("[firmware-ota] Listener OTA reconnect handoff recovered on bounded retry");
     }
-    log::info!(
-        "[firmware-ota] Listener OTA v1 reconnect handoff accepted while notify still live"
-    );
+    log::info!("[firmware-ota] Listener OTA v1 reconnect handoff accepted while notify still live");
     if !coord.try_begin_firmware_ota_transfer() {
         return Err("Firmware OTA is already in progress.".to_string());
     }
+    let listener_release_started = Instant::now();
+    if !coord
+        .pause_embedded_ble_listener_for_ota(FIRMWARE_OTA_LISTENER_RELEASE_TIMEOUT)
+        .await
+    {
+        let error = format!(
+            "Listener BLE audio notification did not release within {} ms before OTA target preparation.",
+            FIRMWARE_OTA_LISTENER_RELEASE_TIMEOUT.as_millis()
+        );
+        log::error!("[firmware-ota] {error}");
+        observability.record_transfer_failed(elapsed_ms_u64(listener_release_started), &error);
+        coord.end_failed_firmware_ota_transfer();
+        return Err(error);
+    }
+    log::info!(
+        "[firmware-ota] Listener notify fully released before OTA target preparation elapsed_ms={}",
+        elapsed_ms_u64(listener_release_started)
+    );
     let version = manifest.version;
     let manifest_chunk_bytes = manifest.gatt_chunk_bytes as usize;
     let transfer_sha256 = expected_sha256.clone();
@@ -2335,13 +2410,12 @@ pub async fn transfer_firmware_ota_ble(
             "[firmware-ota] transfer prepare failed elapsed_ms={target_prepare_elapsed_ms}: {error}"
         );
         observability.record_transfer_failed(target_prepare_elapsed_ms, &error);
-        coord.end_firmware_ota_transfer();
+        coord.end_failed_firmware_ota_transfer();
         return Err(error);
     }
     log::info!(
-        "[firmware-ota] Listener OTA v1 target prepared before listener pause elapsed_ms={target_prepare_elapsed_ms}"
+        "[firmware-ota] Listener OTA v1 target prepared after listener release elapsed_ms={target_prepare_elapsed_ms}"
     );
-    coord.pause_embedded_ble_listener_for_ota();
     if start_transfer_tx.send(()).is_err() {
         let error = "Listener BLE OTA target closed before transfer start.".to_string();
         let _ = transfer_task.await;
@@ -2349,8 +2423,7 @@ pub async fn transfer_firmware_ota_ble(
             "[firmware-ota] transfer start failed elapsed_ms={target_prepare_elapsed_ms}: {error}"
         );
         observability.record_transfer_failed(target_prepare_elapsed_ms, &error);
-        coord.end_firmware_ota_transfer();
-        coord.refresh_embedded_ble_listener();
+        coord.end_failed_firmware_ota_transfer();
         return Err(error);
     }
     let transfer_started = Instant::now();
@@ -2358,24 +2431,26 @@ pub async fn transfer_firmware_ota_ble(
         .await
         .map_err(|err| format!("Listener BLE OTA transfer task failed: {err}"))
         .and_then(|result| result);
-    let transfer_elapsed_ms = elapsed_ms_u64(transfer_started);
+    let transfer_wall_elapsed_ms = elapsed_ms_u64(transfer_started);
     match &transfer {
         Ok(stats) => {
             log::info!(
-                "[firmware-ota] transfer ok elapsed_ms={transfer_elapsed_ms} bytes={} transport={}",
+                "[firmware-ota] transfer ok protocol_ms={} wall_ms={transfer_wall_elapsed_ms} fixed_ms={} bytes={} transport={}",
+                stats.protocol_transfer_elapsed_ms,
+                transfer_wall_elapsed_ms.saturating_sub(stats.protocol_transfer_elapsed_ms),
                 stats.bytes_transferred,
                 stats.transport
             );
-            observability.record_transfer_completed(transfer_elapsed_ms);
+            observability.record_transfer_completed(stats.protocol_transfer_elapsed_ms);
         }
         Err(error) => {
             // Always keep the full host error string in listener-type.log. UI maps
             // unknown failures to "设备拒绝升级"; without this line operators only see
             // obs-v1 category=transport and cannot tell timeout vs ATT protocol_error.
             log::error!(
-                "[firmware-ota] transfer failed elapsed_ms={transfer_elapsed_ms}: {error}"
+                "[firmware-ota] transfer failed elapsed_ms={transfer_wall_elapsed_ms}: {error}"
             );
-            observability.record_transfer_failed(transfer_elapsed_ms, error);
+            observability.record_transfer_failed(transfer_wall_elapsed_ms, error);
         }
     }
     let confirm = if transfer.is_ok() {
@@ -2395,12 +2470,14 @@ pub async fn transfer_firmware_ota_ble(
         coord.end_firmware_ota_transfer_with_listener_restore(false);
         observability.record_reconnect_confirmation(confirm.matched);
     } else {
-        // Failed BEGIN/data/finish: restore paused listener immediately.
-        coord.end_firmware_ota_transfer();
-        coord.refresh_embedded_ble_listener();
+        // Failed BEGIN/data/finish: restore only through a generation-scoped bonded
+        // recovery. OTA disconnect/CCCD errors are not evidence of stale pairing.
+        coord.end_failed_firmware_ota_transfer();
     }
 
     let stats = transfer?;
+    let transfer_elapsed_ms = stats.protocol_transfer_elapsed_ms;
+    let transfer_fixed_elapsed_ms = transfer_wall_elapsed_ms.saturating_sub(transfer_elapsed_ms);
     if !confirm.matched {
         coord.refresh_embedded_ble_listener();
         let error = format!(
@@ -2410,47 +2487,64 @@ pub async fn transfer_firmware_ota_ble(
         log::error!("[firmware-ota] post-transfer version confirm failed: {error}");
         return Err(error);
     }
-    log::info!(
-        "[firmware-ota] post-confirm settle {} ms before TYPE:READY notify reopen",
-        FIRMWARE_OTA_POST_CONFIRM_SETTLE.as_millis()
-    );
-    tokio::time::sleep(FIRMWARE_OTA_POST_CONFIRM_SETTLE).await;
     crate::embedded_ble::request_listener_ota_post_confirm_notify_fast_retry();
     coord.refresh_embedded_ble_listener_after_firmware_ota();
     let type_ready_started = Instant::now();
     let type_ready = match coord
-        .wait_for_embedded_ble_listener_ready_after_firmware_ota(FIRMWARE_OTA_POST_READY_TIMEOUT)
+        .wait_for_embedded_ble_listener_ready_after_firmware_ota(
+            FIRMWARE_OTA_POST_READY_FAST_PATH_TIMEOUT,
+        )
         .await
     {
         Ok(ready) => ready,
-        Err(first_error) => {
-            // Common after OTA: first notify reopen races Windows cache / radio settle.
-            // Refresh once more and wait again before asking the owner to re-pair.
+        Err(fast_path_error) => {
+            // The verified CCCD reuse target can briefly become ready and then
+            // disconnect as Windows releases the service-confirm probe. Restart
+            // promptly; the old 28s first wait made a recoverable edge look stuck.
             log::warn!(
-                "[firmware-ota] post-OTA Listener notify not ready within {} ms ({first_error}); refreshing listener and retrying",
-                FIRMWARE_OTA_POST_READY_TIMEOUT.as_millis()
+                "[firmware-ota] post-OTA fast notify path not stable within {} ms ({fast_path_error}); refreshing immediately",
+                FIRMWARE_OTA_POST_READY_FAST_PATH_TIMEOUT.as_millis()
             );
             crate::embedded_ble::request_listener_ota_post_confirm_notify_fast_retry();
             coord.refresh_embedded_ble_listener_after_firmware_ota();
-            coord
+            match coord
                 .wait_for_embedded_ble_listener_ready_after_firmware_ota(
-                    FIRMWARE_OTA_POST_READY_RETRY_TIMEOUT,
+                    FIRMWARE_OTA_POST_READY_TIMEOUT,
                 )
                 .await
-                .map_err(|retry_error| {
-                    format!(
-                        "Listener did not reattach after OTA. First wait: {first_error}. Retry: {retry_error}. If Windows still shows the device as paired, use 一键修复; if pairing was lost, pair Listener again in Type."
-                    )
-                })?
+            {
+                Ok(ready) => ready,
+                Err(first_error) => {
+                    // Keep the long Windows re-enumeration fallback for devices
+                    // that were not actually exposed when the fast path ran.
+                    log::warn!(
+                        "[firmware-ota] post-OTA Listener notify not ready within {} ms ({first_error}); refreshing listener and retrying",
+                        FIRMWARE_OTA_POST_READY_TIMEOUT.as_millis()
+                    );
+                    crate::embedded_ble::request_listener_ota_post_confirm_notify_fast_retry();
+                    coord.refresh_embedded_ble_listener_after_firmware_ota();
+                    coord
+                        .wait_for_embedded_ble_listener_ready_after_firmware_ota(
+                            FIRMWARE_OTA_POST_READY_RETRY_TIMEOUT,
+                        )
+                        .await
+                        .map_err(|retry_error| {
+                            format!(
+                                "Listener did not reattach after OTA. Fast path: {fast_path_error}. First wait: {first_error}. Retry: {retry_error}. If Windows still shows the device as paired, use 一键修复; if pairing was lost, pair Listener again in Type."
+                            )
+                        })?
+                }
+            }
         }
     };
     let type_ready_elapsed_ms = elapsed_ms_u64(type_ready_started);
     let non_transfer_fixed_elapsed_ms = target_prepare_elapsed_ms
+        .saturating_add(transfer_fixed_elapsed_ms)
         .saturating_add(confirm.elapsed_ms)
         .saturating_add(type_ready_elapsed_ms);
     let total_elapsed_ms = elapsed_ms_u64(total_started);
     log::info!(
-        "[firmware-ota] BLE OTA result transport={} bytes={} chunks={} pretransfer_type_ready={} pretransfer_type_ready_ms={} target_prepare_ms={} transfer_ms={} confirm_ms={} confirm_attempts={} confirm_matched={} type_ready={} type_ready_ms={} non_transfer_fixed_ms={} total_ms={} data_write_ms={} control_write_ms={} status_read_ms={}",
+        "[firmware-ota] BLE OTA result transport={} bytes={} chunks={} pretransfer_type_ready={} pretransfer_type_ready_ms={} target_prepare_ms={} transfer_ms={} transfer_fixed_ms={} confirm_ms={} confirm_attempts={} confirm_matched={} type_ready={} type_ready_ms={} non_transfer_fixed_ms={} total_ms={} data_write_ms={} control_write_ms={} status_read_ms={}",
         stats.transport,
         stats.bytes_transferred,
         stats.chunks_sent,
@@ -2458,6 +2552,7 @@ pub async fn transfer_firmware_ota_ble(
         pretransfer_type_ready_elapsed_ms,
         target_prepare_elapsed_ms,
         transfer_elapsed_ms,
+        transfer_fixed_elapsed_ms,
         confirm.elapsed_ms,
         confirm.attempts,
         confirm.matched,
@@ -2485,4 +2580,3 @@ pub async fn transfer_firmware_ota_ble(
         total_elapsed_ms,
     })
 }
-

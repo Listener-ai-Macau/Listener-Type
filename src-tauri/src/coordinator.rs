@@ -125,8 +125,7 @@ use dictation::{
     handle_pressed, handle_pressed_edge, handle_released_edge, hidden_automatic_candidate_active,
     note_device_key_dictation_start_intent, request_embedded_audio_stop_feedback,
     request_embedded_ble_recording_stop_from_host, request_hidden_automatic_candidate_promotion,
-    request_stop_during_starting,
-    submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
+    request_stop_during_starting, submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
     submit_embedded_audio_ble_stream_background, submit_embedded_audio_file,
     submit_embedded_audio_notifications, submit_embedded_audio_streaming_file,
     submit_embedded_audio_streaming_notifications, HOTKEY_DEBOUNCE,
@@ -274,9 +273,6 @@ struct Inner {
     /// 嵌入式 BLE 流式 ASR 的最近一次 partial preview。只用于胶囊视觉反馈；
     /// 光标仍只在 final text 完成后写入。
     embedded_audio_partial_preview: Mutex<Option<String>>,
-    /// 自动唤醒会话的激活词。只用于从该会话的预览和最终文本中移除激活词；
-    /// 手动录音没有这个标记，因此保留相同文字。
-    embedded_audio_wake_phrase_filter: Mutex<Option<(SessionId, String)>>,
     /// 最近一次用于录音胶囊的嵌入式 BLE PCM 电平。ASR partial preview 到达时沿用它，
     /// 避免文字刷新把音量动画刷成 0。
     embedded_audio_last_capsule_level: Mutex<f32>,
@@ -308,6 +304,9 @@ struct Inner {
     /// 枚举。OTA 前的活动连接和确认后的服务探测共同证明本机配对仍可用；若随后的
     /// GATT 打开失败，常规丢失配对恢复仍会运行。
     embedded_ble_ota_recovery_generation: AtomicU64,
+    /// OTA 恢复成功后只显示一次灰色“Listener 音频已恢复”胶囊。它与预检跳过
+    /// 分开消费，避免重连次数较多时被通用防刷屏规则吞掉。
+    embedded_ble_ota_recovery_capsule_generation: AtomicU64,
     /// 启动时必须先把 Type 目标名同步到固件广播名，再允许后台 BLE 监听启动。
     /// 否则前端/托盘的早期 refresh 会用旧 prefs 名字扫一轮，造成第一次连接失败。
     embedded_ble_startup_name_sync_done: AtomicBool,
@@ -633,7 +632,6 @@ impl Coordinator {
                     embedded_audio_stats: Mutex::new(None),
                     embedded_audio_final_result: Mutex::new(None),
                     embedded_audio_partial_preview: Mutex::new(None),
-                    embedded_audio_wake_phrase_filter: Mutex::new(None),
                     embedded_audio_last_capsule_level: Mutex::new(0.0),
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                     embedded_ble_listener_generation: AtomicU64::new(0),
@@ -644,6 +642,7 @@ impl Coordinator {
                     embedded_ble_listener_ready_notification: Notify::new(),
                     embedded_ble_device_key_wake_generation: AtomicU64::new(0),
                     embedded_ble_ota_recovery_generation: AtomicU64::new(0),
+                    embedded_ble_ota_recovery_capsule_generation: AtomicU64::new(0),
                     embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                     embedded_ble_listener_last_error: Mutex::new(None),
                     embedded_ble_pairing_hold_until: Mutex::new(None),
@@ -713,7 +712,6 @@ impl Coordinator {
                 embedded_audio_stats: Mutex::new(None),
                 embedded_audio_final_result: Mutex::new(None),
                 embedded_audio_partial_preview: Mutex::new(None),
-                embedded_audio_wake_phrase_filter: Mutex::new(None),
                 embedded_audio_last_capsule_level: Mutex::new(0.0),
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
                 embedded_ble_listener_generation: AtomicU64::new(0),
@@ -724,6 +722,7 @@ impl Coordinator {
                 embedded_ble_listener_ready_notification: Notify::new(),
                 embedded_ble_device_key_wake_generation: AtomicU64::new(0),
                 embedded_ble_ota_recovery_generation: AtomicU64::new(0),
+                embedded_ble_ota_recovery_capsule_generation: AtomicU64::new(0),
                 embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
                 embedded_ble_pairing_hold_until: Mutex::new(None),
@@ -899,10 +898,9 @@ impl Coordinator {
                 let active_foundry = foundry::is_foundry_local_whisper(&prefs.active_asr_provider);
                 // Local confirmation helper is needed for automatic wake whether or not
                 // a voiceprint is enrolled (phrase-only open gate after delete voiceprint).
-                let helper_result = tauri::async_runtime::spawn_blocking(
-                    crate::asr::local::wake_helper::preload,
-                )
-                .await;
+                let helper_result =
+                    tauri::async_runtime::spawn_blocking(crate::asr::local::wake_helper::preload)
+                        .await;
                 match helper_result {
                     Ok(Ok(())) => log::info!(
                         "[wake-phrase] isolated local confirmation helper ready reason={reason}"
@@ -1772,11 +1770,12 @@ impl Coordinator {
         cancel_session(&self.inner);
     }
 
-    pub fn pause_embedded_ble_listener_for_ota(&self) {
+    pub async fn pause_embedded_ble_listener_for_ota(&self, timeout: Duration) -> bool {
         // Belt-and-suspenders: OTA may have been marked active already, but any
         // in-flight session must die before exclusive GATT transfer.
         dictation::suppress_dictation_pipeline_for_firmware_ota(&self.inner);
-        pause_embedded_ble_listener_capture(&self.inner, "firmware OTA transfer");
+        pause_embedded_ble_listener_capture_for_ota(&self.inner);
+        wait_for_embedded_ble_listener_inactive(&self.inner, timeout).await
     }
 
     pub fn try_begin_firmware_ota_transfer(&self) -> bool {
@@ -1822,8 +1821,18 @@ impl Coordinator {
             refresh_embedded_ble_listener(&self.inner);
         } else if !restore_listener {
             log::info!(
-                "[firmware-ota] OTA gate cleared; deferred post-confirm listener restore owns TYPE:READY"
+                "[firmware-ota] OTA gate cleared; caller-owned OTA listener recovery owns TYPE:READY"
             );
+        }
+    }
+
+    pub fn end_failed_firmware_ota_transfer(&self) {
+        self.end_firmware_ota_transfer_with_listener_restore(false);
+        if embedded_ble_background_listener_expected(&self.inner) {
+            log::info!(
+                "[firmware-ota] restoring failed OTA through non-destructive bonded listener recovery"
+            );
+            refresh_embedded_ble_listener_after_failed_firmware_ota(&self.inner);
         }
     }
 
@@ -3766,7 +3775,6 @@ fn same_llm_endpoint(a: &str, b: &str) -> bool {
     }
     normalize(a).eq_ignore_ascii_case(normalize(b))
 }
-
 
 #[cfg(test)]
 #[path = "coordinator_tests.rs"]

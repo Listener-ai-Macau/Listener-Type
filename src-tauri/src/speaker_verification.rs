@@ -27,11 +27,11 @@ pub struct VerificationResult {
 mod platform {
     use super::{VerificationResult, VoiceprintStatus};
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    #[cfg(test)]
+    use denzic_speaker_verification_v1_core::DEFAULT_SCORE_MILLI;
     use denzic_speaker_verification_v1_core::{
         Action, CandidateOrigin, Input, Machine, Verdict, DEFAULT_MAX_CANDIDATE_MS,
     };
-    #[cfg(test)]
-    use denzic_speaker_verification_v1_core::DEFAULT_SCORE_MILLI;
     use libloading::Library;
     use once_cell::sync::Lazy;
     use parking_lot::Mutex;
@@ -879,7 +879,10 @@ mod platform {
                     "[speaker-verification] owner not enrolled — open gate (any speaker may wake), pcm_ms={}",
                     pcm.len() / 32
                 );
-                return Ok(VerificationResult { matched: true, score: 0.0 });
+                return Ok(VerificationResult {
+                    matched: true,
+                    score: 0.0,
+                });
             }
         };
         let runtime = ensure_runtime()?;

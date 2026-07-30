@@ -605,169 +605,11 @@ fn is_embedded_audio_partial_preview_decorative(ch: char) -> bool {
         )
 }
 
-fn wake_phrase_character_matches(actual: char, expected: char) -> bool {
-    if actual == expected {
-        return true;
-    }
-    use pinyin::ToPinyin;
-    actual
-        .to_pinyin()
-        .zip(expected.to_pinyin())
-        .is_some_and(|(actual, expected)| actual.plain() == expected.plain())
-}
-
-fn strip_bounded_wake_phrase_suffix_fragment(text: &str, phrase: &[char]) -> Option<String> {
-    if phrase.len() < 2 {
-        return None;
-    }
-
-    for suffix_start in 1..phrase.len() {
-        let mut text_chars = text.char_indices();
-        let mut consumed_end = 0usize;
-        let mut matched = true;
-        for expected in &phrase[suffix_start..] {
-            let Some((index, actual)) = text_chars.next() else {
-                matched = false;
-                break;
-            };
-            if is_embedded_audio_partial_preview_decorative(actual)
-                || !wake_phrase_character_matches(actual, *expected)
-            {
-                matched = false;
-                break;
-            }
-            consumed_end = index + actual.len_utf8();
-        }
-        let matched_len = phrase.len() - suffix_start;
-        let next_char_is_decorative = text[consumed_end..]
-            .chars()
-            .next()
-            .is_some_and(is_embedded_audio_partial_preview_decorative);
-        // 唤醒过滤器只作用于唤醒后的音频,因此开头的唤醒词尾巴是唤醒词残留
-        // (KWS 的 end 时间戳经常偏早,"开始录音"的"录音"尾巴漏进听写)。后随标点
-        // 时一律剥;另外,≥2 字的尾巴片段(如"录音")即使后面直接接正文也要剥——
-        // 这正是修掉"录音今天…"泄漏的关键。单字尾巴(如"音频测试"的"音")仍要求
-        // 后随标点,避免把真词剪成"频测试"。
-        if !matched || matched_len == 0 {
-            continue;
-        }
-        if !next_char_is_decorative && matched_len < 2 {
-            continue;
-        }
-        return Some(
-            text[consumed_end..]
-                .trim_start_matches(is_embedded_audio_partial_preview_decorative)
-                .trim()
-                .to_string(),
-        );
-    }
-    None
-}
-
-fn strip_wake_phrase_prefix(text: &str, phrase: &str, suppress_partial: bool) -> String {
-    let text = text.trim();
-    let phrase_chars = phrase
-        .chars()
-        .filter(|ch| !is_embedded_audio_partial_preview_decorative(*ch))
-        .collect::<Vec<_>>();
-    if text.is_empty() || phrase_chars.is_empty() {
-        return text.to_string();
-    }
-
-    // Prefer prefix strip (normal wake at start of transcript).
-    let mut phrase_index = 0usize;
-    let mut consumed_end = 0usize;
-    for (index, ch) in text.char_indices() {
-        let next = index + ch.len_utf8();
-        if is_embedded_audio_partial_preview_decorative(ch) {
-            consumed_end = next;
-            continue;
-        }
-        if phrase_index == phrase_chars.len() {
-            break;
-        }
-        if !wake_phrase_character_matches(ch, phrase_chars[phrase_index]) {
-            // Not a clean prefix — try first full phrase occurrence later in the
-            // string (pre-wake speech + "开始录音" + dictation in one ASR result).
-            if let Some(after) = strip_through_first_wake_phrase_occurrence(text, &phrase_chars) {
-                return after;
-            }
-            return strip_bounded_wake_phrase_suffix_fragment(text, &phrase_chars)
-                .unwrap_or_else(|| text.to_string());
-        }
-        phrase_index += 1;
-        consumed_end = next;
-    }
-
-    if phrase_index == phrase_chars.len() {
-        text[consumed_end..]
-            .trim_start_matches(is_embedded_audio_partial_preview_decorative)
-            .trim()
-            .to_string()
-    } else if suppress_partial && phrase_index > 0 {
-        String::new()
-    } else if let Some(after) = strip_through_first_wake_phrase_occurrence(text, &phrase_chars) {
-        after
-    } else {
-        text.to_string()
-    }
-}
-
-/// Drop leading context through the first complete wake-phrase hit.
-/// Automatic wake can buffer ambient speech before "开始录音"; when that audio
-/// still reaches ASR, the phrase is mid-transcript — keep only post-wake text.
-fn strip_through_first_wake_phrase_occurrence(text: &str, phrase: &[char]) -> Option<String> {
-    if phrase.is_empty() {
-        return None;
-    }
-    let chars: Vec<(usize, char)> = text
-        .char_indices()
-        .filter(|(_, ch)| !is_embedded_audio_partial_preview_decorative(*ch))
-        .collect();
-    if chars.len() < phrase.len() {
-        return None;
-    }
-    'search: for start in 0..=(chars.len() - phrase.len()) {
-        for (offset, expected) in phrase.iter().enumerate() {
-            if !wake_phrase_character_matches(chars[start + offset].1, *expected) {
-                continue 'search;
-            }
-        }
-        // Phrase starts at `start` in non-decorative chars. Consume through last
-        // matched character's byte end in the original string.
-        let last = &chars[start + phrase.len() - 1];
-        let consumed_end = last.0 + last.1.len_utf8();
-        // Only treat as wake boundary when there was leading content (otherwise
-        // prefix strip already handled ExactStart).
-        if start == 0 {
-            return None;
-        }
-        return Some(
-            text[consumed_end..]
-                .trim_start_matches(is_embedded_audio_partial_preview_decorative)
-                .trim()
-                .to_string(),
-        );
-    }
-    None
-}
-
-fn filter_automatic_wake_phrase_text(
-    inner: &Arc<Inner>,
-    session_id: SessionId,
-    text: &str,
-    suppress_partial: bool,
-) -> String {
-    let phrase = inner
-        .embedded_audio_wake_phrase_filter
-        .lock()
-        .as_ref()
-        .filter(|(filter_session_id, _)| *filter_session_id == session_id)
-        .map(|(_, phrase)| phrase.clone());
-    phrase.map_or_else(
-        || text.trim().to_string(),
-        |phrase| strip_wake_phrase_prefix(text, &phrase, suppress_partial),
-    )
+fn preserve_recording_transcript(text: &str) -> String {
+    // The automatic-wake PCM path already drains audio through the detected
+    // keyword boundary before ASR. Any wake phrase ASR still emits belongs to
+    // the active recording and must remain ordinary dictated text.
+    text.trim().to_string()
 }
 
 fn is_dictation_filler_word(word: &str) -> bool {
@@ -913,8 +755,8 @@ fn strip_inlined_chinese_filler_runs(text: &str) -> String {
     out.trim().to_string()
 }
 
-fn filter_dictation_preview_text(inner: &Arc<Inner>, session_id: SessionId, text: &str) -> String {
-    let text = filter_automatic_wake_phrase_text(inner, session_id, text, true);
+fn filter_dictation_preview_text(inner: &Arc<Inner>, _session_id: SessionId, text: &str) -> String {
+    let text = preserve_recording_transcript(text);
     if inner.prefs.get().remove_filler_words {
         remove_standalone_dictation_fillers(&text)
     } else {

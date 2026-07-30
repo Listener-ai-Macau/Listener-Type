@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 function takeArg(name) {
   const index = process.argv.indexOf(name);
@@ -15,10 +16,11 @@ const packagePath = takeArg("--package");
 const outputPath = takeArg("--output-json");
 const coldStart = process.argv.includes("--cold-start");
 const preflightOnly = process.argv.includes("--preflight-only");
-const MIN_PROTOCOL_TRANSFER_BYTES_PER_SECOND = 18_000;
+const MIN_PROTOCOL_TRANSFER_BYTES_PER_SECOND = 60 * 1024;
 const MAX_NON_TRANSFER_FIXED_MS = 7_000;
 
 function writeResult(value) {
+  mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
@@ -247,8 +249,9 @@ try {
       && protocolTransferBytesPerSecond > MIN_PROTOCOL_TRANSFER_BYTES_PER_SECOND
       && result.nonTransferFixedElapsedMs < MAX_NON_TRANSFER_FIXED_MS
   );
+  const status = outcome.commandError || !preflightPassed || !transferPassed ? "FAIL" : "PASS";
   writeResult({
-    status: outcome.commandError || !preflightPassed || !transferPassed ? "FAIL" : "PASS",
+    status,
     machineGate: {
       preflightPassed,
       transferPassed,
@@ -259,6 +262,9 @@ try {
     },
     ...outcome,
   });
+  if (status !== "PASS") {
+    process.exitCode = 1;
+  }
 } catch (error) {
   writeResult({
     status: "FAIL",

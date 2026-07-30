@@ -2,9 +2,9 @@
 //! Thin Tauri wrappers remain in `commands/mod.rs`.
 
 mod ble;
-mod settings;
 mod firmware;
+mod settings;
 
 pub use ble::*;
-pub use settings::*;
 pub use firmware::*;
+pub use settings::*;

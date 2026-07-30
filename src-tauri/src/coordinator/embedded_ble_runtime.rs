@@ -684,22 +684,21 @@ fn start_embedded_ble_passive_local_reattach_watch(
 
             // Escape hatch: after ~45s still no strict "new HID after baseline"
             // evidence. Prefer any present Listener HID (even if baseline-matched /
-            // PnP lagged) and reopen notify without another silent PairAsync.
-            // Only when HID is still absent do we force Type PairAsync — and when
-            // that returns NeedsUserAction / Failed(19) with no toast, keep the
-            // waiting-manual capsule instead of pretending audio is restoring.
+            // PnP lagged) and reopen notify. If HID is absent, stop and wait for
+            // an explicit pairing action. A passive watcher must never race a
+            // native Windows prompt with PairAsync or an adapter restart.
             if monitor_started.elapsed() >= Duration::from_secs(45) {
                 log::warn!(
-                    "[embedded-ble] passive local Windows reattach timed out after {} ms without strict HID evidence target={expected_ble_name:?}; checking present HID before PairAsync",
+                    "[embedded-ble] passive local Windows reattach timed out after {} ms without strict HID evidence target={expected_ble_name:?}; checking present HID before returning to explicit-pair wait",
                     monitor_started.elapsed().as_millis()
                 );
                 clear_embedded_ble_passive_local_reattach(
                     &inner,
-                    "passive reattach timeout forces Type recovery",
+                    "passive reattach timeout returns to explicit-pair wait",
                 );
                 clear_embedded_ble_pairing_confirmation_hold(
                     &inner,
-                    "passive reattach timeout forces Type recovery",
+                    "passive reattach timeout returns to explicit-pair wait",
                 );
 
                 let present_hid = async_runtime::spawn_blocking(|| {
@@ -740,81 +739,26 @@ fn start_embedded_ble_passive_local_reattach_watch(
                     break;
                 }
 
+                {
+                    let mut wake = inner.embedded_ble_wake_recovery.lock();
+                    wake.status = EmbeddedBleWakeRecoveryStatus::NeedsWakeKey;
+                    wake.notify_subscription_state =
+                        EmbeddedBleNotifySubscriptionState::Cancelled;
+                    wake.recent_disconnect_reason = Some(format!(
+                        "passive local reattach timed out without present Listener HID target={expected_ble_name}"
+                    ));
+                    wake.user_guidance = format!(
+                        "Listener 正在等待 Windows 重新配对 {expected_ble_name}。Type 不会在后台重试配对或重启蓝牙。"
+                    );
+                }
                 log::warn!(
-                    "[embedded-ble] passive reattach timeout still has no present Listener HID target={expected_ble_name:?}; forcing Type recovery PairAsync"
+                    "[embedded-ble] passive reattach timeout still has no present Listener HID target={expected_ble_name:?}; background PairAsync suppressed until explicit pairing"
                 );
-                let expected_for_pair = expected_ble_name.clone();
-                let pairing = async_runtime::spawn_blocking(move || {
-                    crate::embedded_ble::prompt_listener_pairing_for_recovery(Some(
-                        &expected_for_pair,
-                    ))
-                })
-                .await;
-                let mut keep_waiting_manual = false;
-                match pairing {
-                    Ok(result) => {
-                        log::info!(
-                            "[embedded-ble] passive reattach timeout PairAsync status={:?} matched={} already_paired={} failed={} open_settings={}",
-                            result.status,
-                            result.matched_devices,
-                            result.already_paired_devices,
-                            result.failed_devices,
-                            result.open_bluetooth_settings
-                        );
-                        let paired_ok = result.already_paired_devices > 0
-                            || matches!(
-                                result.status,
-                                crate::embedded_ble::BleDevicePairingPromptStatus::Paired
-                                    | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
-                            );
-                        if !paired_ok {
-                            keep_waiting_manual = true;
-                            if result.open_bluetooth_settings {
-                                open_windows_bluetooth_settings_for_embedded_ble_pairing(
-                                    "passive reattach timeout PairAsync NeedsUserAction",
-                                );
-                            }
-                            emit_embedded_ble_recovery_capsule(
-                                &inner,
-                                "reconnecting",
-                                EmbeddedBleRecoveryCapsuleMessage::WaitingManualPairing,
-                                None,
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        log::warn!(
-                            "[embedded-ble] passive reattach timeout PairAsync task failed: {err}"
-                        );
-                        keep_waiting_manual = true;
-                        emit_embedded_ble_recovery_capsule(
-                            &inner,
-                            "reconnecting",
-                            EmbeddedBleRecoveryCapsuleMessage::WaitingManualPairing,
-                            None,
-                        );
-                    }
-                }
-                if keep_waiting_manual {
-                    // Stay held for another user/Windows pair attempt rather than
-                    // spinning notify opens against a missing bond.
-                    hold_embedded_ble_listener_for_pairing_confirmation(
-                        &inner,
-                        "passive reattach timeout PairAsync still needs user pairing",
-                    );
-                    start_embedded_ble_passive_local_reattach_watch(
-                        &inner,
-                        expected_ble_name.clone(),
-                        "passive reattach timeout PairAsync still needs user pairing",
-                    );
-                    break;
-                }
-                arm_embedded_ble_type_pairasync_startup_guard(&inner);
-                resume_embedded_ble_listener_after_pairing_recovery(
+                emit_embedded_ble_recovery_capsule(
                     &inner,
-                    "passive reattach timeout forced Type recovery",
-                    EmbeddedBleRecoveryCapsuleMessage::LocalPairingRestoringAudio,
-                    true,
+                    "reconnecting",
+                    EmbeddedBleRecoveryCapsuleMessage::WaitingManualPairing,
+                    Some(4200),
                 );
                 break;
             }
@@ -1158,11 +1102,15 @@ fn record_embedded_ble_device_settings_power_status(
 }
 
 fn refresh_embedded_ble_listener(inner: &Arc<Inner>) {
-    refresh_embedded_ble_listener_with_options(inner, false, false);
+    refresh_embedded_ble_listener_with_options(inner, false, false, false);
 }
 
 fn refresh_embedded_ble_listener_after_firmware_ota(inner: &Arc<Inner>) {
-    refresh_embedded_ble_listener_with_options(inner, false, true);
+    refresh_embedded_ble_listener_with_options(inner, false, true, true);
+}
+
+fn refresh_embedded_ble_listener_after_failed_firmware_ota(inner: &Arc<Inner>) {
+    refresh_embedded_ble_listener_with_options(inner, false, true, false);
 }
 
 fn refresh_embedded_ble_listener_for_device_key_wake(inner: &Arc<Inner>) {
@@ -1172,13 +1120,14 @@ fn refresh_embedded_ble_listener_for_device_key_wake(inner: &Arc<Inner>) {
         );
         return;
     }
-    refresh_embedded_ble_listener_with_options(inner, true, false);
+    refresh_embedded_ble_listener_with_options(inner, true, false, false);
 }
 
 fn refresh_embedded_ble_listener_with_options(
     inner: &Arc<Inner>,
     device_key_idle_wake: bool,
     firmware_ota_recovery: bool,
+    firmware_ota_recovery_capsule: bool,
 ) {
     if !inner
         .embedded_ble_startup_name_sync_done
@@ -1237,6 +1186,18 @@ fn refresh_embedded_ble_listener_with_options(
         inner
             .embedded_ble_ota_recovery_generation
             .store(generation, Ordering::SeqCst);
+        inner.embedded_ble_ota_recovery_capsule_generation.store(
+            if firmware_ota_recovery_capsule {
+                generation
+            } else {
+                0
+            },
+            Ordering::SeqCst,
+        );
+    } else {
+        inner
+            .embedded_ble_ota_recovery_capsule_generation
+            .store(0, Ordering::SeqCst);
     }
     cancel_embedded_ble_listener_capture(inner, "refresh", false);
     if std::env::var("LISTENER_TYPE_DISABLE_BACKGROUND_BLE")
@@ -1704,12 +1665,20 @@ fn take_embedded_ble_ota_recovery_preflight_bypass(inner: &Arc<Inner>, generatio
         .is_ok()
 }
 
+fn take_embedded_ble_ota_recovery_capsule(inner: &Arc<Inner>, generation: u64) -> bool {
+    inner
+        .embedded_ble_ota_recovery_capsule_generation
+        .compare_exchange(generation, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
 async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u64) {
     log::info!("[embedded-ble] background listener started generation={generation}");
     crate::startup_evidence::record_startup_stage("background_listener_started");
     let mut retry_delay = EMBEDDED_BLE_RETRY_BASE_DELAY;
     let mut last_stale_cleanup_at: Option<Instant> = None;
     let mut startup_pairing_preflight_checked = false;
+    let mut firmware_ota_recovery = false;
     loop {
         if !embedded_ble_listener_generation_is_current(&inner, generation) {
             break;
@@ -1731,6 +1700,7 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                     "[embedded-ble] device-key Idle wake bypassed slow manual-delete preflight generation={generation}; physical HID input proves the local pairing remains installed"
                 );
             } else if take_embedded_ble_ota_recovery_preflight_bypass(&inner, generation) {
+                firmware_ota_recovery = true;
                 log::info!(
                     "[embedded-ble] confirmed firmware OTA recovery bypassed repeated Windows HID pairing preflight generation={generation}; the pre-OTA active link and post-OTA service probe prove this trusted local path"
                 );
@@ -1796,19 +1766,28 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 } else {
                     record_embedded_ble_listener_last_error(&inner, &err);
                     record_embedded_ble_recovery_failure(&inner, &err);
-                    if maybe_hold_embedded_ble_after_lost_native_pairing(&inner, &err).await {
+                    if !firmware_ota_recovery
+                        && maybe_hold_embedded_ble_after_lost_native_pairing(&inner, &err).await
+                    {
                         log::info!(
                             "[embedded-ble] background listener stopped after current native Windows pairing disappeared during link recovery"
                         );
                         break;
                     }
-                    let stale_cleanup_outcome =
+                    let stale_cleanup_outcome = if firmware_ota_recovery {
+                        log::warn!(
+                            "[embedded-ble] OTA recovery generation={generation} preserving Windows pairing and firmware bond after transient reconnect error; retrying bonded GATT without stale-pair cleanup err={}",
+                            embedded_ble_log_preview(&err),
+                        );
+                        EmbeddedBleStalePairingCleanupOutcome::RetrySoon
+                    } else {
                         maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
                             &inner,
                             &err,
                             &mut last_stale_cleanup_at,
                         )
-                        .await;
+                        .await
+                    };
                     if inner
                         .embedded_ble_passive_local_reattach_active
                         .load(Ordering::SeqCst)
@@ -3632,6 +3611,11 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             .notify_waiters();
         clear_embedded_ble_listener_last_error(inner);
         let recovered = record_embedded_ble_notify_ready(inner);
+        let generation = inner
+            .embedded_ble_listener_generation
+            .load(Ordering::SeqCst);
+        let firmware_ota_recovered =
+            take_embedded_ble_ota_recovery_capsule(inner, generation);
         if let Some(hid_observed_at) = inner.embedded_ble_power_cycle_hid_observed_at.lock().take()
         {
             let elapsed = hid_observed_at.elapsed();
@@ -3648,7 +3632,13 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             None,
             "background notify subscription ready",
         );
-        if recovered {
+        if recovered || firmware_ota_recovered {
+            log::info!(
+                "[embedded-ble] audio recovered capsule trigger general_recovery={} firmware_ota_recovery={} generation={}",
+                recovered,
+                firmware_ota_recovered,
+                generation
+            );
             emit_embedded_ble_recovery_capsule(
                 inner,
                 "reconnected",
@@ -3831,6 +3821,20 @@ fn pause_embedded_ble_listener_capture(inner: &Arc<Inner>, reason: &str) {
         + 1;
     log::info!("[embedded-ble] paused background listener generation={generation} ({reason})");
     cancel_embedded_ble_listener_capture(inner, reason, false);
+}
+
+fn pause_embedded_ble_listener_capture_for_ota(inner: &Arc<Inner>) {
+    let generation = inner
+        .embedded_ble_listener_generation
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+    log::info!(
+        "[embedded-ble] paused background listener generation={generation} (firmware OTA transfer)"
+    );
+    // TYPE:OTA was sent on the live notify link immediately before this handoff.
+    // Preserve the bonded CCCD and suppress TYPE:BYE so firmware retains the
+    // encrypted Type lease while Windows opens the OTA characteristics.
+    cancel_embedded_ble_listener_capture(inner, "firmware OTA transfer", true);
 }
 
 

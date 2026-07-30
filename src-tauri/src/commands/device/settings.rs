@@ -1,12 +1,8 @@
 //! Device-domain helpers for Listener Type IPC.
 //! Parent module: `crate::commands::device`.
 
-use super::super::{
-    emit_prefs_changed, persist_settings, settings_update_lock, CoordinatorState,
-};
-use super::ble::{
-    embedded_ble_windows_pairing_result, EmbeddedBleWindowsPairingPromptPolicy,
-};
+use super::super::{emit_prefs_changed, persist_settings, settings_update_lock, CoordinatorState};
+use super::ble::{embedded_ble_windows_pairing_result, EmbeddedBleWindowsPairingPromptPolicy};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -14,14 +10,17 @@ use tauri::AppHandle;
 
 use crate::coordinator::Coordinator;
 use crate::types::{
-    device_ble_name_is_valid, DeviceCustomKeyAction, DeviceKnobRotationAction, DictationInputSource,
-    UserPreferences, DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
+    device_ble_name_is_valid, DeviceCustomKeyAction, DeviceKnobRotationAction,
+    DictationInputSource, UserPreferences, DEFAULT_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
     DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES, DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
     DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES, MAX_DEVICE_BATTERY_AUTO_SHUTDOWN_MINUTES,
     MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
 };
 
-pub fn device_firmware_settings_changed(previous: &UserPreferences, next: &UserPreferences) -> bool {
+pub fn device_firmware_settings_changed(
+    previous: &UserPreferences,
+    next: &UserPreferences,
+) -> bool {
     previous.device_status_led_brightness_percent != next.device_status_led_brightness_percent
         || previous.device_key_led_brightness_percent != next.device_key_led_brightness_percent
         || previous.device_knob_led_brightness_percent != next.device_knob_led_brightness_percent
@@ -71,7 +70,9 @@ pub fn validate_device_firmware_preferences(prefs: &UserPreferences) -> Result<(
     Ok(())
 }
 
-pub fn firmware_mode_for_device_knob_rotation_action(action: DeviceKnobRotationAction) -> &'static str {
+pub fn firmware_mode_for_device_knob_rotation_action(
+    action: DeviceKnobRotationAction,
+) -> &'static str {
     match action {
         DeviceKnobRotationAction::SystemVolume => "system_volume",
         DeviceKnobRotationAction::ScreenBrightness => "screen_brightness",
@@ -364,10 +365,12 @@ pub const DEVICE_SETTINGS_DEFAULT_BLE_NAME: &str = "listener";
 pub const DEVICE_SETTINGS_BLE_WRITE_TIMEOUT: Duration = Duration::from_secs(4);
 pub const DEVICE_SETTINGS_BLE_NAME_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEVICE_SETTINGS_BLE_TASK_TIMEOUT: Duration = Duration::from_secs(20);
-pub const DEVICE_SETTINGS_BLE_NAME_APPLY_CONFIRM_INITIAL_DELAY: Duration = Duration::from_millis(300);
+pub const DEVICE_SETTINGS_BLE_NAME_APPLY_CONFIRM_INITIAL_DELAY: Duration =
+    Duration::from_millis(300);
 pub const DEVICE_SETTINGS_BLE_NAME_APPLY_CONFIRM_RETRY_DELAY: Duration = Duration::from_millis(250);
 pub const DEVICE_SETTINGS_BLE_NAME_APPLY_CONFIRM_READBACK_ATTEMPTS: u8 = 3;
-pub const DEVICE_SETTINGS_BLE_NAME_APPLY_ACK_LOST_SETTLE_DELAY: Duration = Duration::from_millis(700);
+pub const DEVICE_SETTINGS_BLE_NAME_APPLY_ACK_LOST_SETTLE_DELAY: Duration =
+    Duration::from_millis(700);
 pub const DEVICE_SETTINGS_BLE_NAME_APPLY_ACK_LOST_READBACK_ATTEMPTS: u8 = 3;
 pub const DEVICE_SETTINGS_BLE_NAME_CACHE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(45);
 pub const DEVICE_SETTINGS_BLE_RECOVERY_PAIRING_SETTLE_DELAY: Duration = Duration::from_millis(2200);
@@ -379,7 +382,8 @@ pub const DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES: usize = 63;
 pub const DEVICE_SETTINGS_READBACK_VERIFY_ATTEMPTS: u8 = 5;
 pub const DEVICE_SETTINGS_READBACK_VERIFY_RETRY_DELAY: Duration = Duration::from_millis(220);
 
-pub async fn read_device_settings_snapshot_from_firmware() -> Result<DeviceSettingsSnapshot, String> {
+pub async fn read_device_settings_snapshot_from_firmware() -> Result<DeviceSettingsSnapshot, String>
+{
     let started = Instant::now();
     let status = run_device_settings_blocking("readback", || {
         crate::embedded_ble::read_device_settings_status(DEVICE_SETTINGS_BLE_WRITE_TIMEOUT)
@@ -919,7 +923,9 @@ pub fn apply_device_ble_name_windows_refresh_blocking(
     }
 }
 
-pub fn device_ble_name_windows_refresh_detail(outcome: &DeviceBleNameWindowsRefreshOutcome) -> String {
+pub fn device_ble_name_windows_refresh_detail(
+    outcome: &DeviceBleNameWindowsRefreshOutcome,
+) -> String {
     let cleanup_detail = match outcome.unpair_result.status {
         crate::embedded_ble::BleDeviceUnpairStatus::Removed => {
             "Old Windows Bluetooth entries were removed."
@@ -959,7 +965,9 @@ pub fn device_ble_name_windows_refresh_detail(outcome: &DeviceBleNameWindowsRefr
     }
 }
 
-pub fn device_ble_name_windows_refresh_confirmed(outcome: &DeviceBleNameWindowsRefreshOutcome) -> bool {
+pub fn device_ble_name_windows_refresh_confirmed(
+    outcome: &DeviceBleNameWindowsRefreshOutcome,
+) -> bool {
     matches!(
         outcome.pairing_prompt_result.status,
         crate::embedded_ble::BleDevicePairingPromptStatus::Paired
@@ -1053,7 +1061,9 @@ pub async fn refresh_windows_ble_cache_after_device_ble_name_change(
     Ok(device_ble_name_windows_refresh_detail(&outcome))
 }
 
-pub fn device_settings_snapshot_has_authoritative_ble_name(snapshot: &DeviceSettingsSnapshot) -> bool {
+pub fn device_settings_snapshot_has_authoritative_ble_name(
+    snapshot: &DeviceSettingsSnapshot,
+) -> bool {
     snapshot.source == "firmware" || snapshot.source == "lastKnown"
 }
 
@@ -1891,7 +1901,9 @@ pub fn device_settings_update_commands(
     Ok(commands)
 }
 
-pub fn validate_device_settings_request(request: &DeviceSettingsUpdateRequest) -> Result<(), String> {
+pub fn validate_device_settings_request(
+    request: &DeviceSettingsUpdateRequest,
+) -> Result<(), String> {
     if request.status_led_brightness_percent > 100
         || request.key_led_brightness_percent > 100
         || request.knob_led_brightness_percent > 100

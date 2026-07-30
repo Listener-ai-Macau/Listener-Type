@@ -123,6 +123,7 @@ fn open_notify_target_for_startup_cached_address(
                     session: prepared.session,
                     device: Some(device),
                     bluetooth_address: Some(address),
+                    post_ota_preserved_cccd: false,
                 });
             }
             Err(err) => {
@@ -555,7 +556,8 @@ fn open_notify_target_with_retry(capture_id: u64) -> Result<OpenNotifyTarget, St
             None => open_notify_target(),
         };
         match opened {
-            Ok(target) => {
+            Ok(mut target) => {
+                target.post_ota_preserved_cccd = ota_post_confirm_address.is_some();
                 if attempt > 1 {
                     log::info!(
                         "[embedded-ble] capture #{capture_id}: notify target open recovered on attempt {attempt}"

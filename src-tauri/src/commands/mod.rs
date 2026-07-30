@@ -19,8 +19,8 @@ use crate::asr::local::foundry::{
 };
 use crate::asr::local::FoundryLocalRuntime;
 use crate::coordinator::{
-    Coordinator, EmbeddedBleSessionActorDiagnosticRecord,
-    EmbeddedBleWakeRecoverySnapshot, FirmwareWakePolicySnapshot,
+    Coordinator, EmbeddedBleSessionActorDiagnosticRecord, EmbeddedBleWakeRecoverySnapshot,
+    FirmwareWakePolicySnapshot,
 };
 use crate::github_oauth::{
     current_epoch_secs, refresh_token_is_expired, token_needs_refresh, GithubDevicePollStatus,
@@ -42,26 +42,24 @@ use crate::polish::{
 };
 use crate::recorder::{AudioConsumer, Recorder};
 use crate::types::{
-    builtin_style_pack_id, default_active_style_pack_id,
-    ChineseScriptPreference, ComboBinding, CorrectionRule, CredentialsStatus,
-    DeviceCustomKeyAction, DeviceCustomKeyGesture, DeviceCustomKeyId, DeviceCustomKeyMapping,
-    DeviceCustomKeys, DictationInputSource, DictationSession,
-    DictionaryEntry, HotkeyCapability, HotkeyStatus, OutputLanguagePreference, PolishMode,
-    ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics, StyleSystemPrompts,
-    UserPreferences, VocabPresetStore, WindowsImeStatus,
+    builtin_style_pack_id, default_active_style_pack_id, ChineseScriptPreference, ComboBinding,
+    CorrectionRule, CredentialsStatus, DeviceCustomKeyAction, DeviceCustomKeyGesture,
+    DeviceCustomKeyId, DeviceCustomKeyMapping, DeviceCustomKeys, DictationInputSource,
+    DictationSession, DictionaryEntry, HotkeyCapability, HotkeyStatus, OutputLanguagePreference,
+    PolishMode, ShortcutBinding, StylePack, StylePackKind, StylePackRuntimeDiagnostics,
+    StyleSystemPrompts, UserPreferences, VocabPresetStore, WindowsImeStatus,
 };
 
 type CoordinatorState<'a> = State<'a, Arc<Coordinator>>;
 
 pub mod device;
+pub(crate) use device::*;
 pub use device::{
-    DeviceSettingsSnapshot, DeviceSettingsUpdateRequest,
-    EmbeddedBleRepairResult, EmbeddedBleRuntimeStatus, FirmwareOtaBleTransferResult,
-    FirmwareOtaPackagePayload, FirmwareOtaPreflightSnapshot,
-    WiredFirmwareFlashResult, WiredFirmwarePackagePayload,
+    DeviceSettingsSnapshot, DeviceSettingsUpdateRequest, EmbeddedBleRepairResult,
+    EmbeddedBleRuntimeStatus, FirmwareOtaBleTransferResult, FirmwareOtaPackagePayload,
+    FirmwareOtaPreflightSnapshot, WiredFirmwareFlashResult, WiredFirmwarePackagePayload,
     WiredFirmwareSerialPort,
 };
-pub(crate) use device::*;
 
 pub type MicrophoneMonitorState = Mutex<Option<Recorder>>;
 pub type TrayMicrophoneMenuState = Mutex<Vec<TrayMicrophoneMenuItem>>;
@@ -473,18 +471,6 @@ fn persist_settings<T: SettingsWriter>(
     Ok(())
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
 #[tauri::command]
 pub fn set_settings(
     coord: CoordinatorState<'_>,
@@ -505,7 +491,8 @@ pub fn set_settings(
     // Keep the retired streaming-only field synchronized for downgrade compatibility.
     prefs.streaming_insert_save_clipboard = prefs.copy_dictation_to_clipboard;
     let next_input_source = prefs.dictation_input_source;
-    let should_sync_device_firmware = device::device_firmware_settings_changed(&previous_prefs, &prefs);
+    let should_sync_device_firmware =
+        device::device_firmware_settings_changed(&previous_prefs, &prefs);
     if should_sync_device_firmware {
         device::validate_device_firmware_preferences(&prefs)?;
         device::sync_device_firmware_preferences(&previous_prefs, &prefs)?;
@@ -541,7 +528,6 @@ pub fn set_settings(
     let _ = app.emit("prefs:changed", &prefs);
     Ok(())
 }
-
 
 fn refresh_tray_menu_async(app: &AppHandle) {
     let app_for_main = app.clone();
@@ -1673,162 +1659,6 @@ pub async fn start_dictation(coord: CoordinatorState<'_>) -> Result<(), String> 
 pub async fn stop_dictation(coord: CoordinatorState<'_>) -> Result<(), String> {
     coord.stop_dictation().await
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[tauri::command]
 pub fn cancel_dictation(coord: CoordinatorState<'_>) {

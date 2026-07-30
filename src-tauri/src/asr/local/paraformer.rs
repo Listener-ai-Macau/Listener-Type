@@ -22,7 +22,8 @@ mod imp {
     // 模型或符号不可用时回退到原始音频,绝不阻塞唤醒。
     const DENOISER_MODEL: &str = "gtcrn_simple.onnx";
     const DENOISER_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx";
-    const DENOISER_SHA256: &str = "E77603AC0C23DAC3227DD2D7135B3A585CBEE2679048AECFA886657D3AE1B534";
+    const DENOISER_SHA256: &str =
+        "E77603AC0C23DAC3227DD2D7135B3A585CBEE2679048AECFA886657D3AE1B534";
 
     #[repr(C)]
     struct FeatureConfig {
@@ -227,7 +228,8 @@ mod imp {
     // Denoiser 用裸指针存储,在 helper 单线程请求循环中使用(与 recognizer 同生命周期)。
     type CreateDenoiser = unsafe extern "C" fn(*const OfflineSpeechDenoiserConfig) -> *const c_void;
     type DestroyDenoiser = unsafe extern "C" fn(*const c_void);
-    type DenoiserRun = unsafe extern "C" fn(*const c_void, *const f32, i32, i32) -> *const DenoisedAudio;
+    type DenoiserRun =
+        unsafe extern "C" fn(*const c_void, *const f32, i32, i32) -> *const DenoisedAudio;
     type DestroyDenoisedAudio = unsafe extern "C" fn(*const DenoisedAudio);
 
     #[derive(Deserialize)]
@@ -350,12 +352,10 @@ mod imp {
                     let destroy: DestroyDenoiser = *sherpa
                         .get(b"SherpaOnnxDestroyOfflineSpeechDenoiser\0")
                         .ok()?;
-                    let run: DenoiserRun = *sherpa
-                        .get(b"SherpaOnnxOfflineSpeechDenoiserRun\0")
-                        .ok()?;
-                    let destroy_audio: DestroyDenoisedAudio = *sherpa
-                        .get(b"SherpaOnnxDestroyDenoisedAudio\0")
-                        .ok()?;
+                    let run: DenoiserRun =
+                        *sherpa.get(b"SherpaOnnxOfflineSpeechDenoiserRun\0").ok()?;
+                    let destroy_audio: DestroyDenoisedAudio =
+                        *sherpa.get(b"SherpaOnnxDestroyDenoisedAudio\0").ok()?;
                     let model_c = CString::new(model_path.to_string_lossy().as_bytes()).ok()?;
                     let provider_c = CString::new("cpu").expect("literal has no nul");
                     let config = OfflineSpeechDenoiserConfig {
@@ -405,7 +405,7 @@ mod imp {
             }
         }
 
-            // 候选整段离线降噪;任何环节失败都回退原始样本,绝不阻断转写。
+        // 候选整段离线降噪;任何环节失败都回退原始样本,绝不阻断转写。
         fn denoise_samples(&self, samples: Vec<f32>) -> Vec<f32> {
             let Some(denoiser) = self.denoiser.as_ref() else {
                 return samples;
@@ -433,7 +433,7 @@ mod imp {
             }
         }
 
-    pub fn transcribe_wav(&self, path: &Path) -> Result<String, String> {
+        pub fn transcribe_wav(&self, path: &Path) -> Result<String, String> {
             let wav = fs::read(path)
                 .map_err(|err| format!("read local wake confirmation WAV failed: {err}"))?;
             let pcm = denzic_audio_v1_core::read_wav_pcm16le(&wav)
@@ -637,7 +637,10 @@ mod imp {
             );
             assert_eq!(std::mem::offset_of!(OfflineRecognizerConfig, hr), 584);
             // 离线语音增强 C API 布局(对齐 c-api.h v1.13.1,4015-4131)。
-            assert_eq!(std::mem::size_of::<OfflineSpeechDenoiserGtcrnModelConfig>(), 8);
+            assert_eq!(
+                std::mem::size_of::<OfflineSpeechDenoiserGtcrnModelConfig>(),
+                8
+            );
             assert_eq!(std::mem::size_of::<OfflineSpeechDenoiserModelConfig>(), 32);
             assert_eq!(std::mem::size_of::<OfflineSpeechDenoiserConfig>(), 32);
             assert_eq!(std::mem::size_of::<DenoisedAudio>(), 16);

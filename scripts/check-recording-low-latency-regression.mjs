@@ -245,7 +245,7 @@ for (const token of [
 const streamingPcm = section(
   dictation,
   "struct EmbeddedAudioDictationSession",
-  "#[derive(Default)]\nstruct EmbeddedStreamingDictation",
+  "struct EmbeddedStreamingDictation",
   "Embedded streaming PCM batching",
 );
 for (const token of [

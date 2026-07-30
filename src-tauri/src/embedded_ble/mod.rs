@@ -37,6 +37,7 @@ pub struct FirmwareOtaTransferStats {
     pub bytes_transferred: usize,
     pub chunks_sent: usize,
     pub transport: &'static str,
+    pub protocol_transfer_elapsed_ms: u64,
     pub data_write_elapsed_ms: u64,
     pub control_write_elapsed_ms: u64,
     pub status_read_elapsed_ms: u64,
@@ -844,6 +845,16 @@ pub fn listener_ota_v1_service_reachable_snapshot(timeout: Duration) -> Firmware
 }
 
 #[cfg(target_os = "windows")]
+pub fn take_listener_ota_v1_reboot_generation_connected() -> bool {
+    windows_ble::take_listener_ota_v1_reboot_generation_connected()
+}
+
+#[cfg(target_os = "windows")]
+pub fn take_listener_ota_v1_reboot_att_ready() -> bool {
+    windows_ble::take_listener_ota_v1_reboot_att_ready()
+}
+
+#[cfg(target_os = "windows")]
 pub fn pull_firmware_diagnostic_log(timeout: Duration) -> FirmwareDiagnosticLogPull {
     windows_ble::pull_firmware_diagnostic_log(timeout)
 }
@@ -1326,6 +1337,16 @@ pub fn listener_ota_v1_service_reachable_snapshot(_timeout: Duration) -> Firmwar
         usb_powered: None,
         detail: Some("Listener OTA v1 over BLE is only supported on Windows".to_string()),
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn take_listener_ota_v1_reboot_generation_connected() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn take_listener_ota_v1_reboot_att_ready() -> bool {
+    false
 }
 
 #[cfg(not(target_os = "windows"))]

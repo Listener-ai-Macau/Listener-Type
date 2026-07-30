@@ -6,7 +6,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const denzicRoot = resolve(appRoot, "..", "..");
+const listenerRoot = resolve(appRoot, "..");
 const packageJson = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8"));
 const version = packageJson.version;
 
@@ -36,10 +36,10 @@ function assertHashMatches(rootPath, sourcePath, label) {
 
 const expectedTypeName = `ListenerType_${version}_x64_en-US.msi`;
 const expectedFirmwareName = `ListenerFirmware_${version}_ota.zip`;
-const expectedTypePath = join(denzicRoot, expectedTypeName);
-const expectedFirmwarePath = join(denzicRoot, expectedFirmwareName);
+const expectedTypePath = join(listenerRoot, expectedTypeName);
+const expectedFirmwarePath = join(listenerRoot, expectedFirmwareName);
 
-const rootEntries = readdirSync(denzicRoot, { withFileTypes: true })
+const rootEntries = readdirSync(listenerRoot, { withFileTypes: true })
   .filter((entry) => entry.isFile())
   .map((entry) => entry.name);
 
@@ -49,10 +49,10 @@ const packageLike = rootEntries.filter((name) =>
 const forbidden = packageLike.filter((name) =>
   name !== expectedTypeName && name !== expectedFirmwareName,
 );
-assert.deepEqual(forbidden, [], `Denzic root contains stale or forbidden release packages: ${forbidden.join(", ")}`);
+assert.deepEqual(forbidden, [], `Listener root contains stale or forbidden release packages: ${forbidden.join(", ")}`);
 
 const portable = rootEntries.filter((name) => /^ListenerType_.*portable.*\.zip$/i.test(name));
-assert.deepEqual(portable, [], `Type portable zip must not be shipped from Denzic root: ${portable.join(", ")}`);
+assert.deepEqual(portable, [], `Type portable zip must not be shipped from Listener root: ${portable.join(", ")}`);
 
 const typeStats = requirePackage(expectedTypePath, "Type MSI", 1_000_000);
 const firmwareStats = requirePackage(expectedFirmwarePath, "Firmware OTA zip", 100_000);
@@ -62,7 +62,7 @@ assertHashMatches(expectedFirmwarePath, readArg("--firmware-source"), "Firmware 
 
 console.log(JSON.stringify({
   status: "PASS",
-  root: denzicRoot,
+  root: listenerRoot,
   version,
   type_msi: {
     file: basename(expectedTypePath),

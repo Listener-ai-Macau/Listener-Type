@@ -454,12 +454,6 @@ struct EmbeddedAudioDictationSession {
     proactive_stop_body_started: bool,
     proactive_stop_silence_ms: u64,
     proactive_stop_dispatched: bool,
-    // A-desktop 诊断: 正式录音期常驻一个 KWS 监听唤醒词,命中只观测、不切分、
-    // 不影响转写。目的是在投入完整会话切分前,先实测噪声场景下"录音中误命中
-    // 唤醒词"的频率——这决定设备端式唤醒-续录方案是否可行。见 A-desktop 计划。
-    reactivation_detector: Option<crate::wake_phrase::StreamingDetector>,
-    reactivation_triggered: bool,
-    reactivation_hit_count: u32,
 }
 
 include!("dictation_wake_polish.rs");
@@ -501,7 +495,6 @@ async fn begin_embedded_audio_dictation_session(
     let current_session_id = begin_embedded_audio_dictation_session_id(inner)?;
     clear_embedded_audio_stats(inner);
     clear_embedded_audio_partial_preview(inner);
-    clear_embedded_audio_wake_phrase_filter(inner);
     clear_embedded_audio_stop_feedback(inner);
     #[cfg(target_os = "windows")]
     {
@@ -561,9 +554,6 @@ async fn begin_embedded_audio_dictation_session(
         proactive_stop_body_started: false,
         proactive_stop_silence_ms: 0,
         proactive_stop_dispatched: false,
-        reactivation_detector: None,
-        reactivation_triggered: false,
-        reactivation_hit_count: 0,
     })
 }
 
@@ -711,8 +701,8 @@ fn reject_hidden_automatic_candidate(reason: &'static str) {
     );
 }
 
-/// Show Recording capsule as soon as KWS hears the wake phrase (local ExactStart may
-/// still be pending). Audio is already buffered; only the UI was late.
+/// Show Recording only after local full-phrase confirmation. The sensitive KWS
+/// is a recall hint and must not expose a false recording capsule by itself.
 fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut BufferedSpeakerCandidate) {
     if candidate.early_capsule_session_id.is_some() {
         return;
@@ -748,7 +738,7 @@ fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut Buffere
     );
     candidate.early_capsule_session_id = Some(session_id);
     log::info!(
-        "[wake-phrase] early recording capsule shown session_id={session_id} (KWS hit, local confirm pending)"
+        "[wake-phrase] early recording capsule shown session_id={session_id} (local full-phrase confirmed)"
     );
 }
 
@@ -1566,16 +1556,7 @@ async fn finish_end_session_after_stop_transition(
         }
     }
 
-    let unfiltered_text = raw.text.clone();
-    raw.text = filter_automatic_wake_phrase_text(inner, current_session_id, &raw.text, false);
-    if raw.text != unfiltered_text.trim() {
-        log::info!(
-            "[wake-phrase] removed automatic activation phrase from final transcript session_id={} before_chars={} after_chars={}",
-            current_session_id,
-            unfiltered_text.chars().count(),
-            raw.text.chars().count()
-        );
-    }
+    raw.text = preserve_recording_transcript(&raw.text);
     if inner.prefs.get().remove_filler_words {
         let before = raw.text.clone();
         raw.text = remove_standalone_dictation_fillers(&raw.text);
@@ -1641,9 +1622,7 @@ async fn finish_end_session_after_stop_transition(
         }
         {
             let mut state = inner.state.lock();
-            if state.session_id == current_session_id
-                && state.phase == SessionPhase::Processing
-            {
+            if state.session_id == current_session_id && state.phase == SessionPhase::Processing {
                 log::warn!(
                     "[coord] empty transcript force-idle stuck Processing session_id={current_session_id} cancelled={}",
                     state.cancelled
@@ -2362,7 +2341,6 @@ fn append_typed_prefix(target: &mut String, delta: &str, typed_chars: usize) -> 
     target.push_str(&delta[..end]);
     appended
 }
-
 
 #[cfg(test)]
 #[path = "dictation_tests.rs"]

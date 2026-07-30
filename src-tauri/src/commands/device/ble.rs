@@ -7,8 +7,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::coordinator::{
-    Coordinator, EmbeddedBleNotifySubscriptionState,
-    EmbeddedBleWakeRecoverySnapshot,
+    Coordinator, EmbeddedBleNotifySubscriptionState, EmbeddedBleWakeRecoverySnapshot,
 };
 
 pub async fn submit_embedded_audio_notifications(
@@ -539,4 +538,3 @@ pub async fn submit_embedded_audio_ble_stream(
 ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
     coord.submit_embedded_audio_ble_stream(timeout_ms).await
 }
-

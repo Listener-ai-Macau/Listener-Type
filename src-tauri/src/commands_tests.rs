@@ -1,7 +1,7 @@
-use super::*;
 use super::device::*;
 #[cfg(target_os = "windows")]
 use super::release_foundry_runtime_if_inactive;
+use super::*;
 use super::{
     active_asr_is_keyless_for_validation, active_foundry_model_from_prefs,
     asr_configured_for_provider, asr_transcriptions_url, diagnostic_recent_errors,
@@ -17,9 +17,9 @@ use crate::embedded_ble::FirmwareOtaDeviceSnapshot;
 use crate::persistence::CredentialsSnapshot;
 use crate::polish::ProviderProxyConfig;
 use crate::types::{
-    ComboBinding, DeviceCustomKeyAction, DeviceCustomKeyMapping, DictationSession,
-    HotkeyBinding, HotkeyMode, HotkeyTrigger, InsertStatus, PolishMode, ShortcutBinding,
-    UserPreferences, MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
+    ComboBinding, DeviceCustomKeyAction, DeviceCustomKeyMapping, DictationSession, HotkeyBinding,
+    HotkeyMode, HotkeyTrigger, InsertStatus, PolishMode, ShortcutBinding, UserPreferences,
+    MAX_DEVICE_LOW_POWER_IDLE_MINUTES,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -36,17 +36,42 @@ fn provider_models_cache_test_lock() -> &'static tokio::sync::Mutex<()> {
 }
 
 fn normalized_commands_source() -> String {
-    let mut s = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/mod.rs")).replace("\r\n", "\n");
+    let mut s = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/mod.rs"))
+        .replace("\r\n", "\n");
     s.push('\n');
     for part in [
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/style_pack_commands.rs")),
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/local_asr_commands.rs")),
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/diagnostics_export.rs")),
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/marketplace.rs")),
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/mod.rs")),
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/settings.rs")),
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/ble.rs")),
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/device/firmware.rs")),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/commands/style_pack_commands.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/commands/local_asr_commands.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/commands/diagnostics_export.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/commands/marketplace.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/commands/device/mod.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/commands/device/settings.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/commands/device/ble.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/commands/device/firmware.rs"
+        )),
     ] {
         s.push_str(&part.replace("\r\n", "\n"));
         s.push('\n');
@@ -73,12 +98,15 @@ fn ota_observability_handoff_precedes_background_listener_pause() {
         .find("coord.try_begin_firmware_ota_transfer()")
         .expect("OTA transfer must reserve exclusive OTA after TYPE:OTA handoff");
     let pause = transfer
-        .find("coord.pause_embedded_ble_listener_for_ota()")
+        .find(".pause_embedded_ble_listener_for_ota(FIRMWARE_OTA_LISTENER_RELEASE_TIMEOUT)")
         .expect("OTA should pause the listener before opening its GATT transfer");
+    let target_prepare = transfer
+        .find("let target_prepare_started = Instant::now();")
+        .expect("OTA should prepare its GATT target after the listener is fully released");
 
     assert!(
-        handoff < begin && begin < pause,
-        "TYPE:OTA must reach firmware while notify is still live (before try_begin/pause) so LED stays Type-ready"
+        handoff < begin && begin < pause && pause < target_prepare,
+        "TYPE:OTA must reach firmware while notify is live, then OTA must release notify before target preparation"
     );
 }
 
@@ -109,18 +137,18 @@ fn ota_preflight_reuses_active_link_handoff_without_interrupting_notify() {
         .find("listener_ota_v1_gatt_probe_snapshot")
         .expect("preflight must soft-fail TYPE:OTA and still probe OTA GATT for firmware info");
     let end_guard = preflight
-        .find("coord.end_firmware_ota_transfer();")
-        .expect("preflight must release its OTA operation reservation");
+        .find("coord.end_failed_firmware_ota_transfer();")
+        .expect("preflight must release its OTA reservation through bonded recovery");
     assert!(recording_guard < handoff);
     // Live notify TYPE:OTA first; try_begin suppresses capture and must not run earlier.
     assert!(
         handoff < begin && begin < probe && probe < end_guard && soft_fail_probe < end_guard,
         "preflight must TYPE:OTA on live notify before try_begin, then always GATT-probe"
     );
-    // Listener restore is owned by end_firmware_ota_transfer (TYPE:READY after BYE).
+    // Listener restore is owned by the non-destructive OTA recovery path.
     assert!(
-        preflight.contains("end_firmware_ota_transfer"),
-        "preflight must end OTA so the coordinator can restore TYPE:READY / leave find-Type LED"
+        preflight.contains("end_failed_firmware_ota_transfer"),
+        "preflight must end OTA without allowing transient CCCD errors to delete pairing"
     );
 }
 
@@ -178,37 +206,62 @@ fn ota_transfer_failure_restores_the_background_listener() {
         .find("let stats = transfer?;")
         .expect("OTA transfer should propagate its result after cleanup");
     let end_fail = transfer[..result]
-        .rfind("coord.end_firmware_ota_transfer();")
-        .expect("failed OTA transfer must clear its active guard with listener restore");
-    let refresh = transfer[..result]
-        .rfind("coord.refresh_embedded_ble_listener();")
-        .expect("failed OTA transfer must restore the paused listener");
-    let settle = transfer
-        .find("FIRMWARE_OTA_POST_CONFIRM_SETTLE")
-        .expect("successful OTA must settle Windows radio before TYPE:READY notify reopen");
+        .rfind("coord.end_failed_firmware_ota_transfer();")
+        .expect("failed OTA transfer must restore through bonded recovery");
     let after_ota = transfer
         .find("refresh_embedded_ble_listener_after_firmware_ota")
         .expect("successful OTA must use post-confirm listener restore");
     let target_ready = transfer
-        .find("Listener OTA v1 target prepared before listener pause")
-        .expect("OTA target must be prepared before listener pause");
+        .find("Listener OTA v1 target prepared after listener release")
+        .expect("OTA target must be prepared after listener release");
     let pause = transfer
-        .find("coord.pause_embedded_ble_listener_for_ota()")
-        .expect("OTA must pause the listener only after target preparation");
+        .find(".pause_embedded_ble_listener_for_ota(FIRMWARE_OTA_LISTENER_RELEASE_TIMEOUT)")
+        .expect("OTA must pause the listener before target preparation");
     assert!(
-        transfer.contains("log::error!")
-            && transfer.contains("[firmware-ota] transfer failed"),
+        transfer.contains("log::error!") && transfer.contains("[firmware-ota] transfer failed"),
         "OTA transfer failures must log the full host error string for operator diagnostics"
     );
     let transfer_timer = transfer
         .find("let transfer_started = Instant::now();")
         .expect("OTA transfer timing must start after the listener is paused");
 
-    // Success: clear gate → propagate result → settle → single after-ota restore.
-    assert!(success < result && result < settle && settle < after_ota);
-    // Failure: end with restore + explicit refresh before result.
-    assert!(end_fail < refresh && refresh < result);
-    assert!(target_ready < pause && pause < transfer_timer);
+    // Success: the retained stable ATT proof permits a direct single after-OTA restore.
+    assert!(success < result && result < after_ota);
+    assert!(!transfer.contains("FIRMWARE_OTA_POST_CONFIRM_SETTLE"));
+    // Failure: the coordinator owns one non-destructive restore before propagation.
+    assert!(end_fail < result);
+    assert!(
+        transfer[..result]
+            .matches("coord.end_failed_firmware_ota_transfer();")
+            .count()
+            >= 4,
+        "every post-handoff failure exit must preserve the existing pairing"
+    );
+    assert!(pause < target_ready && target_ready < transfer_timer);
+}
+
+#[test]
+fn ota_result_separates_protocol_transfer_from_generation_recovery_time() {
+    let source = normalized_commands_source();
+    let transfer_start = source
+        .rfind("pub async fn transfer_firmware_ota_ble")
+        .expect("firmware OTA command should exist");
+    let transfer_end = source[transfer_start..]
+        .find("Ok(FirmwareOtaBleTransferResult")
+        .map(|offset| transfer_start + offset)
+        .expect("firmware OTA command should return its result");
+    let transfer = &source[transfer_start..transfer_end];
+
+    assert!(
+        transfer.contains("let transfer_elapsed_ms = stats.protocol_transfer_elapsed_ms;")
+            && transfer.contains("transfer_wall_elapsed_ms.saturating_sub(transfer_elapsed_ms)"),
+        "reported transfer time must come from the OTA protocol engine"
+    );
+    assert!(
+        transfer.contains(".saturating_add(transfer_fixed_elapsed_ms)")
+            && transfer.contains("transfer_fixed_ms={}"),
+        "secure reopen and reboot/ATT generation waiting must remain in the fixed-time gate"
+    );
 }
 
 fn ota_snapshot_with_version(version: Option<&str>) -> FirmwareOtaDeviceSnapshot {
@@ -464,8 +517,8 @@ fn device_settings_firmware_readback_syncs_local_preferences_exactly() {
 
 #[test]
 fn device_settings_snapshot_uses_firmware_readback_values() {
-    let snapshot = device_settings_snapshot_from_status(
-        crate::embedded_ble::DeviceSettingsStatus {
+    let snapshot =
+        device_settings_snapshot_from_status(crate::embedded_ble::DeviceSettingsStatus {
             brightness_percent: 80,
             plugged_brightness_percent: 80,
             battery_brightness_percent: 80,
@@ -492,8 +545,7 @@ fn device_settings_snapshot_uses_firmware_readback_values() {
             charging: false,
             charge_full: false,
             raw_line: "~DEVICE:SETTINGS result=OK".to_string(),
-        },
-    );
+        });
 
     assert_eq!(snapshot.source, "firmware");
     assert_eq!(snapshot.status_led_brightness_percent, 70);
@@ -528,8 +580,8 @@ fn device_ble_name_change_detection_prefers_authoritative_snapshot() {
         battery_auto_shutdown_minutes: 30,
         ble_name: "listener-dev".to_string(),
     };
-    let mut snapshot = device_settings_snapshot_from_status(
-        crate::embedded_ble::DeviceSettingsStatus {
+    let mut snapshot =
+        device_settings_snapshot_from_status(crate::embedded_ble::DeviceSettingsStatus {
             brightness_percent: 80,
             plugged_brightness_percent: 80,
             battery_brightness_percent: 80,
@@ -556,8 +608,7 @@ fn device_ble_name_change_detection_prefers_authoritative_snapshot() {
             charging: false,
             charge_full: false,
             raw_line: "~DEVICE:SETTINGS result=OK".to_string(),
-        },
-    );
+        });
 
     assert!(!device_ble_name_changed_for_request(
         &request,
@@ -601,8 +652,8 @@ fn device_ble_name_apply_runs_for_pending_same_name() {
         battery_auto_shutdown_minutes: 30,
         ble_name: "Blistener".to_string(),
     };
-    let mut snapshot = device_settings_snapshot_from_status(
-        crate::embedded_ble::DeviceSettingsStatus {
+    let mut snapshot =
+        device_settings_snapshot_from_status(crate::embedded_ble::DeviceSettingsStatus {
             brightness_percent: 80,
             plugged_brightness_percent: 80,
             battery_brightness_percent: 80,
@@ -629,8 +680,7 @@ fn device_ble_name_apply_runs_for_pending_same_name() {
             charging: false,
             charge_full: false,
             raw_line: "~DEVICE:SETTINGS result=OK".to_string(),
-        },
-    );
+        });
 
     assert!(device_ble_name_apply_needed(
         &request,
@@ -699,26 +749,18 @@ fn device_ble_name_apply_lost_ack_requires_matching_readback() {
 
 #[test]
 fn device_ble_name_apply_transient_ack_loss_allows_deferred_confirmation() {
-    assert!(
-        device_ble_name_apply_error_allows_deferred_confirmation(
-            "BLE device settings write async error: Some(HRESULT(0x800704C7))"
-        )
-    );
-    assert!(
-        device_ble_name_apply_error_allows_deferred_confirmation(
-            "BLE device settings write async canceled"
-        )
-    );
-    assert!(
-        device_ble_name_apply_error_allows_deferred_confirmation(
-            "BLE device settings write timed out after 10000 ms"
-        )
-    );
-    assert!(
-        !device_ble_name_apply_error_allows_deferred_confirmation(
-            "firmware rejected device settings command: invalid ble_name"
-        )
-    );
+    assert!(device_ble_name_apply_error_allows_deferred_confirmation(
+        "BLE device settings write async error: Some(HRESULT(0x800704C7))"
+    ));
+    assert!(device_ble_name_apply_error_allows_deferred_confirmation(
+        "BLE device settings write async canceled"
+    ));
+    assert!(device_ble_name_apply_error_allows_deferred_confirmation(
+        "BLE device settings write timed out after 10000 ms"
+    ));
+    assert!(!device_ble_name_apply_error_allows_deferred_confirmation(
+        "firmware rejected device settings command: invalid ble_name"
+    ));
 }
 
 #[test]
@@ -871,18 +913,20 @@ fn firmware_confirmed_rename_handoff_falls_back_only_after_applied_name_advertis
     let helper = &source[helper_start..helper_end];
     let verified_address = helper
         .find("verified_bluetooth_target_rename_handoff_address")
-        .expect("only the verified rename handoff address may be used before new advertising is seen");
-    let early_unpair = helper.find("early_unpair_result").expect(
-        "rename should start exact-address cleanup while waiting for recovery advertising",
-    );
+        .expect(
+            "only the verified rename handoff address may be used before new advertising is seen",
+        );
+    let early_unpair = helper
+        .find("early_unpair_result")
+        .expect("rename should start exact-address cleanup while waiting for recovery advertising");
     let advertisement_wait = helper
         .find("wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name)")
-        .expect(
-            "rename recovery must confirm the applied Listener advertisement before PairAsync",
-        );
+        .expect("rename recovery must confirm the applied Listener advertisement before PairAsync");
     let handoff_fallback = helper
         .find("advertised_address.or(verified_handoff_address)")
-        .expect("a verified handoff address should remain available only after the advertisement scan");
+        .expect(
+            "a verified handoff address should remain available only after the advertisement scan",
+        );
     assert!(verified_address < early_unpair && early_unpair < advertisement_wait);
     assert!(advertisement_wait < handoff_fallback);
     assert!(helper.contains("firmware_name_confirmed"));
@@ -1056,11 +1100,8 @@ fn device_ble_name_same_name_no_repair_hardware_smoke() {
         battery_auto_shutdown_minutes: status.battery_auto_shutdown_minutes,
         ble_name: status.ble_name.clone(),
     };
-    let ble_name_changed = device_ble_name_changed_for_request(
-        &request,
-        Some(&snapshot),
-        Some(&status.ble_name),
-    );
+    let ble_name_changed =
+        device_ble_name_changed_for_request(&request, Some(&snapshot), Some(&status.ble_name));
     assert!(
         !ble_name_changed,
         "same BLE name should not request Windows re-pair"
@@ -1090,9 +1131,8 @@ fn device_ble_name_same_name_no_repair_hardware_smoke() {
         .unwrap_or_else(|err| panic!("same-name command failed command={command}: {err}"));
     }
 
-    let after =
-        crate::embedded_ble::read_device_settings_status(std::time::Duration::from_secs(8))
-            .expect("device settings should remain readable after same-name smoke");
+    let after = crate::embedded_ble::read_device_settings_status(std::time::Duration::from_secs(8))
+        .expect("device settings should remain readable after same-name smoke");
     assert_eq!(after.ble_name, status.ble_name);
     assert!(
         !after.ble_name_pending_restart,
@@ -1180,9 +1220,9 @@ fn device_settings_update_commands_fit_ble_audio_control() {
     assert!(commands
         .iter()
         .any(|command| command.contains("voice_auto_stop=0")));
-    assert!(commands.iter().all(|command| {
-        command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES
-    }));
+    assert!(commands
+        .iter()
+        .all(|command| { command.as_bytes().len() + 1 <= DEVICE_SETTINGS_BLE_CONTROL_MAX_BYTES }));
 
     let legacy_commands = device_settings_update_commands(
         &request,
@@ -1384,9 +1424,8 @@ fn device_settings_readback_mismatch_fails_after_write() {
         last_updated_at: None,
     };
 
-    let err =
-        ensure_device_settings_readback_matches_request(&snapshot, &request, true, true)
-            .expect_err("mismatched firmware readback must fail the Type settings write");
+    let err = ensure_device_settings_readback_matches_request(&snapshot, &request, true, true)
+        .expect_err("mismatched firmware readback must fail the Type settings write");
     assert!(err.contains("led_status expected=73 actual=72"));
     assert!(err.contains("plugged_low_power_idle_minutes expected=12 actual=13"));
 }
@@ -1436,10 +1475,8 @@ fn device_settings_readback_mismatch_fails_for_each_written_field() {
     };
 
     let assert_mismatch = |snapshot: DeviceSettingsSnapshot, fragment: &str| {
-        let err = ensure_device_settings_readback_matches_request(
-            &snapshot, &request, true, true,
-        )
-        .expect_err("any written field readback mismatch must fail the Type settings write");
+        let err = ensure_device_settings_readback_matches_request(&snapshot, &request, true, true)
+            .expect_err("any written field readback mismatch must fail the Type settings write");
         assert!(
             err.contains(fragment),
             "expected mismatch fragment {fragment:?} in {err:?}"
@@ -1884,8 +1921,7 @@ fn repair_failure_escalates_cccd_timeout_to_repair_user_action() {
     );
     assert!(cccd.automatic_recovery);
 
-    let (user_action_required, open_bluetooth_settings) =
-        embedded_ble_repair_failure_action(&cccd);
+    let (user_action_required, open_bluetooth_settings) = embedded_ble_repair_failure_action(&cccd);
     assert!(user_action_required);
     assert!(open_bluetooth_settings);
 }
@@ -1909,9 +1945,7 @@ fn one_click_recovery_attempts_unpair_only_for_stale_pairing_failures() {
 
     assert!(should_attempt_embedded_ble_auto_unpair(&cccd));
     assert!(should_attempt_embedded_ble_auto_unpair(&stale));
-    assert!(should_attempt_embedded_ble_auto_unpair(
-        &missing_pairing
-    ));
+    assert!(should_attempt_embedded_ble_auto_unpair(&missing_pairing));
     assert!(!should_attempt_embedded_ble_auto_unpair(&transient));
     assert!(!should_attempt_embedded_ble_auto_unpair(&asleep));
     assert_eq!(
@@ -2097,8 +2131,7 @@ fn one_click_recovery_escalates_runtime_cccd_history_after_repair_timeout() {
             "嵌入式 BLE 流式抓音中断: cause=BLE CCCD write timed out after 8000 ms".to_string(),
         ),
         reconnect_attempts: 6,
-        notify_subscription_state:
-            crate::coordinator::EmbeddedBleNotifySubscriptionState::Opening,
+        notify_subscription_state: crate::coordinator::EmbeddedBleNotifySubscriptionState::Opening,
         ..Default::default()
     };
 
@@ -2114,8 +2147,7 @@ fn one_click_recovery_escalates_runtime_cccd_history_after_repair_timeout() {
                 .to_string(),
         ),
         reconnect_attempts: 6,
-        notify_subscription_state:
-            crate::coordinator::EmbeddedBleNotifySubscriptionState::Opening,
+        notify_subscription_state: crate::coordinator::EmbeddedBleNotifySubscriptionState::Opening,
         usb_powered: Some(false),
         ..wake_recovery
     };
@@ -2171,8 +2203,7 @@ fn repair_failure_keeps_idle_disconnect_automatic_but_repairable() {
     );
     assert!(idle.automatic_recovery);
 
-    let (user_action_required, open_bluetooth_settings) =
-        embedded_ble_repair_failure_action(&idle);
+    let (user_action_required, open_bluetooth_settings) = embedded_ble_repair_failure_action(&idle);
     assert!(!user_action_required);
     assert!(!open_bluetooth_settings);
 }
@@ -2198,16 +2229,12 @@ fn repair_failure_distinguishes_pairing_from_sleep() {
         embedded_ble_repair_failure_action(&missing_pairing),
         (true, true)
     );
-    assert_eq!(
-        embedded_ble_repair_failure_action(&asleep),
-        (true, false)
-    );
+    assert_eq!(embedded_ble_repair_failure_action(&asleep), (true, false));
 }
 
 #[test]
 fn load_firmware_ota_package_reads_directory() {
-    let root =
-        std::env::temp_dir().join(format!("listener-ota-dir-test-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("listener-ota-dir-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create temp package dir");
     std::fs::write(root.join("ota_manifest.json"), "{\"schema_version\":2}")
@@ -2358,8 +2385,8 @@ fn load_wired_firmware_package_reads_factory_directory() {
     );
     std::fs::write(root.join("manifest.json"), manifest).expect("write factory manifest");
 
-    let loaded = load_wired_firmware_package_internal(&root)
-        .expect("load factory wired firmware package");
+    let loaded =
+        load_wired_firmware_package_internal(&root).expect("load factory wired firmware package");
     assert_eq!(loaded.kind, WiredFirmwarePackageKind::Factory);
     assert_eq!(loaded.version, "v1.2.3");
     assert_eq!(
@@ -2447,10 +2474,7 @@ fn normalize_esptool_region_arg_accepts_idf_size_units() {
 
 #[test]
 fn parse_flash_u32_arg_accepts_idf_size_units() {
-    assert_eq!(
-        parse_flash_u32_arg("8K", "size", false).unwrap(),
-        8192
-    );
+    assert_eq!(parse_flash_u32_arg("8K", "size", false).unwrap(), 8192);
     assert_eq!(
         parse_flash_u32_arg("0xf000", "offset", true).unwrap(),
         0xf000
@@ -2649,8 +2673,7 @@ fn diagnostic_package_includes_ble_wake_recovery_without_sensitive_text() {
                 service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3091a",
                 index: 0,
                 name: "listener".to_string(),
-                id: r"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3091A}_14C19F48FE72"
-                    .to_string(),
+                id: r"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3091A}_14C19F48FE72".to_string(),
                 bluetooth_address: Some("14C19F48FE72".to_string()),
             }],
             ota_services: Vec::new(),
@@ -2728,8 +2751,7 @@ fn diagnostic_export_test_package() -> super::DiagnosticPackage {
                 service_uuid: "710af845-6d9f-6583-0c4d-9e5b3bc3093a",
                 index: 0,
                 name: "listener".to_string(),
-                id: r"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3093A}_14C19F48FE72"
-                    .to_string(),
+                id: r"BTHLEDEVICE\{710AF845-6D9F-6583-0C4D-9E5B3BC3093A}_14C19F48FE72".to_string(),
                 bluetooth_address: Some("14C19F48FE72".to_string()),
             }],
             firmware_snapshot: FirmwareOtaDeviceSnapshot {
@@ -2873,9 +2895,7 @@ fn diagnostic_ble_failure_taxonomy_deduplicates_sources() {
             connected: true,
             hardware_revision: Some("keyboard-v1".to_string()),
             firmware_version: None,
-            capabilities: vec![
-                crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY.to_string()
-            ],
+            capabilities: vec![crate::firmware_ota::LISTENER_OTA_V1_FIRMWARE_CAPABILITY.to_string()],
             battery_percent: Some(70),
             usb_powered: Some(true),
             detail: None,
@@ -2901,8 +2921,9 @@ fn diagnostic_ble_failure_taxonomy_deduplicates_sources() {
     assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::CccdProtocolError));
     assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::BackgroundListenerContention));
     assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::OtaRebootWindow));
-    assert!(kinds
-        .contains(&crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded));
+    assert!(
+        kinds.contains(&crate::embedded_ble::BleFailureKind::WindowsBluetoothServiceResetNeeded)
+    );
     assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::StaleGattService));
     assert!(kinds.contains(&crate::embedded_ble::BleFailureKind::MissingDisFirmwareRevision));
     assert_eq!(
@@ -3042,9 +3063,7 @@ fn foundry_language_hint_rejects_non_lowercase_iso_639_1() {
 
 #[test]
 fn foundry_model_alias_validation_rejects_unknown_alias() {
-    assert!(
-        validate_foundry_model_alias(crate::asr::local::foundry::DEFAULT_MODEL_ALIAS).is_ok()
-    );
+    assert!(validate_foundry_model_alias(crate::asr::local::foundry::DEFAULT_MODEL_ALIAS).is_ok());
     assert!(validate_foundry_model_alias("whisper-large").is_err());
 }
 
@@ -3186,8 +3205,7 @@ fn asr_transcriptions_url_accepts_base_or_transcriptions_endpoint() {
 #[test]
 fn parse_model_ids_sorts_and_deduplicates() {
     let models =
-        parse_model_ids(r#"{ "data": [{ "id": "b" }, { "id": "a" }, { "id": "b" }] }"#)
-            .unwrap();
+        parse_model_ids(r#"{ "data": [{ "id": "b" }, { "id": "a" }, { "id": "b" }] }"#).unwrap();
     assert_eq!(models, vec!["a".to_string(), "b".to_string()]);
 }
 
@@ -3616,9 +3634,7 @@ fn dictation_translation_overlap_allows_distinct_bindings() {
         modifiers: vec![],
     };
 
-    assert!(
-        super::reject_dictation_translation_hotkey_overlap(&dictation, &translation).is_ok()
-    );
+    assert!(super::reject_dictation_translation_hotkey_overlap(&dictation, &translation).is_ok());
 }
 
 #[test]

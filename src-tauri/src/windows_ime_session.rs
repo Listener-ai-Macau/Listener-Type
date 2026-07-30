@@ -238,14 +238,17 @@ mod tests {
 
     #[test]
     fn session_not_active_classifies_only_the_unavailable_ipc_error() {
-        assert!(WindowsImeSessionError::Ipc(
-            "Listener Type IME session is not active".to_string()
-        )
-        .is_session_not_active());
-        assert!(!WindowsImeSessionError::Ipc("some other ipc error".to_string())
-            .is_session_not_active());
-        assert!(!WindowsImeSessionError::Profile("profile error".to_string())
-            .is_session_not_active());
+        assert!(
+            WindowsImeSessionError::Ipc("Listener Type IME session is not active".to_string())
+                .is_session_not_active()
+        );
+        assert!(
+            !WindowsImeSessionError::Ipc("some other ipc error".to_string())
+                .is_session_not_active()
+        );
+        assert!(
+            !WindowsImeSessionError::Profile("profile error".to_string()).is_session_not_active()
+        );
     }
 
     #[test]

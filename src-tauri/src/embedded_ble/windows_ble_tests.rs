@@ -98,8 +98,7 @@ fn background_capture_cancellation_interrupts_target_open_before_fallback_scans(
 
     let wait_cancel = Arc::new(AtomicBool::new(true));
     let _scope = NotifyCaptureCancelScope::install(&wait_cancel);
-    let Ok(operation) = BluetoothLEDevice::FromBluetoothAddressAsync(0x0000_A1B2_C3D4)
-    else {
+    let Ok(operation) = BluetoothLEDevice::FromBluetoothAddressAsync(0x0000_A1B2_C3D4) else {
         return; // WinRT Bluetooth unavailable on this host
     };
     let err = wait_async_operation(operation, Duration::from_secs(30), "cancel probe")
@@ -122,8 +121,8 @@ fn continuous_listener_skips_notify_cccd_prereset() {
 
 #[test]
 fn type_heartbeat_prefers_no_response_when_available() {
-    let both = GattCharacteristicProperties::Write
-        | GattCharacteristicProperties::WriteWithoutResponse;
+    let both =
+        GattCharacteristicProperties::Write | GattCharacteristicProperties::WriteWithoutResponse;
     assert_eq!(
         type_heartbeat_write_option_from_properties(both),
         GattWriteOption::WriteWithoutResponse
@@ -136,13 +135,10 @@ fn type_heartbeat_prefers_no_response_when_available() {
 
 #[test]
 fn audio_control_toggle_prefers_no_response_when_available() {
-    let both = GattCharacteristicProperties::Write
-        | GattCharacteristicProperties::WriteWithoutResponse;
+    let both =
+        GattCharacteristicProperties::Write | GattCharacteristicProperties::WriteWithoutResponse;
     assert_eq!(
-        audio_control_write_options_from_properties(
-            both,
-            AudioControlWritePolicy::LowLatency
-        ),
+        audio_control_write_options_from_properties(both, AudioControlWritePolicy::LowLatency),
         Some((
             GattWriteOption::WriteWithoutResponse,
             Some(GattWriteOption::WriteWithResponse)
@@ -174,13 +170,10 @@ fn recording_stop_prefers_no_response_when_available() {
 
 #[test]
 fn reliable_audio_control_prefers_with_response_when_available() {
-    let both = GattCharacteristicProperties::Write
-        | GattCharacteristicProperties::WriteWithoutResponse;
+    let both =
+        GattCharacteristicProperties::Write | GattCharacteristicProperties::WriteWithoutResponse;
     assert_eq!(
-        audio_control_write_options_from_properties(
-            both,
-            AudioControlWritePolicy::Reliable
-        ),
+        audio_control_write_options_from_properties(both, AudioControlWritePolicy::Reliable),
         Some((
             GattWriteOption::WriteWithResponse,
             Some(GattWriteOption::WriteWithoutResponse)
@@ -268,12 +261,8 @@ fn recovery_pairing_passes_advertised_addresses_into_windows_selector() {
         .find("scan_listener_pairing_advertisements")
         .expect("recovery pairing must scan advertisements");
     let selector_index = body
-        .find(
-            "listener_pairing_candidates_from_unpaired_selector(expected_name, direct_addresses)",
-        )
-        .expect(
-            "recovery pairing must pass freshly advertised addresses into Windows selector",
-        );
+        .find("listener_pairing_candidates_from_unpaired_selector(expected_name, direct_addresses)")
+        .expect("recovery pairing must pass freshly advertised addresses into Windows selector");
 
     assert!(
         body.contains("let direct_addresses = if fresh_advertised_addresses.is_empty()"),
@@ -372,8 +361,7 @@ fn type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan() {
 }
 
 #[test]
-fn recovery_pairing_fallback_does_not_use_stale_same_name_cache_when_fresh_address_exists()
-{
+fn recovery_pairing_fallback_does_not_use_stale_same_name_cache_when_fresh_address_exists() {
     let source = include_str!("embedded_ble.rs");
     let start = source
         .find("fn listener_recovery_pairing_selector_fallback_candidates")
@@ -385,9 +373,7 @@ fn recovery_pairing_fallback_does_not_use_stale_same_name_cache_when_fresh_addre
     let body = &source[start..end];
 
     assert!(body.contains("let mut fresh_advertised_addresses = Vec::new();"));
-    assert!(
-        body.contains("let selector_addresses = if fresh_advertised_addresses.is_empty()")
-    );
+    assert!(body.contains("let selector_addresses = if fresh_advertised_addresses.is_empty()"));
     assert!(body.contains("not falling back to stale same-name cache"));
 }
 
@@ -560,8 +546,10 @@ fn pairing_discovery_requires_connectable_aep_before_full_cache() {
         connectable_index < full_cache_index,
         "Windows BLE pairing must prefer connectable AEPs before stale full-cache AEPs"
     );
-    assert!(source.contains("WINDOWS_AEP_BLE_IS_CONNECTABLE_PROPERTY")
-        || source.contains("WINDOWS_BLE_AEP_CONNECTABLE_SELECTOR"));
+    assert!(
+        source.contains("WINDOWS_AEP_BLE_IS_CONNECTABLE_PROPERTY")
+            || source.contains("WINDOWS_BLE_AEP_CONNECTABLE_SELECTOR")
+    );
     assert!(source.contains("connectable_selector={connectable_selector}"));
 }
 
@@ -593,8 +581,7 @@ fn usb_serial_device_settings_drain_waits_for_quiet_window() {
         "USB serial fallback must drain stale diagnostic output until a quiet window before sending commands"
     );
     assert!(
-        !production_body
-            .contains("drain_serial_input(&mut *port, Duration::from_millis(180))"),
+        !production_body.contains("drain_serial_input(&mut *port, Duration::from_millis(180))"),
         "USB serial fallback must not use the old fixed 180 ms drain"
     );
 }
@@ -646,9 +633,9 @@ fn already_paired_requires_trusted_address_not_same_name_cache_only() {
         guard_index < already_index,
         "same-name Windows cache entries must not be reported as already paired unless their address is trusted"
     );
-    assert!(body.contains(
-        "same-name cached pairing without matching Listener address/service proof"
-    ));
+    assert!(
+        body.contains("same-name cached pairing without matching Listener address/service proof")
+    );
 }
 
 #[test]
@@ -665,14 +652,10 @@ fn type_recovery_promotes_only_trusted_cached_addresses() {
 
     let pre_cleanup_index = body
         .find("unpair_listener_devices_inner(std::slice::from_ref(&target_name))")
-        .expect(
-            "confirmed Type recovery must clean stale Windows pairing before PairAsync",
-        );
+        .expect("confirmed Type recovery must clean stale Windows pairing before PairAsync");
     let candidate_scan_index = body
         .find("listener_recovery_pairing_candidates_for_addresses")
-        .expect(
-            "confirmed Type recovery must use recovery-address-aware candidate discovery",
-        );
+        .expect("confirmed Type recovery must use recovery-address-aware candidate discovery");
     assert!(
         pre_cleanup_index < candidate_scan_index,
         "confirmed Type recovery must remove stale Windows PnP/bond cache before pairing the Type-observed or freshly scanned recovery address"
@@ -835,7 +818,9 @@ fn fresh_recovery_pairing_only_cleanup_keeps_slow_discovery_out_of_the_recovery_
         .expect("pairing-only known-address cleanup helper boundary should exist");
     let direct_cleanup = &source[direct_cleanup_start..direct_cleanup_end];
     assert!(
-        direct_cleanup.contains("unpair_listener_devices_for_known_addresses_inner(extra_names, addresses, false)"),
+        direct_cleanup.contains(
+            "unpair_listener_devices_for_known_addresses_inner(extra_names, addresses, false)"
+        ),
         "the fresh direct-pair path must not run PnP/BTHPORT cleanup before PairAsync"
     );
 
@@ -973,8 +958,21 @@ fn desktop_pairasync_failed_uses_custom_pairing_fallback() {
 }
 
 #[test]
-fn pairasync_failed_restarts_windows_bluetooth_adapter_only_when_allowed() {
+fn pairasync_failure_does_not_restart_windows_bluetooth_adapter_automatically() {
     let source = include_str!("embedded_ble.rs");
+    let prompt_start = source
+        .find("fn prompt_listener_pairing_inner")
+        .expect("pairing prompt helper should exist");
+    let prompt_end = source[prompt_start..]
+        .find("fn pair_listener_candidates_into_prompt_result")
+        .map(|offset| prompt_start + offset)
+        .expect("pairing prompt helper boundary should exist");
+    let prompt = &source[prompt_start..prompt_end];
+    assert!(
+        prompt.contains("let allow_adapter_restart = false;"),
+        "Type PairAsync must not tear down a concurrent native Windows pairing ceremony"
+    );
+
     let start = source
         .find("fn pair_unpaired_listener_candidate_with_adapter_recovery")
         .expect("adapter recovery pairing helper should exist");
@@ -989,7 +987,7 @@ fn pairasync_failed_restarts_windows_bluetooth_adapter_only_when_allowed() {
     assert!(body.contains("restart_windows_bluetooth_adapter_after_pairing_failure"));
     assert!(
         body.contains("refresh_listener_pairing_candidate(candidate, expected_name)"),
-        "after restarting the local adapter, Type must reopen the BLE DeviceInformation before retrying PairAsync"
+        "the dormant explicit adapter-recovery branch must remain bounded"
     );
     assert!(
         body.contains("!allow_adapter_restart")
@@ -998,12 +996,12 @@ fn pairasync_failed_restarts_windows_bluetooth_adapter_only_when_allowed() {
     );
     assert!(
         body.contains("false,"),
-        "adapter restart retry must disable another restart to avoid a loop"
+        "the dormant adapter-recovery retry must still disable another restart"
     );
     assert!(
         source.contains("fn pairing_status_suggests_adapter_restart")
             && source.contains("DevicePairingResultStatus::Failed"),
-        "only the observed Windows Failed(19) pairing result should trigger adapter restart"
+        "the dormant diagnostic branch must remain restricted to Failed(19)"
     );
 }
 
@@ -1036,9 +1034,8 @@ fn type_recovery_failed_pairasync_retries_once_without_adapter_restart() {
         .filter(|character| !character.is_whitespace())
         .collect();
     assert!(
-        fallback_args.contains(
-            "fallback_candidates,&target_name,false,true,allow_adapter_restart,false,"
-        ),
+        fallback_args
+            .contains("fallback_candidates,&target_name,false,true,allow_adapter_restart,false,"),
         "slow AEP fallback should not recursively enable the direct PairAsync retry"
     );
 
@@ -1089,8 +1086,8 @@ fn type_recovery_pairasync_disables_adapter_restart() {
     let body = &source[start..end];
 
     assert!(
-        body.contains("allow_user_pairing_prompt && !type_recovery_command_confirmed"),
-        "Type-owned or user-prompt-suppressed recovery must not restart the whole Windows Bluetooth adapter"
+        body.contains("let allow_adapter_restart = false;"),
+        "Type-owned pairing must never restart the whole Windows Bluetooth adapter"
     );
     assert!(
         body.contains("allow_adapter_restart,"),
@@ -1103,8 +1100,7 @@ fn rename_recovery_can_skip_duplicate_pre_pair_cleanup_after_cache_refresh() {
     let source = include_str!("embedded_ble.rs");
     // Prefer the Windows impl that actually calls prompt_listener_pairing_inner
     // (mod.rs only has thin wrappers).
-    let call_marker =
-        "prompt_listener_pairing_inner(expected_name, true, true, false, true, &[])";
+    let call_marker = "prompt_listener_pairing_inner(expected_name, true, true, false, true, &[])";
     let call_at = source
         .find(call_marker)
         .expect("Type recovery prompt helper should exist");
@@ -1220,7 +1216,7 @@ fn pairing_prompt_syncs_expected_name_before_control_fallback() {
 fn type_controlled_recovery_uses_explicit_type_commands() {
     let source = include_str!("embedded_ble.rs");
     let production = source.as_str(); // path-separated tests: include_str production only
-    // Prefer the Windows impl body (mod.rs only has a thin wrapper).
+                                      // Prefer the Windows impl body (mod.rs only has a thin wrapper).
     let marker = "b\"VREC:RECOVERY:TYPE\\n\"";
     let marker_at = source
         .find(marker)
@@ -1263,7 +1259,11 @@ fn type_bye_is_a_separate_shutdown_heartbeat_command() {
     let end = source[body_start..]
         .find("pub fn send_recording_processing_state")
         .map(|offset| body_start + offset)
-        .or_else(|| source[body_start..].find("\n}\n\n").map(|o| body_start + o + 2))
+        .or_else(|| {
+            source[body_start..]
+                .find("\n}\n\n")
+                .map(|o| body_start + o + 2)
+        })
         .expect("Type bye command boundary should exist");
     let body = &source[body_start..end];
 
@@ -1284,19 +1284,15 @@ fn audio_control_advertisement_fallback_requires_windows_pairing() {
     let source = include_str!("embedded_ble.rs");
     let production = source.as_str(); // path-separated tests: include_str production only
     assert!(!production.contains("TryFreshGattAllowUnpairedAdvertisement"));
+    assert!(!production.contains("allowing unpaired audio control advertisement GATT fallback"));
     assert!(
-        !production.contains("allowing unpaired audio control advertisement GATT fallback")
-    );
-    assert!(
-        production
-            .contains("ensure_paired_listener_for_advertisement_gatt(\"audio control\""),
+        production.contains("ensure_paired_listener_for_advertisement_gatt(\"audio control\""),
         "audio control advertisement fallback must require Windows pairing"
     );
 }
 
 #[test]
-fn advertisement_gatt_pairing_check_accepts_pnp_service_signature_cache_only_after_pairasync(
-) {
+fn advertisement_gatt_pairing_check_accepts_pnp_service_signature_cache_only_after_pairasync() {
     let source = include_str!("embedded_ble.rs");
     let start = source
         .find("fn paired_listener_device_visible_for_addresses")
@@ -1333,7 +1329,7 @@ fn advertisement_gatt_pairing_check_accepts_pnp_service_signature_cache_only_aft
         "ensure_paired_listener_for_advertisement_gatt(\"audio control\", &addresses, true)"
     ));
     assert!(source.contains(
-        "ensure_paired_listener_for_advertisement_gatt(\n        \"recent pairing audio notify\",\n        &addresses,\n        true,\n    )"
+        "ensure_paired_listener_for_advertisement_gatt(\"recent pairing audio notify\", &addresses, true)"
     ));
 }
 
@@ -1366,7 +1362,7 @@ fn post_confirm_ota_notify_reopen_uses_only_the_verified_current_address() {
 }
 
 #[test]
-fn post_confirm_ota_notify_rehydrates_cached_gatt_before_uncached_fallback() {
+fn post_confirm_ota_notify_reuses_challenge_verified_cached_gatt() {
     let source = include_str!("embedded_ble.rs");
     let start = source
         .find("fn open_notify_target_for_post_confirm_native_windows_hid(")
@@ -1377,8 +1373,9 @@ fn post_confirm_ota_notify_rehydrates_cached_gatt_before_uncached_fallback() {
         .expect("post-confirm native-HID opener boundary should exist");
     let body = &source[start..end];
 
-    assert!(body.contains("bluetooth_cache_modes_for_policy("));
-    assert!(body.contains("denzic_ble_pairing::POST_CONFIRM_NOTIFY_CACHE_POLICY"));
+    assert!(body.contains("&POST_OTA_VERIFIED_CACHED_CACHE_MODES"));
+    assert!(body.contains("POST_OTA_VERIFIED_CACHED_GATT_TIMEOUT"));
+    assert!(!body.contains("&POST_OTA_UNCACHED_CACHE_MODES"));
     assert!(body.contains("require_audio_control_for_notify_target"));
 }
 
@@ -1486,10 +1483,17 @@ fn persisted_notify_fast_path_validates_gatt_before_recovery_advertising() {
         "recovery-window CCCD cancellation must delegate the retry ladder to the shared platform helper so PairAsync recovery can preempt it"
     );
 
-    assert!(source.contains(
-        "write_cccd_notify_with_retry(0, \"diagnostic log\", &data, CCCD_ENABLE_TIMEOUT, None)"
-    ));
+    assert!(source.contains("\"diagnostic log\", &data, CCCD_ENABLE_TIMEOUT, None"));
     assert!(source.contains("cleanup.target.bluetooth_address"));
+}
+
+#[test]
+fn post_confirm_ota_reuses_the_windows_restored_cccd() {
+    let source = include_str!("embedded_ble.rs");
+
+    assert!(source.contains("target.post_ota_preserved_cccd = ota_post_confirm_address.is_some();"));
+    assert!(source.contains("reusing Windows-restored notify CCCD after verified OTA reconnect"));
+    assert!(source.contains("if cleanup.target.post_ota_preserved_cccd"));
 }
 
 #[test]
@@ -1580,7 +1584,9 @@ fn persisted_startup_notify_address_is_named_bounded_and_after_recent_pairing() 
     assert!(source.contains("open_write_characteristic_from_service_with_timeout"));
     assert!(
         source.contains("AUDIO_CONTROL_UUID")
-            && source.contains("persist_successful_notify_target_address(address, \"Type heartbeat ready\")"),
+            && source.contains(
+                "persist_successful_notify_target_address(address, \"Type heartbeat ready\")"
+            ),
         "startup fast path must keep audio control and persist only after Type heartbeat ready"
     );
 }
@@ -1607,9 +1613,8 @@ fn native_windows_hid_takeover_stays_on_current_identity_without_advertisement_w
         native_pairing_index < service_selector_index,
         "native Windows HID recovery must be considered before the general system service selector"
     );
-    assert!(notify_body.contains(
-        "selected native Windows HID startup audio notify address={address:012X}"
-    ));
+    assert!(notify_body
+        .contains("selected native Windows HID startup audio notify address={address:012X}"));
     assert!(
         notify_body.contains("for address in &native_windows_hid_addresses")
             && notify_body.contains("open_notify_target_for_current_native_windows_hid(*address)")
@@ -1679,9 +1684,8 @@ fn stale_native_windows_hid_snapshot_refreshes_only_current_direct_identities() 
 
     assert!(notify_body.contains("native_windows_hid_pairing_addresses()"));
     assert!(notify_body.contains("native_windows_hid_snapshot_refresh_is_useful"));
-    assert!(notify_body.contains(
-        "selected refreshed native Windows HID audio notify address={address:012X}"
-    ));
+    assert!(notify_body
+        .contains("selected refreshed native Windows HID audio notify address={address:012X}"));
     assert!(
         !notify_body.contains("GetDeviceSelectorFromUuid(SERVICE_UUID)")
             || notify_body
@@ -1721,10 +1725,7 @@ fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
         updated_at: None,
     };
     assert_eq!(
-        persisted_ble_device_state_address_for_target(
-            &legacy,
-            DEFAULT_BLUETOOTH_TARGET_NAME
-        ),
+        persisted_ble_device_state_address_for_target(&legacy, DEFAULT_BLUETOOTH_TARGET_NAME),
         None,
         "legacy address-only state must not be trusted after hardware swaps"
     );
@@ -1735,10 +1736,7 @@ fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
         updated_at: None,
     };
     assert_eq!(
-        persisted_ble_device_state_address_for_target(
-            &wrong_target,
-            DEFAULT_BLUETOOTH_TARGET_NAME
-        ),
+        persisted_ble_device_state_address_for_target(&wrong_target, DEFAULT_BLUETOOTH_TARGET_NAME),
         None
     );
 
@@ -1748,10 +1746,7 @@ fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
         updated_at: None,
     };
     assert_eq!(
-        persisted_ble_device_state_address_for_target(
-            &matching,
-            DEFAULT_BLUETOOTH_TARGET_NAME
-        ),
+        persisted_ble_device_state_address_for_target(&matching, DEFAULT_BLUETOOTH_TARGET_NAME),
         Some(0xE5C3_D5B8_D2FC)
     );
 }
@@ -1844,10 +1839,7 @@ fn swift_pair_manufacturer_data_exposes_display_name() {
     assert_eq!(
         denzic_ble_windows::swift_pair_display_name_from_manufacturer_entry(
             0x0006,
-            &[
-                0x06, 0x00, 0x03, 0x00, 0x80, b'l', b'i', b's', b't', b'e', b'n', b'e',
-                b'r', b'B'
-            ]
+            &[0x06, 0x00, 0x03, 0x00, 0x80, b'l', b'i', b's', b't', b'e', b'n', b'e', b'r', b'B']
         ),
         Some("listenerB".to_string())
     );
@@ -2209,11 +2201,7 @@ fn ota_background_capture_cancel_leaves_old_cccd_for_connection_handoff() {
         NotifyCccdTeardown::Disable
     );
     assert_eq!(
-        NotifyCccdTeardown::for_capture_cancel(
-            CaptureTerminalBehavior::StopCapture,
-            true,
-            false,
-        ),
+        NotifyCccdTeardown::for_capture_cancel(CaptureTerminalBehavior::StopCapture, true, false,),
         NotifyCccdTeardown::Disable
     );
 }
@@ -2230,11 +2218,7 @@ fn confirmed_name_change_handoff_skips_old_cccd_only_for_continuous_listener() {
         "a firmware-confirmed BLE rename terminates the old connection, so its background listener must not wait on an obsolete CCCD disable"
     );
     assert_eq!(
-        NotifyCccdTeardown::for_capture_cancel(
-            CaptureTerminalBehavior::StopCapture,
-            false,
-            true,
-        ),
+        NotifyCccdTeardown::for_capture_cancel(CaptureTerminalBehavior::StopCapture, false, true,),
         NotifyCccdTeardown::Disable,
         "foreground capture cancellation still tears down its CCCD normally"
     );

@@ -531,7 +531,12 @@ mod platform {
         ))
     }
 
-    fn keyword_tokens(phrase: &str, score: f32, threshold: f32, emit_variants: bool) -> Result<String, String> {
+    fn keyword_tokens(
+        phrase: &str,
+        score: f32,
+        threshold: f32,
+        emit_variants: bool,
+    ) -> Result<String, String> {
         let phrase = phrase.trim().replace(char::is_whitespace, "");
         if phrase.is_empty() || phrase.chars().count() > 16 {
             return Err("唤醒词应为 1 到 16 个汉字".into());
@@ -569,7 +574,12 @@ mod platform {
         CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "模型路径无效".into())
     }
 
-    fn load_with_config(phrase: &str, score: f32, threshold: f32, emit_variants: bool) -> Result<Arc<Runtime>, String> {
+    fn load_with_config(
+        phrase: &str,
+        score: f32,
+        threshold: f32,
+        emit_variants: bool,
+    ) -> Result<Arc<Runtime>, String> {
         if let Some((cached_phrase, cached_score, cached_threshold, runtime)) =
             CACHE.lock().as_ref()
         {
@@ -591,8 +601,8 @@ mod platform {
         let tokens = cstring(&model.join(TOKENS))?;
         let provider = CString::new("cpu").unwrap();
         let modeling_unit = CString::new("cjkchar").unwrap();
-        let keyword =
-            CString::new(keyword_tokens(phrase, score, threshold, emit_variants)?).map_err(|_| "唤醒词无效")?;
+        let keyword = CString::new(keyword_tokens(phrase, score, threshold, emit_variants)?)
+            .map_err(|_| "唤醒词无效")?;
         unsafe {
             let onnx = Library::new(dll_root.join("onnxruntime.dll")).map_err(|e| e.to_string())?;
             let providers = Library::new(dll_root.join("onnxruntime_providers_shared.dll"))
@@ -750,14 +760,9 @@ mod platform {
                 return Err("唤醒词 PCM16 数据长度无效".into());
             }
             self.accepted_bytes = self.accepted_bytes.saturating_add(pcm.len());
-            if let Some(mut gain) = self.gain {
-                // Re-raise gain if later speech is quieter than the warmup window
-                // (device VA often has a loud click / breath before the phrase).
-                let needed = normalization_gain(pcm).max(STREAM_MIN_GAIN);
-                if needed > gain + 0.5 {
-                    gain = needed.min(48.0);
-                    self.gain = Some(gain);
-                }
+            if let Some(gain) = self.gain {
+                // Keep one gain for the whole candidate. Recomputing it from each
+                // transport chunk makes wake detection depend on BLE packet timing.
                 self.emitted_bytes = self.emitted_bytes.saturating_add(pcm.len());
                 return Ok(samples_with_gain(pcm, gain));
             }
@@ -822,7 +827,12 @@ mod platform {
             })
         }
 
-        fn new_with_config(phrase: &str, score: f32, threshold: f32, emit_variants: bool) -> Result<Self, String> {
+        fn new_with_config(
+            phrase: &str,
+            score: f32,
+            threshold: f32,
+            emit_variants: bool,
+        ) -> Result<Self, String> {
             let runtime = load_with_config(phrase, score, threshold, emit_variants)?;
             let stream = unsafe { (runtime.create_stream)(runtime.spotter) };
             if stream.is_null() {
@@ -1314,8 +1324,8 @@ mod platform {
         #[test]
         #[ignore = "diagnostic: scan LISTENER_WAKE_DIAG_DIR wake_/neg_ wavs"]
         fn diagnostic_scan_negative_clips() {
-            let phrase = std::env::var("LISTENER_WAKE_PHRASE")
-                .unwrap_or_else(|_| "开始录音".to_string());
+            let phrase =
+                std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
             let dir = std::env::var("LISTENER_WAKE_DIAG_DIR")
                 .unwrap_or_else(|_| "target/wake_diag".to_string());
             let threshold = std::env::var("LISTENER_WAKE_THRESHOLD")
@@ -1340,7 +1350,8 @@ mod platform {
                     .to_string();
                 let is_wake = name.starts_with("wake_");
                 let is_neg = name.starts_with("neg_");
-                if (!is_wake && !is_neg) || path.extension().and_then(|e| e.to_str()) != Some("wav") {
+                if (!is_wake && !is_neg) || path.extension().and_then(|e| e.to_str()) != Some("wav")
+                {
                     continue;
                 }
                 let wav = fs::read(&path).expect("wav");
@@ -1384,8 +1395,8 @@ mod platform {
         #[test]
         #[ignore = "diagnostic: needs LISTENER_WAKE_DIAG_DIR wavs"]
         fn strict_detector_suppresses_prefix_variant_false_triggers() {
-            let phrase = std::env::var("LISTENER_WAKE_PHRASE")
-                .unwrap_or_else(|_| "开始录音".to_string());
+            let phrase =
+                std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
             let dir = std::env::var("LISTENER_WAKE_DIAG_DIR")
                 .unwrap_or_else(|_| "target/wake_diag".to_string());
             let wake_wav = fs::read(format!("{}/wake_huihui.wav", dir)).expect("wake wav");

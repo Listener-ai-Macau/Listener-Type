@@ -234,6 +234,10 @@ fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
         if let Some(address) = address {
             match open_listener_ota_v1_target_for_device(address) {
                 Ok(target) => {
+                    remember_runtime_bluetooth_target_address_for_current(
+                        address,
+                        "Listener OTA v1 target open",
+                    );
                     log::info!(
                         "[embedded-ble] selected Listener OTA v1 device index={index} name={name} address={address:012X}"
                     );
@@ -249,6 +253,12 @@ fn open_listener_ota_v1_target() -> Result<OpenListenerOtaV1Target, String> {
 
         match open_listener_ota_v1_target_for_service(&id) {
             Ok(target) => {
+                if let Some(address) = target.bluetooth_address {
+                    remember_runtime_bluetooth_target_address_for_current(
+                        address,
+                        "Listener OTA v1 service target open",
+                    );
+                }
                 log::info!(
                     "[embedded-ble] selected Listener OTA v1 service-id fallback index={index} name={name}"
                 );
@@ -329,6 +339,10 @@ fn open_listener_ota_v1_target_with_deadline(
         if let Some(address) = address {
             match open_listener_ota_v1_target_for_device_with_deadline(address, deadline) {
                 Ok(target) => {
+                    remember_runtime_bluetooth_target_address_for_current(
+                        address,
+                        "Listener OTA v1 deadline target open",
+                    );
                     log::info!(
                         "[embedded-ble] selected Listener OTA v1 device index={index} name={name} address={address:012X}"
                     );
@@ -344,6 +358,12 @@ fn open_listener_ota_v1_target_with_deadline(
 
         match open_listener_ota_v1_target_for_service_with_deadline(&id, deadline) {
             Ok(target) => {
+                if let Some(address) = target.bluetooth_address {
+                    remember_runtime_bluetooth_target_address_for_current(
+                        address,
+                        "Listener OTA v1 deadline service target open",
+                    );
+                }
                 log::info!(
                     "[embedded-ble] selected Listener OTA v1 service-id fallback index={index} name={name}"
                 );
@@ -762,59 +782,6 @@ fn open_listener_ota_v1_target_for_verified_active_handoff(
     open_listener_ota_v1_target_for_device_with_options(address, true)
 }
 
-fn listener_ota_winrt_throughput_skip() -> bool {
-    // A/B only: LISTENER_OTA_SKIP_WINRT_THROUGHPUT=1. Default keeps Companion-style
-    // ThroughputOptimized; measured skip-to-prefer-7.5ms regressed ~39→25 KB/s.
-    std::env::var("LISTENER_OTA_SKIP_WINRT_THROUGHPUT")
-        .map(|value| {
-            let value = value.trim();
-            value == "1"
-                || value.eq_ignore_ascii_case("true")
-                || value.eq_ignore_ascii_case("on")
-                || value.eq_ignore_ascii_case("yes")
-        })
-        .unwrap_or(false)
-}
-
-fn request_ota_ble_throughput_optimized(device: &BluetoothLEDevice) {
-    // Companion recording ~97 KB/s is dual-lane *notify* (device→host). OTA is
-    // host→device WWR. WinRT ThroughputOptimized (~15 ms CI) still improved
-    // measured bulk vs leaving CI unconstrained on this Windows stack.
-    if listener_ota_winrt_throughput_skip() {
-        log::info!(
-            "[embedded-ble] Listener OTA skips WinRT ThroughputOptimized (LISTENER_OTA_SKIP_WINRT_THROUGHPUT=1)"
-        );
-        return;
-    }
-    let Ok(params) = BluetoothLEPreferredConnectionParameters::ThroughputOptimized() else {
-        log::debug!("[embedded-ble] Listener OTA ThroughputOptimized params unavailable");
-        return;
-    };
-    match device.RequestPreferredConnectionParameters(&params) {
-        Ok(status) => log::info!(
-            "[embedded-ble] Listener OTA requested WinRT ThroughputOptimized status={status:?}"
-        ),
-        Err(err) => log::info!(
-            "[embedded-ble] Listener OTA ThroughputOptimized request skipped: {err}"
-        ),
-    }
-}
-
-fn request_ota_ble_throughput_for_runtime_address() {
-    let Some(address) = runtime_bluetooth_target_address() else {
-        log::debug!(
-            "[embedded-ble] Listener OTA ThroughputOptimized: no runtime address yet"
-        );
-        return;
-    };
-    match open_ble_device_by_address(address) {
-        Ok(device) => request_ota_ble_throughput_optimized(&device),
-        Err(err) => log::debug!(
-            "[embedded-ble] Listener OTA ThroughputOptimized open {address:012X} skipped: {err}"
-        ),
-    }
-}
-
 fn open_listener_ota_v1_target_for_device_with_options(
     address: u64,
     verified_active_handoff: bool,
@@ -824,7 +791,6 @@ fn open_listener_ota_v1_target_for_device_with_options(
     } else {
         open_ble_device(address)?
     };
-    request_ota_ble_throughput_optimized(&device);
     if !verified_active_handoff {
         if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
             wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "Listener OTA v1 device access")
@@ -1088,9 +1054,40 @@ fn open_listener_ota_v1_target_for_device_with_deadline_options(
 }
 
 fn open_diagnostic_target_for_device(address: u64) -> Result<OpenDiagnosticTarget, String> {
-    let device = open_ble_device(address)?;
+    open_diagnostic_target_for_device_with_policy(
+        address,
+        denzic_ble_pairing::DIAGNOSTIC_CACHE_POLICY,
+        BLE_DISCOVERY_TIMEOUT,
+    )
+}
+
+fn open_cached_diagnostic_target_for_device(
+    address: u64,
+    timeout: Duration,
+) -> Result<OpenDiagnosticTarget, String> {
+    open_diagnostic_target_for_device_with_policy(
+        address,
+        denzic_ble_pairing::GattCachePolicy::CachedOnly,
+        timeout,
+    )
+}
+
+fn open_diagnostic_target_for_device_with_policy(
+    address: u64,
+    cache_policy: denzic_ble_pairing::GattCachePolicy,
+    timeout: Duration,
+) -> Result<OpenDiagnosticTarget, String> {
+    let deadline = Instant::now() + timeout;
+    let device = open_ble_device_with_timeout(
+        address,
+        remaining_ble_timeout(deadline, timeout, "diagnostic device open")?,
+    )?;
     if let Some(access) = device.RequestAccessAsync().ok().and_then(|op| {
-        wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "diagnostic device access").ok()
+        remaining_ble_timeout(deadline, Duration::from_secs(1), "diagnostic device access")
+            .ok()
+            .and_then(|remaining| {
+                wait_async_operation(op, remaining, "diagnostic device access").ok()
+            })
     }) {
         if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
             return Err(format!(
@@ -1100,9 +1097,7 @@ fn open_diagnostic_target_for_device(address: u64) -> Result<OpenDiagnosticTarge
     }
 
     let mut last_error = None;
-    for &cache_mode in
-        bluetooth_cache_modes_for_policy(denzic_ble_pairing::DIAGNOSTIC_CACHE_POLICY)
-    {
+    for &cache_mode in bluetooth_cache_modes_for_policy(cache_policy) {
         let services_result = match device
             .GetGattServicesForUuidWithCacheModeAsync(DIAGNOSTIC_SERVICE_UUID, cache_mode)
             .map_err(|err| {
@@ -1111,7 +1106,11 @@ fn open_diagnostic_target_for_device(address: u64) -> Result<OpenDiagnosticTarge
             .and_then(|op| {
                 wait_async_operation(
                     op,
-                    BLE_DISCOVERY_TIMEOUT,
+                    remaining_ble_timeout(
+                        deadline,
+                        timeout,
+                        "diagnostic service discovery",
+                    )?,
                     &format!("diagnostic {cache_mode:?} service"),
                 )
                 .map_err(|err| {
@@ -1159,7 +1158,15 @@ fn open_diagnostic_target_for_device(address: u64) -> Result<OpenDiagnosticTarge
                     continue;
                 }
             };
-            match open_diagnostic_characteristics_from_service(&service, cache_mode) {
+            match open_diagnostic_characteristics_from_service_with_timeout(
+                &service,
+                cache_mode,
+                remaining_ble_timeout(
+                    deadline,
+                    timeout,
+                    "diagnostic characteristic discovery",
+                )?,
+            ) {
                 Ok(prepared) => {
                     return Ok(OpenDiagnosticTarget {
                         control: prepared.control,
@@ -1291,13 +1298,13 @@ fn open_notify_target_for_current_native_windows_hid(
 fn open_notify_target_for_post_confirm_native_windows_hid(
     address: u64,
 ) -> Result<OpenNotifyTarget, String> {
-    // The confirmed image retains its GATT schema. Rehydrate the Windows
-    // system cache first, while preserving an uncached fallback for a
-    // Service Changed/schema transition.
+    // The fresh audio-control probe already proved the unchanged
+    // new-generation GATT database and ATT path. Reopen the same stable audio
+    // handles from Windows' bonded cache and reuse the restored CCCD.
     open_notify_target_for_device_with_cache_modes_and_timeout(
         address,
-        bluetooth_cache_modes_for_policy(denzic_ble_pairing::POST_CONFIRM_NOTIFY_CACHE_POLICY),
-        STARTUP_NATIVE_HID_PERSISTED_GATT_TIMEOUT,
+        &POST_OTA_VERIFIED_CACHED_CACHE_MODES,
+        POST_OTA_VERIFIED_CACHED_GATT_TIMEOUT,
     )
     .and_then(|target| {
         require_audio_control_for_notify_target(
@@ -1416,6 +1423,7 @@ fn open_notify_target_for_device_with_cache_modes_and_timeout(
                         session: prepared.session,
                         device: Some(device),
                         bluetooth_address: Some(address),
+                        post_ota_preserved_cccd: false,
                     });
                 }
                 Err(err) => {
@@ -1746,6 +1754,7 @@ fn open_notify_target_for_service_with_timeout(
         bluetooth_address: parse_bluetooth_address_from_device_id(
             &service_id.to_string_lossy(),
         ),
+        post_ota_preserved_cccd: false,
     })
 }
 
@@ -2064,8 +2073,25 @@ fn open_diagnostic_characteristics_from_service(
     service: &GattDeviceService,
     cache_mode: BluetoothCacheMode,
 ) -> Result<PreparedDiagnosticCharacteristics, String> {
+    open_diagnostic_characteristics_from_service_with_timeout(
+        service,
+        cache_mode,
+        BLE_DISCOVERY_TIMEOUT,
+    )
+}
+
+fn open_diagnostic_characteristics_from_service_with_timeout(
+    service: &GattDeviceService,
+    cache_mode: BluetoothCacheMode,
+    timeout: Duration,
+) -> Result<PreparedDiagnosticCharacteristics, String> {
+    let deadline = Instant::now() + timeout;
     if let Some(access) = service.RequestAccessAsync().ok().and_then(|op| {
-        wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "diagnostic service access").ok()
+        remaining_ble_timeout(deadline, Duration::from_secs(1), "diagnostic service access")
+            .ok()
+            .and_then(|remaining| {
+                wait_async_operation(op, remaining, "diagnostic service access").ok()
+            })
     }) {
         if access != DeviceAccessStatus::Allowed && access != DeviceAccessStatus::Unspecified {
             return Err(format!(
@@ -2073,24 +2099,34 @@ fn open_diagnostic_characteristics_from_service(
             ));
         }
     }
-    let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
-    let control = open_write_characteristic_from_service(
+    let session = prepare_gatt_session(
+        service,
+        remaining_ble_timeout(deadline, GATT_READY_TIMEOUT, "diagnostic GATT session")?,
+    )?;
+    let control = open_write_characteristic_from_service_with_timeout(
         service,
         DIAGNOSTIC_CONTROL_UUID,
         "diagnostic control",
         cache_mode,
+        remaining_ble_timeout(
+            deadline,
+            timeout,
+            "diagnostic control characteristic",
+        )?,
     )?;
-    let data = open_notify_characteristic_by_uuid_from_service(
+    let data = open_notify_characteristic_by_uuid_from_service_with_timeout(
         service,
         DIAGNOSTIC_DATA_UUID,
         "diagnostic data",
         cache_mode,
+        remaining_ble_timeout(deadline, timeout, "diagnostic data characteristic")?,
     )?;
-    let count = open_read_characteristic_from_service(
+    let count = open_read_characteristic_from_service_with_timeout(
         service,
         DIAGNOSTIC_COUNT_UUID,
         "diagnostic count",
         cache_mode,
+        remaining_ble_timeout(deadline, timeout, "diagnostic count characteristic")?,
     )?;
     Ok(PreparedDiagnosticCharacteristics {
         control,

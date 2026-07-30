@@ -588,7 +588,10 @@ fn prompt_listener_pairing_inner(
         details: Vec::new(),
     };
 
-    let allow_adapter_restart = allow_user_pairing_prompt && !type_recovery_command_confirmed;
+    // Restarting the host adapter tears down any concurrent native Windows /
+    // Swift Pair ceremony and can turn the next attempt into a stale-key failure.
+    // Adapter recovery is operator-owned; Type only owns its bounded PairAsync.
+    let allow_adapter_restart = false;
     let fast_recovery_pairing_failure = pair_listener_candidates_into_prompt_result(
         &mut result,
         candidates,

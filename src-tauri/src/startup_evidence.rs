@@ -236,12 +236,12 @@ mod tests {
             include_str!("embedded_ble/windows_ble/capture_events.rs"),
             "\n",
             include_str!("embedded_ble/windows_ble/notify_open.rs"),
-        "\n",
-        include_str!("embedded_ble/windows_ble/unpair.rs"),
-        "\n",
-        include_str!("embedded_ble/windows_ble/ota_open.rs"),
-        "\n",
-        include_str!("embedded_ble/windows_ble/gatt_open.rs")
+            "\n",
+            include_str!("embedded_ble/windows_ble/unpair.rs"),
+            "\n",
+            include_str!("embedded_ble/windows_ble/ota_open.rs"),
+            "\n",
+            include_str!("embedded_ble/windows_ble/gatt_open.rs")
         )
         .replace("\r\n", "\n");
         let coordinator = concat!(

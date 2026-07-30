@@ -240,18 +240,6 @@ fn clear_embedded_audio_partial_preview(inner: &Arc<Inner>) {
     *inner.embedded_audio_last_capsule_level.lock() = 0.0;
 }
 
-fn set_embedded_audio_wake_phrase_filter(
-    inner: &Arc<Inner>,
-    session_id: SessionId,
-    phrase: String,
-) {
-    *inner.embedded_audio_wake_phrase_filter.lock() = Some((session_id, phrase));
-}
-
-fn clear_embedded_audio_wake_phrase_filter(inner: &Arc<Inner>) {
-    *inner.embedded_audio_wake_phrase_filter.lock() = None;
-}
-
 fn current_embedded_audio_capsule_level(inner: &Arc<Inner>) -> f32 {
     *inner.embedded_audio_last_capsule_level.lock()
 }

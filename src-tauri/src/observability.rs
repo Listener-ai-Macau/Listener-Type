@@ -489,9 +489,7 @@ impl OtaObservation {
 
     pub(crate) fn record_control_handoff_failed(&mut self, message: &str) {
         let error = classify_error(message);
-        log::error!(
-            "[obs-v1] ota_control_handoff_failed category={error:?} detail={message}"
-        );
+        log::error!("[obs-v1] ota_control_handoff_failed category={error:?} detail={message}");
         let event = self.next_event(
             Instant::now(),
             source_for_error(error),
