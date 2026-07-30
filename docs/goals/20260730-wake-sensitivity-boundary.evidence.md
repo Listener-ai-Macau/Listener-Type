@@ -56,6 +56,9 @@ so no undocumented Xiaomi behavior is claimed.
 | Installed startup/recovery | PASS: local helper ready at `2026-07-30T02:49:04.952Z`; background GATT recovered without re-pair at `02:50:46.036Z` and reached `TYPE:READY` |
 | Installed 1000 ms ladder | PASS: sessions 21-23 log first threshold `1000`, then bounded `1400/1800/2400/3000/5000` retries |
 | Installed ambient-speech candidates | PASS: fresh sessions 21-23 (8860/3140/13700 ms) remained local `Absent`, ended `gate_decision=Reject`, and emitted no recording capsule |
+| Post-acceptance Type release gate | PASS: `npm run release:check`; 917 passed, 19 ignored, 0 failed; 20 OTA helper tests passed |
+| Post-acceptance Firmware release gate | PASS: version, OTA package rules, V2 board, power, status LED, BLE LED sync, diagnostics, and tooling hygiene |
+| Final root artifact identity gate | PASS: MSI and OTA ZIP match their final build-source bytes and SHA-256 identities |
 
 Root package identities:
 
@@ -67,23 +70,30 @@ Root package identities:
 
 ## Final human boundary
 
-Pending one physical owner pass after waking the Listener and observing
-`TYPE:READY`:
+Completed through the visible, topmost canonical operator prompt on
+2026-07-30. The owner personally ran both prompted phrases, selected `通过`, and
+then confirmed in chat that the result "感觉还行".
 
-1. Say `开始录音，现在开始录音又开始不灵敏`.
-2. Confirm the capsule starts with `现在...`, preserves the second `开始录音`,
-   and opens promptly.
-3. Continue ordinary nearby speech without the activation phrase and confirm no
-   unexplained recording capsule appears.
+- Prompted ordinary phrase: `我觉得今天可以开始录音测试一下。`
+- Prompted wake phrase and body:
+  `开始录音，现在开始录音又开始不灵敏，你再精修一下。`
+- Archived selected result: `通过`
+- Archived operator note:
+  `测试一下。现在开始录音又开始不灵敏，你再精修一下。`
+- Matching artifacts:
+  `20260730-wake-sensitivity-boundary.refined.visible.review.json` and
+  `20260730-wake-sensitivity-boundary.refined.visible.note.txt`
 
-The selected result and operator note must be archived next to this evidence.
+This acceptance protects the combined behavior: ordinary speech containing the
+phrase later in the sentence does not independently open a capsule; a deliberate
+start-aligned wake remains responsive; only the leading activation phrase is
+removed and the later body occurrence remains available to dictation.
 
-The first operator capture in
-`20260730-wake-sensitivity-boundary.review.json` is not acceptance: shell
-quoting incorrectly recorded the MSI argument as the selected result. Its note
-is retained as failure evidence (`现在开始录录音又开始不灵敏了。`) and the canonical
-operator prompt must be rerun after the refined installed candidate reaches
-`TYPE:READY`.
+The first capture in `20260730-wake-sensitivity-boundary.review.json` remains
+invalid because shell quoting recorded the MSI argument as the selected result.
+The intermediate `refined.review.json` capture is also not human acceptance:
+the owner did not see its window. Both are retained as superseded diagnostic
+records rather than silently rewritten as acceptance.
 
 ## Public references
 
