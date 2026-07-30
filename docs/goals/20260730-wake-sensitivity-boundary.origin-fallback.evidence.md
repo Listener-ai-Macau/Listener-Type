@@ -45,7 +45,7 @@ rejected because retained quiet true-positive candidates overlap the incident sa
 
 ## Installed build
 
-- Type source commit: `e3cff98b855e1794ee529628491008f32f4fd10b`.
+- Type source commit: `e3cff98873cdb065e830615b8f94f9330b5d9134`.
 - Formal MSI:
   `C:\Users\Billy\Desktop\Denzic\Listener\ListenerType_1.0.3_x64_en-US.msi`.
 - MSI SHA-256:
