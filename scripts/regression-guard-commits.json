@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-13",
+  "updated_at": "2026-07-30",
   "purpose": "Machine-readable index from critical Listener regression guards to the exact repository commit that introduced or hardened the guard. Use this first when a protected behavior regresses: git show the linked commit, inspect the guard, then rerun the listed validation commands.",
   "repositories": {
     "type": {
@@ -56,6 +56,32 @@
     }
   ],
   "entries": [
+    {
+      "id": "type_wake_tail_and_cross_restart_diagnostic_retention",
+      "repo": "type",
+      "commit": "622ca900b567e87b846137909b3ba528cb75923a",
+      "subject": "Stabilize wake tail and diagnostic retention",
+      "state": "human_accepted_with_machine_guard",
+      "protects": [
+        "Auxiliary strict/offline wake checks do not evict the startup-prewarmed sensitive live KWS runtime.",
+        "Runtime cache identity includes prefix-variant behavior as well as phrase, score and threshold.",
+        "Wake latency distinguishes deliberate activation-phrase duration from the processing tail after the detected phrase end.",
+        "Default wake diagnostic WAVs are asynchronously bounded across process restarts by age, count and bytes without deleting unrelated files."
+      ],
+      "human_acceptance_evidence": [
+        "docs/goals/20260730-wake-tail-retention-ota-audit.review.json"
+      ],
+      "machine_evidence": [
+        "docs/goals/20260730-wake-tail-retention-ota-audit.evidence.md"
+      ],
+      "guards": [
+        "cargo test --manifest-path ./src-tauri/Cargo.toml --lib",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml runtime_cache_key_includes_prefix_variant_behavior",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml wake_phrase_tail_latency_excludes_deliberate_phrase_duration",
+        "cargo test --manifest-path ./src-tauri/Cargo.toml wake_diagnostic_",
+        "npm run check:release-root-artifacts -- --type-source .artifacts/windows-msvc/ListenerType_1.0.3_x64_en-US.msi --firmware-source ../ListenerFirmware_1.0.3_ota.zip"
+      ]
+    },
     {
       "id": "type_repo_hygiene_and_review_progress",
       "repo": "type",
