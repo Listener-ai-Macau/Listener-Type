@@ -406,21 +406,24 @@ fn next_owner_verification_retry_ms(pcm_ms: usize) -> Option<usize> {
 }
 
 fn next_local_confirmation_snapshot_bytes(attempts: usize) -> Option<usize> {
-    LOCAL_CONFIRMATION_SNAPSHOT_MS
-        .get(attempts)
-        .map(|milliseconds| milliseconds * 32)
+    denzic_voice_activation_v1_core::confirmation_snapshot_ms(
+        attempts,
+        &LOCAL_CONFIRMATION_SNAPSHOT_MS,
+    )
+    .map(|milliseconds| milliseconds * 32)
 }
 
 /// Bytes of candidate PCM to discard before ASR for an automatic wake accept.
 /// Uses KWS/local end time when available; LocalTranscript must not force 0 —
 /// that shipped pre-wake speech ("好贵啊…开始录音，帮我看…") into the capsule.
 fn post_wake_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
-    if !wake_end_seconds.is_finite() || wake_end_seconds <= 0.0 || pcm_len < 2 {
-        return 0;
-    }
-    // Small pad so the last syllable of the wake phrase does not leak into ASR.
-    let offset = ((wake_end_seconds + WAKE_END_PAD_SECONDS) * 32_000.0) as usize;
-    offset.min(pcm_len) & !1usize
+    denzic_voice_activation_v1_core::pcm_offset_after_activation(
+        wake_end_seconds,
+        WAKE_END_PAD_SECONDS,
+        32_000,
+        pcm_len,
+        2,
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -429,52 +432,18 @@ fn refined_wake_end_seconds(
     confirmation: &LocalWakeConfirmation,
     phrase_chars: usize,
 ) -> f32 {
-    let model_boundary = confirmation
-        .recovered_keyword_end_seconds
-        .filter(|seconds| {
-            seconds.is_finite()
-                && *seconds > 0.0
-                && *seconds <= LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS
-        })
-        .unwrap_or_default();
-    let detected_boundary = keyword_end_seconds.max(model_boundary);
-    let exact_phrase_only = matches!(
-        confirmation.phrase_relation,
-        crate::wake_phrase::LocalPhraseRelation::ExactStart
-            | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
-    ) && confirmation.transcript_chars <= phrase_chars;
-    if !exact_phrase_only {
-        if detected_boundary > 0.0 {
-            return detected_boundary;
-        }
-        if !matches!(
-            confirmation.phrase_relation,
-            crate::wake_phrase::LocalPhraseRelation::ExactStart
-                | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
-        ) || phrase_chars == 0
-            || confirmation.transcript_chars <= phrase_chars
-        {
-            return 0.0;
-        }
-
-        // Paraformer supplies tokens but no timestamps for this model. For the
-        // local-only, start-aligned fallback, estimate just the phrase share of
-        // the observed utterance. The clamp is deliberately narrower than a
-        // Mandarin four-character wake phrase and never applies to PresentLater.
-        let snapshot_seconds = confirmation.snapshot_pcm_ms as f32 / 1_000.0;
-        let proportional = snapshot_seconds * phrase_chars as f32
-            / confirmation.transcript_chars as f32;
-        return proportional
-            .clamp(0.55, LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS)
-            .min((snapshot_seconds - WAKE_END_PAD_SECONDS).max(0.0));
-    }
-
-    // Sherpa's streaming token timestamp can lag the actual detection boundary
-    // by up to the 800 ms lookback window. If local ASR saw only the wake phrase
-    // in this snapshot, cutting through the snapshot cannot remove dictated body.
-    let local_phrase_end =
-        confirmation.snapshot_pcm_ms as f32 / 1_000.0 - WAKE_END_PAD_SECONDS;
-    detected_boundary.max(local_phrase_end.max(0.0))
+    denzic_voice_activation_v1_core::refined_local_wake_end_seconds(
+        denzic_voice_activation_v1_core::LocalConfirmationBoundaryInput {
+            keyword_end_seconds,
+            recovered_keyword_end_seconds: confirmation.recovered_keyword_end_seconds,
+            phrase_relation: confirmation.phrase_relation,
+            transcript_chars: confirmation.transcript_chars,
+            phrase_chars,
+            snapshot_pcm_ms: confirmation.snapshot_pcm_ms,
+            end_pad_seconds: WAKE_END_PAD_SECONDS,
+            local_endpoint_max_seconds: LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS,
+        },
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -482,18 +451,26 @@ fn local_confirmation_can_activate(
     has_keyword_model_hit: bool,
     relation: crate::wake_phrase::LocalPhraseRelation,
 ) -> bool {
-    if has_keyword_model_hit {
-        return matches!(
-            relation,
-            crate::wake_phrase::LocalPhraseRelation::ExactStart
-                | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
-                | crate::wake_phrase::LocalPhraseRelation::PresentLater
-        );
-    }
-    matches!(
+    denzic_voice_activation_v1_core::local_confirmation_can_activate(
+        has_keyword_model_hit,
         relation,
-        crate::wake_phrase::LocalPhraseRelation::ExactStart
-            | crate::wake_phrase::LocalPhraseRelation::PhoneticStart
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn secondary_fallback_can_accept_keyword(
+    keyword_model_hit: bool,
+    explicit_absent_count: u8,
+) -> bool {
+    matches!(
+        denzic_voice_activation_v1_core::decide_secondary_fallback(
+            denzic_voice_activation_v1_core::SecondaryFallbackInput {
+                keyword_model_hit,
+                explicit_absent_count,
+                secondary_unavailable_or_timed_out: true,
+            },
+        ),
+        denzic_voice_activation_v1_core::SecondaryFallbackDecision::AcceptKeywordModel
     )
 }
 

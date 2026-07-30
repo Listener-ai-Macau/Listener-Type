@@ -3162,7 +3162,15 @@ fn recovery_swift_pair_advertisement_visible_for_persisted_address(address: u64)
 
 fn active_capture_disconnect_recovery_pairing_error(reason: &str) -> Option<String> {
     let address = persisted_successful_notify_target_address_for_current()?;
-    if !recovery_swift_pair_advertisement_visible_for_persisted_address(address) {
+    let recovery_advertisement_visible =
+        recovery_swift_pair_advertisement_visible_for_persisted_address(address);
+    let action = denzic_ble_pairing::decide_host_recovery(denzic_ble_pairing::HostRecoveryInput {
+        link_ready: false,
+        pairing_present: false,
+        recovery_advertisement_visible,
+        retry_budget_remaining: true,
+    });
+    if action != denzic_ble_pairing::HostRecoveryAction::RequestAutomaticPair {
         return None;
     }
     Some(format!(
@@ -4237,7 +4245,15 @@ fn cccd_notify_recovery_pairing_error(
         return None;
     }
     let address = recovery_probe_address?;
-    if !recovery_swift_pair_advertisement_visible_for_persisted_address(address) {
+    let recovery_advertisement_visible =
+        recovery_swift_pair_advertisement_visible_for_persisted_address(address);
+    let action = denzic_ble_pairing::decide_host_recovery(denzic_ble_pairing::HostRecoveryInput {
+        link_ready: false,
+        pairing_present: false,
+        recovery_advertisement_visible,
+        retry_budget_remaining: true,
+    });
+    if action != denzic_ble_pairing::HostRecoveryAction::RequestAutomaticPair {
         return None;
     }
     Some(format!(

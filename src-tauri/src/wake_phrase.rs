@@ -3,8 +3,6 @@ pub struct Match {
     pub end_seconds: f32,
 }
 
-use pinyin::ToPinyin;
-
 const MAX_KEYWORD_DETECTION_LOOKBACK_SECONDS: f32 = 0.8;
 
 fn absolute_keyword_end_seconds(
@@ -29,63 +27,9 @@ fn absolute_keyword_end_seconds(
     native_end.max(recent_detection_floor).min(accepted_seconds)
 }
 
-fn normalized_phrase_text(value: &str) -> String {
-    value
-        .chars()
-        .filter(|ch| ch.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LocalPhraseRelation {
-    ExactStart,
-    PhoneticStart,
-    PresentLater,
-    Absent,
-}
-
-fn phonetic_phrase_units(value: &str) -> Vec<String> {
-    normalized_phrase_text(value)
-        .chars()
-        .map(|ch| {
-            ch.to_pinyin()
-                .map(|value| value.plain().to_string())
-                .unwrap_or_else(|| ch.to_lowercase().collect())
-        })
-        .collect()
-}
-
-pub fn local_transcript_phrase_relation(transcript: &str, phrase: &str) -> LocalPhraseRelation {
-    let phrase = normalized_phrase_text(phrase);
-    if phrase.is_empty() {
-        return LocalPhraseRelation::Absent;
-    }
-    let transcript = normalized_phrase_text(transcript);
-    if transcript.starts_with(&phrase) {
-        LocalPhraseRelation::ExactStart
-    } else {
-        let phrase_units = phonetic_phrase_units(&phrase);
-        let transcript_units = phonetic_phrase_units(&transcript);
-        if transcript_units.len() >= phrase_units.len()
-            && transcript_units[..phrase_units.len()] == phrase_units
-        {
-            LocalPhraseRelation::PhoneticStart
-        } else if transcript.contains(&phrase) {
-            LocalPhraseRelation::PresentLater
-        } else {
-            LocalPhraseRelation::Absent
-        }
-    }
-}
-
-pub fn local_transcript_matches_phrase(transcript: &str, phrase: &str) -> bool {
-    matches!(
-        local_transcript_phrase_relation(transcript, phrase),
-        LocalPhraseRelation::ExactStart | LocalPhraseRelation::PhoneticStart
-    )
-}
+pub use denzic_voice_activation_v1_core::{
+    local_transcript_matches_phrase, local_transcript_phrase_relation, LocalPhraseRelation,
+};
 
 #[cfg(test)]
 mod phrase_confirmation_tests {

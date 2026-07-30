@@ -207,7 +207,7 @@
       "item": "1.0.3 local wake phrase, owner voiceprint, post-dictation automation, streaming ASR, platform pin, and release version",
       "state": "machine_validated_pending_release_commit",
       "evidence": [
-        "cargo test --lib: 877 passed, 16 ignored, 0 failed",
+        "cargo test --lib: 918 passed, 19 ignored, 0 failed",
         "npm test PASS",
         "npm run build PASS",
         ".cache/validation/power-cycle-audio-recovery-20260725/machine-summary.json"
@@ -255,16 +255,18 @@
       "item": "Two-stage wake sensitivity, local-only false-wake fusion, activation endpoint, and owner review evidence",
       "state": "focused_machine_validated_pending_installed_review",
       "evidence": [
-        "LST-WAKE-003 and LST-WAKE-004 in Listener-Firmware/docs/listener_product_requirements.md",
+        "LST-WAKE-003 through LST-WAKE-005 in Listener-Firmware/docs/listener_product_requirements.md",
         "Focused local_confirmation, local_only, and automatic_wake Rust tests PASS",
-        "docs/goals/20260730-wake-sensitivity-boundary.evidence.md"
+        "docs/goals/20260730-wake-sensitivity-boundary.evidence.md",
+        "docs/goals/20260730-wake-sensitivity-boundary.origin-fallback.evidence.md"
       ],
       "patterns": [
         "docs/listener_product_requirements.md",
         "docs/goals/20260730-wake-sensitivity-boundary.*",
         "src-tauri/src/coordinator/dictation_embedded_stream.rs",
         "src-tauri/src/coordinator/dictation_tests.rs",
-        "src-tauri/src/coordinator/dictation_wake_polish.rs"
+        "src-tauri/src/coordinator/dictation_wake_polish.rs",
+        "src-tauri/src/embedded_ble/windows_ble/mod.rs"
       ]
     }
   ]

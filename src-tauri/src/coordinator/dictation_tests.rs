@@ -1593,9 +1593,12 @@ fn hidden_candidate_marked_active_before_detector_init() {
         stream_all.contains("show_early_wake_recording_capsule")
             && dictation.contains("local full-phrase confirmed")
             && stream_all.contains("stage2 timeout fail-open KeywordModel")
+            && stream_all.contains("stage2 timeout held after explicit Absent")
+            && stream_all.contains("terminal stage2 unavailable held after explicit Absent")
+            && stream_all.contains("terminal stage2 task failure held after explicit Absent")
             && stream_all.contains("stage2 Absent reject")
             && stream_all.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS"),
-        "XiaoAi-style: stage2 Present/timeout fail-open; explicit Absent rejects half-phrase"
+        "XiaoAi-style: stage2 Present/timeout fallback; explicit Absent remains authoritative through terminal confirmation"
     );
 }
 
@@ -2053,9 +2056,10 @@ fn kws_hit_schedules_immediate_local_confirmation() {
             && stream.contains("kws_first_hit_at")
             && stream.contains("stage1 KWS hit")
             && stream.contains("stage2 timeout fail-open KeywordModel")
+            && stream.contains("stage2 timeout held after explicit Absent")
             && stream.contains("stage2 Absent reject")
             && !stream.contains("KWS provisional accept after local Absent"),
-        "XiaoAi-style cascade: stage1 KWS → stage2 local; Absent rejects; timeout fail-open"
+        "XiaoAi-style cascade: stage1 KWS -> stage2 local; Absent blocks timeout fail-open"
     );
     let polish = include_str!("dictation_wake_polish.rs");
     assert!(
@@ -2067,6 +2071,15 @@ fn kws_hit_schedules_immediate_local_confirmation() {
             && polish.contains("gain_normalized_pcm16"),
         "secondary budget 900ms + 2 Absent rejects + gain-boosted local ASR"
     );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn explicit_absent_blocks_keyword_only_secondary_fallback() {
+    assert!(super::secondary_fallback_can_accept_keyword(true, 0));
+    assert!(!super::secondary_fallback_can_accept_keyword(true, 1));
+    assert!(!super::secondary_fallback_can_accept_keyword(true, 2));
+    assert!(!super::secondary_fallback_can_accept_keyword(false, 0));
 }
 
 #[test]

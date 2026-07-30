@@ -743,20 +743,44 @@ impl EmbeddedStreamingDictation {
                                 }
                             }
                             Ok(Err(err)) => {
-                                log::warn!(
-                                    "[wake-phrase] terminal stage2 unavailable embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
-                                );
-                                phrase_signal =
-                                    denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                                Some(found)
+                                if secondary_fallback_can_accept_keyword(
+                                    true,
+                                    candidate.kws_local_absent_count,
+                                ) {
+                                    log::warn!(
+                                        "[wake-phrase] terminal stage2 unavailable embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
+                                    );
+                                    phrase_signal =
+                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                    Some(found)
+                                } else {
+                                    log::info!(
+                                        "[wake-phrase] terminal stage2 unavailable held after explicit Absent embedded_session_id={} absent_count={}",
+                                        embedded_session_id,
+                                        candidate.kws_local_absent_count
+                                    );
+                                    None
+                                }
                             }
                             Err(err) => {
-                                log::warn!(
-                                    "[wake-phrase] terminal stage2 task failed embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
-                                );
-                                phrase_signal =
-                                    denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                                Some(found)
+                                if secondary_fallback_can_accept_keyword(
+                                    true,
+                                    candidate.kws_local_absent_count,
+                                ) {
+                                    log::warn!(
+                                        "[wake-phrase] terminal stage2 task failed embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
+                                    );
+                                    phrase_signal =
+                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                    Some(found)
+                                } else {
+                                    log::info!(
+                                        "[wake-phrase] terminal stage2 task failure held after explicit Absent embedded_session_id={} absent_count={}",
+                                        embedded_session_id,
+                                        candidate.kws_local_absent_count
+                                    );
+                                    None
+                                }
                             }
                         }
                     }
@@ -1440,8 +1464,16 @@ impl EmbeddedStreamingDictation {
                                 log::warn!(
                                         "[wake-phrase] stage2 local confirm unavailable embedded_session_id={embedded_session_id}: {err}"
                                     );
-                                // Helper broken: fail-open on strong stage-1 (小爱式可靠性).
-                                if let Some(kws) = kws_hit {
+                                let explicit_absent_count = self
+                                    .speaker_candidate
+                                    .as_ref()
+                                    .map(|candidate| candidate.kws_local_absent_count)
+                                    .unwrap_or(0);
+                                if secondary_fallback_can_accept_keyword(
+                                    kws_hit.is_some(),
+                                    explicit_absent_count,
+                                ) {
+                                    let kws = kws_hit.expect("fallback requires keyword hit");
                                     phrase_signal =
                                         denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
                                     log::info!(
@@ -1449,6 +1481,11 @@ impl EmbeddedStreamingDictation {
                                     );
                                     Some(kws)
                                 } else {
+                                    log::info!(
+                                        "[wake-phrase] stage2 unavailable held after explicit Absent embedded_session_id={} absent_count={}",
+                                        embedded_session_id,
+                                        explicit_absent_count
+                                    );
                                     None
                                 }
                             }
@@ -1456,7 +1493,16 @@ impl EmbeddedStreamingDictation {
                                 log::warn!(
                                         "[wake-phrase] stage2 local confirm task failed embedded_session_id={embedded_session_id}: {err}"
                                     );
-                                if let Some(kws) = kws_hit {
+                                let explicit_absent_count = self
+                                    .speaker_candidate
+                                    .as_ref()
+                                    .map(|candidate| candidate.kws_local_absent_count)
+                                    .unwrap_or(0);
+                                if secondary_fallback_can_accept_keyword(
+                                    kws_hit.is_some(),
+                                    explicit_absent_count,
+                                ) {
+                                    let kws = kws_hit.expect("fallback requires keyword hit");
                                     phrase_signal =
                                         denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
                                     log::info!(
@@ -1464,6 +1510,11 @@ impl EmbeddedStreamingDictation {
                                     );
                                     Some(kws)
                                 } else {
+                                    log::info!(
+                                        "[wake-phrase] stage2 task failure held after explicit Absent embedded_session_id={} absent_count={}",
+                                        embedded_session_id,
+                                        explicit_absent_count
+                                    );
                                     None
                                 }
                             }
@@ -1475,18 +1526,19 @@ impl EmbeddedStreamingDictation {
                             .and_then(|c| c.kws_first_hit_at)
                             .map(|t| t.elapsed().as_millis() as u64)
                             .unwrap_or(0);
-                        let absent_capped = self
+                        let explicit_absent_count = self
                             .speaker_candidate
                             .as_ref()
-                            .is_some_and(|c| {
-                                c.kws_local_absent_count >= KWS_SECONDARY_ABSENT_REJECT_COUNT
-                            });
-                        if absent_capped {
-                            // Already hard-rejected by stage-2 Absent; keep waiting for
-                            // session end / next utterance rather than fail-open.
-                            None
-                        } else if waited_ms >= KWS_SECONDARY_CONFIRM_BUDGET_MS {
-                            // Secondary slow/hung: fail-open so wake is not bricked.
+                            .map(|candidate| candidate.kws_local_absent_count)
+                            .unwrap_or(0);
+                        if waited_ms >= KWS_SECONDARY_CONFIRM_BUDGET_MS
+                            && secondary_fallback_can_accept_keyword(
+                                true,
+                                explicit_absent_count,
+                            )
+                        {
+                            // Secondary slow/hung before returning evidence: fail-open
+                            // so a broken helper cannot disable voice activation.
                             phrase_signal =
                                 denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
                             log::info!(
@@ -1496,6 +1548,17 @@ impl EmbeddedStreamingDictation {
                                 KWS_SECONDARY_CONFIRM_BUDGET_MS
                             );
                             Some(kws)
+                        } else if waited_ms >= KWS_SECONDARY_CONFIRM_BUDGET_MS
+                            && explicit_absent_count > 0
+                        {
+                            log::info!(
+                                "[wake-phrase] stage2 timeout held after explicit Absent embedded_session_id={} waited_ms={} budget_ms={} absent_count={}",
+                                embedded_session_id,
+                                waited_ms,
+                                KWS_SECONDARY_CONFIRM_BUDGET_MS,
+                                explicit_absent_count
+                            );
+                            None
                         } else {
                             // Within budget: wait for stage-2 (do not bare-KWS Accept).
                             None
@@ -1652,8 +1715,15 @@ impl EmbeddedStreamingDictation {
             post_wake_pcm_offset_bytes(wake_match.end_seconds, candidate.pcm.len());
         candidate.pcm.drain(..post_wake_offset);
         let capsule_request_ms = candidate.started_at.elapsed().as_millis() as u64;
-        let latency_target_pass = capsule_request_ms <= 1_200;
-        let latency_ceiling_pass = capsule_request_ms <= 1_500;
+        let latency = denzic_observability_v1_core::assess_duration_ms(
+            capsule_request_ms,
+            denzic_observability_v1_core::PerformanceBudget {
+                target_ms: 1_200,
+                ceiling_ms: 1_500,
+            },
+        );
+        let latency_target_pass = latency.target_pass;
+        let latency_ceiling_pass = latency.ceiling_pass;
         let session = begin_embedded_audio_dictation_session(inner).await?;
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
             return Err("嵌入式音频听写会话已被取消".to_string());
