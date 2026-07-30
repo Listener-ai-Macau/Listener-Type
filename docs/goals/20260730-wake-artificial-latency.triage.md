@@ -29,4 +29,15 @@ Date: 2026-07-30
 - Resolution: explain that the window belongs to the workflow, not Listener Type.
   Do not classify it as a product failure or acceptance.
 
+## Final bounded-tail review
+
+- Selected result: `失败`.
+- Operator note: empty.
+- Matching machine evidence: installed `session 264` accepted an `ExactStart` phrase
+  with 344 ms local confirmation, 475 ms total gate compute and 0 ms reported
+  phrase-tail-to-capsule latency.
+- Resolution: latency correction is machine-positive, but human product acceptance
+  remains failed. Do not declare sensitivity and false-wake accuracy accepted until a
+  fixed owner positive/near-phrase/ambient matrix passes.
+
 No firmware, OTA, pairing, LED or transcript defect is opened by these notes.

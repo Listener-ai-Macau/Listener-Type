@@ -70,6 +70,9 @@ Date: 2026-07-30
 - Root release-artifact identity check: PASS.
 - Final installed Type BLE status probe: PASS in 248 ms with firmware 1.0.3 and
   audio/OTA readiness present.
+- Final installed `session 264`: streaming KWS hit, local `ExactStart` confirmation
+  completed in 344 ms, total gate compute was 475 ms and phrase-tail-to-capsule was
+  0 ms; the 350/500 ms latency gates passed without keyword timeout fail-open.
 
 ## Human boundary
 
@@ -78,4 +81,7 @@ The first canonical review selected `通过` with note
 phrase-tail sample. It remains non-final. The priority-lane review was a failure and is
 stored separately. A later prompt result asking where the prompt came from is triaged as
 tooling clarification without a product trial. Final acceptance remains pending on the
-installed bounded-tail single-helper build.
+installed bounded-tail single-helper build: its latest canonical review selected
+`失败` without a note even though matching machine session 264 passed the latency gate.
+Do not claim overall sensitivity/false-wake acceptance until a positive/negative owner
+matrix resolves that human-machine contradiction.
