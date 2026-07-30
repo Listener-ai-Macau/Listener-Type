@@ -312,6 +312,9 @@ struct BufferedSpeakerCandidate {
     kws_prompted_local_confirm: bool,
     /// Local ASR returned Absent while KWS still hot (telemetry / retry pacing).
     kws_local_absent_count: u8,
+    /// Wall clock of first live KWS hit — drives secondary-confirm budget
+    /// (XiaoAi-style stage-2 timeout fail-open).
+    kws_first_hit_at: Option<Instant>,
     /// Recording capsule shown at first KWS hit (before local ExactStart) so the
     /// user is not left waiting with no UI while post-wake speech is already buffered.
     early_capsule_session_id: Option<SessionId>,
@@ -372,6 +375,14 @@ const KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_BYTES: usize = KWS_IMMEDIATE_LOCAL_CONFIRM
 /// stays hot — avoids sitting on the 2.4/3.0/5.0s ladder rungs.
 const KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400;
 const KWS_LOCAL_CONFIRM_RETRY_BYTES: usize = KWS_LOCAL_CONFIRM_RETRY_MS * 32;
+/// XiaoAi-style cascade after sensitive KWS hit:
+///   stage-1 KWS (high recall) → stage-2 local wake verifier (precision)
+/// Wait up to this budget for stage-2; then fail-open as KeywordModel so a
+/// hung/slow helper never bricks wake. Explicit Absent still rejects.
+const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 900;
+/// Explicit local Absent count before midstream hard-reject (blocks short
+/// prefix false wakes like "开始啥的"; one retry for noisy short clips).
+const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
 
 fn owner_verification_window_ready(pcm_bytes: usize) -> bool {
     // No enrolled voiceprint → phrase hit alone is enough; do not stall for the

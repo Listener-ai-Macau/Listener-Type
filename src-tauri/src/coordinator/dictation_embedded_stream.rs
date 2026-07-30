@@ -393,6 +393,7 @@ impl EmbeddedStreamingDictation {
                 local_confirmation_last_snapshot_bytes: 0,
                 kws_prompted_local_confirm: false,
                 kws_local_absent_count: 0,
+                kws_first_hit_at: None,
                 early_capsule_session_id: None,
                 kws_fed_bytes: 0,
                 kws_total_ms: 0,
@@ -730,22 +731,19 @@ impl EmbeddedStreamingDictation {
                                         denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                     Some(found)
                                 } else {
-                                    // Owner 2026-07-30: local Absent must not veto sensitive KWS
-                                    // (StreamingDetector::new). KeywordModel accept restores wake
-                                    // recall after the anti-false-wake gate over-tightened.
+                                    // Terminal: explicit Absent → reject (precision).
+                                    // Session is ending; no more audio for stage-2 retry.
                                     log::info!(
-                                        "[wake-phrase] terminal KWS accepted as KeywordModel after local Absent embedded_session_id={} prior_absent_count={} (sensitivity restore)",
+                                        "[wake-phrase] terminal stage2 Absent reject KWS embedded_session_id={} prior_absent_count={} (anti false-wake)",
                                         embedded_session_id,
                                         candidate.kws_local_absent_count
                                     );
-                                    phrase_signal =
-                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                                    Some(found)
+                                    None
                                 }
                             }
                             Ok(Err(err)) => {
                                 log::warn!(
-                                    "[wake-phrase] terminal KWS local confirmation unavailable embedded_session_id={embedded_session_id}: {err}; accepting KWS KeywordModel"
+                                    "[wake-phrase] terminal stage2 unavailable embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
                                 );
                                 phrase_signal =
                                     denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
@@ -753,7 +751,7 @@ impl EmbeddedStreamingDictation {
                             }
                             Err(err) => {
                                 log::warn!(
-                                    "[wake-phrase] terminal KWS local confirmation task failed embedded_session_id={embedded_session_id}: {err}; accepting KWS KeywordModel"
+                                    "[wake-phrase] terminal stage2 task failed embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
                                 );
                                 phrase_signal =
                                     denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
@@ -830,24 +828,24 @@ impl EmbeddedStreamingDictation {
                                                 phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                                 Some(found)
                                             } else {
+                                                // Offline cascade is a weak stage-1; Absent rejects.
                                                 log::info!(
-                                                    "[wake-phrase] terminal offline hit accepted as KeywordModel after local Absent embedded_session_id={} (sensitivity restore)",
+                                                    "[wake-phrase] terminal offline stage2 Absent reject embedded_session_id={} (anti false-wake)",
                                                     embedded_session_id
                                                 );
-                                                phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                                                Some(found)
+                                                None
                                             }
                                         }
                                         Ok(Err(err)) => {
                                             log::warn!(
-                                                "[wake-phrase] terminal offline local confirmation unavailable embedded_session_id={embedded_session_id}: {err}; accepting offline KeywordModel"
+                                                "[wake-phrase] terminal offline stage2 unavailable embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
                                             );
                                             phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
                                             Some(found)
                                         }
                                         Err(err) => {
                                             log::warn!(
-                                                "[wake-phrase] terminal offline local confirmation task failed embedded_session_id={embedded_session_id}: {err}; accepting offline KeywordModel"
+                                                "[wake-phrase] terminal offline stage2 task failed embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
                                             );
                                             phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
                                             Some(found)
@@ -1251,14 +1249,30 @@ impl EmbeddedStreamingDictation {
                     }
                 }
             };
-            // Product contract: main wake is sensitive StreamingDetector::new.
-            // Owner 2026-07-30: local paraformer must not veto a live KWS hit
-            // (that gate caused 开始录音 recall regression). Local Present still
-            // upgrades to LocalTranscript + early capsule; Absent only blocks
-            // local-only (no KWS) candidates.
+            // XiaoAi-style cascade (product: sensitive StreamingDetector::new):
+            //   stage-1 KWS high recall → stage-2 local wake verifier (precision)
+            // Decision:
+            //   Present/PresentLater → Accept LocalTranscript
+            //   explicit Absent ×N → reject (anti "开始啥的" half-phrase)
+            //   secondary timeout / helper down → fail-open KeywordModel
+            // Never bare-KWS Accept without a budgeted secondary attempt, and
+            // never infinite-hold on stage-2 (that was the sensitivity regression).
             let mut phrase_signal = denzic_voice_activation_v1_core::PhraseSignal::None;
             let mut local_confirmation_ms = 0u64;
             let kws_hit = wake_match.clone();
+            if kws_hit.is_some() {
+                if let Some(candidate) = self.speaker_candidate.as_mut() {
+                    if candidate.kws_first_hit_at.is_none() {
+                        candidate.kws_first_hit_at = Some(Instant::now());
+                        log::info!(
+                            "[wake-phrase] stage1 KWS hit embedded_session_id={} pcm_ms={} secondary_budget_ms={}",
+                            embedded_session_id,
+                            candidate.pcm.len() / 32,
+                            KWS_SECONDARY_CONFIRM_BUDGET_MS
+                        );
+                    }
+                }
+            }
             let wake_match = {
                 #[cfg(target_os = "windows")]
                 {
@@ -1272,8 +1286,7 @@ impl EmbeddedStreamingDictation {
                                 candidate.local_confirmation_attempts,
                             )
                             .filter(|snapshot_bytes| candidate.pcm.len() >= *snapshot_bytes);
-                            // KWS already heard the phrase: confirm ASAP (0.8s floor)
-                            // for LocalTranscript upgrade / early capsule only.
+                            // Stage-2 ASAP after KWS (0.8s floor), not the 1.8s ladder.
                             let new_audio_since_last = candidate
                                 .pcm
                                 .len()
@@ -1284,7 +1297,9 @@ impl EmbeddedStreamingDictation {
                                 && new_audio_since_last > 0;
                             let kws_retry = kws_hit.is_some()
                                 && candidate.kws_prompted_local_confirm
-                                && new_audio_since_last >= KWS_LOCAL_CONFIRM_RETRY_BYTES;
+                                && new_audio_since_last >= KWS_LOCAL_CONFIRM_RETRY_BYTES
+                                && candidate.kws_local_absent_count
+                                    < KWS_SECONDARY_ABSENT_REJECT_COUNT;
                             if ladder_snapshot.is_some() || kws_immediate || kws_retry {
                                 if ladder_snapshot.is_some() {
                                     candidate.local_confirmation_attempts += 1;
@@ -1305,7 +1320,7 @@ impl EmbeddedStreamingDictation {
                                         phrase.clone(),
                                     ));
                                 log::info!(
-                                        "[wake-phrase] bounded local confirmation started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} kws_hit={} kws_immediate={} kws_retry={}",
+                                        "[wake-phrase] stage2 local confirm started embedded_session_id={} attempt={} threshold_pcm_ms={} snapshot_pcm_ms={} kws_hit={} kws_immediate={} kws_retry={}",
                                         embedded_session_id,
                                         candidate.local_confirmation_attempts,
                                         threshold_pcm_ms,
@@ -1331,7 +1346,7 @@ impl EmbeddedStreamingDictation {
                             Ok(Ok(result)) => {
                                 local_confirmation_ms = result.inference_ms;
                                 log::info!(
-                                        "[wake-phrase] bounded local confirmation finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={} kws_hit={}",
+                                        "[wake-phrase] stage2 local confirm finished embedded_session_id={} matched={} phrase_relation={:?} snapshot_pcm_ms={} transcript_chars={} inference_ms={} kws_hit={}",
                                         embedded_session_id,
                                         result.matched,
                                         result.phrase_relation,
@@ -1348,8 +1363,8 @@ impl EmbeddedStreamingDictation {
                                     kws_hit.or(Some(crate::wake_phrase::Match {
                                         end_seconds: 0.0,
                                     }))
-                                } else if let Some(kws) = kws_hit {
-                                    // KWS provisional accept after local Absent — sensitivity restore.
+                                } else if kws_hit.is_some() {
+                                    // Explicit Absent: precision reject (retry once).
                                     let absent_count = {
                                         let candidate = self
                                             .speaker_candidate
@@ -1359,25 +1374,36 @@ impl EmbeddedStreamingDictation {
                                             candidate.kws_local_absent_count.saturating_add(1);
                                         candidate.kws_local_absent_count
                                     };
-                                    phrase_signal =
-                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                                    log::info!(
-                                        "[wake-phrase] KWS provisional accept after local Absent embedded_session_id={} count={} (sensitivity restore; StreamingDetector::new)",
-                                        embedded_session_id,
-                                        absent_count
-                                    );
-                                    Some(kws)
+                                    if absent_count >= KWS_SECONDARY_ABSENT_REJECT_COUNT {
+                                        log::info!(
+                                            "[wake-phrase] stage2 Absent reject embedded_session_id={} count={} (anti half-phrase false wake)",
+                                            embedded_session_id,
+                                            absent_count
+                                        );
+                                    } else {
+                                        log::info!(
+                                            "[wake-phrase] stage2 Absent retry embedded_session_id={} count={}/{}",
+                                            embedded_session_id,
+                                            absent_count,
+                                            KWS_SECONDARY_ABSENT_REJECT_COUNT
+                                        );
+                                    }
+                                    None
                                 } else {
                                     None
                                 }
                             }
                             Ok(Err(err)) => {
                                 log::warn!(
-                                        "[wake-phrase] bounded local confirmation unavailable embedded_session_id={embedded_session_id}: {err}"
+                                        "[wake-phrase] stage2 local confirm unavailable embedded_session_id={embedded_session_id}: {err}"
                                     );
+                                // Helper broken: fail-open on strong stage-1 (小爱式可靠性).
                                 if let Some(kws) = kws_hit {
                                     phrase_signal =
                                         denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                    log::info!(
+                                        "[wake-phrase] stage2 unavailable fail-open KeywordModel embedded_session_id={embedded_session_id}"
+                                    );
                                     Some(kws)
                                 } else {
                                     None
@@ -1385,11 +1411,14 @@ impl EmbeddedStreamingDictation {
                             }
                             Err(err) => {
                                 log::warn!(
-                                        "[wake-phrase] bounded local confirmation task failed embedded_session_id={embedded_session_id}: {err}"
+                                        "[wake-phrase] stage2 local confirm task failed embedded_session_id={embedded_session_id}: {err}"
                                     );
                                 if let Some(kws) = kws_hit {
                                     phrase_signal =
                                         denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                    log::info!(
+                                        "[wake-phrase] stage2 task-fail fail-open KeywordModel embedded_session_id={embedded_session_id}"
+                                    );
                                     Some(kws)
                                 } else {
                                     None
@@ -1397,12 +1426,39 @@ impl EmbeddedStreamingDictation {
                             }
                         }
                     } else if let Some(kws) = kws_hit {
-                        // Do not wait for local before Accept — KWS is the primary gate.
-                        phrase_signal =
-                            denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
-                        Some(kws)
+                        let waited_ms = self
+                            .speaker_candidate
+                            .as_ref()
+                            .and_then(|c| c.kws_first_hit_at)
+                            .map(|t| t.elapsed().as_millis() as u64)
+                            .unwrap_or(0);
+                        let absent_capped = self
+                            .speaker_candidate
+                            .as_ref()
+                            .is_some_and(|c| {
+                                c.kws_local_absent_count >= KWS_SECONDARY_ABSENT_REJECT_COUNT
+                            });
+                        if absent_capped {
+                            // Already hard-rejected by stage-2 Absent; keep waiting for
+                            // session end / next utterance rather than fail-open.
+                            None
+                        } else if waited_ms >= KWS_SECONDARY_CONFIRM_BUDGET_MS {
+                            // Secondary slow/hung: fail-open so wake is not bricked.
+                            phrase_signal =
+                                denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                            log::info!(
+                                "[wake-phrase] stage2 timeout fail-open KeywordModel embedded_session_id={} waited_ms={} budget_ms={}",
+                                embedded_session_id,
+                                waited_ms,
+                                KWS_SECONDARY_CONFIRM_BUDGET_MS
+                            );
+                            Some(kws)
+                        } else {
+                            // Within budget: wait for stage-2 (do not bare-KWS Accept).
+                            None
+                        }
                     } else {
-                        // No KWS yet: wait for local-only ladder.
+                        // No stage-1 yet: local-only ladder may still Present.
                         None
                     }
                 }

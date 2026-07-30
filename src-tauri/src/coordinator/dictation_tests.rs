@@ -1556,11 +1556,10 @@ fn hidden_candidate_marked_active_before_detector_init() {
     assert!(
         stream_all.contains("show_early_wake_recording_capsule")
             && dictation.contains("local full-phrase confirmed")
-            && stream_all.contains(
-                "terminal KWS accepted as KeywordModel after local Absent"
-            )
-            && stream_all.contains("KWS provisional accept after local Absent"),
-        "Local Present still upgrades capsule; sensitive KWS must Accept as KeywordModel without local veto"
+            && stream_all.contains("stage2 timeout fail-open KeywordModel")
+            && stream_all.contains("stage2 Absent reject")
+            && stream_all.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS"),
+        "XiaoAi-style: stage2 Present/timeout fail-open; explicit Absent rejects half-phrase"
     );
 }
 
@@ -2015,17 +2014,22 @@ fn kws_hit_schedules_immediate_local_confirmation() {
             && stream.contains("kws_retry")
             && stream.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_BYTES")
             && stream.contains("kws_local_absent_count")
-            && stream.contains("KWS provisional accept after local Absent")
-            && stream.contains("sensitivity restore"),
-        "KWS must Accept as KeywordModel without waiting for local; local Present only upgrades signal/capsule"
+            && stream.contains("kws_first_hit_at")
+            && stream.contains("stage1 KWS hit")
+            && stream.contains("stage2 timeout fail-open KeywordModel")
+            && stream.contains("stage2 Absent reject")
+            && !stream.contains("KWS provisional accept after local Absent"),
+        "XiaoAi-style cascade: stage1 KWS → stage2 local; Absent rejects; timeout fail-open"
     );
     let polish = include_str!("dictation_wake_polish.rs");
     assert!(
         polish.contains("kws_prompted_local_confirm")
             && polish.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 800")
             && polish.contains("KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400")
+            && polish.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 900")
+            && polish.contains("KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2")
             && polish.contains("gain_normalized_pcm16"),
-        "KWS-immediate confirm must use 800ms floor + 400ms retry + gain-boosted local ASR"
+        "secondary budget 900ms + 2 Absent rejects + gain-boosted local ASR"
     );
 }
 
