@@ -434,7 +434,7 @@ fn prepare_gatt_session(
             current_status
         );
         release_gatt_maintain_request(&session, "GATT readiness timeout");
-        let _ = session.Close();
+        release_winrt_bluetooth_object(session);
         return Err(format!(
             "BLE GATT session did not become active after {} ms initial={:?} current={:?}; stale GATT/cache or paired device disconnected",
             timeout.as_millis(),

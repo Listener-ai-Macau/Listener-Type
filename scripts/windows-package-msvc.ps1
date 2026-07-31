@@ -568,6 +568,13 @@ function Stop-InstalledListenerType {
     if ($commandLine.IndexOf($resolvedInstalledExe, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
       continue
     }
+    if ($commandLine -match "(?i)--local-wake-helper") {
+      Write-Host "[info] Leaving Listener Type local wake helper to exit with its parent: pid=$($process.ProcessId)"
+      continue
+    }
+    if (-not (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue)) {
+      continue
+    }
 
     Write-Host "[info] Requesting normal Listener Type shutdown before MSI update: pid=$($process.ProcessId)"
     Start-Process -FilePath $resolvedInstalledExe -ArgumentList "--quit" -WindowStyle Hidden | Out-Null
@@ -662,13 +669,33 @@ function Start-InstalledListenerType {
   $installRoot = Split-Path -Parent $installedExePath
   Write-Host "[info] Starting installed Listener Type app"
   Write-Host "       exe: $installedExePath"
+  $launchedAt = Get-Date
   $process = Start-Process -FilePath $installedExePath -WorkingDirectory $installRoot -WindowStyle Hidden -PassThru
-  Start-Sleep -Milliseconds 800
+  $stabilityDeadline = (Get-Date).AddSeconds(5)
+  do {
+    Start-Sleep -Milliseconds 250
+    $running = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)" -ErrorAction SilentlyContinue
+    if (-not $running) {
+      throw "Installed Listener Type process exited during the 5 second startup stability gate."
+    }
+  } while ((Get-Date) -lt $stabilityDeadline)
 
-  $running = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)" -ErrorAction SilentlyContinue
-  if (-not $running) {
-    throw "Installed Listener Type process exited immediately after launch."
+  $bluetoothCrashes = @(
+    Get-WinEvent -FilterHashtable @{
+      LogName = "Application"
+      Id = 1000
+      StartTime = $launchedAt.AddSeconds(-1)
+    } -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.Message -match "listener-type\.exe" -and
+        $_.Message -match "Windows\.Devices\.Bluetooth\.dll" -and
+        $_.Message -match "0xc0000005"
+      }
+  )
+  if ($bluetoothCrashes.Count -gt 0) {
+    throw "Installed Listener Type produced a Windows.Devices.Bluetooth.dll 0xc0000005 crash during startup."
   }
+
   $commandLine = [string]$running.CommandLine
   if ($commandLine.IndexOf($installedExePath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
     throw "Started Listener Type process is not the installed Program Files exe: $commandLine"

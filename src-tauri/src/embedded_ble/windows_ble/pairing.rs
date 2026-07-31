@@ -502,7 +502,7 @@ pub fn native_windows_hid_pairing_active_connection(
         match open_ble_device_by_address_with_timeout(*address, Duration::from_millis(750)) {
             Ok(device) => {
                 let status = device.ConnectionStatus();
-                let _ = device.Close();
+                release_winrt_bluetooth_object(device);
                 match status {
                     Ok(BluetoothConnectionStatus::Connected) => return Ok(Some(*address)),
                     Ok(BluetoothConnectionStatus::Disconnected) => {}
@@ -1673,7 +1673,7 @@ fn pairing_device_information_from_bluetooth_address_handle(
             None
         }
     };
-    let _ = device.Close();
+    release_winrt_bluetooth_object(device);
     Ok(info)
 }
 
@@ -2530,14 +2530,14 @@ fn push_address_unpair_candidates(
         let info = match device.DeviceInformation() {
             Ok(info) => info,
             Err(err) => {
-                let _ = device.Close();
+                release_winrt_bluetooth_object(device);
                 log::warn!(
                     "[embedded-ble] BLE address cleanup DeviceInformation for {address_text} failed: {err}"
                 );
                 continue;
             }
         };
-        let _ = device.Close();
+        release_winrt_bluetooth_object(device);
         log::info!(
             "[embedded-ble] opened BLE address object for stale pairing cleanup: {address_text}"
         );

@@ -3569,6 +3569,18 @@ async fn wait_for_embedded_ble_listener_inactive(inner: &Arc<Inner>, timeout: Du
     }
 }
 
+#[cfg(target_os = "windows")]
+fn wait_for_embedded_ble_listener_shutdown_release(timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while crate::embedded_ble::notify_capture_session_active() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    true
+}
+
 fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>) {
     if inner
         .embedded_ble_listener_cancel

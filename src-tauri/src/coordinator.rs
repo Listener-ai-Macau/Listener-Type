@@ -1038,6 +1038,16 @@ impl Coordinator {
             }
         }
         cancel_embedded_ble_listener_capture(&self.inner, "shutdown", false);
+        #[cfg(target_os = "windows")]
+        if first_shutdown {
+            if wait_for_embedded_ble_listener_shutdown_release(Duration::from_secs(3)) {
+                log::info!("[embedded-ble] shutdown waited for the WinRT notify owner to release");
+            } else {
+                log::warn!(
+                    "[embedded-ble] shutdown WinRT notify owner did not release within 3000 ms"
+                );
+            }
+        }
     }
 
     pub fn start_hotkey_listener(&self) {

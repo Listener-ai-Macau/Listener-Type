@@ -1724,6 +1724,7 @@ fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
         last_successful_address: Some("FB8FBDD8C90F".to_string()),
         target_name: None,
         updated_at: None,
+        last_ghost_prune_at: None,
     };
     assert_eq!(
         persisted_ble_device_state_address_for_target(&legacy, DEFAULT_BLUETOOTH_TARGET_NAME),
@@ -1735,6 +1736,7 @@ fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
         last_successful_address: Some("FB8FBDD8C90F".to_string()),
         target_name: Some("OldType".to_string()),
         updated_at: None,
+        last_ghost_prune_at: None,
     };
     assert_eq!(
         persisted_ble_device_state_address_for_target(&wrong_target, DEFAULT_BLUETOOTH_TARGET_NAME),
@@ -1745,6 +1747,7 @@ fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
         last_successful_address: Some("E5:C3:D5:B8:D2:FC".to_string()),
         target_name: Some("listener".to_string()),
         updated_at: None,
+        last_ghost_prune_at: None,
     };
     assert_eq!(
         persisted_ble_device_state_address_for_target(&matching, DEFAULT_BLUETOOTH_TARGET_NAME),
@@ -2222,5 +2225,84 @@ fn confirmed_name_change_handoff_skips_old_cccd_only_for_continuous_listener() {
         NotifyCccdTeardown::for_capture_cancel(CaptureTerminalBehavior::StopCapture, false, true,),
         NotifyCccdTeardown::Disable,
         "foreground capture cancellation still tears down its CCCD normally"
+    );
+}
+
+#[test]
+fn winrt_bluetooth_targets_release_without_synchronous_close_after_handler_detach() {
+    let source = include_str!("embedded_ble.rs");
+
+    assert!(
+        source.contains("fn release_winrt_bluetooth_object<T>(object: T)")
+            && source.contains("dropping the COM reference lets WinRT finish"),
+        "WinRT Bluetooth target release policy must remain explicit"
+    );
+    assert!(
+        source.contains("last_ghost_prune_at")
+            && source.contains("persisted cross-process cooldown active"),
+        "automatic ghost pairing cleanup must retain its cooldown across Type restarts"
+    );
+    for forbidden in ["session.Close()", "service.Close()", "device.Close()"] {
+        assert!(
+            !source.contains(forbidden),
+            "WinRT Bluetooth target cleanup must not synchronously call {forbidden}"
+        );
+    }
+
+    let finish_start = source
+        .find("fn finish(&mut self, teardown: NotifyCccdTeardown)")
+        .expect("notify cleanup finish should exist");
+    let finish_end = source[finish_start..]
+        .find("fn handle_audio_control_request")
+        .map(|offset| finish_start + offset)
+        .expect("notify cleanup finish boundary should exist");
+    let finish = &source[finish_start..finish_end];
+    let remove_status = finish
+        .find("self.remove_status_handlers();")
+        .expect("status handlers must be removed");
+    let remove_value = finish
+        .find("self.remove_handler();")
+        .expect("ValueChanged handler must be removed");
+    let release_registration = finish
+        .find("self.audio_control_registration.take()")
+        .expect("active control registration must be released");
+    assert!(
+        remove_status < remove_value && remove_value < release_registration,
+        "notify cleanup must detach WinRT event sources before releasing retained target state"
+    );
+}
+
+#[test]
+fn transient_gatt_inactive_does_not_tear_down_a_connected_notify_target() {
+    let source = include_str!("embedded_ble.rs");
+    let handler_start = source
+        .find("fn register_gatt_session_status_handler")
+        .expect("GATT session status handler should exist");
+    let handler_end = source[handler_start..]
+        .find("struct OpenListenerOtaV1Target")
+        .map(|offset| handler_start + offset)
+        .expect("GATT session status handler boundary should exist");
+    let handler = &source[handler_start..handler_end];
+
+    assert!(handler.contains("BleCaptureSignal::GattSessionInactive"));
+    assert!(handler.contains("BleCaptureSignal::GattSessionActive"));
+    assert!(
+        !handler.contains("BleCaptureSignal::Disconnected"),
+        "GATT Inactive must not be treated as a physical BluetoothLEDevice disconnect"
+    );
+
+    let inactive_branch = source
+        .find("BleCaptureSignal::GattSessionInactive(reason) =>")
+        .expect("capture wait should handle advisory GATT Inactive");
+    let active_branch = source[inactive_branch..]
+        .find("BleCaptureSignal::GattSessionActive =>")
+        .map(|offset| inactive_branch + offset)
+        .expect("advisory GATT Inactive branch boundary should exist");
+    let body = &source[inactive_branch..active_branch];
+    assert!(body.contains("retaining the notify target"));
+    assert!(body.contains("continue;"));
+    assert!(
+        !body.contains("cleanup.disable_notify()"),
+        "transient GATT Inactive must preserve the existing notify channel"
     );
 }

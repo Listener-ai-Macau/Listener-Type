@@ -94,6 +94,15 @@ const DIS_FIRMWARE_REVISION_UUID: GUID = GUID::from_u128(0x00002a26_0000_1000_80
 const DIS_HARDWARE_REVISION_UUID: GUID = GUID::from_u128(0x00002a27_0000_1000_8000_00805f9b34fb);
 const BATTERY_SERVICE_UUID: GUID = GUID::from_u128(0x0000180f_0000_1000_8000_00805f9b34fb);
 const BATTERY_LEVEL_UUID: GUID = GUID::from_u128(0x00002a19_0000_1000_8000_00805f9b34fb);
+
+fn release_winrt_bluetooth_object<T>(object: T) {
+    // Windows.Devices.Bluetooth.dll has repeatedly access-violated when Close
+    // races an in-flight discovery, GATT operation, or queued event callback.
+    // Event sources are detached and GATT maintenance is released separately;
+    // dropping the COM reference lets WinRT finish its asynchronous teardown.
+    drop(object);
+}
+
 const RECONNECT_COOLDOWN: Duration = Duration::from_millis(350);
 const RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TYPE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(8);
@@ -337,6 +346,8 @@ fn release_listener_ota_post_confirm_device() {
 enum BleCaptureSignal {
     Notification(Vec<u8>),
     Disconnected(String),
+    GattSessionInactive(String),
+    GattSessionActive,
 }
 
 struct AudioControlRequest {
@@ -369,6 +380,8 @@ struct PersistedBleDeviceState {
     target_name: Option<String>,
     #[serde(default)]
     updated_at: Option<String>,
+    #[serde(default)]
+    last_ghost_prune_at: Option<String>,
 }
 
 fn active_audio_control_slot() -> &'static Mutex<Option<ActiveAudioControlSender>> {
@@ -2127,8 +2140,8 @@ fn register_gatt_session_status_handler(
     if let Ok(status) = session.SessionStatus() {
         log::info!("[embedded-ble] capture #{capture_id}: GATT session status={status:?}");
         if status != GattSessionStatus::Active {
-            let _ = tx.send(BleCaptureSignal::Disconnected(format!(
-                "BLE GATT session status changed to {status:?} before notify wait; transport_not_ready"
+            let _ = tx.send(BleCaptureSignal::GattSessionInactive(format!(
+                "BLE GATT session status changed to {status:?} before notify wait"
             )));
         }
     }
@@ -2142,10 +2155,16 @@ fn register_gatt_session_status_handler(
                 log::info!(
                     "[embedded-ble] capture #{capture_id}: GATT session status changed status={status:?} error={error:?}"
                 );
-                if status.is_some_and(|status| status != GattSessionStatus::Active) {
-                    let _ = handler_tx.send(BleCaptureSignal::Disconnected(format!(
-                        "BLE GATT session status changed to {status:?} error={error:?}; transport_not_ready"
-                    )));
+                match status {
+                    Some(GattSessionStatus::Active) => {
+                        let _ = handler_tx.send(BleCaptureSignal::GattSessionActive);
+                    }
+                    Some(status) => {
+                        let _ = handler_tx.send(BleCaptureSignal::GattSessionInactive(format!(
+                            "BLE GATT session status changed to {status:?} error={error:?}"
+                        )));
+                    }
+                    None => {}
                 }
             }
             Ok(())
@@ -2223,7 +2242,7 @@ impl Drop for OtaPreBulkMaintainHandoff {
                 &session,
                 "Listener OTA pre-bulk maintain handoff failure",
             );
-            let _ = session.Close();
+            release_winrt_bluetooth_object(session);
             log::info!(
                 "[embedded-ble] Listener OTA v1: unreplaced prepare GATT maintain state released after handoff failure"
             );
@@ -3672,7 +3691,7 @@ fn read_optional_characteristic_bytes_from_discovered_service(
             characteristic_uuid,
             BluetoothCacheMode::Uncached,
         );
-        let _ = service.Close();
+        release_winrt_bluetooth_object(service);
         if result.is_some() {
             return result;
         }
@@ -3855,15 +3874,65 @@ fn persisted_successful_notify_target_address_for_current() -> Option<u64> {
     Some(address)
 }
 
+fn persisted_ghost_pairing_prune_is_recent(cooldown: Duration) -> bool {
+    let Some(path) = ble_device_state_path() else {
+        return false;
+    };
+    let Ok(text) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(state) = serde_json::from_str::<PersistedBleDeviceState>(&text) else {
+        return false;
+    };
+    let Some(timestamp) = state.last_ghost_prune_at.as_deref() else {
+        return false;
+    };
+    let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(timestamp) else {
+        return false;
+    };
+    let elapsed = chrono::Utc::now().signed_duration_since(timestamp.with_timezone(&chrono::Utc));
+    elapsed < chrono::Duration::zero() || elapsed.to_std().is_ok_and(|elapsed| elapsed < cooldown)
+}
+
+fn persist_ghost_pairing_prune_completed() {
+    let Some(path) = ble_device_state_path() else {
+        return;
+    };
+    let mut state = fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<PersistedBleDeviceState>(&text).ok())
+        .unwrap_or_default();
+    state.last_ghost_prune_at = Some(super::utc_now_rfc3339());
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(&state) {
+        if let Err(err) = fs::write(&path, bytes) {
+            log::warn!(
+                "[embedded-ble] failed to persist ghost pairing prune cooldown to {}: {err}",
+                path.display()
+            );
+        }
+    }
+}
+
 fn persist_successful_notify_target_address(address: u64, context: &str) {
     let target_name = effective_bluetooth_target_name(None);
     let Some(path) = ble_device_state_path() else {
         return;
     };
+    let last_ghost_prune_at = fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<PersistedBleDeviceState>(&text).ok())
+        .and_then(|state| state.last_ghost_prune_at);
     let state = PersistedBleDeviceState {
         last_successful_address: Some(crate::embedded_ble::format_bluetooth_address(address)),
         target_name: Some(target_name.clone()),
         updated_at: Some(super::utc_now_rfc3339()),
+        last_ghost_prune_at,
     };
     let Some(parent) = path.parent() else {
         return;
@@ -4450,13 +4519,13 @@ impl Drop for OpenListenerOtaV1Target {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
             release_gatt_maintain_request(&session, "Listener OTA target drop");
-            let _ = session.Close();
+            release_winrt_bluetooth_object(session);
         }
         if let Some(service) = self.service.take() {
-            let _ = service.Close();
+            release_winrt_bluetooth_object(service);
         }
         if let Some(device) = self.device.take() {
-            let _ = device.Close();
+            release_winrt_bluetooth_object(device);
         }
     }
 }
@@ -4465,13 +4534,13 @@ impl Drop for OpenAudioControlTarget {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
             release_gatt_maintain_request(&session, "audio control target drop");
-            let _ = session.Close();
+            release_winrt_bluetooth_object(session);
         }
         if let Some(service) = self.service.take() {
-            let _ = service.Close();
+            release_winrt_bluetooth_object(service);
         }
         if let Some(device) = self.device.take() {
-            let _ = device.Close();
+            release_winrt_bluetooth_object(device);
         }
     }
 }
@@ -4480,13 +4549,13 @@ impl Drop for OpenDiagnosticTarget {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
             release_gatt_maintain_request(&session, "diagnostic target drop");
-            let _ = session.Close();
+            release_winrt_bluetooth_object(session);
         }
         if let Some(service) = self.service.take() {
-            let _ = service.Close();
+            release_winrt_bluetooth_object(service);
         }
         if let Some(device) = self.device.take() {
-            let _ = device.Close();
+            release_winrt_bluetooth_object(device);
         }
     }
 }
@@ -4975,13 +5044,13 @@ impl Drop for NotifyCleanup {
         }
         if let Some(session) = self.target.session.take() {
             release_gatt_maintain_request(&session, "notify target drop");
-            let _ = session.Close();
+            release_winrt_bluetooth_object(session);
         }
         if let Some(service) = self.target.service.take() {
-            let _ = service.Close();
+            release_winrt_bluetooth_object(service);
         }
         if let Some(device) = self.target.device.take() {
-            let _ = device.Close();
+            release_winrt_bluetooth_object(device);
         }
     }
 }

@@ -679,11 +679,11 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains(
                 "\"Listener OTA pre-bulk maintain handoff failure\","
             )
-            && source.contains("let _ = session.Close();")
+            && source.contains("release_winrt_bluetooth_object(session);")
             && source.contains(
                 "superseded wrapper released without false/Close"
             ),
-        "failed handoff must balance false+Close while successful overlapping ownership must avoid collapsing shared session state"
+        "failed handoff must release maintain ownership and its COM reference while successful overlapping ownership avoids collapsing shared session state"
     );
 }
 

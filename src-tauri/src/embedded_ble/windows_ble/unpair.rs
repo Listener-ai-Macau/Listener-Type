@@ -12,6 +12,7 @@ pub fn prune_listener_ghost_pairings_keeping(
     extra_names: &[String],
     keep_addresses: &[u64],
 ) -> crate::embedded_ble::BleDeviceUnpairResult {
+    const GHOST_PRUNE_CROSS_PROCESS_COOLDOWN: Duration = Duration::from_secs(180);
     let target_name = extra_names
         .iter()
         .find_map(|name| {
@@ -35,6 +36,23 @@ pub fn prune_listener_ghost_pairings_keeping(
             ],
         };
     }
+    if persisted_ghost_pairing_prune_is_recent(GHOST_PRUNE_CROSS_PROCESS_COOLDOWN) {
+        log::info!(
+            "[embedded-ble] skipping ghost pairing prune keep={keep_addresses:?}: persisted cross-process cooldown active"
+        );
+        return crate::embedded_ble::BleDeviceUnpairResult {
+            status: crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean,
+            attempted: false,
+            matched_devices: 0,
+            unpaired_devices: 0,
+            already_unpaired_devices: 0,
+            failed_devices: 0,
+            needs_user_action: false,
+            details: vec![
+                "Ghost pairing prune skipped during persisted cross-process cooldown.".to_string(),
+            ],
+        };
+    }
     let Some(_maintenance) =
         try_begin_listener_pairing_maintenance("ghost-prune", &target_name, Instant::now())
     else {
@@ -51,7 +69,7 @@ pub fn prune_listener_ghost_pairings_keeping(
             )],
         };
     };
-    match prune_listener_ghost_pairings_keeping_inner(extra_names, keep_addresses) {
+    let result = match prune_listener_ghost_pairings_keeping_inner(extra_names, keep_addresses) {
         Ok(result) => {
             log::info!(
                 "[embedded-ble] ghost pairing prune keep={keep_addresses:?} status={:?} matched={} removed={} already_clean={} failed={}",
@@ -76,7 +94,9 @@ pub fn prune_listener_ghost_pairings_keeping(
                 details: vec![err],
             }
         }
-    }
+    };
+    persist_ghost_pairing_prune_completed();
+    result
 }
 
 pub fn unpair_listener_devices_for_names(

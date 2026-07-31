@@ -128,7 +128,7 @@ fn open_notify_target_for_startup_cached_address(
             }
             Err(err) => {
                 last_error = Some(format!("persisted startup Cached index={index}: {err}"));
-                let _ = service.Close();
+                release_winrt_bluetooth_object(service);
             }
         }
     }

@@ -891,7 +891,7 @@ fn open_listener_ota_v1_target_for_device_with_options(
                 }
                 Err(err) => {
                     last_error = Some(format!("{cache_mode:?}: {err}"));
-                    let _ = service.Close();
+                    release_winrt_bluetooth_object(service);
                 }
             }
         }
@@ -1042,7 +1042,7 @@ fn open_listener_ota_v1_target_for_device_with_deadline_options(
                 }
                 Err(err) => {
                     last_error = Some(format!("{cache_mode:?}: {err}"));
-                    let _ = service.Close();
+                    release_winrt_bluetooth_object(service);
                 }
             }
         }
@@ -1179,7 +1179,7 @@ fn open_diagnostic_target_for_device_with_policy(
                 }
                 Err(err) => {
                     last_error = Some(format!("{cache_mode:?}: {err}"));
-                    let _ = service.Close();
+                    release_winrt_bluetooth_object(service);
                 }
             }
         }
@@ -1428,7 +1428,7 @@ fn open_notify_target_for_device_with_cache_modes_and_timeout(
                 }
                 Err(err) => {
                     last_error = Some(format!("{cache_mode:?}: {err}"));
-                    let _ = service.Close();
+                    release_winrt_bluetooth_object(service);
                 }
             }
         }
@@ -1524,7 +1524,7 @@ fn open_audio_control_target_for_device(
                 }
                 Err(err) => {
                     last_error = Some(format!("{cache_mode:?}: {err}"));
-                    let _ = service.Close();
+                    release_winrt_bluetooth_object(service);
                 }
             }
         }

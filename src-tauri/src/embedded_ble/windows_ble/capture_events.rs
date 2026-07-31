@@ -609,6 +609,18 @@ fn capture_notification_events_until_cancelled_impl(
                 }
                 notification
             }
+            BleCaptureSignal::GattSessionInactive(reason) => {
+                log::warn!(
+                    "[embedded-ble] capture #{capture_id}: {reason}; retaining the notify target because GATT Inactive is advisory until the device disconnects or heartbeat fails"
+                );
+                continue;
+            }
+            BleCaptureSignal::GattSessionActive => {
+                log::info!(
+                    "[embedded-ble] capture #{capture_id}: GATT session returned to Active while retaining the notify target"
+                );
+                continue;
+            }
             BleCaptureSignal::Disconnected(reason) => {
                 if ec11_recovery_disconnect_deadline.take().is_some() {
                     log::info!(

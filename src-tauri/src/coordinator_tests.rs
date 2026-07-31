@@ -145,6 +145,9 @@ fn shutdown_sends_type_bye_before_background_listener_cancel() {
     let cancel_index = body
         .find("cancel_embedded_ble_listener_capture")
         .expect("shutdown must cancel the background listener");
+    let release_index = body
+        .find("wait_for_embedded_ble_listener_shutdown_release")
+        .expect("shutdown must wait for the real WinRT notify owner");
 
     assert!(
         body.contains("Duration::from_millis(250)"),
@@ -153,6 +156,14 @@ fn shutdown_sends_type_bye_before_background_listener_cancel() {
     assert!(
         bye_index < cancel_index,
         "Type exit must clear firmware TYPE_READY before tearing down the background listener"
+    );
+    assert!(
+        cancel_index < release_index,
+        "Type exit must request cancellation before waiting for the notify owner"
+    );
+    assert!(
+        body.contains("Duration::from_secs(3)"),
+        "shutdown release wait must stay bounded"
     );
 }
 
@@ -1043,6 +1054,26 @@ fn recovery_cleanup_waits_for_the_actual_notify_capture_to_release() {
     assert!(
         body.contains("crate::embedded_ble::notify_capture_session_active()"),
         "a cancelled flag alone is not proof that the serialized Windows GATT session released"
+    );
+}
+
+#[test]
+fn shutdown_waits_for_the_actual_winrt_notify_owner_to_release() {
+    let source = include_str!("coordinator.rs");
+    let start = source
+        .find("fn wait_for_embedded_ble_listener_shutdown_release")
+        .expect("shutdown release wait should exist");
+    let end = source[start..]
+        .find("fn mark_embedded_ble_listener_ready")
+        .map(|offset| start + offset)
+        .expect("shutdown release wait boundary should exist");
+    let body = &source[start..end];
+
+    assert!(body.contains("crate::embedded_ble::notify_capture_session_active()"));
+    assert!(body.contains("Duration::from_millis(25)"));
+    assert!(
+        !body.contains("embedded_ble_listener_capture_active"),
+        "the cancel slot is cleared before WinRT teardown and cannot prove release"
     );
 }
 
