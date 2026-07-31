@@ -2213,6 +2213,33 @@ fn explicit_absent_blocks_keyword_only_secondary_fallback() {
 
 #[cfg(target_os = "windows")]
 #[test]
+fn completed_full_length_absent_blocks_fallback_without_rejecting_partial_phrase() {
+    use crate::wake_phrase::LocalPhraseRelation;
+
+    assert!(super::completed_secondary_absent_is_authoritative(
+        LocalPhraseRelation::Absent,
+        4,
+        4,
+    ));
+    assert!(super::completed_secondary_absent_is_authoritative(
+        LocalPhraseRelation::Absent,
+        5,
+        4,
+    ));
+    assert!(!super::completed_secondary_absent_is_authoritative(
+        LocalPhraseRelation::Absent,
+        3,
+        4,
+    ));
+    assert!(!super::completed_secondary_absent_is_authoritative(
+        LocalPhraseRelation::ExactStart,
+        4,
+        4,
+    ));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
 fn busy_local_wake_helper_is_retried_without_queue_or_keyword_fallback() {
     assert!(crate::asr::local::wake_helper::is_busy_error(
         "local wake confirmation failed: local_wake_helper_busy"

@@ -702,6 +702,24 @@ fn secondary_fallback_can_accept_keyword(
 }
 
 #[cfg(target_os = "windows")]
+fn completed_secondary_absent_is_authoritative(
+    relation: crate::wake_phrase::LocalPhraseRelation,
+    transcript_chars: usize,
+    phrase_chars: usize,
+) -> bool {
+    matches!(
+        denzic_voice_activation_v1_core::decide_completed_secondary(
+            denzic_voice_activation_v1_core::CompletedSecondaryInput {
+                relation,
+                transcript_chars,
+                phrase_chars,
+            },
+        ),
+        denzic_voice_activation_v1_core::CompletedSecondaryDecision::RejectExplicitAbsent
+    )
+}
+
+#[cfg(target_os = "windows")]
 fn run_local_wake_confirmation_once(
     pcm: &[u8],
     phrase: &str,

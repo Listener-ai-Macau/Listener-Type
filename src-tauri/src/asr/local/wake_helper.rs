@@ -479,6 +479,55 @@ mod imp {
                 );
             }
         }
+
+        #[test]
+        #[ignore = "diagnostic: verify LISTENER_WAKE_DIAG_DIR contains full-length negative WAVs"]
+        fn diagnostic_secondary_negative_gate() {
+            let phrase =
+                std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
+            let dir = PathBuf::from(
+                std::env::var("LISTENER_WAKE_DIAG_DIR").expect("LISTENER_WAKE_DIAG_DIR"),
+            );
+            let runtime =
+                super::ParaformerRuntime::load_cached().expect("load cached Paraformer runtime");
+            let mut paths = fs::read_dir(dir)
+                .expect("diagnostic directory")
+                .map(|entry| entry.expect("directory entry").path())
+                .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("wav"))
+                .collect::<Vec<_>>();
+            paths.sort();
+            assert!(
+                !paths.is_empty(),
+                "secondary negative gate needs WAV fixtures"
+            );
+            for path in paths {
+                let text = runtime
+                    .transcribe_wav(&path)
+                    .expect("transcribe diagnostic WAV");
+                let relation = denzic_voice_activation_v1_core::local_transcript_phrase_relation(
+                    &text, &phrase,
+                );
+                let decision = denzic_voice_activation_v1_core::decide_completed_secondary(
+                    denzic_voice_activation_v1_core::CompletedSecondaryInput {
+                        relation,
+                        transcript_chars: text.chars().filter(|ch| ch.is_alphanumeric()).count(),
+                        phrase_chars: phrase.chars().filter(|ch| ch.is_alphanumeric()).count(),
+                    },
+                );
+                println!(
+                    "secondary_negative file={} text={text:?} relation={relation:?} decision={decision:?}",
+                    path.file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("<invalid>")
+                );
+                assert_eq!(
+                    decision,
+                    denzic_voice_activation_v1_core::CompletedSecondaryDecision::RejectExplicitAbsent,
+                    "secondary verifier must reject {}",
+                    path.display()
+                );
+            }
+        }
     }
 }
 

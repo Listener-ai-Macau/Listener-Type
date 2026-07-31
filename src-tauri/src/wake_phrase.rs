@@ -1,6 +1,7 @@
 #[derive(Debug, Clone)]
 pub struct Match {
     pub end_seconds: f32,
+    pub matched_keyword: Option<String>,
 }
 
 pub fn normalize_configured_phrase(phrase: &str) -> Result<String, String> {
@@ -922,6 +923,8 @@ mod platform {
                     if !value.keyword.is_null()
                         && !CStr::from_ptr(value.keyword).to_bytes().is_empty()
                     {
+                        let matched_keyword =
+                            CStr::from_ptr(value.keyword).to_string_lossy().into_owned();
                         let accepted_seconds = self.normalizer.accepted_bytes as f32 / 32_000.0;
                         let token_end_seconds = if value.count > 0 && !value.timestamps.is_null() {
                             Some(*value.timestamps.add(value.count as usize - 1))
@@ -947,7 +950,11 @@ mod platform {
                                 end_seconds
                             );
                         }
-                        self.found = Some(Match { end_seconds });
+                        log::info!("[wake-phrase] matched keyword label={matched_keyword}");
+                        self.found = Some(Match {
+                            end_seconds,
+                            matched_keyword: Some(matched_keyword),
+                        });
                     }
                     (self.runtime.destroy_result)(result);
                     if self.found.is_some() {
@@ -1034,7 +1041,10 @@ mod platform {
                             start / 32,
                             pcm.len() / 32
                         );
-                        return Ok(Some(Match { end_seconds }));
+                        return Ok(Some(Match {
+                            end_seconds,
+                            matched_keyword: found.matched_keyword,
+                        }));
                     }
                     None => {}
                 }
@@ -1408,6 +1418,117 @@ mod platform {
                 neg_total,
                 BOOTSTRAP_KEYWORD_SCORE,
                 BOOTSTRAP_KEYWORD_THRESHOLD
+            );
+        }
+
+        #[test]
+        #[ignore = "diagnostic: compare sensitive/strict recall and owner negatives"]
+        fn diagnostic_compare_sensitive_and_strict_matrix() {
+            let phrase =
+                std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
+            let positive_dir =
+                std::env::var("LISTENER_WAKE_POSITIVE_DIR").expect("LISTENER_WAKE_POSITIVE_DIR");
+            let negative_dir =
+                std::env::var("LISTENER_WAKE_NEGATIVE_DIR").expect("LISTENER_WAKE_NEGATIVE_DIR");
+
+            fn hit(mut detector: StreamingDetector, pcm: &[u8]) -> Option<String> {
+                for chunk in pcm.chunks(320) {
+                    if let Some(found) = detector.accept_pcm(chunk).expect("accept PCM") {
+                        return found.matched_keyword;
+                    }
+                }
+                detector
+                    .finish()
+                    .expect("finish detector")
+                    .and_then(|found| found.matched_keyword)
+            }
+
+            let mut categories = std::collections::BTreeMap::<String, (usize, usize, usize)>::new();
+            for entry in fs::read_dir(&positive_dir).expect("positive directory") {
+                let path = entry.expect("positive entry").path();
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("");
+                if !name.starts_with("wake_")
+                    || path.extension().and_then(|ext| ext.to_str()) != Some("wav")
+                {
+                    continue;
+                }
+                let category = name
+                    .strip_prefix("wake_")
+                    .and_then(|rest| rest.split('-').next())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let wav = fs::read(&path).expect("positive WAV");
+                let pcm = wav_pcm(&wav);
+                let sensitive_keyword = hit(
+                    StreamingDetector::new(&phrase).expect("sensitive detector"),
+                    pcm,
+                );
+                let strict_keyword = hit(
+                    StreamingDetector::new_strict(&phrase).expect("strict detector"),
+                    pcm,
+                );
+                let row = categories.entry(category).or_default();
+                row.0 += 1;
+                row.1 += usize::from(sensitive_keyword.is_some());
+                row.2 += usize::from(strict_keyword.is_some());
+                println!(
+                    "positive_keyword file={name} sensitive={sensitive_keyword:?} strict={strict_keyword:?}"
+                );
+            }
+            assert!(!categories.is_empty(), "positive matrix is empty");
+            let mut total = 0usize;
+            let mut sensitive_total = 0usize;
+            let mut strict_total = 0usize;
+            for (category, (count, sensitive, strict)) in &categories {
+                println!(
+                    "precision_matrix category={category} sensitive={sensitive}/{count} strict={strict}/{count}"
+                );
+                total += count;
+                sensitive_total += sensitive;
+                strict_total += strict;
+            }
+            let mut negative_total = 0usize;
+            let mut sensitive_false = 0usize;
+            let mut strict_false = 0usize;
+            for entry in fs::read_dir(&negative_dir).expect("negative directory") {
+                let path = entry.expect("negative entry").path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("wav") {
+                    continue;
+                }
+                let wav = fs::read(&path).expect("negative WAV");
+                let pcm = wav_pcm(&wav);
+                let sensitive_keyword = hit(
+                    StreamingDetector::new(&phrase).expect("sensitive detector"),
+                    pcm,
+                );
+                let strict_keyword = hit(
+                    StreamingDetector::new_strict(&phrase).expect("strict detector"),
+                    pcm,
+                );
+                println!(
+                    "precision_negative file={} sensitive={sensitive_keyword:?} strict={strict_keyword:?}",
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("<invalid>")
+                );
+                negative_total += 1;
+                sensitive_false += usize::from(sensitive_keyword.is_some());
+                strict_false += usize::from(strict_keyword.is_some());
+            }
+            assert!(negative_total > 0, "negative matrix is empty");
+            assert!(
+                sensitive_false > 0,
+                "owner negatives no longer reproduce the primary hit"
+            );
+            assert_eq!(
+                strict_false, 0,
+                "strict precision detector accepted an owner negative"
+            );
+            println!(
+                "precision_summary sensitive={sensitive_total}/{total} strict={strict_total}/{total} owner_negative_sensitive={sensitive_false}/{negative_total} owner_negative_strict={strict_false}/{negative_total}"
             );
         }
 

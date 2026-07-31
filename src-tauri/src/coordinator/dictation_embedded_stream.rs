@@ -967,6 +967,7 @@ impl EmbeddedStreamingDictation {
                                                         );
                                                     Some(crate::wake_phrase::Match {
                                                         end_seconds,
+                                                        matched_keyword: None,
                                                     })
                                                 } else {
                                                     None
@@ -1476,6 +1477,8 @@ impl EmbeddedStreamingDictation {
                                     }
                                     Some(crate::wake_phrase::Match {
                                         end_seconds: refined_end,
+                                        matched_keyword: kws_hit
+                                            .and_then(|found| found.matched_keyword),
                                     })
                                 } else if !result.matched {
                                     let (local_absent_count, kws_absent_count, counted_kws_absent) = {
@@ -1487,7 +1490,25 @@ impl EmbeddedStreamingDictation {
                                             candidate.local_absent_count.saturating_add(1);
                                         let mut counted_kws_absent = false;
                                         if kws_hit.is_some() {
-                                            if kws_absent_counts_toward_reject(
+                                            let authoritative_full_absent =
+                                                completed_secondary_absent_is_authoritative(
+                                                    result.phrase_relation,
+                                                    result.transcript_chars,
+                                                    phrase.chars().count(),
+                                                );
+                                            if authoritative_full_absent {
+                                                candidate.kws_local_absent_count = candidate
+                                                    .kws_local_absent_count
+                                                    .max(1);
+                                                counted_kws_absent = true;
+                                                log::info!(
+                                                    "[wake-phrase] stage2 full-length Absent authoritative embedded_session_id={} transcript_chars={} phrase_chars={} first_hit_pcm_ms={:?}",
+                                                    embedded_session_id,
+                                                    result.transcript_chars,
+                                                    phrase.chars().count(),
+                                                    candidate.kws_first_hit_pcm_ms
+                                                );
+                                            } else if kws_absent_counts_toward_reject(
                                                 candidate.kws_first_hit_pcm_ms,
                                                 result.snapshot_pcm_ms,
                                             ) {
