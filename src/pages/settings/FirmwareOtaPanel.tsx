@@ -17,6 +17,7 @@ import {
 } from '../../lib/ipc';
 import {
   compareVersionish,
+  estimateFirmwareOtaTransferSpeedKibPerSec,
   evaluateFirmwareOtaPreflight,
   firmwareOtaConfirmedVersionMatches,
   firmwareOtaConfirmedVersionLooksRolledBack,
@@ -24,6 +25,7 @@ import {
   firmwareOtaRollbackVersionFromText,
   firmwareOtaSnapshotSatisfiesVersionRefreshFallback,
   firmwareOtaVersionNotConfirmedAction,
+  formatFirmwareOtaTransferSpeed,
   initialFirmwareOtaState,
   LISTENER_OTA_V1_TRANSPORT_BOUNDARY,
   validateFirmwareOtaPackage,
@@ -72,6 +74,9 @@ export function FirmwareOtaPanel({
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
   const [diagnosticStatus, setDiagnosticStatus] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
   const [progressBytes, setProgressBytes] = useState<{ sent: number; total: number } | null>(null);
+  /** Rough live transfer rate shown above the progress bar during BLE OTA. */
+  const [transferSpeedKibPerSec, setTransferSpeedKibPerSec] = useState<number | null>(null);
+  const transferSpeedSamplesRef = useRef<Array<{ tMs: number; bytes: number }>>([]);
   const otaStartInFlightRef = useRef(false);
 
   const transferActive = state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying';
@@ -274,12 +279,26 @@ export function FirmwareOtaPanel({
       setBlockers([]);
       dispatch({ type: 'startTransfer' });
       setProgressBytes({ sent: 0, total: packageForUpdate.firmwareBytes.byteLength });
+      setTransferSpeedKibPerSec(null);
+      transferSpeedSamplesRef.current = [{ tMs: performance.now(), bytes: 0 }];
       let transferResult: Awaited<ReturnType<typeof transferFirmwareOtaBle>> | null = null;
       const unlisten = await listen<{ bytesSent: number; bytesTotal: number }>('firmware-ota:progress', event => {
         const bytesTotal = Math.max(1, event.payload.bytesTotal);
         const bytesSent = Math.min(event.payload.bytesSent, bytesTotal);
         bytesSentForFailureCheck = Math.max(bytesSentForFailureCheck, bytesSent);
         setProgressBytes({ sent: bytesSent, total: bytesTotal });
+        const nowMs = performance.now();
+        const samples = transferSpeedSamplesRef.current;
+        // Overall average from transfer start (t0 @ 0 bytes) → current offset.
+        // Keep the origin sample + latest sample only; no rolling window.
+        samples.push({ tMs: nowMs, bytes: bytesSent });
+        if (samples.length > 2) {
+          samples.splice(1, samples.length - 2);
+        }
+        const speed = estimateFirmwareOtaTransferSpeedKibPerSec(samples);
+        if (speed != null) {
+          setTransferSpeedKibPerSec(speed);
+        }
         const pct = Math.round((bytesSent / bytesTotal) * 100);
         if (bytesSent >= bytesTotal) {
           dispatch({ type: 'transferComplete' });
@@ -340,6 +359,8 @@ export function FirmwareOtaPanel({
     } finally {
       otaStartInFlightRef.current = false;
       setProgressBytes(null);
+      setTransferSpeedKibPerSec(null);
+      transferSpeedSamplesRef.current = [];
     }
   };
 
@@ -520,6 +541,31 @@ export function FirmwareOtaPanel({
 
           {(state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying') && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', lineHeight: 1.4 }}>
+                  {state.userState === 'transferring'
+                    ? t('settings.recording.firmwareOtaTransferProgress', '正在发送固件...')
+                    : state.userState === 'rebooting'
+                      ? t('settings.recording.firmwareOtaFinalizeProgress', '固件已发送，正在校验并准备重启...')
+                      : t('settings.recording.firmwareOtaVerifyProgress', '正在重新连接并确认固件版本...')}
+                </div>
+                {state.userState === 'transferring' && (
+                  <span
+                    style={{ fontSize: 11, color: 'var(--ol-ink-3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
+                    title={t('settings.recording.firmwareOtaTransferSpeedHint', '约等于最近几秒的平均传输速度（协议吞吐，供参考）')}
+                  >
+                    {transferSpeedKibPerSec != null
+                      ? t(
+                          'settings.recording.firmwareOtaTransferSpeed',
+                          '平均 {{speed}} KiB/s',
+                          {
+                            speed: formatFirmwareOtaTransferSpeed(transferSpeedKibPerSec),
+                          },
+                        )
+                      : t('settings.recording.firmwareOtaTransferSpeedPending', '测速中…')}
+                  </span>
+                )}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: 1, height: 6, borderRadius: 999, overflow: 'hidden', background: 'var(--ol-control-track)' }}>
                   <div
@@ -536,13 +582,6 @@ export function FirmwareOtaPanel({
                     ? `${formatBytes(progressBytes.sent)} / ${formatBytes(progressBytes.total)}`
                     : state.userState === 'transferring' ? `${state.progress}%` : t('settings.recording.firmwareOtaFinalizingBytes', '已传完')}
                 </span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', lineHeight: 1.4 }}>
-                {state.userState === 'transferring'
-                  ? t('settings.recording.firmwareOtaTransferProgress', '正在发送固件...')
-                  : state.userState === 'rebooting'
-                    ? t('settings.recording.firmwareOtaFinalizeProgress', '固件已发送，正在校验并准备重启...')
-                    : t('settings.recording.firmwareOtaVerifyProgress', '正在重新连接并确认固件版本...')}
               </div>
             </div>
           )}

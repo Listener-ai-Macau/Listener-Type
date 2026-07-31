@@ -1732,6 +1732,22 @@ fn recovered_capsule_guard_suppresses_non_link_loss_and_repeated_reconnect() {
 }
 
 #[test]
+fn type_recovery_audio_capsule_is_armed_when_intermediate_is_suppressed_and_consumed_once() {
+    let coordinator = Coordinator::new();
+    assert!(!take_embedded_ble_type_recovery_audio_capsule(
+        &coordinator.inner
+    ));
+    arm_embedded_ble_type_recovery_audio_capsule(&coordinator.inner);
+    assert!(take_embedded_ble_type_recovery_audio_capsule(
+        &coordinator.inner
+    ));
+    assert!(
+        !take_embedded_ble_type_recovery_audio_capsule(&coordinator.inner),
+        "terminal Type-recovery audio capsule must be one-shot"
+    );
+}
+
+#[test]
 fn ota_recovery_capsule_is_consumed_once_for_the_matching_generation() {
     let coordinator = Coordinator::new();
     coordinator
@@ -2561,8 +2577,15 @@ fn ec11_type_controlled_recovery_capsule_waits_for_firmware_terminal_control_wri
         resume.contains("if emit_reconnecting_capsule")
             && resume.contains(
                 "EC11 Type-controlled recovery suppresses intermediate capsule until firmware Type-ready terminal confirmation"
-            ),
-        "the notify-reopen path must retain the same terminal-only UI boundary"
+            )
+            && resume.contains("arm_embedded_ble_type_recovery_audio_capsule"),
+        "the notify-reopen path must suppress intermediate UI and arm the terminal grey audio-recovered capsule"
+    );
+    assert!(
+        source.contains("take_embedded_ble_type_recovery_audio_capsule")
+            && source.contains("type_recovery_recovered")
+            && source.contains("AudioRecovered"),
+        "notify ready must consume the armed Type-recovery capsule as grey Listener 音频已恢复"
     );
 
     let embedded_ble_source = include_str!("embedded_ble.rs");
@@ -3025,23 +3048,58 @@ fn embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path() {
         body.contains("!pairing_confirmation_hold_active"),
         "Type-observed fast recovery must not steal back connections while a manual/hardware pairing hold is active"
     );
-    let pairing_only_cleanup_index = body
-        .find("unpair_listener_pairing_for_known_addresses")
+    assert!(
+        body.contains("recover_listener_pairing_after_type_recovery_for_addresses")
+            && body.contains("&observed_recovery_addresses")
+            && body.contains("&pairing_recovery_addresses"),
+        "Type-controlled recovery must pass exact cleanup and fresh pairing addresses into one atomic pairing transaction"
+    );
+    assert!(
+        body.contains("pairing_maintenance_active && !type_controlled_recovery")
+            && body.contains("Type-controlled recovery will wait for active pairing/cache maintenance inside the atomic pairing transaction"),
+        "an in-flight maintenance owner must be awaited by Type-controlled recovery instead of returning RetrySoon to the stale GATT ladder"
+    );
+
+    let pairing_source = include_str!("embedded_ble.rs");
+    let atomic_start = pairing_source
+        .find("fn recover_listener_pairing_after_type_recovery_for_addresses_inner")
+        .expect("atomic Type recovery helper should exist");
+    let atomic_end = pairing_source[atomic_start..]
+        .find("fn pairing_prompt_result_ready_for_atomic_recovery")
+        .map(|offset| atomic_start + offset)
+        .expect("atomic Type recovery helper boundary should exist");
+    let atomic = &pairing_source[atomic_start..atomic_end];
+    let ownership_index = atomic
+        .find("begin_listener_pairing_maintenance_after_wait")
+        .expect("atomic recovery must acquire pairing maintenance ownership");
+    let pairing_only_cleanup_index = atomic
+        .find("unpair_listener_devices_for_known_addresses_inner")
         .expect("fresh recovery addresses must take the pairing-only cleanup path");
-    let direct_pairasync_index = body
-        .find("let pairing = crate::embedded_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses")
+    let direct_pairasync_index = atomic
+        .find("let pairing = prompt_listener_pairing_inner")
         .expect("Type-controlled recovery must PairAsync using the fresh observed address");
-    let fallback_marker_index = body
-        .find("fresh-address direct PairAsync did not complete after pairing-only cleanup")
+    let fallback_marker_index = atomic
+        .find("fresh-address PairAsync did not complete")
         .expect("exact cache cleanup must remain an explicit PairAsync-failure fallback");
-    let fallback_cleanup_index = body
-        .find("let fallback_unpair = crate::embedded_ble::clear_listener_bthport_cache_for_known_addresses")
+    let fallback_cleanup_index = atomic
+        .find("clear_listener_bthport_cache_for_known_addresses_inner")
         .expect("PairAsync failure must retain the exact-cache fallback");
     assert!(
-        pairing_only_cleanup_index < direct_pairasync_index
+        ownership_index < pairing_only_cleanup_index
+            && pairing_only_cleanup_index < direct_pairasync_index
             && direct_pairasync_index < fallback_marker_index
             && fallback_marker_index < fallback_cleanup_index,
-        "fresh recovery addresses must run pairing-only cleanup and direct PairAsync before only an exact BTHPORT cache retry; full PnP discovery must stay out of the user recovery path"
+        "one maintenance owner must span pairing-only cleanup, direct PairAsync, and the exact-cache fallback"
+    );
+    assert!(
+        atomic
+            .matches("begin_listener_pairing_maintenance_after_wait")
+            .count()
+            == 1
+            && atomic.matches("prompt_listener_pairing_inner(").count() == 2
+            && !atomic.contains("unpair_listener_pairing_for_known_addresses(")
+            && !atomic.contains("clear_listener_bthport_cache_for_known_addresses("),
+        "atomic recovery must not release ownership through separately guarded public cleanup or pairing entrypoints"
     );
     assert!(
         body.contains("background Type controlled-recovery PairAsync paired; reopening notify immediately for GATT/notify validation"),
@@ -3072,9 +3130,10 @@ fn embedded_ble_observed_recovery_extracts_known_address_for_fast_cleanup() {
     let body = &source[start..end];
     assert!(
         body.contains("recovery_pairing_addresses_for_cleanup")
-            && body.contains("unpair_listener_devices_for_known_addresses")
+            && body.contains("recover_listener_pairing_after_type_recovery_for_addresses")
+            && body.contains("&observed_recovery_addresses")
             && !body.contains("unpair_listener_devices_for_names(&cleanup_names)"),
-        "Type-observed recovery must carry either its scanned or error-embedded address directly into known-address cleanup instead of doing the slow full-name cleanup"
+        "Type-observed recovery must carry either its scanned or error-embedded address directly into the atomic known-address recovery transaction instead of doing the slow full-name cleanup"
     );
 }
 

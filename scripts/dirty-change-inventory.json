@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-30",
-  "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.3 release consolidation is in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
+  "updated_at": "2026-07-31",
+  "purpose": "Classifies every current dirty Listener Type/Firmware path while the 1.0.4 recording and wake refinement is in progress. Release gates still require clean worktrees; this inventory prevents mystery dirty changes during focused repair/review.",
   "entries": [
     {
       "id": "repo_hygiene_and_review_traceability",
@@ -10,20 +10,25 @@
       "state": "tooling_guard_validated",
       "evidence": [
         "npm run check:preproduction-bench-contract PASS",
+        "node scripts/check-ota-transfer-speed-log.test.mjs PASS",
+        "hardware-ota/speed-check-60kib.json PASS at 68.79 KiB/s with zero offset recovery",
         "npm run check:repo-hygiene fails on current dirty tree as intended",
         "Firmware tools/release_check.ps1 fails on current dirty tree as intended"
       ],
       "patterns": [
         "package.json",
         "scripts/release-check.mjs",
-      "scripts/check-repo-hygiene.mjs",
-      "scripts/check-brand-residue.mjs",
-      "scripts/check-dirty-change-inventory.mjs",
+        "scripts/check-repo-hygiene.mjs",
+        "scripts/check-brand-residue.mjs",
+        "scripts/check-dirty-change-inventory.mjs",
+        "scripts/check-ota-transfer-speed-log.mjs",
+        "scripts/check-ota-transfer-speed-log.test.mjs",
         "scripts/check-preproduction-operator-note-triage.mjs",
         "scripts/check-regression-guard-commits.mjs",
         "scripts/dirty-change-inventory.json",
         "scripts/regression-guard-commits.json",
-        "scripts/windows-listener-preproduction-human-review.ps1"
+        "scripts/windows-listener-preproduction-human-review.ps1",
+        "AGENTS.md"
       ]
     },
     {
@@ -224,6 +229,8 @@
         "src-tauri/src/speaker_verification.rs",
         "src-tauri/src/wake_phrase.rs",
         "src/lib/firmwareOta.test.ts",
+        "src/lib/firmwareOta.ts",
+        "src/pages/settings/FirmwareOtaPanel.tsx",
         "src/styles/global.css",
         "third_party/denzic-platform"
       ]
@@ -240,12 +247,20 @@
       "patterns": [
         "CMakeLists.txt",
         "VERSION",
+        "components/voice_recording_control/include/voice_recording_control.h",
         "components/voice_recording_control/voice_recording_control.c",
+        "ports/esp32/audio_capture/CMakeLists.txt",
         "ports/esp32/audio_capture/audio_capture_esp32.c",
+        "ports/esp32/audio_capture/pack_embedded_vadnet.py",
         "ports/esp32/ble_audio_stream/include/ble_audio_stream.h",
         "protocols/listener_proto/include/listener_audio_proto.h",
         "tools/package_factory_firmware.ps1",
         "tools/package_ota_firmware.ps1",
+        "tools/verify_pdm_afe_scheduler_static.py",
+        "tools/verify_pdm_afe_stop_drain_static.py",
+        "tools/verify_pdm_final_limiter.py",
+        "tools/verify_pdm_vad_noise_gate.py",
+        "tools/verify_voice_activation_airborne.py",
         "tools/verify_voice_recording_control_fsm.py"
       ]
     },
@@ -264,10 +279,48 @@
       "patterns": [
         "docs/listener_product_requirements.md",
         "docs/goals/20260730-wake-sensitivity-boundary.*",
+        "docs/goals/20260730-ec11-pair-atomic-recovery.evidence.md",
         "src-tauri/src/coordinator/dictation_embedded_stream.rs",
         "src-tauri/src/coordinator/dictation_tests.rs",
         "src-tauri/src/coordinator/dictation_wake_polish.rs",
-        "src-tauri/src/embedded_ble/windows_ble/mod.rs"
+        "src-tauri/src/embedded_ble/windows_ble/mod.rs",
+        "tools/generate_wake_104_matrix.py",
+        "tools/verify_wake_104_matrix.py"
+      ]
+    },
+    {
+      "id": "listener_1_0_4_type_ble_recovery_retained_work",
+      "repo": "type",
+      "item": "Retained Type BLE ownership, pairing recovery, runtime and focused regression work present before the recording refinement",
+      "state": "machine_validated_pending_final_human_review",
+      "evidence": [
+        "docs/goals/20260730-ec11-pair-atomic-recovery.evidence.md",
+        "Installed 1.0.4 Program Files Type reached notify ready and helper ready after same-version MSI replacement"
+      ],
+      "patterns": [
+        "src-tauri/src/coordinator/embedded_ble_runtime.rs",
+        "src-tauri/src/coordinator_tests.rs",
+        "src-tauri/src/embedded_ble/mod.rs",
+        "src-tauri/src/embedded_ble/windows_ble/pairing.rs",
+        "src-tauri/src/embedded_ble/windows_ble_tests.rs"
+      ]
+    },
+    {
+      "id": "listener_1_0_4_firmware_validation_and_board_contracts",
+      "repo": "firmware",
+      "item": "Firmware validation entrypoints, board/static contracts, capture harness tests, and repository instructions",
+      "state": "machine_validated_pending_final_human_review",
+      "evidence": [
+        "Firmware focused PDM/VAD/limiter/control tests PASS on 2026-07-31",
+        "Current 1.0.4 firmware build and COM3 flash PASS"
+      ],
+      "patterns": [
+        "AGENTS.md",
+        "tools/capture_audio_ble_wav.ps1",
+        "tools/test_capture_audio_ble_wav.py",
+        "tools/verify_charging_awake_policy_static.ps1",
+        "tools/verify_device_settings_static.ps1",
+        "tools/verify_v2_board_profile_static.ps1"
       ]
     }
   ]

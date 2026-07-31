@@ -116,9 +116,10 @@ pub fn get_settings(coord: CoordinatorState<'_>) -> UserPreferences {
 
 #[tauri::command]
 pub fn get_voiceprint_status(
-    _coord: CoordinatorState<'_>,
+    coord: CoordinatorState<'_>,
 ) -> crate::speaker_verification::VoiceprintStatus {
-    crate::speaker_verification::status()
+    let wake_phrase = coord.prefs().get().voice_wake_phrase;
+    crate::speaker_verification::status_for_phrase(&wake_phrase)
 }
 
 #[tauri::command]
@@ -134,10 +135,16 @@ pub async fn start_voiceprint_enrollment(
 }
 
 #[tauri::command]
-pub async fn delete_voiceprint() -> Result<crate::speaker_verification::VoiceprintStatus, String> {
-    tauri::async_runtime::spawn_blocking(crate::speaker_verification::delete_template)
-        .await
-        .map_err(|err| format!("删除声纹任务失败: {err}"))?
+pub async fn delete_voiceprint(
+    coord: CoordinatorState<'_>,
+) -> Result<crate::speaker_verification::VoiceprintStatus, String> {
+    let wake_phrase = coord.prefs().get().voice_wake_phrase;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::speaker_verification::delete_template()?;
+        Ok(crate::speaker_verification::status_for_phrase(&wake_phrase))
+    })
+    .await
+    .map_err(|err| format!("删除声纹任务失败: {err}"))?
 }
 
 #[tauri::command]
@@ -482,6 +489,20 @@ pub fn set_settings(
     sync_style_pack_preferences(&mut prefs, &packs);
     let _settings_guard = settings_update_lock().lock();
     let previous_prefs = coord.prefs().get();
+    let previous_wake_phrase =
+        crate::wake_phrase::normalize_configured_phrase(&previous_prefs.voice_wake_phrase)?;
+    let next_wake_phrase =
+        crate::wake_phrase::normalize_configured_phrase(&prefs.voice_wake_phrase)?;
+    let wake_phrase_changed = previous_wake_phrase != next_wake_phrase;
+    prefs.voice_wake_phrase = next_wake_phrase.clone();
+    if wake_phrase_changed {
+        #[cfg(target_os = "windows")]
+        crate::wake_phrase::prepare(&next_wake_phrase)?;
+        crate::speaker_verification::invalidate_for_phrase_change(
+            &previous_wake_phrase,
+            &next_wake_phrase,
+        )?;
+    }
     if prefs.dictation_input_source != previous_prefs.dictation_input_source {
         prefs.dictation_input_source_user_overridden = true;
     }

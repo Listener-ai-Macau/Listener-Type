@@ -80,6 +80,33 @@ fn normalized_commands_source() -> String {
 }
 
 #[test]
+fn wake_phrase_change_is_prepared_and_invalidated_before_persistence() {
+    let source = normalized_commands_source();
+    let start = source
+        .find("pub fn set_settings")
+        .expect("set_settings command must exist");
+    let end = source[start..]
+        .find("fn refresh_tray_menu_async")
+        .map(|offset| start + offset)
+        .expect("set_settings command boundary must exist");
+    let body = &source[start..end];
+    let prepare = body
+        .find("crate::wake_phrase::prepare(&next_wake_phrase)")
+        .expect("changed wake phrase must be prewarmed");
+    let invalidate = body
+        .find("crate::speaker_verification::invalidate_for_phrase_change")
+        .expect("changed wake phrase must invalidate the old voiceprint");
+    let persist = body
+        .find("persist_settings(&*coord, prefs.clone())")
+        .expect("normalized wake phrase must be persisted");
+
+    assert!(
+        prepare < invalidate && invalidate < persist,
+        "wake phrase changes must prewarm first, invalidate the old voiceprint second, and persist last"
+    );
+}
+
+#[test]
 fn ota_observability_handoff_precedes_background_listener_pause() {
     let source = normalized_commands_source();
     // mod.rs may re-export the symbol; use the real implementation body in firmware.rs.

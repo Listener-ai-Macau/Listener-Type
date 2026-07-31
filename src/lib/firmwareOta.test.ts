@@ -4,6 +4,7 @@ import {
   FIRMWARE_OTA_REQUIRED_PUBLIC_STATES,
   LISTENER_OTA_V1_TRANSPORT_BOUNDARY,
   compareVersionish,
+  estimateFirmwareOtaTransferSpeedKibPerSec,
   evaluateFirmwareOtaPreflight,
   firmwareOtaConfirmedVersionMatches,
   firmwareOtaConfirmedVersionLooksRolledBack,
@@ -12,6 +13,7 @@ import {
   firmwareOtaRollbackVersionFromText,
   firmwareOtaSnapshotSatisfiesVersionRefreshFallback,
   firmwareOtaVersionNotConfirmedAction,
+  formatFirmwareOtaTransferSpeed,
   initialFirmwareOtaState,
   validateFirmwareOtaPackage,
   type FirmwareOtaManifest,
@@ -793,4 +795,37 @@ for (const expectedTimingField of ['transferElapsedMs', 'confirmElapsedMs', 'tot
     ipcSource.includes(expectedTimingField),
     `firmware OTA IPC type must expose ${expectedTimingField}`,
   );
+}
+
+{
+  assert.equal(estimateFirmwareOtaTransferSpeedKibPerSec([{ tMs: 0, bytes: 0 }]), null);
+  assert.equal(
+    estimateFirmwareOtaTransferSpeedKibPerSec([
+      { tMs: 0, bytes: 0 },
+      { tMs: 200, bytes: 10_000 },
+    ]),
+    null,
+    'too short window must not report speed',
+  );
+  const speed = estimateFirmwareOtaTransferSpeedKibPerSec([
+    { tMs: 0, bytes: 0 },
+    { tMs: 1000, bytes: 60 * 1024 },
+  ]);
+  assert.ok(speed != null);
+  assert.ok(Math.abs(speed - 60) < 0.01);
+  // Overall average: mid-burst samples must not dominate; first→last only.
+  const overall = estimateFirmwareOtaTransferSpeedKibPerSec([
+    { tMs: 0, bytes: 0 },
+    { tMs: 1000, bytes: 10 * 1024 },
+    { tMs: 2000, bytes: 20 * 1024 },
+    { tMs: 5000, bytes: 100 * 1024 },
+  ]);
+  assert.ok(overall != null);
+  assert.ok(
+    Math.abs(overall - 20) < 0.01,
+    `expected overall 20 KiB/s from 100 KiB / 5 s, got ${overall}`,
+  );
+  assert.equal(formatFirmwareOtaTransferSpeed(60.04), '60.0');
+  assert.equal(formatFirmwareOtaTransferSpeed(120.4), '120');
+  console.log('ota transfer speed helpers: ok');
 }

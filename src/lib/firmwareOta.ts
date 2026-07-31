@@ -604,3 +604,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
+
+/**
+ * Overall OTA transfer average rate from the first sample (transfer start) to the
+ * latest sample. Not a rolling/segment window — owner contract is total average.
+ * Null until enough elapsed time and positive byte progress.
+ */
+export function estimateFirmwareOtaTransferSpeedKibPerSec(
+  samples: ReadonlyArray<{ tMs: number; bytes: number }>,
+): number | null {
+  if (samples.length < 2) return null;
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const elapsedMs = last.tMs - first.tMs;
+  const deltaBytes = last.bytes - first.bytes;
+  if (elapsedMs < 400 || deltaBytes <= 0) return null;
+  return (deltaBytes / 1024) / (elapsedMs / 1000);
+}
+
+export function formatFirmwareOtaTransferSpeed(kibPerSec: number): string {
+  if (!Number.isFinite(kibPerSec) || kibPerSec <= 0) return '—';
+  if (kibPerSec >= 100) return kibPerSec.toFixed(0);
+  return kibPerSec.toFixed(1);
+}

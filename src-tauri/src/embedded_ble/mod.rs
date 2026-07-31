@@ -970,6 +970,19 @@ pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cac
 }
 
 #[cfg(target_os = "windows")]
+pub fn recover_listener_pairing_after_type_recovery_for_addresses(
+    expected_name: Option<&str>,
+    cleanup_addresses: &[u64],
+    pairing_addresses: &[u64],
+) -> BleDevicePairingPromptResult {
+    windows_ble::recover_listener_pairing_after_type_recovery_for_addresses(
+        expected_name,
+        cleanup_addresses,
+        pairing_addresses,
+    )
+}
+
+#[cfg(target_os = "windows")]
 pub fn query_listener_pairing(expected_name: Option<&str>) -> BleDevicePairingPromptResult {
     windows_ble::query_listener_pairing(expected_name)
 }
@@ -1490,6 +1503,15 @@ pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cac
 pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses(
     _expected_name: Option<&str>,
     _observed_recovery_addresses: &[u64],
+) -> BleDevicePairingPromptResult {
+    prompt_listener_pairing_after_type_recovery_without_user_prompt(_expected_name)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn recover_listener_pairing_after_type_recovery_for_addresses(
+    _expected_name: Option<&str>,
+    _cleanup_addresses: &[u64],
+    _pairing_addresses: &[u64],
 ) -> BleDevicePairingPromptResult {
     prompt_listener_pairing_after_type_recovery_without_user_prompt(_expected_name)
 }

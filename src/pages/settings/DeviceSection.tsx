@@ -328,6 +328,9 @@ function DeviceFirmwareSettingsCard() {
   const [message, setMessage] = useState('');
   const [voiceprint, setVoiceprint] = useState<VoiceprintStatus | null>(null);
   const [voiceprintBusy, setVoiceprintBusy] = useState(false);
+  const [wakePhraseDraft, setWakePhraseDraft] = useState('');
+  const [wakePhraseBusy, setWakePhraseBusy] = useState(false);
+  const [wakePhraseError, setWakePhraseError] = useState<string | null>(null);
 
   const refreshVoiceprint = async () => {
     try {
@@ -346,6 +349,33 @@ function DeviceFirmwareSettingsCard() {
     const timer = window.setInterval(() => void refreshVoiceprint(), 1200);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (prefs) {
+      setWakePhraseDraft(prefs.voiceWakePhrase);
+    }
+  }, [prefs?.voiceWakePhrase]);
+
+  const voiceprintCaptureActive = ['preparing', 'armed', 'capturing', 'processing']
+    .includes(voiceprint?.state ?? '');
+
+  const commitWakePhrase = async () => {
+    if (!prefs || wakePhraseBusy || voiceprintCaptureActive) return;
+    const normalizedPhrase = wakePhraseDraft.replace(/\s/g, '');
+    setWakePhraseBusy(true);
+    setWakePhraseError(null);
+    try {
+      await savePrefs(current => ({
+        ...current,
+        voiceWakePhrase: normalizedPhrase,
+      }));
+      await refreshVoiceprint();
+    } catch (error) {
+      setWakePhraseError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setWakePhraseBusy(false);
+    }
+  };
 
   const enrollVoiceprint = async () => {
     setVoiceprintBusy(true);
@@ -566,25 +596,51 @@ function DeviceFirmwareSettingsCard() {
             </SettingRow>
             <SettingRow
               label={t('settings.recording.wakePhraseLabel', '唤醒词')}
-              desc={t('settings.recording.wakePhraseDesc', '只有本人说出这个词后才开始录音。')}
+              desc={t('settings.recording.wakePhraseDesc', '可自定义中文唤醒词；修改后需要重新录制声纹。')}
             >
               <div className="ol-wake-phrase-control">
-                <input
-                  value={prefs.voiceWakePhrase}
-                  onChange={event => savePrefs(current => ({
-                    ...current,
-                    voiceWakePhrase: event.target.value,
-                  }))}
-                  maxLength={16}
-                  aria-label={t('settings.recording.wakePhraseLabel', '唤醒词')}
-                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-                />
+                <div className="ol-wake-phrase-editor">
+                  <input
+                    value={wakePhraseDraft}
+                    onChange={event => {
+                      setWakePhraseDraft(event.target.value);
+                      setWakePhraseError(null);
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void commitWakePhrase();
+                      }
+                    }}
+                    maxLength={16}
+                    disabled={controlsDisabled || wakePhraseBusy || voiceprintCaptureActive}
+                    aria-label={t('settings.recording.wakePhraseLabel', '唤醒词')}
+                    style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                  />
+                  <Btn
+                    variant="blue"
+                    size="sm"
+                    icon="check"
+                    disabled={
+                      controlsDisabled
+                      || wakePhraseBusy
+                      || voiceprintCaptureActive
+                      || wakePhraseDraft.replace(/\s/g, '') === prefs.voiceWakePhrase
+                    }
+                    onClick={() => void commitWakePhrase()}
+                    style={{ justifyContent: 'center', whiteSpace: 'nowrap' }}
+                  >
+                    {wakePhraseBusy
+                      ? t('settings.recording.wakePhraseApplying', '应用中')
+                      : t('settings.recording.wakePhraseApply', '应用')}
+                  </Btn>
+                </div>
                 <div className="ol-voiceprint-actions">
                   <Btn
                     variant={voiceprint?.enrolled ? 'ghost' : 'blue'}
                     size="sm"
                     icon="mic"
-                    disabled={voiceprintBusy || !voiceprint?.available || ['preparing', 'armed', 'capturing', 'processing'].includes(voiceprint?.state ?? '')}
+                    disabled={voiceprintBusy || !voiceprint?.available || voiceprintCaptureActive || wakePhraseDraft.replace(/\s/g, '') !== prefs.voiceWakePhrase}
                     onClick={() => void enrollVoiceprint()}
                     style={{ justifyContent: 'center' }}
                   >
@@ -594,11 +650,11 @@ function DeviceFirmwareSettingsCard() {
                         ? t('settings.recording.voiceprintCapturing', { phrase: prefs.voiceWakePhrase })
                         : voiceprint?.state === 'processing'
                           ? t('settings.recording.voiceprintProcessing', '校验中')
-                          : voiceprint?.enrolled
+                          : voiceprint?.enrolled || voiceprint?.requiresReenrollment
                             ? t('settings.recording.voiceprintRedo', '重新录制')
                             : t('settings.recording.voiceprintEnroll', '录制声纹')}
                   </Btn>
-                  {voiceprint?.enrolled && (
+                  {(voiceprint?.enrolled || voiceprint?.requiresReenrollment) && (
                     <Btn
                       variant="ghost"
                       size="sm"
@@ -611,6 +667,16 @@ function DeviceFirmwareSettingsCard() {
                     </Btn>
                   )}
                 </div>
+                <div className={`ol-voiceprint-status${voiceprint?.requiresReenrollment ? ' is-warning' : ''}`}>
+                  {voiceprint?.requiresReenrollment
+                    ? t('settings.recording.voiceprintReenrollDesc', '唤醒词已更换。重新录制前，任何人说对新唤醒词都可以启动。')
+                    : voiceprint?.enrolled
+                      ? t('settings.recording.voiceprintReadyDesc', '已启用本机声纹校验；旁人说话不会进入转写。')
+                      : t('settings.recording.voiceprintOpenGateDesc', '未录制声纹：任何人说对当前唤醒词都可以启动。')}
+                </div>
+                {wakePhraseError && (
+                  <div className="ol-voiceprint-status is-error">{wakePhraseError}</div>
+                )}
               </div>
             </SettingRow>
             {voiceprint?.error && (

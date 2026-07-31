@@ -3,6 +3,30 @@ pub struct Match {
     pub end_seconds: f32,
 }
 
+pub fn normalize_configured_phrase(phrase: &str) -> Result<String, String> {
+    let normalized = phrase
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
+    let count = normalized.chars().count();
+    if !(1..=16).contains(&count) {
+        return Err("唤醒词应为 1 到 16 个汉字".to_string());
+    }
+    let is_cjk = |ch: char| {
+        matches!(
+            ch,
+            '\u{3400}'..='\u{4dbf}'
+                | '\u{4e00}'..='\u{9fff}'
+                | '\u{f900}'..='\u{faff}'
+                | '\u{20000}'..='\u{2fa1f}'
+        )
+    };
+    if !normalized.chars().all(is_cjk) {
+        return Err("当前唤醒词仅支持中文汉字".to_string());
+    }
+    Ok(normalized)
+}
+
 const MAX_KEYWORD_DETECTION_LOOKBACK_SECONDS: f32 = 0.8;
 
 fn absolute_keyword_end_seconds(
@@ -33,6 +57,22 @@ pub use denzic_voice_activation_v1_core::{local_transcript_phrase_relation, Loca
 
 #[cfg(test)]
 mod phrase_confirmation_tests {
+    #[test]
+    fn configured_phrase_is_normalized_and_rejects_partial_or_non_chinese_input() {
+        assert_eq!(
+            super::normalize_configured_phrase(" 小爱 同学 ").unwrap(),
+            "小爱同学"
+        );
+        assert_eq!(
+            super::normalize_configured_phrase("帮我记录").unwrap(),
+            "帮我记录"
+        );
+        assert!(super::normalize_configured_phrase("").is_err());
+        assert!(super::normalize_configured_phrase("hello").is_err());
+        assert!(super::normalize_configured_phrase("小爱1号").is_err());
+        assert!(super::normalize_configured_phrase(&"啊".repeat(17)).is_err());
+    }
+
     #[test]
     fn keyword_boundary_is_absolute_across_sherpa_silence_segments() {
         assert_eq!(
@@ -138,18 +178,15 @@ mod platform {
     const JOINER: &str = "joiner-epoch-13-avg-2-chunk-8-left-64.int8.onnx";
     const TOKENS: &str = "tokens.txt";
     const SAMPLE_RATE: i32 = 16_000;
-    // 0.4s warmup (was 0.8s): short "开始录音" often finishes near 0.8s; long
-    // warmup delayed first KWS feed and locked gain on quiet pre-roll only.
-    const STREAM_GAIN_WARMUP_BYTES: usize = SAMPLE_RATE as usize * 2 * 2 / 5;
-    /// Floor so a transient loud spike in warmup cannot pin gain too low for the
-    /// later wake phrase (owner intermittent miss on device candidates).
-    const STREAM_MIN_GAIN: f32 = 8.0;
+    const HOST_LIMITER_PEAK: f32 = 0.707_945_76;
     const FINAL_PADDING_SAMPLES: usize = SAMPLE_RATE as usize;
     const CONTINUOUS_SPEECH_TRAILING_BLANKS: i32 = 0;
     const KEYWORD_SCORE: f32 = 1.5;
     const KEYWORD_THRESHOLD: f32 = 0.25;
-    /// Product-sensitive live defaults. Raised for everyday recall after owner
-    /// reports misses at 3.0/0.08 on real device audio (2026-07-27).
+    /// Product baseline restored toward 1.0.3-era stability (3.5/0.05). The
+    /// 4.5/0.03 thrash raised false windows and still missed mid-distance speech
+    /// (owner: 比 1.0.3 还差). Recall under noise relies on multi-window offline
+    /// cascade, not an ultra-sensitive live threshold.
     const BOOTSTRAP_KEYWORD_SCORE: f32 = 3.5;
     const BOOTSTRAP_KEYWORD_THRESHOLD: f32 = 0.05;
     const CALIBRATION_FILE: &str = "calibration.json";
@@ -163,13 +200,15 @@ mod platform {
         (3.0, 0.08),
         (3.5, 0.05),
         (4.0, 0.04),
+        (4.0, 0.03),
     ];
-    /// Offline second-pass cascade when streaming KWS misses (full-buffer gain).
-    /// Keep within product-sensitive bounds — 4.5/0.03 recovered ambient speech as
-    ///「开始录音」and opened dead 0.6s host dictation sessions (owner: unusable).
+    /// Offline second-pass + multi-window (full / first / mid / last 2.5s).
+    /// Keep ladder near product bootstrap — do not live at 4.5/0.03.
     const RECALL_CASCADE: &[(f32, f32)] = &[
         (BOOTSTRAP_KEYWORD_SCORE, BOOTSTRAP_KEYWORD_THRESHOLD),
-        (4.0, 0.05),
+        (4.0, 0.04),
+        (4.0, 0.03),
+        (3.0, 0.08),
     ];
 
     #[repr(C)]
@@ -302,8 +341,9 @@ mod platform {
     // Offline recall and strict in-session checks use different spotter
     // configurations. A single cache slot made those checks evict the sensitive
     // live runtime, so the next idle wake intermittently paid a 1-2s model load.
-    static LIVE_CACHE: Lazy<Mutex<Option<RuntimeCacheEntry>>> = Lazy::new(|| Mutex::new(None));
-    static AUXILIARY_CACHE: Lazy<Mutex<Option<RuntimeCacheEntry>>> = Lazy::new(|| Mutex::new(None));
+    static LIVE_CACHE: Lazy<Mutex<Vec<RuntimeCacheEntry>>> = Lazy::new(|| Mutex::new(Vec::new()));
+    static AUXILIARY_CACHE: Lazy<Mutex<Vec<RuntimeCacheEntry>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
 
     /// Live KWS always uses the product-sensitive bootstrap (score 3.0 / threshold 0.08).
     ///
@@ -334,8 +374,8 @@ mod platform {
     }
 
     fn clear_runtime_cache() {
-        *LIVE_CACHE.lock() = None;
-        *AUXILIARY_CACHE.lock() = None;
+        LIVE_CACHE.lock().clear();
+        AUXILIARY_CACHE.lock().clear();
     }
 
     fn calibration_path() -> Result<PathBuf, String> {
@@ -509,10 +549,7 @@ mod platform {
         threshold: f32,
         emit_variants: bool,
     ) -> Result<String, String> {
-        let phrase = phrase.trim().replace(char::is_whitespace, "");
-        if phrase.is_empty() || phrase.chars().count() > 16 {
-            return Err("唤醒词应为 1 到 16 个汉字".into());
-        }
+        let phrase = super::normalize_configured_phrase(phrase)?;
         let mut keywords = vec![
             keyword_entry(&phrase, &phrase, score, threshold, true)?,
             keyword_entry(&phrase, &phrase, score, threshold, false)?,
@@ -556,17 +593,15 @@ mod platform {
     }
 
     fn load_cached_runtime(
-        cache: &Mutex<Option<RuntimeCacheEntry>>,
+        cache: &Mutex<Vec<RuntimeCacheEntry>>,
         phrase: &str,
         score: f32,
         threshold: f32,
         emit_variants: bool,
     ) -> Result<Arc<Runtime>, String> {
         let key = RuntimeCacheKey::new(phrase, score, threshold, emit_variants);
-        if let Some(entry) = cache.lock().as_ref() {
-            if entry.key == key {
-                return Ok(Arc::clone(&entry.runtime));
-            }
+        if let Some(entry) = cache.lock().iter().find(|entry| entry.key == key) {
+            return Ok(Arc::clone(&entry.runtime));
         }
         let model = model_root()?;
         let dll_root = model
@@ -665,7 +700,7 @@ mod platform {
                 destroy_stream,
                 destroy_spotter,
             });
-            *cache.lock() = Some(RuntimeCacheEntry {
+            cache.lock().push(RuntimeCacheEntry {
                 key,
                 runtime: Arc::clone(&runtime),
             });
@@ -679,28 +714,21 @@ mod platform {
     }
 
     fn normalization_gain(pcm: &[u8]) -> f32 {
-        let mut absolute = pcm
+        let peak = pcm
             .chunks_exact(2)
             .map(|value| i16::from_le_bytes([value[0], value[1]]).unsigned_abs() as f32 / 32768.0)
-            .collect::<Vec<_>>();
-        absolute.sort_by(f32::total_cmp);
-        let reference = if absolute.is_empty() {
-            0.0
-        } else {
-            absolute[(absolute.len() * 95 / 100).min(absolute.len() - 1)]
-        };
-        let gain = if reference > f32::EPSILON {
-            (0.65 / reference).clamp(1.0, 48.0)
+            .fold(0.0f32, f32::max);
+        if peak > HOST_LIMITER_PEAK {
+            HOST_LIMITER_PEAK / peak
         } else {
             1.0
-        };
-        gain
+        }
     }
 
-    /// PCM16 with full-buffer gain for local paraformer wake confirmation.
-    /// Streaming candidates are often too quiet for ExactStart without this.
-    pub fn gain_normalized_pcm16(pcm: &[u8]) -> Vec<u8> {
-        let gain = normalization_gain(pcm).max(STREAM_MIN_GAIN);
+    /// Host-side safety limiter for local confirmation. Firmware AFE owns AGC;
+    /// this path may attenuate an over-peak block but must never boost it.
+    pub fn limit_pcm16_for_confirmation(pcm: &[u8]) -> Vec<u8> {
+        let gain = normalization_gain(pcm);
         let mut out = Vec::with_capacity(pcm.len());
         for sample in samples_with_gain(pcm, gain) {
             let q = (sample * 32767.0).clamp(-32768.0, 32767.0) as i16;
@@ -724,7 +752,6 @@ mod platform {
 
     #[derive(Default)]
     struct StreamingNormalizer {
-        warmup: Vec<u8>,
         gain: Option<f32>,
         accepted_bytes: usize,
         emitted_bytes: usize,
@@ -736,44 +763,13 @@ mod platform {
                 return Err("唤醒词 PCM16 数据长度无效".into());
             }
             self.accepted_bytes = self.accepted_bytes.saturating_add(pcm.len());
-            if let Some(gain) = self.gain {
-                // Keep one gain for the whole candidate. Recomputing it from each
-                // transport chunk makes wake detection depend on BLE packet timing.
-                self.emitted_bytes = self.emitted_bytes.saturating_add(pcm.len());
-                return Ok(samples_with_gain(pcm, gain));
-            }
-
-            let needed = STREAM_GAIN_WARMUP_BYTES.saturating_sub(self.warmup.len());
-            let split = needed.min(pcm.len());
-            self.warmup.extend_from_slice(&pcm[..split]);
-            if self.warmup.len() < STREAM_GAIN_WARMUP_BYTES {
-                return Ok(Vec::new());
-            }
-
-            let gain = normalization_gain(&self.warmup).max(STREAM_MIN_GAIN);
-            self.gain = Some(gain);
-            let mut samples = samples_with_gain(&self.warmup, gain);
-            self.emitted_bytes = self.emitted_bytes.saturating_add(self.warmup.len());
-            self.warmup.clear();
-            if split < pcm.len() {
-                samples.extend(samples_with_gain(&pcm[split..], gain));
-                self.emitted_bytes = self
-                    .emitted_bytes
-                    .saturating_add(pcm.len().saturating_sub(split));
-            }
-            Ok(samples)
+            self.emitted_bytes = self.emitted_bytes.saturating_add(pcm.len());
+            self.gain = Some(1.0);
+            Ok(samples_with_gain(pcm, 1.0))
         }
 
         fn finish(&mut self) -> Vec<f32> {
-            if self.warmup.is_empty() {
-                return Vec::new();
-            }
-            let gain = normalization_gain(&self.warmup).max(STREAM_MIN_GAIN);
-            self.gain = Some(gain);
-            self.emitted_bytes = self.emitted_bytes.saturating_add(self.warmup.len());
-            let samples = samples_with_gain(&self.warmup, gain);
-            self.warmup.clear();
-            samples
+            Vec::new()
         }
     }
 
@@ -974,8 +970,8 @@ mod platform {
         score: f32,
         threshold: f32,
     ) -> Result<Option<Match>, String> {
-        // Full-buffer gain: streaming warmup often locks on quiet pre-roll and
-        // under-amplifies the later wake phrase on device candidates.
+        // Firmware AFE owns AGC. The host only attenuates a candidate whose
+        // incoming peak exceeds the -3 dBFS safety ceiling.
         let gain = normalization_gain(pcm);
         log::info!(
             "[wake-phrase] offline detect pcm_bytes={} gain={gain:.2} score={score:.1} threshold={threshold:.2}",
@@ -992,36 +988,64 @@ mod platform {
         detect_with_config(pcm, phrase, score, threshold)
     }
 
-    /// When the live streaming detector misses, re-run offline over the whole
-    /// candidate with full-buffer gain and a short sensitive cascade.
+    /// Offline windows for noisy rooms: whole candidate, last 2.5s, first 2.5s,
+    /// middle 2.5s. Ambient before/after the phrase used to drown whole-buffer
+    /// KWS (owner: 有干扰就不行 / not XiaoAi-like).
+    fn offline_recall_windows(pcm_len: usize) -> Vec<(usize, usize)> {
+        let mut windows = vec![(0usize, pcm_len)];
+        let window_bytes = SAMPLE_RATE as usize * 2 * 5 / 2; // 2.5 s * 16-bit mono
+        if pcm_len > window_bytes {
+            windows.push((pcm_len - window_bytes, pcm_len));
+            windows.push((0, window_bytes));
+            let mid = (pcm_len - window_bytes) / 2;
+            windows.push((mid, mid + window_bytes));
+        }
+        windows
+    }
+
+    /// When the live streaming detector misses, re-run offline over multiple
+    /// windows with the same attenuation-only limiter and a sensitive cascade.
     pub fn detect_with_recall_cascade(pcm: &[u8], phrase: &str) -> Result<Option<Match>, String> {
         if pcm.len() < SAMPLE_RATE as usize {
             return Ok(None);
         }
         let mut tried = std::collections::BTreeSet::new();
-        for &(score, threshold) in RECALL_CASCADE {
-            let key = ((score * 100.0) as i32, (threshold * 1000.0) as i32);
-            if !tried.insert(key) {
+        for (start, end) in offline_recall_windows(pcm.len()) {
+            if end <= start || end - start < SAMPLE_RATE as usize {
                 continue;
             }
-            match detect_with_config(pcm, phrase, score, threshold)? {
-                Some(found) => {
-                    log::info!(
-                        "[wake-phrase] offline recall cascade hit phrase={} score={score:.1} threshold={threshold:.2} end_s={:.3} pcm_ms={}",
-                        phrase,
-                        found.end_seconds,
-                        pcm.len() / 32
-                    );
-                    return Ok(Some(found));
+            let slice = &pcm[start..end];
+            let offset_s = start as f32 / (SAMPLE_RATE as f32 * 2.0);
+            for &(score, threshold) in RECALL_CASCADE {
+                let key = (
+                    start as i32,
+                    (score * 100.0) as i32,
+                    (threshold * 1000.0) as i32,
+                );
+                if !tried.insert(key) {
+                    continue;
                 }
-                None => {}
+                match detect_with_config(slice, phrase, score, threshold)? {
+                    Some(found) => {
+                        let end_seconds = found.end_seconds + offset_s;
+                        log::info!(
+                            "[wake-phrase] offline recall cascade hit phrase={} score={score:.1} threshold={threshold:.2} end_s={end_seconds:.3} window_start_ms={} pcm_ms={}",
+                            phrase,
+                            start / 32,
+                            pcm.len() / 32
+                        );
+                        return Ok(Some(Match { end_seconds }));
+                    }
+                    None => {}
+                }
             }
         }
         log::info!(
-            "[wake-phrase] offline recall cascade miss phrase={} pcm_ms={} configs={}",
+            "[wake-phrase] offline recall cascade miss phrase={} pcm_ms={} configs={} windows={}",
             phrase,
             pcm.len() / 32,
-            RECALL_CASCADE.len()
+            RECALL_CASCADE.len(),
+            offline_recall_windows(pcm.len()).len()
         );
         Ok(None)
     }
@@ -1107,8 +1131,7 @@ mod platform {
                 select_calibration(|score, threshold| Ok(score >= 2.0 && threshold <= 0.15))
                     .expect("calibration");
             assert_eq!(selected, Some((2.0, 0.15)));
-            // Product bootstrap (3.5/0.05) sits mid-ladder; stricter recall
-            // candidates (4.0/0.04+) remain available after it.
+            // Product bootstrap (4.0/0.04) sits on the sensitive end of the ladder.
             assert!(
                 CALIBRATION_CANDIDATES.iter().any(|&(score, threshold)| {
                     (score - BOOTSTRAP_KEYWORD_SCORE).abs() < f32::EPSILON
@@ -1134,6 +1157,7 @@ mod platform {
                 BOOTSTRAP_KEYWORD_THRESHOLD
             ));
             assert!(!RECALL_CASCADE.is_empty());
+            assert!(RECALL_CASCADE.len() >= 3);
         }
 
         #[test]
@@ -1143,7 +1167,7 @@ mod platform {
         }
 
         #[test]
-        fn quiet_device_pcm_receives_bounded_keyword_gain() {
+        fn quiet_device_pcm_is_not_boosted_by_keyword_path() {
             let pcm = (0..SAMPLE_RATE)
                 .flat_map(|index| {
                     let sample = if index % 2 == 0 { 100i16 } else { -100i16 };
@@ -1151,9 +1175,9 @@ mod platform {
                 })
                 .collect::<Vec<_>>();
             let (samples, gain) = normalized_kws_samples(&pcm);
-            assert_eq!(gain, 48.0);
+            assert_eq!(gain, 1.0);
             assert!(samples.iter().all(|sample| sample.abs() <= 1.0));
-            assert!(samples.iter().any(|sample| sample.abs() > 0.1));
+            assert!(samples.iter().all(|sample| sample.abs() < 0.01));
         }
 
         #[test]
@@ -1195,11 +1219,11 @@ mod platform {
         }
 
         #[test]
-        fn short_stream_flushes_every_accepted_pcm16_sample_once() {
-            let pcm = vec![7u8; STREAM_GAIN_WARMUP_BYTES / 2];
+        fn short_stream_emits_every_accepted_pcm16_sample_once() {
+            let pcm = vec![7u8; 3_200];
             let mut normalizer = StreamingNormalizer::default();
-            assert!(normalizer.accept(&pcm).expect("short chunk").is_empty());
-            let samples = normalizer.finish();
+            let samples = normalizer.accept(&pcm).expect("short chunk");
+            assert!(normalizer.finish().is_empty());
             assert_eq!(samples.len() * 2, pcm.len());
             assert_eq!(normalizer.accepted_bytes, pcm.len());
             assert_eq!(normalizer.emitted_bytes, pcm.len());
@@ -1304,19 +1328,14 @@ mod platform {
                 std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
             let dir = std::env::var("LISTENER_WAKE_DIAG_DIR")
                 .unwrap_or_else(|_| "target/wake_diag".to_string());
-            let threshold = std::env::var("LISTENER_WAKE_THRESHOLD")
-                .ok()
-                .and_then(|t| t.parse::<f32>().ok());
-            // score 固定为产品 BOOTSTRAP_KEYWORD_SCORE=3.0,只扫 threshold,保证数据点可比;
-            // baseline(threshold 未设)用 BOOTSTRAP_KEYWORD_THRESHOLD=0.08 对齐产品默认。
-            let effective_threshold = threshold.unwrap_or(0.08);
-            let make_detector = || -> Result<StreamingDetector, String> {
-                StreamingDetector::new_with_config(&phrase, 3.0, effective_threshold, false)
-            };
+            let make_detector =
+                || -> Result<StreamingDetector, String> { StreamingDetector::new(&phrase) };
             let mut wake_total = 0usize;
-            let mut wake_hit = 0usize;
+            let mut wake_streaming_hit = 0usize;
+            let mut wake_combined_hit = 0usize;
             let mut neg_total = 0usize;
-            let mut neg_hit = 0usize;
+            let mut neg_streaming_hit = 0usize;
+            let mut neg_combined_hit = 0usize;
             for entry in fs::read_dir(&dir).expect("diag dir") {
                 let path = entry.expect("entry").path();
                 let name = path
@@ -1340,29 +1359,142 @@ mod platform {
                         break;
                     }
                 }
+                let offline_hit = if streaming_hit {
+                    false
+                } else {
+                    detect_with_recall_cascade(pcm, &phrase)
+                        .expect("offline recall cascade")
+                        .is_some()
+                };
+                let combined_hit = streaming_hit || offline_hit;
                 if is_wake {
                     wake_total += 1;
                     if streaming_hit {
-                        wake_hit += 1;
+                        wake_streaming_hit += 1;
+                    }
+                    if combined_hit {
+                        wake_combined_hit += 1;
                     }
                 } else {
                     neg_total += 1;
                     if streaming_hit {
-                        neg_hit += 1;
+                        neg_streaming_hit += 1;
+                    }
+                    if combined_hit {
+                        neg_combined_hit += 1;
                     }
                 }
                 println!(
-                    "diag {} kind={} streaming_hit={} pcm_ms={} threshold={:?}",
+                    "diag {} kind={} streaming_hit={} offline_hit={} combined_hit={} pcm_ms={} runtime_score={:.1} runtime_threshold={:.2}",
                     name,
                     if is_wake { "wake" } else { "neg" },
                     streaming_hit,
+                    offline_hit,
+                    combined_hit,
                     pcm.len() / 32,
-                    threshold
+                    BOOTSTRAP_KEYWORD_SCORE,
+                    BOOTSTRAP_KEYWORD_THRESHOLD
                 );
             }
             println!(
-                "summary wake_hit={}/{} neg_false_trigger={}/{} threshold={:?}",
-                wake_hit, wake_total, neg_hit, neg_total, threshold
+                "summary wake_streaming_hit={}/{} wake_combined_hit={}/{} neg_streaming_false_trigger={}/{} neg_combined_false_trigger={}/{} runtime_score={:.1} runtime_threshold={:.2}",
+                wake_streaming_hit,
+                wake_total,
+                wake_combined_hit,
+                wake_total,
+                neg_streaming_hit,
+                neg_total,
+                neg_combined_hit,
+                neg_total,
+                BOOTSTRAP_KEYWORD_SCORE,
+                BOOTSTRAP_KEYWORD_THRESHOLD
+            );
+        }
+
+        #[test]
+        #[ignore = "diagnostic: scan 12h of product-lifecycle negative candidates"]
+        fn diagnostic_streaming_negative_candidate_soak() {
+            let phrase =
+                std::env::var("LISTENER_WAKE_PHRASE").unwrap_or_else(|_| "开始录音".to_string());
+            let dir = std::env::var("LISTENER_WAKE_DIAG_DIR")
+                .unwrap_or_else(|_| "target/wake_diag".to_string());
+            let soak_hours = std::env::var("LISTENER_WAKE_SOAK_HOURS")
+                .ok()
+                .and_then(|value| value.parse::<f64>().ok())
+                .unwrap_or(12.0);
+            assert!(
+                soak_hours > 0.0,
+                "LISTENER_WAKE_SOAK_HOURS must be positive"
+            );
+            let target_pcm_ms = (soak_hours * 60.0 * 60.0 * 1000.0).ceil() as u64;
+            let mut negative_paths = fs::read_dir(&dir)
+                .expect("diag dir")
+                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.starts_with("neg_"))
+                        && path.extension().and_then(|extension| extension.to_str()) == Some("wav")
+                })
+                .collect::<Vec<_>>();
+            negative_paths.sort();
+            assert!(
+                !negative_paths.is_empty(),
+                "negative soak requires at least one neg_*.wav"
+            );
+
+            let started = std::time::Instant::now();
+            let mut total_pcm_ms = 0u64;
+            let mut files_scanned = 0u64;
+            let mut passes = 0u64;
+            while total_pcm_ms < target_pcm_ms {
+                passes += 1;
+                for path in &negative_paths {
+                    let wav = fs::read(path).expect("negative wav");
+                    let pcm = wav_pcm(&wav);
+                    // Production creates one detector per firmware VAD candidate
+                    // and drops it at candidate end. Idle silence never reaches KWS.
+                    let mut detector = StreamingDetector::new(&phrase).expect("streaming detector");
+                    for chunk in pcm.chunks(320) {
+                        assert!(
+                            detector
+                                .accept_pcm(chunk)
+                                .expect("streaming negative candidate soak")
+                                .is_none(),
+                            "streaming detector false-triggered after {} ms at {}",
+                            total_pcm_ms,
+                            path.display()
+                        );
+                    }
+                    assert!(
+                        detector
+                            .finish()
+                            .expect("finish streaming negative candidate")
+                            .is_none(),
+                        "streaming detector false-triggered at candidate terminal after {} ms at {}",
+                        total_pcm_ms,
+                        path.display()
+                    );
+                    total_pcm_ms += (pcm.len() / 32) as u64;
+                    files_scanned += 1;
+                    if total_pcm_ms >= target_pcm_ms {
+                        break;
+                    }
+                    // One second of non-candidate idle separates fixture sessions.
+                    total_pcm_ms += 1_000;
+                    if total_pcm_ms >= target_pcm_ms {
+                        break;
+                    }
+                }
+            }
+            println!(
+                "streaming_negative_candidate_soak target_pcm_ms={} total_pcm_ms={} files_scanned={} source_files={} passes={} false_triggers=0 compute_ms={}",
+                target_pcm_ms,
+                total_pcm_ms,
+                files_scanned,
+                negative_paths.len(),
+                passes,
+                started.elapsed().as_millis()
             );
         }
 

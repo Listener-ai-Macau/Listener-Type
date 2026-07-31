@@ -7,20 +7,59 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `index.html` | Core app | Build and targeted tests |
 | `package-lock.json` | Build and release config | Build, updater and audit scripts |
 | `package.json` | Build and release config | Build, updater and audit scripts |
+| `scripts/advance-preproduction-total-review.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/build-mac.sh` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-brand-residue.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-cloud-services.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-dark-mode.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-dirty-change-inventory.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-doc-inheritance.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-ec11-type-recovery-randomized.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-ec11-type-recovery-speed.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-embedded-ble-processing-led.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-hotkey-injection.mjs` | Global hotkeys | Hotkey tests and manual smoke |
 | `scripts/check-hotkey-recorder.mjs` | Global hotkeys | Hotkey tests and manual smoke |
+| `scripts/check-module-budgets.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-ota-transfer-speed-log.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-ota-transfer-speed-log.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-performance-baselines.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-preproduction-bench-contract.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-preproduction-operator-note-triage.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-pwsh-entrypoints.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-recording-consumption-evidence.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-recording-consumption-evidence.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-recording-consumption-runner.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-recording-low-latency-regression.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-regression-guard-commits.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-release-root-artifacts.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-release-version.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-repo-hygiene.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-tauri-info.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-traceability.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-type-startup-reconnect-speed.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/check-volcengine-low-latency-preview.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/check-window-hotkey-fallback.mjs` | Global hotkeys | Hotkey tests and manual smoke |
+| `scripts/dirty-change-inventory.json` | Automation and audits | Node/PowerShell script tests |
+| `scripts/listener-preproduction-scenarios.json` | Automation and audits | Node/PowerShell script tests |
+| `scripts/performance-baselines.json` | Automation and audits | Node/PowerShell script tests |
+| `scripts/record-preproduction-machine-acceptance.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/regression-guard-commits.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/release-check.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/release-version-gate.json` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-installed-audio-cdp.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-installed-audio-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-installed-ota-cdp.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-installed-ota-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-recording-consumption-physical-validation.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-v1.0.2-regression.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/validation/run_ble_recording_cancel_matrix.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/verify-frontend.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/verify_device_control_ble_settings_static.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/verify_device_control_recovery_root_cause.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/verify_native_hid_gatt_recovery_static.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-ble-focused-human-review.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-ble-notification-helper.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-ble-user-scenarios-human-review.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-build-gnu.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-capsule-lifecycle-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-capsule-watch.ps1` | Automation and audits | Node/PowerShell script tests |
@@ -32,6 +71,13 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/windows-ime-install-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-ime-register.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-ime-unregister.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-installed-device-settings-ui-e2e.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-installed-device-settings-ui-e2e.test.mjs` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-installed-device-settings-write-e2e.py` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-listener-preproduction-bench-collect.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-listener-preproduction-bench-review.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-listener-preproduction-ble-active-bench.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-listener-preproduction-human-review.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-listener-type-lifecycle-e2e.py` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-microphone-privacy-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-open-dev.ps1` | Automation and audits | Node/PowerShell script tests |
@@ -41,6 +87,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/windows-preflight.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-real-asr-insertion-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-real-regression.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/windows-recording-response-human-review.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-runtime-smoke.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-smoke-suite.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/windows-startup-lifecycle-contract.test.mjs` | Automation and audits | Node/PowerShell script tests |
@@ -64,41 +111,65 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/asr/local/local_provider.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/mod.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/models.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/local/paraformer.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/qwen_engine.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/qwen_ffi.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/local/test_run.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/local/wake_helper.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/mod.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine.rs` | ASR providers | Provider tests, dictation smoke |
+| `src-tauri/src/asr/volcengine_platform.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/volcengine_transcript.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/wav.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/asr/whisper.rs` | ASR providers | Provider tests, dictation smoke |
 | `src-tauri/src/audio_mute.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/audio_transport_codec.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/capsule_log.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/cli.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/combo_hotkey.rs` | Global hotkeys | Hotkey tests and manual smoke |
-| `src-tauri/src/commands/mod.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/commands/device/mod.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/commands/device/settings.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/device/ble.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/commands/device/firmware.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/commands_tests.rs` | Core app | `cargo test --lib` |
+| `src-tauri/src/commands/device/mod.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/device/settings.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/diagnostics_export.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/local_asr_commands.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/marketplace.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/mod.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/commands/style_pack_commands.rs` | Local data and style packs | Rust unit tests, local import/export smoke |
 | `src-tauri/src/commands_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/dictation.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_device_ai.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_embedded_stream.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_embedded_stream_completion.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_embedded_submit.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_preview.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_session.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/dictation_wake_polish.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/embedded_ble_runtime.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/hotkey_device_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
 | `src-tauri/src/coordinator/qa.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator/recording_gate.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/resources.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator/support.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/coordinator/dictation_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/coordinator_state.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/coordinator_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/correction.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/embedded_audio.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/device_control_platform.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/mod.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/mod_tests.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/capture_events.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/gatt_open.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/embedded_ble/windows_ble/mod.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/embedded_ble/windows_ble/tests.rs` | Core app | Build and targeted tests |
-| `src-tauri/src/embedded_ble/tests.rs` | Core app | Build and targeted tests |
-| `scripts/check-module-budgets.mjs` | Core app | `npm run check:module-budgets` |
-| `docs/goals/20260727-type-maintainability-excellent.md` | Core app | Goal contract |
+| `src-tauri/src/embedded_ble/windows_ble/notify_open.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/ota_open.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/ota_transfer.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/pairing.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/pnp_cache.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/recording_control.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble/unpair.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/embedded_ble/windows_ble_tests.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/firmware_ota.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/github_oauth.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/global_hotkey_runtime.rs` | Global hotkeys | Hotkey tests and manual smoke |
@@ -108,6 +179,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/llm_gemini.rs` | Polish providers | Rust unit tests, provider smoke |
 | `src-tauri/src/main.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/marketplace_backend.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/observability.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/permissions.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/persistence.rs` | Local data and style packs | Rust unit tests, local import/export smoke |
 | `src-tauri/src/polish.rs` | Polish providers | Rust unit tests, provider smoke |
@@ -116,9 +188,12 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src-tauri/src/selection.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_binding.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/shortcut_dispatch.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/speaker_verification.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/startup_evidence.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/timeline.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/types.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/unicode_keystroke.rs` | Core app | Build and targeted tests |
+| `src-tauri/src/wake_phrase.rs` | Core app | Build and targeted tests |
 | `src-tauri/src/windows_ime_ipc.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_profile.rs` | Windows IME insertion | Windows static and runtime smoke |
 | `src-tauri/src/windows_ime_protocol.rs` | Windows IME insertion | Windows static and runtime smoke |
@@ -174,10 +249,10 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/bleRecoveryUi.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleActionRules.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleActionRules.ts` | Core app | Build and targeted tests |
-| `src/lib/capsuleEventOrdering.test.ts` | Core app | Build and targeted tests |
-| `src/lib/capsuleEventOrdering.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleDisplayMessage.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleDisplayMessage.ts` | Core app | Build and targeted tests |
+| `src/lib/capsuleEventOrdering.test.ts` | Core app | Build and targeted tests |
+| `src/lib/capsuleEventOrdering.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleLayout.test.ts` | Core app | Build and targeted tests |
 | `src/lib/capsuleLayout.ts` | Core app | Build and targeted tests |
 | `src/lib/capsulePreviewRules.test.ts` | Core app | Build and targeted tests |
@@ -186,8 +261,9 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/demoMode.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceHealth.test.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceHealth.ts` | Core app | Build and targeted tests |
-| `src/lib/deviceSettingsMockWrite.test.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsDefaults.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceSettingsMock.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsMockWrite.test.ts` | Core app | Build and targeted tests |
 | `src/lib/embeddedBleProbe.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.test.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.ts` | Core app | Build and targeted tests |

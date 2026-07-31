@@ -22,24 +22,15 @@ use super::*;
 /// 避免微动开关回弹 / 用户手抖双击造成的空转写报错和 ASR session 抢资源。
 pub(super) const HOTKEY_DEBOUNCE: Duration = Duration::from_millis(250);
 const EMBEDDED_AUDIO_FEED_CHUNK_BYTES: usize = 3_200;
-const EMBEDDED_AUDIO_TARGET_RMS: f64 = 2_300.0;
-const EMBEDDED_AUDIO_MAX_GAIN: f64 = 16.0;
-const EMBEDDED_AUDIO_MIN_GAIN: f64 = 1.05;
+const EMBEDDED_AUDIO_HOST_LIMITER_PEAK: f64 = i16::MAX as f64 * 0.707_945_784;
 const EMBEDDED_AUDIO_VISUAL_RMS_REFERENCE: f64 = 700.0;
-// Volcengine streaming is latency sensitive. Calibrate from the first voiced
-// 100 ms block, then only raise that session gain when later confirmed speech
-// is quieter. Ignore the noisiest one percent of a block while calibrating:
-// a PDM impulse must not make an otherwise quiet spoken block look loud.
+// Firmware AFE owns adaptive gain. Type keeps speech-energy telemetry but may
+// only attenuate blocks that exceed the -3 dBFS host safety ceiling.
 const EMBEDDED_AUDIO_STREAMING_SPEECH_RMS: f64 = 120.0;
 const EMBEDDED_AUDIO_STREAMING_QUIET_SPEECH_RMS: f64 = 45.0;
 const EMBEDDED_AUDIO_STREAMING_QUIET_SPEECH_PEAK: u16 = 256;
-const EMBEDDED_AUDIO_STREAMING_AGC_PEAK_HEADROOM: f64 = 0.90;
 const EMBEDDED_AUDIO_STREAMING_AGC_SIGNAL_PERCENTILE_NUMERATOR: usize = 99;
 const EMBEDDED_AUDIO_STREAMING_AGC_SIGNAL_PERCENTILE_DENOMINATOR: usize = 100;
-// Firmware preserves microphone headroom instead of pre-amplifying it, so a
-// quiet first voiced block may need the full bounded streaming gain. Each
-// later block still has its own peak guard before it reaches the provider.
-const EMBEDDED_AUDIO_STREAMING_INITIAL_MAX_GAIN: f64 = EMBEDDED_AUDIO_MAX_GAIN;
 const EMBEDDED_BLE_PCM_EVENT_TRACE_PACKET_INTERVAL: u16 = 50;
 const EMBEDDED_BLE_READY_CAPSULE_MESSAGE: &str = "Listener BLE 已连接，等待设备开始录音。";
 const DEVICE_AI_PROCESSING_MIN_VISIBLE_MS: u64 = 750;
@@ -470,6 +461,7 @@ fn embedded_audio_file_session_id() -> u32 {
 }
 
 include!("dictation_embedded_stream.rs");
+include!("dictation_embedded_stream_completion.rs");
 
 fn submission_result_from_stats(
     terminal_received: bool,
@@ -637,12 +629,16 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
         .audio_archive_active
         .store(archive_active, std::sync::atomic::Ordering::Relaxed);
     let (asr_pcm, gain_stats) = normalize_embedded_pcm_for_asr(pcm);
-    if gain_stats.gain > 1.0 {
+    if gain_stats.gain < 1.0 || gain_stats.upstream_clipped_samples > 0 {
         log::info!(
-            "[coord] embedded audio normalized for ASR (rms_before={:.1}, peak_before={}, gain={:.2}, clipped_samples={})",
+            "[coord] embedded audio host limiter (rms_before={:.1}, peak_before={}, rms_after={:.1}, peak_after={}, gain={:.4}, limiter_reduction_db={:.2}, upstream_clipped_samples={}, newly_clipped_samples={})",
             gain_stats.rms_before,
             gain_stats.peak_before,
+            gain_stats.rms_after,
+            gain_stats.peak_after,
             gain_stats.gain,
+            gain_stats.limiter_reduction_db,
+            gain_stats.upstream_clipped_samples,
             gain_stats.clipped_samples
         );
     }
@@ -658,7 +654,7 @@ async fn submit_embedded_pcm_for_dictation_with_stats(
         consumer.consume_pcm_chunk(chunk);
     }
     log::info!(
-        "[coord] embedded audio submitted to dictation pipeline (asr={active_asr}, pcm_bytes={}, asr_pcm_bytes={}, gain={:.2})",
+        "[coord] embedded audio submitted to dictation pipeline (asr={active_asr}, pcm_bytes={}, asr_pcm_bytes={}, host_limiter_gain={:.4})",
         pcm.len(),
         asr_pcm.len(),
         gain_stats.gain
@@ -699,14 +695,55 @@ async fn persist_verified_wake_phrase_calibration(phrase: String) {
     }
 }
 
-fn reject_hidden_automatic_candidate(reason: &'static str) {
-    log::info!(
-        "[speaker-verification] hidden automatic candidate rejected silently reason={reason}"
-    );
+/// Newest hidden VA session Type is currently handling. Used so a late
+/// VREC:STOP for reject N does not kill already-started candidate N+1
+/// (owner: called twice, second window cut at ~0.9s by previous reject STOP).
+static LAST_HIDDEN_VA_SESSION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn note_hidden_va_session(embedded_session_id: u32) {
+    LAST_HIDDEN_VA_SESSION.store(embedded_session_id, Ordering::SeqCst);
 }
 
-/// Show Recording only after local full-phrase confirmation. The sensitive KWS
-/// is a recall hint and must not expose a false recording capsule by itself.
+fn reject_hidden_automatic_candidate(reason: &'static str, embedded_session_id: u32) {
+    log::info!(
+        "[speaker-verification] hidden automatic candidate rejected silently reason={reason} embedded_session_id={embedded_session_id}"
+    );
+    // Hidden VA candidates never open a Type dictation session (phase stays Idle),
+    // so request_embedded_ble_recording_stop_from_host is a no-op. Without an
+    // explicit VREC:STOP the device keeps streaming ambient speech until silence
+    // or max_session — owner could not re-arm 「开始录音」. Cut the device only
+    // when this reject is still the latest candidate (avoid killing N+1).
+    #[cfg(not(test))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            // Brief yield: SessionStart for the next candidate often races the
+            // terminal reject of the previous one.
+            std::thread::sleep(Duration::from_millis(80));
+            let current = LAST_HIDDEN_VA_SESSION.load(Ordering::SeqCst);
+            if embedded_session_id != 0 && current != embedded_session_id {
+                log::info!(
+                    "[coord] skip VREC:STOP after reject reason={reason} rejected_session={embedded_session_id} active_session={current}"
+                );
+                return;
+            }
+            match crate::embedded_ble::send_recording_control_stop(
+                EMBEDDED_BLE_RECORDING_CONTROL_WRITE_TIMEOUT,
+            ) {
+                Ok(()) => log::info!(
+                    "[coord] VREC:STOP sent after hidden automatic reject reason={reason} embedded_session_id={embedded_session_id}"
+                ),
+                Err(err) => log::warn!(
+                    "[coord] VREC:STOP after hidden reject failed reason={reason} embedded_session_id={embedded_session_id}: {err}"
+                ),
+            }
+        });
+    }
+}
+
+/// Show Recording capsule early so the user is not waiting on stage-2 alone.
+/// Prefer local ExactStart; also allow first KWS hit when no voiceprint is
+/// enrolled (open-gate contract — phrase alone accepts). With voiceprint,
+/// keep KWS as recall-only until local/owner gates pass (false-start risk).
 fn show_early_wake_recording_capsule(inner: &Arc<Inner>, candidate: &mut BufferedSpeakerCandidate) {
     if candidate.early_capsule_session_id.is_some() {
         return;
@@ -799,10 +836,11 @@ fn embedded_ble_session_event_detail(
             format!("event=start embedded_session_id={session_id} origin={origin:?}")
         }
         crate::embedded_audio::StreamingSessionEvent::PcmChunk(chunk) => format!(
-            "event=pcm embedded_session_id={} packet_sequence={} pcm_bytes={} after_stop={}",
+            "event=pcm embedded_session_id={} packet_sequence={} pcm_bytes={} raw_input_level_percent={:?} after_stop={}",
             chunk.session_id,
             chunk.packet_sequence,
             chunk.pcm.len(),
+            chunk.raw_input_level_percent,
             chunk.after_stop_boundary
         ),
         crate::embedded_audio::StreamingSessionEvent::Stopped {
@@ -1043,11 +1081,33 @@ fn embedded_pcm_visual_level(pcm: &[u8]) -> f32 {
     (rms / EMBEDDED_AUDIO_VISUAL_RMS_REFERENCE).clamp(0.0, 1.0) as f32
 }
 
+fn embedded_pcm_capsule_level(pcm: &[u8], raw_input_level_percent: Option<u8>) -> f32 {
+    raw_input_level_percent
+        .map(embedded_raw_input_level_to_capsule_level)
+        .unwrap_or_else(|| embedded_pcm_visual_level(pcm))
+}
+
+fn embedded_raw_input_level_to_capsule_level(level_percent: u8) -> f32 {
+    const CAPSULE_SILENCE_GATE: f32 = 0.012;
+    const CAPSULE_RESPONSE_CEILING: f32 = 0.34;
+
+    let level_percent = level_percent.min(100);
+    if level_percent == 0 {
+        return 0.0;
+    }
+    CAPSULE_SILENCE_GATE
+        + (f32::from(level_percent) / 100.0) * (CAPSULE_RESPONSE_CEILING - CAPSULE_SILENCE_GATE)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct EmbeddedPcmGainStats {
     rms_before: f64,
     peak_before: u16,
+    rms_after: f64,
+    peak_after: u16,
     gain: f64,
+    limiter_reduction_db: f64,
+    upstream_clipped_samples: usize,
     clipped_samples: usize,
 }
 
@@ -1069,6 +1129,8 @@ struct EmbeddedStreamingAgcState {
     first_gain: Option<f64>,
     max_gain: f64,
     gain_update_count: usize,
+    limiter_reduction_db_max: f64,
+    upstream_clipped_samples: usize,
     clipped_samples: usize,
 }
 
@@ -1091,6 +1153,8 @@ impl Default for EmbeddedStreamingAgcState {
             first_gain: None,
             max_gain: 1.0,
             gain_update_count: 0,
+            limiter_reduction_db_max: 0.0,
+            upstream_clipped_samples: 0,
             clipped_samples: 0,
         }
     }
@@ -1098,32 +1162,34 @@ impl Default for EmbeddedStreamingAgcState {
 
 fn normalize_embedded_pcm_for_asr(pcm: &[u8]) -> (Vec<u8>, EmbeddedPcmGainStats) {
     let (rms_before, peak_before) = embedded_pcm_rms_and_peak(pcm);
+    let upstream_clipped_samples = pcm
+        .chunks_exact(2)
+        .filter(|chunk| {
+            let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+            sample == i16::MIN || sample == i16::MAX
+        })
+        .count();
+    let gain = if peak_before as f64 > EMBEDDED_AUDIO_HOST_LIMITER_PEAK {
+        EMBEDDED_AUDIO_HOST_LIMITER_PEAK / peak_before as f64
+    } else {
+        1.0
+    };
+    let (normalized, clipped_samples) = apply_embedded_pcm_gain(pcm, gain);
+    let (rms_after, peak_after) = embedded_pcm_rms_and_peak(&normalized);
     let stats = EmbeddedPcmGainStats {
         rms_before,
         peak_before,
-        gain: 1.0,
-        clipped_samples: 0,
+        rms_after,
+        peak_after,
+        gain,
+        limiter_reduction_db: if gain < 1.0 {
+            -20.0 * gain.log10()
+        } else {
+            0.0
+        },
+        upstream_clipped_samples,
+        clipped_samples,
     };
-
-    normalize_embedded_pcm_for_asr_with_stats(pcm, stats)
-}
-
-fn normalize_embedded_pcm_for_asr_with_stats(
-    pcm: &[u8],
-    mut stats: EmbeddedPcmGainStats,
-) -> (Vec<u8>, EmbeddedPcmGainStats) {
-    if stats.rms_before <= 0.0 || stats.rms_before >= EMBEDDED_AUDIO_TARGET_RMS {
-        return (pcm.to_vec(), stats);
-    }
-
-    let gain = (EMBEDDED_AUDIO_TARGET_RMS / stats.rms_before).min(EMBEDDED_AUDIO_MAX_GAIN);
-    if gain < EMBEDDED_AUDIO_MIN_GAIN {
-        return (pcm.to_vec(), stats);
-    }
-
-    let (normalized, clipped_samples) = apply_embedded_pcm_gain(pcm, gain);
-    stats.gain = gain;
-    stats.clipped_samples = clipped_samples;
     (normalized, stats)
 }
 
@@ -1146,14 +1212,8 @@ fn normalize_embedded_streaming_pcm_for_asr(
     pcm: &[u8],
     agc: &mut EmbeddedStreamingAgcState,
 ) -> (Vec<u8>, EmbeddedPcmGainStats) {
-    let (rms_before, peak_before) = embedded_pcm_rms_and_peak(pcm);
     let (signal_rms, signal_peak) = embedded_pcm_streaming_agc_signal_level(pcm);
-    let mut stats = EmbeddedPcmGainStats {
-        rms_before,
-        peak_before,
-        gain: 1.0,
-        clipped_samples: 0,
-    };
+    let (normalized, stats) = normalize_embedded_pcm_for_asr(pcm);
 
     let has_speech_energy = embedded_streaming_chunk_has_speech_energy(signal_rms, signal_peak);
     agc.observed_signal_rms_min = Some(
@@ -1164,64 +1224,23 @@ fn normalize_embedded_streaming_pcm_for_asr(
     agc.observed_signal_peak_max = agc.observed_signal_peak_max.max(signal_peak);
     if !has_speech_energy {
         agc.quiet_chunks += 1;
-        // Leading silence must not calibrate the session. Once calibration has
-        // happened, however, weak phonemes and word endings need the same
-        // stable gain as voiced blocks or the provider repeatedly sees gaps.
-        if !agc.gain_calibrated {
-            agc.pre_calibration_quiet_chunks += 1;
-            agc.pre_calibration_signal_rms_max = agc.pre_calibration_signal_rms_max.max(signal_rms);
-            agc.pre_calibration_signal_peak_max =
-                agc.pre_calibration_signal_peak_max.max(signal_peak);
-            return (pcm.to_vec(), stats);
-        }
+        agc.pre_calibration_quiet_chunks += 1;
+        agc.pre_calibration_signal_rms_max = agc.pre_calibration_signal_rms_max.max(signal_rms);
+        agc.pre_calibration_signal_peak_max = agc.pre_calibration_signal_peak_max.max(signal_peak);
     } else {
         agc.voiced_chunks += 1;
         agc.first_eligible_signal_rms.get_or_insert(signal_rms);
         agc.first_eligible_signal_peak.get_or_insert(signal_peak);
     }
-    let peak_limited_gain = if signal_peak == 0 {
-        EMBEDDED_AUDIO_MAX_GAIN
-    } else {
-        (i16::MAX as f64 * EMBEDDED_AUDIO_STREAMING_AGC_PEAK_HEADROOM / signal_peak as f64)
-            .min(EMBEDDED_AUDIO_MAX_GAIN)
-    };
-    let requested_gain = (EMBEDDED_AUDIO_TARGET_RMS / signal_rms)
-        .min(peak_limited_gain)
-        .clamp(1.0, EMBEDDED_AUDIO_STREAMING_INITIAL_MAX_GAIN);
-    let previous_gain = agc.gain;
-    let session_gain = if !agc.gain_calibrated {
-        agc.gain_calibrated = true;
-        requested_gain
-    } else if has_speech_energy {
-        // A later quieter phrase may otherwise fall below the provider's
-        // streaming recognition floor. Raising is monotonic for this session;
-        // a loud block is handled below without making later speech quieter.
-        agc.gain.max(requested_gain)
-    } else {
-        // Silence does not calibrate the session or amplify background noise.
-        agc.gain
-    };
-
-    if (session_gain - previous_gain).abs() > f64::EPSILON {
+    if stats.gain < 1.0 {
         agc.gain_update_count += 1;
     }
-    agc.first_gain.get_or_insert(session_gain);
-    agc.max_gain = agc.max_gain.max(session_gain);
-    agc.gain = session_gain;
-
-    // Limit only this over-peak block. Sparse PDM impulses may clip after the
-    // gain is applied, but must not make the rest of the block inaudible.
-    // Persisting a lower gain would make later normal speech too quiet and
-    // reintroduce accumulating ASR lag.
-    let block_gain = session_gain.min(peak_limited_gain);
-    stats.gain = block_gain;
-    if block_gain < EMBEDDED_AUDIO_MIN_GAIN {
-        return (pcm.to_vec(), stats);
-    }
-
-    let (normalized, clipped_samples) = apply_embedded_pcm_gain(pcm, block_gain);
-    stats.clipped_samples = clipped_samples;
-    agc.clipped_samples += clipped_samples;
+    agc.gain_calibrated = true;
+    agc.first_gain.get_or_insert(stats.gain);
+    agc.gain = stats.gain;
+    agc.limiter_reduction_db_max = agc.limiter_reduction_db_max.max(stats.limiter_reduction_db);
+    agc.upstream_clipped_samples += stats.upstream_clipped_samples;
+    agc.clipped_samples += stats.clipped_samples;
     (normalized, stats)
 }
 

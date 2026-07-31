@@ -310,6 +310,9 @@ struct Inner {
     /// OTA 恢复成功后只显示一次灰色“Listener 音频已恢复”胶囊。它与预检跳过
     /// 分开消费，避免重连次数较多时被通用防刷屏规则吞掉。
     embedded_ble_ota_recovery_capsule_generation: AtomicU64,
+    /// EC11 Type 控制恢复故意抑制中间胶囊；终态 TYPE:READY/notify ready 时只消费
+    /// 一次灰色“Listener 音频已恢复”，避免被 reconnect_attempts 防刷屏规则吞掉。
+    embedded_ble_type_recovery_audio_capsule_pending: AtomicBool,
     /// 启动时必须先把 Type 目标名同步到固件广播名，再允许后台 BLE 监听启动。
     /// 否则前端/托盘的早期 refresh 会用旧 prefs 名字扫一轮，造成第一次连接失败。
     embedded_ble_startup_name_sync_done: AtomicBool,
@@ -647,6 +650,7 @@ impl Coordinator {
                     embedded_ble_device_key_wake_generation: AtomicU64::new(0),
                     embedded_ble_ota_recovery_generation: AtomicU64::new(0),
                     embedded_ble_ota_recovery_capsule_generation: AtomicU64::new(0),
+                    embedded_ble_type_recovery_audio_capsule_pending: AtomicBool::new(false),
                     embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                     embedded_ble_listener_last_error: Mutex::new(None),
                     embedded_ble_pairing_hold_until: Mutex::new(None),
@@ -728,6 +732,7 @@ impl Coordinator {
                 embedded_ble_device_key_wake_generation: AtomicU64::new(0),
                 embedded_ble_ota_recovery_generation: AtomicU64::new(0),
                 embedded_ble_ota_recovery_capsule_generation: AtomicU64::new(0),
+                embedded_ble_type_recovery_audio_capsule_pending: AtomicBool::new(false),
                 embedded_ble_startup_name_sync_done: AtomicBool::new(false),
                 embedded_ble_listener_last_error: Mutex::new(None),
                 embedded_ble_pairing_hold_until: Mutex::new(None),

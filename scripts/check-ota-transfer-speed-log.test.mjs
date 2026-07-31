@@ -124,6 +124,48 @@ try {
   assert.equal(stagedTransferKeepsHandoffVisible.transportTrace.dataWriteMs, 50028);
   assert.equal(stagedTransferKeepsHandoffVisible.transportTrace.statusReads, 21);
 
+  const currentDetailedTransportFormat = runCase(
+    "current-detailed-transport-format",
+    [
+      "[embedded-ble] Denzic OTA v1 #1: transferred 1680880/1680880 bytes in 3362 data writes, 10 status reads, 0 offset recoveries, resumed_bytes=0, active_link_confirmed=true, elapsed_ms=23862, bulk_kb_s=68.8, data_write_ms=889, control_write_ms=22649, status_read_ms=314, non_transfer_ms=8",
+      lineFor(
+        transferReport({
+          bytesTransferred: 1680880,
+          chunksSent: 3362,
+          transferElapsedMs: 27590,
+          totalElapsedMs: 30230,
+        }),
+      ),
+    ].join("\n"),
+    true,
+  );
+  assert.equal(currentDetailedTransportFormat.payloadTransferMs, 23862);
+  assert.equal(currentDetailedTransportFormat.transportTrace.offsetRecoveries, 0);
+  assert.equal(currentDetailedTransportFormat.transportTrace.resumedBytes, 0);
+  assert.equal(currentDetailedTransportFormat.transportTrace.bulkKbS, 68.8);
+  assert.equal(currentDetailedTransportFormat.transportTrace.nonTransferMs, 8);
+
+  const recoveredOffsetIsRejected = runCase(
+    "recovered-offset-is-rejected",
+    [
+      "[embedded-ble] Denzic OTA v1 #3: transferred 1680880/1680880 bytes in 3362 data writes, 10 status reads, 1 offset recoveries, resumed_bytes=500, active_link_confirmed=true, elapsed_ms=23862, bulk_kb_s=68.8, data_write_ms=889, control_write_ms=22649, status_read_ms=314, non_transfer_ms=8",
+      lineFor(
+        transferReport({
+          bytesTransferred: 1680880,
+          chunksSent: 3362,
+          transferElapsedMs: 27590,
+          totalElapsedMs: 30230,
+        }),
+      ),
+    ].join("\n"),
+    false,
+  );
+  assert.match(
+    recoveredOffsetIsRejected.failures.join("\n"),
+    /offset_recoveries=1/,
+  );
+  assert.match(recoveredOffsetIsRejected.failures.join("\n"), /resumed_bytes=500/);
+
   const largerPackageScalesBudget = runCase(
     "larger-package-scales-budget",
     lineFor(

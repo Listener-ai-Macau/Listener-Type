@@ -104,7 +104,7 @@ fn recent_pairing_fast_gatt_active(now: Instant) -> Option<RecentPairingFastGatt
 pub fn prompt_listener_pairing(
     expected_name: Option<&str>,
 ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-    match prompt_listener_pairing_inner(expected_name, false, false, true, false, &[]) {
+    match prompt_listener_pairing_inner(expected_name, false, false, true, false, &[], false) {
         Ok(result) => result,
         Err(err) => {
             log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -125,7 +125,7 @@ pub fn prompt_listener_pairing(
 pub fn prompt_listener_pairing_for_recovery(
     expected_name: Option<&str>,
 ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-    match prompt_listener_pairing_inner(expected_name, true, false, true, false, &[]) {
+    match prompt_listener_pairing_inner(expected_name, true, false, true, false, &[], false) {
         Ok(result) => result,
         Err(err) => {
             log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -146,7 +146,7 @@ pub fn prompt_listener_pairing_for_recovery(
 pub fn prompt_listener_pairing_for_recovery_without_user_prompt(
     expected_name: Option<&str>,
 ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-    match prompt_listener_pairing_inner(expected_name, true, false, false, false, &[]) {
+    match prompt_listener_pairing_inner(expected_name, true, false, false, false, &[], false) {
         Ok(result) => result,
         Err(err) => {
             log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -169,7 +169,7 @@ pub fn prompt_listener_pairing_for_recovery_without_user_prompt(
 pub fn prompt_listener_pairing_after_type_recovery(
     expected_name: Option<&str>,
 ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-    match prompt_listener_pairing_inner(expected_name, true, true, true, true, &[]) {
+    match prompt_listener_pairing_inner(expected_name, true, true, true, true, &[], false) {
         Ok(result) => result,
         Err(err) => {
             log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -190,7 +190,7 @@ pub fn prompt_listener_pairing_after_type_recovery(
 pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt(
     expected_name: Option<&str>,
 ) -> crate::embedded_ble::BleDevicePairingPromptResult {
-    match prompt_listener_pairing_inner(expected_name, true, true, false, true, &[]) {
+    match prompt_listener_pairing_inner(expected_name, true, true, false, true, &[], false) {
         Ok(result) => result,
         Err(err) => {
             log::warn!("[embedded-ble] automatic Listener pairing prompt unavailable: {err}");
@@ -230,6 +230,7 @@ pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cac
         false,
         false,
         observed_recovery_addresses,
+        false,
     ) {
         Ok(result) => result,
         Err(err) => {
@@ -247,6 +248,159 @@ pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cac
                 )],
             }
         }
+    }
+}
+
+pub fn recover_listener_pairing_after_type_recovery_for_addresses(
+    expected_name: Option<&str>,
+    cleanup_addresses: &[u64],
+    pairing_addresses: &[u64],
+) -> crate::embedded_ble::BleDevicePairingPromptResult {
+    match recover_listener_pairing_after_type_recovery_for_addresses_inner(
+        expected_name,
+        cleanup_addresses,
+        pairing_addresses,
+    ) {
+        Ok(result) => result,
+        Err(err) => {
+            log::warn!("[embedded-ble] atomic Listener pairing recovery unavailable: {err}");
+            crate::embedded_ble::BleDevicePairingPromptResult {
+                status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+                attempted: false,
+                matched_devices: 0,
+                prompted_devices: 0,
+                already_paired_devices: 0,
+                failed_devices: 0,
+                open_bluetooth_settings: false,
+                details: vec![err],
+            }
+        }
+    }
+}
+
+fn recover_listener_pairing_after_type_recovery_for_addresses_inner(
+    expected_name: Option<&str>,
+    cleanup_addresses: &[u64],
+    pairing_addresses: &[u64],
+) -> Result<crate::embedded_ble::BleDevicePairingPromptResult, String> {
+    const OWNERSHIP_WAIT: Duration = Duration::from_secs(5);
+
+    let target_name = effective_bluetooth_target_name(expected_name);
+    let Some(_maintenance) = begin_listener_pairing_maintenance_after_wait(
+        "type-recovery",
+        &target_name,
+        OWNERSHIP_WAIT,
+    ) else {
+        return Ok(pairing_maintenance_busy_prompt_result(&target_name));
+    };
+
+    let cleanup_names = vec![target_name.clone()];
+    let direct_pairing_uses_fresh_recovery_address = !pairing_addresses.is_empty();
+    if cleanup_addresses.is_empty() {
+        log::warn!(
+            "[embedded-ble] atomic Type recovery has no exact stale address to clean before PairAsync"
+        );
+    } else {
+        let unpair = unpair_listener_devices_for_known_addresses_inner(
+            &cleanup_names,
+            cleanup_addresses,
+            !direct_pairing_uses_fresh_recovery_address,
+        )?;
+        log::warn!(
+            "[embedded-ble] atomic Type recovery known-address cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={} fresh_direct_pairing={} cleanup_addresses={cleanup_addresses:?} pairing_addresses={pairing_addresses:?}",
+            unpair.status,
+            unpair.matched_devices,
+            unpair.unpaired_devices,
+            unpair.already_unpaired_devices,
+            unpair.failed_devices,
+            unpair.needs_user_action,
+            direct_pairing_uses_fresh_recovery_address,
+        );
+    }
+
+    let pairing = prompt_listener_pairing_inner(
+        Some(target_name.as_str()),
+        true,
+        true,
+        false,
+        false,
+        pairing_addresses,
+        true,
+    )?;
+    if !direct_pairing_uses_fresh_recovery_address
+        || pairing_prompt_result_ready_for_atomic_recovery(&pairing)
+    {
+        return Ok(pairing);
+    }
+
+    log::warn!(
+        "[embedded-ble] atomic Type recovery fresh-address PairAsync did not complete; clearing only the exact BTHPORT cache before the final PairAsync status={:?} matched={} prompted={} failed={}",
+        pairing.status,
+        pairing.matched_devices,
+        pairing.prompted_devices,
+        pairing.failed_devices,
+    );
+    let fallback_unpair =
+        clear_listener_bthport_cache_for_known_addresses_inner(&cleanup_names, cleanup_addresses)?;
+    log::warn!(
+        "[embedded-ble] atomic Type recovery exact BTHPORT cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
+        fallback_unpair.status,
+        fallback_unpair.matched_devices,
+        fallback_unpair.unpaired_devices,
+        fallback_unpair.already_unpaired_devices,
+        fallback_unpair.failed_devices,
+        fallback_unpair.needs_user_action,
+    );
+    prompt_listener_pairing_inner(
+        Some(target_name.as_str()),
+        true,
+        true,
+        false,
+        false,
+        pairing_addresses,
+        true,
+    )
+}
+
+fn pairing_prompt_result_ready_for_atomic_recovery(
+    pairing: &crate::embedded_ble::BleDevicePairingPromptResult,
+) -> bool {
+    matches!(
+        pairing.status,
+        crate::embedded_ble::BleDevicePairingPromptStatus::Paired
+            | crate::embedded_ble::BleDevicePairingPromptStatus::AlreadyPaired
+    )
+}
+
+fn begin_listener_pairing_maintenance_after_wait(
+    owner: &'static str,
+    target_name: &str,
+    timeout: Duration,
+) -> Option<PairingMaintenanceGuard> {
+    let started_at = Instant::now();
+    loop {
+        if !listener_pairing_maintenance_active() {
+            if let Some(guard) =
+                try_begin_listener_pairing_maintenance(owner, target_name, Instant::now())
+            {
+                let waited = started_at.elapsed();
+                if !waited.is_zero() {
+                    log::info!(
+                        "[embedded-ble] Listener pairing maintenance ownership acquired after wait owner={owner} target={target_name:?} waited_ms={}",
+                        waited.as_millis(),
+                    );
+                }
+                return Some(guard);
+            }
+        }
+        if started_at.elapsed() >= timeout {
+            log::warn!(
+                "[embedded-ble] Listener pairing maintenance ownership wait timed out owner={owner} target={target_name:?} timeout_ms={}",
+                timeout.as_millis(),
+            );
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(25));
     }
 }
 
@@ -507,6 +661,7 @@ fn prompt_listener_pairing_inner(
     allow_user_pairing_prompt: bool,
     pre_pair_stale_cleanup: bool,
     observed_recovery_addresses: &[u64],
+    maintenance_already_held: bool,
 ) -> Result<crate::embedded_ble::BleDevicePairingPromptResult, String> {
     let target_name = effective_bluetooth_target_name(expected_name);
     set_configured_bluetooth_target_name(&target_name);
@@ -520,9 +675,15 @@ fn prompt_listener_pairing_inner(
             return Ok(suppressed_pairing_prompt_result(&target_name, remaining));
         }
     }
-    let Some(_maintenance) = try_begin_listener_pairing_maintenance("pair", &target_name, now)
-    else {
-        return Ok(pairing_maintenance_busy_prompt_result(&target_name));
+    let _maintenance = if maintenance_already_held {
+        None
+    } else {
+        let Some(maintenance) =
+            try_begin_listener_pairing_maintenance("pair", &target_name, now)
+        else {
+            return Ok(pairing_maintenance_busy_prompt_result(&target_name));
+        };
+        Some(maintenance)
     };
 
     if type_recovery_command_confirmed && pre_pair_stale_cleanup {

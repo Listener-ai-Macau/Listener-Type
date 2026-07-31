@@ -82,6 +82,8 @@ const mockVoiceprintStatus: VoiceprintStatus = {
   runtimeReady: false,
   modelReady: false,
   enrolled: false,
+  enrolledPhrase: null,
+  requiresReenrollment: false,
   state: 'idle',
   progress: 0,
   score: null,

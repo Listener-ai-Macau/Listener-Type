@@ -410,12 +410,31 @@ fn resume_embedded_ble_listener_after_pairing_recovery(
     if emit_reconnecting_capsule {
         emit_embedded_ble_recovery_capsule(inner, "reconnecting", message, Some(1800));
     } else {
+        // Intermediate pairing-progress UI stays suppressed (owner: capsule felt
+        // fake while LEDs still chased). Arm a one-shot terminal grey capsule for
+        // the next notify-ready generation instead.
+        arm_embedded_ble_type_recovery_audio_capsule(inner);
         log::info!(
             "[embedded-ble] EC11 Type-controlled recovery suppresses intermediate capsule until firmware Type-ready terminal confirmation"
         );
     }
     clear_embedded_ble_pairing_confirmation_hold(inner, reason);
     refresh_embedded_ble_listener(inner);
+}
+
+fn arm_embedded_ble_type_recovery_audio_capsule(inner: &Arc<Inner>) {
+    inner
+        .embedded_ble_type_recovery_audio_capsule_pending
+        .store(true, Ordering::SeqCst);
+    log::info!(
+        "[embedded-ble] armed terminal Type-recovery audio capsule for next notify ready"
+    );
+}
+
+fn take_embedded_ble_type_recovery_audio_capsule(inner: &Arc<Inner>) -> bool {
+    inner
+        .embedded_ble_type_recovery_audio_capsule_pending
+        .swap(false, Ordering::SeqCst)
 }
 
 fn arm_embedded_ble_type_pairasync_startup_guard(inner: &Arc<Inner>) {
@@ -2135,11 +2154,18 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
         );
         return EmbeddedBleStalePairingCleanupOutcome::Skipped;
     }
-    if crate::embedded_ble::listener_pairing_maintenance_active() {
+    let pairing_maintenance_active =
+        crate::embedded_ble::listener_pairing_maintenance_active();
+    if pairing_maintenance_active && !type_controlled_recovery {
         log::warn!(
             "[embedded-ble] background stale pairing cleanup deferred because Listener pairing/cache maintenance is already active"
         );
         return EmbeddedBleStalePairingCleanupOutcome::RetrySoon;
+    }
+    if pairing_maintenance_active {
+        log::info!(
+            "[embedded-ble] Type-controlled recovery will wait for active pairing/cache maintenance inside the atomic pairing transaction"
+        );
     }
     *last_cleanup_at = Some(now);
 
@@ -2218,61 +2244,9 @@ async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup(
     };
     let pairing = async_runtime::spawn_blocking(move || {
         if type_controlled_recovery {
-            let cleanup_names = vec![pairing_expected_name.clone()];
-            let direct_pairing_uses_fresh_recovery_address = !pairing_recovery_addresses.is_empty();
-            let unpair = if direct_pairing_uses_fresh_recovery_address {
-                crate::embedded_ble::unpair_listener_pairing_for_known_addresses(
-                    &cleanup_names,
-                    &observed_recovery_addresses,
-                )
-            } else {
-                crate::embedded_ble::unpair_listener_devices_for_known_addresses(
-                    &cleanup_names,
-                    &observed_recovery_addresses,
-                )
-            };
-            log::warn!(
-                "[embedded-ble] background Type controlled-recovery known-address cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={} fresh_direct_pairing={} active_capture={active_capture_type_recovery} stale_native_hid_recovery={stale_native_hid_recovery} cleanup_addresses={observed_recovery_addresses:?} pairing_addresses={pairing_recovery_addresses:?}",
-                unpair.status,
-                unpair.matched_devices,
-                unpair.unpaired_devices,
-                unpair.already_unpaired_devices,
-                unpair.failed_devices,
-                unpair.needs_user_action,
-                direct_pairing_uses_fresh_recovery_address,
-            );
-            let pairing = crate::embedded_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses(
+            crate::embedded_ble::recover_listener_pairing_after_type_recovery_for_addresses(
                 Some(pairing_expected_name.as_str()),
-                &pairing_recovery_addresses,
-            );
-            if !direct_pairing_uses_fresh_recovery_address
-                || embedded_ble_pairing_prompt_ready(&pairing)
-            {
-                return pairing;
-            }
-
-            log::warn!(
-                "[embedded-ble] fresh-address direct PairAsync did not complete after pairing-only cleanup; clearing only the exact BTHPORT cache before one final direct PairAsync status={:?} matched={} prompted={} failed={}",
-                pairing.status,
-                pairing.matched_devices,
-                pairing.prompted_devices,
-                pairing.failed_devices,
-            );
-            let fallback_unpair = crate::embedded_ble::clear_listener_bthport_cache_for_known_addresses(
-                &cleanup_names,
                 &observed_recovery_addresses,
-            );
-            log::warn!(
-                "[embedded-ble] fresh-address direct PairAsync exact BTHPORT cache cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={}",
-                fallback_unpair.status,
-                fallback_unpair.matched_devices,
-                fallback_unpair.unpaired_devices,
-                fallback_unpair.already_unpaired_devices,
-                fallback_unpair.failed_devices,
-                fallback_unpair.needs_user_action,
-            );
-            crate::embedded_ble::prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses(
-                Some(pairing_expected_name.as_str()),
                 &pairing_recovery_addresses,
             )
         } else {
@@ -3616,6 +3590,7 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             .load(Ordering::SeqCst);
         let firmware_ota_recovered =
             take_embedded_ble_ota_recovery_capsule(inner, generation);
+        let type_recovery_recovered = take_embedded_ble_type_recovery_audio_capsule(inner);
         if let Some(hid_observed_at) = inner.embedded_ble_power_cycle_hid_observed_at.lock().take()
         {
             let elapsed = hid_observed_at.elapsed();
@@ -3632,11 +3607,12 @@ fn mark_embedded_ble_listener_ready(inner: &Arc<Inner>, cancel: &Arc<AtomicBool>
             None,
             "background notify subscription ready",
         );
-        if recovered || firmware_ota_recovered {
+        if recovered || firmware_ota_recovered || type_recovery_recovered {
             log::info!(
-                "[embedded-ble] audio recovered capsule trigger general_recovery={} firmware_ota_recovery={} generation={}",
+                "[embedded-ble] audio recovered capsule trigger general_recovery={} firmware_ota_recovery={} type_recovery={} generation={}",
                 recovered,
                 firmware_ota_recovered,
+                type_recovery_recovered,
                 generation
             );
             emit_embedded_ble_recovery_capsule(

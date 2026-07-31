@@ -1100,7 +1100,8 @@ fn rename_recovery_can_skip_duplicate_pre_pair_cleanup_after_cache_refresh() {
     let source = include_str!("embedded_ble.rs");
     // Prefer the Windows impl that actually calls prompt_listener_pairing_inner
     // (mod.rs only has thin wrappers).
-    let call_marker = "prompt_listener_pairing_inner(expected_name, true, true, false, true, &[])";
+    let call_marker =
+        "prompt_listener_pairing_inner(expected_name, true, true, false, true, &[], false)";
     let call_at = source
         .find(call_marker)
         .expect("Type recovery prompt helper should exist");

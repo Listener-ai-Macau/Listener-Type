@@ -142,7 +142,11 @@ impl EmbeddedStreamingDictation {
                             .as_mut()
                             .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
                         crate::observability::record_embedded_audio_first_packet(session.session_id);
-                        session.consume_streaming_pcm(inner, &chunk.pcm)?;
+                        session.consume_streaming_pcm(
+                            inner,
+                            &chunk.pcm,
+                            chunk.raw_input_level_percent,
+                        )?;
                         // 改A: body started + sustained trailing silence + not yet dispatched.
                         session.proactive_stop_body_started
                             && session.proactive_stop_silence_ms
@@ -250,7 +254,10 @@ impl EmbeddedStreamingDictation {
                                 "voiceprint_enrollment_cancelled",
                             );
                         } else {
-                            reject_hidden_automatic_candidate("hidden_candidate_cancelled");
+                            reject_hidden_automatic_candidate(
+                                "hidden_candidate_cancelled",
+                                session_id,
+                            );
                         }
                         self.reset_for_next_session();
                         return Ok(true);
@@ -346,10 +353,11 @@ impl EmbeddedStreamingDictation {
             return Ok(());
         }
         self.embedded_session_id = Some(embedded_session_id);
+        let configured_phrase = inner.prefs.get().voice_wake_phrase;
         let mut kind = buffered_speaker_candidate_kind(
             start_origin,
             crate::speaker_verification::take_enrollment_arm(),
-            crate::speaker_verification::is_enrolled(),
+            crate::speaker_verification::is_enrolled_for_phrase(&configured_phrase),
         );
         if let Some(candidate_kind) = kind.take() {
             // Mark hidden ACTIVE before StreamingDetector::new (~1–2s). Device-key
@@ -381,6 +389,9 @@ impl EmbeddedStreamingDictation {
                 "[speaker-verification] buffering embedded candidate kind={candidate_kind:?} embedded_session_id={embedded_session_id} detector_deferred={}",
                 wake_detector_init.is_some()
             );
+            if candidate_kind == BufferedSpeakerCandidateKind::Verification {
+                note_hidden_va_session(embedded_session_id);
+            }
             self.speaker_candidate = Some(BufferedSpeakerCandidate {
                 kind: candidate_kind,
                 pcm: Vec::new(),
@@ -473,7 +484,7 @@ impl EmbeddedStreamingDictation {
             .store(archive_active, std::sync::atomic::Ordering::Relaxed);
         if session.active_asr == "volcengine" {
             log::info!(
-                "[coord] embedded audio streaming AGC summary (mode=voice_gated_fixed_session_gain, first_voiced_pcm_ms={:?}, voiced_chunks={}, quiet_chunks={}, observed_signal_rms_min={:?}, observed_signal_rms_max={:.2}, observed_signal_peak_max={}, pre_calibration_quiet_chunks={}, pre_calibration_signal_rms_max={:.2}, pre_calibration_signal_peak_max={}, first_eligible_signal_rms={:?}, first_eligible_signal_peak={:?}, first_gain={:?}, final_gain={:.2}, max_gain={:.2}, gain_updates={}, clipped_samples={})",
+                "[coord] embedded audio level summary (mode=firmware_afe_agc_host_attenuation_limiter, first_voiced_pcm_ms={:?}, voiced_chunks={}, quiet_chunks={}, observed_signal_rms_min={:?}, observed_signal_rms_max={:.2}, observed_signal_peak_max={}, pre_calibration_quiet_chunks={}, pre_calibration_signal_rms_max={:.2}, pre_calibration_signal_peak_max={}, first_eligible_signal_rms={:?}, first_eligible_signal_peak={:?}, first_gain={:?}, final_gain={:.4}, max_gain={:.4}, limiter_blocks={}, limiter_reduction_db_max={:.2}, upstream_clipped_samples={}, newly_clipped_samples={})",
                 session.streaming_agc.first_voiced_pcm_ms,
                 session.streaming_agc.voiced_chunks,
                 session.streaming_agc.quiet_chunks,
@@ -489,6 +500,8 @@ impl EmbeddedStreamingDictation {
                 session.streaming_agc.gain,
                 session.streaming_agc.max_gain,
                 session.streaming_agc.gain_update_count,
+                session.streaming_agc.limiter_reduction_db_max,
+                session.streaming_agc.upstream_clipped_samples,
                 session.streaming_agc.clipped_samples
             );
         }
@@ -496,9 +509,9 @@ impl EmbeddedStreamingDictation {
             "[coord] embedded audio streaming submitted to dictation pipeline (asr={}, input_mode={}, pcm_bytes={}, asr_pcm_bytes={}, archive={})",
             session.active_asr,
             if session.active_asr == "volcengine" {
-                "voice_gated_fixed_session_gain"
+                "firmware_afe_agc_host_attenuation_limiter"
             } else {
-                "normalized_pcm"
+                "host_attenuation_limiter"
             },
             session.streamed_pcm_bytes,
             session.normalized_pcm_bytes,
@@ -591,7 +604,10 @@ impl EmbeddedStreamingDictation {
             if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
                 dismiss_early_wake_recording_capsule(inner, sid);
             }
-            reject_hidden_automatic_candidate("automatic_candidate_rejected");
+            reject_hidden_automatic_candidate(
+                "automatic_candidate_rejected",
+                embedded_session_id,
+            );
             return Ok(true);
         }
         if candidate.kind == BufferedSpeakerCandidateKind::Enrollment {
@@ -599,7 +615,7 @@ impl EmbeddedStreamingDictation {
             let phrase = inner.prefs.get().voice_wake_phrase;
             let result = tauri::async_runtime::spawn_blocking(move || {
                 crate::wake_phrase::calibrate(&pcm, &phrase)?;
-                crate::speaker_verification::finish_enrollment(&pcm)
+                crate::speaker_verification::finish_enrollment(&pcm, &phrase)
             })
             .await
             .map_err(|err| format!("声纹登记处理任务失败: {err}"))
@@ -673,7 +689,10 @@ impl EmbeddedStreamingDictation {
                     "detector-unavailable",
                     &candidate.pcm,
                 );
-                reject_hidden_automatic_candidate("wake_phrase_detection_failed");
+                reject_hidden_automatic_candidate(
+                    "wake_phrase_detection_failed",
+                    embedded_session_id,
+                );
                 return Ok(true);
             };
             let remaining_pcm = candidate.pcm[candidate.kws_fed_bytes..].to_vec();
@@ -695,7 +714,10 @@ impl EmbeddedStreamingDictation {
                     log::warn!(
                         "[wake-phrase] terminal streaming detector task failed embedded_session_id={embedded_session_id}: {err}"
                     );
-                    reject_hidden_automatic_candidate("wake_phrase_detection_failed");
+                    reject_hidden_automatic_candidate(
+                        "wake_phrase_detection_failed",
+                        embedded_session_id,
+                    );
                     return Ok(true);
                 }
             };
@@ -789,17 +811,10 @@ impl EmbeddedStreamingDictation {
                     }
                 }
                 Ok(None) => {
-                    // Streaming KWS missed. Fast-reject before expensive offline work
-                    // when midstream local already said Absent, or the candidate is short.
-                    if candidate.local_absent_count >= TERMINAL_OFFLINE_SKIP_ABSENT_COUNT {
-                        log::info!(
-                            "[wake-phrase] terminal skip offline cascade: repeated midstream local Absent count={} embedded_session_id={} pcm_ms={}",
-                            candidate.local_absent_count,
-                            embedded_session_id,
-                            candidate.pcm.len() / 32
-                        );
-                        None
-                    } else if !should_run_terminal_offline_recall(
+                    // Streaming KWS missed — still try offline full-buffer cascade.
+                    // Do not skip on midstream local Absent: that dropped last-chance
+                    // recall when streaming never hit (owner quiet/device VA).
+                    if !should_run_terminal_offline_recall(
                         candidate.pcm.len(),
                         candidate.local_absent_count,
                     ) {
@@ -991,14 +1006,19 @@ impl EmbeddedStreamingDictation {
                         "detector-failed",
                         &candidate.pcm,
                     );
-                    reject_hidden_automatic_candidate("wake_phrase_detection_failed");
+                    reject_hidden_automatic_candidate(
+                        "wake_phrase_detection_failed",
+                        embedded_session_id,
+                    );
                     return Ok(true);
                 }
             };
             let voiceprint_pcm = candidate.pcm.clone();
+            let voiceprint_phrase = phrase.clone();
             let verification_task = tauri::async_runtime::spawn_blocking(move || {
                 let started = Instant::now();
-                let result = crate::speaker_verification::verify(&voiceprint_pcm);
+                let result =
+                    crate::speaker_verification::verify(&voiceprint_pcm, &voiceprint_phrase);
                 (result, started.elapsed().as_millis() as u64)
             })
             .await;
@@ -1050,7 +1070,10 @@ impl EmbeddedStreamingDictation {
                     "phrase-non-match",
                     &candidate.pcm,
                 );
-                reject_hidden_automatic_candidate("wake_phrase_non_match");
+                reject_hidden_automatic_candidate(
+                    "wake_phrase_non_match",
+                    embedded_session_id,
+                );
                 return Ok(true);
             };
             if gate_decision != denzic_voice_activation_v1_core::GateDecision::Accept {
@@ -1074,7 +1097,7 @@ impl EmbeddedStreamingDictation {
                     dismiss_early_wake_recording_capsule(inner, sid);
                 }
                 save_bounded_wake_diagnostic(embedded_session_id, reason, &candidate.pcm);
-                reject_hidden_automatic_candidate(reason);
+                reject_hidden_automatic_candidate(reason, embedded_session_id);
                 return Ok(true);
             }
             let result = match verification {
@@ -1118,7 +1141,10 @@ impl EmbeddedStreamingDictation {
                     "wake-without-usable-dictation",
                     &[],
                 );
-                reject_hidden_automatic_candidate("wake_phrase_without_usable_dictation");
+                reject_hidden_automatic_candidate(
+                    "wake_phrase_without_usable_dictation",
+                    embedded_session_id,
+                );
                 return Ok(true);
             }
         } else {
@@ -1146,7 +1172,7 @@ impl EmbeddedStreamingDictation {
             .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
         crate::observability::record_embedded_audio_first_packet(session.session_id);
         for chunk in candidate.pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
-            session.consume_streaming_pcm(inner, chunk)?;
+            session.consume_streaming_pcm(inner, chunk, None)?;
         }
         log::info!(
             "[speaker-verification] released buffered candidate to ASR embedded_session_id={} pcm_bytes={}",
@@ -1486,11 +1512,23 @@ impl EmbeddedStreamingDictation {
                                         )
                                     };
                                     if kws_hit.is_none() {
-                                        log::debug!(
-                                            "[wake-phrase] local-only Absent recorded embedded_session_id={} count={}",
+                                        let pcm_ms = self
+                                            .speaker_candidate
+                                            .as_ref()
+                                            .map(|c| c.pcm.len() / 32)
+                                            .unwrap_or(0);
+                                        log::info!(
+                                            "[wake-phrase] local-only Absent recorded embedded_session_id={} count={} pcm_ms={}",
                                             embedded_session_id,
-                                            local_absent_count
+                                            local_absent_count,
+                                            pcm_ms
                                         );
+                                        // Do NOT midstream-abort on exploratory Absents.
+                                        // Owner evidence 2026-07-30: real 「开始录音」 can
+                                        // get stage-1 KWS only at ~2.7 s; aborting at 2.4 s
+                                        // (count=4 Absent) killed those wakes with zero KWS
+                                        // hit. Firmware already caps hidden VA at ~4.5 s;
+                                        // Type host VREC:STOP on terminal reject is enough.
                                     } else if counted_kws_absent
                                         && kws_absent_count >= KWS_SECONDARY_ABSENT_REJECT_COUNT
                                     {
@@ -1641,10 +1679,14 @@ impl EmbeddedStreamingDictation {
             let Some(wake_match) = wake_match else {
                 return Ok(false);
             };
+            let phrase_enrolled =
+                crate::speaker_verification::is_enrolled_for_phrase(&phrase);
             if self
                 .speaker_candidate
                 .as_ref()
-                .is_some_and(|candidate| !owner_verification_window_ready(candidate.pcm.len()))
+                .is_some_and(|candidate| {
+                    !owner_verification_window_ready(candidate.pcm.len(), phrase_enrolled)
+                })
             {
                 let candidate = self
                     .speaker_candidate
@@ -1680,9 +1722,10 @@ impl EmbeddedStreamingDictation {
         let pcm = candidate.pcm.clone();
         let pcm_ms = pcm.len() / 32;
         let kws_ms = candidate.kws_total_ms;
+        let voiceprint_phrase = phrase.clone();
         let verification_task = tauri::async_runtime::spawn_blocking(move || {
             let started = Instant::now();
-            let result = crate::speaker_verification::verify(&pcm);
+            let result = crate::speaker_verification::verify(&pcm, &voiceprint_phrase);
             (result, started.elapsed().as_millis() as u64)
         })
         .await;
@@ -1807,7 +1850,7 @@ impl EmbeddedStreamingDictation {
             .ok_or_else(|| "嵌入式音频流式听写 session 尚未创建".to_string())?;
         crate::observability::record_embedded_audio_first_packet(session.session_id);
         for pcm in candidate.pcm.chunks(EMBEDDED_AUDIO_FEED_CHUNK_BYTES) {
-            session.consume_streaming_pcm(inner, pcm)?;
+            session.consume_streaming_pcm(inner, pcm, None)?;
         }
         let recording_control_ms = match recording_control_task.await {
             Ok((Ok(()), elapsed_ms)) => elapsed_ms,
@@ -1849,269 +1892,4 @@ impl EmbeddedStreamingDictation {
         Ok(true)
     }
 
-    async fn finish_completed_streaming_session(
-        &mut self,
-        inner: &Arc<Inner>,
-        embedded_session_id: u32,
-        expected_packet_count: u16,
-    ) -> Result<(), String> {
-        match self
-            .finish_streaming_session(inner, embedded_session_id, expected_packet_count)
-            .await
-        {
-            Ok(()) => {
-                self.terminal_received = true;
-                Ok(())
-            }
-            Err(err) if self.keep_notify_ready_after_completed_pipeline_error(inner, &err) => {
-                Ok(())
-            }
-            Err(err) => Err(err),
-        }
-    }
-
-    fn keep_notify_ready_after_completed_pipeline_error(
-        &mut self,
-        inner: &Arc<Inner>,
-        err: &str,
-    ) -> bool {
-        if !self.keep_listening_after_pipeline_errors || self.session.is_some() {
-            return false;
-        }
-        self.terminal_received = true;
-        record_embedded_ble_session_actor_command(
-            inner,
-            EmbeddedBleSessionActorCommand::ActorRestart,
-            None,
-            format!("completed session pipeline error kept notify ready: {err}"),
-        );
-        log::warn!(
-            "[embedded-ble] background session completed with dictation pipeline error; keeping notify open: {err}"
-        );
-        true
-    }
-
-    async fn finish_pending_stop_after_capture(
-        &mut self,
-        inner: &Arc<Inner>,
-    ) -> Result<(), String> {
-        let embedded_session_id = self
-            .embedded_session_id
-            .ok_or_else(|| "嵌入式 BLE 流式会话尚未收到开始包".to_string())?;
-        let expected_packet_count = self
-            .pending_stop_expected_packet_count
-            .or_else(|| {
-                self.collector
-                    .inner()
-                    .stats()
-                    .expected_packet_count
-                    .and_then(|count| u16::try_from(count).ok())
-            })
-            .ok_or_else(|| "嵌入式 BLE 流式会话尚未收到结束包".to_string())?;
-        self.finish_completed_streaming_session(inner, embedded_session_id, expected_packet_count)
-            .await
-    }
-
-    fn abort_streaming_session(
-        &mut self,
-        inner: &Arc<Inner>,
-        embedded_session_id: u32,
-        message: &str,
-    ) {
-        if self.embedded_session_id != Some(embedded_session_id) {
-            return;
-        }
-        self.abort_active_session(inner, message);
-    }
-
-    fn abort_active_session(&mut self, inner: &Arc<Inner>, message: &str) {
-        clear_hidden_automatic_candidate();
-        set_device_ai_processing_async(inner, false, "embedded_stream_abort");
-        if matches!(
-            self.speaker_candidate
-                .as_ref()
-                .map(|candidate| candidate.kind),
-            Some(BufferedSpeakerCandidateKind::Enrollment)
-        ) {
-            crate::speaker_verification::fail_enrollment(message);
-        }
-        let event_session_id = self.session.as_ref().map(|session| session.session_id);
-        if let Some(session) = self.session.take() {
-            crate::observability::record_embedded_audio_failure(session.session_id, message);
-            cancel_asr_for_session(inner, session.session_id);
-            restore_prepared_windows_ime_session(inner, session.session_id);
-            publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
-        } else {
-            let elapsed = inner.state.lock().started_at.elapsed().as_millis() as u64;
-            emit_capsule(
-                inner,
-                CapsuleState::Error,
-                0.0,
-                elapsed,
-                Some(message.to_string()),
-                None,
-            );
-        }
-        schedule_capsule_idle(inner, CAPSULE_STREAM_ERROR_HIDE_DELAY_MS, event_session_id);
-        self.terminal_received = true;
-    }
-
-    /// User/capsule cancel while the continuous background notify must stay open.
-    /// Dictation state is already cancelled by `cancel_session`; only clear stream-
-    /// local buffers so the next START/PCM can form a new session without TYPE:BYE.
-    fn discard_active_session_after_user_cancel(&mut self, inner: &Arc<Inner>) -> bool {
-        let had_work = self.session.is_some()
-            || self.speaker_candidate.is_some()
-            || self.embedded_session_id.is_some();
-        if !had_work {
-            return false;
-        }
-        clear_hidden_automatic_candidate();
-        set_device_ai_processing_async(inner, false, "embedded_stream_user_cancel");
-        if matches!(
-            self.speaker_candidate
-                .as_ref()
-                .map(|candidate| candidate.kind),
-            Some(BufferedSpeakerCandidateKind::Enrollment)
-        ) {
-            crate::speaker_verification::fail_enrollment("用户取消录音");
-        }
-        if let Some(session) = self.session.take() {
-            cancel_asr_for_session(inner, session.session_id);
-            restore_prepared_windows_ime_session(inner, session.session_id);
-        }
-        self.reset_for_next_session();
-        log::info!(
-            "[embedded-ble] discarded in-flight background stream session after user cancel; notify kept open"
-        );
-        true
-    }
-
-    /// Logical stream error on continuous background: drop local session state but
-    /// keep the GATT notify subscription alive for the next attempt.
-    fn discard_active_session_after_stream_error(&mut self, inner: &Arc<Inner>, message: &str) {
-        clear_hidden_automatic_candidate();
-        set_device_ai_processing_async(inner, false, "embedded_stream_soft_error");
-        if matches!(
-            self.speaker_candidate
-                .as_ref()
-                .map(|candidate| candidate.kind),
-            Some(BufferedSpeakerCandidateKind::Enrollment)
-        ) {
-            crate::speaker_verification::fail_enrollment(message);
-        }
-        if let Some(session) = self.session.take() {
-            crate::observability::record_embedded_audio_failure(session.session_id, message);
-            cancel_asr_for_session(inner, session.session_id);
-            restore_prepared_windows_ime_session(inner, session.session_id);
-            // Only surface error UI when a host session was live; candidate-only
-            // wake rejections should not bounce the BLE link.
-            publish_dictation_pipeline_error(inner, session.session_id, message.to_string());
-        }
-        self.reset_for_next_session();
-        log::warn!(
-            "[embedded-ble] discarded background stream session after error while keeping notify open: {message}"
-        );
-    }
-
-    fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
-        if let Some(session) = self.session.as_ref() {
-            let already_latched = embedded_audio_stop_feedback_latched(inner);
-            latch_embedded_audio_stop_feedback(inner);
-            if !already_latched {
-                let _ = emit_embedded_audio_transcribing_if_active(
-                    inner,
-                    session.session_id,
-                    current_embedded_audio_partial_preview(inner),
-                );
-            }
-        }
-    }
-
-    fn submission_result(
-        &self,
-    ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-        submission_result_from_stats(
-            self.terminal_received,
-            self.collector.inner().stats(),
-            self.transcript.clone(),
-        )
-    }
-
-    fn reset_for_next_session(&mut self) {
-        clear_hidden_automatic_candidate();
-        self.collector.reset();
-        self.session = None;
-        self.speaker_candidate = None;
-        self.embedded_session_id = None;
-        self.transcript = None;
-        self.pending_stop_expected_packet_count = None;
-        self.pending_stop_force_after = None;
-        self.terminal_received = false;
-    }
-
-    /// Continuous background: force-finish a STOP that never recovered missing
-    /// packets, without tearing down the notify subscription.
-    async fn force_finish_pending_stop_if_due(
-        &mut self,
-        inner: &Arc<Inner>,
-    ) -> Result<bool, String> {
-        let Some(deadline) = self.pending_stop_force_after else {
-            return Ok(false);
-        };
-        if Instant::now() < deadline {
-            return Ok(false);
-        }
-        let Some(expected) = self.pending_stop_expected_packet_count else {
-            self.pending_stop_force_after = None;
-            return Ok(false);
-        };
-        let Some(embedded_session_id) = self.embedded_session_id else {
-            self.pending_stop_force_after = None;
-            return Ok(false);
-        };
-        self.pending_stop_force_after = None;
-        log::warn!(
-            "[coord] continuous background forcing stop finish after drain wait embedded_session_id={embedded_session_id} expected={expected} received={} missing={}",
-            self.collector.inner().stats().received_packet_count,
-            self.collector.inner().stats().missing_packet_count
-        );
-        // Prefer the candidate/session finish path even with missing packets.
-        match self
-            .finish_completed_streaming_session(inner, embedded_session_id, expected)
-            .await
-        {
-            Ok(()) => Ok(true),
-            Err(err) => {
-                log::warn!(
-                    "[coord] continuous background forced stop finish failed; discarding session while keeping notify: {err}"
-                );
-                self.discard_active_session_after_stream_error(inner, &err);
-                Ok(true)
-            }
-        }
-    }
-
-    fn into_submission_result(
-        self,
-    ) -> Result<crate::embedded_audio::EmbeddedAudioSubmissionResult, String> {
-        submission_result_from_stats(
-            self.terminal_received,
-            self.collector.into_inner().stats(),
-            self.transcript,
-        )
-    }
-
-    fn into_cancelled_submission_result(
-        self,
-    ) -> crate::embedded_audio::EmbeddedAudioSubmissionResult {
-        let collector = self.collector.into_inner();
-        let mut stats = collector.stats();
-        stats.end_reason = Some(crate::embedded_audio::SessionEndReason::Cancel);
-        crate::embedded_audio::EmbeddedAudioSubmissionResult {
-            reconstructed_pcm_bytes: stats.reconstructed_pcm_bytes,
-            stats,
-            transcript: None,
-        }
-    }
 }

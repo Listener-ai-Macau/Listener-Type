@@ -2,7 +2,12 @@
 // Included into `coordinator::dictation` via `include!`.
 
 impl EmbeddedAudioDictationSession {
-    fn consume_streaming_pcm(&mut self, inner: &Arc<Inner>, pcm: &[u8]) -> Result<(), String> {
+    fn consume_streaming_pcm(
+        &mut self,
+        inner: &Arc<Inner>,
+        pcm: &[u8],
+        raw_input_level_percent: Option<u8>,
+    ) -> Result<(), String> {
         if pcm.is_empty() {
             return Ok(());
         }
@@ -23,7 +28,7 @@ impl EmbeddedAudioDictationSession {
                 inner,
                 self.session_id,
                 CapsuleState::Recording,
-                embedded_pcm_visual_level(pcm),
+                embedded_pcm_capsule_level(pcm, raw_input_level_percent),
             ) {
                 log::debug!(
                     "[coord] embedded audio streaming PCM ignored for inactive dictation session ({})",
@@ -523,8 +528,7 @@ const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
     5_000,
 ];
 /// Once KWS already heard the phrase, do not wait for the 1.8s ladder floor.
-/// ~0.8s covers a full "开始录音" plus a small pad; logs showed wake_end≈0.8s
-/// but accept delayed to 1.65s solely for LOCAL_CONFIRMATION_START_MS.
+/// ~0.8s covers a full "开始录音" plus a small pad.
 const KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 800;
 const KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_BYTES: usize = KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS * 32;
 /// After a failed immediate confirm, re-try every 400ms of new audio while KWS
@@ -550,9 +554,11 @@ const KWS_LOCAL_CONFIRM_FOCUS_PCM_BYTES: usize = KWS_LOCAL_CONFIRM_FOCUS_PCM_MS 
 const KWS_ABSENT_COUNT_MIN_POST_HIT_MS: usize = 1_000;
 /// XiaoAi-style cascade after sensitive KWS hit:
 ///   stage-1 KWS (high recall) → stage-2 local wake verifier (precision)
-/// Wait up to this budget for stage-2; then fail-open as KeywordModel so a
-/// hung/slow helper never bricks wake. Explicit Absent still rejects.
-const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 900;
+/// Wait only inside the accepted phrase-tail budget for stage-2; then fail-open
+/// as KeywordModel so an intermittently slow helper never makes wake feel
+/// unresponsive. Explicit Absent still rejects. The remaining ~100 ms covers
+/// actor polling plus recording-control/capsule dispatch under the 350 ms target.
+const KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 250;
 /// Explicit local Absent count before midstream hard-reject (blocks short
 /// prefix false wakes like "开始啥的"; one retry for noisy short clips).
 const KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2;
@@ -564,10 +570,10 @@ const TERMINAL_OFFLINE_RECALL_BUDGET_MS: u64 = 500;
 const WAKE_END_PAD_SECONDS: f32 = 0.12;
 const LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS: f32 = 1.20;
 
-fn owner_verification_window_ready(pcm_bytes: usize) -> bool {
+fn owner_verification_window_ready(pcm_bytes: usize, enrolled: bool) -> bool {
     // No enrolled voiceprint → phrase hit alone is enough; do not stall for the
     // 1.1s owner speech window (that delay only exists for embedding quality).
-    if !crate::speaker_verification::is_enrolled() {
+    if !enrolled {
         return true;
     }
     pcm_bytes >= OWNER_VERIFICATION_START_BYTES
@@ -701,10 +707,10 @@ fn run_local_wake_confirmation_once(
     phrase: &str,
 ) -> Result<LocalWakeConfirmation, String> {
     let snapshot_pcm_ms = pcm.len() / 32;
-    // Same full-buffer gain path as offline KWS — raw device VA is often too
-    // quiet for ExactStart without it (intermittent local Absent with KWS hot).
-    let boosted = crate::wake_phrase::gain_normalized_pcm16(pcm);
-    let result = crate::asr::local::wake_helper::confirm(&boosted, phrase, Duration::from_secs(4))
+    // Firmware AFE owns AGC. The local helper receives the same waveform with
+    // only an attenuation limiter for the -3 dBFS host ceiling.
+    let limited = crate::wake_phrase::limit_pcm16_for_confirmation(pcm);
+    let result = crate::asr::local::wake_helper::confirm(&limited, phrase, Duration::from_secs(4))
         .map_err(|err| format!("local wake confirmation failed: {err}"))?;
     Ok(LocalWakeConfirmation {
         matched: result.matched,

@@ -535,6 +535,8 @@ export interface VoiceprintStatus {
   runtimeReady: boolean;
   modelReady: boolean;
   enrolled: boolean;
+  enrolledPhrase: string | null;
+  requiresReenrollment: boolean;
   state: 'idle' | 'preparing' | 'armed' | 'capturing' | 'processing' | 'complete' | 'error' | 'unavailable';
   progress: number;
   score: number | null;

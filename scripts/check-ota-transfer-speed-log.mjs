@@ -57,7 +57,7 @@ const text = readFileSync(logPath, "utf8");
 const pattern =
   /BLE OTA result transport=(?<transport>\S+) bytes=(?<bytes>\d+) chunks=(?<chunks>\d+)(?: pretransfer_type_ready=(?<pretransferTypeReady>true|false) pretransfer_type_ready_ms=(?<pretransferTypeReadyMs>\d+))? transfer_ms=(?<transferMs>\d+) confirm_ms=(?<confirmMs>\d+) confirm_attempts=(?<confirmAttempts>\d+) confirm_matched=(?<confirmMatched>true|false) type_ready=(?<typeReady>true|false) type_ready_ms=(?<typeReadyMs>\d+) total_ms=(?<totalMs>\d+)/g;
 const transportPattern =
-  /Denzic OTA v1 #\d+: transferred (?<bytes>\d+)\/(?<totalBytes>\d+) bytes in (?<dataWrites>\d+) data writes, (?<statusReads>\d+) status reads, (?<offsetRecoveries>\d+) offset recoveries, active_link_confirmed=(?<activeLinkConfirmed>true|false), elapsed_ms=(?<protocolMs>\d+)(?:, data_write_ms=(?<dataWriteMs>\d+), control_write_ms=(?<controlWriteMs>\d+), status_read_ms=(?<statusReadMs>\d+))?/g;
+  /Denzic OTA v1 #\d+: transferred (?<bytes>\d+)\/(?<totalBytes>\d+) bytes in (?<dataWrites>\d+) data writes, (?<statusReads>\d+) status reads, (?<offsetRecoveries>\d+) offset recoveries(?:, resumed_bytes=(?<resumedBytes>\d+))?, active_link_confirmed=(?<activeLinkConfirmed>true|false), elapsed_ms=(?<protocolMs>\d+)(?:, bulk_kb_s=(?<bulkKbS>[\d.]+))?(?:, data_write_ms=(?<dataWriteMs>\d+), control_write_ms=(?<controlWriteMs>\d+), status_read_ms=(?<statusReadMs>\d+)(?:, non_transfer_ms=(?<nonTransferMs>\d+))?)?/g;
 
 const results = [...text.matchAll(pattern)].map((match) => ({
   status: "PASS",
@@ -142,11 +142,14 @@ const transportResults = [...text.matchAll(transportPattern)].map(match => ({
   dataWrites: Number(match.groups.dataWrites),
   statusReads: Number(match.groups.statusReads),
   offsetRecoveries: Number(match.groups.offsetRecoveries),
+  resumedBytes: Number(match.groups.resumedBytes ?? 0),
   activeLinkConfirmed: match.groups.activeLinkConfirmed === "true",
   protocolMs: Number(match.groups.protocolMs),
+  bulkKbS: Number(match.groups.bulkKbS ?? 0),
   dataWriteMs: Number(match.groups.dataWriteMs ?? 0),
   controlWriteMs: Number(match.groups.controlWriteMs ?? 0),
   statusReadMs: Number(match.groups.statusReadMs ?? 0),
+  nonTransferMs: Number(match.groups.nonTransferMs ?? 0),
 }));
 const latestTransport = transportResults
   .filter(candidate => candidate.index < latest.index && candidate.bytes === latest.bytes)
@@ -223,13 +226,23 @@ if (payloadTransferMs > acceptanceMaxTransferMs) {
   );
 }
 if (latestTransport) {
-  const requiredStatusReads = Math.floor((latest.chunks - 1) / 100) + 2;
+  // Production negotiates at most 400 chunks per SYNC window. The transfer
+  // reads status after START, each full window, and the final partial window.
+  const requiredStatusReads = Math.floor((latest.chunks - 1) / 400) + 2;
   if (!latestTransport.activeLinkConfirmed) {
     failures.push("active_link_confirmed=false");
   }
+  if (latestTransport.offsetRecoveries !== 0) {
+    failures.push(
+      `offset_recoveries=${latestTransport.offsetRecoveries}, expected 0`,
+    );
+  }
+  if (latestTransport.resumedBytes !== 0) {
+    failures.push(`resumed_bytes=${latestTransport.resumedBytes}, expected 0`);
+  }
   if (latestTransport.statusReads < requiredStatusReads) {
     failures.push(
-      `status_reads=${latestTransport.statusReads}, expected >=${requiredStatusReads} for the required 100-packet progress cadence`,
+      `status_reads=${latestTransport.statusReads}, expected >=${requiredStatusReads} for the production 400-chunk SYNC cadence`,
     );
   }
 }

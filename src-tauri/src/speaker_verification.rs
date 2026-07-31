@@ -7,6 +7,8 @@ pub struct VoiceprintStatus {
     pub runtime_ready: bool,
     pub model_ready: bool,
     pub enrolled: bool,
+    pub enrolled_phrase: Option<String>,
+    pub requires_reenrollment: bool,
     pub state: String,
     pub progress: u8,
     pub score: Option<f32>,
@@ -100,6 +102,7 @@ mod platform {
         last_score: Option<f32>,
         template: Option<SpeakerTemplate>,
         template_checked: bool,
+        enrollment_phrase: Option<String>,
         runtime: Option<Arc<SpeakerRuntime>>,
     }
 
@@ -111,11 +114,17 @@ mod platform {
         model_sha256: String,
         dimension: usize,
         embedding_base64: String,
+        #[serde(default)]
+        phrase: Option<String>,
+        #[serde(default)]
+        invalidated: bool,
     }
 
     #[derive(Debug, Clone)]
     struct SpeakerTemplate {
         embeddings: Vec<Vec<f32>>,
+        phrase: Option<String>,
+        invalidated: bool,
     }
 
     #[repr(C)]
@@ -608,16 +617,22 @@ mod platform {
         }
     }
 
-    fn encode_template(embedding: &[f32]) -> Result<String, String> {
+    fn encode_template(
+        embedding: &[f32],
+        phrase: &str,
+        invalidated: bool,
+    ) -> Result<String, String> {
         let mut bytes = Vec::with_capacity(embedding.len() * 4);
         for value in embedding {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         serde_json::to_string(&StoredTemplate {
-            version: 1,
+            version: 2,
             model_sha256: MODEL_SHA256.to_string(),
             dimension: embedding.len(),
             embedding_base64: BASE64.encode(bytes),
+            phrase: Some(phrase.to_string()),
+            invalidated,
         })
         .map_err(|err| format!("encode voiceprint template failed: {err}"))
     }
@@ -625,8 +640,16 @@ mod platform {
     fn decode_template(value: &str) -> Result<SpeakerTemplate, String> {
         let stored: StoredTemplate = serde_json::from_str(value)
             .map_err(|err| format!("voiceprint template damaged: {err}"))?;
-        if stored.version != 1 || stored.model_sha256 != MODEL_SHA256 {
+        if !matches!(stored.version, 1 | 2) || stored.model_sha256 != MODEL_SHA256 {
             return Err("voiceprint template is incompatible with the current model".to_string());
+        }
+        if stored.version == 2
+            && stored
+                .phrase
+                .as_ref()
+                .is_none_or(|phrase| phrase.trim().is_empty())
+        {
+            return Err("voiceprint template wake phrase is invalid".to_string());
         }
         let bytes = BASE64
             .decode(stored.embedding_base64)
@@ -641,7 +664,38 @@ mod platform {
         normalize(&mut embedding)?;
         Ok(SpeakerTemplate {
             embeddings: vec![embedding],
+            phrase: stored.phrase,
+            invalidated: stored.invalidated,
         })
+    }
+
+    fn persist_template(template: &SpeakerTemplate) -> Result<(), String> {
+        let phrase = template
+            .phrase
+            .as_deref()
+            .ok_or_else(|| "voiceprint template wake phrase is missing".to_string())?;
+        let encoded = template
+            .embeddings
+            .iter()
+            .map(|embedding| encode_template(embedding, phrase, template.invalidated))
+            .collect::<Result<Vec<_>, _>>()?;
+        delete_stored_credentials()?;
+        for index in 0..MAX_SUPPLEMENTAL_TEMPLATES {
+            let entry = supplemental_keyring_entry(index)?;
+            if let Some(value) = encoded.get(index + 1) {
+                if let Err(err) = entry.set_password(value) {
+                    clear_stored_credentials_after_failed_enrollment();
+                    return Err(format!(
+                        "save supplemental system voiceprint credential failed: {err}"
+                    ));
+                }
+            }
+        }
+        if let Err(err) = keyring_entry()?.set_password(&encoded[0]) {
+            clear_stored_credentials_after_failed_enrollment();
+            return Err(format!("save system voiceprint credential failed: {err}"));
+        }
+        Ok(())
     }
 
     fn load_template_locked(state: &mut State) {
@@ -669,7 +723,15 @@ mod platform {
                         });
                         match supplemental {
                             Ok(Some(value)) => match decode_template(&value) {
-                                Ok(extra) => template.embeddings.extend(extra.embeddings),
+                                Ok(extra)
+                                    if extra.phrase == template.phrase
+                                        && extra.invalidated == template.invalidated =>
+                                {
+                                    template.embeddings.extend(extra.embeddings)
+                                }
+                                Ok(_) => log::warn!(
+                                    "[speaker-verification] ignored supplemental owner template index={index}: wake phrase binding differs"
+                                ),
                                 Err(err) => {
                                     log::warn!(
                                         "[speaker-verification] ignored supplemental owner template index={index}: {err}"
@@ -691,6 +753,33 @@ mod platform {
         }
     }
 
+    fn bind_legacy_template_locked(state: &mut State, phrase: &str) {
+        let Some(template) = state.template.as_mut() else {
+            return;
+        };
+        if template.phrase.is_some() {
+            return;
+        }
+        template.phrase = Some(phrase.to_string());
+        if let Err(err) = persist_template(template) {
+            template.phrase = None;
+            state.error = Some(format!("绑定旧声纹到当前唤醒词失败: {err}"));
+            return;
+        }
+        log::info!(
+            "[speaker-verification] bound legacy owner template to current wake phrase={phrase}"
+        );
+    }
+
+    fn load_template_for_phrase_locked(state: &mut State, phrase: &str) {
+        load_template_locked(state);
+        bind_legacy_template_locked(state, phrase);
+    }
+
+    fn template_matches_phrase(template: &SpeakerTemplate, phrase: &str) -> bool {
+        !template.invalidated && template.phrase.as_deref() == Some(phrase)
+    }
+
     fn assets_ready() -> (bool, bool) {
         let Ok(root) = crate::persistence::speaker_verification_root() else {
             return (false, false);
@@ -701,15 +790,28 @@ mod platform {
         )
     }
 
-    pub fn status() -> VoiceprintStatus {
+    pub fn status_for_phrase(wake_phrase: &str) -> VoiceprintStatus {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)
+            .unwrap_or_else(|_| wake_phrase.trim().to_string());
         let (runtime_ready, model_ready) = assets_ready();
         let mut state = STATE.lock();
-        load_template_locked(&mut state);
+        load_template_for_phrase_locked(&mut state, &phrase);
+        let enrolled_phrase = state
+            .template
+            .as_ref()
+            .and_then(|template| template.phrase.clone());
+        let enrolled = state
+            .template
+            .as_ref()
+            .is_some_and(|template| template_matches_phrase(template, &phrase));
+        let requires_reenrollment = state.template.is_some() && !enrolled;
         VoiceprintStatus {
             available: true,
             runtime_ready,
             model_ready,
-            enrolled: state.template.is_some(),
+            enrolled,
+            enrolled_phrase,
+            requires_reenrollment,
             state: state
                 .capture
                 .unwrap_or(CaptureState::Idle)
@@ -725,22 +827,38 @@ mod platform {
         }
     }
 
-    pub fn is_enrolled() -> bool {
-        let mut state = STATE.lock();
-        load_template_locked(&mut state);
-        state.template.is_some()
+    pub fn status() -> VoiceprintStatus {
+        status_for_phrase("开始录音")
     }
 
-    pub fn prepare() -> Result<(), String> {
+    pub fn is_enrolled_for_phrase(wake_phrase: &str) -> bool {
+        let Ok(phrase) = crate::wake_phrase::normalize_configured_phrase(wake_phrase) else {
+            return false;
+        };
+        let mut state = STATE.lock();
+        load_template_for_phrase_locked(&mut state, &phrase);
+        state
+            .template
+            .as_ref()
+            .is_some_and(|template| template_matches_phrase(template, &phrase))
+    }
+
+    pub fn prepare_for_phrase(wake_phrase: &str) -> Result<(), String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
         let started = std::time::Instant::now();
         ensure_runtime()?;
         let mut state = STATE.lock();
-        load_template_locked(&mut state);
-        if state.template.is_none() {
+        load_template_for_phrase_locked(&mut state, &phrase);
+        if !state
+            .template
+            .as_ref()
+            .is_some_and(|template| template_matches_phrase(template, &phrase))
+        {
             return Err("voiceprint is not enrolled".to_string());
         }
         log::info!(
-            "[speaker-verification] owner gate prepared elapsed_ms={}",
+            "[speaker-verification] owner gate prepared phrase={} elapsed_ms={}",
+            phrase,
             started.elapsed().as_millis()
         );
         Ok(())
@@ -751,10 +869,7 @@ mod platform {
     }
 
     pub fn start_enrollment(wake_phrase: &str) -> Result<VoiceprintStatus, String> {
-        let wake_phrase = wake_phrase.trim();
-        if wake_phrase.is_empty() {
-            return Err("请先输入唤醒词，再录制声纹。".to_string());
-        }
+        let wake_phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
         log::info!(
             "[speaker-verification] enrollment requested for configured wake phrase={wake_phrase}"
         );
@@ -770,6 +885,7 @@ mod platform {
             state.progress = 5;
             state.error = None;
             state.last_score = None;
+            state.enrollment_phrase = Some(wake_phrase.clone());
         }
         if let Err(err) = ensure_runtime() {
             mark_error(&err);
@@ -793,7 +909,7 @@ mod platform {
                 mark_error(&format!("stop voiceprint enrollment failed: {err}"));
             }
         });
-        Ok(status())
+        Ok(status_for_phrase(&wake_phrase))
     }
 
     pub fn take_enrollment_arm() -> bool {
@@ -807,9 +923,13 @@ mod platform {
         }
     }
 
-    pub fn finish_enrollment(pcm: &[u8]) -> Result<VoiceprintStatus, String> {
+    pub fn finish_enrollment(pcm: &[u8], wake_phrase: &str) -> Result<VoiceprintStatus, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
         {
             let mut state = STATE.lock();
+            if state.enrollment_phrase.as_deref() != Some(phrase.as_str()) {
+                return Err("录制期间唤醒词已改变，请重新录制声纹。".to_string());
+            }
             state.capture = Some(CaptureState::Processing);
             state.progress = 70;
         }
@@ -824,36 +944,23 @@ mod platform {
                         .map_err(|err| format!("声纹特征提取失败，请重新说三遍唤醒词：{err}"))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let encoded = embeddings
-                .iter()
-                .map(|embedding| encode_template(embedding))
-                .collect::<Result<Vec<_>, _>>()?;
-            delete_stored_credentials()?;
-            for index in 0..MAX_SUPPLEMENTAL_TEMPLATES {
-                let entry = supplemental_keyring_entry(index)?;
-                if let Some(value) = encoded.get(index + 1) {
-                    if let Err(err) = entry.set_password(value) {
-                        clear_stored_credentials_after_failed_enrollment();
-                        return Err(format!(
-                            "save supplemental system voiceprint credential failed: {err}"
-                        ));
-                    }
-                }
-            }
-            if let Err(err) = keyring_entry()?.set_password(&encoded[0]) {
-                clear_stored_credentials_after_failed_enrollment();
-                return Err(format!("save system voiceprint credential failed: {err}"));
-            }
+            let template = SpeakerTemplate {
+                embeddings,
+                phrase: Some(phrase.clone()),
+                invalidated: false,
+            };
+            persist_template(&template)?;
             {
                 let mut state = STATE.lock();
-                state.template = Some(SpeakerTemplate { embeddings });
+                state.template = Some(template);
                 state.template_checked = true;
                 state.capture = Some(CaptureState::Complete);
                 state.progress = 100;
                 state.last_score = None;
                 state.error = None;
+                state.enrollment_phrase = None;
             }
-            Ok(status())
+            Ok(status_for_phrase(&phrase))
         })();
         if let Err(err) = &result {
             mark_error(err);
@@ -861,7 +968,8 @@ mod platform {
         result
     }
 
-    pub fn verify(pcm: &[u8]) -> Result<VerificationResult, String> {
+    pub fn verify(pcm: &[u8], wake_phrase: &str) -> Result<VerificationResult, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
         // 小爱同学模式：未注册主人声纹 → 不做说话人校验，唤醒词命中即放行（任何人可唤醒）；
         // 注册后才执行声纹匹配（仅主人能唤醒）。
         // 兼带修复旧逻辑的坑：以前未注册时这里返回 Err，导致 gate 把"开始录音"判定为
@@ -869,15 +977,28 @@ mod platform {
         // 未注册时直接短路返回，避免无谓加载 ONNX runtime/模型（省几百 ms 延迟 + 网络下载）。
         let template = {
             let mut state = STATE.lock();
-            load_template_locked(&mut state);
+            load_template_for_phrase_locked(&mut state, &phrase);
             state.template.clone()
         };
         let template = match template {
-            Some(template) => template,
+            Some(template) if template_matches_phrase(&template, &phrase) => template,
             None => {
                 log::info!(
-                    "[speaker-verification] owner not enrolled — open gate (any speaker may wake), pcm_ms={}",
+                    "[speaker-verification] owner not enrolled for phrase={} — open gate (any speaker may wake), pcm_ms={}",
+                    phrase,
                     pcm.len() / 32
+                );
+                return Ok(VerificationResult {
+                    matched: true,
+                    score: 0.0,
+                });
+            }
+            Some(template) => {
+                log::info!(
+                    "[speaker-verification] owner template inactive for phrase={} enrolled_phrase={} invalidated={} — open gate until re-enrollment",
+                    phrase,
+                    template.phrase.as_deref().unwrap_or("-"),
+                    template.invalidated
                 );
                 return Ok(VerificationResult {
                     matched: true,
@@ -927,6 +1048,47 @@ mod platform {
         })
     }
 
+    pub fn invalidate_for_phrase_change(
+        previous_phrase: &str,
+        next_phrase: &str,
+    ) -> Result<(), String> {
+        let previous = crate::wake_phrase::normalize_configured_phrase(previous_phrase)?;
+        let next = crate::wake_phrase::normalize_configured_phrase(next_phrase)?;
+        if previous == next {
+            return Ok(());
+        }
+        let mut state = STATE.lock();
+        if matches!(
+            state.capture,
+            Some(
+                CaptureState::Preparing
+                    | CaptureState::Armed
+                    | CaptureState::Capturing
+                    | CaptureState::Processing
+            )
+        ) {
+            return Err("声纹录制进行中，完成或取消后才能更换唤醒词。".to_string());
+        }
+        load_template_for_phrase_locked(&mut state, &previous);
+        let Some(mut template) = state.template.clone() else {
+            return Ok(());
+        };
+        template.invalidated = true;
+        persist_template(&template)?;
+        state.template = Some(template);
+        state.capture = Some(CaptureState::Idle);
+        state.progress = 0;
+        state.last_score = None;
+        state.error = None;
+        state.enrollment_phrase = None;
+        log::info!(
+            "[speaker-verification] owner template invalidated after wake phrase change previous={} next={}; re-enrollment required",
+            previous,
+            next
+        );
+        Ok(())
+    }
+
     pub fn delete_template() -> Result<VoiceprintStatus, String> {
         delete_stored_credentials()?;
         let mut state = STATE.lock();
@@ -936,6 +1098,7 @@ mod platform {
         state.progress = 0;
         state.last_score = None;
         state.error = None;
+        state.enrollment_phrase = None;
         drop(state);
         Ok(status())
     }
@@ -958,10 +1121,12 @@ mod platform {
         fn template_binary_round_trip_is_normalized_and_compact() {
             let mut embedding = (1..=192).map(|value| value as f32).collect::<Vec<_>>();
             normalize(&mut embedding).unwrap();
-            let encoded = encode_template(&embedding).unwrap();
+            let encoded = encode_template(&embedding, "小爱同学", false).unwrap();
             assert!(encoded.len() < 1800);
             let decoded = decode_template(&encoded).unwrap();
             assert!((cosine(&embedding, &decoded.embeddings[0]).unwrap() - 1.0).abs() < 1e-5);
+            assert_eq!(decoded.phrase.as_deref(), Some("小爱同学"));
+            assert!(!decoded.invalidated);
         }
 
         #[test]
@@ -972,9 +1137,27 @@ mod platform {
                 model_sha256: "wrong".into(),
                 dimension: 1,
                 embedding_base64: BASE64.encode(0.5f32.to_le_bytes()),
+                phrase: Some("小爱同学".into()),
+                invalidated: false,
             })
             .unwrap();
             assert!(decode_template(&wrong).is_err());
+        }
+
+        #[test]
+        fn voiceprint_template_only_protects_its_enrolled_phrase() {
+            let template = SpeakerTemplate {
+                embeddings: vec![vec![1.0, 0.0]],
+                phrase: Some("小爱同学".into()),
+                invalidated: false,
+            };
+            assert!(template_matches_phrase(&template, "小爱同学"));
+            assert!(!template_matches_phrase(&template, "开始录音"));
+            let invalidated = SpeakerTemplate {
+                invalidated: true,
+                ..template
+            };
+            assert!(!template_matches_phrase(&invalidated, "小爱同学"));
         }
 
         #[test]
@@ -1129,8 +1312,9 @@ mod platform {
 pub(crate) use platform::prepare_runtime_assets;
 #[cfg(target_os = "windows")]
 pub use platform::{
-    delete_template, fail_enrollment, finish_enrollment, is_enrolled, prepare, start_enrollment,
-    status, take_enrollment_arm, verify,
+    delete_template, fail_enrollment, finish_enrollment, invalidate_for_phrase_change,
+    is_enrolled_for_phrase, prepare_for_phrase, start_enrollment, status_for_phrase,
+    take_enrollment_arm, verify,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -1140,6 +1324,8 @@ pub fn status() -> VoiceprintStatus {
         runtime_ready: false,
         model_ready: false,
         enrolled: false,
+        enrolled_phrase: None,
+        requires_reenrollment: false,
         state: "unavailable".into(),
         progress: 0,
         score: None,
@@ -1152,7 +1338,7 @@ pub fn status() -> VoiceprintStatus {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn is_enrolled() -> bool {
+pub fn is_enrolled_for_phrase(_wake_phrase: &str) -> bool {
     false
 }
 
@@ -1172,7 +1358,7 @@ pub fn delete_template() -> Result<VoiceprintStatus, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn finish_enrollment(_pcm: &[u8]) -> Result<VoiceprintStatus, String> {
+pub fn finish_enrollment(_pcm: &[u8], _wake_phrase: &str) -> Result<VoiceprintStatus, String> {
     Err("voiceprint enrollment is currently available on Windows only".into())
 }
 
@@ -1180,13 +1366,26 @@ pub fn finish_enrollment(_pcm: &[u8]) -> Result<VoiceprintStatus, String> {
 pub fn fail_enrollment(_error: &str) {}
 
 #[cfg(not(target_os = "windows"))]
-pub fn verify(_pcm: &[u8]) -> Result<VerificationResult, String> {
+pub fn verify(_pcm: &[u8], _wake_phrase: &str) -> Result<VerificationResult, String> {
     Err("voiceprint verification is currently available on Windows only".into())
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn prepare() -> Result<(), String> {
+pub fn prepare_for_phrase(_wake_phrase: &str) -> Result<(), String> {
     Err("voiceprint verification is currently available on Windows only".into())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn status_for_phrase(_wake_phrase: &str) -> VoiceprintStatus {
+    status()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn invalidate_for_phrase_change(
+    _previous_phrase: &str,
+    _next_phrase: &str,
+) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1200,7 +1399,7 @@ mod tests {
 
     #[test]
     fn public_status_has_explicit_local_privacy_contract() {
-        assert!(status().local_only);
-        assert!(status().threshold > 0.0);
+        assert!(status_for_phrase("开始录音").local_only);
+        assert!(status_for_phrase("开始录音").threshold > 0.0);
     }
 }

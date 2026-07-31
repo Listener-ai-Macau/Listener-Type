@@ -47,6 +47,7 @@ mod imp {
     enum HelperResponse {
         Ready {
             model_id: Option<String>,
+            warmup_ms: u64,
             error: Option<String>,
         },
         Result {
@@ -107,9 +108,15 @@ mod imp {
             };
             match process.receive(HELPER_READY_TIMEOUT)? {
                 HelperResponse::Ready {
-                    model_id: Some(_),
+                    model_id: Some(model_id),
+                    warmup_ms,
                     error: None,
-                } => Ok(process),
+                } => {
+                    log::info!(
+                        "[wake-phrase] local wake helper true-warm ready model_id={model_id} warmup_ms={warmup_ms}"
+                    );
+                    Ok(process)
+                }
                 HelperResponse::Ready { error, .. } => {
                     let _ = process.child.kill();
                     Err(error.unwrap_or_else(|| "local wake helper model unavailable".to_string()))
@@ -304,10 +311,15 @@ mod imp {
     }
 
     pub fn run_helper() -> i32 {
-        let paraformer = match ParaformerRuntime::load_cached() {
+        let warmup_started = Instant::now();
+        let paraformer = match ParaformerRuntime::load_cached().and_then(|runtime| {
+            runtime.warm_up()?;
+            Ok(runtime)
+        }) {
             Ok(runtime) => {
                 if emit_response(&HelperResponse::Ready {
                     model_id: Some("sherpa-onnx-paraformer-zh-small-2024-03-09".to_string()),
+                    warmup_ms: warmup_started.elapsed().as_millis() as u64,
                     error: None,
                 })
                 .is_err()
@@ -319,6 +331,7 @@ mod imp {
             Err(err) => {
                 let _ = emit_response(&HelperResponse::Ready {
                     model_id: None,
+                    warmup_ms: warmup_started.elapsed().as_millis() as u64,
                     error: Some(err),
                 });
                 return 2;
@@ -339,16 +352,32 @@ mod imp {
                 phrase,
             } = request;
             let started = Instant::now();
-            let transcript = paraformer.transcribe_wav(std::path::Path::new(&wav_path));
+            let wav_path = std::path::Path::new(&wav_path);
+            let transcript = paraformer.transcribe_wav(wav_path);
             let response = match transcript {
                 Ok(text) => {
-                    let phrase_relation =
+                    let mut phrase_relation =
                         crate::wake_phrase::local_transcript_phrase_relation(&text, &phrase);
+                    let mut transcript_chars = text.chars().count();
+                    // GTCRN is valuable for steady noise, but some short room
+                    // reflections smear wake phonemes. Only after the enhanced
+                    // pass misses, confirm once against the untouched waveform.
+                    if !phrase_relation_matches(phrase_relation) && paraformer.has_denoiser() {
+                        if let Ok(raw_text) = paraformer.transcribe_wav_raw(wav_path) {
+                            let raw_relation = crate::wake_phrase::local_transcript_phrase_relation(
+                                &raw_text, &phrase,
+                            );
+                            if phrase_relation_matches(raw_relation) {
+                                phrase_relation = raw_relation;
+                                transcript_chars = raw_text.chars().count();
+                            }
+                        }
+                    }
                     HelperResponse::Result {
                         request_id,
                         matched: phrase_relation_matches(phrase_relation),
                         phrase_relation,
-                        transcript_chars: text.chars().count(),
+                        transcript_chars,
                         inference_ms: started.elapsed().as_millis() as u64,
                         error: None,
                     }
@@ -371,6 +400,8 @@ mod imp {
 
     #[cfg(test)]
     mod tests {
+        use std::fs;
+        use std::path::PathBuf;
         use std::time::Duration;
 
         use super::{phrase_relation_matches, HelperRequest, HelperResponse, WakeHelperClient};
@@ -419,6 +450,33 @@ mod imp {
                 (LocalPhraseRelation::Absent, false),
             ] {
                 assert_eq!(phrase_relation_matches(relation), expected);
+            }
+        }
+
+        #[test]
+        #[ignore = "diagnostic: scan LISTENER_WAKE_DIAG_DIR WAV transcripts"]
+        fn diagnostic_scan_local_wake_transcripts() {
+            let dir = PathBuf::from(
+                std::env::var("LISTENER_WAKE_DIAG_DIR").expect("LISTENER_WAKE_DIAG_DIR"),
+            );
+            let runtime =
+                super::ParaformerRuntime::load_cached().expect("load cached Paraformer runtime");
+            let mut paths = fs::read_dir(dir)
+                .expect("diagnostic directory")
+                .map(|entry| entry.expect("directory entry").path())
+                .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("wav"))
+                .collect::<Vec<_>>();
+            paths.sort();
+            for path in paths {
+                let text = runtime
+                    .transcribe_wav(&path)
+                    .expect("transcribe diagnostic WAV");
+                println!(
+                    "local_transcript file={} text={text:?}",
+                    path.file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("<invalid>")
+                );
             }
         }
     }

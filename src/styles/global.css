@@ -291,6 +291,14 @@ a { color: inherit; text-decoration: none; }
   gap: 8px;
 }
 
+.ol-wake-phrase-editor {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .ol-voiceprint-actions {
   min-width: 0;
   max-width: 100%;
@@ -299,6 +307,22 @@ a { color: inherit; text-decoration: none; }
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.ol-voiceprint-status {
+  min-width: 0;
+  color: var(--ol-ink-4);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.ol-voiceprint-status.is-warning {
+  color: var(--ol-warn, #8a6418);
+}
+
+.ol-voiceprint-status.is-error {
+  color: var(--ol-err);
 }
 
 .ol-voiceprint-actions button {

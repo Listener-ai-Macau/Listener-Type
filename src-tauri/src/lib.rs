@@ -399,9 +399,13 @@ pub fn run() {
                 .spawn(move || {
                     let started = std::time::Instant::now();
                     // Always warm KWS for automatic wake. Voiceprint prepare only when enrolled.
-                    let enrolled = crate::speaker_verification::is_enrolled();
+                    let enrolled =
+                        crate::speaker_verification::is_enrolled_for_phrase(&wake_phrase);
+                    let speaker_phrase = wake_phrase.clone();
                     let speaker_prepare = enrolled.then(|| {
-                        std::thread::spawn(crate::speaker_verification::prepare)
+                        std::thread::spawn(move || {
+                            crate::speaker_verification::prepare_for_phrase(&speaker_phrase)
+                        })
                     });
                     let wake_result = crate::wake_phrase::prepare(&wake_phrase);
                     let speaker_result = match speaker_prepare {

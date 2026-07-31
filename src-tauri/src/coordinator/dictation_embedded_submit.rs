@@ -289,6 +289,27 @@ async fn submit_embedded_audio_ble_stats_only(
     })
     .await
     .map_err(|err| format!("嵌入式 BLE stats-only 抓音任务失败: {err}"))??;
+    let raw_input_levels: Vec<u8> = notifications
+        .iter()
+        .filter_map(|notification| crate::embedded_audio::parse_packet(notification).ok())
+        .filter(|packet| {
+            packet.header.packet_type == crate::embedded_audio::PacketType::AudioData
+        })
+        .filter_map(|packet| {
+            crate::embedded_audio::raw_input_level_percent_from_flags(packet.header.flags)
+        })
+        .collect();
+    let raw_level_min = raw_input_levels.iter().copied().min();
+    let raw_level_max = raw_input_levels.iter().copied().max();
+    let raw_level_distinct = raw_input_levels
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    log::info!(
+        "[embedded-ble] stats-only raw input level metadata: packets={} min={raw_level_min:?} max={raw_level_max:?} distinct={raw_level_distinct}",
+        raw_input_levels.len()
+    );
     let collector =
         crate::embedded_audio::collect_notifications(notifications.iter().map(Vec::as_slice))
             .map_err(|err| format!("嵌入式 BLE stats-only 包解析失败: {err}"))?;

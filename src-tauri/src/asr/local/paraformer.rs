@@ -407,6 +407,10 @@ mod imp {
 
         // 候选整段离线降噪;任何环节失败都回退原始样本,绝不阻断转写。
         fn denoise_samples(&self, samples: Vec<f32>) -> Vec<f32> {
+            #[cfg(test)]
+            if std::env::var_os("LISTENER_DISABLE_WAKE_DENOISER").is_some() {
+                return samples;
+            }
             let Some(denoiser) = self.denoiser.as_ref() else {
                 return samples;
             };
@@ -433,17 +437,18 @@ mod imp {
             }
         }
 
-        pub fn transcribe_wav(&self, path: &Path) -> Result<String, String> {
+        fn wav_samples(path: &Path) -> Result<Vec<f32>, String> {
             let wav = fs::read(path)
                 .map_err(|err| format!("read local wake confirmation WAV failed: {err}"))?;
             let pcm = denzic_audio_v1_core::read_wav_pcm16le(&wav)
                 .map_err(|err| format!("decode local wake confirmation WAV failed: {err}"))?;
-            let samples = pcm
+            Ok(pcm
                 .chunks_exact(2)
                 .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
-                .collect::<Vec<_>>();
-            // 候选降噪(见 denoise_samples),电视/底噪压下去 paraformer 才转得出唤醒词。
-            let samples = self.denoise_samples(samples);
+                .collect::<Vec<_>>())
+        }
+
+        fn transcribe_samples(&self, samples: &[f32]) -> Result<String, String> {
             let sample_count =
                 i32::try_from(samples.len()).map_err(|_| "local wake candidate is too long")?;
 
@@ -468,6 +473,33 @@ mod imp {
                 (self.destroy_stream)(stream);
                 result
             }
+        }
+
+        pub fn transcribe_wav(&self, path: &Path) -> Result<String, String> {
+            let samples = Self::wav_samples(path)?;
+            // 候选降噪(见 denoise_samples),电视/底噪压下去 paraformer 才转得出唤醒词。
+            let enhanced = self.denoise_samples(samples);
+            self.transcribe_samples(&enhanced)
+        }
+
+        pub fn transcribe_wav_raw(&self, path: &Path) -> Result<String, String> {
+            let samples = Self::wav_samples(path)?;
+            self.transcribe_samples(&samples)
+        }
+
+        pub fn warm_up(&self) -> Result<(), String> {
+            // Loading the ONNX sessions is not enough to make the first wake
+            // confirmation warm. Exercise the same denoiser + recognizer path
+            // before the helper advertises Ready so the user's first phrase
+            // never pays lazy kernel/session initialization.
+            let silence = vec![0.0_f32; SAMPLE_RATE as usize];
+            let enhanced = self.denoise_samples(silence);
+            let _ = self.transcribe_samples(&enhanced)?;
+            Ok(())
+        }
+
+        pub fn has_denoiser(&self) -> bool {
+            self.denoiser.is_some()
         }
     }
 

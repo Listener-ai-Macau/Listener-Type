@@ -11,6 +11,8 @@
 //! A legacy plaintext JSON file is read once as a migration source and removed
 //! after a successful vault write; new writes never persist plaintext secrets.
 
+#[cfg(test)]
+use std::cell::RefCell;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -99,7 +101,16 @@ fn app_profile_dir_name() -> &'static str {
     "Listener Type"
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_DATA_DIR_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
 fn data_dir() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_DATA_DIR_OVERRIDE.with(|slot| slot.borrow().clone()) {
+        return Ok(path);
+    }
     // 诊断 / 便携版 / 测试覆盖：显式指定的 data dir 优先（绝对路径）。生产路径不
     // set 这个 env，仍走平台默认（APPDATA / ~/Library/Application Support / XDG_DATA_HOME）。
     // 便携版或排障时可重定向整个用户数据目录，避免污染系统 Application Support。
@@ -2570,35 +2581,29 @@ mod tests {
     use crate::types::{builtin_style_packs, CustomStylePrompts, VocabPreset, VocabPresetStore};
     use std::fs;
     use std::path::PathBuf;
-    use std::sync::{Mutex, MutexGuard};
 
-    // LISTENER_TYPE_DATA_DIR 是进程级全局 env，并行测试会互相踩。用模块级 mutex
-    // 串行所有依赖 scoped_data_dir 的测试，保证 set/restore 不被打断。
-    static DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    /// RAII guard：set LISTENER_TYPE_DATA_DIR 指向唯一临时目录，drop 时恢复 env 并
-    /// 删除临时目录，确保 history delete/clear 测试不污染真实用户 data_dir。
+    /// RAII guard: use a thread-local data root so parallel coordinator tests
+    /// never observe or delete this test's temporary directory.
     struct DataDirGuard {
-        _lock: MutexGuard<'static, ()>,
         path: PathBuf,
+        previous: Option<PathBuf>,
     }
     impl Drop for DataDirGuard {
         fn drop(&mut self) {
-            std::env::remove_var("LISTENER_TYPE_DATA_DIR");
+            super::TEST_DATA_DIR_OVERRIDE.with(|slot| {
+                slot.replace(self.previous.take());
+            });
             let _ = fs::remove_dir_all(&self.path);
         }
     }
     fn scoped_data_dir() -> DataDirGuard {
-        let lock = DATA_DIR_TEST_LOCK
-            .lock()
-            .expect("data dir test lock poisoned");
         let tmp: PathBuf =
             std::env::temp_dir().join(format!("listener-type-data-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&tmp).expect("create temp data dir");
-        std::env::set_var("LISTENER_TYPE_DATA_DIR", &tmp);
+        let previous = super::TEST_DATA_DIR_OVERRIDE.with(|slot| slot.replace(Some(tmp.clone())));
         DataDirGuard {
-            _lock: lock,
             path: tmp,
+            previous,
         }
     }
 

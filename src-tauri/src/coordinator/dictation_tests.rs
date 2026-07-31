@@ -8,13 +8,13 @@ use super::{
     embedded_audio_stop_feedback_latched, embedded_audio_stop_is_user_initiated,
     embedded_ble_listener_capture_ready, embedded_ble_processing_sync_disabled,
     embedded_ble_session_actor_history, embedded_ble_session_event_should_trace,
-    embedded_ble_stream_idle_timeout, embedded_pcm_rms_and_peak, embedded_pcm_visual_level,
-    embedded_streaming_chunk_is_asr_input, emit_embedded_audio_transcribing_if_active,
-    end_embedded_ble_session, finalize_polished_text, finish_dictation_pipeline_error,
-    finish_dictation_timeout, install_embedded_ble_listener_cancel,
-    mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
-    normalize_embedded_streaming_pcm_for_asr, preserve_recording_transcript,
-    provider_preview_change, publish_embedded_ble_asr_final,
+    embedded_ble_stream_idle_timeout, embedded_pcm_capsule_level, embedded_pcm_rms_and_peak,
+    embedded_pcm_visual_level, embedded_streaming_chunk_is_asr_input,
+    emit_embedded_audio_transcribing_if_active, end_embedded_ble_session, finalize_polished_text,
+    finish_dictation_pipeline_error, finish_dictation_timeout,
+    install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
+    normalize_embedded_pcm_for_asr, normalize_embedded_streaming_pcm_for_asr,
+    preserve_recording_transcript, provider_preview_change, publish_embedded_ble_asr_final,
     record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
     remove_standalone_dictation_fillers, request_embedded_audio_stop_feedback,
     request_embedded_ble_recording_stop_from_host, should_restore_clipboard_after_dictation,
@@ -23,10 +23,10 @@ use super::{
     streaming_insert_eligible, update_embedded_audio_partial_preview, wayland_done_message,
     EmbeddedAudioDictationSession, EmbeddedBleSessionActorCommand, EmbeddedStreamingAgcState,
     EmbeddedStreamingDictation, DEVICE_AI_PROCESSING_MAX_VISIBLE_MS,
-    DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES, EMBEDDED_AUDIO_MAX_GAIN,
-    EMBEDDED_AUDIO_STREAMING_SPEECH_RMS, EMBEDDED_AUDIO_TARGET_RMS,
-    EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV, EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS,
-    LOCAL_CONFIRMATION_START_BYTES, LOCAL_CONFIRMATION_START_MS,
+    DEVICE_AI_PROCESSING_MIN_VISIBLE_MS, EMBEDDED_AUDIO_FEED_CHUNK_BYTES,
+    EMBEDDED_AUDIO_HOST_LIMITER_PEAK, EMBEDDED_BLE_DISABLE_PROCESSING_SYNC_ENV,
+    EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS, LOCAL_CONFIRMATION_START_BYTES,
+    LOCAL_CONFIRMATION_START_MS,
 };
 use crate::coordinator::Coordinator;
 use crate::coordinator_state::{new_session_id, SessionPhase};
@@ -510,6 +510,31 @@ fn embedded_pcm_visual_level_tracks_raw_voice_energy_without_asr_gain() {
     assert_eq!(loud_level, 1.0);
 }
 
+#[test]
+fn embedded_pcm_capsule_level_prefers_firmware_raw_meter_and_keeps_legacy_fallback() {
+    let processed_loud = pcm_from_samples(&[2_000, -2_000, 2_000, -2_000]);
+    let processed_quiet = pcm_from_samples(&[20, -20, 20, -20]);
+
+    let quiet_raw = embedded_pcm_capsule_level(&processed_loud, Some(7));
+    let loud_raw = embedded_pcm_capsule_level(&processed_quiet, Some(83));
+    assert!(
+        (quiet_raw - 0.03496).abs() < 0.00001,
+        "quiet_raw={quiet_raw}"
+    );
+    assert!((loud_raw - 0.28424).abs() < 0.00001, "loud_raw={loud_raw}");
+    assert_eq!(
+        embedded_pcm_capsule_level(&processed_quiet, None),
+        embedded_pcm_visual_level(&processed_quiet)
+    );
+
+    let sweep = [1, 21, 99].map(|level| embedded_pcm_capsule_level(&processed_loud, Some(level)));
+    assert!(sweep[0] < sweep[1] && sweep[1] < sweep[2]);
+    assert!(
+        sweep[2] < 0.34,
+        "24 dB sweep must not saturate the capsule response: {sweep:?}"
+    );
+}
+
 fn samples_for_ms(ms: usize, sample: i16) -> Vec<i16> {
     vec![sample; 16_000 * ms / 1_000]
 }
@@ -814,6 +839,7 @@ async fn session_actor_ble_packet_command_feeds_pcm_through_single_handler() {
                 session_id: 77,
                 packet_sequence: 0,
                 pcm: pcm.clone(),
+                raw_input_level_percent: Some(31),
                 after_stop_boundary: false,
             }),
         )
@@ -1114,7 +1140,7 @@ fn embedded_streaming_pcm_after_cancel_is_not_fed_to_asr() {
     let pcm = pcm_from_samples(&samples_for_ms(100, 3_000));
 
     session
-        .consume_streaming_pcm(&coordinator.inner, &pcm)
+        .consume_streaming_pcm(&coordinator.inner, &pcm, None)
         .expect("cancelled PCM is ignored without error");
 
     assert_eq!(session.streamed_pcm_bytes, 0);
@@ -1140,7 +1166,7 @@ fn embedded_streaming_pcm_for_active_session_feeds_asr_without_early_ai_led() {
     let pcm = pcm_from_samples(&samples_for_ms(100, 3_000));
 
     session
-        .consume_streaming_pcm(&coordinator.inner, &pcm)
+        .consume_streaming_pcm(&coordinator.inner, &pcm, None)
         .expect("active PCM is accepted");
 
     assert_eq!(session.streamed_pcm_bytes, pcm.len());
@@ -1169,13 +1195,13 @@ fn embedded_streaming_pcm_combines_short_ble_packets_before_asr() {
     expected_pcm.extend_from_slice(&second_packet);
 
     session
-        .consume_streaming_pcm(&coordinator.inner, &first_packet)
+        .consume_streaming_pcm(&coordinator.inner, &first_packet, None)
         .expect("first short packet is accepted");
     assert!(consumer.chunks.lock().expect("capture lock").is_empty());
     assert_eq!(session.normalized_pcm_bytes, 0);
 
     session
-        .consume_streaming_pcm(&coordinator.inner, &second_packet)
+        .consume_streaming_pcm(&coordinator.inner, &second_packet, None)
         .expect("second short packet is accepted");
 
     let chunks = consumer.chunks.lock().expect("capture lock");
@@ -1205,7 +1231,7 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
     // Leading silence before the body must not arm the proactive stop.
     let silence = pcm_from_samples(&samples_for_ms(200, 0));
     session
-        .consume_streaming_pcm(&coordinator.inner, &silence)
+        .consume_streaming_pcm(&coordinator.inner, &silence, None)
         .expect("leading silence accepted");
     assert!(!session.proactive_stop_body_started);
     assert_eq!(session.proactive_stop_silence_ms, 0);
@@ -1213,7 +1239,7 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
     // A voiced block starts the body and zeroes trailing silence.
     let voiced = pcm_from_samples(&samples_for_ms(100, 3_000));
     session
-        .consume_streaming_pcm(&coordinator.inner, &voiced)
+        .consume_streaming_pcm(&coordinator.inner, &voiced, None)
         .expect("voiced body accepted");
     assert!(session.proactive_stop_body_started);
     assert_eq!(session.proactive_stop_silence_ms, 0);
@@ -1221,7 +1247,7 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
     // Trailing silence accumulates only after the body has started, but a
     // single short gap must not yet cross the proactive-stop threshold.
     session
-        .consume_streaming_pcm(&coordinator.inner, &silence)
+        .consume_streaming_pcm(&coordinator.inner, &silence, None)
         .expect("trailing silence accepted");
     assert!(session.proactive_stop_silence_ms > 0);
     assert!(
@@ -1231,7 +1257,7 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
 
     // Resuming speech resets the trailing-silence accumulator.
     session
-        .consume_streaming_pcm(&coordinator.inner, &voiced)
+        .consume_streaming_pcm(&coordinator.inner, &voiced, None)
         .expect("resume body accepted");
     assert_eq!(session.proactive_stop_silence_ms, 0);
     // The dispatcher lives in the packet handler; the session only exposes readiness.
@@ -1254,7 +1280,7 @@ fn embedded_streaming_pcm_flushes_final_partial_block_once() {
     let tail_pcm = pcm_from_samples(&samples_for_ms(50, 3_000));
 
     session
-        .consume_streaming_pcm(&coordinator.inner, &tail_pcm)
+        .consume_streaming_pcm(&coordinator.inner, &tail_pcm, None)
         .expect("partial tail is accepted");
     assert!(consumer.chunks.lock().expect("capture lock").is_empty());
 
@@ -1288,14 +1314,14 @@ fn volcengine_streaming_agc_resolves_one_provider_block_not_each_ble_packet() {
 
     for _ in 0..4 {
         session
-            .consume_streaming_pcm(&coordinator.inner, &packet)
+            .consume_streaming_pcm(&coordinator.inner, &packet, None)
             .expect("short voiced packet is accepted");
     }
     assert_eq!(consumer.bytes.load(Ordering::SeqCst), 0);
     assert_eq!(session.streaming_agc.voiced_chunks, 0);
 
     session
-        .consume_streaming_pcm(&coordinator.inner, &packet)
+        .consume_streaming_pcm(&coordinator.inner, &packet, None)
         .expect("provider block is accepted");
     assert_eq!(
         consumer.bytes.load(Ordering::SeqCst),
@@ -1376,19 +1402,25 @@ fn embedded_streaming_tail_chunk_remains_asr_input_until_the_session_drains() {
         session_id: 1,
         packet_sequence: 0,
         pcm: vec![1, 2],
+        raw_input_level_percent: None,
         after_stop_boundary: false,
     };
     let after_stop = StreamingPcmChunk {
         session_id: 1,
         packet_sequence: 1,
         pcm: vec![3, 4],
+        raw_input_level_percent: None,
         after_stop_boundary: true,
     };
 
     assert!(embedded_streaming_chunk_is_asr_input(&before_stop));
     assert!(embedded_streaming_chunk_is_asr_input(&after_stop));
     session
-        .consume_streaming_pcm(&coordinator.inner, &after_stop.pcm)
+        .consume_streaming_pcm(
+            &coordinator.inner,
+            &after_stop.pcm,
+            after_stop.raw_input_level_percent,
+        )
         .expect("post-stop drain PCM is forwarded to ASR");
     session.flush_streaming_pcm();
 
@@ -1403,24 +1435,28 @@ fn embedded_ble_pcm_event_trace_is_sampled() {
         session_id: 1,
         packet_sequence: 0,
         pcm: vec![1, 2],
+        raw_input_level_percent: None,
         after_stop_boundary: false,
     });
     let middle = StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
         session_id: 1,
         packet_sequence: 17,
         pcm: vec![1, 2],
+        raw_input_level_percent: None,
         after_stop_boundary: false,
     });
     let sample = StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
         session_id: 1,
         packet_sequence: 50,
         pcm: vec![1, 2],
+        raw_input_level_percent: None,
         after_stop_boundary: false,
     });
     let after_stop = StreamingSessionEvent::PcmChunk(StreamingPcmChunk {
         session_id: 1,
         packet_sequence: 51,
         pcm: vec![1, 2],
+        raw_input_level_percent: None,
         after_stop_boundary: true,
     });
 
@@ -1575,21 +1611,21 @@ fn automatic_speaker_candidate_reaches_asr_only_after_verified_match() {
 
 #[test]
 fn phrase_hit_waits_for_real_owner_audio_without_requiring_a_pause() {
-    // No enrolled voiceprint: phrase hit is enough (product contract). The 1.1s
-    // owner window only applies when a template is enrolled for embedding quality.
-    if crate::speaker_verification::is_enrolled() {
-        assert!(!super::owner_verification_window_ready(
-            super::OWNER_VERIFICATION_START_BYTES - 2
-        ));
-        assert!(super::owner_verification_window_ready(
-            super::OWNER_VERIFICATION_START_BYTES
-        ));
-    } else {
-        assert!(super::owner_verification_window_ready(0));
-        assert!(super::owner_verification_window_ready(
-            super::OWNER_VERIFICATION_START_BYTES - 2
-        ));
-    }
+    // No voiceprint enrolled for the configured phrase: phrase hit is enough.
+    // The 1.1s owner window only applies to a phrase-bound owner template.
+    assert!(!super::owner_verification_window_ready(
+        super::OWNER_VERIFICATION_START_BYTES - 2,
+        true,
+    ));
+    assert!(super::owner_verification_window_ready(
+        super::OWNER_VERIFICATION_START_BYTES,
+        true,
+    ));
+    assert!(super::owner_verification_window_ready(0, false));
+    assert!(super::owner_verification_window_ready(
+        super::OWNER_VERIFICATION_START_BYTES - 2,
+        false,
+    ));
     assert_eq!(super::next_owner_verification_retry_ms(1_100), Some(1_800));
     assert_eq!(super::next_owner_verification_retry_ms(1_800), Some(2_400));
     assert_eq!(super::next_owner_verification_retry_ms(2_400), None);
@@ -1758,12 +1794,15 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         include_str!("dictation_embedded_submit.rs"),
         "
 ",
-        include_str!("dictation_embedded_stream.rs")
+        include_str!("dictation_embedded_stream.rs"),
+        "
+",
+        include_str!("dictation_embedded_stream_completion.rs")
     );
     assert!(
-        source.contains("if !crate::speaker_verification::is_enrolled()")
+        source.contains("crate::speaker_verification::is_enrolled_for_phrase(&phrase)")
             && source.contains("fn owner_verification_window_ready"),
-        "no-voiceprint path must skip the owner speech window delay"
+        "no-voiceprint path must skip the owner speech window delay for the configured phrase"
     );
     // Hidden ACTIVE must be marked before StreamingDetector::new (~1–2s init)
     // so device-key Start promotes instead of toggle-stop during that window.
@@ -1790,10 +1829,10 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
     let body = &source[start..end];
     assert!(body.contains("detector.accept_pcm(&new_pcm)"));
     assert!(body.contains("candidate.kws_fed_bytes = candidate.pcm.len()"));
-    assert!(body.contains("crate::speaker_verification::verify(&pcm)"));
+    assert!(body.contains("crate::speaker_verification::verify(&pcm, &voiceprint_phrase)"));
     assert!(
         body.find("detector.accept_pcm(&new_pcm)")
-            < body.find("crate::speaker_verification::verify(&pcm)")
+            < body.find("crate::speaker_verification::verify(&pcm, &voiceprint_phrase)")
     );
     assert!(
         body.find("let recording_control_task")
@@ -2151,10 +2190,15 @@ fn kws_hit_schedules_immediate_local_confirmation() {
         polish.contains("kws_prompted_local_confirm")
             && polish.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 800")
             && polish.contains("KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400")
-            && polish.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 900")
+            && polish.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 250")
             && polish.contains("KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2")
-            && polish.contains("gain_normalized_pcm16"),
-        "secondary budget 900ms + 2 Absent rejects + gain-boosted local ASR"
+            && polish.contains("limit_pcm16_for_confirmation"),
+        "secondary budget 250ms + 2 Absent rejects + attenuation-only local ASR"
+    );
+    assert_eq!(super::KWS_SECONDARY_CONFIRM_BUDGET_MS, 250);
+    assert!(
+        super::KWS_SECONDARY_CONFIRM_BUDGET_MS + 100 <= 350,
+        "keyword fail-open plus actor/control allowance must fit the phrase-tail target"
     );
 }
 
@@ -2201,7 +2245,7 @@ fn busy_local_wake_helper_is_retried_without_queue_or_keyword_fallback() {
 }
 
 #[test]
-fn terminal_offline_recall_releases_the_actor_after_repeated_local_absence() {
+fn terminal_offline_recall_skips_after_repeated_local_absence() {
     assert!(!super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES - 2,
         0
@@ -2214,6 +2258,8 @@ fn terminal_offline_recall_releases_the_actor_after_repeated_local_absence() {
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
         1
     ));
+    // Explicit repeated local Absent remains authoritative and must not spend
+    // more actor time on a sensitive terminal KWS retry.
     assert!(!super::should_run_terminal_offline_recall(
         super::MIN_TERMINAL_OFFLINE_PCM_BYTES,
         super::TERMINAL_OFFLINE_SKIP_ABSENT_COUNT
@@ -2428,163 +2474,70 @@ fn wayland_clipboard_failure_uses_specific_error_code() {
 }
 
 #[test]
-fn embedded_pcm_normalization_boosts_low_rms_despite_single_peak() {
-    let mut samples = vec![500i16; 999];
-    samples.push(i16::MAX);
+fn embedded_pcm_host_path_never_boosts_quiet_firmware_pcm() {
+    let pcm = pcm_from_samples(&vec![320i16; 1_600]);
+    let (limited, stats) = normalize_embedded_pcm_for_asr(&pcm);
+
+    assert_eq!(limited, pcm);
+    assert_eq!(stats.gain, 1.0);
+    assert_eq!(stats.rms_after, stats.rms_before);
+    assert_eq!(stats.peak_after, stats.peak_before);
+    assert_eq!(stats.upstream_clipped_samples, 0);
+    assert_eq!(stats.clipped_samples, 0);
+}
+
+#[test]
+fn embedded_pcm_host_limiter_flags_upstream_clip_without_creating_one() {
+    let mut samples = vec![30_000i16; 1_600];
+    samples[0] = i16::MAX;
+    samples[1] = i16::MIN;
     let pcm = pcm_from_samples(&samples);
+    let (limited, stats) = normalize_embedded_pcm_for_asr(&pcm);
+    let (_, peak_after) = embedded_pcm_rms_and_peak(&limited);
 
-    let (normalized, stats) = normalize_embedded_pcm_for_asr(&pcm);
-    let (rms_after, _) = embedded_pcm_rms_and_peak(&normalized);
-
-    assert_eq!(normalized.len(), pcm.len());
-    assert!(stats.gain > 1.5, "gain={}", stats.gain);
-    assert!(stats.clipped_samples > 0);
-    assert!(rms_after > stats.rms_before);
+    assert_eq!(limited.len(), pcm.len());
+    assert!(stats.gain < 1.0);
+    assert!(stats.limiter_reduction_db > 0.0);
+    assert_eq!(stats.upstream_clipped_samples, 2);
+    assert_eq!(stats.clipped_samples, 0);
+    assert!(peak_after as f64 <= EMBEDDED_AUDIO_HOST_LIMITER_PEAK.ceil());
 }
 
 #[test]
-fn embedded_pcm_normalization_leaves_loud_audio_unchanged() {
-    let pcm = pcm_from_samples(&vec![3_000i16; 256]);
-
-    let (normalized, stats) = normalize_embedded_pcm_for_asr(&pcm);
-
-    assert_eq!(stats.gain, 1.0);
-    assert_eq!(normalized, pcm);
-}
-
-#[test]
-fn volcengine_streaming_agc_forwards_quiet_pcm_without_buffering() {
-    let quiet = pcm_from_samples(&vec![12i16; 320]);
-    let mut agc = EmbeddedStreamingAgcState::default();
-
-    let (forwarded, stats) = normalize_embedded_streaming_pcm_for_asr(&quiet, &mut agc);
-
-    assert_eq!(forwarded, quiet);
-    assert_eq!(stats.gain, 1.0);
-    assert_eq!(agc.quiet_chunks, 1);
-    assert_eq!(agc.voiced_chunks, 0);
-}
-
-#[test]
-fn volcengine_streaming_agc_ignores_quiet_start_and_boosts_first_voice_immediately() {
+fn volcengine_streaming_path_is_attenuation_only_and_unbuffered() {
     let quiet = pcm_from_samples(&vec![12i16; 320]);
     let voice = pcm_from_samples(&vec![320i16; 320]);
-    let mut agc = EmbeddedStreamingAgcState::default();
+    let mut state = EmbeddedStreamingAgcState::default();
 
-    let (quiet_forwarded, _) = normalize_embedded_streaming_pcm_for_asr(&quiet, &mut agc);
-    let (voice_forwarded, voice_stats) = normalize_embedded_streaming_pcm_for_asr(&voice, &mut agc);
+    let (quiet_out, quiet_stats) = normalize_embedded_streaming_pcm_for_asr(&quiet, &mut state);
+    let (voice_out, voice_stats) = normalize_embedded_streaming_pcm_for_asr(&voice, &mut state);
 
-    assert_eq!(quiet_forwarded, quiet);
-    assert_eq!(voice_forwarded.len(), voice.len());
-    assert!(voice_stats.gain > 1.0, "gain={}", voice_stats.gain);
-    assert!(embedded_pcm_rms_and_peak(&voice_forwarded).0 > embedded_pcm_rms_and_peak(&voice).0);
-    assert_eq!(agc.quiet_chunks, 1);
-    assert_eq!(agc.voiced_chunks, 1);
-    assert_eq!(agc.first_gain, Some(voice_stats.gain));
-    assert_eq!(agc.max_gain, voice_stats.gain);
-    assert_eq!(agc.gain_update_count, 1);
-    assert_eq!(agc.clipped_samples, voice_stats.clipped_samples);
+    assert_eq!(quiet_out, quiet);
+    assert_eq!(voice_out, voice);
+    assert_eq!(quiet_stats.gain, 1.0);
+    assert_eq!(voice_stats.gain, 1.0);
+    assert_eq!(state.quiet_chunks, 1);
+    assert_eq!(state.voiced_chunks, 1);
+    assert_eq!(state.gain_update_count, 0);
+    assert_eq!(state.clipped_samples, 0);
 }
 
 #[test]
-fn volcengine_streaming_agc_uses_full_bounded_gain_for_quiet_voiced_input() {
-    let quiet_voice = pcm_from_samples(&vec![120i16; 1_600]);
-    let mut agc = EmbeddedStreamingAgcState::default();
+fn volcengine_streaming_limiter_does_not_poison_later_blocks() {
+    let hot = pcm_from_samples(&vec![30_000i16; 1_600]);
+    let ordinary = pcm_from_samples(&vec![3_000i16; 1_600]);
+    let mut state = EmbeddedStreamingAgcState::default();
 
-    let (_, stats) = normalize_embedded_streaming_pcm_for_asr(&quiet_voice, &mut agc);
+    let (_, hot_stats) = normalize_embedded_streaming_pcm_for_asr(&hot, &mut state);
+    let (ordinary_out, ordinary_stats) =
+        normalize_embedded_streaming_pcm_for_asr(&ordinary, &mut state);
 
-    assert_eq!(stats.gain, EMBEDDED_AUDIO_MAX_GAIN);
-    assert_eq!(agc.gain, EMBEDDED_AUDIO_MAX_GAIN);
-    assert_eq!(agc.gain_update_count, 1);
-}
-
-#[test]
-fn volcengine_streaming_agc_amplifies_quiet_blocks_after_session_calibration() {
-    let calibration_voice = pcm_from_samples(&vec![120i16; 1_600]);
-    let quiet = pcm_from_samples(&vec![12i16; 1_600]);
-    let mut agc = EmbeddedStreamingAgcState::default();
-
-    normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
-    let (normalized_quiet, quiet_stats) =
-        normalize_embedded_streaming_pcm_for_asr(&quiet, &mut agc);
-
-    assert_eq!(quiet_stats.gain, EMBEDDED_AUDIO_MAX_GAIN);
-    assert_ne!(normalized_quiet, quiet);
-    assert_eq!(agc.quiet_chunks, 1);
-    assert_eq!(agc.gain_update_count, 1);
-}
-
-#[test]
-fn volcengine_streaming_agc_does_not_calibrate_from_a_sparse_clipped_impulse() {
-    let mut samples = vec![0i16; 1_600];
-    samples[0] = i16::MIN;
-    let pcm = pcm_from_samples(&samples);
-    let mut agc = EmbeddedStreamingAgcState::default();
-
-    let (normalized, stats) = normalize_embedded_streaming_pcm_for_asr(&pcm, &mut agc);
-
-    assert_eq!(normalized, pcm);
-    assert!(stats.rms_before > EMBEDDED_AUDIO_STREAMING_SPEECH_RMS);
-    assert_eq!(agc.voiced_chunks, 0);
-    assert_eq!(agc.quiet_chunks, 1);
-    assert!(!agc.gain_calibrated);
-}
-
-#[test]
-fn volcengine_streaming_agc_preserves_spoken_gain_despite_a_sparse_clipped_impulse() {
-    let mut samples = vec![180i16; 1_600];
-    samples[0] = i16::MIN;
-    let pcm = pcm_from_samples(&samples);
-    let mut agc = EmbeddedStreamingAgcState::default();
-
-    let (normalized, stats) = normalize_embedded_streaming_pcm_for_asr(&pcm, &mut agc);
-    let (normalized_rms, _) = embedded_pcm_rms_and_peak(&normalized);
-
-    assert!(stats.gain > 8.0, "gain={}", stats.gain);
-    assert!(stats.clipped_samples >= 1);
-    assert!(normalized_rms > EMBEDDED_AUDIO_TARGET_RMS * 0.8);
-    assert_eq!(agc.first_gain, Some(stats.gain));
-    assert!(agc.gain_calibrated);
-}
-
-#[test]
-fn volcengine_streaming_agc_limits_only_the_later_over_peak_block() {
-    let calibration_voice = pcm_from_samples(&vec![500i16; 1_600]);
-    let ordinary_voice = pcm_from_samples(&vec![900i16; 1_600]);
-    let loud_voice = pcm_from_samples(&vec![16_000i16; 1_600]);
-    let later_moderate_voice = pcm_from_samples(&vec![600i16; 1_600]);
-    let mut agc = EmbeddedStreamingAgcState::default();
-
-    let (_, first_stats) = normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
-    let calibrated_gain = first_stats.gain;
-    assert!(calibrated_gain > 1.0);
-
-    let (_, ordinary_stats) = normalize_embedded_streaming_pcm_for_asr(&ordinary_voice, &mut agc);
-    assert_eq!(ordinary_stats.gain, calibrated_gain);
-
-    let (_, loud_stats) = normalize_embedded_streaming_pcm_for_asr(&loud_voice, &mut agc);
-    assert!(loud_stats.gain < calibrated_gain);
-    assert!(loud_stats.gain >= 1.0);
-    assert_eq!(loud_stats.clipped_samples, 0);
-
-    let (_, later_stats) =
-        normalize_embedded_streaming_pcm_for_asr(&later_moderate_voice, &mut agc);
-    assert_eq!(later_stats.gain, calibrated_gain);
-    assert_eq!(agc.gain_update_count, 1);
-}
-
-#[test]
-fn volcengine_streaming_agc_raises_for_later_quiet_confirmed_speech() {
-    let calibration_voice = pcm_from_samples(&vec![700i16; 1_600]);
-    let later_quiet_voice = pcm_from_samples(&vec![180i16; 1_600]);
-    let mut agc = EmbeddedStreamingAgcState::default();
-
-    let (_, first_stats) = normalize_embedded_streaming_pcm_for_asr(&calibration_voice, &mut agc);
-    let (_, later_stats) = normalize_embedded_streaming_pcm_for_asr(&later_quiet_voice, &mut agc);
-
-    assert!(later_stats.gain > first_stats.gain);
-    assert_eq!(agc.gain, later_stats.gain);
-    assert_eq!(agc.gain_update_count, 2);
+    assert!(hot_stats.gain < 1.0);
+    assert_eq!(hot_stats.clipped_samples, 0);
+    assert_eq!(ordinary_stats.gain, 1.0);
+    assert_eq!(ordinary_out, ordinary);
+    assert_eq!(state.gain_update_count, 1);
+    assert!(state.limiter_reduction_db_max > 0.0);
 }
 
 #[test]

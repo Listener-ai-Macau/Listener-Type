@@ -201,6 +201,27 @@ assert.ok(
   !deviceSectionSource.includes('setForm(submittedForm);'),
   'device settings save must not mask write/readback mismatches by keeping the submitted form',
 );
+assert.ok(
+  deviceSectionSource.includes("const [wakePhraseDraft, setWakePhraseDraft] = useState('');") &&
+    deviceSectionSource.includes('const commitWakePhrase = async () =>'),
+  'wake phrase editing must keep a local draft and expose an explicit commit path',
+);
+assert.ok(
+  deviceSectionSource.includes('setWakePhraseDraft(event.target.value);') &&
+    !deviceSectionSource.includes("onChange={event => void savePrefs(current => ({\n                      ...current,\n                      voiceWakePhrase: event.target.value,"),
+  'wake phrase keystrokes must edit only the local draft instead of activating partial phrases',
+);
+assert.ok(
+  deviceSectionSource.includes("if (event.key === 'Enter')") &&
+    deviceSectionSource.includes('void commitWakePhrase();') &&
+    deviceSectionSource.includes("t('settings.recording.wakePhraseApply'"),
+  'wake phrase changes must activate only on Enter or the explicit Apply command',
+);
+assert.ok(
+  deviceSectionSource.includes('voiceprint?.requiresReenrollment') &&
+    deviceSectionSource.includes("t('settings.recording.voiceprintOpenGateDesc'"),
+  'voiceprint UI must distinguish phrase-change re-enrollment from the open-to-any-speaker state',
+);
 
 const ipcSource = readFileSync('src/lib/ipc.ts', 'utf8');
 const commandsSource = [
