@@ -247,23 +247,23 @@ const LISTENER_OTA_V1_PROTOCOL_MAX_CHUNK_PAYLOAD_BYTES: usize = 500;
 // 443 data + 4 OTA + 3 ATT + 4 L2CAP = 454 bytes, exactly two 2M packets at the
 // release Windows controller's measured 251-octet / 965-us envelope.
 const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 443;
-// Dual-lane DATA+DATA_B + device reorder. Window 400 cuts SYNC rounds vs 200.
+// Dual-lane DATA+DATA_B + device reorder. The first response-bearing status
+// hands Windows' 15 ms firmware-update request back to the firmware-owned
+// 7.5 ms link. A 64-chunk first window bounds that warm-up while still exceeding
+// the instantaneous 40-write host pipeline; later windows return to 400.
 // The firmware places NimBLE allocations in PSRAM and reserves 128 controller
 // ACL receive buffers. A 40-write link-aligned burst needs at most 80
 // fragments, leaving 48 buffers for control and notification traffic.
-// Throughput contract: dual-lane ~50 KB/s needs full 400-chunk windows (owner
-// 2026-07-28: 128 regressed bulk_kb_s 48.9 → 18.8). SYNC cancel/timeout retries
-// handle mid-bulk flakiness without shrinking the hot path.
 const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400;
+// Keep the retained WinRT request only long enough to prove real on-air bulk
+// progress, then let firmware restore the 7.5 ms link for full-size windows.
+const LISTENER_OTA_V1_FIRST_WINDOW_CHUNKS: usize = 64;
 const LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 40;
 // Cold link only: first windows stay small until active_link_confirmed.
 const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64;
 const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
 const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
 const LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD: Duration = Duration::from_millis(500);
-const LISTENER_OTA_FIRMWARE_INTERVAL_TIMEOUT: Duration = Duration::from_millis(1800);
-const LISTENER_OTA_FIRMWARE_INTERVAL_SETTLE: Duration = Duration::from_millis(250);
-const LISTENER_OTA_FIRMWARE_INTERVAL_UNITS: u16 = 6;
 
 const LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(100),
@@ -2200,14 +2200,16 @@ fn register_gatt_session_status_handler(
 struct OtaThroughputPrime {
     request: BluetoothLEPreferredConnectionParametersRequest,
     started_at: Instant,
-    closed: bool,
+    closed: AtomicBool,
 }
 
 impl OtaThroughputPrime {
-    fn close(mut self, reason: &str) {
+    fn close(&self, reason: &str) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let status = self.request.Status().ok();
         let _ = self.request.Close();
-        self.closed = true;
         log::info!(
             "[embedded-ble] Listener OTA released WinRT ThroughputOptimized DLE prime reason={reason} status={status:?} held_ms={}",
             self.started_at.elapsed().as_millis()
@@ -2217,9 +2219,7 @@ impl OtaThroughputPrime {
 
 impl Drop for OtaThroughputPrime {
     fn drop(&mut self) {
-        if !self.closed {
-            let _ = self.request.Close();
-        }
+        self.close("prime_drop");
     }
 }
 
@@ -2376,9 +2376,10 @@ impl PreparedListenerOtaV1Transfer {
                     continue;
                 }
             };
-            if let Err(err) = fresh.release_throughput_prime_for_bulk(transfer_guard.session_id()) {
+            if let Err(err) = fresh.retain_throughput_request_for_bulk(transfer_guard.session_id())
+            {
                 log::warn!(
-                    "[embedded-ble] Listener OTA v1: two-phase WinRT DLE/firmware interval handoff failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
+                    "[embedded-ble] Listener OTA v1: retained WinRT throughput handoff failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
                 );
                 last_error = Some(err);
                 drop(fresh);
@@ -2897,6 +2898,11 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         match result {
             Ok(bytes) => {
                 self.status_error_started = None;
+                if self.control_sequence == 2 {
+                    if let Some(prime) = self.target.throughput_request.as_ref() {
+                        prime.close("after_first_air_and_status_confirmed_bulk_window");
+                    }
+                }
                 Ok(bytes)
             }
             Err(error) => {

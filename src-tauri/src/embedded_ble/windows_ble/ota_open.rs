@@ -807,7 +807,7 @@ fn request_ota_ble_throughput_optimized(
             Some(OtaThroughputPrime {
                 request,
                 started_at: Instant::now(),
-                closed: false,
+                closed: AtomicBool::new(false),
             })
         }
         Err(err) => {

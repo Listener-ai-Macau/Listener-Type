@@ -545,6 +545,7 @@ export function FirmwareOtaPanel({
                 </div>
                 {state.userState === 'transferring' && transferSpeedKibPerSec != null && (
                   <span
+                    data-testid="firmware-ota-current-speed"
                     style={{ fontSize: 11, color: 'var(--ol-ink-3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
                     title={t('settings.recording.firmwareOtaTransferSpeedHint', '当前传输速度')}
                   >

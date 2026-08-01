@@ -428,6 +428,7 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("reconnect handoff accepted")
             && source.contains("let settle_ms = if round == 1 { 350 } else { 700 }")
             && source.contains("LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400")
+            && source.contains("LISTENER_OTA_V1_FIRST_WINDOW_CHUNKS: usize = 64")
             && source.contains("LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64")
             && source.contains("LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 40")
             && source.contains("\"Listener OTA v1 target open\"")
@@ -655,14 +656,15 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("throughput_request: Option<OtaThroughputPrime>")
             && source.contains("let throughput_request = request_ota_ble_throughput_optimized(&device)")
             && source.contains("LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD")
-            && source.contains("fresh.release_throughput_prime_for_bulk(")
-            && source.contains("prime.close(\"before_bulk_firmware_interval_handoff\")")
-            && source.contains("device.GetConnectionParameters()")
-            && source.contains("interval <= LISTENER_OTA_FIRMWARE_INTERVAL_UNITS")
-            && source.contains("LISTENER_OTA_FIRMWARE_INTERVAL_SETTLE")
-            && source.contains("stable_since = None")
-            && source.contains("firmware-owned bulk interval continuously confirmed"),
-        "Windows OTA must retain ThroughputOptimized long enough to prime DLE, then release it and continuously confirm firmware-owned 7.5 ms before bulk"
+            && source.contains("fresh.retain_throughput_request_for_bulk(")
+            && source.contains("first_window_chunks: Some(LISTENER_OTA_V1_FIRST_WINDOW_CHUNKS as u16)")
+            && source.contains("self.throughput_request.as_ref()")
+            && source.contains("retaining WinRT ThroughputOptimized request through aligned bulk transfer")
+            && source.contains("if self.control_sequence == 2")
+            && source.contains("after_first_air_and_status_confirmed_bulk_window")
+            && source.contains("self.closed.swap(true, Ordering::SeqCst)")
+            && source.contains("request.close(\"target_drop\")"),
+        "Windows OTA must retain ThroughputOptimized through the first aligned bulk window and its successful status proof, then release it idempotently"
     );
     let retain = source
         .find("OtaPreBulkMaintainHandoff::take_from(&mut target)")

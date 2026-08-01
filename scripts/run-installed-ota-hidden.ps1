@@ -5,6 +5,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputJson,
 
+    [string]$ExePath = "C:\Program Files\Listener Type\listener-type.exe",
+
     [int]$CdpPort = 9222,
 
     [int]$StartupTimeoutSeconds = 15
@@ -12,7 +14,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$installedExe = "C:\Program Files\Listener Type\listener-type.exe"
+$installedExe = $ExePath
 $cdpListUrl = "http://127.0.0.1:$CdpPort/json/list"
 $runner = Join-Path $PSScriptRoot "run-installed-ota-cdp.mjs"
 

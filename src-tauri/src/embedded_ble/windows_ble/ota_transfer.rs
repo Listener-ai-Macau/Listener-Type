@@ -123,10 +123,11 @@ pub fn take_listener_ota_v1_reboot_att_ready() -> bool {
 }
 
 impl OpenListenerOtaV1Target {
-    fn release_throughput_prime_for_bulk(&mut self, transfer_id: u64) -> Result<(), String> {
-        let Some(prime) = self.throughput_request.take() else {
+    fn retain_throughput_request_for_bulk(&mut self, transfer_id: u64) -> Result<(), String> {
+        let Some(prime) = self.throughput_request.as_ref() else {
             return Err(
-                "Listener OTA cannot start bulk without a retained WinRT DLE prime".to_string(),
+                "Listener OTA cannot start bulk without a retained WinRT throughput request"
+                    .to_string(),
             );
         };
         let remaining_hold = LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD
@@ -134,44 +135,11 @@ impl OpenListenerOtaV1Target {
         if !remaining_hold.is_zero() {
             std::thread::sleep(remaining_hold);
         }
-        prime.close("before_bulk_firmware_interval_handoff");
-
-        let device = self
-            .device
-            .as_ref()
-            .ok_or_else(|| "Listener OTA bulk target has no BluetoothLEDevice".to_string())?;
-        let started = Instant::now();
-        let mut last_interval = None;
-        let mut stable_since = None;
-        while started.elapsed() < LISTENER_OTA_FIRMWARE_INTERVAL_TIMEOUT {
-            if let Ok(params) = device.GetConnectionParameters() {
-                if let Ok(interval) = params.ConnectionInterval() {
-                    last_interval = Some(interval);
-                    if interval <= LISTENER_OTA_FIRMWARE_INTERVAL_UNITS {
-                        let stable_started = stable_since.get_or_insert_with(Instant::now);
-                        if stable_started.elapsed() >= LISTENER_OTA_FIRMWARE_INTERVAL_SETTLE {
-                            log::info!(
-                                "[embedded-ble] Denzic OTA v1 #{transfer_id}: WinRT DLE prime released and firmware-owned bulk interval continuously confirmed units={interval} settle_ms={} elapsed_ms={}",
-                                stable_started.elapsed().as_millis(),
-                                started.elapsed().as_millis()
-                            );
-                            return Ok(());
-                        }
-                    } else {
-                        stable_since = None;
-                    }
-                } else {
-                    stable_since = None;
-                }
-            } else {
-                stable_since = None;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        Err(format!(
-            "Listener OTA firmware-owned 7.5 ms interval was not restored after WinRT DLE prime release within {} ms (last_interval_units={last_interval:?})",
-            LISTENER_OTA_FIRMWARE_INTERVAL_TIMEOUT.as_millis()
-        ))
+        log::info!(
+            "[embedded-ble] Denzic OTA v1 #{transfer_id}: retaining WinRT ThroughputOptimized request through aligned bulk transfer held_ms={}",
+            prime.started_at.elapsed().as_millis()
+        );
+        Ok(())
     }
 
     fn handoff_new_generation_to_post_confirm(&mut self, transfer_id: u64) {
@@ -234,6 +202,7 @@ fn transfer_denzic_ota_v1_to_target(
         denzic_ota_core::TransferOptions {
             chunk_payload_bytes,
             window_chunks,
+            first_window_chunks: Some(LISTENER_OTA_V1_FIRST_WINDOW_CHUNKS as u16),
             status_read_attempts: 5,
             max_stalled_windows: 3,
             progress_timeout: Some(LISTENER_OTA_V1_PROGRESS_TIMEOUT),

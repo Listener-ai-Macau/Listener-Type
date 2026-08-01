@@ -194,8 +194,15 @@ try {
         };
       }
       const progress = [];
+      const visibleSpeedSamples = [];
+      let averageLabelSeen = false;
       const unlisten = await window.__TAURI__.event.listen("firmware-ota:progress", event => {
         progress.push({ atMs: Date.now(), ...event.payload });
+        const speedElement = document.querySelector('[data-testid="firmware-ota-current-speed"]');
+        if (speedElement?.textContent) {
+          visibleSpeedSamples.push({ atMs: Date.now(), text: speedElement.textContent.trim() });
+        }
+        averageLabelSeen ||= speedElement?.textContent?.includes("平均") === true;
       });
       let result = null;
       let commandError = null;
@@ -225,6 +232,8 @@ try {
         result,
         commandError,
         progress,
+        visibleSpeedSamples,
+        averageLabelSeen,
       };
     })()
   `;
