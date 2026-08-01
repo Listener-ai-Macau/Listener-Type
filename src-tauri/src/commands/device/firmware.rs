@@ -663,7 +663,7 @@ impl LoadedWiredFirmwarePackage {
 pub const WIRED_FIRMWARE_PACKAGE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 pub const WIRED_OTADATA_OFFSET: &str = "0xf000";
 pub const WIRED_OTADATA_SIZE: &str = "0x2000";
-pub const WIRED_DEFAULT_BAUD: u32 = 460_800;
+pub const WIRED_DEFAULT_BAUD: u32 = 921_600;
 pub const WIRED_BOOT_REPAIR_BAUDS: &[u32] = &[115_200, 57_600, 9_600];
 pub const WIRED_FLASH_MODE: FlashMode = FlashMode::Dio;
 pub const WIRED_FLASH_FREQUENCY: FlashFrequency = FlashFrequency::_80Mhz;

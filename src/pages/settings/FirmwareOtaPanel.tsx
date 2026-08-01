@@ -62,6 +62,7 @@ export function FirmwareOtaPanel({
   const { t, i18n } = useTranslation();
   const [state, dispatch] = useReducer(firmwareOtaReducer, initialFirmwareOtaState);
   const [firmwareMode, setFirmwareMode] = useState<'ble' | 'wired'>('ble');
+  const firmwareModeManuallySelectedRef = useRef(false);
   const [wiredBusy, setWiredBusy] = useState(false);
   const wiredRef = useRef<FirmwareWiredFlashHandle>(null);
   const [wiredAction, setWiredAction] = useState<{ canFlash: boolean; isFlashing: boolean }>({ canFlash: false, isFlashing: false });
@@ -77,6 +78,31 @@ export function FirmwareOtaPanel({
   const [transferSpeedKibPerSec, setTransferSpeedKibPerSec] = useState<number | null>(null);
   const transferSpeedSamplesRef = useRef<Array<{ tMs: number; bytes: number }>>([]);
   const otaStartInFlightRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listWiredFirmwarePorts()
+      .then(ports => {
+        if (
+          !cancelled &&
+          !firmwareModeManuallySelectedRef.current &&
+          ports.some(item => item.isLikelyEsp32)
+        ) {
+          setFirmwareMode('wired');
+        }
+      })
+      .catch(() => {
+        // BLE remains the fallback when USB discovery is unavailable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectFirmwareMode = useCallback((mode: 'ble' | 'wired') => {
+    firmwareModeManuallySelectedRef.current = true;
+    setFirmwareMode(mode);
+  }, []);
 
   const transferActive = state.userState === 'transferring' || state.userState === 'rebooting' || state.userState === 'verifying';
   const firmwareActionBusy = transferActive || wiredBusy;
@@ -470,10 +496,10 @@ export function FirmwareOtaPanel({
 
       <div className="ol-firmware-control-bar">
         <div className="ol-firmware-mode-switch" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Btn variant={firmwareMode === 'ble' ? 'blue' : 'soft'} size="sm" icon="cloud" onClick={() => setFirmwareMode('ble')} disabled={firmwareActionBusy}>
+          <Btn variant={firmwareMode === 'ble' ? 'blue' : 'soft'} size="sm" icon="cloud" onClick={() => selectFirmwareMode('ble')} disabled={firmwareActionBusy}>
             {t('settings.recording.firmwareModeBleOta', '蓝牙 OTA')}
           </Btn>
-          <Btn variant={firmwareMode === 'wired' ? 'blue' : 'soft'} size="sm" icon="bolt" onClick={() => setFirmwareMode('wired')} disabled={firmwareActionBusy}>
+          <Btn variant={firmwareMode === 'wired' ? 'blue' : 'soft'} size="sm" icon="bolt" onClick={() => selectFirmwareMode('wired')} disabled={firmwareActionBusy}>
             {t('settings.recording.firmwareModeWired', '有线刷机')}
           </Btn>
         </div>
@@ -664,16 +690,18 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
   const [selection, setSelection] = useState<WiredPackageSelection | null>(null);
   const [ports, setPorts] = useState<WiredFirmwareSerialPort[]>([]);
   const [port, setPort] = useState('COMx');
-  const [baud, setBaud] = useState('460800');
+  const [baud, setBaud] = useState('921600');
   const [preserveOtaData, setPreserveOtaData] = useState(false);
   const [status, setStatus] = useState<WiredFlashStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<WiredFirmwareFlashResult | null>(null);
   const [progress, setProgress] = useState<WiredFirmwareProgressPayload | null>(null);
+  const [wiredSpeedKibPerSec, setWiredSpeedKibPerSec] = useState<number | null>(null);
+  const wiredSpeedSamplesRef = useRef<Array<{ tMs: number; bytes: number }>>([]);
 
   const selectedPayload = selection?.payload ?? null;
   const activeWiredPort = port;
-  const activeWiredBaud = parseBaud(baud) ?? 460800;
+  const activeWiredBaud = parseBaud(baud) ?? 921600;
   const activePreserveOtaData = preserveOtaData;
   const busy = status === 'checking' || status === 'flashing';
   const statusTone = wiredStatusTone(status);
@@ -747,10 +775,24 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
     action: WiredFirmwareProgressPayload['action'],
     operation: () => Promise<WiredFirmwareFlashResult>,
   ) => {
+    wiredSpeedSamplesRef.current = [];
+    setWiredSpeedKibPerSec(null);
     setProgress(makeInitialWiredProgress(action, activeWiredPort, selection?.payload.version ?? null));
     const unlisten = await listen<WiredFirmwareProgressPayload>('wired-firmware:progress', event => {
       if (event.payload.action === action) {
         setProgress(event.payload);
+        if (event.payload.stage === 'writing' && event.payload.bytesWritten > 0) {
+          const nowMs = performance.now();
+          const samples = wiredSpeedSamplesRef.current;
+          if (samples.length > 0 && event.payload.bytesWritten < samples[samples.length - 1].bytes) {
+            samples.length = 0;
+          }
+          samples.push({ tMs: nowMs, bytes: event.payload.bytesWritten });
+          while (samples.length > 3 && samples[1].tMs < nowMs - 5_000) {
+            samples.shift();
+          }
+          setWiredSpeedKibPerSec(estimateFirmwareOtaTransferSpeedKibPerSec(samples));
+        }
       }
     });
     try {
@@ -776,6 +818,7 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
       );
       setResult(nextResult);
       setProgress(makeDoneWiredProgress('flash', nextResult.port, nextResult.version));
+      setWiredSpeedKibPerSec(null);
       setStatus('ok');
     } catch (error) {
       setStatus('err');
@@ -903,11 +946,18 @@ const FirmwareWiredFlashPanel = forwardRef<FirmwareWiredFlashHandle, FirmwareWir
                 }}
               />
             </div>
-            <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', minWidth: 112, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-              {progress.bytesTotal > 0
-                ? `${formatBytes(progress.bytesWritten)} / ${formatBytes(progress.bytesTotal)}`
-                : `${Math.max(0, Math.min(100, progress.percent))}%`}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, minWidth: 190, fontVariantNumeric: 'tabular-nums' }}>
+              {wiredSpeedKibPerSec != null && progress.stage === 'writing' && (
+                <span style={{ fontSize: 11, color: 'var(--ol-ink-3)', minWidth: 68, textAlign: 'right' }}>
+                  {formatFirmwareOtaTransferSpeed(wiredSpeedKibPerSec)}
+                </span>
+              )}
+              <span style={{ fontSize: 11, color: 'var(--ol-ink-4)', minWidth: 112, textAlign: 'right' }}>
+                {progress.bytesTotal > 0
+                  ? `${formatBytes(progress.bytesWritten)} / ${formatBytes(progress.bytesTotal)}`
+                  : `${Math.max(0, Math.min(100, progress.percent))}%`}
+              </span>
+            </div>
           </div>
           <div style={{ fontSize: 11, color: 'var(--ol-ink-4)', lineHeight: 1.4 }}>
             {formatWiredProgressMessage(progress, t)}

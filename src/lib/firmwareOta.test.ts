@@ -632,6 +632,25 @@ assert.ok(
   'selected firmware package summary must be outside the BLE/wired mode-specific panels',
 );
 assert.ok(
+  firmwareOtaPanelSource.includes('const firmwareModeManuallySelectedRef = useRef(false);')
+    && firmwareOtaPanelSource.includes('ports.some(item => item.isLikelyEsp32)')
+    && firmwareOtaPanelSource.includes("setFirmwareMode('wired');")
+    && firmwareOtaPanelSource.includes("selectFirmwareMode('ble')")
+    && firmwareOtaPanelSource.includes("selectFirmwareMode('wired')"),
+  'a likely Listener USB port must select the deterministic wired updater by default while preserving explicit BLE/wired user choice',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes("const [baud, setBaud] = useState('921600');")
+    && firmwareOtaPanelSource.includes('parseBaud(baud) ?? 921600'),
+  'the wired updater must default to the hardware-proven 921600 baud path',
+);
+assert.ok(
+  firmwareOtaPanelSource.includes('const wiredSpeedSamplesRef = useRef<Array<{ tMs: number; bytes: number }>>([]);')
+    && firmwareOtaPanelSource.includes('setWiredSpeedKibPerSec(estimateFirmwareOtaTransferSpeedKibPerSec(samples));')
+    && firmwareOtaPanelSource.includes('formatFirmwareOtaTransferSpeed(wiredSpeedKibPerSec)'),
+  'wired flashing must display the same bounded recent-speed metric as BLE OTA without an average label',
+);
+assert.ok(
   /dispatch\(previousPackage\s*\n\s*\?\s*\{\s*type:\s*'ready'\s*\}/.test(firmwareOtaPanelSource),
   'failed new firmware selection should restore ready state when an older package is still selected',
 );
