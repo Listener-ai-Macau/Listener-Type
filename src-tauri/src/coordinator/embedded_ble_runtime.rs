@@ -3785,7 +3785,7 @@ fn cancel_embedded_ble_listener_capture(
                 if Arc::ptr_eq(active_cancel, &cancel) {
                     handoff.store(true, Ordering::SeqCst);
                     log::info!(
-                        "[embedded-ble] confirmed BLE-name change will leave old notify CCCD enabled for firmware disconnect handoff"
+                        "[embedded-ble] confirmed controlled handoff will leave old notify CCCD enabled for firmware disconnect handoff"
                     );
                 }
             }

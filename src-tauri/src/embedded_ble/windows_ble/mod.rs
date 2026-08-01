@@ -46,6 +46,7 @@ use windows::Devices::Bluetooth::GenericAttributeProfile::{
 };
 use windows::Devices::Bluetooth::{
     BluetoothAddressType, BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
+    BluetoothLEPreferredConnectionParameters, BluetoothLEPreferredConnectionParametersRequest,
 };
 use windows::Devices::Enumeration::{
     DeviceAccessStatus, DeviceClass, DeviceInformation, DeviceInformationCustomPairing,
@@ -242,19 +243,27 @@ const LISTENER_SERVICE_UUID_TEXTS: [&str; 3] = [
 // Catch-up status after each SYNC: short interval so flash lag resolves without
 // counting a full-window recovery.
 const LISTENER_OTA_V1_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(8);
-const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 500;
-// Dual-lane DATA+DATA_B + device reorder. Window 400 cuts SYNC rounds vs 200;
-// pipeline 32 with ~16/lane is the proven host shape. Deeper 24/lane and
-// 32/lane WinRT queues both regressed airtime.
+const LISTENER_OTA_V1_PROTOCOL_MAX_CHUNK_PAYLOAD_BYTES: usize = 500;
+// 443 data + 4 OTA + 3 ATT + 4 L2CAP = 454 bytes, exactly two 2M packets at the
+// release Windows controller's measured 251-octet / 965-us envelope.
+const LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES: usize = 443;
+// Dual-lane DATA+DATA_B + device reorder. Window 400 cuts SYNC rounds vs 200.
+// The firmware places NimBLE allocations in PSRAM and reserves 128 controller
+// ACL receive buffers. A 40-write link-aligned burst needs at most 80
+// fragments, leaving 48 buffers for control and notification traffic.
 // Throughput contract: dual-lane ~50 KB/s needs full 400-chunk windows (owner
 // 2026-07-28: 128 regressed bulk_kb_s 48.9 → 18.8). SYNC cancel/timeout retries
 // handle mid-bulk flakiness without shrinking the hot path.
 const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400;
-const LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 32;
+const LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 40;
 // Cold link only: first windows stay small until active_link_confirmed.
 const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64;
 const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
 const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
+const LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD: Duration = Duration::from_millis(500);
+const LISTENER_OTA_FIRMWARE_INTERVAL_TIMEOUT: Duration = Duration::from_millis(1800);
+const LISTENER_OTA_FIRMWARE_INTERVAL_UNITS: u16 = 6;
+
 const LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(100),
     Duration::from_millis(200),
@@ -2187,6 +2196,32 @@ fn register_gatt_session_status_handler(
     }
 }
 
+struct OtaThroughputPrime {
+    request: BluetoothLEPreferredConnectionParametersRequest,
+    started_at: Instant,
+    closed: bool,
+}
+
+impl OtaThroughputPrime {
+    fn close(mut self, reason: &str) {
+        let status = self.request.Status().ok();
+        let _ = self.request.Close();
+        self.closed = true;
+        log::info!(
+            "[embedded-ble] Listener OTA released WinRT ThroughputOptimized DLE prime reason={reason} status={status:?} held_ms={}",
+            self.started_at.elapsed().as_millis()
+        );
+    }
+}
+
+impl Drop for OtaThroughputPrime {
+    fn drop(&mut self) {
+        if !self.closed {
+            let _ = self.request.Close();
+        }
+    }
+}
+
 struct OpenListenerOtaV1Target {
     control: GattCharacteristic,
     data: GattCharacteristic,
@@ -2198,6 +2233,7 @@ struct OpenListenerOtaV1Target {
     service: Option<GattDeviceService>,
     session: Option<GattSession>,
     device: Option<BluetoothLEDevice>,
+    throughput_request: Option<OtaThroughputPrime>,
     bluetooth_address: Option<u64>,
 }
 
@@ -2339,6 +2375,14 @@ impl PreparedListenerOtaV1Transfer {
                     continue;
                 }
             };
+            if let Err(err) = fresh.release_throughput_prime_for_bulk(transfer_guard.session_id()) {
+                log::warn!(
+                    "[embedded-ble] Listener OTA v1: two-phase WinRT DLE/firmware interval handoff failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
+                );
+                last_error = Some(err);
+                drop(fresh);
+                continue;
+            }
             let reboot_disconnect_observer =
                 OtaRebootDisconnectObserver::arm(&fresh, transfer_guard.session_id());
             match transfer_denzic_ota_v1_to_target(
@@ -2531,10 +2575,11 @@ impl ListenerOtaV1Transport<'_> {
     /// Lane selection is owned by denzic_ota_core dual-lane alternation.
     fn enqueue_wwr_data_write(&mut self, packet: &[u8], lane_b: bool) -> Result<(), String> {
         let dual = self.target.data_b.is_some();
+        let pipeline_depth = LISTENER_OTA_V1_WWR_PIPELINE_DEPTH;
         let depth_per_lane = if dual {
-            (LISTENER_OTA_V1_WWR_PIPELINE_DEPTH + 1) / 2
+            (pipeline_depth + 1) / 2
         } else {
-            LISTENER_OTA_V1_WWR_PIPELINE_DEPTH
+            pipeline_depth
         };
 
         if lane_b {
@@ -2567,7 +2612,7 @@ impl ListenerOtaV1Transport<'_> {
         let total = self.pending_wwr.len() + self.pending_wwr_b.len();
         if self.pending_wwr.len() > max_a
             || self.pending_wwr_b.len() > max_b
-            || total >= LISTENER_OTA_V1_WWR_PIPELINE_DEPTH
+            || total >= pipeline_depth
         {
             self.drain_pending_wwr_until(max_a, max_b)?;
         }
@@ -4517,6 +4562,9 @@ struct PreparedDiagnosticCharacteristics {
 
 impl Drop for OpenListenerOtaV1Target {
     fn drop(&mut self) {
+        if let Some(request) = self.throughput_request.take() {
+            request.close("target_drop");
+        }
         if let Some(session) = self.session.take() {
             release_gatt_maintain_request(&session, "Listener OTA target drop");
             release_winrt_bluetooth_object(session);

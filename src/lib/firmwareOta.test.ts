@@ -813,17 +813,17 @@ for (const expectedTimingField of ['transferElapsedMs', 'confirmElapsedMs', 'tot
   ]);
   assert.ok(speed != null);
   assert.ok(Math.abs(speed - 60) < 0.01);
-  // Overall average: mid-burst samples must not dominate; first→last only.
-  const overall = estimateFirmwareOtaTransferSpeedKibPerSec([
+  // Current speed uses the latest bounded segment rather than transfer-start average.
+  const current = estimateFirmwareOtaTransferSpeedKibPerSec([
     { tMs: 0, bytes: 0 },
     { tMs: 1000, bytes: 10 * 1024 },
     { tMs: 2000, bytes: 20 * 1024 },
     { tMs: 5000, bytes: 100 * 1024 },
   ]);
-  assert.ok(overall != null);
+  assert.ok(current != null);
   assert.ok(
-    Math.abs(overall - 20) < 0.01,
-    `expected overall 20 KiB/s from 100 KiB / 5 s, got ${overall}`,
+    Math.abs(current - (80 / 3)) < 0.01,
+    `expected recent 26.67 KiB/s from the latest 80 KiB / 3 s segment, got ${current}`,
   );
   assert.equal(formatFirmwareOtaTransferSpeed(60.04), '60.0');
   assert.equal(formatFirmwareOtaTransferSpeed(120.4), '120');

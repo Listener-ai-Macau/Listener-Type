@@ -123,6 +123,46 @@ pub fn take_listener_ota_v1_reboot_att_ready() -> bool {
 }
 
 impl OpenListenerOtaV1Target {
+    fn release_throughput_prime_for_bulk(&mut self, transfer_id: u64) -> Result<(), String> {
+        let Some(prime) = self.throughput_request.take() else {
+            return Err(
+                "Listener OTA cannot start bulk without a retained WinRT DLE prime".to_string(),
+            );
+        };
+        let remaining_hold = LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD
+            .saturating_sub(prime.started_at.elapsed());
+        if !remaining_hold.is_zero() {
+            std::thread::sleep(remaining_hold);
+        }
+        prime.close("before_bulk_firmware_interval_handoff");
+
+        let device = self
+            .device
+            .as_ref()
+            .ok_or_else(|| "Listener OTA bulk target has no BluetoothLEDevice".to_string())?;
+        let started = Instant::now();
+        let mut last_interval = None;
+        while started.elapsed() < LISTENER_OTA_FIRMWARE_INTERVAL_TIMEOUT {
+            if let Ok(params) = device.GetConnectionParameters() {
+                if let Ok(interval) = params.ConnectionInterval() {
+                    last_interval = Some(interval);
+                    if interval <= LISTENER_OTA_FIRMWARE_INTERVAL_UNITS {
+                        log::info!(
+                            "[embedded-ble] Denzic OTA v1 #{transfer_id}: WinRT DLE prime released and firmware-owned bulk interval confirmed units={interval} elapsed_ms={}",
+                            started.elapsed().as_millis()
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        Err(format!(
+            "Listener OTA firmware-owned 7.5 ms interval was not restored after WinRT DLE prime release within {} ms (last_interval_units={last_interval:?})",
+            LISTENER_OTA_FIRMWARE_INTERVAL_TIMEOUT.as_millis()
+        ))
+    }
+
     fn handoff_new_generation_to_post_confirm(&mut self, transfer_id: u64) {
         if let Some(device) = self.device.take() {
             hold_listener_ota_post_confirm_device(&device);
@@ -144,13 +184,16 @@ fn transfer_denzic_ota_v1_to_target(
     manifest_chunk_bytes: usize,
     on_progress: Option<&dyn Fn(usize, usize)>,
 ) -> Result<crate::embedded_ble::FirmwareOtaTransferStats, String> {
-    if manifest_chunk_bytes != LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES {
+    if manifest_chunk_bytes == 0
+        || manifest_chunk_bytes > LISTENER_OTA_V1_PROTOCOL_MAX_CHUNK_PAYLOAD_BYTES
+    {
         return Err(format!(
-            "Denzic OTA v1 manifest chunk size must be {LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES} bytes, got {manifest_chunk_bytes}."
+            "Denzic OTA v1 manifest chunk size must be 1..={LISTENER_OTA_V1_PROTOCOL_MAX_CHUNK_PAYLOAD_BYTES} bytes, got {manifest_chunk_bytes}."
         ));
     }
     let configured_window = listener_ota_v1_window_chunks()?;
     let chunk_payload_bytes = manifest_chunk_bytes
+        .min(LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES)
         .min(target.data_chunk_payload_bytes)
         .min(u16::MAX as usize)
         .max(1) as u16;

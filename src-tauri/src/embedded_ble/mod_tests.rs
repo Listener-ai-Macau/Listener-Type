@@ -429,7 +429,7 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("let settle_ms = if round == 1 { 350 } else { 700 }")
             && source.contains("LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400")
             && source.contains("LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64")
-            && source.contains("LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 32")
+            && source.contains("LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 40")
             && source.contains("\"Listener OTA v1 target open\"")
             && source.contains("\"Listener OTA v1 deadline target open\"")
             && source.contains("remember_runtime_bluetooth_target_address_for_current(")
@@ -650,10 +650,17 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
         "OTA must retain the complete connected WinRT generation and require the final response-bearing TYPE:READY for ATT proof"
     );
     assert!(
-        !source.contains("BluetoothLEPreferredConnectionParameters")
-            && !source.contains("RequestPreferredConnectionParameters")
-            && !source.contains("ThroughputOptimized"),
-        "the rejected WinRT throughput lease must stay out of the shipping OTA path"
+        source.contains("BluetoothLEPreferredConnectionParameters::ThroughputOptimized()")
+            && source.contains("device.RequestPreferredConnectionParameters(&params)")
+            && source.contains("throughput_request: Option<OtaThroughputPrime>")
+            && source.contains("let throughput_request = request_ota_ble_throughput_optimized(&device)")
+            && source.contains("LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD")
+            && source.contains("fresh.release_throughput_prime_for_bulk(")
+            && source.contains("prime.close(\"before_bulk_firmware_interval_handoff\")")
+            && source.contains("device.GetConnectionParameters()")
+            && source.contains("interval <= LISTENER_OTA_FIRMWARE_INTERVAL_UNITS")
+            && source.contains("firmware-owned bulk interval confirmed"),
+        "Windows OTA must retain ThroughputOptimized long enough to prime DLE, then release it and confirm firmware-owned 7.5 ms before bulk"
     );
     let retain = source
         .find("OtaPreBulkMaintainHandoff::take_from(&mut target)")

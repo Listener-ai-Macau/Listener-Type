@@ -782,6 +782,43 @@ fn open_listener_ota_v1_target_for_verified_active_handoff(
     open_listener_ota_v1_target_for_device_with_options(address, true)
 }
 
+fn request_ota_ble_throughput_optimized(
+    device: &BluetoothLEDevice,
+) -> Option<OtaThroughputPrime> {
+    let params = match BluetoothLEPreferredConnectionParameters::ThroughputOptimized() {
+        Ok(params) => params,
+        Err(err) => {
+            log::warn!(
+                "[embedded-ble] Listener OTA WinRT ThroughputOptimized parameters unavailable: {err}"
+            );
+            return None;
+        }
+    };
+    match device.RequestPreferredConnectionParameters(&params) {
+        Ok(request) => {
+            let status = request.Status().ok();
+            log::info!(
+                "[embedded-ble] Listener OTA retained WinRT ThroughputOptimized request status={status:?} min_interval={} max_interval={} latency={} timeout={}",
+                params.MinConnectionInterval().unwrap_or_default(),
+                params.MaxConnectionInterval().unwrap_or_default(),
+                params.ConnectionLatency().unwrap_or_default(),
+                params.LinkTimeout().unwrap_or_default()
+            );
+            Some(OtaThroughputPrime {
+                request,
+                started_at: Instant::now(),
+                closed: false,
+            })
+        }
+        Err(err) => {
+            log::warn!(
+                "[embedded-ble] Listener OTA WinRT ThroughputOptimized request failed: {err}"
+            );
+            None
+        }
+    }
+}
+
 fn open_listener_ota_v1_target_for_device_with_options(
     address: u64,
     verified_active_handoff: bool,
@@ -805,6 +842,7 @@ fn open_listener_ota_v1_target_for_device_with_options(
             }
         }
     }
+    let throughput_request = request_ota_ble_throughput_optimized(&device);
 
     let mut last_error = None;
     // A verified active link makes its device handle and access grant reusable, but
@@ -886,6 +924,7 @@ fn open_listener_ota_v1_target_for_device_with_options(
                         service: Some(service),
                         session: prepared.session,
                         device: Some(device),
+                        throughput_request,
                         bluetooth_address: Some(address),
                     });
                 }
@@ -954,6 +993,7 @@ fn open_listener_ota_v1_target_for_device_with_deadline_options(
             }
         }
     }
+    let throughput_request = request_ota_ble_throughput_optimized(&device);
 
     let mut last_error = None;
     let cache_modes = bluetooth_cache_modes_for_policy(
@@ -1037,6 +1077,7 @@ fn open_listener_ota_v1_target_for_device_with_deadline_options(
                         service: Some(service),
                         session: prepared.session,
                         device: Some(device),
+                        throughput_request,
                         bluetooth_address: Some(address),
                     });
                 }
@@ -1601,6 +1642,9 @@ fn open_listener_ota_v1_target_for_service_with_cache_policy(
                 .ok()
             })
     });
+    let throughput_request = device
+        .as_ref()
+        .and_then(request_ota_ble_throughput_optimized);
 
     let mut last_error = None;
     let cache_modes = bluetooth_cache_modes_for_policy(
@@ -1620,6 +1664,7 @@ fn open_listener_ota_v1_target_for_service_with_cache_policy(
                     service: Some(service),
                     session: prepared.session,
                     device,
+                    throughput_request,
                     bluetooth_address: parse_bluetooth_address_from_device_id(
                         &service_id.to_string_lossy(),
                     ),
@@ -1669,6 +1714,9 @@ fn open_listener_ota_v1_target_for_service_with_deadline(
                 .ok()
             })
     });
+    let throughput_request = device
+        .as_ref()
+        .and_then(request_ota_ble_throughput_optimized);
 
     let mut last_error = None;
     for &cache_mode in bluetooth_cache_modes_for_policy(
@@ -1688,6 +1736,7 @@ fn open_listener_ota_v1_target_for_service_with_deadline(
                     service: Some(service),
                     session: prepared.session,
                     device,
+                    throughput_request,
                     bluetooth_address: parse_bluetooth_address_from_device_id(
                         &service_id.to_string_lossy(),
                     ),

@@ -43,6 +43,16 @@ fn bluetooth_target_name_test_lock() -> &'static Mutex<()> {
 }
 
 #[test]
+fn ota_wwr_depth_stays_within_the_device_acl_pool() {
+    assert_eq!(LISTENER_OTA_V1_WWR_PIPELINE_DEPTH, 40);
+    assert_eq!(LISTENER_OTA_V1_CHUNK_PAYLOAD_BYTES, 443);
+    assert!(
+        LISTENER_OTA_V1_WWR_PIPELINE_DEPTH * 2 <= 128 - 48,
+        "the link-aligned 443-byte OTA pipeline must leave 48 of the PSRAM-backed 128-buffer controller ACL pool reserved"
+    );
+}
+
+#[test]
 fn background_capture_cancel_scope_is_visible_to_winrt_waits() {
     let cancel = Arc::new(AtomicBool::new(false));
     assert!(!notify_capture_cancel_requested());
