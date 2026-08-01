@@ -264,6 +264,7 @@ const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64;
 const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
 const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
 const LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD: Duration = Duration::from_millis(500);
+const LISTENER_OTA_PRE_BEGIN_LINK_TIMEOUT: Duration = Duration::from_secs(3);
 
 const LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(100),
@@ -2376,10 +2377,9 @@ impl PreparedListenerOtaV1Transfer {
                     continue;
                 }
             };
-            if let Err(err) = fresh.retain_throughput_request_for_bulk(transfer_guard.session_id())
-            {
+            if let Err(err) = fresh.converge_active_link_before_begin(transfer_guard.session_id()) {
                 log::warn!(
-                    "[embedded-ble] Listener OTA v1: retained WinRT throughput handoff failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
+                    "[embedded-ble] Listener OTA v1: pre-BEGIN active-link convergence failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
                 );
                 last_error = Some(err);
                 drop(fresh);
@@ -2898,11 +2898,6 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         match result {
             Ok(bytes) => {
                 self.status_error_started = None;
-                if self.control_sequence == 2 {
-                    if let Some(prime) = self.target.throughput_request.as_ref() {
-                        prime.close("after_first_air_and_status_confirmed_bulk_window");
-                    }
-                }
                 Ok(bytes)
             }
             Err(error) => {

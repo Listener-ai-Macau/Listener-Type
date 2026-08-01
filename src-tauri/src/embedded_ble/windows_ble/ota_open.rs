@@ -1872,6 +1872,23 @@ fn open_listener_ota_v1_characteristics_from_service(
         }
     }
     let session = prepare_gatt_session(service, GATT_READY_TIMEOUT)?;
+    let readiness = open_read_characteristic_from_service(
+        service,
+        OTA_READINESS_UUID,
+        "Listener OTA v1 readiness prime",
+        cache_mode,
+    )?;
+    let readiness_bytes = read_characteristic_bytes_with_timeout(
+        &readiness,
+        BluetoothCacheMode::Uncached,
+        "Listener OTA v1 readiness prime",
+        BLE_DISCOVERY_TIMEOUT,
+    )?;
+    log::info!(
+        "[embedded-ble] Listener OTA v1 readiness prime completed bytes={}",
+        readiness_bytes.len()
+    );
+    release_winrt_bluetooth_object(readiness);
     let control = open_write_characteristic_from_service(
         service,
         LISTENER_OTA_V1_CONTROL_UUID,
@@ -1950,6 +1967,32 @@ fn open_listener_ota_v1_characteristics_from_service_with_deadline(
         service,
         remaining_ble_timeout(deadline, GATT_READY_TIMEOUT, "Listener OTA v1 GATT session")?,
     )?;
+    let readiness = open_read_characteristic_from_service_with_timeout(
+        service,
+        OTA_READINESS_UUID,
+        "Listener OTA v1 readiness prime",
+        cache_mode,
+        remaining_ble_timeout(
+            deadline,
+            BLE_DISCOVERY_TIMEOUT,
+            "Listener OTA v1 readiness prime characteristic",
+        )?,
+    )?;
+    let readiness_bytes = read_characteristic_bytes_with_timeout(
+        &readiness,
+        BluetoothCacheMode::Uncached,
+        "Listener OTA v1 readiness prime",
+        remaining_ble_timeout(
+            deadline,
+            BLE_DISCOVERY_TIMEOUT,
+            "Listener OTA v1 readiness prime read",
+        )?,
+    )?;
+    log::info!(
+        "[embedded-ble] Listener OTA v1 readiness prime completed bytes={}",
+        readiness_bytes.len()
+    );
+    release_winrt_bluetooth_object(readiness);
     let control = open_write_characteristic_from_service_with_timeout(
         service,
         LISTENER_OTA_V1_CONTROL_UUID,

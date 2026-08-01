@@ -656,15 +656,15 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("throughput_request: Option<OtaThroughputPrime>")
             && source.contains("let throughput_request = request_ota_ble_throughput_optimized(&device)")
             && source.contains("LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD")
-            && source.contains("fresh.retain_throughput_request_for_bulk(")
+            && source.contains("fresh.converge_active_link_before_begin(")
             && source.contains("first_window_chunks: Some(LISTENER_OTA_V1_FIRST_WINDOW_CHUNKS as u16)")
             && source.contains("self.throughput_request.as_ref()")
-            && source.contains("retaining WinRT ThroughputOptimized request through aligned bulk transfer")
-            && source.contains("if self.control_sequence == 2")
-            && source.contains("after_first_air_and_status_confirmed_bulk_window")
+            && source.contains("prime.close(\"before_begin_device_link_convergence\")")
+            && source.contains("status.active_link_confirmed()")
+            && source.contains("device confirmed active BLE link before BEGIN")
             && source.contains("self.closed.swap(true, Ordering::SeqCst)")
             && source.contains("request.close(\"target_drop\")"),
-        "Windows OTA must retain ThroughputOptimized through the first aligned bulk window and its successful status proof, then release it idempotently"
+        "Windows OTA must release ThroughputOptimized after DLE priming and await device-confirmed 7.5 ms/2M/DLE before BEGIN"
     );
     let retain = source
         .find("OtaPreBulkMaintainHandoff::take_from(&mut target)")

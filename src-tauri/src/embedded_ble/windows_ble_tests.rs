@@ -53,6 +53,39 @@ fn ota_wwr_depth_stays_within_the_device_acl_pool() {
 }
 
 #[test]
+fn listener_ota_target_open_primes_the_bounded_firmware_prepare_lease() {
+    let source = include_str!("embedded_ble.rs");
+    assert_eq!(
+        source
+            .matches("Listener OTA v1 readiness prime completed")
+            .count(),
+        2,
+        "normal and deadline OTA target opens must both prime firmware before BEGIN"
+    );
+    assert!(
+        source.matches("OTA_READINESS_UUID").count() >= 3
+            && source
+                .matches(
+                    "BluetoothCacheMode::Uncached,\n        \"Listener OTA v1 readiness prime\""
+                )
+                .count()
+                == 2,
+        "the prepare handshake must read the existing readiness characteristic uncached"
+    );
+}
+
+#[test]
+fn listener_ota_confirms_the_device_link_before_begin() {
+    let source = include_str!("embedded_ble.rs");
+    assert!(
+        source.contains("prime.close(\"before_begin_device_link_convergence\")")
+            && source.contains("status.active_link_confirmed()")
+            && source.contains("device confirmed active BLE link before BEGIN"),
+        "Type must release the temporary WinRT request and await device link confirmation before BEGIN"
+    );
+}
+
+#[test]
 fn background_capture_cancel_scope_is_visible_to_winrt_waits() {
     let cancel = Arc::new(AtomicBool::new(false));
     assert!(!notify_capture_cancel_requested());

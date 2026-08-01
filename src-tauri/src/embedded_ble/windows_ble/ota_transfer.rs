@@ -123,7 +123,7 @@ pub fn take_listener_ota_v1_reboot_att_ready() -> bool {
 }
 
 impl OpenListenerOtaV1Target {
-    fn retain_throughput_request_for_bulk(&mut self, transfer_id: u64) -> Result<(), String> {
+    fn converge_active_link_before_begin(&mut self, transfer_id: u64) -> Result<(), String> {
         let Some(prime) = self.throughput_request.as_ref() else {
             return Err(
                 "Listener OTA cannot start bulk without a retained WinRT throughput request"
@@ -135,11 +135,31 @@ impl OpenListenerOtaV1Target {
         if !remaining_hold.is_zero() {
             std::thread::sleep(remaining_hold);
         }
-        log::info!(
-            "[embedded-ble] Denzic OTA v1 #{transfer_id}: retaining WinRT ThroughputOptimized request through aligned bulk transfer held_ms={}",
-            prime.started_at.elapsed().as_millis()
-        );
-        Ok(())
+        prime.close("before_begin_device_link_convergence");
+
+        let started = Instant::now();
+        while started.elapsed() < LISTENER_OTA_PRE_BEGIN_LINK_TIMEOUT {
+            let status_bytes = read_characteristic_bytes_with_timeout(
+                &self.status,
+                BluetoothCacheMode::Uncached,
+                "Denzic OTA v1 pre-BEGIN link status",
+                LISTENER_OTA_V1_STATUS_READ_TIMEOUT,
+            )?;
+            let status = denzic_ota_core::parse_status(&status_bytes)?;
+            if status.active_link_confirmed() {
+                log::info!(
+                    "[embedded-ble] Denzic OTA v1 #{transfer_id}: device confirmed active BLE link before BEGIN elapsed_ms={} prime_held_ms={}",
+                    started.elapsed().as_millis(),
+                    prime.started_at.elapsed().as_millis()
+                );
+                return Ok(());
+            }
+            std::thread::sleep(LISTENER_OTA_V1_STATUS_POLL_INTERVAL);
+        }
+        Err(format!(
+            "Listener OTA active BLE link was not confirmed before BEGIN within {} ms",
+            LISTENER_OTA_PRE_BEGIN_LINK_TIMEOUT.as_millis()
+        ))
     }
 
     fn handoff_new_generation_to_post_confirm(&mut self, transfer_id: u64) {
