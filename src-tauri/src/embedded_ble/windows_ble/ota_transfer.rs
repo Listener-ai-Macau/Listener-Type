@@ -142,18 +142,29 @@ impl OpenListenerOtaV1Target {
             .ok_or_else(|| "Listener OTA bulk target has no BluetoothLEDevice".to_string())?;
         let started = Instant::now();
         let mut last_interval = None;
+        let mut stable_since = None;
         while started.elapsed() < LISTENER_OTA_FIRMWARE_INTERVAL_TIMEOUT {
             if let Ok(params) = device.GetConnectionParameters() {
                 if let Ok(interval) = params.ConnectionInterval() {
                     last_interval = Some(interval);
                     if interval <= LISTENER_OTA_FIRMWARE_INTERVAL_UNITS {
-                        log::info!(
-                            "[embedded-ble] Denzic OTA v1 #{transfer_id}: WinRT DLE prime released and firmware-owned bulk interval confirmed units={interval} elapsed_ms={}",
-                            started.elapsed().as_millis()
-                        );
-                        return Ok(());
+                        let stable_started = stable_since.get_or_insert_with(Instant::now);
+                        if stable_started.elapsed() >= LISTENER_OTA_FIRMWARE_INTERVAL_SETTLE {
+                            log::info!(
+                                "[embedded-ble] Denzic OTA v1 #{transfer_id}: WinRT DLE prime released and firmware-owned bulk interval continuously confirmed units={interval} settle_ms={} elapsed_ms={}",
+                                stable_started.elapsed().as_millis(),
+                                started.elapsed().as_millis()
+                            );
+                            return Ok(());
+                        }
+                    } else {
+                        stable_since = None;
                     }
+                } else {
+                    stable_since = None;
                 }
+            } else {
+                stable_since = None;
             }
             std::thread::sleep(Duration::from_millis(25));
         }

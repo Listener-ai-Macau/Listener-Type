@@ -659,8 +659,10 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("prime.close(\"before_bulk_firmware_interval_handoff\")")
             && source.contains("device.GetConnectionParameters()")
             && source.contains("interval <= LISTENER_OTA_FIRMWARE_INTERVAL_UNITS")
-            && source.contains("firmware-owned bulk interval confirmed"),
-        "Windows OTA must retain ThroughputOptimized long enough to prime DLE, then release it and confirm firmware-owned 7.5 ms before bulk"
+            && source.contains("LISTENER_OTA_FIRMWARE_INTERVAL_SETTLE")
+            && source.contains("stable_since = None")
+            && source.contains("firmware-owned bulk interval continuously confirmed"),
+        "Windows OTA must retain ThroughputOptimized long enough to prime DLE, then release it and continuously confirm firmware-owned 7.5 ms before bulk"
     );
     let retain = source
         .find("OtaPreBulkMaintainHandoff::take_from(&mut target)")

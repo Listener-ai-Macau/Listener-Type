@@ -262,6 +262,7 @@ const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
 const LISTENER_OTA_V1_STATUS_READ_TIMEOUT: Duration = Duration::from_secs(3);
 const LISTENER_OTA_WINRT_DLE_PRIME_MIN_HOLD: Duration = Duration::from_millis(500);
 const LISTENER_OTA_FIRMWARE_INTERVAL_TIMEOUT: Duration = Duration::from_millis(1800);
+const LISTENER_OTA_FIRMWARE_INTERVAL_SETTLE: Duration = Duration::from_millis(250);
 const LISTENER_OTA_FIRMWARE_INTERVAL_UNITS: u16 = 6;
 
 const LISTENER_OTA_V1_HANDOFF_DISCOVERY_RETRY_DELAYS: [Duration; 3] = [
