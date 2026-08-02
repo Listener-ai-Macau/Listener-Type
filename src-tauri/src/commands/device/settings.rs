@@ -791,15 +791,6 @@ pub fn apply_device_ble_name_windows_refresh_blocking(
                 .flatten()
         })
         .flatten();
-    let early_unpair_result = verified_handoff_address.map(|address| {
-        log::info!(
-            "[device-settings] BLE name Windows cache cleanup starting from firmware-confirmed handoff address before recovery advertisement confirmation address={address:012X}"
-        );
-        crate::embedded_ble::unpair_listener_devices_for_known_addresses(
-            &cleanup_target_names,
-            &[address],
-        )
-    });
     let observed_recovery_addresses = if recovery_error.is_none() {
         let advertised_address =
             wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name);
@@ -825,25 +816,11 @@ pub fn apply_device_ble_name_windows_refresh_blocking(
         "[device-settings] BLE name Windows cache refresh settle complete recovery_error={}",
         recovery_error.as_deref().unwrap_or("none")
     );
-    let unpair_result = if let Some(fast_result) = early_unpair_result {
-        if matches!(
-            fast_result.status,
-            crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction
-                | crate::embedded_ble::BleDeviceUnpairStatus::NotFound
-        ) {
-            log::warn!(
-                "[device-settings] early recovery-address BLE cache cleanup status={:?}; falling back to complete Windows cache cleanup",
-                fast_result.status
-            );
-            crate::embedded_ble::unpair_listener_devices_for_names(&cleanup_target_names)
-        } else {
-            fast_result
-        }
-    } else if observed_recovery_addresses.is_empty() {
+    let unpair_result = if observed_recovery_addresses.is_empty() {
         crate::embedded_ble::unpair_listener_devices_for_names(&cleanup_target_names)
     } else {
         log::info!(
-            "[device-settings] BLE name Windows cache cleanup using firmware-confirmed recovery address(es)={observed_recovery_addresses:?}"
+            "[device-settings] BLE name Windows cache cleanup starting after the recovery-advertisement scan using address(es)={observed_recovery_addresses:?}"
         );
         let fast_result = crate::embedded_ble::unpair_listener_devices_for_known_addresses(
             &cleanup_target_names,

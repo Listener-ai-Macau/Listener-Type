@@ -48,6 +48,7 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `scripts/release-version-gate.json` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-audio-cdp.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-audio-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
+| `scripts/run-installed-device-settings-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-ota-cdp.mjs` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-installed-ota-hidden.ps1` | Automation and audits | Node/PowerShell script tests |
 | `scripts/run-recording-consumption-physical-validation.ps1` | Automation and audits | Node/PowerShell script tests |

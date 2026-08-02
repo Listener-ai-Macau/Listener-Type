@@ -1785,7 +1785,16 @@ async fn embedded_ble_background_listener_loop(inner: Arc<Inner>, generation: u6
                 } else {
                     record_embedded_ble_listener_last_error(&inner, &err);
                     record_embedded_ble_recovery_failure(&inner, &err);
+                    let hardware_ec11_recovery_notice =
+                        embedded_ble_hardware_ec11_recovery_notice_observed(&err);
+                    if firmware_ota_recovery && hardware_ec11_recovery_notice {
+                        firmware_ota_recovery = false;
+                        log::info!(
+                            "[embedded-ble] acknowledged EC11 hardware recovery superseded older OTA recovery semantics generation={generation}; entering matching-advertisement PairAsync arbitration"
+                        );
+                    }
                     if !firmware_ota_recovery
+                        && !hardware_ec11_recovery_notice
                         && maybe_hold_embedded_ble_after_lost_native_pairing(&inner, &err).await
                     {
                         log::info!(

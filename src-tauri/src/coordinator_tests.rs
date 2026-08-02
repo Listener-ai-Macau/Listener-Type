@@ -871,6 +871,46 @@ fn failed_firmware_ota_recovery_is_non_destructive_and_has_no_success_capsule() 
 }
 
 #[test]
+fn ec11_hardware_recovery_supersedes_older_ota_recovery_semantics() {
+    let runtime = include_str!("coordinator.rs");
+    let loop_start = runtime
+        .find("async fn embedded_ble_background_listener_loop")
+        .expect("background listener loop should exist");
+    let cleanup_start = runtime[loop_start..]
+        .find("async fn maybe_attempt_embedded_ble_background_stale_pairing_cleanup")
+        .map(|offset| loop_start + offset)
+        .expect("stale cleanup boundary should exist");
+    let listener_loop = &runtime[loop_start..cleanup_start];
+
+    let ec11_notice = listener_loop
+        .find("let hardware_ec11_recovery_notice =")
+        .expect("listener loop must classify explicit EC11 recovery evidence");
+    let clear_ota = listener_loop[ec11_notice..]
+        .find("firmware_ota_recovery = false;")
+        .map(|offset| ec11_notice + offset)
+        .expect("explicit EC11 recovery must end older OTA semantics");
+    let manual_pairing_hold = listener_loop
+        .find("maybe_hold_embedded_ble_after_lost_native_pairing")
+        .expect("manual pairing hold must remain present");
+    let ota_retry = listener_loop
+        .find("if firmware_ota_recovery {")
+        .expect("genuine OTA transient recovery must remain non-destructive");
+
+    assert!(
+        listener_loop.contains("if firmware_ota_recovery && hardware_ec11_recovery_notice")
+            && listener_loop.contains("&& !hardware_ec11_recovery_notice")
+            && listener_loop.contains("acknowledged EC11 hardware recovery superseded older OTA recovery semantics"),
+        "acknowledged EC11 recovery must override stale OTA preservation and bypass the manual-unpair hold"
+    );
+    assert!(
+        ec11_notice < clear_ota
+            && clear_ota < manual_pairing_hold
+            && manual_pairing_hold < ota_retry,
+        "EC11 arbitration must happen before both lost-pairing hold and OTA bonded-GATT retry"
+    );
+}
+
+#[test]
 fn device_key_idle_wake_joins_an_active_notify_recovery() {
     let coordinator = Coordinator::new();
     let active = install_embedded_ble_listener_cancel(&coordinator.inner, 1);

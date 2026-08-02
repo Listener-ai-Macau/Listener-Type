@@ -928,7 +928,7 @@ fn device_ble_name_change_path_refreshes_windows_cache_after_apply() {
 }
 
 #[test]
-fn firmware_confirmed_rename_handoff_falls_back_only_after_applied_name_advertisement_scan() {
+fn firmware_confirmed_rename_handoff_defers_windows_cleanup_until_after_advertisement_scan() {
     let source = normalized_commands_source();
     let helper_start = source
         .find("fn apply_device_ble_name_windows_refresh_blocking")
@@ -943,19 +943,19 @@ fn firmware_confirmed_rename_handoff_falls_back_only_after_applied_name_advertis
         .expect(
             "only the verified rename handoff address may be used before new advertising is seen",
         );
-    let early_unpair = helper
-        .find("early_unpair_result")
-        .expect("rename should start exact-address cleanup while waiting for recovery advertising");
     let advertisement_wait = helper
         .find("wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name)")
         .expect("rename recovery must confirm the applied Listener advertisement before PairAsync");
+    let exact_address_cleanup = helper
+        .find("unpair_listener_devices_for_known_addresses")
+        .expect("rename should retain exact-address cleanup after recovery advertising settles");
     let handoff_fallback = helper
         .find("advertised_address.or(verified_handoff_address)")
         .expect(
             "a verified handoff address should remain available only after the advertisement scan",
         );
-    assert!(verified_address < early_unpair && early_unpair < advertisement_wait);
-    assert!(advertisement_wait < handoff_fallback);
+    assert!(verified_address < advertisement_wait);
+    assert!(advertisement_wait < handoff_fallback && handoff_fallback < exact_address_cleanup);
     assert!(helper.contains("firmware_name_confirmed"));
     assert!(helper.contains("if advertised_address.is_none()"));
     assert!(
@@ -963,7 +963,7 @@ fn firmware_confirmed_rename_handoff_falls_back_only_after_applied_name_advertis
         "the existing silent PairAsync path must receive the fresh advertisement address or the bounded firmware-confirmed fallback"
     );
     assert!(
-        helper.contains("early recovery-address BLE cache cleanup status"),
+        helper.contains("recovery-address BLE cache cleanup status"),
         "failed exact-address cleanup must retain the complete Windows cache cleanup fallback"
     );
 }
