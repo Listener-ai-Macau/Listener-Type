@@ -94,6 +94,7 @@ const EMBEDDED_BLE_TYPE_RECOVERY_PAIRING_SETTLE: Duration = Duration::from_milli
 // BLE/HID service graph. Do not mistake that short post-PairAsync interval for
 // a user-driven manual delete and reopen the recovery window.
 const EMBEDDED_BLE_TYPE_PAIRASYNC_STARTUP_GUARD: Duration = Duration::from_secs(20);
+const EMBEDDED_BLE_MANUAL_UNPAIR_CONFIRM_DELAY: Duration = Duration::from_millis(350);
 const EMBEDDED_BLE_RECOVERY_PAIRING_ADV_SCAN_TIMEOUT: Duration = Duration::from_secs(4);
 const EMBEDDED_BLE_PROBE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const EMBEDDED_BLE_PROBE_RECOVERY_POLL: Duration = Duration::from_millis(100);

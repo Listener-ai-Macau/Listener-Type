@@ -758,7 +758,7 @@ fn prompt_listener_pairing_inner(
         candidates,
         &target_name,
         bypass_prompt_suppression,
-        bypass_prompt_suppression,
+        type_recovery_command_confirmed || !allow_user_pairing_prompt,
         allow_adapter_restart,
         type_recovery_command_confirmed,
     );
@@ -1216,12 +1216,42 @@ fn listener_recovery_pairing_candidates_for_addresses(
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let mut seen_ids = Vec::new();
+    let fast_known_addresses = if observed_recovery_addresses.is_empty() {
+        listener_recovery_fast_target_addresses()
+    } else {
+        Vec::new()
+    };
+    let mut fresh_advertised_addresses = Vec::new();
+
+    if !fast_known_addresses.is_empty() {
+        let mut known_candidates = listener_recovery_direct_pairing_candidates(
+            &fast_known_addresses,
+            &[],
+            expected_name,
+            &mut seen_ids,
+        );
+        known_candidates.retain(|candidate| {
+            candidate
+                .info
+                .Pairing()
+                .and_then(|pairing| pairing.IsPaired())
+                .unwrap_or(false)
+        });
+        if !known_candidates.is_empty() {
+            log::info!(
+                "[embedded-ble] recovery pairing found {} already-paired known-address candidate(s); skipping the advertisement scan",
+                known_candidates.len()
+            );
+            return Ok(known_candidates);
+        }
+        seen_ids.clear();
+    }
+
     let mut addresses = if observed_recovery_addresses.is_empty() {
         listener_recovery_target_addresses()
     } else {
         Vec::new()
     };
-    let mut fresh_advertised_addresses = Vec::new();
 
     if !observed_recovery_addresses.is_empty() {
         for address in observed_recovery_addresses.iter().copied() {
@@ -1234,7 +1264,7 @@ fn listener_recovery_pairing_candidates_for_addresses(
             .map(crate::embedded_ble::format_bluetooth_address)
             .collect::<Vec<_>>();
         log::info!(
-            "[embedded-ble] recovery pairing using Type-observed Swift Pair address(es) before any duplicate advertisement scan: {observed_labels:?}"
+            "[embedded-ble] recovery pairing using Type-observed recovery address(es) before any duplicate advertisement scan: {observed_labels:?}"
         );
         let candidates = listener_recovery_direct_pairing_candidates(
             &fresh_advertised_addresses,
@@ -1352,7 +1382,7 @@ fn listener_recovery_pairing_selector_fallback_candidates_for_addresses(
             .map(crate::embedded_ble::format_bluetooth_address)
             .collect::<Vec<_>>();
         log::info!(
-            "[embedded-ble] recovery AEP fallback using Type-observed Swift Pair address(es) without duplicate advertisement scan: {observed_labels:?}"
+            "[embedded-ble] recovery AEP fallback using Type-observed recovery address(es) without duplicate advertisement scan: {observed_labels:?}"
         );
     }
     if fresh_advertised_addresses.is_empty() {
@@ -1722,15 +1752,21 @@ fn pair_listener_candidate(
             .map_err(|err| format!("read pairing state failed: {err}"))?
         {
             if !candidate.fresh_pairing_advertisement {
-                let trusted_addresses = listener_recovery_target_addresses();
+                let fast_trusted_addresses = listener_recovery_fast_target_addresses();
                 if !listener_pairing_candidate_has_trusted_address(
                     &candidate,
-                    &trusted_addresses,
+                    &fast_trusted_addresses,
                 ) {
-                    return Err(format!(
-                        "Windows only reports {} from a same-name cached pairing without matching Listener address/service proof",
-                        candidate.label
-                    ));
+                    let trusted_addresses = listener_recovery_target_addresses();
+                    if !listener_pairing_candidate_has_trusted_address(
+                        &candidate,
+                        &trusted_addresses,
+                    ) {
+                        return Err(format!(
+                            "Windows only reports {} from a same-name cached pairing without matching Listener address/service proof",
+                            candidate.label
+                        ));
+                    }
                 }
                 if verify_already_paired_liveness {
                     if listener_trusted_paired_candidate_has_fresh_status(&candidate) {
@@ -2331,10 +2367,7 @@ fn listener_unpair_candidates(
 }
 
 fn listener_recovery_target_addresses() -> Vec<u64> {
-    let mut addresses = Vec::new();
-    if let Some(address) = configured_bluetooth_address() {
-        push_unique_address(&mut addresses, address);
-    }
+    let mut addresses = listener_recovery_fast_target_addresses();
     match listener_pnp_service_signature_addresses() {
         Ok(pnp_addresses) => {
             for address in pnp_addresses {
@@ -2346,6 +2379,17 @@ fn listener_recovery_target_addresses() -> Vec<u64> {
                 "[embedded-ble] Listener PnP service-signature address discovery failed: {err}"
             );
         }
+    }
+    addresses
+}
+
+fn listener_recovery_fast_target_addresses() -> Vec<u64> {
+    let mut addresses = Vec::new();
+    if let Some(address) = configured_bluetooth_address() {
+        push_unique_address(&mut addresses, address);
+    }
+    if let Some(address) = persisted_successful_notify_target_address_for_current() {
+        push_unique_address(&mut addresses, address);
     }
     addresses
 }

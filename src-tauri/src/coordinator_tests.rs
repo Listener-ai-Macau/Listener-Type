@@ -2198,20 +2198,31 @@ fn embedded_ble_background_stale_cleanup_respects_manual_windows_unpair() {
         "the generic visible-advertisement hold must yield to the dedicated manual-delete branch"
     );
     assert!(
-        manual_helper.contains("start_embedded_ble_pairing_confirmation_watch"),
-        "background stale cleanup must keep a Windows pairing confirmation watcher alive instead of sleeping through the hold window"
+        manual_helper.contains("start_embedded_ble_passive_local_reattach_watch"),
+        "manual Windows removal must wait passively for explicit local recovery"
     );
     assert!(
-        manual_helper.contains("manual Windows unpair sent Listener manual-pairing recovery cue without Windows PairAsync"),
-        "manual Windows removal should clear/open the firmware pairing window without letting Type automatically PairAsync the old PC"
+        manual_helper.contains("start_embedded_ble_manual_unpair_recovery_watch")
+            && manual_helper.contains("baseline_recovery_addresses"),
+        "manual Windows removal must retain the already-visible recovery-address baseline and watch only for a fresh EC11 identity"
     );
+    for forbidden in [
+        "send_recording_control_manual_pairing",
+        "start_embedded_ble_pairing_confirmation_watch",
+        "prompt_listener_pairing_after_type_recovery",
+    ] {
+        assert!(
+            !manual_helper.contains(forbidden),
+            "manual Windows removal must stay quiet and must not invoke {forbidden}"
+        );
+    }
     let manual_suppression_index = manual_helper
         .find("suppressed automatic PairAsync because Windows no longer reports a paired Listener")
         .expect("manual removal suppression log should exist");
-    let manual_recovery_index = manual_helper[manual_suppression_index..]
-        .find("manual Windows unpair sent Listener manual-pairing recovery cue without Windows PairAsync")
+    let manual_quiet_index = manual_helper[manual_suppression_index..]
+        .find("manual Windows unpair quiet hold")
         .map(|offset| manual_suppression_index + offset)
-        .expect("manual removal branch should command firmware recovery");
+        .expect("manual removal branch should record its quiet ownership release");
     let manual_emit_index = manual_helper[manual_suppression_index..]
         .find("EmbeddedBleRecoveryCapsuleMessage::WaitingManualPairing")
         .map(|offset| manual_suppression_index + offset)
@@ -2231,8 +2242,8 @@ fn embedded_ble_background_stale_cleanup_respects_manual_windows_unpair() {
         .find("prompt_listener_pairing_after_type_recovery")
         .expect("automatic Type recovery branch should still exist");
     assert!(
-        manual_suppression_index < manual_recovery_index
-            && manual_recovery_index < manual_emit_index
+        manual_suppression_index < manual_quiet_index
+            && manual_quiet_index < manual_emit_index
             && manual_call_index < generic_cleanup_index
             && generic_cleanup_index < direct_gatt_retry_index
             && manual_call_index < cleanup_index,
@@ -2773,11 +2784,14 @@ fn embedded_ble_lost_native_pairing_pauses_before_stale_gatt_retry() {
         &[],
         &missing_pairing,
     ));
-    assert!(!embedded_ble_lost_current_native_pairing_should_pause(
-        link_loss,
-        &[0xD374D0103F0B],
-        &missing_pairing,
-    ));
+    assert!(
+        embedded_ble_lost_current_native_pairing_should_pause(
+            link_loss,
+            &[0xD374D0103F0B],
+            &missing_pairing,
+        ),
+        "stale HID nodes may remain Present after Settings removes the real pairing"
+    );
     assert!(!embedded_ble_lost_current_native_pairing_should_pause(
         "BLE embedded audio capture timed out",
         &[],
@@ -2806,6 +2820,47 @@ fn embedded_ble_lost_native_pairing_pauses_before_stale_gatt_retry() {
     assert!(
         listener_loop[lost_pairing_hold..stale_cleanup].contains("break;"),
         "after current native pairing disappears, the active background loop must stop instead of retrying"
+    );
+
+    let runtime_source = source.as_str();
+    let lost_helper_start = runtime_source
+        .find("async fn maybe_hold_embedded_ble_after_lost_native_pairing")
+        .expect("lost-native-pairing helper should exist");
+    let lost_helper_end = runtime_source[lost_helper_start..]
+        .find("async fn maybe_hold_embedded_ble_startup_without_current_native_pairing")
+        .map(|offset| lost_helper_start + offset)
+        .expect("lost-native-pairing helper boundary should exist");
+    let lost_helper = &runtime_source[lost_helper_start..lost_helper_end];
+    assert!(
+        lost_helper.contains("native_windows_hid_present_pairing_addresses()"),
+        "link-loss ownership must use current Present HID evidence, not historical PnP nodes left by Windows device removal"
+    );
+    assert!(
+        !lost_helper.contains("native_windows_hid_pairing_addresses()"),
+        "historical/non-present HID nodes must not authorize stale GATT reopen after manual Windows removal"
+    );
+    assert!(
+        lost_helper.matches("query_listener_pairing").count() >= 2
+            && lost_helper.contains("EMBEDDED_BLE_MANUAL_UNPAIR_CONFIRM_DELAY")
+            && lost_helper.contains("hold_embedded_ble_for_stale_native_hid_recovery"),
+        "link loss must confirm pairing removal twice and route a stale Present HID into quiet EC11-advertisement recovery instead of reopening GATT"
+    );
+    assert!(
+        lost_helper.contains("listener_recovery_addresses_from_error(err)"),
+        "the no-HID link-loss hold must preserve any recovery address already visible before it watches for a fresh EC11 identity"
+    );
+
+    let notify_ready_start = runtime_source
+        .find("fn record_embedded_ble_notify_ready")
+        .expect("notify-ready recorder should exist");
+    let notify_ready_end = runtime_source[notify_ready_start..]
+        .find("fn firmware_mode_for_device_knob_rotation_action")
+        .map(|offset| notify_ready_start + offset)
+        .expect("notify-ready recorder boundary should exist");
+    let notify_ready = &runtime_source[notify_ready_start..notify_ready_end];
+    assert!(
+        notify_ready.contains("clear_embedded_ble_type_pairasync_startup_guard"),
+        "a proven notify-ready session must end the Windows service-rebuild guard so a later manual delete is visible immediately"
     );
 
     let helper_start = source
@@ -2962,6 +3017,36 @@ fn embedded_ble_passive_local_reattach_requires_windows_evidence_before_gatt_res
             "passive local reattach must not auto-reclaim another host through {forbidden}"
         );
     }
+}
+
+#[test]
+fn embedded_ble_manual_unpair_passive_timeout_keeps_ec11_watcher_alive() {
+    let source = include_str!("coordinator.rs");
+    let start = source
+        .find("fn start_embedded_ble_passive_local_reattach_watch")
+        .expect("passive local reattach helper should exist");
+    let end = source[start..]
+        .find("fn embedded_ble_passive_local_reattach_evidence_ready")
+        .map(|offset| start + offset)
+        .expect("passive local reattach helper boundary should exist");
+    let body = &source[start..end];
+    let timeout = body
+        .find("monitor_started.elapsed() >= Duration::from_secs(45)")
+        .expect("passive reattach should retain its bounded timeout");
+    let manual_hold = body[timeout..]
+        .find("reason == EMBEDDED_BLE_MANUAL_UNPAIR_HOLD_REASON")
+        .map(|offset| timeout + offset)
+        .expect("manual unpair timeout should have a dedicated branch");
+    let clear_hold = body[timeout..]
+        .find("clear_embedded_ble_pairing_confirmation_hold")
+        .map(|offset| timeout + offset)
+        .expect("other passive reattach reasons should still clear their hold");
+
+    assert!(manual_hold < clear_hold);
+    assert!(
+        body[manual_hold..clear_hold].contains("fresh-identity EC11 watcher"),
+        "the 45-second passive HID timeout must not cancel the longer explicit EC11 recovery watcher"
+    );
 }
 
 #[test]
@@ -3180,6 +3265,17 @@ fn embedded_ble_type_observed_recovery_uses_after_cache_type_pairing_path() {
         body.contains("let stale_native_hid_recovery =")
             && body.contains("type_observed_recovery_advertisement || stale_native_hid_recovery"),
         "a random recovery advertisement with an unusable native HID record must reuse the no-popup Type-controlled path instead of falling back to generic Windows pairing"
+    );
+}
+
+#[test]
+fn embedded_ble_silent_ec11_recovery_advertisement_is_type_owned() {
+    let error = "Listener recovery advertisement visible for persisted address D09E84330820 after explicit EC11 fresh identity; missing pairing must use Type automatic PairAsync recovery before declaring notify ready";
+
+    assert!(recovery_pairing_advertisement_already_observed_during_notify_open(error));
+    assert_eq!(
+        listener_recovery_addresses_from_error(error),
+        vec![0xD09E_8433_0820]
     );
 }
 
@@ -3526,6 +3622,43 @@ fn startup_stale_native_hid_requires_visible_recovery_before_type_pairasync() {
         &current_pairing,
         &recovery_advertisement,
     ));
+
+    let manual_delete = crate::embedded_ble::BleDevicePairingPromptResult {
+        status: crate::embedded_ble::BleDevicePairingPromptStatus::NotFound,
+        attempted: true,
+        matched_devices: 0,
+        prompted_devices: 0,
+        already_paired_devices: 0,
+        failed_devices: 0,
+        open_bluetooth_settings: false,
+        details: Vec::new(),
+    };
+    assert!(
+        !startup_stale_native_hid_recovery_is_authorized(
+            &[0xDCC2_3A61_9576],
+            &manual_delete,
+            &recovery_advertisement,
+        ),
+        "the old same-address advertisement after manual deletion is not new physical authorization"
+    );
+    assert!(
+        startup_stale_native_hid_recovery_is_authorized(
+            &[0xDCC2_3A61_9577],
+            &manual_delete,
+            &recovery_advertisement,
+        ),
+        "a fresh rotated recovery identity after confirmed manual deletion is the EC11 authorization boundary"
+    );
+
+    assert!(
+        recovery_pairing_probe_fresh_addresses(&[], &recovery_advertisement,)
+            .contains(&0xDCC2_3A61_9576)
+    );
+    assert!(
+        recovery_pairing_probe_fresh_addresses(&[0xDCC2_3A61_9576], &recovery_advertisement,)
+            .is_empty(),
+        "an advertisement already visible at the quiet-hold boundary cannot authorize PairAsync"
+    );
 }
 
 #[test]

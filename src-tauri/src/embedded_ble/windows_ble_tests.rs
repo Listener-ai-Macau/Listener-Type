@@ -431,7 +431,7 @@ fn type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan() {
         .find("observed_recovery_addresses")
         .expect("Type-observed recovery addresses must enter candidate selection");
     let direct_index = helper
-        .find("recovery pairing using Type-observed Swift Pair address(es)")
+        .find("recovery pairing using Type-observed recovery address(es)")
         .expect("Type-observed addresses should be logged as the first candidate source");
     let scan_index = helper
         .find("scan_listener_pairing_advertisements")
@@ -443,7 +443,7 @@ fn type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan() {
     assert!(
         helper.contains(
             "let mut addresses = if observed_recovery_addresses.is_empty() {\n        listener_recovery_target_addresses()\n    } else {\n        Vec::new()\n    };"
-        ),
+        ) && helper.contains("listener_recovery_fast_target_addresses()"),
         "a current recovery advertisement address must bypass the redundant PnP address enumeration before direct PairAsync"
     );
     assert!(helper.contains(
@@ -475,9 +475,82 @@ fn type_observed_recovery_address_skips_duplicate_pairing_advertisement_scan() {
         .expect("recovery AEP fallback boundary should exist");
     let fallback = &source[fallback_start..fallback_end];
     assert!(fallback.contains(
-        "recovery AEP fallback using Type-observed Swift Pair address(es) without duplicate advertisement scan"
+        "recovery AEP fallback using Type-observed recovery address(es) without duplicate advertisement scan"
     ));
     assert!(fallback.contains("if fresh_advertised_addresses.is_empty()"));
+}
+
+#[test]
+fn pairing_only_checks_an_already_paired_known_address_before_scanning() {
+    let source = include_str!("embedded_ble.rs");
+    let start = source
+        .find("fn listener_recovery_pairing_candidates_for_addresses")
+        .expect("recovery pairing candidate helper should exist");
+    let end = source[start..]
+        .find("fn listener_recovery_pairing_selector_fallback_candidates")
+        .map(|offset| start + offset)
+        .expect("recovery pairing helper boundary should exist");
+    let body = &source[start..end];
+    let known_index = body
+        .find("recovery pairing found {} already-paired known-address candidate(s); skipping the advertisement scan")
+        .expect("known paired addresses should have a fast path");
+    let scan_index = body
+        .find("scan_listener_pairing_advertisements")
+        .expect("unpaired recovery must retain advertisement discovery");
+
+    assert!(
+        body.contains("if !fast_known_addresses.is_empty()") && body.contains("pairing.IsPaired()"),
+        "only a confirmed already-paired known address may bypass recovery advertising"
+    );
+    assert!(
+        known_index < scan_index,
+        "pairing-only CLI must not pay the 12-second advertisement scan before returning an already-paired known device"
+    );
+}
+
+#[test]
+fn manual_pairing_only_never_deletes_a_healthy_pair_for_gatt_contention() {
+    let source = include_str!("embedded_ble.rs");
+    let start = source
+        .find("fn prompt_listener_pairing_inner")
+        .expect("pairing prompt helper should exist");
+    let end = source[start..]
+        .find("fn pair_listener_candidates_into_prompt_result")
+        .map(|offset| start + offset)
+        .expect("pairing prompt helper boundary should exist");
+    let body = &source[start..end];
+
+    assert!(body.contains("type_recovery_command_confirmed || !allow_user_pairing_prompt"));
+    assert!(
+        !body.contains("&target_name,\n        bypass_prompt_suppression,\n        bypass_prompt_suppression,"),
+        "the user-facing pairing-only path must not treat a busy GATT status read as proof that an already-paired Windows bond is stale"
+    );
+}
+
+#[test]
+fn already_paired_persisted_address_skips_slow_pnp_trust_enumeration() {
+    let source = include_str!("embedded_ble.rs");
+    let start = source
+        .find("fn pair_listener_candidate(")
+        .expect("single pairing candidate helper should exist");
+    let end = source[start..]
+        .find("fn listener_trusted_paired_candidate_has_fresh_status")
+        .map(|offset| start + offset)
+        .expect("single pairing candidate helper boundary should exist");
+    let body = &source[start..end];
+    let fast_trust = body
+        .find("let fast_trusted_addresses = listener_recovery_fast_target_addresses()")
+        .expect("already-paired candidates should first use in-process trusted addresses");
+    let fast_match = body[fast_trust..]
+        .find("if !listener_pairing_candidate_has_trusted_address(")
+        .map(|offset| fast_trust + offset)
+        .expect("fast trusted addresses should validate the candidate");
+    let slow_pnp = body[fast_match..]
+        .find("let trusted_addresses = listener_recovery_target_addresses()")
+        .map(|offset| fast_match + offset)
+        .expect("slow PnP trust discovery should remain as a fallback");
+
+    assert!(fast_trust < fast_match && fast_match < slow_pnp);
 }
 
 #[test]
