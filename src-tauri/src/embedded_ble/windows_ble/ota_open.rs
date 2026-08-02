@@ -819,6 +819,121 @@ fn request_ota_ble_throughput_optimized(
     }
 }
 
+struct OtaConcurrentBlePowerPeer {
+    _device: BluetoothLEDevice,
+    request: BluetoothLEPreferredConnectionParametersRequest,
+    label: String,
+}
+
+struct OtaConcurrentBlePowerGuard {
+    peers: Vec<OtaConcurrentBlePowerPeer>,
+}
+
+impl Drop for OtaConcurrentBlePowerGuard {
+    fn drop(&mut self) {
+        for peer in self.peers.drain(..) {
+            let status = peer.request.Status().ok();
+            let _ = peer.request.Close();
+            log::info!(
+                "[embedded-ble] Listener OTA released concurrent BLE PowerOptimized request peer={} status={status:?}",
+                peer.label
+            );
+            release_winrt_bluetooth_object(peer._device);
+        }
+    }
+}
+
+fn request_concurrent_ble_power_optimized(
+    listener_address: Option<u64>,
+) -> OtaConcurrentBlePowerGuard {
+    const PEER_QUERY_TIMEOUT: Duration = Duration::from_millis(1500);
+    let mut peers = Vec::new();
+    let selector = match BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(
+        BluetoothConnectionStatus::Connected,
+    ) {
+        Ok(selector) => selector,
+        Err(err) => {
+            log::warn!(
+                "[embedded-ble] Listener OTA concurrent BLE selector unavailable: {err}"
+            );
+            return OtaConcurrentBlePowerGuard { peers };
+        }
+    };
+    let devices = match DeviceInformation::FindAllAsyncAqsFilter(&selector)
+        .map_err(|err| format!("connected BLE peer query failed: {err}"))
+        .and_then(|op| wait_async_operation(op, PEER_QUERY_TIMEOUT, "connected BLE peer query"))
+    {
+        Ok(devices) => devices,
+        Err(err) => {
+            log::warn!("[embedded-ble] Listener OTA concurrent BLE query unavailable: {err}");
+            return OtaConcurrentBlePowerGuard { peers };
+        }
+    };
+    let params = match BluetoothLEPreferredConnectionParameters::PowerOptimized() {
+        Ok(params) => params,
+        Err(err) => {
+            log::warn!(
+                "[embedded-ble] Listener OTA concurrent BLE PowerOptimized parameters unavailable: {err}"
+            );
+            return OtaConcurrentBlePowerGuard { peers };
+        }
+    };
+    let count = devices.Size().unwrap_or_default();
+    for index in 0..count {
+        let Ok(info) = devices.GetAt(index) else {
+            continue;
+        };
+        let id = info.Id().unwrap_or_default();
+        let label = device_information_display_name(&info);
+        let device = match BluetoothLEDevice::FromIdAsync(&id)
+            .map_err(|err| format!("open failed: {err}"))
+            .and_then(|op| wait_async_operation(op, PEER_QUERY_TIMEOUT, "connected BLE peer open"))
+        {
+            Ok(device) => device,
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] Listener OTA skipping connected BLE peer {label:?}: {err}"
+                );
+                continue;
+            }
+        };
+        let address = device.BluetoothAddress().ok();
+        if address.is_some() && address == listener_address {
+            release_winrt_bluetooth_object(device);
+            continue;
+        }
+        if device.ConnectionStatus().ok() != Some(BluetoothConnectionStatus::Connected) {
+            release_winrt_bluetooth_object(device);
+            continue;
+        }
+        match device.RequestPreferredConnectionParameters(&params) {
+            Ok(request) => {
+                let status = request.Status().ok();
+                let address = address
+                    .map(crate::embedded_ble::format_bluetooth_address)
+                    .unwrap_or_else(|| "unknown".to_string());
+                let label = format!("{label}@{address}");
+                log::info!(
+                    "[embedded-ble] Listener OTA retained concurrent BLE PowerOptimized request peer={} status={status:?}",
+                    label
+                );
+                peers.push(OtaConcurrentBlePowerPeer {
+                    _device: device,
+                    request,
+                    label,
+                });
+            }
+            Err(err) => {
+                log::warn!(
+                    "[embedded-ble] Listener OTA concurrent BLE PowerOptimized request failed peer={label:?}: {err}"
+                );
+                release_winrt_bluetooth_object(device);
+            }
+        }
+    }
+    OtaConcurrentBlePowerGuard { peers }
+}
+
 fn open_listener_ota_v1_target_for_device_with_options(
     address: u64,
     verified_active_handoff: bool,
@@ -907,9 +1022,8 @@ fn open_listener_ota_v1_target_for_device_with_options(
                     continue;
                 }
             };
-            match open_listener_ota_v1_characteristics_from_service_with_retry(
-                &service, cache_mode,
-            ) {
+            match open_listener_ota_v1_characteristics_from_service_with_retry(&service, cache_mode)
+            {
                 Ok(prepared) => {
                     log::info!(
                         "[embedded-ble] Listener OTA v1 selected {cache_mode:?} GATT characteristics"

@@ -86,6 +86,83 @@ fn listener_ota_confirms_the_device_link_before_begin() {
 }
 
 #[test]
+fn listener_ota_rebalances_other_connected_ble_peers_during_bulk() {
+    let source = include_str!("embedded_ble.rs");
+    assert!(
+        source.contains(
+            "GetDeviceSelectorFromConnectionStatus(\n        BluetoothConnectionStatus::Connected"
+        ) && source.contains("BluetoothLEPreferredConnectionParameters::PowerOptimized()")
+            && source.contains("request_concurrent_ble_power_optimized(fresh.bluetooth_address)")
+            && source.contains("released concurrent BLE PowerOptimized request"),
+        "OTA must temporarily rebalance other connected BLE peers without disconnecting them"
+    );
+    let rebalance = source
+        .find("request_concurrent_ble_power_optimized(fresh.bluetooth_address)")
+        .expect("connected BLE peer rebalance should exist");
+    let converge = source[rebalance..]
+        .find("fresh.converge_active_link_before_begin")
+        .map(|offset| rebalance + offset)
+        .expect("device active-link convergence should follow peer rebalance");
+    let begin = source[converge..]
+        .find("transfer_denzic_ota_v1_to_target")
+        .map(|offset| converge + offset)
+        .expect("bulk transfer should follow active-link convergence");
+    assert!(
+        rebalance < converge && converge < begin,
+        "Windows must receive peer scheduling requests before pre-BEGIN convergence"
+    );
+    assert!(
+        source.contains("let settle_ms = if round == 1 { 150 } else { 700 };"),
+        "secure reopen must retain a bounded first-round encryption settle"
+    );
+}
+
+#[test]
+fn listener_ota_bounded_prepare_skips_optional_dis_latency() {
+    let source = include_str!("embedded_ble.rs");
+    let bounded = source
+        .find("let snapshot = if target_prepare_timeout.is_some()")
+        .expect("bounded OTA preparation should select a transfer-ready snapshot");
+    let transfer_ready = source[bounded..]
+        .find("listener_ota_v1_transfer_ready_snapshot_from_target(&target)")
+        .expect("bounded OTA preparation should avoid optional identity reads");
+    let full_probe = source[bounded..]
+        .find("listener_ota_v1_gatt_probe_snapshot_from_target(&target)")
+        .expect("ordinary device probes should retain full DIS metadata reads");
+    assert!(
+        transfer_ready < full_probe,
+        "the bounded user transfer path must use the fast service proof"
+    );
+    assert!(
+        source.contains("bounded transfer preparation skipped optional DIS reads"),
+        "the fast path should remain explicit and observable"
+    );
+}
+
+#[test]
+fn listener_ota_sync_waits_for_the_controller_air_tail() {
+    let source = include_str!("embedded_ble.rs");
+    assert!(
+        source.contains(
+            "const LISTENER_OTA_V1_WWR_AIR_DRAIN_HOLD: Duration = Duration::from_millis(30)"
+        ),
+        "the fixed 40-write pipeline needs four 7.5 ms events before SYNC"
+    );
+    let flush = source
+        .find("self.flush_pending_wwr()?;")
+        .expect("control writes should flush WinRT operations");
+    let air_drain = source[flush..]
+        .find("std::thread::sleep(LISTENER_OTA_V1_WWR_AIR_DRAIN_HOLD)")
+        .map(|offset| flush + offset)
+        .expect("SYNC should wait for the controller's queued air tail");
+    let control_write = source[air_drain..]
+        .find("let result = if use_status_write")
+        .map(|offset| air_drain + offset)
+        .expect("the response-bearing control write should follow the air drain");
+    assert!(flush < air_drain && air_drain < control_write);
+}
+
+#[test]
 fn background_capture_cancel_scope_is_visible_to_winrt_waits() {
     let cancel = Arc::new(AtomicBool::new(false));
     assert!(!notify_capture_cancel_requested());

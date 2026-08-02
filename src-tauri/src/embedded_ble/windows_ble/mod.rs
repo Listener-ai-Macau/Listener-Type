@@ -259,6 +259,10 @@ const LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400;
 // progress, then let firmware restore the 7.5 ms link for full-size windows.
 const LISTENER_OTA_V1_FIRST_WINDOW_CHUNKS: usize = 64;
 const LISTENER_OTA_V1_WWR_PIPELINE_DEPTH: usize = 40;
+// WinRT marks WriteWithoutResponse operations complete when queued to the
+// controller, not when every packet has crossed the air. Four 7.5 ms events
+// let the fixed 40-write tail drain before the response-bearing SYNC.
+const LISTENER_OTA_V1_WWR_AIR_DRAIN_HOLD: Duration = Duration::from_millis(30);
 // Cold link only: first windows stay small until active_link_confirmed.
 const LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64;
 const LISTENER_OTA_V1_WINDOW_ENV: &str = "LISTENER_OTA_V1_WINDOW_CHUNKS";
@@ -2359,7 +2363,7 @@ impl PreparedListenerOtaV1Transfer {
             // only needs a short capture-gate quiet window (was 750/1200ms).
             // Round 1: short settle after exclusive handoff so encryption is up
             // before BEGIN. Prefer device 7.5 ms CI over WinRT 15 ms pin.
-            let settle_ms = if round == 1 { 350 } else { 700 };
+            let settle_ms = if round == 1 { 150 } else { 700 };
             std::thread::sleep(Duration::from_millis(settle_ms));
             let mut fresh = match open_listener_ota_v1_target_after_active_link_handoff() {
                 Ok(fresh) => {
@@ -2377,6 +2381,8 @@ impl PreparedListenerOtaV1Transfer {
                     continue;
                 }
             };
+            let _concurrent_ble_power_guard =
+                request_concurrent_ble_power_optimized(fresh.bluetooth_address);
             if let Err(err) = fresh.converge_active_link_before_begin(transfer_guard.session_id()) {
                 log::warn!(
                     "[embedded-ble] Listener OTA v1: pre-BEGIN active-link convergence failed round={round}/{SECURE_REOPEN_ROUNDS}: {err}"
@@ -2650,6 +2656,13 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         let flush_started = std::time::Instant::now();
         self.flush_pending_wwr()?;
         let flush_elapsed = flush_started.elapsed();
+        let is_sync = packet[4] == denzic_ota_core::OP_SYNC;
+        let air_drain_hold = if is_sync && flush_pending_a + flush_pending_b > 0 {
+            std::thread::sleep(LISTENER_OTA_V1_WWR_AIR_DRAIN_HOLD);
+            LISTENER_OTA_V1_WWR_AIR_DRAIN_HOLD
+        } else {
+            Duration::ZERO
+        };
         let label = match packet[4] {
             denzic_ota_core::OP_BEGIN => "Denzic OTA v1 begin",
             denzic_ota_core::OP_SYNC => "Denzic OTA v1 sync",
@@ -2670,10 +2683,6 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
         // ATT-acking SYNC (ble_firmware_ota_drain_queued_data_locked) — large windows
         // can exceed 8s on ESP32 flash erase/write. Retry timeouts, not only ATT 14.
         let is_begin = packet[4] == denzic_ota_core::OP_BEGIN;
-        let is_sync = packet[4] == denzic_ota_core::OP_SYNC;
-        // The response-bearing SYNC is the ordered air/link drain after WWR
-        // submission. A fixed quiet delay here only removes useful airtime;
-        // the following status read remains the confirmed-offset proof.
         const CONTROL_AUTH_RETRIES: usize = 5;
         let control_retry_delay_ms: u64 = if is_begin {
             1500
@@ -2722,13 +2731,14 @@ impl denzic_ota_core::OtaV1Transport for ListenerOtaV1Transport<'_> {
             match result {
                 Ok(_) => {
                     log::info!(
-                        "[embedded-ble] Denzic OTA v1 #{}: control boundary seq={} op={} pending_a={} pending_b={} flush_ms={} control_after_flush_ms={}",
+                        "[embedded-ble] Denzic OTA v1 #{}: control boundary seq={} op={} pending_a={} pending_b={} flush_ms={} air_drain_ms={} control_after_flush_ms={}",
                         self.transfer_id,
                         control_sequence,
                         packet[4],
                         flush_pending_a,
                         flush_pending_b,
                         flush_elapsed.as_millis(),
+                        air_drain_hold.as_millis(),
                         flush_started.elapsed().saturating_sub(flush_elapsed).as_millis()
                     );
                     return Ok(());

@@ -408,7 +408,11 @@ fn prepare_listener_ota_v1_transfer_impl(
             Instant::now() + Duration::from_secs(8),
         )?
     };
-    let snapshot = listener_ota_v1_gatt_probe_snapshot_from_target(&target);
+    let snapshot = if target_prepare_timeout.is_some() {
+        listener_ota_v1_transfer_ready_snapshot_from_target(&target)
+    } else {
+        listener_ota_v1_gatt_probe_snapshot_from_target(&target)
+    };
     log::info!(
         "[embedded-ble] Listener OTA v1 prepare: ready (detail={})",
         snapshot.detail.as_deref().unwrap_or("unknown")
@@ -887,6 +891,36 @@ fn listener_ota_v1_gatt_probe_snapshot_from_target(
     };
     log::info!(
         "[embedded-ble] Listener OTA v1 GATT probe connected={} capabilities={:?} detail={:?}",
+        snapshot.connected,
+        snapshot.capabilities,
+        snapshot.detail
+    );
+    snapshot
+}
+
+fn listener_ota_v1_transfer_ready_snapshot_from_target(
+    target: &OpenListenerOtaV1Target,
+) -> crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+    let address = target.bluetooth_address.map(|value| {
+        format!(
+            " at {}",
+            crate::embedded_ble::format_bluetooth_address(value)
+        )
+    });
+    let snapshot = crate::embedded_ble::FirmwareOtaDeviceSnapshot {
+        connected: true,
+        hardware_revision: None,
+        firmware_version: None,
+        capabilities: vec![denzic_ota_core::PROTOCOL_NAME.to_string()],
+        battery_percent: None,
+        usb_powered: None,
+        detail: Some(format!(
+            "Listener OTA v1 service is ready{}; bounded transfer preparation skipped optional DIS reads.",
+            address.as_deref().unwrap_or("")
+        )),
+    };
+    log::info!(
+        "[embedded-ble] Listener OTA v1 bounded transfer probe connected={} capabilities={:?} detail={:?}",
         snapshot.connected,
         snapshot.capabilities,
         snapshot.detail

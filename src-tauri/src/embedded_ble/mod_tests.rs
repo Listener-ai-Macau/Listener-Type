@@ -426,7 +426,7 @@ fn listener_ota_v1_blocks_cross_process_background_heartbeat() {
             && source.contains("open_ble_device_by_address(address)")
             && source.contains("[BluetoothCacheMode::Uncached, BluetoothCacheMode::Cached]")
             && source.contains("reconnect handoff accepted")
-            && source.contains("let settle_ms = if round == 1 { 350 } else { 700 }")
+            && source.contains("let settle_ms = if round == 1 { 150 } else { 700 }")
             && source.contains("LISTENER_OTA_V1_DEFAULT_WINDOW_CHUNKS: usize = 400")
             && source.contains("LISTENER_OTA_V1_FIRST_WINDOW_CHUNKS: usize = 64")
             && source.contains("LISTENER_OTA_V1_INACTIVE_LINK_WINDOW_CHUNKS: usize = 64")
@@ -1078,11 +1078,10 @@ fn ota_sync_uses_lightweight_response_status_path_only() {
         .expect("Listener OTA write_control boundary should exist");
     let write_control = &source[write_control_start..write_control_end];
     assert!(
-        write_control.contains("The response-bearing SYNC is the ordered air/link drain")
-            && !write_control.contains(
-                "if is_sync {\n            std::thread::sleep(Duration::from_millis(150))"
-            ),
-        "SYNC must immediately follow submitted WWR operations; a fixed quiet delay consumes the strict OTA throughput budget"
+        write_control.contains("LISTENER_OTA_V1_WWR_AIR_DRAIN_HOLD")
+            && write_control.contains("air_drain_ms={}")
+            && !write_control.contains("Duration::from_millis(150)"),
+        "SYNC may use only the measured 30 ms controller-tail drain, never the old 150 ms throughput penalty"
     );
 }
 
