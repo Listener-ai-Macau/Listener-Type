@@ -36,7 +36,11 @@ pub fn prune_listener_ghost_pairings_keeping(
             ],
         };
     }
-    if persisted_ghost_pairing_prune_is_recent(GHOST_PRUNE_CROSS_PROCESS_COOLDOWN) {
+    let keep = keep_addresses[0];
+    if persisted_ghost_pairing_prune_is_recent_for_keep(
+        keep,
+        GHOST_PRUNE_CROSS_PROCESS_COOLDOWN,
+    ) {
         log::info!(
             "[embedded-ble] skipping ghost pairing prune keep={keep_addresses:?}: persisted cross-process cooldown active"
         );
@@ -95,7 +99,7 @@ pub fn prune_listener_ghost_pairings_keeping(
             }
         }
     };
-    persist_ghost_pairing_prune_completed();
+    persist_ghost_pairing_prune_completed(keep);
     result
 }
 

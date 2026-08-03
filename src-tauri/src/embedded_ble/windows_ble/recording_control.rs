@@ -257,6 +257,34 @@ pub fn send_recording_control_silent_recovery(timeout: Duration) -> Result<(), S
     )
 }
 
+pub fn send_recording_control_silent_fresh_identity_recovery(
+    timeout: Duration,
+) -> Result<(), String> {
+    let serial_result = send_recovery_control_command_via_usb_serial(
+        "VREC:RECOVERY:TYPE:SILENT:FRESH",
+        timeout,
+    );
+    match &serial_result {
+        Ok(()) => {
+            log::info!(
+                "[embedded-ble] BLE rename fresh-identity recovery execution confirmed by firmware via USB serial"
+            );
+            return Ok(());
+        }
+        Err(err) => {
+            log::warn!(
+                "[embedded-ble] BLE rename fresh-identity recovery USB serial path unavailable; trying BLE control: {err}"
+            );
+        }
+    }
+    send_recording_control_command(
+        b"VREC:RECOVERY:TYPE:SILENT:FRESH\n",
+        timeout,
+        "BLE rename fresh-identity recovery",
+        ActiveControlTransientFallback::TryFreshGatt,
+    )
+}
+
 pub fn send_recording_control_type_bye(timeout: Duration) -> Result<(), String> {
     if let Some(result) =
         send_audio_control_via_active_capture(b"TYPE:BYE\n", timeout, "audio type bye")

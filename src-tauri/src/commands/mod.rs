@@ -512,6 +512,7 @@ pub fn set_settings(
     // Keep the retired streaming-only field synchronized for downgrade compatibility.
     prefs.streaming_insert_save_clipboard = prefs.copy_dictation_to_clipboard;
     let next_input_source = prefs.dictation_input_source;
+    let input_source_changed = next_input_source != previous_prefs.dictation_input_source;
     let should_sync_device_firmware =
         device::device_firmware_settings_changed(&previous_prefs, &prefs);
     if should_sync_device_firmware {
@@ -522,7 +523,9 @@ pub fn set_settings(
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
     persist_settings(&*coord, prefs.clone())?;
-    coord.refresh_embedded_ble_listener();
+    if input_source_changed {
+        coord.refresh_embedded_ble_listener();
+    }
     if next_input_source == DictationInputSource::EmbeddedBle && !should_sync_device_firmware {
         coord.sync_device_knob_rotation_action_to_firmware("settings_save");
     }

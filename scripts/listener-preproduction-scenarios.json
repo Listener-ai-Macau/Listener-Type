@@ -645,9 +645,9 @@
       "recorded_at": "2026-07-17T21:45:00+08:00",
       "source": "Operator note: 双击后本机已恢复音频胶囊太快，灯光还在双闪，胶囊显得假；只应显示最终灰色 Listener 音频已恢复.",
       "observed_evidence": "Listener-Type/.artifacts/bluetooth-machine-20260717/guided-double-click-physical-20260717-2135.log: recovery advertisement was accepted at 37 ms, pairing window closed at audio_notify_subscribe, then firmware accepted TYPE:READY. The Type recovery capsule must be correlated against this terminal truth and its visual completion boundary rather than a fixed delay.",
-      "triage": "Machine closed. The root cause was Type publishing ready after notify CCCD enablement, before the successful TYPE:READY control write which is the firmware recovery terminal. Type now defers ready until that write succeeds and suppresses only EC11 Type-controlled intermediate recovery capsules. No fixed delay was added; error, manual pairing, rename, and other-host paths remain distinct.",
+      "triage": "Machine closed. TYPE:READY remains the terminal audio truth. LST-OTA-108 supersedes the old Type-controlled physical EC11 pairing step: EC11 now uses native Windows Swift Pair, Type waits for a fresh paired HID identity without PairAsync, and only then reopens notify to reach TYPE:READY.",
       "machine_closure": "Listener-Type/.cache/validation/ble-capsule-terminal-truth-20260717/machine-closure-final-only.json",
-      "regression_gate": "coordinator::tests::ec11_type_controlled_recovery_capsule_waits_for_firmware_terminal_control_write",
+      "regression_gate": "coordinator::tests::embedded_ble_ec11_recovery_yields_to_native_windows_pairing + coordinator::tests::ec11_native_pairing_requires_a_fresh_windows_hid_identity",
       "final_human_boundary": "No individual human prompt is opened. This is machine-only closure and remains pending the single final human acceptance after Bluetooth, recording, OTA, and logging capabilities are all machine-closed. Physical EC11 timing and the no-second-host BENCH_REVIEW_NO_GO are not upgraded by this evidence."
     },
     "listener_final_text_clipboard_retention_20260717": {

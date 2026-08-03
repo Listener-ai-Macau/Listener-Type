@@ -6,6 +6,32 @@ fn listener_pnp_remove_candidates(
     target_names: &[String],
     exact_address_only: bool,
 ) -> Result<Vec<ListenerPnpRemoveCandidate>, String> {
+    if exact_address_only {
+        let mut candidates = Vec::new();
+        for address in target_addresses.iter().copied() {
+            if candidates
+                .iter()
+                .any(|candidate: &ListenerPnpRemoveCandidate| candidate.address == Some(address))
+            {
+                continue;
+            }
+            let address_label = crate::embedded_ble::format_bluetooth_address(address);
+            let instance_id = format!(r"BTHLE\Dev_{address:012x}");
+            candidates.push(ListenerPnpRemoveCandidate {
+                label: format!("{address_label} [{instance_id}]"),
+                instance_id,
+                name: String::new(),
+                address: Some(address),
+                is_ble_device_root: true,
+            });
+        }
+        log::info!(
+            "[embedded-ble] exact-address PnP cleanup using {} direct BTHLE root(s) without global device enumeration",
+            candidates.len()
+        );
+        return Ok(candidates);
+    }
+
     let devices = DeviceInformation::FindAllAsyncDeviceClass(DeviceClass::All)
         .map_err(|err| format!("Windows PnP device query failed: {err}"))
         .and_then(|op| wait_async_operation(op, BLE_DISCOVERY_TIMEOUT, "PnP device query"))?;

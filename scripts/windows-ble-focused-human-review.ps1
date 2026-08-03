@@ -52,7 +52,7 @@ $steps = @(
     [ordered]@{
         id = "ec11-double-repair"
         title = "5. EC11 双击重配"
-        prompt = "动作：快速双击 EC11 旋钮。`r`n期望：不要进录音；出现已验收的蓝色重配三次双闪；Windows/Type 能完成重新连接，不长时间卡已连接/未连接；未连接、重连、等待 Type audio notify 时不能有已连接蓝底，恢复完成后才允许 Type-ready/蓝底。`r`n填写灯效、Windows 状态和 Type 胶囊。"
+        prompt = "动作：快速双击 EC11 旋钮。`r`n期望：不要进录音；出现已验收的蓝色重配三次双闪；Windows 必须出现原生 Swift Pair 配对弹窗，点击后完成连接；Type 只等待这次原生配对，不能同时 PairAsync 抢连接，也不能出现 Blistener 无法连接；未连接、重连、等待 Type audio notify 时不能有已连接蓝底，恢复完成后才允许 Type-ready/蓝底。`r`n填写弹窗、灯效、Windows 状态和 Type 胶囊。"
     },
     [ordered]@{
         id = "type-restart-recovers-led"

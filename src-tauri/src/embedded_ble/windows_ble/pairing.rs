@@ -101,6 +101,10 @@ fn recent_pairing_fast_gatt_active(now: Instant) -> Option<RecentPairingFastGatt
     Some(state)
 }
 
+pub fn recent_listener_pairing_fast_gatt_address() -> Option<u64> {
+    recent_pairing_fast_gatt_active(Instant::now()).and_then(|state| state.address)
+}
+
 pub fn prompt_listener_pairing(
     expected_name: Option<&str>,
 ) -> crate::embedded_ble::BleDevicePairingPromptResult {
@@ -256,6 +260,22 @@ pub fn recover_listener_pairing_after_type_recovery_for_addresses(
     cleanup_addresses: &[u64],
     pairing_addresses: &[u64],
 ) -> crate::embedded_ble::BleDevicePairingPromptResult {
+    recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses(
+        expected_name,
+        cleanup_addresses,
+        pairing_addresses,
+    )
+    .1
+}
+
+pub fn recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses(
+    expected_name: Option<&str>,
+    cleanup_addresses: &[u64],
+    pairing_addresses: &[u64],
+) -> (
+    crate::embedded_ble::BleDeviceUnpairResult,
+    crate::embedded_ble::BleDevicePairingPromptResult,
+) {
     match recover_listener_pairing_after_type_recovery_for_addresses_inner(
         expected_name,
         cleanup_addresses,
@@ -264,16 +284,28 @@ pub fn recover_listener_pairing_after_type_recovery_for_addresses(
         Ok(result) => result,
         Err(err) => {
             log::warn!("[embedded-ble] atomic Listener pairing recovery unavailable: {err}");
-            crate::embedded_ble::BleDevicePairingPromptResult {
-                status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
-                attempted: false,
-                matched_devices: 0,
-                prompted_devices: 0,
-                already_paired_devices: 0,
-                failed_devices: 0,
-                open_bluetooth_settings: false,
-                details: vec![err],
-            }
+            (
+                crate::embedded_ble::BleDeviceUnpairResult {
+                    status: crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction,
+                    attempted: false,
+                    matched_devices: 0,
+                    unpaired_devices: 0,
+                    already_unpaired_devices: 0,
+                    failed_devices: 0,
+                    needs_user_action: false,
+                    details: vec![err.clone()],
+                },
+                crate::embedded_ble::BleDevicePairingPromptResult {
+                    status: crate::embedded_ble::BleDevicePairingPromptStatus::NeedsUserAction,
+                    attempted: false,
+                    matched_devices: 0,
+                    prompted_devices: 0,
+                    already_paired_devices: 0,
+                    failed_devices: 0,
+                    open_bluetooth_settings: false,
+                    details: vec![err],
+                },
+            )
         }
     }
 }
@@ -282,7 +314,13 @@ fn recover_listener_pairing_after_type_recovery_for_addresses_inner(
     expected_name: Option<&str>,
     cleanup_addresses: &[u64],
     pairing_addresses: &[u64],
-) -> Result<crate::embedded_ble::BleDevicePairingPromptResult, String> {
+) -> Result<
+    (
+        crate::embedded_ble::BleDeviceUnpairResult,
+        crate::embedded_ble::BleDevicePairingPromptResult,
+    ),
+    String,
+> {
     const OWNERSHIP_WAIT: Duration = Duration::from_secs(5);
 
     let target_name = effective_bluetooth_target_name(expected_name);
@@ -291,20 +329,28 @@ fn recover_listener_pairing_after_type_recovery_for_addresses_inner(
         &target_name,
         OWNERSHIP_WAIT,
     ) else {
-        return Ok(pairing_maintenance_busy_prompt_result(&target_name));
+        return Ok((
+            atomic_type_recovery_no_cleanup_result(
+                "Pairing maintenance was busy before exact stale-address cleanup.",
+            ),
+            pairing_maintenance_busy_prompt_result(&target_name),
+        ));
     };
 
     let cleanup_names = vec![target_name.clone()];
     let direct_pairing_uses_fresh_recovery_address = !pairing_addresses.is_empty();
-    if cleanup_addresses.is_empty() {
+    let mut unpair = if cleanup_addresses.is_empty() {
         log::warn!(
             "[embedded-ble] atomic Type recovery has no exact stale address to clean before PairAsync"
         );
+        atomic_type_recovery_no_cleanup_result(
+            "No exact pre-recovery address was available; exhaustive ghost cleanup remains deferred until TYPE:READY.",
+        )
     } else {
         let unpair = unpair_listener_devices_for_known_addresses_inner(
             &cleanup_names,
             cleanup_addresses,
-            !direct_pairing_uses_fresh_recovery_address,
+            true,
         )?;
         log::warn!(
             "[embedded-ble] atomic Type recovery known-address cleanup status={:?} matched={} removed={} already_clean={} failed={} user_action={} fresh_direct_pairing={} cleanup_addresses={cleanup_addresses:?} pairing_addresses={pairing_addresses:?}",
@@ -316,7 +362,8 @@ fn recover_listener_pairing_after_type_recovery_for_addresses_inner(
             unpair.needs_user_action,
             direct_pairing_uses_fresh_recovery_address,
         );
-    }
+        unpair
+    };
 
     let pairing = prompt_listener_pairing_inner(
         Some(target_name.as_str()),
@@ -330,7 +377,18 @@ fn recover_listener_pairing_after_type_recovery_for_addresses_inner(
     if !direct_pairing_uses_fresh_recovery_address
         || pairing_prompt_result_ready_for_atomic_recovery(&pairing)
     {
-        return Ok(pairing);
+        return Ok((unpair, pairing));
+    }
+
+    if cleanup_addresses.is_empty() {
+        log::warn!(
+            "[embedded-ble] atomic Type recovery fresh-address PairAsync did not complete; preserving the previous Windows pairing and deferring all previous-identity cleanup until TYPE:READY status={:?} matched={} prompted={} failed={}",
+            pairing.status,
+            pairing.matched_devices,
+            pairing.prompted_devices,
+            pairing.failed_devices,
+        );
+        return Ok((unpair, pairing));
     }
 
     log::warn!(
@@ -351,7 +409,8 @@ fn recover_listener_pairing_after_type_recovery_for_addresses_inner(
         fallback_unpair.failed_devices,
         fallback_unpair.needs_user_action,
     );
-    prompt_listener_pairing_inner(
+    merge_atomic_type_recovery_cleanup_result(&mut unpair, fallback_unpair);
+    let pairing = prompt_listener_pairing_inner(
         Some(target_name.as_str()),
         true,
         true,
@@ -359,7 +418,45 @@ fn recover_listener_pairing_after_type_recovery_for_addresses_inner(
         false,
         pairing_addresses,
         true,
-    )
+    )?;
+    Ok((unpair, pairing))
+}
+
+fn atomic_type_recovery_no_cleanup_result(
+    detail: &str,
+) -> crate::embedded_ble::BleDeviceUnpairResult {
+    crate::embedded_ble::BleDeviceUnpairResult {
+        status: crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean,
+        attempted: false,
+        matched_devices: 0,
+        unpaired_devices: 0,
+        already_unpaired_devices: 0,
+        failed_devices: 0,
+        needs_user_action: false,
+        details: vec![detail.to_string()],
+    }
+}
+
+fn merge_atomic_type_recovery_cleanup_result(
+    base: &mut crate::embedded_ble::BleDeviceUnpairResult,
+    fallback: crate::embedded_ble::BleDeviceUnpairResult,
+) {
+    base.attempted |= fallback.attempted;
+    base.matched_devices = base.matched_devices.saturating_add(fallback.matched_devices);
+    base.unpaired_devices = base.unpaired_devices.saturating_add(fallback.unpaired_devices);
+    base.already_unpaired_devices = base
+        .already_unpaired_devices
+        .saturating_add(fallback.already_unpaired_devices);
+    base.failed_devices = base.failed_devices.saturating_add(fallback.failed_devices);
+    base.details.extend(fallback.details);
+    base.status = if base.failed_devices > 0 {
+        crate::embedded_ble::BleDeviceUnpairStatus::NeedsUserAction
+    } else if base.unpaired_devices > 0 {
+        crate::embedded_ble::BleDeviceUnpairStatus::Removed
+    } else {
+        crate::embedded_ble::BleDeviceUnpairStatus::AlreadyClean
+    };
+    base.needs_user_action = base.failed_devices > 0;
 }
 
 fn pairing_prompt_result_ready_for_atomic_recovery(
@@ -1452,8 +1549,13 @@ fn listener_recovery_direct_pairing_candidates(
     let mut candidates = Vec::new();
     for address in addresses.iter().copied() {
         let address_text = crate::embedded_ble::format_bluetooth_address(address);
+        let address_type = fresh_advertised_addresses
+            .contains(&address)
+            .then(|| recent_recovery_pairing_address_type(address))
+            .flatten();
         match pairing_device_information_from_bluetooth_address_handle(
             address,
+            address_type,
             "recovery direct BLE pairing",
         ) {
             Ok(Some(info)) => {
@@ -1475,7 +1577,7 @@ fn listener_recovery_direct_pairing_candidates(
                 }
                 seen_ids.push(id);
                 log::info!(
-                    "[embedded-ble] recovery direct pairing candidate name={name:?} address={address_text}"
+                    "[embedded-ble] recovery direct pairing candidate name={name:?} address={address_text} address_type={address_type:?} path=typed_handle"
                 );
                 let label = listener_pairing_candidate_label(&name, Some(address));
                 candidates.push(ListenerPairingCandidate {
@@ -1659,7 +1761,7 @@ fn pairing_device_information_from_bluetooth_address(
         }
     }
 
-    match pairing_device_information_from_bluetooth_address_handle(address, label) {
+    match pairing_device_information_from_bluetooth_address_handle(address, address_type, label) {
         Ok(Some(info)) => return Ok(Some(info)),
         Ok(None) => {}
         Err(err) => {
@@ -1677,10 +1779,20 @@ fn pairing_device_information_from_bluetooth_address(
 
 fn pairing_device_information_from_bluetooth_address_handle(
     address: u64,
+    address_type: Option<BluetoothAddressType>,
     label: &str,
 ) -> Result<Option<DeviceInformation>, String> {
     let address_text = crate::embedded_ble::format_bluetooth_address(address);
-    let device = BluetoothLEDevice::FromBluetoothAddressAsync(address)
+    let address_type = address_type
+        .or_else(|| recent_recovery_pairing_address_type(address))
+        .filter(|kind| *kind != BluetoothAddressType::Unspecified);
+    let operation = match address_type {
+        Some(kind) => BluetoothLEDevice::FromBluetoothAddressWithBluetoothAddressTypeAsync(
+            address, kind,
+        ),
+        None => BluetoothLEDevice::FromBluetoothAddressAsync(address),
+    };
+    let device = operation
         .map_err(|err| format!("{label} transient BLE device open failed: {err}"))
         .and_then(|op| {
             wait_async_operation(
@@ -1692,7 +1804,7 @@ fn pairing_device_information_from_bluetooth_address_handle(
     let info = match device.DeviceInformation() {
         Ok(info) => {
             log::info!(
-                "[embedded-ble] opened transient BLE DeviceInformation for pairing address={address_text}"
+                "[embedded-ble] opened transient BLE DeviceInformation for pairing address={address_text} address_type={address_type:?}"
             );
             Some(info)
         }
@@ -1920,6 +2032,20 @@ fn pair_unpaired_listener_candidate_with_adapter_recovery(
         );
     }
 
+    if retry_failed_pairasync_once {
+        log::info!(
+            "[embedded-ble] fresh Type recovery registering custom ConfirmOnly handler before the first Windows pairing ceremony for {}",
+            candidate.label
+        );
+        match custom_pair_listener_candidate(pairing, &candidate.label, expected_name) {
+            Ok(outcome) => return Ok(outcome),
+            Err(err) => log::warn!(
+                "[embedded-ble] fresh Type recovery first custom PairAsync failed for {}: {err}; retaining bounded generic fallback",
+                candidate.label
+            ),
+        }
+    }
+
     let mut status = run_default_pairing_once(pairing, &candidate.label, "standard pairing")?;
     match pairing_status_or_reachable(status, expected_name, "") {
         Ok(outcome) => return Ok(outcome),
@@ -1940,7 +2066,7 @@ fn pair_unpaired_listener_candidate_with_adapter_recovery(
         }
     }
     let mut custom_pairing_already_in_progress = false;
-    if pairing_status_should_try_custom_fallback(status) {
+    if !retry_failed_pairasync_once && pairing_status_should_try_custom_fallback(status) {
         log::warn!(
             "[embedded-ble] Windows standard pairing returned status={status:?} for {}; trying custom PairAsync fallback",
             candidate.label
@@ -2231,6 +2357,7 @@ fn refresh_listener_pairing_candidate(
     if let Some(address) = stale_address {
         match pairing_device_information_from_bluetooth_address_handle(
             address,
+            recent_recovery_pairing_address_type(address),
             "refreshed BLE pairing device query",
         )? {
             Some(info) => {

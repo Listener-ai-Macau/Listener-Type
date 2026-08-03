@@ -56,6 +56,8 @@
           "decided_at": "2026-07-15",
           "accepted_at": "2026-07-15",
           "decision": "EC11 Type-controlled double-click recovery must meet the same visible notify-ready speed limit as BLE rename recovery.",
+          "superseded_at": "2026-08-03",
+          "superseded_by": "LST-OTA-108: physical EC11 double-click is native Windows Swift Pair; Type waits for the fresh HID identity and does not PairAsync.",
           "human_acceptance_evidence": ".cache/validation/preproduction-human-review-preliminary-step-15-recording-response-20260714-2317/physical-ec11-double-recovery-after-address-order-20260715-084803.operator-result.json",
           "machine_acceptance_evidence": ".cache/validation/preproduction-human-review-preliminary-step-15-recording-response-20260714-2317/physical-ec11-double-recovery-after-address-order-20260715-084803.machine-speed.json",
           "measured_type_notice_to_notify_ready_ms": 9256.0663,

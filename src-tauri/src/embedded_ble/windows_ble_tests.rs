@@ -780,6 +780,50 @@ fn usb_serial_device_settings_drain_waits_for_quiet_window() {
 }
 
 #[test]
+fn fresh_identity_recovery_requires_the_exact_firmware_execution_result() {
+    let expected = "VREC:RECOVERY:TYPE:SILENT:FRESH";
+    let response = concat!(
+        "old diagnostic output\r\n",
+        "~VREC:RESULT command=VREC:RECOVERY:TYPE:SILENT result=OK\r\n",
+        "~VREC:RESULT command=VREC:RECOVERY:TYPE:SILENT:FRESH result=OK\r\n",
+    );
+    assert_eq!(
+        complete_recovery_control_result(response, expected).as_deref(),
+        Some("OK")
+    );
+    assert_eq!(
+        complete_recovery_control_result(
+            "~VREC:RESULT command=VREC:RECOVERY:TYPE:SILENT:FRESH result=ESP_FAIL\n",
+            expected,
+        )
+        .as_deref(),
+        Some("ESP_FAIL")
+    );
+    assert!(complete_recovery_control_result(
+        "~VREC:RESULT command=VREC:RECOVERY:TYPE:SILENT result=OK\n",
+        expected,
+    )
+    .is_none());
+
+    let source = include_str!("embedded_ble.rs");
+    let start = source
+        .find("fn send_recovery_control_command_via_serial_port")
+        .expect("recovery serial transaction should exist");
+    let end = source[start..]
+        .find("fn complete_recovery_control_result")
+        .map(|offset| start + offset)
+        .expect("recovery result parser boundary should exist");
+    let transaction = &source[start..end];
+    assert!(
+        transaction.contains("drain_serial_input_until_quiet")
+            && transaction.contains("complete_recovery_control_result(&response, command)")
+            && transaction.contains("timed out waiting for exact firmware recovery result")
+            && !transaction.contains("std::thread::sleep"),
+        "a host serial flush is not recovery confirmation; Type must wait for the exact firmware execution result"
+    );
+}
+
+#[test]
 fn pairing_discovery_rejects_stale_same_name_aep_when_target_address_known() {
     let source = include_str!("embedded_ble.rs");
     let start = source
@@ -907,7 +951,7 @@ fn windows_pairing_uses_standard_pairasync_by_default() {
 }
 
 #[test]
-fn windows_pairing_attempts_standard_pairasync_before_custom_fallback() {
+fn windows_pairing_uses_custom_first_only_for_exact_type_recovery() {
     let source = include_str!("embedded_ble.rs");
     let start = source
         .find("fn pair_unpaired_listener_candidate")
@@ -917,18 +961,24 @@ fn windows_pairing_attempts_standard_pairasync_before_custom_fallback() {
         .map(|offset| start + offset)
         .expect("pairing helper boundary should exist");
     let body = &source[start..end];
+    let custom_first_index = body
+        .find("if retry_failed_pairasync_once")
+        .expect("fresh Type recovery should have a dedicated first ceremony");
+    let custom_index = body[custom_first_index..]
+        .find("custom_pair_listener_candidate")
+        .map(|offset| custom_first_index + offset)
+        .expect("fresh Type recovery should register custom pairing first");
     let standard_index = body
         .find("run_default_pairing_once")
         .expect("pairing helper must attempt standard PairAsync");
-    let custom_index = body
-        .find("custom_pair_listener_candidate")
-        .expect("pairing helper should retain custom fallback");
 
     assert!(
-        standard_index < custom_index,
-        "Windows BLE HID pairing must keep the hardware-proven v1.0.2 path: standard PairAsync primes Windows, then custom ConfirmOnly recovers Failed(19)"
+        custom_first_index < custom_index && custom_index < standard_index,
+        "exact Type-owned fresh recovery must register ConfirmOnly before its first security ceremony"
     );
-    assert!(body.contains("pairing_status_should_try_custom_fallback"));
+    assert!(body.contains(
+        "if !retry_failed_pairasync_once && pairing_status_should_try_custom_fallback(status)"
+    ));
 }
 
 #[test]
@@ -1034,6 +1084,117 @@ fn fresh_recovery_pairing_only_cleanup_keeps_slow_discovery_out_of_the_recovery_
     assert!(
         source.contains("fresh recovery-address direct PairAsync failed; skipping slow AEP discovery"),
         "a fresh recovery address must not fall through to slow AEP discovery after direct PairAsync fails"
+    );
+}
+
+#[test]
+fn rename_pairing_failure_preserves_previous_identity_until_type_ready() {
+    let source = include_str!("embedded_ble.rs");
+    let start = source
+        .find("fn recover_listener_pairing_after_type_recovery_for_addresses_inner")
+        .expect("atomic Type recovery helper should exist");
+    let end = source[start..]
+        .find("fn atomic_type_recovery_no_cleanup_result")
+        .map(|offset| start + offset)
+        .expect("atomic Type recovery helper boundary should exist");
+    let body = &source[start..end];
+    let direct_pair = body
+        .find("let pairing = prompt_listener_pairing_inner")
+        .expect("fresh identity PairAsync should exist");
+    let preserve_guard = body[direct_pair..]
+        .find("if cleanup_addresses.is_empty()")
+        .map(|offset| direct_pair + offset)
+        .expect("an empty cleanup set must preserve the previous pairing");
+    let cache_fallback = body
+        .find("clear_listener_bthport_cache_for_known_addresses_inner")
+        .expect("non-rename recovery may retain its exact-cache fallback");
+
+    assert!(direct_pair < preserve_guard && preserve_guard < cache_fallback);
+    assert!(
+        body[preserve_guard..cache_fallback].contains("return Ok((unpair, pairing));")
+            && body[preserve_guard..cache_fallback]
+                .contains("deferring all previous-identity cleanup until TYPE:READY"),
+        "a failed fresh PairAsync in the rename path must return without UnpairAsync, PnP removal, or BTHPORT deletion"
+    );
+}
+
+#[test]
+fn atomic_rename_finishes_exact_predecessor_windows_teardown_before_pairing() {
+    let source = include_str!("embedded_ble.rs");
+    let start = source
+        .find("fn recover_listener_pairing_after_type_recovery_for_addresses_inner")
+        .expect("atomic Type recovery helper should exist");
+    let end = source[start..]
+        .find("fn atomic_type_recovery_no_cleanup_result")
+        .map(|offset| start + offset)
+        .expect("atomic Type recovery helper boundary should exist");
+    let body = &source[start..end];
+    let exact_teardown = body
+        .find("unpair_listener_devices_for_known_addresses_inner(\n            &cleanup_names,\n            cleanup_addresses,\n            true,")
+        .expect("atomic rename must finish exact predecessor PnP/BTHPORT teardown");
+    let direct_pair = body
+        .find("let pairing = prompt_listener_pairing_inner")
+        .expect("fresh identity PairAsync should exist");
+
+    assert!(exact_teardown < direct_pair);
+    assert!(!body.contains("prune_listener_ghost_pairings_keeping"));
+}
+
+#[test]
+fn exact_predecessor_pnp_cleanup_uses_direct_root_without_global_enumeration() {
+    let source = include_str!("embedded_ble.rs");
+    let start = source
+        .find("fn listener_pnp_remove_candidates")
+        .expect("PnP cleanup candidate helper should exist");
+    let end = source[start..]
+        .find("fn push_listener_pnp_entry")
+        .map(|offset| start + offset)
+        .expect("PnP cleanup candidate helper boundary should exist");
+    let body = &source[start..end];
+    let exact = body
+        .find("if exact_address_only")
+        .expect("exact-address PnP branch should exist");
+    let global = body
+        .find("DeviceInformation::FindAllAsyncDeviceClass(DeviceClass::All)")
+        .expect("generic cleanup should retain global PnP enumeration");
+    let direct = &body[exact..global];
+
+    assert!(exact < global);
+    assert!(direct.contains(r#"format!(r"BTHLE\Dev_{address:012x}")"#));
+    assert!(direct.contains("return Ok(candidates);"));
+    assert!(!direct.contains("powershell_listener_pnp_entries"));
+}
+
+#[test]
+fn recent_pairing_notify_uses_only_the_exact_pairasync_address_before_type_ready() {
+    let notify_source = std::include_str!("windows_ble/notify_open.rs");
+    let start = notify_source
+        .find("if let Some(state) = recent_pairing.as_ref()")
+        .expect("recent pairing notify fast path should exist");
+    let end = notify_source[start..]
+        .find("let native_windows_hid_addresses")
+        .map(|offset| start + offset)
+        .expect("recent pairing notify fast path boundary should exist");
+    let fast_path = &notify_source[start..end];
+    assert!(
+        fast_path.contains("open_notify_target_for_known_addresses_with_cache_modes")
+            && fast_path.contains("false,"),
+        "a fresh Type-confirmed PairAsync address must not repeat full historical-address/PnP discovery before GATT reopen"
+    );
+
+    let source = include_str!("embedded_ble.rs");
+    let helper_start = source
+        .find("fn open_notify_target_for_known_addresses_with_cache_modes")
+        .expect("known-address notify helper should exist");
+    let helper_end = source[helper_start..]
+        .find("fn recovery_swift_pair_advertisement_visible_for_persisted_address")
+        .map(|offset| helper_start + offset)
+        .expect("known-address notify helper boundary should exist");
+    let helper = &source[helper_start..helper_end];
+    assert!(
+        helper.contains("if include_recovery_addresses")
+            && helper.contains("listener_recovery_target_addresses()"),
+        "normal recovery must retain historical-address discovery while the exact recent-pairing path can skip it"
     );
 }
 
@@ -1324,7 +1485,7 @@ fn rename_recovery_can_skip_duplicate_pre_pair_cleanup_after_cache_refresh() {
     ));
     assert!(
         prompt_setup.contains("type_recovery_command_confirmed && pre_pair_stale_cleanup"),
-        "double-click/one-click Type recovery must keep pre-pair stale cleanup, while BLE rename may skip it only after its explicit Windows cache cleanup already ran"
+        "double-click/one-click Type recovery must keep pre-pair stale cleanup, while BLE rename uses its explicit empty-cleanup atomic handoff"
     );
 }
 
@@ -1434,6 +1595,8 @@ fn type_controlled_recovery_uses_explicit_type_commands() {
     assert!(source.contains("pub fn send_recording_control_silent_recovery"));
     assert!(source.contains("\"VREC:RECOVERY:TYPE:SILENT\""));
     assert!(source.contains("b\"VREC:RECOVERY:TYPE:SILENT\\n\""));
+    assert!(source.contains("\"VREC:RECOVERY:TYPE:SILENT:FRESH\""));
+    assert!(source.contains("b\"VREC:RECOVERY:TYPE:SILENT:FRESH\\n\""));
     assert!(source.contains("pub fn send_recording_control_manual_pairing"));
     assert!(source.contains("\"VREC:RECOVERY:TYPE:MANUAL\""));
     assert!(source.contains("b\"VREC:RECOVERY:TYPE:MANUAL\\n\""));
@@ -1912,12 +2075,63 @@ fn native_windows_hid_current_identity_uses_random_address_type() {
 }
 
 #[test]
+fn rename_recovery_preserves_advertised_address_type_through_first_pairasync() {
+    let source = include_str!("embedded_ble.rs");
+    let wait_start = source
+        .find("pub(super) fn wait_for_bluetooth_target_advertisement_by_name")
+        .expect("typed rename advertisement wait helper should exist");
+    let wait_end = source[wait_start..]
+        .find("fn find_bluetooth_target_service_address")
+        .map(|offset| wait_start + offset)
+        .expect("typed rename advertisement wait helper boundary should exist");
+    let wait_body = &source[wait_start..wait_end];
+    assert!(
+        wait_body.contains("scan_listener_advertisements(context, Some(&target_name), timeout)")
+            && wait_body.contains("remember_recovery_pairing_address_type(")
+            && wait_body.contains("address_type"),
+        "rename recovery must retain the address type from the exact-name advertisement"
+    );
+
+    let direct_start = source
+        .find("fn listener_recovery_direct_pairing_candidates")
+        .expect("direct recovery pairing helper should exist");
+    let direct_end = source[direct_start..]
+        .find("fn push_listener_pairing_candidate_if_matching")
+        .map(|offset| direct_start + offset)
+        .expect("direct recovery pairing helper boundary should exist");
+    let direct_body = &source[direct_start..direct_end];
+    assert!(
+        direct_body.contains("recent_recovery_pairing_address_type(address)")
+            && direct_body.contains("pairing_device_information_from_bluetooth_address_handle(")
+            && direct_body.contains("path=typed_handle"),
+        "the first fresh-address candidate must use the typed direct-handle path without a selector wait"
+    );
+    assert!(
+        source.contains("BluetoothLEDevice::FromBluetoothAddressWithBluetoothAddressTypeAsync(")
+            && source.contains("opened transient BLE DeviceInformation for pairing address={address_text} address_type={address_type:?}"),
+        "typed identity must survive the transient WinRT device fallback and remain observable"
+    );
+
+    let custom = source
+        .find("custom_pair_listener_candidate(pairing, &candidate.label, expected_name)")
+        .expect("custom PairAsync should be the exact recovery ceremony");
+    let standard = source
+        .find("run_default_pairing_once(pairing, &candidate.label, \"standard pairing\")")
+        .expect("generic standard PairAsync fallback should remain available");
+    assert!(
+        custom < standard,
+        "typed Type recovery must register its ConfirmOnly handler before generic PairAsync"
+    );
+}
+
+#[test]
 fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
     let legacy = PersistedBleDeviceState {
         last_successful_address: Some("FB8FBDD8C90F".to_string()),
         target_name: None,
         updated_at: None,
         last_ghost_prune_at: None,
+        last_ghost_prune_keep_address: None,
     };
     assert_eq!(
         persisted_ble_device_state_address_for_target(&legacy, DEFAULT_BLUETOOTH_TARGET_NAME),
@@ -1930,6 +2144,7 @@ fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
         target_name: Some("OldType".to_string()),
         updated_at: None,
         last_ghost_prune_at: None,
+        last_ghost_prune_keep_address: None,
     };
     assert_eq!(
         persisted_ble_device_state_address_for_target(&wrong_target, DEFAULT_BLUETOOTH_TARGET_NAME),
@@ -1941,11 +2156,47 @@ fn persisted_startup_notify_state_ignores_legacy_or_wrong_target_address() {
         target_name: Some("listener".to_string()),
         updated_at: None,
         last_ghost_prune_at: None,
+        last_ghost_prune_keep_address: None,
     };
     assert_eq!(
         persisted_ble_device_state_address_for_target(&matching, DEFAULT_BLUETOOTH_TARGET_NAME),
         Some(0xE5C3_D5B8_D2FC)
     );
+}
+
+#[test]
+fn ghost_pairing_prune_cooldown_is_scoped_to_the_proven_keep_address() {
+    let now = chrono::Utc::now();
+    let state = PersistedBleDeviceState {
+        last_successful_address: Some("DA:6C:ED:FB:55:40".to_string()),
+        target_name: Some("listenerB".to_string()),
+        updated_at: Some(now.to_rfc3339()),
+        last_ghost_prune_at: Some((now - chrono::Duration::seconds(30)).to_rfc3339()),
+        last_ghost_prune_keep_address: Some("DA:6C:ED:FB:55:40".to_string()),
+    };
+    let cooldown = Duration::from_secs(180);
+
+    assert!(ghost_pairing_prune_state_is_recent_for_keep(
+        &state,
+        0xDA6C_EDFB_5540,
+        now,
+        cooldown,
+    ));
+    assert!(
+        !ghost_pairing_prune_state_is_recent_for_keep(&state, 0xC32F_73D2_15B6, now, cooldown,),
+        "a newly proven identity must not inherit the previous identity's cooldown"
+    );
+
+    let legacy_without_keep = PersistedBleDeviceState {
+        last_ghost_prune_keep_address: None,
+        ..state.clone()
+    };
+    assert!(!ghost_pairing_prune_state_is_recent_for_keep(
+        &legacy_without_keep,
+        0xDA6C_EDFB_5540,
+        now,
+        cooldown,
+    ));
 }
 
 #[test]
@@ -1976,6 +2227,31 @@ fn advertisement_address_selection_does_not_short_circuit_on_runtime_cache() {
         body.contains("runtime_bluetooth_target_address()"),
         "runtime cache may remain a late fallback after fresh Windows candidates"
     );
+}
+
+#[test]
+fn rapid_rename_predecessor_prefers_recent_pair_or_live_notify_before_windows_cache() {
+    let source = include_str!("embedded_ble.rs");
+    let start = source
+        .find("pub(super) fn remember_current_bluetooth_target_address_for_name")
+        .expect("rename predecessor helper should exist");
+    let end = source[start..]
+        .find("pub(super) fn wait_for_bluetooth_target_advertisement_by_name")
+        .map(|offset| start + offset)
+        .expect("rename predecessor helper boundary should exist");
+    let body = &source[start..end];
+
+    let recent = body
+        .find("recent_listener_pairing_fast_gatt_address()")
+        .expect("recent exact PairAsync address must be considered");
+    let live = body
+        .find(".or_else(runtime_bluetooth_target_address)")
+        .expect("current runtime notify address must be the fallback authority");
+    let windows = body
+        .find("find_bluetooth_target_service_address(")
+        .expect("Windows service discovery remains a late fallback");
+    assert!(recent < live && live < windows);
+    assert!(body.contains("retaining authoritative current/recent-pair address"));
 }
 
 #[test]
@@ -2291,44 +2567,13 @@ fn default_target_name_accepts_discovered_custom_listener_service_name() {
 
 #[test]
 fn candidate_address_learning_promotes_default_target_name_to_discovered_name() {
-    let _guard = bluetooth_target_name_test_lock().lock().unwrap();
-    if configured_bluetooth_address_from_env().is_some()
-        || std::env::var("LISTENER_TYPE_BLE_TARGET_NAME").is_ok()
-        || std::env::var("LISTENER_TYPE_BLUETOOTH_TARGET_NAME").is_ok()
-    {
-        return;
-    }
-
-    let previous_name = configured_bluetooth_target_name();
-    let previous_address = RUNTIME_BLUETOOTH_TARGET_ADDRESS
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .ok()
-        .and_then(|slot| slot.clone());
-
-    set_configured_bluetooth_target_name(DEFAULT_BLUETOOTH_TARGET_NAME);
-    remember_runtime_bluetooth_target_address_for_candidate(
-        0xA4CB8FF2B512,
-        "Blistener",
-        "unit test",
+    let (target_name, update_configured_name) = bluetooth_target_name_for_candidate(
+        Some(DEFAULT_BLUETOOTH_TARGET_NAME.to_string()),
+        Some("Blistener".to_string()),
     );
 
-    assert_eq!(
-        configured_bluetooth_target_name().as_deref(),
-        Some("Blistener")
-    );
-    assert_eq!(runtime_bluetooth_target_address(), Some(0xA4CB8FF2B512));
-
-    match previous_name {
-        Some(name) => set_configured_bluetooth_target_name(&name),
-        None => set_configured_bluetooth_target_name(""),
-    }
-    if let Ok(mut slot) = RUNTIME_BLUETOOTH_TARGET_ADDRESS
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-    {
-        *slot = previous_address;
-    }
+    assert_eq!(target_name, "Blistener");
+    assert!(update_configured_name);
 }
 
 #[test]
@@ -2432,8 +2677,10 @@ fn winrt_bluetooth_targets_release_without_synchronous_close_after_handler_detac
     );
     assert!(
         source.contains("last_ghost_prune_at")
+            && source.contains("last_ghost_prune_keep_address")
+            && source.contains("persisted_ghost_pairing_prune_is_recent_for_keep")
             && source.contains("persisted cross-process cooldown active"),
-        "automatic ghost pairing cleanup must retain its cooldown across Type restarts"
+        "automatic ghost pairing cleanup must retain its address-scoped cooldown across Type restarts"
     );
     for forbidden in ["session.Close()", "service.Close()", "device.Close()"] {
         assert!(

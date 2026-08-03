@@ -32,6 +32,7 @@ expect(/--max-rename-total-ms/, 'BLE-name E2E must enforce a bounded end-to-end 
 expect(/ble_name_write_wait_ms = max\(args\.max_write_ms, args\.max_rename_total_ms\)/, 'BLE-name E2E must let the visible saved confirmation consume the same bounded rename budget instead of incorrectly applying the numeric-settings write limit');
 expect(/background listener notify ready/, 'BLE-name E2E must require Type audio notifications to recover after each rename');
 expect(/wait_for_listener_notify_ready/, 'BLE-name E2E must wait for the post-pairing notify subscription instead of accepting only UI confirmation');
+expect(/lambda: card_button_center\(client, text\),\s*10,/, 'installed UI E2E must keep startup-readiness waiting separate from the bounded rename timing budget');
 expect(/pair_indices\[-1\] \+ 1/, 'BLE-name E2E must associate notify-ready evidence with the current rename PairAsync rather than an earlier operation');
 expect(/restore_error/, 'random BLE-name E2E must report a failed restore instead of hiding it');
 expect(/wait_for_device_settings_write_to_settle/, 'a timed-out rename probe must wait for the in-flight UI write to settle before restoring the user name');

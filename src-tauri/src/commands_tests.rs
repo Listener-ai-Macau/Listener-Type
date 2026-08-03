@@ -80,6 +80,32 @@ fn normalized_commands_source() -> String {
 }
 
 #[test]
+fn settings_save_refreshes_ble_only_when_input_source_changes() {
+    let source = normalized_commands_source();
+    let start = source
+        .find("pub fn set_settings(")
+        .expect("set_settings command should exist");
+    let end = source[start..]
+        .find("pub fn get_hotkey_status")
+        .map(|offset| start + offset)
+        .expect("set_settings command boundary should exist");
+    let body = &source[start..end];
+
+    assert!(body.contains(
+        "let input_source_changed = next_input_source != previous_prefs.dictation_input_source;"
+    ));
+    assert!(body.contains(
+        "if input_source_changed {\n        coord.refresh_embedded_ble_listener();\n    }"
+    ));
+    assert_eq!(
+        body.matches("coord.refresh_embedded_ble_listener();")
+            .count(),
+        1,
+        "ordinary settings persistence must not have an unconditional BLE refresh path"
+    );
+}
+
+#[test]
 fn wake_phrase_change_is_prepared_and_invalidated_before_persistence() {
     let source = normalized_commands_source();
     let start = source
@@ -862,6 +888,19 @@ fn usb_confirmed_ble_name_apply_overlaps_cache_recovery_but_keeps_final_readback
         body.contains("Ok(_) => match read_device_ble_name_apply_confirmation"),
         "non-USB BLE-name apply paths must retain firmware status confirmation before recovery"
     );
+    let usb_branch_start = body
+        .find("Ok(crate::embedded_ble::DeviceSettingsCommandTransport::UsbSerial)")
+        .expect("USB apply branch should exist");
+    let usb_branch_end = body[usb_branch_start..]
+        .find("Ok(_) => match read_device_ble_name_apply_confirmation")
+        .map(|offset| usb_branch_start + offset)
+        .expect("non-USB apply branch should follow USB apply");
+    let usb_branch = &body[usb_branch_start..usb_branch_end];
+    assert!(
+        usb_branch.contains("defers full firmware settings readback until after the exact-name Windows handoff")
+            && !usb_branch.contains("read_device_settings_snapshot_from_firmware().await"),
+        "USB apply must start the exact-name Windows handoff without a redundant serialized settings snapshot"
+    );
     assert!(
         body.contains("read_device_settings_snapshot_after_write"),
         "the settings command must still complete a final firmware readback before the UI reports success"
@@ -892,43 +931,46 @@ fn device_ble_name_change_path_refreshes_windows_cache_after_apply() {
         .map(|offset| helper_start + offset)
         .expect("BLE name Windows refresh helper boundary should exist");
     let helper = &source[helper_start..helper_end];
-    assert!(helper.contains("send_recording_control_silent_recovery"));
+    assert!(helper.contains("send_recording_control_silent_fresh_identity_recovery"));
     assert!(!helper.contains("send_recording_control_recovery("));
-    assert!(helper.contains("unpair_listener_devices_for_names"));
     assert!(
-        helper.contains("unpair_listener_devices_for_known_addresses")
-            && helper.contains("if observed_recovery_addresses.is_empty()"),
-        "a fresh, verified recovery advertisement address must avoid a redundant full PnP/cache discovery before silent PairAsync"
+        helper.contains("recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses")
+            && helper.contains("if observed_recovery_addresses.is_empty()")
+            && helper.contains("let exact_predecessor_cleanup_addresses = previous_address")
+            && helper.contains("pre-pair exhaustive ghost prune deferred")
+            && !helper.contains("prune_listener_ghost_pairings_keeping")
+            && helper.contains("let pre_pair_cleanup_addresses = exact_predecessor_cleanup_addresses.as_slice()")
+            && helper.contains("pre_pair_cleanup_addresses,"),
+        "rename must retire only the exact predecessor before pairing while deferring exhaustive cleanup until TYPE:READY"
     );
     assert!(
-        helper.contains("BleDeviceUnpairStatus::NeedsUserAction")
-            && helper.contains("BleDeviceUnpairStatus::NotFound"),
-        "fast exact-address cleanup must retain the full Windows cache cleanup fallback when it cannot prove the stale pairing was handled"
+        helper.contains("atomic_handoff=true")
+            && helper.contains("pre_pair_cleanup={}")
+            && helper.contains("allow_user_prompt=false")
+            && helper.contains("open_settings={}"),
+        "atomic rename recovery must preserve the established PairAsync observability contract"
     );
-    assert!(helper.contains("embedded_ble_windows_pairing_result"));
-    assert!(helper.contains("EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt"));
     assert!(
         helper.contains("observed_recovery_addresses.as_slice()")
-            && source.contains(
-                "prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cache_cleanup_for_addresses"
-            ),
+            && source.contains("recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses"),
         "rename recovery must carry the first confirmed recovery advertisement address into the silent PairAsync path instead of rescanning Windows BLE"
     );
     assert!(
-        helper.contains("let advertised_address =\n            wait_for_device_ble_name_recovery_pairing_ready")
-            && helper.contains("advertised_address.or(verified_handoff_address)"),
-        "rename recovery must prefer a freshly observed applied-name advertisement before silent PairAsync, retaining the firmware-confirmed address only as a bounded fallback"
+        helper.contains("wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name)")
+            && helper.contains("previous_address == Some(address)")
+            && helper.contains("refusing stale-address PairAsync"),
+        "rename recovery must require a freshly observed applied-name identity and reject the pre-rename address"
     );
     assert!(
         helper.contains("firmware_name_confirmed")
-            && helper.contains(".then(")
-            && helper.contains("verified_bluetooth_target_rename_handoff_address"),
-        "when Windows misses an immediate post-rename advertisement, Type may use only the address handed off before this exact firmware-confirmed name transition"
+            && helper.contains("verified_bluetooth_target_rename_handoff_address")
+            && helper.contains("PairAsync skipped because no exact fresh-name BLE identity was observed"),
+        "missing firmware confirmation or fresh advertising must preserve the old Windows pairing and skip PairAsync"
     );
 }
 
 #[test]
-fn firmware_confirmed_rename_handoff_defers_windows_cleanup_until_after_advertisement_scan() {
+fn firmware_confirmed_rename_handoff_retires_exact_predecessor_before_pairing() {
     let source = normalized_commands_source();
     let helper_start = source
         .find("fn apply_device_ble_name_windows_refresh_blocking")
@@ -946,26 +988,31 @@ fn firmware_confirmed_rename_handoff_defers_windows_cleanup_until_after_advertis
     let advertisement_wait = helper
         .find("wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name)")
         .expect("rename recovery must confirm the applied Listener advertisement before PairAsync");
-    let exact_address_cleanup = helper
-        .find("unpair_listener_devices_for_known_addresses")
-        .expect("rename should retain exact-address cleanup after recovery advertising settles");
-    let handoff_fallback = helper
-        .find("advertised_address.or(verified_handoff_address)")
-        .expect(
-            "a verified handoff address should remain available only after the advertisement scan",
-        );
+    let atomic_recovery = helper
+        .find("recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses")
+        .expect("rename should retire the exact predecessor and pair the fresh address");
+    let stale_address_rejection = helper
+        .find("previous_address == Some(address)")
+        .expect("the pre-rename address must be rejected after the advertisement scan");
     assert!(verified_address < advertisement_wait);
-    assert!(advertisement_wait < handoff_fallback && handoff_fallback < exact_address_cleanup);
+    assert!(
+        advertisement_wait < stale_address_rejection && stale_address_rejection < atomic_recovery
+    );
     assert!(helper.contains("firmware_name_confirmed"));
-    assert!(helper.contains("if advertised_address.is_none()"));
+    assert!(helper.contains("no fresh advertisement carrying applied BLE name"));
     assert!(
         helper.contains("observed_recovery_addresses.as_slice()"),
-        "the existing silent PairAsync path must receive the fresh advertisement address or the bounded firmware-confirmed fallback"
+        "the silent PairAsync path must receive only the fresh advertisement address"
     );
     assert!(
-        helper.contains("recovery-address BLE cache cleanup status"),
-        "failed exact-address cleanup must retain the complete Windows cache cleanup fallback"
+        helper.contains("let exact_predecessor_cleanup_addresses = previous_address")
+            && helper.contains("let pre_pair_cleanup_addresses = exact_predecessor_cleanup_addresses.as_slice()")
+            && helper.contains("only the now-invalid exact predecessor is retired before PairAsync")
+            && helper.contains("all non-predecessor ghost cleanup remains deferred until TYPE:READY keep-address prune"),
+        "the exact predecessor must be retired after fresh advertising is proven while unrelated ghost cleanup stays post-ready"
     );
+    assert!(!helper.contains(".or(verified_handoff_address)"));
+    assert!(!helper.contains("unpair_listener_devices_for_names"));
 }
 
 #[cfg(target_os = "windows")]
@@ -2027,35 +2074,39 @@ fn ble_name_refresh_and_one_click_use_type_controlled_pairasync_recovery() {
         .map(|offset| rename_helper_start + offset)
         .expect("BLE name Windows refresh helper boundary should exist");
     let rename_helper = &source[rename_helper_start..rename_helper_end];
-    assert!(rename_helper.contains("send_recording_control_silent_recovery"));
-    assert!(rename_helper.contains("unpair_listener_devices_for_names"));
-    assert!(rename_helper.contains("EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt"));
+    assert!(rename_helper.contains("send_recording_control_silent_fresh_identity_recovery"));
+    assert!(rename_helper
+        .contains("recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses"));
     assert!(
-        rename_helper.contains(
-            "EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt,\n        false,\n        observed_recovery_addresses.as_slice(),"
-        ),
-        "BLE rename already cleaned Windows cache for old/new names and must not repeat Type pre-pair stale cleanup before PairAsync"
+        rename_helper.contains("let exact_predecessor_cleanup_addresses = previous_address")
+            && rename_helper.contains("pre-pair exhaustive ghost prune deferred")
+            && !rename_helper.contains("prune_listener_ghost_pairings_keeping")
+            && rename_helper.contains("let pre_pair_cleanup_addresses = exact_predecessor_cleanup_addresses.as_slice()")
+            && rename_helper.contains("pre_pair_cleanup_addresses,")
+            && rename_helper.contains("observed_recovery_addresses.as_slice()"),
+        "BLE rename must retire only the exact predecessor, defer exhaustive cleanup, and pair only the fresh observed address"
     );
     let cleanup_start = rename_helper
-        .find("unpair_listener_devices_for_names")
+        .find("recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses")
         .expect("rename cleanup call should exist");
     let pairing_start = rename_helper[cleanup_start..]
-        .find("embedded_ble_windows_pairing_result")
+        .find("if recovery_error.is_none()")
         .map(|offset| cleanup_start + offset)
-        .expect("rename pairing call should exist after cleanup");
+        .expect("rename retry decision should exist after atomic recovery");
     assert!(
         !rename_helper[cleanup_start..pairing_start]
             .contains("std::thread::sleep(DEVICE_SETTINGS_BLE_NAME_PAIRING_SETTLE_DELAY)"),
-        "a completed Windows cache cleanup must start observed-address PairAsync immediately instead of adding an unconditional settle delay"
+        "the observed-address PairAsync must start immediately instead of adding an unconditional settle delay"
     );
     assert!(
-        rename_helper.contains("embedded_ble_windows_pairing_result"),
-        "BLE rename refresh must run the bounded Windows pairing/cache refresh path after firmware applies a different name"
+        rename_helper.contains("recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses"),
+        "BLE rename refresh must run the bounded atomic Windows pairing/cache refresh path after firmware applies a different name"
     );
     assert!(
         rename_helper.contains("wait_for_device_ble_name_recovery_pairing_ready(&expected_ble_name)")
-            && rename_helper.contains("advertised_address.or(verified_handoff_address)"),
-        "rename recovery must prefer a newly observed applied-name advertisement and retain the exact handoff only as its bounded fallback"
+            && rename_helper.contains("previous_address == Some(address)")
+            && !rename_helper.contains(".or(verified_handoff_address)"),
+        "rename recovery must use only a newly observed applied-name identity and never fall back to the old handoff address"
     );
 
     let one_click_start = source
@@ -2103,9 +2154,9 @@ fn ble_name_refresh_uses_silent_recovery_while_one_click_keeps_user_prompt() {
         .expect("BLE name Windows refresh helper boundary should exist");
     let rename_helper = &source[rename_helper_start..rename_helper_end];
     assert!(
-        rename_helper.contains("send_recording_control_silent_recovery")
+        rename_helper.contains("send_recording_control_silent_fresh_identity_recovery")
             && rename_helper.contains("EmbeddedBleWindowsPairingPromptPolicy::SuppressUserPrompt"),
-        "BLE rename must use the silent firmware recovery command and suppress local user pairing prompts"
+        "BLE rename must use the silent fresh-identity firmware recovery command and suppress local user pairing prompts"
     );
     assert!(
         !rename_helper.contains("send_recording_control_recovery("),

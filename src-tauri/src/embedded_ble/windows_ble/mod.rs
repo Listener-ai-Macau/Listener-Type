@@ -170,6 +170,10 @@ const BLE_ADAPTER_RESTART_SETTLE: Duration = Duration::from_millis(2500);
 const BLE_PAIRING_IN_PROGRESS_SETTLE: Duration = Duration::from_millis(2200);
 const DEVICE_SETTINGS_SERIAL_BAUD_RATE: u32 = 115_200;
 const DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES: usize = 256;
+const RECOVERY_CONTROL_SERIAL_DRAIN_MAX_DURATION: Duration = Duration::from_millis(350);
+const RECOVERY_CONTROL_SERIAL_DRAIN_QUIET_DURATION: Duration = Duration::from_millis(60);
+const RECOVERY_CONTROL_SERIAL_ACK_MAX_DURATION: Duration = Duration::from_secs(2);
+const RECOVERY_CONTROL_SERIAL_ACK_MIN_DURATION: Duration = Duration::from_millis(800);
 
 // A background capture owns the cross-process GATT gate.  Keep its caller's
 // cancellation flag available to the blocking WinRT wait helpers so a rename,
@@ -279,6 +283,7 @@ const RECORDING_STOP_ACTIVE_CONTROL_TIMEOUT: Duration = Duration::from_millis(70
 const DIS_SERVICE_UUID_TEXT: &str = "0000180a-0000-1000-8000-00805f9b34fb";
 const BLE_TARGET_ADDRESS_CACHE_WINDOW: Duration = Duration::from_secs(60 * 60);
 const BLE_RENAME_ADDRESS_GRACE_WINDOW: Duration = Duration::from_secs(10 * 60);
+const BLE_RECOVERY_ADDRESS_TYPE_WINDOW: Duration = Duration::from_secs(60);
 const BLE_DEVICE_STATE_FILE: &str = "ble_device_state.json";
 const STARTUP_NOTIFY_FAST_PATH_TIMEOUT: Duration = Duration::from_millis(2500);
 const STARTUP_NOTIFY_FAST_PATH_OPERATION_TIMEOUT: Duration = Duration::from_millis(1200);
@@ -293,6 +298,8 @@ static OTA_REBOOT_NEW_GENERATION_CONNECTED: AtomicBool = AtomicBool::new(false);
 static OTA_REBOOT_NEW_GENERATION_ATT_READY: AtomicBool = AtomicBool::new(false);
 static RUNTIME_BLUETOOTH_TARGET_NAME: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static RUNTIME_BLUETOOTH_TARGET_ADDRESS: OnceLock<Mutex<Option<RuntimeBluetoothTargetAddress>>> =
+    OnceLock::new();
+static RECENT_RECOVERY_ADDRESS_TYPE: OnceLock<Mutex<Option<RecoveryAddressTypeState>>> =
     OnceLock::new();
 static NATIVE_WINDOWS_HID_PAIRING_VISIBLE: AtomicBool = AtomicBool::new(false);
 static OTA_POST_CONFIRM_NOTIFY_TARGET_ADDRESS: OnceLock<Mutex<Option<u64>>> = OnceLock::new();
@@ -387,7 +394,52 @@ struct RuntimeBluetoothTargetAddress {
     valid_for: Duration,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone)]
+struct RecoveryAddressTypeState {
+    address: u64,
+    address_type: BluetoothAddressType,
+    observed_at: Instant,
+}
+
+fn remember_recovery_pairing_address_type(
+    address: u64,
+    address_type: BluetoothAddressType,
+    context: &str,
+) {
+    if address == 0 || address_type == BluetoothAddressType::Unspecified {
+        return;
+    }
+    if let Ok(mut slot) = RECENT_RECOVERY_ADDRESS_TYPE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    {
+        *slot = Some(RecoveryAddressTypeState {
+            address,
+            address_type,
+            observed_at: Instant::now(),
+        });
+        log::info!(
+            "[embedded-ble] remembered typed recovery identity address={address:012X} address_type={address_type:?} context={context}"
+        );
+    }
+}
+
+fn recent_recovery_pairing_address_type(address: u64) -> Option<BluetoothAddressType> {
+    let mut slot = RECENT_RECOVERY_ADDRESS_TYPE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .ok()?;
+    let state = slot.as_ref()?.clone();
+    if state.address != address || state.observed_at.elapsed() >= BLE_RECOVERY_ADDRESS_TYPE_WINDOW {
+        if state.observed_at.elapsed() >= BLE_RECOVERY_ADDRESS_TYPE_WINDOW {
+            *slot = None;
+        }
+        return None;
+    }
+    Some(state.address_type)
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 struct PersistedBleDeviceState {
     #[serde(default)]
     last_successful_address: Option<String>,
@@ -397,6 +449,8 @@ struct PersistedBleDeviceState {
     updated_at: Option<String>,
     #[serde(default)]
     last_ghost_prune_at: Option<String>,
+    #[serde(default)]
+    last_ghost_prune_keep_address: Option<String>,
 }
 
 fn active_audio_control_slot() -> &'static Mutex<Option<ActiveAudioControlSender>> {
@@ -1655,15 +1709,65 @@ fn send_recovery_control_command_via_serial_port(
     let _ = port.write_data_terminal_ready(false);
     let _ = port.write_request_to_send(false);
 
-    // Recovery commands are write-only. Draining diagnostics cannot validate
-    // one, and delaying it shortens the firmware's pairing recovery window.
+    drain_serial_input_until_quiet(
+        &mut *port,
+        RECOVERY_CONTROL_SERIAL_DRAIN_MAX_DURATION,
+        RECOVERY_CONTROL_SERIAL_DRAIN_QUIET_DURATION,
+    );
     let payload = format!("~{command}\n");
     port.write_all(payload.as_bytes())
         .map_err(|err| DeviceSettingsSerialError::Transport(format!("write failed: {err}")))?;
     port.flush()
         .map_err(|err| DeviceSettingsSerialError::Transport(format!("flush failed: {err}")))?;
-    std::thread::sleep(timeout.min(Duration::from_millis(500)));
-    Ok(())
+    let ack_budget = timeout
+        .min(RECOVERY_CONTROL_SERIAL_ACK_MAX_DURATION)
+        .max(RECOVERY_CONTROL_SERIAL_ACK_MIN_DURATION);
+    let deadline = Instant::now() + ack_budget;
+    let mut response = String::new();
+    let mut read_buf = [0_u8; DEVICE_SETTINGS_SERIAL_READ_CHUNK_BYTES];
+    while Instant::now() < deadline {
+        match port.read(&mut read_buf) {
+            Ok(count) if count > 0 => {
+                response.push_str(&String::from_utf8_lossy(&read_buf[..count]));
+                if let Some(result) = complete_recovery_control_result(&response, command) {
+                    if result == "OK" {
+                        return Ok(());
+                    }
+                    return Err(DeviceSettingsSerialError::FirmwareRejected(format!(
+                        "firmware rejected recovery command {command}: {result}"
+                    )));
+                }
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(err) => {
+                return Err(DeviceSettingsSerialError::Transport(format!(
+                    "read failed: {err}"
+                )));
+            }
+        }
+    }
+
+    let tail = response_tail(&response, 320);
+    Err(DeviceSettingsSerialError::Transport(format!(
+        "timed out waiting for exact firmware recovery result command={command}; received={tail:?}"
+    )))
+}
+
+fn complete_recovery_control_result(response: &str, expected_command: &str) -> Option<String> {
+    response.lines().find_map(|line| {
+        let fields = line.trim().strip_prefix("~VREC:RESULT ")?;
+        let mut command = None;
+        let mut result = None;
+        for field in fields.split_ascii_whitespace() {
+            if let Some(value) = field.strip_prefix("command=") {
+                command = Some(value);
+            } else if let Some(value) = field.strip_prefix("result=") {
+                result = Some(value);
+            }
+        }
+        (command == Some(expected_command)).then(|| result.map(str::to_string))?
+    })
 }
 
 #[cfg(test)]
@@ -3172,6 +3276,7 @@ fn open_notify_target_for_known_addresses(
         context,
         preferred_address,
         bluetooth_cache_modes_for_policy(denzic_ble_pairing::KNOWN_ADDRESS_NOTIFY_CACHE_POLICY),
+        true,
     )
 }
 
@@ -3179,13 +3284,16 @@ fn open_notify_target_for_known_addresses_with_cache_modes(
     context: &str,
     preferred_address: Option<u64>,
     cache_modes: &[BluetoothCacheMode],
+    include_recovery_addresses: bool,
 ) -> Result<OpenNotifyTarget, String> {
     let mut addresses = Vec::new();
     if let Some(address) = preferred_address {
         push_unique_address(&mut addresses, address);
     }
-    for address in listener_recovery_target_addresses() {
-        push_unique_address(&mut addresses, address);
+    if include_recovery_addresses {
+        for address in listener_recovery_target_addresses() {
+            push_unique_address(&mut addresses, address);
+        }
     }
     if let Some(address) = configured_bluetooth_address() {
         push_unique_address(&mut addresses, address);
@@ -3451,6 +3559,22 @@ pub(super) fn remember_current_bluetooth_target_address_for_name(
         return Some(address);
     }
 
+    if let Some(address) =
+        recent_listener_pairing_fast_gatt_address().or_else(runtime_bluetooth_target_address)
+    {
+        log::info!(
+            "[embedded-ble] {context}: retaining authoritative current/recent-pair address {} across target transition next={next_target_name:?}",
+            crate::embedded_ble::format_bluetooth_address(address)
+        );
+        remember_runtime_bluetooth_target_address_for_name(
+            address,
+            &next_target_name,
+            BLE_RENAME_ADDRESS_GRACE_WINDOW,
+            context,
+        );
+        return Some(address);
+    }
+
     let current_target_name = effective_bluetooth_target_name(None);
     let discovery_timeout = timeout.clamp(Duration::from_millis(300), Duration::from_secs(2));
     let address = find_bluetooth_target_service_address(
@@ -3507,11 +3631,12 @@ pub(super) fn wait_for_bluetooth_target_advertisement_by_name(
         );
         return Ok(address);
     }
-    let addresses = scan_ble_advertisements_by_name(context, &target_name, timeout)?;
-    let address = addresses
+    let advertisements = scan_listener_advertisements(context, Some(&target_name), timeout)?;
+    let (address, address_type, _) = advertisements
         .into_iter()
         .next()
         .ok_or_else(|| format!("{context}: advertisement scan returned no address"))?;
+    remember_recovery_pairing_address_type(address, address_type, context);
     remember_runtime_bluetooth_target_address_for_name(
         address,
         &target_name,
@@ -3931,7 +4056,33 @@ fn persisted_successful_notify_target_address_for_current() -> Option<u64> {
     Some(address)
 }
 
-fn persisted_ghost_pairing_prune_is_recent(cooldown: Duration) -> bool {
+fn ghost_pairing_prune_state_is_recent_for_keep(
+    state: &PersistedBleDeviceState,
+    keep: u64,
+    now: chrono::DateTime<chrono::Utc>,
+    cooldown: Duration,
+) -> bool {
+    let Some(stored_keep) = state
+        .last_ghost_prune_keep_address
+        .as_deref()
+        .and_then(parse_bluetooth_address_hex)
+    else {
+        return false;
+    };
+    if stored_keep != keep {
+        return false;
+    }
+    let Some(timestamp) = state.last_ghost_prune_at.as_deref() else {
+        return false;
+    };
+    let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(timestamp) else {
+        return false;
+    };
+    let elapsed = now.signed_duration_since(timestamp.with_timezone(&chrono::Utc));
+    elapsed < chrono::Duration::zero() || elapsed.to_std().is_ok_and(|elapsed| elapsed < cooldown)
+}
+
+fn persisted_ghost_pairing_prune_is_recent_for_keep(keep: u64, cooldown: Duration) -> bool {
     let Some(path) = ble_device_state_path() else {
         return false;
     };
@@ -3941,17 +4092,10 @@ fn persisted_ghost_pairing_prune_is_recent(cooldown: Duration) -> bool {
     let Ok(state) = serde_json::from_str::<PersistedBleDeviceState>(&text) else {
         return false;
     };
-    let Some(timestamp) = state.last_ghost_prune_at.as_deref() else {
-        return false;
-    };
-    let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(timestamp) else {
-        return false;
-    };
-    let elapsed = chrono::Utc::now().signed_duration_since(timestamp.with_timezone(&chrono::Utc));
-    elapsed < chrono::Duration::zero() || elapsed.to_std().is_ok_and(|elapsed| elapsed < cooldown)
+    ghost_pairing_prune_state_is_recent_for_keep(&state, keep, chrono::Utc::now(), cooldown)
 }
 
-fn persist_ghost_pairing_prune_completed() {
+fn persist_ghost_pairing_prune_completed(keep: u64) {
     let Some(path) = ble_device_state_path() else {
         return;
     };
@@ -3960,6 +4104,7 @@ fn persist_ghost_pairing_prune_completed() {
         .and_then(|text| serde_json::from_str::<PersistedBleDeviceState>(&text).ok())
         .unwrap_or_default();
     state.last_ghost_prune_at = Some(super::utc_now_rfc3339());
+    state.last_ghost_prune_keep_address = Some(crate::embedded_ble::format_bluetooth_address(keep));
     let Some(parent) = path.parent() else {
         return;
     };
@@ -3981,15 +4126,22 @@ fn persist_successful_notify_target_address(address: u64, context: &str) {
     let Some(path) = ble_device_state_path() else {
         return;
     };
-    let last_ghost_prune_at = fs::read_to_string(&path)
+    let persisted_prune = fs::read_to_string(&path)
         .ok()
         .and_then(|text| serde_json::from_str::<PersistedBleDeviceState>(&text).ok())
-        .and_then(|state| state.last_ghost_prune_at);
+        .map(|state| {
+            (
+                state.last_ghost_prune_at,
+                state.last_ghost_prune_keep_address,
+            )
+        })
+        .unwrap_or((None, None));
     let state = PersistedBleDeviceState {
         last_successful_address: Some(crate::embedded_ble::format_bluetooth_address(address)),
         target_name: Some(target_name.clone()),
         updated_at: Some(super::utc_now_rfc3339()),
-        last_ghost_prune_at,
+        last_ghost_prune_at: persisted_prune.0,
+        last_ghost_prune_keep_address: persisted_prune.1,
     };
     let Some(parent) = path.parent() else {
         return;
@@ -4086,30 +4238,36 @@ fn remember_runtime_bluetooth_target_address_for_candidate(
     candidate_name: &str,
     context: &str,
 ) {
-    let target_name = match (
+    let (target_name, update_configured_name) = bluetooth_target_name_for_candidate(
         configured_bluetooth_target_name(),
         normalize_bluetooth_target_name(candidate_name),
-    ) {
-        (Some(configured), Some(candidate))
-            if bluetooth_name_matches_expected(&configured, DEFAULT_BLUETOOTH_TARGET_NAME)
-                && !bluetooth_name_matches_expected(&candidate, DEFAULT_BLUETOOTH_TARGET_NAME) =>
-        {
-            set_configured_bluetooth_target_name(&candidate);
-            candidate
-        }
-        (Some(configured), _) => configured,
-        (None, Some(candidate)) => {
-            set_configured_bluetooth_target_name(&candidate);
-            candidate
-        }
-        (None, None) => DEFAULT_BLUETOOTH_TARGET_NAME.to_string(),
-    };
+    );
+    if update_configured_name {
+        set_configured_bluetooth_target_name(&target_name);
+    }
     remember_runtime_bluetooth_target_address_for_name(
         address,
         &target_name,
         BLE_TARGET_ADDRESS_CACHE_WINDOW,
         context,
     );
+}
+
+fn bluetooth_target_name_for_candidate(
+    configured_name: Option<String>,
+    candidate_name: Option<String>,
+) -> (String, bool) {
+    match (configured_name, candidate_name) {
+        (Some(configured), Some(candidate))
+            if bluetooth_name_matches_expected(&configured, DEFAULT_BLUETOOTH_TARGET_NAME)
+                && !bluetooth_name_matches_expected(&candidate, DEFAULT_BLUETOOTH_TARGET_NAME) =>
+        {
+            (candidate, true)
+        }
+        (Some(configured), _) => (configured, false),
+        (None, Some(candidate)) => (candidate, true),
+        (None, None) => (DEFAULT_BLUETOOTH_TARGET_NAME.to_string(), false),
+    }
 }
 
 pub fn set_configured_bluetooth_target_name(name: &str) {

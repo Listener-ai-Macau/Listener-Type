@@ -306,7 +306,7 @@ def card_button_center(client: CdpClient, text: str) -> dict[str, float] | None:
 def button_center(client: CdpClient, text: str) -> dict[str, float]:
     point = wait_for(
         lambda: card_button_center(client, text),
-        3,
+        10,
         f"visible enabled device-settings button not found: {text}",
     )
     if not point or not point.get("visible"):

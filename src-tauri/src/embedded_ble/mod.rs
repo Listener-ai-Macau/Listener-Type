@@ -538,6 +538,13 @@ pub fn send_recording_control_silent_recovery(timeout: Duration) -> Result<(), S
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_silent_fresh_identity_recovery(
+    timeout: Duration,
+) -> Result<(), String> {
+    windows_ble::send_recording_control_silent_fresh_identity_recovery(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_control_type_bye(timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_control_type_bye(timeout)
 }
@@ -983,6 +990,29 @@ pub fn recover_listener_pairing_after_type_recovery_for_addresses(
 }
 
 #[cfg(target_os = "windows")]
+pub fn recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses(
+    expected_name: Option<&str>,
+    cleanup_addresses: &[u64],
+    pairing_addresses: &[u64],
+) -> (BleDeviceUnpairResult, BleDevicePairingPromptResult) {
+    windows_ble::recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses(
+        expected_name,
+        cleanup_addresses,
+        pairing_addresses,
+    )
+}
+
+#[cfg(target_os = "windows")]
+pub fn recent_listener_pairing_fast_gatt_address() -> Option<u64> {
+    windows_ble::recent_listener_pairing_fast_gatt_address()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn recent_listener_pairing_fast_gatt_address() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "windows")]
 pub fn query_listener_pairing(expected_name: Option<&str>) -> BleDevicePairingPromptResult {
     windows_ble::query_listener_pairing(expected_name)
 }
@@ -1115,6 +1145,13 @@ pub fn send_recording_control_manual_pairing(_timeout: Duration) -> Result<(), S
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_silent_recovery(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE silent recovery is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_silent_fresh_identity_recovery(
+    _timeout: Duration,
+) -> Result<(), String> {
+    Err("Embedded BLE rename recovery is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1497,6 +1534,27 @@ pub fn prompt_listener_pairing_after_type_recovery_without_user_prompt_after_cac
     _expected_name: Option<&str>,
 ) -> BleDevicePairingPromptResult {
     prompt_listener_pairing_after_type_recovery_without_user_prompt(_expected_name)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn recover_listener_pairing_after_type_recovery_with_cleanup_for_addresses(
+    _expected_name: Option<&str>,
+    _cleanup_addresses: &[u64],
+    _pairing_addresses: &[u64],
+) -> (BleDeviceUnpairResult, BleDevicePairingPromptResult) {
+    (
+        BleDeviceUnpairResult {
+            status: BleDeviceUnpairStatus::AlreadyClean,
+            attempted: false,
+            matched_devices: 0,
+            unpaired_devices: 0,
+            already_unpaired_devices: 0,
+            failed_devices: 0,
+            needs_user_action: false,
+            details: vec!["Windows Bluetooth cleanup is only supported on Windows".to_string()],
+        },
+        prompt_listener_pairing_after_type_recovery_without_user_prompt(_expected_name),
+    )
 }
 
 #[cfg(not(target_os = "windows"))]

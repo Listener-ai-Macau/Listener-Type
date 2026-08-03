@@ -200,6 +200,7 @@ fn open_notify_target() -> Result<OpenNotifyTarget, String> {
             bluetooth_cache_modes_for_policy(
                 denzic_ble_pairing::RECENT_PAIRING_NOTIFY_CACHE_POLICY,
             ),
+            false,
         ) {
             Ok(target) => {
                 log::info!(
