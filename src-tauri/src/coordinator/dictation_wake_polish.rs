@@ -73,23 +73,28 @@ impl EmbeddedAudioDictationSession {
 
     fn consume_prepared_streaming_pcm(&mut self, pcm: &[u8]) {
         let source_pcm_offset_ms = (self.normalized_pcm_bytes as u64) / 32;
+        let chunk_ms = (pcm.len() / 32) as u64;
         let (asr_pcm, gain_stats) = self.prepare_streaming_pcm_for_asr(pcm);
-        if self.active_asr == "volcengine"
-            && embedded_streaming_chunk_has_speech_energy(
-                gain_stats.rms_before,
-                gain_stats.peak_before,
-            )
-        {
+        let has_speech_energy = embedded_streaming_chunk_has_speech_energy(
+            gain_stats.rms_before,
+            gain_stats.peak_before,
+        );
+        if self.active_asr == "volcengine" && has_speech_energy {
             self.streaming_agc
                 .first_voiced_pcm_ms
                 .get_or_insert(source_pcm_offset_ms);
+        }
+        if let Some(asr) = self.volcengine_asr.as_ref() {
+            asr.note_local_audio_activity(
+                source_pcm_offset_ms.saturating_add(chunk_ms),
+                has_speech_energy,
+            );
         }
 
         // 改A: track sustained trailing silence AFTER the body has started so the
         // caller can request a host-initiated device stop early. Leading silence
         // (before the user speaks the dictation body) and post-stop tails never
         // count toward the threshold.
-        let chunk_ms = (pcm.len() / 32) as u64;
         let (signal_rms, signal_peak) = embedded_pcm_streaming_agc_signal_level(pcm);
         if embedded_streaming_chunk_has_speech_energy(signal_rms, signal_peak) {
             self.proactive_stop_body_started = true;

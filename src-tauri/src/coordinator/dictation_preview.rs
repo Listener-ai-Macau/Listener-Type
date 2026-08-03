@@ -120,10 +120,14 @@ fn ascii_edit_distance_at_most_one(left: &str, right: &str) -> Option<usize> {
     (edits <= 1).then_some(edits)
 }
 
-fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: SessionId, text: String) {
+fn update_embedded_audio_partial_preview(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    text: String,
+) -> bool {
     let preview = filter_dictation_preview_text(inner, session_id, &text);
     if preview.is_empty() {
-        return;
+        return false;
     }
     dispatch_embedded_ble_session_actor_command(
         inner,
@@ -147,18 +151,18 @@ fn update_embedded_audio_partial_preview(inner: &Arc<Inner>, session_id: Session
             }
             emitted
         },
-    );
+    )
 }
 
 fn update_embedded_audio_partial_preview_from_final_supplement(
     inner: &Arc<Inner>,
     session_id: SessionId,
     update: crate::asr::volcengine::FinalIntermediateTranscript,
-) {
+) -> bool {
     let authoritative_two_pass = update.authoritative_two_pass;
     let preview = filter_dictation_preview_text(inner, session_id, &update.text);
     if preview.is_empty() {
-        return;
+        return false;
     }
     dispatch_embedded_ble_session_actor_command(
         inner,
@@ -186,7 +190,7 @@ fn update_embedded_audio_partial_preview_from_final_supplement(
             }
             emitted
         },
-    );
+    )
 }
 
 // `stream` and `two_pass` originate from the same authoritative ASR session.

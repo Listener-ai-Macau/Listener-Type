@@ -48,6 +48,10 @@ const WAKE_DIAGNOSTIC_RETENTION_MAX_FILES: usize = 128;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES: u64 = 32 * 1024 * 1024;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
+const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);
+const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
+const EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS: u64 = 200;
+static EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 fn should_restore_clipboard_after_dictation(
     prefs: &UserPreferences,
@@ -257,6 +261,106 @@ fn log_dictation_asr_engine_selection(session_id: SessionId, active_asr: &str) {
     }
 }
 
+fn note_embedded_asr_speech_activity(inner: &Arc<Inner>, session_id: SessionId) {
+    if !device_ai_processing_io_allowed()
+        || !embedded_ble_host_recording_control_context_active(inner)
+        || embedded_audio_stop_feedback_latched(inner)
+    {
+        return;
+    }
+    let active = {
+        let state = inner.state.lock();
+        state.session_id == session_id
+            && matches!(
+                state.phase,
+                SessionPhase::Starting | SessionPhase::Listening
+            )
+    };
+    if !active
+        || EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+    {
+        return;
+    }
+
+    async_runtime::spawn_blocking(move || {
+        let result = crate::embedded_ble::send_recording_control_speech_activity(
+            EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT,
+        );
+        EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT.store(false, Ordering::SeqCst);
+        match result {
+            Ok(()) => log::debug!(
+                "[embedded-ble] recognized speech refreshed auto-stop timeout session_id={session_id}"
+            ),
+            Err(err) => log::warn!(
+                "[embedded-ble] recognized speech refresh failed session_id={session_id}: {err}"
+            ),
+        }
+    });
+}
+
+fn handle_target_speaker_update(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    stop_dispatched: &Arc<AtomicBool>,
+    update: crate::asr::volcengine::TargetSpeakerUpdate,
+) {
+    if update.target_activity_advanced || update.pending_activity_advanced {
+        note_embedded_asr_speech_activity(inner, session_id);
+    }
+    let endpoint_due = target_speaker_endpoint_due(&update);
+    if !endpoint_due
+        || stop_dispatched
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+    {
+        return;
+    }
+
+    let inner = Arc::clone(inner);
+    async_runtime::spawn(async move {
+        match request_embedded_ble_recording_stop_from_host(
+            &inner,
+            "target_speaker_inactive_1000ms",
+        )
+        .await
+        {
+            Ok(true) => log::info!(
+                "[embedded-ble] target-speaker auto-stop sent session_id={session_id}"
+            ),
+            Ok(false) => log::debug!(
+                "[embedded-ble] target-speaker auto-stop ignored for inactive session_id={session_id}"
+            ),
+            Err(err) => log::warn!(
+                "[embedded-ble] target-speaker auto-stop failed session_id={session_id}: {err}"
+            ),
+        }
+    });
+}
+
+fn target_speaker_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpdate) -> bool {
+    let unresolved_recent_local_speech = update
+        .audio_duration_ms
+        .zip(update.local_speech_end_ms)
+        .is_some_and(|(audio_ms, local_speech_ms)| {
+            let attributed_end_ms = update.stable_attributed_speech_end_ms.unwrap_or_default();
+            local_speech_ms
+                > attributed_end_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+                && audio_ms.saturating_sub(local_speech_ms) < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+        });
+    update.speaker_info_present
+        && update.speaker_id.is_some()
+        && !update.pending_unattributed_speech
+        && !unresolved_recent_local_speech
+        && update
+            .audio_duration_ms
+            .zip(update.target_speech_end_ms)
+            .is_some_and(|(audio_ms, target_ms)| {
+                audio_ms.saturating_sub(target_ms) >= EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+            })
+}
+
 fn set_volcengine_preview_callbacks(
     asr: &Arc<VolcengineStreamingASR>,
     inner: &Arc<Inner>,
@@ -274,6 +378,12 @@ fn set_volcengine_preview_callbacks(
             session_id,
             update,
         );
+    })));
+
+    let stop_dispatched = Arc::new(AtomicBool::new(false));
+    let inner_for_speaker = Arc::clone(inner);
+    asr.set_target_speaker_update_callback(Some(Arc::new(move |update| {
+        handle_target_speaker_update(&inner_for_speaker, session_id, &stop_dispatched, update);
     })));
 }
 
@@ -437,6 +547,7 @@ struct EmbeddedAudioDictationSession {
     session_id: SessionId,
     active_asr: String,
     consumer: Arc<dyn crate::recorder::AudioConsumer>,
+    volcengine_asr: Option<Arc<VolcengineStreamingASR>>,
     archive_pcm: Option<Vec<u8>>,
     streamed_pcm_bytes: usize,
     normalized_pcm_bytes: usize,
@@ -523,7 +634,7 @@ async fn begin_embedded_audio_dictation_session(
         schedule_actionable_error_capsule_idle(inner, current_session_id);
         return Err(message);
     }
-    let consumer =
+    let (consumer, volcengine_asr) =
         match build_embedded_audio_asr_consumer(inner, current_session_id, &active_asr).await {
             Ok(consumer) => consumer,
             Err(message) => {
@@ -541,6 +652,7 @@ async fn begin_embedded_audio_dictation_session(
         session_id: current_session_id,
         active_asr,
         consumer,
+        volcengine_asr,
         archive_pcm,
         streamed_pcm_bytes: 0,
         normalized_pcm_bytes: 0,
@@ -886,7 +998,13 @@ async fn build_embedded_audio_asr_consumer(
     inner: &Arc<Inner>,
     session_id: SessionId,
     active_asr: &str,
-) -> Result<Arc<dyn crate::recorder::AudioConsumer>, String> {
+) -> Result<
+    (
+        Arc<dyn crate::recorder::AudioConsumer>,
+        Option<Arc<VolcengineStreamingASR>>,
+    ),
+    String,
+> {
     #[cfg(target_os = "windows")]
     if foundry::is_foundry_local_whisper(active_asr) {
         let prefs = inner.prefs.get();
@@ -913,7 +1031,7 @@ async fn build_embedded_audio_asr_consumer(
             ActiveAsr::FoundryLocalWhisper(Arc::clone(&local)),
         );
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
-        return Ok(consumer);
+        return Ok((consumer, None));
     }
 
     if is_whisper_compatible_provider(active_asr) {
@@ -933,7 +1051,7 @@ async fn build_embedded_audio_asr_consumer(
         ));
         store_asr_for_session(inner, session_id, ActiveAsr::Whisper(Arc::clone(&whisper)));
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = whisper;
-        return Ok(consumer);
+        return Ok((consumer, None));
     }
 
     if is_bailian_provider(active_asr) {
@@ -946,7 +1064,7 @@ async fn build_embedded_audio_asr_consumer(
         let target: Arc<dyn crate::asr::AudioConsumer> = asr;
         bridge.attach(target);
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge;
-        return Ok(consumer);
+        return Ok((consumer, None));
     }
 
     let final_asr = build_volcengine_asr(inner, session_id);
@@ -958,8 +1076,9 @@ async fn build_embedded_audio_asr_consumer(
         ActiveAsr::Volcengine(Arc::clone(&final_asr)),
     );
     let inner_for_open = Arc::clone(inner);
+    let final_asr_for_open = Arc::clone(&final_asr);
     tauri::async_runtime::spawn(async move {
-        match open_volcengine_asr(&final_asr).await {
+        match open_volcengine_asr(&final_asr_for_open).await {
             Ok(()) => {
                 let still_current = {
                     let state = inner_for_open.state.lock();
@@ -968,21 +1087,21 @@ async fn build_embedded_audio_asr_consumer(
                         && state.phase != SessionPhase::Idle
                 };
                 if !still_current {
-                    final_asr.cancel();
+                    final_asr_for_open.cancel();
                     log::info!(
                         "[coord] embedded Volcengine ASR opened after stale session {session_id} - discarded"
                     );
                     return;
                 }
-                let target: Arc<dyn crate::asr::AudioConsumer> = final_asr.clone();
+                let target: Arc<dyn crate::asr::AudioConsumer> = final_asr_for_open.clone();
                 let flushed_bytes = bridge.attach(target);
-                final_asr.mark_audio_delivery_ready();
+                final_asr_for_open.mark_audio_delivery_ready();
                 log::info!(
                     "[coord] embedded Volcengine ASR connected; flushed {flushed_bytes} deferred audio bytes"
                 );
             }
             Err(err) => {
-                final_asr.cancel();
+                final_asr_for_open.cancel();
                 let still_current = {
                     let state = inner_for_open.state.lock();
                     state.session_id == session_id
@@ -1000,7 +1119,7 @@ async fn build_embedded_audio_asr_consumer(
             }
         }
     });
-    Ok(consumer)
+    Ok((consumer, Some(final_asr)))
 }
 
 fn archive_embedded_audio_if_enabled(

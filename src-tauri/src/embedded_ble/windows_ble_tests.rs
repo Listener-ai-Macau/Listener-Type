@@ -289,6 +289,14 @@ fn recording_stop_prefers_no_response_when_available() {
 }
 
 #[test]
+fn recognized_speech_refresh_prefers_no_response_when_available() {
+    assert_eq!(
+        audio_control_write_policy(b"VREC:SPEECH\n"),
+        AudioControlWritePolicy::LowLatency
+    );
+}
+
+#[test]
 fn reliable_audio_control_prefers_with_response_when_available() {
     let both =
         GattCharacteristicProperties::Write | GattCharacteristicProperties::WriteWithoutResponse;
@@ -2602,6 +2610,24 @@ fn recording_stop_uses_bounded_active_then_usb_serial_without_fresh_gatt() {
         !body.contains("open_audio_control_target_with_retry"),
         "recording stop must not run the long audio-control rediscovery path"
     );
+}
+
+#[test]
+fn recognized_speech_refresh_is_scoped_to_the_active_audio_capture() {
+    let source = std::include_str!("windows_ble/recording_control.rs");
+    let start = source
+        .find("pub fn send_recording_control_speech_activity")
+        .expect("recognized speech helper should exist");
+    let end = source[start..]
+        .find("pub fn send_recording_control_stop")
+        .map(|offset| start + offset)
+        .expect("recognized speech helper boundary should exist");
+    let body = &source[start..end];
+
+    assert!(body.contains("send_audio_control_via_active_capture"));
+    assert!(body.contains("VREC:SPEECH"));
+    assert!(!body.contains("send_control_command_via_usb_serial"));
+    assert!(!body.contains("open_audio_control_target_with_retry"));
 }
 
 #[test]

@@ -5184,6 +5184,7 @@ enum AudioControlWritePolicy {
 fn audio_control_write_policy(bytes: &[u8]) -> AudioControlWritePolicy {
     if bytes == b"VREC:TOGGLE\n"
         || bytes == b"VREC:STOP\n"
+        || bytes == b"VREC:SPEECH\n"
         || bytes == super::EC11_HARDWARE_RECOVERY_ACK
         || bytes == super::EC11_HARDWARE_RECOVERY_PREPARE_ACK
     {

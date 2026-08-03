@@ -187,6 +187,17 @@ pub fn send_recording_control_activate(timeout: Duration) -> Result<(), String> 
     )
 }
 
+pub fn send_recording_control_speech_activity(timeout: Duration) -> Result<(), String> {
+    let Some(result) = send_audio_control_via_active_capture(
+        b"VREC:SPEECH\n",
+        timeout,
+        "recognized speech activity",
+    ) else {
+        return Err("no active Listener audio capture for recognized speech activity".to_string());
+    };
+    result
+}
+
 pub fn send_recording_control_stop(timeout: Duration) -> Result<(), String> {
     send_recording_stop_control_command(timeout)
 }

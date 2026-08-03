@@ -456,6 +456,7 @@ fn embedded_audio_test_session(
         session_id,
         active_asr: "openai".into(),
         consumer,
+        volcengine_asr: None,
         archive_pcm: Some(Vec::new()),
         streamed_pcm_bytes: 0,
         normalized_pcm_bytes: 0,
@@ -1262,6 +1263,60 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
     assert_eq!(session.proactive_stop_silence_ms, 0);
     // The dispatcher lives in the packet handler; the session only exposes readiness.
     assert!(!session.proactive_stop_dispatched);
+}
+
+#[test]
+fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
+    let update = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("1".into()),
+        target_speech_end_ms: Some(1_500),
+        audio_duration_ms: Some(2_499),
+        local_speech_end_ms: Some(1_500),
+        stable_attributed_speech_end_ms: Some(1_500),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(!super::target_speaker_endpoint_due(&update));
+
+    let due = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(2_500),
+        ..update.clone()
+    };
+    assert!(super::target_speaker_endpoint_due(&due));
+
+    let pending = crate::asr::volcengine::TargetSpeakerUpdate {
+        pending_unattributed_speech: true,
+        pending_activity_advanced: true,
+        ..due.clone()
+    };
+    assert!(!super::target_speaker_endpoint_due(&pending));
+
+    let unresolved_recent_local = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(3_100),
+        local_speech_end_ms: Some(3_000),
+        stable_attributed_speech_end_ms: Some(1_500),
+        ..due.clone()
+    };
+    assert!(!super::target_speaker_endpoint_due(
+        &unresolved_recent_local
+    ));
+
+    let unresolved_local_has_reached_its_own_one_second_endpoint =
+        crate::asr::volcengine::TargetSpeakerUpdate {
+            audio_duration_ms: Some(4_000),
+            ..unresolved_recent_local
+        };
+    assert!(super::target_speaker_endpoint_due(
+        &unresolved_local_has_reached_its_own_one_second_endpoint
+    ));
+
+    let no_identity = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_info_present: false,
+        ..due
+    };
+    assert!(!super::target_speaker_endpoint_due(&no_identity));
 }
 
 #[test]

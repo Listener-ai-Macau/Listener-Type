@@ -90,12 +90,26 @@ type WsSink = futures_util::stream::SplitSink<WsStream, Message>;
 type SharedWriter = Arc<AsyncMutex<Option<WsSink>>>;
 type PartialTranscriptCallback = Arc<dyn Fn(String) + Send + Sync>;
 type FinalIntermediateTranscriptCallback = Arc<dyn Fn(FinalIntermediateTranscript) + Send + Sync>;
+type TargetSpeakerUpdateCallback = Arc<dyn Fn(TargetSpeakerUpdate) + Send + Sync>;
 type StreamingEventCallback = Arc<dyn Fn(VolcengineStreamingEvent) + Send + Sync>;
 
 #[derive(Clone, Debug)]
 pub struct FinalIntermediateTranscript {
     pub text: String,
     pub authoritative_two_pass: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TargetSpeakerUpdate {
+    pub speaker_id: Option<String>,
+    pub target_speech_end_ms: Option<u64>,
+    pub audio_duration_ms: Option<u64>,
+    pub local_speech_end_ms: Option<u64>,
+    pub stable_attributed_speech_end_ms: Option<u64>,
+    pub target_activity_advanced: bool,
+    pub pending_unattributed_speech: bool,
+    pub pending_activity_advanced: bool,
+    pub speaker_info_present: bool,
 }
 
 /// Events exposed to the platform adapter without changing the legacy
@@ -224,10 +238,49 @@ struct SyncState {
     /// 火山流式响应会反复发送同一 utterance 起点的修订文本。用时间戳合并这些片段，
     /// 避免把同一段尾巴当作新内容追加，导致胶囊预览和最终插入重复膨胀。
     best_transcript_segments: Vec<TranscriptSegment>,
+    /// Speaker attribution lags behind the provider's streaming text. Keep a
+    /// display-only merge here so the capsule can advance without promoting
+    /// provisional words into the authoritative/final transcript.
+    optimistic_preview_text: String,
+    optimistic_preview_segments: Vec<TranscriptSegment>,
+    last_emitted_preview_text: String,
     /// 最新服务端响应已处理的音频时长。two-pass 终帧可能只给最后一个 utterance 的
     /// 词时间戳，但 `audio_info.duration` 仍覆盖整段音频；收尾时应优先采用这项
     /// 传输级覆盖证据，避免把已返回的完整文本误判为截断。
     last_server_audio_duration_ms: Option<u64>,
+    target_speaker_id: Option<String>,
+    target_speech_end_ms: Option<u64>,
+    stable_attributed_speech_end_ms: Option<u64>,
+    local_audio_duration_ms: Option<u64>,
+    local_speech_end_ms: Option<u64>,
+    speaker_info_present: bool,
+    pending_unattributed_text: String,
+}
+
+fn latest_audio_duration_ms(state: &SyncState) -> Option<u64> {
+    state
+        .last_server_audio_duration_ms
+        .into_iter()
+        .chain(state.local_audio_duration_ms)
+        .max()
+}
+
+fn target_speaker_update_from_state(
+    state: &SyncState,
+    target_activity_advanced: bool,
+    pending_activity_advanced: bool,
+) -> TargetSpeakerUpdate {
+    TargetSpeakerUpdate {
+        speaker_id: state.target_speaker_id.clone(),
+        target_speech_end_ms: state.target_speech_end_ms,
+        audio_duration_ms: latest_audio_duration_ms(state),
+        local_speech_end_ms: state.local_speech_end_ms,
+        stable_attributed_speech_end_ms: state.stable_attributed_speech_end_ms,
+        target_activity_advanced,
+        pending_unattributed_speech: !state.pending_unattributed_text.is_empty(),
+        pending_activity_advanced,
+        speaker_info_present: state.speaker_info_present,
+    }
 }
 
 fn final_partial_coverage_gap_from_state(state: &SyncState) -> Option<(u64, u64)> {
@@ -257,6 +310,203 @@ fn server_audio_duration_ms(json: &Value) -> Option<u64> {
     json.get("audio_info")
         .and_then(|audio_info| audio_info.get("duration"))
         .and_then(Value::as_u64)
+}
+
+struct SpeakerFilteredResult {
+    result: Value,
+    optimistic_result: Value,
+    speaker_info_present: bool,
+    target_speech_end_ms: Option<u64>,
+    stable_attributed_speech_end_ms: Option<u64>,
+    pending_unattributed_text: String,
+}
+
+fn spoken_content_len(text: &str) -> usize {
+    text.chars().filter(|ch| ch.is_alphanumeric()).count()
+}
+
+fn utterance_speaker_id(utterance: &Value) -> Option<String> {
+    let value = utterance
+        .get("additions")
+        .and_then(|additions| {
+            additions
+                .get("speaker")
+                .or_else(|| additions.get("speaker_id"))
+        })
+        .or_else(|| utterance.get("speaker"))?;
+    if let Some(value) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(value.to_string());
+    }
+    if let Some(value) = value.as_i64() {
+        return Some(value.to_string());
+    }
+    value.as_u64().map(|value| value.to_string())
+}
+
+fn utterance_end_ms(utterance: &Value) -> Option<u64> {
+    let word_end = utterance
+        .get("words")
+        .and_then(Value::as_array)
+        .and_then(|words| words.iter().rev().find_map(utterance_time_value))
+        .and_then(time_value_ms);
+    let utterance_end = utterance_time_value(utterance).and_then(time_value_ms);
+    word_end.into_iter().chain(utterance_end).max()
+}
+
+fn time_value_ms(value: &Value) -> Option<u64> {
+    if let Some(value) = value.as_u64() {
+        return Some(value);
+    }
+    if let Some(value) = value.as_i64() {
+        return u64::try_from(value).ok();
+    }
+    value.as_str()?.trim().parse::<u64>().ok()
+}
+
+fn utterance_is_stable(utterance: &Value) -> bool {
+    utterance
+        .get("definite")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn utterance_time_value(value: &Value) -> Option<&Value> {
+    ["end_time", "endTime", "end_ms"]
+        .iter()
+        .find_map(|key| value.get(*key))
+}
+
+fn filter_result_to_target_speaker(
+    result: &Value,
+    target_speaker_id: &mut Option<String>,
+) -> SpeakerFilteredResult {
+    let mut filtered_result = result.clone();
+    let utterances = result
+        .get("utterances")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let speaker_info_present = utterances.iter().any(|utterance| {
+        utterance_is_stable(utterance) && utterance_speaker_id(utterance).is_some()
+    });
+
+    if target_speaker_id.is_none() {
+        *target_speaker_id = utterances.iter().find_map(|utterance| {
+            let text = utterance.get("text").and_then(Value::as_str)?.trim();
+            (utterance_is_stable(utterance) && !text.is_empty())
+                .then(|| utterance_speaker_id(utterance))
+                .flatten()
+        });
+    }
+
+    let selected = target_speaker_id
+        .as_deref()
+        .map(|target| {
+            utterances
+                .iter()
+                .filter(|utterance| {
+                    utterance_is_stable(utterance)
+                        && utterance_speaker_id(utterance).as_deref() == Some(target)
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let target_text = selected
+        .iter()
+        .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    let attributed_text = result
+        .get("utterances")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|utterance| utterance_is_stable(utterance))
+        .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    let unstable_text = result
+        .get("utterances")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|utterance| !utterance_is_stable(utterance))
+        .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    let raw_text = result
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let raw_has_unattributed_tail =
+        spoken_content_len(raw_text) > spoken_content_len(&attributed_text);
+    let pending_unattributed_speech = !unstable_text.trim().is_empty() || raw_has_unattributed_tail;
+    let stable_other_speaker_present = target_speaker_id.as_deref().is_some_and(|target| {
+        utterances.iter().any(|utterance| {
+            utterance_is_stable(utterance)
+                && utterance_speaker_id(utterance)
+                    .as_deref()
+                    .is_some_and(|id| id != target)
+        })
+    });
+    let optimistic_utterances = utterances
+        .iter()
+        .filter(|utterance| {
+            !utterance_is_stable(utterance)
+                || target_speaker_id.as_deref().is_some_and(|target| {
+                    utterance_speaker_id(utterance).as_deref() == Some(target)
+                })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let optimistic_utterance_text = optimistic_utterances
+        .iter()
+        .filter_map(|utterance| utterance.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    let optimistic_text = if !pending_unattributed_speech {
+        target_text.clone()
+    } else if !optimistic_utterance_text.trim().is_empty()
+        && spoken_content_len(&optimistic_utterance_text) > spoken_content_len(&target_text)
+    {
+        optimistic_utterance_text
+    } else if !stable_other_speaker_present && raw_has_unattributed_tail {
+        raw_text.to_string()
+    } else if let Some(tail) = raw_text.strip_prefix(&attributed_text) {
+        format!("{target_text}{tail}")
+    } else {
+        target_text.clone()
+    };
+    let pending_unattributed_text = pending_unattributed_speech
+        .then(|| optimistic_text.clone())
+        .unwrap_or_default();
+    let target_speech_end_ms = selected
+        .iter()
+        .filter(|utterance| utterance_is_stable(utterance))
+        .filter_map(|utterance| utterance_end_ms(utterance))
+        .max();
+    let stable_attributed_speech_end_ms = utterances
+        .iter()
+        .filter(|utterance| {
+            utterance_is_stable(utterance) && utterance_speaker_id(utterance).is_some()
+        })
+        .filter_map(utterance_end_ms)
+        .max();
+
+    filtered_result["utterances"] = Value::Array(selected);
+    filtered_result["text"] = Value::String(target_text);
+    let mut optimistic_result = result.clone();
+    optimistic_result["utterances"] = Value::Array(optimistic_utterances);
+    optimistic_result["text"] = Value::String(optimistic_text);
+    SpeakerFilteredResult {
+        result: filtered_result,
+        optimistic_result,
+        speaker_info_present,
+        target_speech_end_ms,
+        stable_attributed_speech_end_ms,
+        pending_unattributed_text,
+    }
 }
 
 fn provider_response_metadata(
@@ -305,6 +555,7 @@ pub struct VolcengineStreamingASR {
     state: ParkingMutex<SyncState>,
     partial_callback: ParkingMutex<Option<PartialTranscriptCallback>>,
     final_intermediate_callback: ParkingMutex<Option<FinalIntermediateTranscriptCallback>>,
+    target_speaker_update_callback: ParkingMutex<Option<TargetSpeakerUpdateCallback>>,
     streaming_event_callback: ParkingMutex<Option<StreamingEventCallback>>,
     /// Guards the WebSocket write half so concurrent `send` calls serialize.
     /// Stored as Arc so spawned send tasks can hold their own clone — independent
@@ -344,6 +595,7 @@ impl VolcengineStreamingASR {
             state: ParkingMutex::new(SyncState::default()),
             partial_callback: ParkingMutex::new(None),
             final_intermediate_callback: ParkingMutex::new(None),
+            target_speaker_update_callback: ParkingMutex::new(None),
             streaming_event_callback: ParkingMutex::new(None),
             writer: Arc::new(AsyncMutex::new(None)),
             final_rx: ParkingMutex::new(None),
@@ -494,6 +746,37 @@ impl VolcengineStreamingASR {
         *self.final_intermediate_callback.lock() = callback;
     }
 
+    pub fn set_target_speaker_update_callback(
+        &self,
+        callback: Option<TargetSpeakerUpdateCallback>,
+    ) {
+        *self.target_speaker_update_callback.lock() = callback;
+    }
+
+    pub fn note_local_audio_activity(&self, audio_duration_ms: u64, speech_detected: bool) {
+        let update = {
+            let mut state = self.state.lock();
+            state.local_audio_duration_ms = Some(
+                state
+                    .local_audio_duration_ms
+                    .unwrap_or_default()
+                    .max(audio_duration_ms),
+            );
+            if speech_detected {
+                state.local_speech_end_ms = Some(
+                    state
+                        .local_speech_end_ms
+                        .unwrap_or_default()
+                        .max(audio_duration_ms),
+                );
+            }
+            target_speaker_update_from_state(&state, false, false)
+        };
+        if update.speaker_id.is_some() {
+            self.emit_target_speaker_update(update);
+        }
+    }
+
     pub(crate) fn set_streaming_event_callback(&self, callback: Option<StreamingEventCallback>) {
         *self.streaming_event_callback.lock() = callback;
     }
@@ -507,6 +790,13 @@ impl VolcengineStreamingASR {
 
     fn emit_final_intermediate_transcript(&self, update: FinalIntermediateTranscript) {
         let callback = self.final_intermediate_callback.lock().clone();
+        if let Some(callback) = callback {
+            callback(update);
+        }
+    }
+
+    fn emit_target_speaker_update(&self, update: TargetSpeakerUpdate) {
+        let callback = self.target_speaker_update_callback.lock().clone();
         if let Some(callback) = callback {
             callback(update);
         }
@@ -599,7 +889,17 @@ impl VolcengineStreamingASR {
             st.last_partial_text.clear();
             st.best_transcript_text.clear();
             st.best_transcript_segments.clear();
+            st.optimistic_preview_text.clear();
+            st.optimistic_preview_segments.clear();
+            st.last_emitted_preview_text.clear();
             st.last_server_audio_duration_ms = None;
+            st.target_speaker_id = None;
+            st.target_speech_end_ms = None;
+            st.stable_attributed_speech_end_ms = None;
+            st.local_audio_duration_ms = None;
+            st.local_speech_end_ms = None;
+            st.speaker_info_present = false;
+            st.pending_unattributed_text.clear();
         }
         self.pending_sends.store(0, Ordering::SeqCst);
         self.pending_sends_high_water.store(0, Ordering::SeqCst);
@@ -884,6 +1184,7 @@ impl VolcengineStreamingASR {
             "enable_itn": true,
             "enable_punc": true,
             "show_utterances": true,
+            "enable_speaker_info": true,
             "result_type": self.session_options.result_type.as_str(),
         });
         if let Some(end_window_size_ms) = self.session_options.end_window_size_ms {
@@ -970,11 +1271,109 @@ impl VolcengineStreamingASR {
             return true;
         };
 
+        let has_final = parsed.is_final();
+        let (speaker_filtered_result, target_speaker_update) = {
+            let mut state = self.state.lock();
+            let filtered = filter_result_to_target_speaker(result, &mut state.target_speaker_id);
+            let previous_end_ms = state.target_speech_end_ms;
+            let previous_pending_text = std::mem::take(&mut state.pending_unattributed_text);
+            if let Some(end_ms) = filtered.target_speech_end_ms {
+                state.target_speech_end_ms = Some(previous_end_ms.unwrap_or_default().max(end_ms));
+            }
+            if let Some(end_ms) = filtered.stable_attributed_speech_end_ms {
+                state.stable_attributed_speech_end_ms = Some(
+                    state
+                        .stable_attributed_speech_end_ms
+                        .unwrap_or_default()
+                        .max(end_ms),
+                );
+            }
+            state.speaker_info_present |= filtered.speaker_info_present;
+            let target_activity_advanced = state.target_speech_end_ms != previous_end_ms;
+            let pending_unattributed_speech = !filtered.pending_unattributed_text.is_empty();
+            let pending_activity_advanced = pending_unattributed_speech
+                && filtered.pending_unattributed_text != previous_pending_text;
+            state.pending_unattributed_text = filtered.pending_unattributed_text.clone();
+            let update = target_speaker_update_from_state(
+                &state,
+                target_activity_advanced,
+                pending_activity_advanced,
+            );
+            (filtered, update)
+        };
+        if target_speaker_update.speaker_id.is_some() {
+            log::info!(
+                "[asr] target-speaker state speaker_id={:?} stable_end_ms={:?} audio_duration_ms={:?} local_speech_end_ms={:?} stable_attributed_end_ms={:?} pending_provisional={} target_advanced={} pending_advanced={}",
+                target_speaker_update.speaker_id,
+                target_speaker_update.target_speech_end_ms,
+                target_speaker_update.audio_duration_ms,
+                target_speaker_update.local_speech_end_ms,
+                target_speaker_update.stable_attributed_speech_end_ms,
+                target_speaker_update.pending_unattributed_speech,
+                target_speaker_update.target_activity_advanced,
+                target_speaker_update.pending_activity_advanced,
+            );
+        }
+        self.emit_target_speaker_update(target_speaker_update);
+
+        let pending_unattributed_speech =
+            !speaker_filtered_result.pending_unattributed_text.is_empty();
+        if !has_final
+            && pending_unattributed_speech
+            && self
+                .session_options
+                .endpoint
+                .emits_stream_preview_before_final()
+        {
+            let optimistic_candidate =
+                transcript_candidate_from_result(&speaker_filtered_result.optimistic_result);
+            let optimistic_preview = {
+                let mut state = self.state.lock();
+                let (mut merged, segments) = merge_streaming_candidate(
+                    &state.optimistic_preview_text,
+                    &state.optimistic_preview_segments,
+                    optimistic_candidate,
+                );
+                merged = trim_repeated_short_streaming_tail(&merged);
+                let should_emit =
+                    !is_unstable_initial_partial(&state.last_emitted_preview_text, &merged)
+                        && !merged.trim().is_empty()
+                        && state.last_emitted_preview_text != merged;
+                if !merged.trim().is_empty() {
+                    state.optimistic_preview_text = merged.clone();
+                    state.optimistic_preview_segments = segments;
+                }
+                if should_emit {
+                    state.last_emitted_preview_text = merged.clone();
+                    state.partial_updates_seen += 1;
+                    Some(merged)
+                } else {
+                    None
+                }
+            };
+            if let Some(preview) = optimistic_preview {
+                let elapsed_ms = self
+                    .state
+                    .lock()
+                    .start
+                    .map(|s| s.elapsed().as_millis() as u64)
+                    .unwrap_or(0);
+                log::info!(
+                    "[asr] {} optimistic partial update chars={} elapsed_ms={}",
+                    self.session_options.endpoint.label(),
+                    preview.chars().count(),
+                    elapsed_ms
+                );
+                self.emit_partial_transcript(&preview);
+                self.emit_streaming_event(VolcengineStreamingEvent::Partial(preview));
+            }
+        }
+        let result = &speaker_filtered_result.result;
+
         // 流结束信号只信帧头 flags（lastPacket / negativeSequence）。
         // 之前误把 utterance.definite=true 当成流结束——但那只代表"这一段语音已固化"，
         // 用户可能还在继续说。结果一收到第一个 definite=true 就关掉接收，
         // 后面用户讲的内容全部丢失（实测丢了 9 秒）。
-        let has_final = parsed.is_final();
         let candidate = transcript_candidate_from_result(result);
         let authoritative_two_pass = candidate.authoritative_cumulative;
         log::info!(
@@ -1053,6 +1452,10 @@ impl VolcengineStreamingASR {
                 state.best_transcript_segments = segments;
                 state.last_partial_text = merged.clone();
             }
+            if !pending_unattributed_speech || has_final {
+                state.optimistic_preview_text = merged.clone();
+                state.optimistic_preview_segments = state.best_transcript_segments.clone();
+            }
             (merged, changed)
         };
 
@@ -1077,24 +1480,29 @@ impl VolcengineStreamingASR {
         // 缓存最新的 transcript：服务端在 final 帧前断连时 fallback 用，
         // 同时把稳定预览推给胶囊。final 也要推一次，因为火山 two-pass
         // 经常在 final 才补齐长句前半段；这能让胶囊消失前先显示完整预览。
-        if (has_final
-            || self
-                .session_options
-                .endpoint
-                .emits_stream_preview_before_final())
-            && (partial_changed || has_final)
+        let should_emit_authoritative_preview = (has_final
+            || (!pending_unattributed_speech
+                && self
+                    .session_options
+                    .endpoint
+                    .emits_stream_preview_before_final()))
             && !full_text.is_empty()
-        {
+            && {
+                let mut state = self.state.lock();
+                let changed = state.last_emitted_preview_text != full_text;
+                if changed || has_final {
+                    state.last_emitted_preview_text = full_text.clone();
+                    state.partial_updates_seen += 1;
+                }
+                changed || has_final
+            };
+        if should_emit_authoritative_preview {
             let elapsed_ms = self
                 .state
                 .lock()
                 .start
                 .map(|s| s.elapsed().as_millis() as u64)
                 .unwrap_or(0);
-            {
-                let mut st = self.state.lock();
-                st.partial_updates_seen += 1;
-            }
             log::info!(
                 "[asr] {} partial update chars={} final={} elapsed_ms={}",
                 self.session_options.endpoint.label(),
@@ -1506,6 +1914,7 @@ mod tests {
         assert_eq!(request["enable_punc"], true);
         assert_eq!(request["result_type"], "full");
         assert_eq!(request["show_utterances"], true);
+        assert_eq!(request["enable_speaker_info"], true);
         assert_eq!(request["enable_nonstream"], true);
         assert_eq!(request["end_window_size"], SECOND_PASS_END_WINDOW_MS);
         assert_eq!(
@@ -1519,7 +1928,7 @@ mod tests {
     }
 
     #[test]
-    fn optimized_bidirectional_emits_its_early_stream_result_before_two_pass() {
+    fn optimized_bidirectional_emits_speakerless_early_text_without_promoting_it_to_final_state() {
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
                 app_id: "app".into(),
@@ -1557,8 +1966,343 @@ mod tests {
         );
 
         assert!(asr.handle_frame(&frame));
-        assert_eq!(&*previews.lock(), &["请在今天".to_string()]);
-        assert_eq!(asr.state.lock().partial_updates_seen, 1);
+        let growing_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 1200 },
+            "result": {
+                "text": "请在今天下午",
+                "utterances": [{
+                    "additions": { "source": "stream" },
+                    "definite": false,
+                    "start_time": 360,
+                    "end_time": 1199,
+                    "text": "请在今天下午",
+                    "words": [{ "start_time": 360, "end_time": 1199, "text": "请在今天下午" }]
+                }]
+            }
+        }))
+        .expect("growing stream response serializes");
+        let growing_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &growing_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&growing_frame));
+        assert_eq!(
+            &*previews.lock(),
+            &["请在今天".to_string(), "请在今天下午".to_string()]
+        );
+        let state = asr.state.lock();
+        assert_eq!(state.partial_updates_seen, 2);
+        assert_eq!(state.optimistic_preview_text, "请在今天下午");
+        assert!(state.best_transcript_text.is_empty());
+        assert!(state.last_partial_text.is_empty());
+    }
+
+    #[test]
+    fn speaker_filter_locks_first_speaker_and_excludes_other_people() {
+        let result = json!({
+            "text": "目标说话旁人插话目标继续",
+            "utterances": [
+                {
+                    "additions": { "speaker": "1", "source": "stream" },
+                    "definite": true,
+                    "start_time": 100,
+                    "end_time": 700,
+                    "text": "目标说话"
+                },
+                {
+                    "additions": { "speaker": "2", "source": "stream" },
+                    "definite": true,
+                    "start_time": 800,
+                    "end_time": 1300,
+                    "text": "旁人插话"
+                },
+                {
+                    "additions": { "speaker": "1", "source": "stream" },
+                    "definite": true,
+                    "start_time": 1400,
+                    "end_time": 1900,
+                    "text": "目标继续"
+                }
+            ]
+        });
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker(&result, &mut target);
+
+        assert_eq!(target.as_deref(), Some("1"));
+        assert!(filtered.speaker_info_present);
+        assert_eq!(filtered.result["text"], "目标说话目标继续");
+        assert_eq!(filtered.result["utterances"].as_array().unwrap().len(), 2);
+        assert_eq!(filtered.target_speech_end_ms, Some(1900));
+        assert_eq!(filtered.stable_attributed_speech_end_ms, Some(1900));
+        assert!(filtered.pending_unattributed_text.is_empty());
+    }
+
+    #[test]
+    fn growing_unattributed_tail_blocks_endpoint_without_leaking_into_output() {
+        let result = json!({
+            "text": "这个东西现在能不能弄？然后帮我看一下",
+            "utterances": [{
+                "additions": { "speaker_id": "0", "source": "two_pass" },
+                "definite": true,
+                "start_time": 312,
+                "end_time": 2542,
+                "text": "这个东西现在能不能弄？"
+            }]
+        });
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker(&result, &mut target);
+
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], "这个东西现在能不能弄？");
+        assert_eq!(
+            filtered.pending_unattributed_text,
+            "这个东西现在能不能弄？然后帮我看一下"
+        );
+        assert_eq!(
+            filtered.optimistic_result["text"],
+            "这个东西现在能不能弄？然后帮我看一下"
+        );
+    }
+
+    #[test]
+    fn provisional_speaker_split_blocks_endpoint_until_provider_stabilizes() {
+        let result = json!({
+            "text": "根因已修现在新版本正在运行之前是云端只给一段",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 542,
+                    "end_time": 5572,
+                    "text": "根因已修现在新版本正在运行之前是云端只给",
+                    "words": [{ "start_time": 5000, "end_time": 5200, "text": "给" }]
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "stream" },
+                    "definite": false,
+                    "start_time": 5700,
+                    "end_time": 6900,
+                    "text": "一段"
+                }
+            ]
+        });
+        let mut target = Some("0".to_string());
+
+        let filtered = filter_result_to_target_speaker(&result, &mut target);
+
+        assert_eq!(filtered.target_speech_end_ms, Some(5572));
+        assert_eq!(
+            filtered.result["text"],
+            "根因已修现在新版本正在运行之前是云端只给"
+        );
+        assert!(!filtered.pending_unattributed_text.is_empty());
+        assert_eq!(
+            filtered.optimistic_result["text"],
+            "根因已修现在新版本正在运行之前是云端只给一段"
+        );
+        assert!(filtered.speaker_info_present);
+    }
+
+    #[test]
+    fn provisional_other_speaker_preview_retracts_without_entering_authoritative_transcript() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        let previews = Arc::new(ParkingMutex::new(Vec::new()));
+        let previews_for_callback = Arc::clone(&previews);
+        asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
+            previews_for_callback.lock().push(text);
+        })));
+
+        let provisional_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 1800 },
+            "result": {
+                "text": "目标正文临时旁人",
+                "utterances": [
+                    {
+                        "additions": { "speaker": "0", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 100,
+                        "end_time": 900,
+                        "text": "目标正文"
+                    },
+                    {
+                        "additions": { "speaker": "1", "source": "stream" },
+                        "definite": false,
+                        "start_time": 1000,
+                        "end_time": 1700,
+                        "text": "临时旁人"
+                    }
+                ]
+            }
+        }))
+        .expect("provisional response serializes");
+        let provisional_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &provisional_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&provisional_frame));
+        assert_eq!(&*previews.lock(), &["目标正文临时旁人".to_string()]);
+        assert_eq!(asr.state.lock().best_transcript_text, "目标正文");
+
+        let stable_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 2100 },
+            "result": {
+                "text": "目标正文临时旁人",
+                "utterances": [
+                    {
+                        "additions": { "speaker": "0", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 100,
+                        "end_time": 900,
+                        "text": "目标正文"
+                    },
+                    {
+                        "additions": { "speaker": "1", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 1000,
+                        "end_time": 1700,
+                        "text": "临时旁人"
+                    }
+                ]
+            }
+        }))
+        .expect("stable response serializes");
+        let stable_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &stable_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&stable_frame));
+        assert_eq!(
+            &*previews.lock(),
+            &["目标正文临时旁人".to_string(), "目标正文".to_string()]
+        );
+        let state = asr.state.lock();
+        assert_eq!(state.best_transcript_text, "目标正文");
+        assert_eq!(state.last_partial_text, "目标正文");
+    }
+
+    #[test]
+    fn other_speaker_does_not_advance_target_speech_time() {
+        let result = json!({
+            "text": "旁人一直说",
+            "utterances": [{
+                "additions": { "speaker": "2", "source": "stream" },
+                "definite": true,
+                "start_time": 2000,
+                "end_time": 4200,
+                "text": "旁人一直说"
+            }]
+        });
+        let mut target = Some("1".to_string());
+
+        let filtered = filter_result_to_target_speaker(&result, &mut target);
+
+        assert!(filtered.speaker_info_present);
+        assert_eq!(filtered.result["text"], "");
+        assert!(filtered.result["utterances"].as_array().unwrap().is_empty());
+        assert_eq!(filtered.target_speech_end_ms, None);
+        assert_eq!(filtered.stable_attributed_speech_end_ms, Some(4200));
+        assert!(filtered.pending_unattributed_text.is_empty());
+    }
+
+    #[test]
+    fn local_speech_activity_is_provisional_until_stable_speaker_attribution_arrives() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        let updates = Arc::new(ParkingMutex::new(Vec::new()));
+        let updates_for_callback = Arc::clone(&updates);
+        asr.set_target_speaker_update_callback(Some(Arc::new(move |update| {
+            updates_for_callback.lock().push(update);
+        })));
+
+        let stable_target_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 2000 },
+            "result": {
+                "text": "第一句",
+                "utterances": [{
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 200,
+                    "end_time": 1500,
+                    "text": "第一句"
+                }]
+            }
+        }))
+        .expect("stable target response serializes");
+        let stable_target_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &stable_target_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&stable_target_frame));
+
+        asr.note_local_audio_activity(2400, true);
+        asr.note_local_audio_activity(2500, false);
+        let provisional = updates.lock().last().cloned().expect("local update");
+        assert_eq!(provisional.target_speech_end_ms, Some(1500));
+        assert_eq!(provisional.stable_attributed_speech_end_ms, Some(1500));
+        assert_eq!(provisional.local_speech_end_ms, Some(2400));
+        assert_eq!(provisional.audio_duration_ms, Some(2500));
+
+        let stable_other_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 2800 },
+            "result": {
+                "text": "第一句旁人",
+                "utterances": [
+                    {
+                        "additions": { "speaker_id": "0", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 200,
+                        "end_time": 1500,
+                        "text": "第一句"
+                    },
+                    {
+                        "additions": { "speaker_id": "1", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 1800,
+                        "end_time": 2400,
+                        "text": "旁人"
+                    }
+                ]
+            }
+        }))
+        .expect("stable other response serializes");
+        let stable_other_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &stable_other_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&stable_other_frame));
+        let resolved = updates.lock().last().cloned().expect("resolved update");
+        assert_eq!(resolved.target_speech_end_ms, Some(1500));
+        assert_eq!(resolved.stable_attributed_speech_end_ms, Some(2400));
     }
 
     #[test]

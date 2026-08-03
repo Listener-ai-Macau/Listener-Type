@@ -134,6 +134,32 @@ requireIncludes(
   ".emits_stream_preview_before_final()",
   "Realtime ASR preview delivery",
 );
+for (const token of [
+  "optimistic_preview_text: String",
+  "optimistic_preview_segments: Vec<TranscriptSegment>",
+  "last_emitted_preview_text: String",
+  "transcript_candidate_from_result(&speaker_filtered_result.optimistic_result)",
+  "state.best_transcript_text = merged.clone();",
+  "state.last_partial_text = merged.clone();",
+]) {
+  requireIncludes(volcengine, token, "Display-only provisional preview isolation");
+}
+const provisionalPreview = section(
+  volcengine,
+  "if !has_final\n            && pending_unattributed_speech",
+  "let result = &speaker_filtered_result.result;",
+  "Display-only provisional preview path",
+);
+requireExcludes(
+  provisionalPreview,
+  "best_transcript_text =",
+  "Display-only provisional preview path",
+);
+requireExcludes(
+  provisionalPreview,
+  "last_partial_text =",
+  "Display-only provisional preview path",
+);
 
 const opener = section(
   dictation,

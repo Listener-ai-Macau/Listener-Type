@@ -518,6 +518,11 @@ pub fn send_recording_control_activate(timeout: Duration) -> Result<(), String> 
 }
 
 #[cfg(target_os = "windows")]
+pub fn send_recording_control_speech_activity(timeout: Duration) -> Result<(), String> {
+    windows_ble::send_recording_control_speech_activity(timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn send_recording_control_stop(timeout: Duration) -> Result<(), String> {
     windows_ble::send_recording_control_stop(timeout)
 }
@@ -1125,6 +1130,11 @@ pub fn send_recording_control_cancel(_timeout: Duration) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn send_recording_control_activate(_timeout: Duration) -> Result<(), String> {
     Err("Embedded BLE recording activation is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn send_recording_control_speech_activity(_timeout: Duration) -> Result<(), String> {
+    Err("Embedded BLE recognized speech activity is only supported on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
