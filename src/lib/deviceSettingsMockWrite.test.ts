@@ -33,8 +33,8 @@ const initial: DeviceSettingsSnapshot = {
   pluggedLowPowerIdleMinutes: DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
   batteryLowPowerIdleMinutes: DEFAULT_DEVICE_LOW_POWER_IDLE_MINUTES,
   pluggedLowPowerEnabled: DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
-  voiceAutoStartEnabled: false,
-  voiceAutoStopEnabled: false,
+  voiceAutoStartEnabled: true,
+  voiceAutoStopEnabled: true,
   pluggedAutoShutdownMs: 0,
   batteryAutoShutdownMs: 10 * 60 * 1000,
   knobRotationAction: 'systemVolume',
@@ -99,6 +99,8 @@ assert.equal(
   DEFAULT_DEVICE_PLUGGED_LOW_POWER_ENABLED,
   'Type frontend mock/default plugged low-power must start enabled',
 );
+assert.equal(initial.voiceAutoStartEnabled, true, 'voice auto-start must default to enabled');
+assert.equal(initial.voiceAutoStopEnabled, true, 'voice auto-stop must default to enabled');
 assert.equal(
   LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT,
   50,
@@ -235,6 +237,21 @@ const commandsSource = [
 assert.ok(
   ipcSource.includes('LEGACY_DEVICE_STATUS_KEY_LED_BRIGHTNESS_DEFAULT_PERCENT'),
   'Type IPC normalization must recognize the old status/key LED 50 default',
+);
+assert.match(
+  ipcSource,
+  /removeFillerWords:\s*true,[\s\S]*sendKeyAfterDictation:\s*false,/,
+  'Type defaults must remove filler words while keeping post-dictation submission disabled',
+);
+assert.match(
+  ipcSource,
+  /voiceAutoStartEnabled:\s*true,[\s\S]*voiceAutoStopEnabled:\s*true,/,
+  'Type mock device settings must default both voice automation controls to enabled',
+);
+assert.match(
+  deviceSectionSource,
+  /voiceAutoStartEnabled:\s*true,[\s\S]*voiceAutoStopEnabled:\s*true,/,
+  'the device settings form must render both voice automation controls enabled before readback',
 );
 assert.ok(
   ipcSource.includes('deviceLedBrightness102DefaultMigrated'),
@@ -417,10 +434,10 @@ const voiceAutomationWrite = applyMockDeviceSettingsWrite(
   currentSettings,
   initial,
   requestFromSnapshot(initial, {
-    voiceAutoStartEnabled: true,
-    voiceAutoStopEnabled: true,
+    voiceAutoStartEnabled: false,
+    voiceAutoStopEnabled: false,
   }),
   '2026-07-24T00:00:00.000Z',
 );
-assert.equal(voiceAutomationWrite.snapshot.voiceAutoStartEnabled, true);
-assert.equal(voiceAutomationWrite.snapshot.voiceAutoStopEnabled, true);
+assert.equal(voiceAutomationWrite.snapshot.voiceAutoStartEnabled, false);
+assert.equal(voiceAutomationWrite.snapshot.voiceAutoStopEnabled, false);

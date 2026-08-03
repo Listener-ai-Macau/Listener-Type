@@ -62,7 +62,6 @@ export function FirmwareOtaPanel({
   const { t, i18n } = useTranslation();
   const [state, dispatch] = useReducer(firmwareOtaReducer, initialFirmwareOtaState);
   const [firmwareMode, setFirmwareMode] = useState<'ble' | 'wired'>('ble');
-  const firmwareModeManuallySelectedRef = useRef(false);
   const [wiredBusy, setWiredBusy] = useState(false);
   const wiredRef = useRef<FirmwareWiredFlashHandle>(null);
   const [wiredAction, setWiredAction] = useState<{ canFlash: boolean; isFlashing: boolean }>({ canFlash: false, isFlashing: false });
@@ -79,28 +78,7 @@ export function FirmwareOtaPanel({
   const transferSpeedSamplesRef = useRef<Array<{ tMs: number; bytes: number }>>([]);
   const otaStartInFlightRef = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    void listWiredFirmwarePorts()
-      .then(ports => {
-        if (
-          !cancelled &&
-          !firmwareModeManuallySelectedRef.current &&
-          ports.some(item => item.isLikelyEsp32)
-        ) {
-          setFirmwareMode('wired');
-        }
-      })
-      .catch(() => {
-        // BLE remains the fallback when USB discovery is unavailable.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const selectFirmwareMode = useCallback((mode: 'ble' | 'wired') => {
-    firmwareModeManuallySelectedRef.current = true;
     setFirmwareMode(mode);
   }, []);
 
