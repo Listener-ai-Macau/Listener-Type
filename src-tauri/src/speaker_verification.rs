@@ -50,11 +50,17 @@ pub struct SessionSpeakerObservation {
 pub struct SessionSpeakerAdaptationGate {
     consecutive_candidates: Vec<(u64, SessionSpeakerObservation)>,
     pending_candidates: std::collections::VecDeque<(u64, SessionSpeakerObservation)>,
+    bootstrap_candidates: Vec<SessionSpeakerObservation>,
+    bootstrap_pending: Vec<SessionSpeakerObservation>,
+    bootstrap_consecutive_non_target: usize,
+    bootstrap_disqualified: bool,
+    bootstrap_complete: bool,
 }
 
 const SESSION_SPEAKER_MIN_NON_TARGET_MS: usize = 1_000;
 const SESSION_SPEAKER_ADAPT_MIN_SCORE: f32 = 0.50;
 const SESSION_SPEAKER_ADAPT_CONFIRMATIONS: usize = 2;
+const SESSION_SPEAKER_BOOTSTRAP_CONFIRMATIONS: usize = 3;
 const SESSION_SPEAKER_ADAPT_PENDING_LIMIT: usize = 6;
 const SESSION_SPEAKER_MAX_EMBEDDINGS: usize = 4;
 
@@ -75,10 +81,43 @@ impl SessionSpeakerObservation {
                     if score >= SESSION_SPEAKER_ADAPT_MIN_SCORE
             )
     }
+
+    fn is_bootstrap_candidate(&self) -> bool {
+        self.real_speech_ms >= SESSION_SPEAKER_MIN_NON_TARGET_MS
+            && matches!(
+                self.classification,
+                SessionSpeakerClassification::Target { .. }
+            )
+    }
 }
 
 impl SessionSpeakerAdaptationGate {
     pub fn note(&mut self, audio_end_ms: u64, observation: SessionSpeakerObservation) {
+        if !self.bootstrap_complete && !self.bootstrap_disqualified {
+            match observation.classification {
+                SessionSpeakerClassification::Target { .. }
+                    if observation.is_bootstrap_candidate() =>
+                {
+                    self.bootstrap_consecutive_non_target = 0;
+                    self.bootstrap_candidates.push(observation.clone());
+                    if self.bootstrap_candidates.len() >= SESSION_SPEAKER_BOOTSTRAP_CONFIRMATIONS {
+                        self.bootstrap_pending = std::mem::take(&mut self.bootstrap_candidates);
+                    }
+                }
+                SessionSpeakerClassification::NonTarget { .. } => {
+                    self.bootstrap_candidates.clear();
+                    self.bootstrap_consecutive_non_target =
+                        self.bootstrap_consecutive_non_target.saturating_add(1);
+                    if self.bootstrap_consecutive_non_target >= 2 {
+                        self.bootstrap_disqualified = true;
+                    }
+                }
+                _ => {
+                    self.bootstrap_candidates.clear();
+                    self.bootstrap_consecutive_non_target = 0;
+                }
+            }
+        }
         if !observation.is_adaptation_candidate() {
             self.consecutive_candidates.clear();
             return;
@@ -100,6 +139,14 @@ impl SessionSpeakerAdaptationGate {
         profile: &mut SessionSpeakerProfile,
         stable_target_end_ms: Option<u64>,
     ) -> usize {
+        if !self.bootstrap_complete && !self.bootstrap_pending.is_empty() {
+            let added = bootstrap_session_speaker_profile(profile, &self.bootstrap_pending);
+            self.bootstrap_pending.clear();
+            if added > 0 {
+                self.bootstrap_complete = true;
+                return added;
+            }
+        }
         let Some(stable_target_end_ms) = stable_target_end_ms else {
             return 0;
         };
@@ -115,6 +162,29 @@ impl SessionSpeakerAdaptationGate {
         }
         adapt_session_speaker_profile(profile, &covered)
     }
+}
+
+fn bootstrap_session_speaker_profile(
+    profile: &mut SessionSpeakerProfile,
+    observations: &[SessionSpeakerObservation],
+) -> usize {
+    if !profile.adaptive || profile.embeddings.len() >= SESSION_SPEAKER_MAX_EMBEDDINGS {
+        return 0;
+    }
+    let expected_dimension = profile.embeddings.first().map_or(0, Vec::len);
+    let available = SESSION_SPEAKER_MAX_EMBEDDINGS.saturating_sub(profile.embeddings.len());
+    let additions = observations
+        .iter()
+        .filter(|observation| {
+            observation.is_bootstrap_candidate()
+                && observation.embedding.len() == expected_dimension
+        })
+        .take(available)
+        .map(|observation| observation.embedding.clone())
+        .collect::<Vec<_>>();
+    let count = additions.len();
+    Arc::make_mut(&mut profile.embeddings).extend(additions);
+    count
 }
 
 fn adapt_session_speaker_profile(
@@ -1780,6 +1850,96 @@ mod tests {
         assert_eq!(profile.embeddings.len(), 2);
         assert_eq!(gate.promote_covered(&mut profile, Some(3_000)), 1);
         assert_eq!(profile.embeddings.len(), 3);
+    }
+
+    #[test]
+    fn unenrolled_session_bootstraps_from_three_consecutive_full_target_windows_without_cloud_coverage(
+    ) {
+        let mut profile = SessionSpeakerProfile {
+            embeddings: Arc::new(vec![vec![1.0, 0.0]]),
+            adaptive: true,
+        };
+        let mut gate = SessionSpeakerAdaptationGate::default();
+        for (audio_end_ms, score, embedding) in [
+            (3_000, 0.483, [0.90, 0.10]),
+            (3_400, 0.458, [0.85, 0.15]),
+            (3_800, 0.435, [0.80, 0.20]),
+        ] {
+            gate.note(
+                audio_end_ms,
+                observation(
+                    SessionSpeakerClassification::Target { score },
+                    1_200,
+                    embedding,
+                ),
+            );
+        }
+
+        assert_eq!(gate.promote_covered(&mut profile, None), 3);
+        assert_eq!(profile.embeddings.len(), 4);
+        assert_eq!(gate.promote_covered(&mut profile, None), 0);
+    }
+
+    #[test]
+    fn uncertain_or_confirmed_non_target_prevents_local_body_bootstrap() {
+        let target = |score, embedding| {
+            observation(
+                SessionSpeakerClassification::Target { score },
+                1_200,
+                embedding,
+            )
+        };
+        let mut interrupted_profile = SessionSpeakerProfile {
+            embeddings: Arc::new(vec![vec![1.0, 0.0]]),
+            adaptive: true,
+        };
+        let mut interrupted = SessionSpeakerAdaptationGate::default();
+        interrupted.note(3_000, target(0.48, [0.90, 0.10]));
+        interrupted.note(
+            3_400,
+            observation(
+                SessionSpeakerClassification::Uncertain { score: 0.38 },
+                1_200,
+                [0.75, 0.25],
+            ),
+        );
+        interrupted.note(3_800, target(0.47, [0.88, 0.12]));
+        interrupted.note(4_200, target(0.46, [0.86, 0.14]));
+        assert_eq!(
+            interrupted.promote_covered(&mut interrupted_profile, None),
+            0
+        );
+
+        let mut switched_profile = SessionSpeakerProfile {
+            embeddings: Arc::new(vec![vec![1.0, 0.0]]),
+            adaptive: true,
+        };
+        let mut switched = SessionSpeakerAdaptationGate::default();
+        for audio_end_ms in [3_000, 3_400] {
+            switched.note(
+                audio_end_ms,
+                observation(
+                    SessionSpeakerClassification::NonTarget { score: 0.20 },
+                    1_200,
+                    [0.0, 1.0],
+                ),
+            );
+        }
+        for (index, audio_end_ms) in [3_800, 4_200, 4_600].into_iter().enumerate() {
+            switched.note(audio_end_ms, target(0.48 - index as f32 * 0.01, [0.9, 0.1]));
+        }
+        assert_eq!(switched.promote_covered(&mut switched_profile, None), 0);
+
+        let mut enrolled_profile = SessionSpeakerProfile {
+            embeddings: Arc::new(vec![vec![1.0, 0.0]]),
+            adaptive: false,
+        };
+        let mut enrolled = SessionSpeakerAdaptationGate::default();
+        for audio_end_ms in [3_000, 3_400, 3_800] {
+            enrolled.note(audio_end_ms, target(0.60, [0.9, 0.1]));
+        }
+        assert_eq!(enrolled.promote_covered(&mut enrolled_profile, None), 0);
+        assert_eq!(enrolled_profile.embeddings.len(), 1);
     }
 
     #[test]

@@ -411,6 +411,8 @@ impl EmbeddedStreamingDictation {
                 kws_prompted_local_confirm: false,
                 kws_local_absent_count: 0,
                 local_absent_count: 0,
+                #[cfg(target_os = "windows")]
+                local_absent_coverage: None,
                 kws_first_hit_at: None,
                 kws_first_hit_pcm_ms: None,
                 early_capsule_session_id: None,
@@ -775,9 +777,11 @@ impl EmbeddedStreamingDictation {
                                 }
                             }
                             Ok(Err(err)) => {
+                                let explicit_absent_count =
+                                    keyword_fallback_absent_count(&candidate, &found);
                                 if secondary_fallback_can_accept_keyword(
                                     true,
-                                    candidate.kws_local_absent_count,
+                                    explicit_absent_count,
                                 ) {
                                     log::warn!(
                                         "[wake-phrase] terminal stage2 unavailable embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
@@ -789,15 +793,17 @@ impl EmbeddedStreamingDictation {
                                     log::info!(
                                         "[wake-phrase] terminal stage2 unavailable held after explicit Absent embedded_session_id={} absent_count={}",
                                         embedded_session_id,
-                                        candidate.kws_local_absent_count
+                                        explicit_absent_count
                                     );
                                     None
                                 }
                             }
                             Err(err) => {
+                                let explicit_absent_count =
+                                    keyword_fallback_absent_count(&candidate, &found);
                                 if secondary_fallback_can_accept_keyword(
                                     true,
-                                    candidate.kws_local_absent_count,
+                                    explicit_absent_count,
                                 ) {
                                     log::warn!(
                                         "[wake-phrase] terminal stage2 task failed embedded_session_id={embedded_session_id}: {err}; fail-open KeywordModel"
@@ -809,7 +815,7 @@ impl EmbeddedStreamingDictation {
                                     log::info!(
                                         "[wake-phrase] terminal stage2 task failure held after explicit Absent embedded_session_id={} absent_count={}",
                                         embedded_session_id,
-                                        candidate.kws_local_absent_count
+                                        explicit_absent_count
                                     );
                                     None
                                 }
@@ -1629,6 +1635,13 @@ impl EmbeddedStreamingDictation {
                                             .ok_or_else(|| "自动唤醒候选已丢失".to_string())?;
                                         candidate.local_absent_count =
                                             candidate.local_absent_count.saturating_add(1);
+                                        candidate.local_absent_coverage =
+                                            Some(LocalConfirmationCoverage {
+                                                start_bytes: task_origin_bytes,
+                                                end_bytes: task_origin_bytes.saturating_add(
+                                                    result.snapshot_pcm_ms.saturating_mul(32),
+                                                ),
+                                            });
                                         let mut counted_kws_absent = false;
                                         if task_has_keyword_model_hit {
                                             let authoritative_full_absent =
@@ -1727,7 +1740,14 @@ impl EmbeddedStreamingDictation {
                                     let explicit_absent_count = self
                                         .speaker_candidate
                                         .as_ref()
-                                        .map(|candidate| candidate.kws_local_absent_count)
+                                        .and_then(|candidate| {
+                                            kws_hit.as_ref().map(|wake_match| {
+                                                keyword_fallback_absent_count(
+                                                    candidate,
+                                                    wake_match,
+                                                )
+                                            })
+                                        })
                                         .unwrap_or(0);
                                     if secondary_fallback_can_accept_keyword(
                                         kws_hit.is_some(),
@@ -1757,7 +1777,11 @@ impl EmbeddedStreamingDictation {
                                 let explicit_absent_count = self
                                     .speaker_candidate
                                     .as_ref()
-                                    .map(|candidate| candidate.kws_local_absent_count)
+                                    .and_then(|candidate| {
+                                        kws_hit.as_ref().map(|wake_match| {
+                                            keyword_fallback_absent_count(candidate, wake_match)
+                                        })
+                                    })
                                     .unwrap_or(0);
                                 if secondary_fallback_can_accept_keyword(
                                     kws_hit.is_some(),
@@ -1791,7 +1815,7 @@ impl EmbeddedStreamingDictation {
                         let explicit_absent_count = self
                             .speaker_candidate
                             .as_ref()
-                            .map(|candidate| candidate.kws_local_absent_count)
+                            .map(|candidate| keyword_fallback_absent_count(candidate, &kws))
                             .unwrap_or(0);
                         if waited_ms >= KWS_SECONDARY_CONFIRM_BUDGET_MS
                             && secondary_fallback_can_accept_keyword(

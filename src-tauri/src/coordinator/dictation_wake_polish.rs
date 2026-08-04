@@ -651,6 +651,10 @@ struct BufferedSpeakerCandidate {
     /// All completed midstream local Absent results. Terminal handling uses
     /// repeated evidence to skip an expensive ambient-only offline cascade.
     local_absent_count: u8,
+    /// Absolute PCM interval inspected by the newest non-stale local Absent.
+    /// A KWS fallback may not override it when it already covered that hit.
+    #[cfg(target_os = "windows")]
+    local_absent_coverage: Option<LocalConfirmationCoverage>,
     /// Wall clock of first live KWS hit — drives secondary-confirm budget
     /// (XiaoAi-style stage-2 timeout fail-open).
     kws_first_hit_at: Option<Instant>,
@@ -674,6 +678,13 @@ struct PendingAutomaticPhraseMatch {
     phrase_signal: denzic_voice_activation_v1_core::PhraseSignal,
     local_confirmation_ms: u64,
     owner_verification_start_ms: usize,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LocalConfirmationCoverage {
+    start_bytes: usize,
+    end_bytes: usize,
 }
 
 #[cfg(target_os = "windows")]
@@ -955,6 +966,36 @@ fn secondary_fallback_can_accept_keyword(
         ),
         denzic_voice_activation_v1_core::SecondaryFallbackDecision::AcceptKeywordModel
     )
+}
+
+#[cfg(target_os = "windows")]
+fn local_absent_covers_keyword_endpoint(
+    coverage: Option<LocalConfirmationCoverage>,
+    keyword_stream_origin_bytes: usize,
+    keyword_end_seconds: f32,
+) -> bool {
+    if !keyword_end_seconds.is_finite() || keyword_end_seconds <= 0.0 {
+        return false;
+    }
+    let keyword_end_bytes = (keyword_end_seconds * 32_000.0).round() as usize;
+    coverage.is_some_and(|covered| {
+        covered.start_bytes <= keyword_stream_origin_bytes
+            && covered.end_bytes >= keyword_end_bytes
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn keyword_fallback_absent_count(
+    candidate: &BufferedSpeakerCandidate,
+    wake_match: &crate::wake_phrase::Match,
+) -> u8 {
+    candidate.kws_local_absent_count.max(u8::from(
+        local_absent_covers_keyword_endpoint(
+            candidate.local_absent_coverage,
+            candidate.kws_stream_origin_bytes,
+            wake_match.end_seconds,
+        ),
+    ))
 }
 
 #[cfg(target_os = "windows")]

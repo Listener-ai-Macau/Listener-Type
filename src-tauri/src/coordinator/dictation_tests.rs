@@ -2677,6 +2677,35 @@ fn explicit_absent_blocks_keyword_only_secondary_fallback() {
 
 #[cfg(target_os = "windows")]
 #[test]
+fn pre_hit_absent_blocks_only_the_keyword_endpoint_it_already_covered() {
+    let covered = super::LocalConfirmationCoverage {
+        start_bytes: 0,
+        end_bytes: 1_855 * 32,
+    };
+    assert!(super::local_absent_covers_keyword_endpoint(
+        Some(covered),
+        1_055 * 32,
+        1.815,
+    ));
+    assert!(!super::local_absent_covers_keyword_endpoint(
+        Some(covered),
+        2_035 * 32,
+        2.795,
+    ));
+
+    let later_window = super::LocalConfirmationCoverage {
+        start_bytes: 2_035 * 32,
+        end_bytes: 3_435 * 32,
+    };
+    assert!(super::local_absent_covers_keyword_endpoint(
+        Some(later_window),
+        2_035 * 32,
+        2.795,
+    ));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
 fn completed_full_length_absent_blocks_fallback_without_rejecting_partial_phrase() {
     use crate::wake_phrase::LocalPhraseRelation;
 
