@@ -1138,7 +1138,16 @@ impl VolcengineStreamingASR {
                         .max(audio_duration_ms),
                 );
             }
-            if !stable_target {
+            // Hysteresis describes the retained identity, not the newest
+            // evidence window. A recovering Target (or Uncertain window) must
+            // not advance the non-target endpoint clock before the second
+            // Target restores the debounced identity.
+            if !stable_target
+                && matches!(
+                    classification,
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
+                )
+            {
                 state.local_non_target_speech_end_ms = Some(
                     state
                         .local_non_target_speech_end_ms
@@ -2709,6 +2718,7 @@ mod tests {
             crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.55 },
         );
         assert!(!asr.state.lock().local_speaker_stable_target);
+        assert_eq!(asr.state.lock().local_non_target_speech_end_ms, Some(2_200));
         asr.note_local_speaker_classification(
             3_000,
             crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.55 },
@@ -2767,7 +2777,7 @@ mod tests {
             assert!(!state.local_speaker_stable_target);
             assert!(!state.local_target_confirmed);
             assert_eq!(state.local_target_speech_end_ms, None);
-            assert_eq!(state.local_non_target_speech_end_ms, Some(3_500));
+            assert_eq!(state.local_non_target_speech_end_ms, Some(2_300));
         }
 
         asr.note_local_speaker_classification(

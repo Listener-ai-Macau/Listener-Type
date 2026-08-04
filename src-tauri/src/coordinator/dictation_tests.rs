@@ -1525,6 +1525,43 @@ fn target_speaker_endpoint_holds_after_one_transient_local_mismatch() {
 }
 
 #[test]
+fn target_speaker_endpoint_holds_during_owner_identity_recovery() {
+    // Installed session 53a3f755 reproduced this shape. The provider had
+    // already heard the continuing tail while the first recovering Target
+    // window was still waiting for its second hysteresis confirmation.
+    let first_recovering_target = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(3_152),
+        provider_audio_duration_ms: Some(4_400),
+        audio_duration_ms: Some(4_500),
+        local_speech_end_ms: Some(4_500),
+        local_target_speech_end_ms: Some(3_300),
+        local_non_target_speech_end_ms: Some(4_100),
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(3_152),
+        target_activity_advanced: false,
+        pending_unattributed_speech: true,
+        pending_activity_advanced: true,
+        speaker_info_present: true,
+    };
+
+    assert!(!super::target_speaker_endpoint_due(
+        &first_recovering_target
+    ));
+
+    let owner_restored = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(4_600),
+        audio_duration_ms: Some(4_900),
+        local_speech_end_ms: Some(4_900),
+        local_target_speech_end_ms: Some(4_900),
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        ..first_recovering_target
+    };
+    assert!(!super::target_speaker_endpoint_due(&owner_restored));
+}
+
+#[test]
 fn target_speaker_endpoint_waits_for_startup_body_calibration() {
     let unresolved_body = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("0".into()),
