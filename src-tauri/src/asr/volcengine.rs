@@ -329,12 +329,14 @@ fn local_speaker_allows_optimistic_preview(state: &SyncState) -> bool {
 
 fn confirmed_owner_final_preview_fallback(
     state: &SyncState,
+    retained_text: &str,
 ) -> Option<(String, Vec<TranscriptSegment>)> {
     if !state.local_speaker_tracking_enabled
         || !state.local_target_confirmed
         || state.local_non_target_speech_end_ms.is_some()
         || !local_speaker_allows_optimistic_preview(state)
         || state.optimistic_preview_text.trim().is_empty()
+        || spoken_content_len(&state.optimistic_preview_text) <= spoken_content_len(retained_text)
     {
         return None;
     }
@@ -1842,6 +1844,7 @@ impl VolcengineStreamingASR {
         // 用户可能还在继续说。结果一收到第一个 definite=true 就关掉接收，
         // 后面用户讲的内容全部丢失（实测丢了 9 秒）。
         let candidate = transcript_candidate_from_result(result);
+        let final_speaker_candidate_empty = has_final && candidate.text.trim().is_empty();
         let authoritative_two_pass = candidate.authoritative_cumulative;
         log::info!(
             "[asr] {} server metadata: {}",
@@ -1884,13 +1887,14 @@ impl VolcengineStreamingASR {
                 &state.best_transcript_segments,
                 candidate,
             );
-            if has_final && merged.trim().is_empty() {
+            if final_speaker_candidate_empty {
                 if let Some((fallback_text, fallback_segments)) =
-                    confirmed_owner_final_preview_fallback(&state)
+                    confirmed_owner_final_preview_fallback(&state, &merged)
                 {
                     log::warn!(
-                        "[asr] protocol final lost confirmed owner preview; preserving {} accepted chars",
-                        fallback_text.chars().count()
+                        "[asr] protocol final lost confirmed owner preview; preserving {} accepted chars over {} retained chars",
+                        fallback_text.chars().count(),
+                        merged.chars().count()
                     );
                     merged = fallback_text;
                     segments = fallback_segments;
@@ -2526,6 +2530,10 @@ mod tests {
         );
         assert!(asr.state.lock().best_transcript_text.is_empty());
 
+        // A previously stabilized wake-only prefix is non-empty in the ASR
+        // layer but becomes empty when the coordinator removes activation text.
+        asr.state.lock().best_transcript_text = "开始录音".into();
+
         let (tx, mut rx) = oneshot::channel();
         asr.state.lock().final_tx = Some(tx);
         let final_payload = serde_json::to_vec(&json!({
@@ -2570,10 +2578,10 @@ mod tests {
     #[test]
     fn final_preview_fallback_rejects_manual_uncertain_and_confirmed_other_speaker_states() {
         let mut manual = SyncState {
-            optimistic_preview_text: "不应保留".into(),
+            optimistic_preview_text: "这是应该保留的本人正文".into(),
             ..SyncState::default()
         };
-        assert!(confirmed_owner_final_preview_fallback(&manual).is_none());
+        assert!(confirmed_owner_final_preview_fallback(&manual, "").is_none());
 
         manual.local_speaker_tracking_enabled = true;
         manual.local_target_confirmed = true;
@@ -2581,18 +2589,23 @@ mod tests {
         manual.local_speaker_classification = Some(
             crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.38 },
         );
-        assert!(confirmed_owner_final_preview_fallback(&manual).is_none());
+        assert!(confirmed_owner_final_preview_fallback(&manual, "").is_none());
 
         manual.local_speaker_classification =
             Some(crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.6 });
         manual.local_non_target_speech_end_ms = Some(2_200);
-        assert!(confirmed_owner_final_preview_fallback(&manual).is_none());
+        assert!(confirmed_owner_final_preview_fallback(&manual, "").is_none());
 
         manual.local_non_target_speech_end_ms = None;
         assert_eq!(
-            confirmed_owner_final_preview_fallback(&manual).map(|(text, _)| text),
-            Some("不应保留".into())
+            confirmed_owner_final_preview_fallback(&manual, "开始录音").map(|(text, _)| text),
+            Some("这是应该保留的本人正文".into())
         );
+        assert!(confirmed_owner_final_preview_fallback(
+            &manual,
+            "这是一个明显更加完整而且已经稳定的正文"
+        )
+        .is_none());
     }
 
     #[test]
