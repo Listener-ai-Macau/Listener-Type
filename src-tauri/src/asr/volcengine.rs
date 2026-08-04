@@ -327,6 +327,23 @@ fn local_speaker_allows_optimistic_preview(state: &SyncState) -> bool {
         )
 }
 
+fn confirmed_owner_final_preview_fallback(
+    state: &SyncState,
+) -> Option<(String, Vec<TranscriptSegment>)> {
+    if !state.local_speaker_tracking_enabled
+        || !state.local_target_confirmed
+        || state.local_non_target_speech_end_ms.is_some()
+        || !local_speaker_allows_optimistic_preview(state)
+        || state.optimistic_preview_text.trim().is_empty()
+    {
+        return None;
+    }
+    Some((
+        state.optimistic_preview_text.clone(),
+        state.optimistic_preview_segments.clone(),
+    ))
+}
+
 fn final_partial_coverage_gap_from_state(state: &SyncState) -> Option<(u64, u64)> {
     if !state.finishing || state.best_transcript_text.trim().is_empty() {
         return None;
@@ -1862,11 +1879,23 @@ impl VolcengineStreamingASR {
         }
         let (full_text, partial_changed) = {
             let mut state = self.state.lock();
-            let (mut merged, segments) = merge_streaming_candidate(
+            let (mut merged, mut segments) = merge_streaming_candidate(
                 &state.best_transcript_text,
                 &state.best_transcript_segments,
                 candidate,
             );
+            if has_final && merged.trim().is_empty() {
+                if let Some((fallback_text, fallback_segments)) =
+                    confirmed_owner_final_preview_fallback(&state)
+                {
+                    log::warn!(
+                        "[asr] protocol final lost confirmed owner preview; preserving {} accepted chars",
+                        fallback_text.chars().count()
+                    );
+                    merged = fallback_text;
+                    segments = fallback_segments;
+                }
+            }
             let cleaned_streaming_tail = trim_repeated_short_streaming_tail(&merged);
             if cleaned_streaming_tail != merged {
                 log::info!(
@@ -2448,6 +2477,122 @@ mod tests {
         assert_eq!(state.optimistic_preview_text, "请在今天下午");
         assert!(state.best_transcript_text.is_empty());
         assert!(state.last_partial_text.is_empty());
+    }
+
+    #[test]
+    fn protocol_final_preserves_continuously_confirmed_owner_preview_when_boundaries_drop_it() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_local_speaker_tracking_started("开始录音");
+        for audio_end_ms in [3_600, 4_000, 4_400, 4_800] {
+            asr.note_local_speaker_classification(
+                audio_end_ms,
+                crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.6 },
+            );
+        }
+        asr.state.lock().target_speaker_id = Some("0".into());
+
+        let preview_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 5_300 },
+            "result": {
+                "text": "现在好像应该没有什么别的问题了吧？我看了",
+                "utterances": [{
+                    "additions": { "source": "stream" },
+                    "definite": false,
+                    "start_time": 1_300,
+                    "end_time": 4_900,
+                    "text": "现在好像应该没有什么别的问题了吧？我看了"
+                }]
+            }
+        }))
+        .expect("preview response serializes");
+        let preview_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::None,
+            Serialization::Json,
+            &preview_payload,
+            None,
+        );
+        assert!(asr.handle_frame(&preview_frame));
+        assert_eq!(
+            asr.state.lock().optimistic_preview_text,
+            "现在好像应该没有什么别的问题了吧？我看了"
+        );
+        assert!(asr.state.lock().best_transcript_text.is_empty());
+
+        let (tx, mut rx) = oneshot::channel();
+        asr.state.lock().final_tx = Some(tx);
+        let final_payload = serde_json::to_vec(&json!({
+            "audio_info": { "duration": 6_000 },
+            "result": {
+                "text": "能录音 现在好像应该没有什么别的问题了吧？我看。",
+                "utterances": [
+                    {
+                        "additions": { "speaker_id": "0", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 0,
+                        "end_time": 1_232,
+                        "text": "能录音"
+                    },
+                    {
+                        "additions": { "speaker_id": "0", "source": "two_pass" },
+                        "definite": true,
+                        "start_time": 5_000,
+                        "end_time": 5_492,
+                        "text": "现在好像应该没有什么别的问题了吧？我看。"
+                    }
+                ]
+            }
+        }))
+        .expect("final response serializes");
+        let final_frame = frame::build(
+            MessageType::FullServerResponse,
+            Flags::LastPacket,
+            Serialization::Json,
+            &final_payload,
+            None,
+        );
+
+        assert!(!asr.handle_frame(&final_frame));
+        let transcript = rx
+            .try_recv()
+            .expect("protocol final should resolve the transcript")
+            .expect("confirmed owner preview should remain successful");
+        assert_eq!(transcript.text, "现在好像应该没有什么别的问题了吧？我看了");
+    }
+
+    #[test]
+    fn final_preview_fallback_rejects_manual_uncertain_and_confirmed_other_speaker_states() {
+        let mut manual = SyncState {
+            optimistic_preview_text: "不应保留".into(),
+            ..SyncState::default()
+        };
+        assert!(confirmed_owner_final_preview_fallback(&manual).is_none());
+
+        manual.local_speaker_tracking_enabled = true;
+        manual.local_target_confirmed = true;
+        manual.local_speaker_stable_target = true;
+        manual.local_speaker_classification = Some(
+            crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.38 },
+        );
+        assert!(confirmed_owner_final_preview_fallback(&manual).is_none());
+
+        manual.local_speaker_classification =
+            Some(crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.6 });
+        manual.local_non_target_speech_end_ms = Some(2_200);
+        assert!(confirmed_owner_final_preview_fallback(&manual).is_none());
+
+        manual.local_non_target_speech_end_ms = None;
+        assert_eq!(
+            confirmed_owner_final_preview_fallback(&manual).map(|(text, _)| text),
+            Some("不应保留".into())
+        );
     }
 
     #[test]
