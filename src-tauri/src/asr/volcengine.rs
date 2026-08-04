@@ -13,7 +13,7 @@ use parking_lot::Mutex as ParkingMutex;
 use serde_json::{json, Value};
 use tokio::net::TcpStream;
 use tokio::runtime::Handle;
-use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex, Notify};
+use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex, Notify, OnceCell};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
@@ -592,6 +592,52 @@ fn local_evidence_allows_utterance(
     target_votes > 0 && target_votes >= non_target_votes
 }
 
+fn utterance_belongs_to_target(
+    utterance: &Value,
+    target_speaker_id: &str,
+    local_speaker_tracking_enabled: bool,
+    local_speaker_evidence: &[LocalSpeakerEvidence],
+    wake_speaker_phrase: Option<&str>,
+    wake_speaker_end_ms: Option<u64>,
+) -> bool {
+    if !utterance_is_stable(utterance) {
+        return false;
+    }
+
+    let cloud_id_matches = utterance_speaker_id(utterance).as_deref() == Some(target_speaker_id);
+    if !local_speaker_tracking_enabled {
+        return cloud_id_matches;
+    }
+
+    let Some(wake_phrase) = wake_speaker_phrase else {
+        return cloud_id_matches
+            && local_evidence_allows_utterance(
+                utterance,
+                local_speaker_evidence,
+                wake_speaker_phrase,
+            );
+    };
+    let normalized_phrase = wake_phrase
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .collect::<String>();
+    if utterance_is_bounded_wake_phrase(utterance, &normalized_phrase) {
+        return cloud_id_matches;
+    }
+
+    // In an automatic session the local wake-speaker timeline owns identity.
+    // Cloud speaker IDs are diarization clusters and may split one real speaker.
+    let local_target =
+        local_evidence_allows_utterance(utterance, local_speaker_evidence, wake_speaker_phrase);
+    if cloud_id_matches {
+        return local_target;
+    }
+    local_target
+        && wake_speaker_end_ms.is_some_and(|wake_end_ms| {
+            utterance_start_ms(utterance).is_some_and(|start_ms| start_ms >= wake_end_ms)
+        })
+}
+
 fn filter_result_to_target_speaker_with_local_evidence(
     result: &Value,
     target_speaker_id: &mut Option<String>,
@@ -623,6 +669,21 @@ fn filter_result_to_target_speaker_with_local_evidence(
             })
         };
     }
+    let wake_speaker_end_ms = target_speaker_id.as_deref().and_then(|target| {
+        let normalized_phrase = wake_speaker_phrase?
+            .chars()
+            .filter(|ch| ch.is_alphanumeric())
+            .collect::<String>();
+        utterances
+            .iter()
+            .filter(|utterance| {
+                utterance_is_stable(utterance)
+                    && utterance_speaker_id(utterance).as_deref() == Some(target)
+                    && utterance_contains_normalized_phrase(utterance, &normalized_phrase)
+            })
+            .filter_map(utterance_end_ms)
+            .max()
+    });
 
     let selected = target_speaker_id
         .as_deref()
@@ -630,14 +691,14 @@ fn filter_result_to_target_speaker_with_local_evidence(
             utterances
                 .iter()
                 .filter(|utterance| {
-                    utterance_is_stable(utterance)
-                        && utterance_speaker_id(utterance).as_deref() == Some(target)
-                        && (!local_speaker_tracking_enabled
-                            || local_evidence_allows_utterance(
-                                utterance,
-                                local_speaker_evidence,
-                                wake_speaker_phrase,
-                            ))
+                    utterance_belongs_to_target(
+                        utterance,
+                        target,
+                        local_speaker_tracking_enabled,
+                        local_speaker_evidence,
+                        wake_speaker_phrase,
+                        wake_speaker_end_ms,
+                    )
                 })
                 .cloned()
                 .collect::<Vec<_>>()
@@ -673,9 +734,15 @@ fn filter_result_to_target_speaker_with_local_evidence(
     let stable_other_speaker_present = target_speaker_id.as_deref().is_some_and(|target| {
         utterances.iter().any(|utterance| {
             utterance_is_stable(utterance)
-                && utterance_speaker_id(utterance)
-                    .as_deref()
-                    .is_some_and(|id| id != target)
+                && utterance_speaker_id(utterance).is_some()
+                && !utterance_belongs_to_target(
+                    utterance,
+                    target,
+                    local_speaker_tracking_enabled,
+                    local_speaker_evidence,
+                    wake_speaker_phrase,
+                    wake_speaker_end_ms,
+                )
         })
     });
     let optimistic_utterances = utterances
@@ -683,13 +750,14 @@ fn filter_result_to_target_speaker_with_local_evidence(
         .filter(|utterance| {
             !utterance_is_stable(utterance)
                 || target_speaker_id.as_deref().is_some_and(|target| {
-                    utterance_speaker_id(utterance).as_deref() == Some(target)
-                        && (!local_speaker_tracking_enabled
-                            || local_evidence_allows_utterance(
-                                utterance,
-                                local_speaker_evidence,
-                                wake_speaker_phrase,
-                            ))
+                    utterance_belongs_to_target(
+                        utterance,
+                        target,
+                        local_speaker_tracking_enabled,
+                        local_speaker_evidence,
+                        wake_speaker_phrase,
+                        wake_speaker_end_ms,
+                    )
                 })
         })
         .cloned()
@@ -809,6 +877,7 @@ pub struct VolcengineStreamingASR {
     pending_sends_high_water: Arc<AtomicUsize>,
     send_done: Arc<Notify>,
     audio_delivery_changed: Arc<Notify>,
+    final_frame_result: OnceCell<Result<(), VolcengineASRError>>,
 }
 
 impl VolcengineStreamingASR {
@@ -837,6 +906,7 @@ impl VolcengineStreamingASR {
             pending_sends_high_water: Arc::new(AtomicUsize::new(0)),
             send_done: Arc::new(Notify::new()),
             audio_delivery_changed: Arc::new(Notify::new()),
+            final_frame_result: OnceCell::new(),
         }
     }
 
@@ -984,6 +1054,10 @@ impl VolcengineStreamingASR {
         callback: Option<TargetSpeakerUpdateCallback>,
     ) {
         *self.target_speaker_update_callback.lock() = callback;
+    }
+
+    pub fn stable_target_speech_end_ms(&self) -> Option<u64> {
+        self.state.lock().target_speech_end_ms
     }
 
     pub fn note_local_audio_activity(&self, audio_duration_ms: u64, speech_detected: bool) {
@@ -1343,6 +1417,16 @@ impl VolcengineStreamingASR {
     }
 
     pub async fn send_last_frame(&self) -> Result<(), VolcengineASRError> {
+        self.final_frame_result
+            .get_or_init(|| self.send_last_frame_once())
+            .await
+            .clone()
+    }
+
+    async fn send_last_frame_once(&self) -> Result<(), VolcengineASRError> {
+        // Seal immediately so a proactive endpoint finalization cannot race
+        // later firmware-drain PCM into the stream after its negative frame.
+        self.state.lock().finishing = true;
         let delivery_ready_started = Instant::now();
         self.await_audio_delivery_ready(FINAL_FRAME_SEND_BUDGET)
             .await?;
@@ -1364,8 +1448,6 @@ impl VolcengineStreamingASR {
             drain_started.elapsed().as_millis(),
             drain_budget.as_millis()
         );
-        self.state.lock().finishing = true;
-
         // Drain leftover audio (if any) into one final positive-sequence frame.
         let finish_send_deadline = Instant::now() + FINAL_FRAME_SEND_BUDGET;
         let leftover = {
@@ -1954,7 +2036,7 @@ impl AudioConsumer for VolcengineStreamingASR {
         // 哪怕跨多个 consume 调用、多个 spawn 也不会再有 writer 锁竞争。
         let chunks: Vec<(i32, Vec<u8>)> = {
             let mut st = self.state.lock();
-            if !st.is_connected {
+            if !st.is_connected || st.finishing {
                 return;
             }
             st.pending_audio.extend_from_slice(pcm);
@@ -2830,6 +2912,146 @@ mod tests {
     }
 
     #[test]
+    fn local_target_timeline_rescues_same_person_split_across_cloud_speakers() {
+        let result = json!({
+            "text": "开始录音本人继续说完整正文",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 1042,
+                    "text": "开始录音"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1200,
+                    "end_time": 7652,
+                    "text": "本人继续说完整正文"
+                }
+            ]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 2_200,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.44,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 3_100,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.43,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 4_000,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                        score: 0.30,
+                    },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 4_900,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                        score: 0.33,
+                    },
+                stable_target: false,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 5_800,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.46,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 6_700,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.45,
+                },
+                stable_target: true,
+            },
+        ];
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+        );
+
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], "开始录音本人继续说完整正文");
+        assert_eq!(
+            filtered.optimistic_result["text"],
+            "开始录音本人继续说完整正文"
+        );
+        assert_eq!(filtered.target_speech_end_ms, Some(7652));
+    }
+
+    #[test]
+    fn local_non_target_timeline_rejects_real_other_cloud_speaker() {
+        let result = json!({
+            "text": "开始录音旁人正文",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 1042,
+                    "text": "开始录音"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1400,
+                    "end_time": 5000,
+                    "text": "旁人正文"
+                }
+            ]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 2_400,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                        score: 0.20,
+                    },
+                stable_target: false,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 3_200,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                        score: 0.18,
+                    },
+                stable_target: false,
+            },
+        ];
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+        );
+
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], "开始录音");
+        assert_eq!(filtered.target_speech_end_ms, Some(1042));
+    }
+
+    #[test]
     fn local_timeline_excludes_other_person_when_cloud_collapses_speaker_ids() {
         let result = json!({
             "text": "开始录音旁人正文",
@@ -3230,6 +3452,42 @@ mod tests {
             result,
             Err(VolcengineASRError::FinalResultTimeout)
         ));
+    }
+
+    #[tokio::test]
+    async fn proactive_final_frame_is_idempotent_and_seals_later_audio() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.mark_audio_delivery_ready();
+        {
+            let mut state = asr.state.lock();
+            state.is_connected = true;
+            state.next_sequence = 7;
+        }
+
+        let first = asr
+            .send_last_frame()
+            .await
+            .expect_err("test writer is intentionally absent");
+        let sequence_after_first = asr.state.lock().next_sequence;
+        let second = asr
+            .send_last_frame()
+            .await
+            .expect_err("the cached final-frame result should be reused");
+        assert_eq!(first.to_string(), second.to_string());
+        assert_eq!(asr.state.lock().next_sequence, sequence_after_first);
+        assert!(asr.state.lock().finishing);
+
+        asr.consume_pcm_chunk(&vec![1; TARGET_AUDIO_CHUNK_BYTES]);
+        let state = asr.state.lock();
+        assert!(state.pending_audio.is_empty());
+        assert_eq!(state.frames_sent, 0);
     }
 
     #[tokio::test]

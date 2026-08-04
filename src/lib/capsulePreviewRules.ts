@@ -50,6 +50,42 @@ export function truncatePreview(
  */
 export const PREVIEW_DEDUP_POLICY = 'exact-match' as const;
 
+/**
+ * Provider partials can arrive as a larger pure append after a pause. Split
+ * only that visual append into a bounded number of rendering frames.
+ */
+export const PREVIEW_BURST_REVEAL = {
+  minimumAppendChars: 3,
+  maxFrames: 8,
+  maxCatchUpMs: 160,
+} as const;
+
+/** The wake capsule is visible immediately; only its geometry settles. */
+export const CAPSULE_APPEARANCE = {
+  enterAnimMs: 160,
+  initialOpacity: 1,
+} as const;
+
+/**
+ * Build the visual path between two authoritative previews. Rewrites and
+ * routine short updates return one immediate frame.
+ */
+export function buildPreviewRevealFrames(current: string, target: string): string[] {
+  if (!current || !target.startsWith(current)) return [target];
+
+  const appended = Array.from(target.slice(current.length));
+  if (appended.length < PREVIEW_BURST_REVEAL.minimumAppendChars) return [target];
+
+  const frameCount = Math.min(PREVIEW_BURST_REVEAL.maxFrames, appended.length);
+  const charsPerFrame = Math.ceil(appended.length / frameCount);
+  const frames: string[] = [];
+  for (let end = charsPerFrame; end < appended.length; end += charsPerFrame) {
+    frames.push(current + appended.slice(0, end).join(''));
+  }
+  frames.push(target);
+  return frames;
+}
+
 // ── Final transition ────────────────────────────────────────
 
 /**

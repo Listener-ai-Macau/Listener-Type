@@ -5,11 +5,13 @@
 //! insertion, persists history, emits `capsule:state` events to the capsule
 //! window.
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
@@ -42,8 +44,8 @@ use crate::persistence::{
 use crate::llm_gemini::{GeminiConfig, GeminiProvider};
 use crate::polish::{
     http_client_builder_with_proxy, ActiveLLMProvider, CodexOAuthConfig, CodexOAuthLLMProvider,
-    OpenAICompatibleConfig, OpenAICompatibleLLMProvider, ProviderProxyConfig, CODEX_DEFAULT_MODEL,
-    CODEX_OAUTH_PROVIDER_ID,
+    LLMError, OpenAICompatibleConfig, OpenAICompatibleLLMProvider, ProviderProxyConfig,
+    CODEX_DEFAULT_MODEL, CODEX_OAUTH_PROVIDER_ID,
 };
 use crate::qa_hotkey::{QaHotkeyError, QaHotkeyEvent, QaHotkeyMonitor};
 use crate::recorder::{Recorder, RecorderError};
@@ -2795,6 +2797,54 @@ pub enum StreamingPolishOutcome {
     Failed(String),
 }
 
+#[derive(Default)]
+struct LlmAuthFailureCircuit {
+    rejected_fingerprint: Option<u64>,
+}
+
+impl LlmAuthFailureCircuit {
+    fn rejects(&self, fingerprint: u64) -> bool {
+        self.rejected_fingerprint == Some(fingerprint)
+    }
+
+    fn reject(&mut self, fingerprint: u64) {
+        self.rejected_fingerprint = Some(fingerprint);
+    }
+}
+
+static LLM_AUTH_FAILURE_CIRCUIT: OnceLock<Mutex<LlmAuthFailureCircuit>> = OnceLock::new();
+
+fn current_llm_auth_fingerprint() -> anyhow::Result<u64> {
+    let mut hasher = DefaultHasher::new();
+    CredentialsVault::get_active_llm().hash(&mut hasher);
+    CredentialsVault::get(CredentialAccount::ArkApiKey)?.hash(&mut hasher);
+    CredentialsVault::get(CredentialAccount::ArkModelId)?.hash(&mut hasher);
+    CredentialsVault::get(CredentialAccount::ArkEndpoint)?.hash(&mut hasher);
+    Ok(hasher.finish())
+}
+
+fn llm_auth_failure_circuit() -> &'static Mutex<LlmAuthFailureCircuit> {
+    LLM_AUTH_FAILURE_CIRCUIT.get_or_init(|| Mutex::new(LlmAuthFailureCircuit::default()))
+}
+
+fn current_llm_auth_is_rejected(fingerprint: u64) -> bool {
+    llm_auth_failure_circuit().lock().rejects(fingerprint)
+}
+
+fn note_llm_auth_rejection(fingerprint: u64) {
+    llm_auth_failure_circuit().lock().reject(fingerprint);
+}
+
+fn llm_error_is_auth_rejection(error: &LLMError) -> bool {
+    matches!(
+        error,
+        LLMError::InvalidResponse {
+            status: 401 | 403,
+            ..
+        }
+    )
+}
+
 /// 流式润色入口。在不支持流式的所有 case 都返回 `UnsupportedFallback`，让调用方
 /// 透明降级。不修改任何持久化 / 焦点 / 光标状态。
 ///
@@ -2829,6 +2879,15 @@ where
             "[coord] streaming polish skipped: active LLM provider=gemini (v1 not implemented), fall back to one-shot"
         );
         return StreamingPolishOutcome::UnsupportedFallback;
+    }
+    let auth_fingerprint = current_llm_auth_fingerprint().ok();
+    if auth_fingerprint.is_some_and(current_llm_auth_is_rejected) {
+        log::warn!(
+            "[coord] streaming polish skipped: current LLM credentials were already rejected; using raw text without another network wait"
+        );
+        return StreamingPolishOutcome::Failed(
+            "current LLM credentials were already rejected".to_string(),
+        );
     }
     let provider = match build_active_llm_provider(llm_thinking_enabled) {
         Ok(p) => p,
@@ -2873,6 +2932,11 @@ where
             StreamingPolishOutcome::Streamed(text)
         }
         Err(e) => {
+            if llm_error_is_auth_rejection(&e) {
+                if let Some(fingerprint) = auth_fingerprint {
+                    note_llm_auth_rejection(fingerprint);
+                }
+            }
             let reason = e.to_string();
             log::error!("[coord] streaming polish FAILED: {reason}");
             StreamingPolishOutcome::Failed(reason)
@@ -2957,8 +3021,12 @@ async fn polish_text(
             .await?);
     }
 
+    let auth_fingerprint = current_llm_auth_fingerprint()?;
+    if current_llm_auth_is_rejected(auth_fingerprint) {
+        anyhow::bail!("current LLM credentials were already rejected");
+    }
     let provider = build_active_llm_provider(llm_thinking_enabled)?;
-    Ok(provider
+    let result = provider
         .polish(
             raw,
             mode,
@@ -2970,7 +3038,11 @@ async fn polish_text(
             front_app,
             prior_turns,
         )
-        .await?)
+        .await;
+    if result.as_ref().is_err_and(llm_error_is_auth_rejection) {
+        note_llm_auth_rejection(auth_fingerprint);
+    }
+    Ok(result?)
 }
 
 /// 翻译路径——和 polish 一样失败时返回原文 + 失败原因，避免"不丢字"约定被违反（CLAUDE.md）。

@@ -15,11 +15,12 @@ struct LocalSessionSpeakerTracker {
     classification_rx: Option<
         std::sync::mpsc::Receiver<
             Result<
-                (u64, crate::speaker_verification::SessionSpeakerClassification),
+                (u64, crate::speaker_verification::SessionSpeakerObservation),
                 String,
             >,
         >,
     >,
+    adaptation_gate: crate::speaker_verification::SessionSpeakerAdaptationGate,
     rolling_pcm: Vec<u8>,
     next_classification_audio_ms: u64,
 }
@@ -39,6 +40,7 @@ impl LocalSessionSpeakerTracker {
             profile_rx: Some(rx),
             profile: None,
             classification_rx: None,
+            adaptation_gate: Default::default(),
             rolling_pcm: Vec::with_capacity(LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES),
             next_classification_audio_ms: LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
         }
@@ -49,6 +51,7 @@ impl LocalSessionSpeakerTracker {
         pcm: &[u8],
         audio_end_ms: u64,
         has_speech_energy: bool,
+        stable_target_end_ms: Option<u64>,
     ) -> Option<(u64, crate::speaker_verification::SessionSpeakerClassification)> {
         self.rolling_pcm.extend_from_slice(pcm);
         if self.rolling_pcm.len() > LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES {
@@ -84,7 +87,8 @@ impl LocalSessionSpeakerTracker {
         if let Some(rx) = self.classification_rx.as_ref() {
             match rx.try_recv() {
                 Ok(Ok(result)) => {
-                    completed = Some(result);
+                    self.adaptation_gate.note(result.0, result.1.clone());
+                    completed = Some((result.0, result.1.classification));
                     self.classification_rx = None;
                 }
                 Ok(Err(err)) => {
@@ -100,6 +104,18 @@ impl LocalSessionSpeakerTracker {
             }
         }
 
+        if let Some(profile) = self.profile.as_mut() {
+            let adapted = self
+                .adaptation_gate
+                .promote_covered(profile, stable_target_end_ms);
+            if adapted > 0 {
+                log::info!(
+                    "[speaker-verification] local session target profile adapted exemplars_added={adapted} stable_target_end_ms={}",
+                    stable_target_end_ms.unwrap_or_default()
+                );
+            }
+        }
+
         if has_speech_energy
             && self.classification_rx.is_none()
             && self.rolling_pcm.len() >= LOCAL_SPEAKER_CLASSIFY_MIN_BYTES
@@ -112,7 +128,7 @@ impl LocalSessionSpeakerTracker {
                 self.next_classification_audio_ms =
                     audio_end_ms.saturating_add(LOCAL_SPEAKER_CLASSIFY_STEP_MS);
                 tauri::async_runtime::spawn_blocking(move || {
-                    let result = crate::speaker_verification::classify_session_speaker(
+                    let result = crate::speaker_verification::observe_session_speaker(
                         &profile,
                         &snapshot,
                     )
@@ -230,11 +246,16 @@ impl EmbeddedAudioDictationSession {
                 has_speech_energy,
             );
         }
+        let stable_target_end_ms = self
+            .volcengine_asr
+            .as_ref()
+            .and_then(|asr| asr.stable_target_speech_end_ms());
         let local_speaker_evidence = self.local_speaker_tracker.as_mut().and_then(|tracker| {
             tracker.observe(
                 pcm,
                 source_pcm_offset_ms.saturating_add(chunk_ms),
                 has_speech_energy,
+                stable_target_end_ms,
             )
         });
         if let (Some(asr), Some((audio_end_ms, classification))) =

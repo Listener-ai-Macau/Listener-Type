@@ -1,0 +1,193 @@
+{
+  "schema": "listener.1.0.4.requirement_test_map",
+  "schema_version": 1,
+  "frozen_baseline": {
+    "type_ref": "v1.0.4",
+    "type_tag": "v1.0.4",
+    "firmware_commit": "95aca299ab28b1970773c29864fa01c71fd8dbc6",
+    "firmware_tag": "v1.0.4",
+    "msi_sha256": "A7DFA087076DF7691ACB33E78360D16A9D01EB8AACB1FA437EC32FF46DB5E26F",
+    "ota_sha256": "D36552F61932CB7EE2966FBEB3CF85ED020F263D24B11F2B71AA30C29088DE2B",
+    "human_pass_artifact": "Listener-Type/.artifacts/listener-1.0.4-endpoint-calibration-20260804"
+  },
+  "items": [
+    {
+      "id": "REG-ID-001",
+      "registry_refs": ["LST-REL-003", "LST-OTA-073"],
+      "behavior": "发布身份与冻结 MSI/OTA/源码 tag 一致",
+      "level": "L0",
+      "automated": true,
+      "tests": [
+        "scripts/verify-listener-1.0.4-identity.ps1",
+        "scripts/check-release-root-artifacts.mjs"
+      ],
+      "pass_rule": "MSI/OTA SHA-256 与冻结值一致；Type/FW 为 v1.0.4 或显式允许 dirty"
+    },
+    {
+      "id": "REG-WAKE-001",
+      "registry_refs": ["LST-WAKE-012", "LST-WAKE-015"],
+      "behavior": "唤醒只在非 idle、蓝牙灯亮状态工作",
+      "level": "L0-L1",
+      "automated": true,
+      "tests": [
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#wake_idle_boundary",
+        "Listener-Firmware/tools/verify_power_manager_static.py",
+        "cargo test --lib voice_activation -- --test-threads=1 (Type)"
+      ],
+      "pass_rule": "静态合同证明 idle 关闭语音监测；非 idle 合同保留",
+      "human_residual": "唤醒手感"
+    },
+    {
+      "id": "REG-WAKE-002",
+      "registry_refs": ["LST-WAKE-003", "LST-WAKE-014", "LST-WAKE-015"],
+      "behavior": "保留 800 ms 推测确认与当前唤醒灵敏度，不改阈值",
+      "level": "L0",
+      "automated": true,
+      "tests": [
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#local_confirmation_800ms",
+        "src-tauri/src/coordinator/dictation_tests.rs"
+      ],
+      "pass_rule": "LOCAL_CONFIRMATION_START_MS == 800；相关 dictation 测试 PASS",
+      "human_residual": "唤醒手感"
+    },
+    {
+      "id": "REG-END-001",
+      "registry_refs": ["endpoint-calibration-20260804"],
+      "behavior": "胶囊可见前不触发自动结束；正文后目标说话人停约 1000 ms 才结束",
+      "level": "L0-L1",
+      "automated": true,
+      "tests": [
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#target_speaker_end_1000ms",
+        "src-tauri/src/coordinator/dictation_tests.rs",
+        ".artifacts/listener-1.0.4-endpoint-calibration-20260804"
+      ],
+      "pass_rule": "EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS == 1000；端点序列测试 PASS",
+      "human_residual": "双人实说"
+    },
+    {
+      "id": "REG-MULTI-001",
+      "registry_refs": ["endpoint-calibration-20260804", "LST-WAKE-017"],
+      "behavior": "多人场景只保留唤醒者正文，其他人和噪声不能续录或污染结果",
+      "level": "L1",
+      "automated": true,
+      "tests": [
+        "src-tauri/src/coordinator/dictation_tests.rs",
+        "src-tauri/src/speaker_verification.rs"
+      ],
+      "pass_rule": "NonTarget/Uncertain 不能错误推进目标说话人时钟；机器序列 PASS",
+      "human_residual": "双人实说"
+    },
+    {
+      "id": "REG-FEAT-001",
+      "registry_refs": ["LST-WAKE-016", "LST-WAKE-017", "LST-AUDIO-002", "LST-AUDIO-004"],
+      "behavior": "手动录音、声纹、自定义唤醒词、原始声音 LED 电平不回退",
+      "level": "L0-L1",
+      "automated": true,
+      "tests": [
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#feature_surface",
+        "npm run test:firmware-ota",
+        "Listener-Firmware/tools/verify_status_led_static.py",
+        "Listener-Firmware/tools/verify_audio_leveling_platform_static.py"
+      ],
+      "pass_rule": "相关设置/声纹/原始电平合同存在且源码阈值未静默删除",
+      "human_residual": "灯效"
+    },
+    {
+      "id": "REG-BLE-001",
+      "registry_refs": ["LST-STAB-006", "LST-LAT-001"],
+      "behavior": "Type 温启动 BLE notify-ready < 3000 ms",
+      "level": "L1-L2",
+      "automated": true,
+      "tests": [
+        "scripts/check-type-startup-reconnect-speed.ps1",
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#notify_ready_3000"
+      ],
+      "pass_rule": "MaxNotifyReadyMs 默认 3000；硬件门测时实测 <3000 ms",
+      "hardware": "optional_for_measured"
+    },
+    {
+      "id": "REG-OTA-001",
+      "registry_refs": ["LST-OTA-072", "LST-OTA-073", "LST-OTA-075"],
+      "behavior": "Type 默认进入 BLE OTA；连续三次 bulk_kb_s 严格 >60 KiB/s，零 recovery/ACL/OOM/WDT",
+      "level": "L2-L3",
+      "automated": true,
+      "tests": [
+        "scripts/check-ota-transfer-speed-log.mjs",
+        "scripts/check-ota-transfer-speed-log.test.mjs",
+        "src/lib/firmwareOta.test.ts",
+        "scripts/run-installed-ota-hidden.ps1"
+      ],
+      "pass_rule": "合同阈值严格 >60 KiB/s；硬件门三次全过",
+      "hardware": "optional_for_measured"
+    },
+    {
+      "id": "REG-STAB-001",
+      "registry_refs": ["LST-STAB-001", "LST-STAB-003", "LST-STAB-004"],
+      "behavior": "录音长稳至少 20 分钟，无重启、WDT、丢包或会话计数断裂",
+      "level": "L2-L3",
+      "automated": true,
+      "tests": [
+        "Listener-Firmware/tools/verify_audio_ble_upload_long_session.ps1",
+        "Listener-Firmware/tools/verify_voice_recording_control_fsm.py"
+      ],
+      "pass_rule": "长会话门 PASS 或 SkipHardware 时标记 SKIPPED_HARDWARE",
+      "hardware": "optional_for_measured"
+    },
+    {
+      "id": "REG-DEFAULT-001",
+      "registry_refs": ["preproduction post-dictation", "types.rs defaults"],
+      "behavior": "默认设置：听写后自动发送关闭；剪贴板保留/胶囊/嵌入式输入等指定功能开启",
+      "level": "L0",
+      "automated": true,
+      "tests": [
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#default_settings"
+      ],
+      "pass_rule": "send_key_after_dictation=false；copy_dictation_to_clipboard=true；show_capsule=true；dictation_input_source=EmbeddedBle"
+    },
+    {
+      "id": "REG-ENV-001",
+      "registry_refs": ["shared_product_engineering_rules", "persistence tests"],
+      "behavior": "测试不读写生产 %APPDATA%\\Listener Type",
+      "level": "L0",
+      "automated": true,
+      "tests": [
+        "scripts/verify-listener-1.0.4-clean-env.ps1",
+        "src-tauri/src/persistence.rs::default_test_data_dir_is_process_scoped_and_outside_production_profile"
+      ],
+      "pass_rule": "回归输出在 .artifacts；测试 data dir 在 temp；生产 profile 无新增写"
+    },
+    {
+      "id": "REG-DIAG-001",
+      "registry_refs": ["LST-DIAG-001", "export_diagnostic_package"],
+      "behavior": "一键诊断采集 Type 日志、BLE 状态、固件 boot/reset/WDT、包哈希、版本与关键设置；默认不采用户录音/正文/凭据",
+      "level": "L0",
+      "automated": true,
+      "tests": [
+        "scripts/collect-listener-1.0.4-diagnostics.ps1",
+        "tools/ai_diagnostics/collector.py",
+        "Listener-Firmware/tools/collect_ai_diagnostics.ps1"
+      ],
+      "pass_rule": "诊断包含 privacy.json 与排除清单；无 wav/transcript/credential 明文"
+    }
+  ],
+  "reuse_existing": [
+    "scripts/run-v1.0.2-regression.ps1",
+    "scripts/release-check.mjs",
+    "scripts/check-type-startup-reconnect-speed.ps1",
+    "scripts/check-ota-transfer-speed-log.mjs",
+    "scripts/run-installed-ota-hidden.ps1",
+    "tools/collect_ai_diagnostics.ps1",
+    "Listener-Firmware/tools/run_v1_0_2_regression.ps1",
+    "Listener-Firmware/tools/release_check.ps1",
+    "Listener-Firmware/tools/verify_audio_ble_upload_long_session.ps1",
+    "Listener-Firmware/tools/collect_ai_diagnostics.ps1"
+  ],
+  "non_goals": [
+    "主观微调唤醒或自动结束",
+    "延长 1000 ms 自动结束",
+    "靠重启/放宽 watchdog/隐藏红灯/吞错误治标",
+    "清空用户数据或解除蓝牙配对",
+    "机器闭环前弹人工验收窗",
+    "推送或发布新版本"
+  ]
+}

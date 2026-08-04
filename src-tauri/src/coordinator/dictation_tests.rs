@@ -1412,6 +1412,85 @@ fn target_speaker_endpoint_waits_for_provider_coverage_before_stopping_quiet_tai
 }
 
 #[test]
+fn target_speaker_endpoint_uses_local_clock_only_for_a_clean_provider_stall() {
+    let one_ms_before = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(9_992),
+        provider_audio_duration_ms: Some(10_400),
+        audio_duration_ms: Some(10_991),
+        local_speech_end_ms: Some(9_400),
+        local_target_speech_end_ms: Some(9_400),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(9_992),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(!super::provider_stall_local_endpoint_due(&one_ms_before));
+    assert!(!super::target_speaker_endpoint_due(&one_ms_before));
+
+    let exact_endpoint = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(10_992),
+        ..one_ms_before.clone()
+    };
+    assert!(super::provider_stall_local_endpoint_due(&exact_endpoint));
+    assert!(super::target_speaker_endpoint_due(&exact_endpoint));
+
+    let ordinary_provider_lag = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(10_493),
+        ..exact_endpoint.clone()
+    };
+    assert!(!super::provider_stall_local_endpoint_due(
+        &ordinary_provider_lag
+    ));
+    assert!(!super::target_speaker_endpoint_due(&ordinary_provider_lag));
+
+    let pending_tail = crate::asr::volcengine::TargetSpeakerUpdate {
+        pending_unattributed_speech: true,
+        ..exact_endpoint.clone()
+    };
+    assert!(!super::provider_stall_local_endpoint_due(&pending_tail));
+    assert!(!super::target_speaker_endpoint_due(&pending_tail));
+
+    let noisy_raw_energy_without_target_advance = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_speech_end_ms: Some(10_400),
+        ..exact_endpoint.clone()
+    };
+    assert!(super::provider_stall_local_endpoint_due(
+        &noisy_raw_energy_without_target_advance
+    ));
+    assert!(super::target_speaker_endpoint_due(
+        &noisy_raw_energy_without_target_advance
+    ));
+
+    let confirmed_other_speaker = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(11_000),
+        local_speech_end_ms: Some(10_500),
+        local_non_target_speech_end_ms: Some(10_500),
+        ..exact_endpoint.clone()
+    };
+    assert!(super::provider_stall_local_endpoint_due(
+        &confirmed_other_speaker
+    ));
+    assert!(super::target_speaker_endpoint_due(&confirmed_other_speaker));
+
+    let unconfirmed_newer_local_target = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(11_400),
+        local_speech_end_ms: Some(10_300),
+        local_target_speech_end_ms: Some(10_300),
+        ..exact_endpoint
+    };
+    assert!(!super::provider_stall_local_endpoint_due(
+        &unconfirmed_newer_local_target
+    ));
+    assert!(!super::target_speaker_endpoint_due(
+        &unconfirmed_newer_local_target
+    ));
+}
+
+#[test]
 fn target_speaker_endpoint_holds_after_one_transient_local_mismatch() {
     // Installed session 6ef0d4b8 reproduced this exact shape: cloud
     // diarization had stabilized only the wake phrase while the debounced local

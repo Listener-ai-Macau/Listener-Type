@@ -4160,6 +4160,36 @@ fn resolve_ark_endpoint_allows_blank_key_with_custom_endpoint() {
 }
 
 #[test]
+fn llm_auth_failure_circuit_only_rejects_the_failed_configuration() {
+    let mut circuit = LlmAuthFailureCircuit::default();
+
+    assert!(!circuit.rejects(11));
+    circuit.reject(11);
+    assert!(circuit.rejects(11));
+    assert!(
+        !circuit.rejects(12),
+        "changing credentials, model or endpoint must permit a fresh attempt"
+    );
+}
+
+#[test]
+fn llm_auth_failure_circuit_only_classifies_auth_http_statuses() {
+    assert!(llm_error_is_auth_rejection(&LLMError::InvalidResponse {
+        status: 401,
+        body: "unauthorized".to_string(),
+    }));
+    assert!(llm_error_is_auth_rejection(&LLMError::InvalidResponse {
+        status: 403,
+        body: "forbidden".to_string(),
+    }));
+    assert!(!llm_error_is_auth_rejection(&LLMError::InvalidResponse {
+        status: 429,
+        body: "rate limited".to_string(),
+    }));
+    assert!(!llm_error_is_auth_rejection(&LLMError::Timeout));
+}
+
+#[test]
 fn deferred_asr_bridge_flushes_startup_audio_before_live_chunks() {
     #[derive(Default)]
     struct RecordingConsumer {

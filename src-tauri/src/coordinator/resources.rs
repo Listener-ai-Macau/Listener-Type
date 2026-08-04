@@ -64,6 +64,21 @@ pub(super) fn take_asr_for_session(inner: &Arc<Inner>, session_id: SessionId) ->
     take_session_resource(&mut slot, session_id)
 }
 
+pub(super) fn clone_volcengine_asr_for_session(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) -> Option<Arc<crate::asr::volcengine::VolcengineStreamingASR>> {
+    let slot = inner.asr.lock();
+    let resource = slot.as_ref()?;
+    if resource.session_id != session_id {
+        return None;
+    }
+    match &resource.resource {
+        ActiveAsr::Volcengine(asr) => Some(Arc::clone(asr)),
+        _ => None,
+    }
+}
+
 pub(super) fn cancel_active_asr(asr: ActiveAsr) {
     match asr {
         ActiveAsr::Volcengine(v) => v.cancel(),

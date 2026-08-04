@@ -1,0 +1,11 @@
+{
+  "schema": "listener.release_human_review_evidence",
+  "schema_version": 1,
+  "release": "1.0.4",
+  "reviews": [
+    {
+      "behavior": "automatic endpoint preserves continuing target speech",
+      "operator_result": "docs/release/evidence/1.0.4-endpoint-calibration/operator-result.json"
+    }
+  ]
+}

@@ -3,6 +3,9 @@ import {
   PREVIEW_MAX_CHARS,
   PREVIEW_FINAL_TRANSITION,
   LAYOUT_RULES,
+  PREVIEW_BURST_REVEAL,
+  CAPSULE_APPEARANCE,
+  buildPreviewRevealFrames,
   shouldShowStopAcknowledgement,
 } from './capsulePreviewRules.ts';
 
@@ -110,5 +113,50 @@ assertOk(
 // Layout heights are positive
 assertOk(LAYOUT_RULES.fixedHeight.win > 0, 'win height should be positive');
 assertOk(LAYOUT_RULES.fixedHeight.mac > 0, 'mac height should be positive');
+assertEqual(
+  CAPSULE_APPEARANCE.initialOpacity,
+  1,
+  'wake capsule should be visible on its first frame',
+);
+assertOk(
+  CAPSULE_APPEARANCE.enterAnimMs <= 160,
+  'wake capsule geometry should settle within 160 ms',
+);
+
+{
+  const current = '这是已有的预览文字';
+  const target = `${current}现在一次补回八个新字`;
+  const frames = buildPreviewRevealFrames(current, target);
+  assertOk(frames.length > 1, 'large pure append should be visually smoothed');
+  assertOk(
+    frames.length <= PREVIEW_BURST_REVEAL.maxFrames,
+    'burst reveal should stay within the frame budget',
+  );
+  assertEqual(frames.at(-1), target, 'burst reveal must end at the exact provider text');
+  for (const frame of frames) {
+    assertOk(target.startsWith(frame), 'every reveal frame must be an exact target prefix');
+  }
+}
+
+assertEqual(
+  buildPreviewRevealFrames('开始路音', '开始录音').length,
+  1,
+  'non-prefix correction should apply immediately',
+);
+assertEqual(
+  buildPreviewRevealFrames('开始录音', '开始录音。').length,
+  1,
+  'short append should apply immediately',
+);
+
+{
+  const current = '你好';
+  const target = `${current}A\u{1F642}B\u{1F680}C`;
+  const frames = buildPreviewRevealFrames(current, target);
+  assertEqual(frames.at(-1), target, 'Unicode reveal must preserve exact text');
+  for (const frame of frames) {
+    assertOk(!frame.includes('\uFFFD'), 'Unicode reveal must not split a code point');
+  }
+}
 
 console.log('capsulePreviewRules: all assertions passed');

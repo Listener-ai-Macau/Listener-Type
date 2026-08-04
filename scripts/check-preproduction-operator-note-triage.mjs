@@ -122,6 +122,19 @@ function latestSummary() {
   return matches[0] ?? "";
 }
 
+function isCanonicalOperatorResult(resultPath) {
+  if (pathLooksSynthetic(resultPath)) return false;
+  let result;
+  try {
+    result = readJson(resultPath);
+  } catch {
+    return false;
+  }
+  if (result.selected !== "通过" || typeof result.machine_result !== "string") return false;
+  const notePath = path.resolve(path.dirname(resultPath), String(result.operator_note_path ?? ""));
+  return fs.existsSync(notePath) && fs.readFileSync(notePath, "utf8").trim().length > 0;
+}
+
 function collectStrings(value, output = []) {
   if (typeof value === "string") {
     output.push(value);
@@ -148,15 +161,16 @@ function trackedSummaryPaths() {
   if (latest) paths.add(path.resolve(latest));
 
   for (const rel of [
-    ["scripts", "dirty-change-inventory.json"],
+    ["scripts", "release-human-review-evidence.json"],
     ["scripts", "performance-baselines.json"],
   ]) {
     const filePath = path.join(repoRoot, ...rel);
     if (!fs.existsSync(filePath)) continue;
     const strings = collectStrings(readJson(filePath));
     for (const text of strings) {
-      if (text.includes("preproduction-human-review-summary.json")) {
-        paths.add(resolveMaybeRepoPath(text));
+      if (text.includes("preproduction-human-review-summary.json") || text.endsWith("operator-result.json")) {
+        const candidate = resolveMaybeRepoPath(text);
+        if (fs.existsSync(candidate)) paths.add(candidate);
       }
     }
   }
@@ -168,6 +182,17 @@ function validateSummary(summaryPath, explicitTriagePath = "") {
   const failures = [];
   if (!summaryPath || !fs.existsSync(summaryPath)) {
     return { summaryPath, noteCount: 0, failures: [`preproduction human review summary not found: ${summaryPath}`] };
+  }
+
+  if (path.basename(summaryPath) === "operator-result.json") {
+    if (!isCanonicalOperatorResult(summaryPath)) {
+      return {
+        summaryPath,
+        noteCount: 0,
+        failures: [`canonical operator result is incomplete or not accepted: ${summaryPath}`],
+      };
+    }
+    return { summaryPath, noteCount: 0, failures };
   }
 
   const summary = readJson(summaryPath);

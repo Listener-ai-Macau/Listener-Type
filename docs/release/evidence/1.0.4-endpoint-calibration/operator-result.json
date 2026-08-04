@@ -1,0 +1,10 @@
+{
+  "selected": "通过",
+  "observed_at": "2026-08-04T09:27:02+08:00",
+  "installed_exe_sha256": "2DE0FF15A57D48C9A3ED8D422EA910EF13748181C0D38732558EF67933DFDD72",
+  "session_id": "6b47e960-d329-4e48-99ec-74668b127bf8",
+  "embedded_session_id": 599,
+  "machine_result": "最终文本非空，missing_packets=0，连续正文期间没有错误触发 target_speaker_inactive_1000ms，设备在停说后的静音阶段正常结束。",
+  "operator_note_path": "operator-note.txt",
+  "machine_evidence_path": "machine-evidence.md"
+}

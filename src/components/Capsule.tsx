@@ -11,6 +11,8 @@ import { invokeOrMock, isTauri } from '../lib/ipc';
 import { capsuleCancelEnabled, capsuleConfirmEnabled } from '../lib/capsuleActionRules';
 import { getCapsuleDisplayMessage } from '../lib/capsuleDisplayMessage';
 import {
+  buildPreviewRevealFrames,
+  CAPSULE_APPEARANCE,
   truncatePreview,
   PREVIEW_FINAL_TRANSITION,
   shouldShowStopAcknowledgement,
@@ -522,6 +524,11 @@ export function Capsule() {
   const previousStateRef = useRef<CapsuleState>(INITIAL_VISIBLE_STATE);
   const previousElapsedMsRef = useRef<number>(0);
   const messageSessionIdRef = useRef<string | null>(null);
+  const messageRef = useRef<string | undefined>(DEV_CAPSULE_PREVIEW_MESSAGE);
+  const previewTargetRef = useRef<string | undefined>(DEV_CAPSULE_PREVIEW_MESSAGE);
+  const previewSessionIdRef = useRef<string | null>(null);
+  const previewRevealFramesRef = useRef<string[]>([]);
+  const previewRevealFrameRef = useRef<number | null>(null);
   const capsuleOrderingRef = useRef(createCapsuleOrderingTracker());
   const capsuleIngressTraceRef = useRef<{
     elapsedMs: number;
@@ -562,6 +569,64 @@ export function Capsule() {
     }
   };
 
+  const commitMessage = (next: string | undefined) => {
+    messageRef.current = next;
+    setMessage(next);
+  };
+
+  const clearPreviewRevealFrame = () => {
+    if (previewRevealFrameRef.current !== null) {
+      cancelAnimationFrame(previewRevealFrameRef.current);
+      previewRevealFrameRef.current = null;
+    }
+    previewRevealFramesRef.current = [];
+  };
+
+  const resetPreviewReveal = (flushTarget: boolean) => {
+    clearPreviewRevealFrame();
+    if (flushTarget && previewTargetRef.current !== undefined) {
+      commitMessage(previewTargetRef.current);
+    }
+    previewTargetRef.current = undefined;
+    previewSessionIdRef.current = null;
+  };
+
+  const schedulePreviewReveal = () => {
+    const revealNextFrame = () => {
+      previewRevealFrameRef.current = null;
+      const next = previewRevealFramesRef.current.shift();
+      if (next !== undefined) commitMessage(next);
+      if (previewRevealFramesRef.current.length > 0) {
+        previewRevealFrameRef.current = requestAnimationFrame(revealNextFrame);
+      }
+    };
+    if (previewRevealFramesRef.current.length > 0) {
+      previewRevealFrameRef.current = requestAnimationFrame(revealNextFrame);
+    }
+  };
+
+  const applyRecordingPreview = (target: string, sessionId: string | null) => {
+    const sessionChanged = previewSessionIdRef.current !== sessionId;
+    const current = messageRef.current;
+    clearPreviewRevealFrame();
+    previewTargetRef.current = target;
+    previewSessionIdRef.current = sessionId;
+    if (sessionChanged || !current) {
+      commitMessage(target);
+      return;
+    }
+
+    const frames = buildPreviewRevealFrames(current, target);
+    if (frames.length === 1) {
+      commitMessage(target);
+      return;
+    }
+    const first = frames.shift();
+    previewRevealFramesRef.current = frames;
+    if (first !== undefined) commitMessage(first);
+    schedulePreviewReveal();
+  };
+
   const hideCapsuleLocally = () => {
     clearErrorAutoDismiss();
     const activeSessionId = capsuleOrderingRef.current.activeSessionId;
@@ -575,7 +640,8 @@ export function Capsule() {
     clearStopAcknowledgement();
     setState('idle');
     messageSessionIdRef.current = null;
-    setMessage(undefined);
+    resetPreviewReveal(false);
+    commitMessage(undefined);
     setTranslation(false);
   };
 
@@ -655,6 +721,7 @@ export function Capsule() {
         }
         setState(p.state);
         if (p.state === 'idle') {
+          resetPreviewReveal(true);
           setLevel(0);
           messageSessionIdRef.current = null;
           setTranslation(false);
@@ -664,10 +731,16 @@ export function Capsule() {
         const displayMessage = getCapsuleDisplayMessage(p.state, p.message);
         if (displayMessage) {
           messageSessionIdRef.current = p.sessionId ?? null;
-          setMessage(displayMessage);
+          if (p.state === 'recording') {
+            applyRecordingPreview(displayMessage, p.sessionId ?? null);
+          } else {
+            resetPreviewReveal(false);
+            commitMessage(displayMessage);
+          }
         } else if (p.message) {
           messageSessionIdRef.current = null;
-          setMessage(undefined);
+          resetPreviewReveal(false);
+          commitMessage(undefined);
         } else if (!shouldPreserveMessageWithoutPayload(
           p.state,
           p.sessionId ?? null,
@@ -676,7 +749,8 @@ export function Capsule() {
           p.elapsedMs,
         )) {
           messageSessionIdRef.current = null;
-          setMessage(undefined);
+          resetPreviewReveal(false);
+          commitMessage(undefined);
         }
         setTranslation(p.translation === true);
       });
@@ -734,6 +808,7 @@ export function Capsule() {
       if (stopAckTimerRef.current !== null) {
         clearTimeout(stopAckTimerRef.current);
       }
+      clearPreviewRevealFrame();
       clearErrorAutoDismiss();
     };
   }, []);
@@ -838,7 +913,7 @@ export function Capsule() {
         animation: leaving
           // 入场保留一点弹性；出场压短，让 final text 上屏和胶囊消失更贴近同一瞬间。
           ? `capsule-out ${EXIT_ANIM_MS}ms cubic-bezier(.55,.06,.68,.19) forwards`
-          : 'capsule-in .38s cubic-bezier(.16,.86,.32,1.18) both',
+          : `capsule-in ${CAPSULE_APPEARANCE.enterAnimMs}ms cubic-bezier(.16,.86,.32,1.18) both`,
         transformOrigin: 'center',
         willChange: 'transform, opacity',
       }}
@@ -902,11 +977,9 @@ export function Capsule() {
         onRetry={onRetry}
       />
       <style>{`
-        /* 入场：从中央很窄的一小条（scaleX 0.18）+ 略压扁（scaleY 0.95）+ 透明，
-           长出到 scaleX 1 / scaleY 1 / 不透明。配合 wrapper 的 transformOrigin:center，
-           视觉上是「从中心向左右展开」。 */
+        /* 入场首帧即完整可见，只让几何从中央快速展开。 */
         @keyframes capsule-in {
-          from { opacity: 0; transform: scaleX(.18) scaleY(.95); }
+          from { opacity: ${CAPSULE_APPEARANCE.initialOpacity}; transform: scaleX(.68) scaleY(.97); }
           to   { opacity: 1; transform: scaleX(1)   scaleY(1); }
         }
         /* 离场：scaleX 由 1 收回 0.18 + 整体向下偏移 8px + 淡出。

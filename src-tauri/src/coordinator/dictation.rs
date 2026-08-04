@@ -50,6 +50,7 @@ const WAKE_DIAGNOSTIC_RETENTION_MAX_AGE: Duration = Duration::from_secs(7 * 24 *
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);
 const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
+const EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS: u64 = 500;
 const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 1_000;
 const EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS: u64 = 200;
 const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 100;
@@ -322,14 +323,40 @@ fn handle_target_speaker_update(
         return;
     }
 
+    let provider_stall_fallback = provider_stall_local_endpoint_due(&update);
+    if provider_stall_fallback {
+        log::info!(
+            "[asr] target endpoint using bounded provider-stall fallback provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?}",
+            update.provider_audio_duration_ms,
+            update.audio_duration_ms,
+            update.target_speech_end_ms,
+            update.local_target_speech_end_ms
+        );
+    }
+
     let inner = Arc::clone(inner);
+    let early_final_asr = clone_volcengine_asr_for_session(&inner, session_id);
     async_runtime::spawn(async move {
-        match request_embedded_ble_recording_stop_from_host(
-            &inner,
-            "target_speaker_inactive_1000ms",
-        )
-        .await
-        {
+        let stop_future =
+            request_embedded_ble_recording_stop_from_host(&inner, "target_speaker_inactive_1000ms");
+        let finalization_future = async move {
+            let Some(asr) = early_final_asr else {
+                return;
+            };
+            let started = Instant::now();
+            match asr.send_last_frame().await {
+                Ok(()) => log::info!(
+                    "[asr] proactive endpoint final frame sent session_id={session_id} provider_stall_fallback={provider_stall_fallback} elapsed_ms={}",
+                    started.elapsed().as_millis()
+                ),
+                Err(err) => log::warn!(
+                    "[asr] proactive endpoint final frame failed session_id={session_id} provider_stall_fallback={provider_stall_fallback} elapsed_ms={} error={err}",
+                    started.elapsed().as_millis()
+                ),
+            }
+        };
+        let (stop_result, ()) = tokio::join!(stop_future, finalization_future);
+        match stop_result {
             Ok(true) => log::info!(
                 "[embedded-ble] target-speaker auto-stop sent session_id={session_id}"
             ),
@@ -374,17 +401,55 @@ fn target_speaker_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpd
     // endpoint only inside that authoritative coverage. Local capture normally
     // runs ahead; using its newer clock with an older attributed target end can
     // stop a quiet sentence tail milliseconds before the next provider update.
-    let endpoint_audio_duration_ms = update
-        .provider_audio_duration_ms
-        .or(update.audio_duration_ms);
+    let provider_stall_fallback = provider_stall_local_endpoint_due(update);
+    let endpoint_audio_duration_ms = if provider_stall_fallback {
+        update.audio_duration_ms
+    } else {
+        update
+            .provider_audio_duration_ms
+            .or(update.audio_duration_ms)
+    };
     (cloud_target_authority || local_target_authority)
         && !pending_blocks_endpoint
-        && !unresolved_recent_local_speech
+        && (!unresolved_recent_local_speech || provider_stall_fallback)
         && endpoint_audio_duration_ms
             .zip(target_speech_end_ms)
             .is_some_and(|(audio_ms, target_ms)| {
                 audio_ms.saturating_sub(target_ms) >= EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
             })
+}
+
+fn provider_stall_local_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpdate) -> bool {
+    let Some(provider_audio_ms) = update.provider_audio_duration_ms else {
+        return false;
+    };
+    let Some(local_audio_ms) = update.audio_duration_ms else {
+        return false;
+    };
+    let Some(cloud_target_end_ms) = update.target_speech_end_ms else {
+        return false;
+    };
+    let Some(local_target_end_ms) = update.local_target_speech_end_ms else {
+        return false;
+    };
+    if !update.local_speaker_tracking_enabled
+        || update.pending_unattributed_speech
+        || local_audio_ms.saturating_sub(provider_audio_ms)
+            < EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS
+    {
+        return false;
+    }
+
+    // Speaker-agnostic energy is deliberately not an authority here. Room
+    // noise can keep advancing it after the stabilized target profile stops.
+    // The local target clock may corroborate the provider, but it may not
+    // invent a newer target tail while the provider is behind.
+    if local_target_end_ms
+        > cloud_target_end_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+    {
+        return false;
+    }
+    local_audio_ms.saturating_sub(cloud_target_end_ms) >= EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
 }
 
 fn set_volcengine_preview_callbacks(
