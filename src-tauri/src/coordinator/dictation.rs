@@ -50,7 +50,9 @@ const WAKE_DIAGNOSTIC_RETENTION_MAX_AGE: Duration = Duration::from_secs(7 * 24 *
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);
 const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
+const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 1_000;
 const EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS: u64 = 200;
+const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 100;
 static EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 fn should_restore_clipboard_after_dictation(
@@ -309,7 +311,9 @@ fn handle_target_speaker_update(
     if update.target_activity_advanced || update.pending_activity_advanced {
         note_embedded_asr_speech_activity(inner, session_id);
     }
-    let endpoint_due = target_speaker_endpoint_due(&update);
+    let initial_body_wait_active =
+        automatic_wake_initial_body_wait_active(inner, session_id, update.audio_duration_ms);
+    let endpoint_due = !initial_body_wait_active && target_speaker_endpoint_due(&update);
     if !endpoint_due
         || stop_dispatched
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -345,17 +349,39 @@ fn target_speaker_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpd
         .zip(update.local_speech_end_ms)
         .is_some_and(|(audio_ms, local_speech_ms)| {
             let attributed_end_ms = update.stable_attributed_speech_end_ms.unwrap_or_default();
+            let confidently_non_target =
+                update
+                    .local_non_target_speech_end_ms
+                    .is_some_and(|non_target_ms| {
+                        non_target_ms.saturating_add(EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS)
+                            >= local_speech_ms
+                    });
             local_speech_ms
                 > attributed_end_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+                && !confidently_non_target
                 && audio_ms.saturating_sub(local_speech_ms) < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
         });
-    update.speaker_info_present
-        && update.speaker_id.is_some()
-        && !update.pending_unattributed_speech
+    let local_target_authority =
+        update.local_speaker_tracking_enabled && update.local_target_speech_end_ms.is_some();
+    let cloud_target_authority = update.speaker_info_present && update.speaker_id.is_some();
+    let pending_blocks_endpoint = update.pending_unattributed_speech && !local_target_authority;
+    let target_speech_end_ms = update
+        .target_speech_end_ms
+        .into_iter()
+        .chain(update.local_target_speech_end_ms)
+        .max();
+    // Once the provider has reported any covered audio boundary, measure the
+    // endpoint only inside that authoritative coverage. Local capture normally
+    // runs ahead; using its newer clock with an older attributed target end can
+    // stop a quiet sentence tail milliseconds before the next provider update.
+    let endpoint_audio_duration_ms = update
+        .provider_audio_duration_ms
+        .or(update.audio_duration_ms);
+    (cloud_target_authority || local_target_authority)
+        && !pending_blocks_endpoint
         && !unresolved_recent_local_speech
-        && update
-            .audio_duration_ms
-            .zip(update.target_speech_end_ms)
+        && endpoint_audio_duration_ms
+            .zip(target_speech_end_ms)
             .is_some_and(|(audio_ms, target_ms)| {
                 audio_ms.saturating_sub(target_ms) >= EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
             })
@@ -553,6 +579,7 @@ struct EmbeddedAudioDictationSession {
     normalized_pcm_bytes: usize,
     streaming_pcm_buffer: Vec<u8>,
     streaming_agc: EmbeddedStreamingAgcState,
+    local_speaker_tracker: Option<LocalSessionSpeakerTracker>,
     device_ai_processing_started: bool,
     // Proactive trailing-silence stop (改A) state. See
     // EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS and consume_prepared_streaming_pcm.
@@ -658,6 +685,7 @@ async fn begin_embedded_audio_dictation_session(
         normalized_pcm_bytes: 0,
         streaming_pcm_buffer: Vec::new(),
         streaming_agc: EmbeddedStreamingAgcState::default(),
+        local_speaker_tracker: None,
         device_ai_processing_started: false,
         proactive_stop_body_started: false,
         proactive_stop_silence_ms: 0,

@@ -39,6 +39,7 @@ import {
   DEFAULT_DEVICE_PLUGGED_LOW_POWER_IDLE_MINUTES,
   DEFAULT_DEVICE_STATUS_LED_BRIGHTNESS_PERCENT,
 } from '../../lib/deviceSettingsDefaults';
+import { shouldRefreshDeviceSettingsOnFocus } from '../../lib/deviceSettingsRefresh';
 
 const DEVICE_KEYS = [
   { id: 'key1' },
@@ -422,6 +423,20 @@ function DeviceFirmwareSettingsCard() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    const refreshAuthoritativeDeviceState = () => {
+      if (!shouldRefreshDeviceSettingsOnFocus(
+        status,
+        snapshot,
+        form,
+        snapshot ? snapshotToForm(snapshot) : null,
+      )) return;
+      void refresh();
+    };
+    window.addEventListener('focus', refreshAuthoritativeDeviceState);
+    return () => window.removeEventListener('focus', refreshAuthoritativeDeviceState);
+  }, [form, snapshot, status]);
 
   const validationError = validateDeviceSettingsForm(form, t);
   const writeDisabled = status === 'loading' || status === 'saving' || !!validationError || !snapshot?.writeSupported;

@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,9 +26,61 @@ pub struct VerificationResult {
     pub score: f32,
 }
 
+#[derive(Debug, Clone)]
+pub struct SessionSpeakerProfile {
+    embeddings: Arc<Vec<Vec<f32>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SessionSpeakerClassification {
+    Target { score: f32 },
+    NonTarget { score: f32 },
+    Uncertain { score: f32 },
+}
+
+const SESSION_SPEAKER_MIN_NON_TARGET_MS: usize = 1_000;
+
+impl SessionSpeakerClassification {
+    pub fn score(self) -> f32 {
+        match self {
+            Self::Target { score } | Self::NonTarget { score } | Self::Uncertain { score } => score,
+        }
+    }
+}
+
+fn session_speaker_classification_for_score(score: f32) -> SessionSpeakerClassification {
+    if score >= 0.42 {
+        SessionSpeakerClassification::Target { score }
+    } else if score <= 0.34 {
+        SessionSpeakerClassification::NonTarget { score }
+    } else {
+        SessionSpeakerClassification::Uncertain { score }
+    }
+}
+
+fn session_speaker_classification_for_evidence(
+    score: f32,
+    real_speech_ms: usize,
+) -> SessionSpeakerClassification {
+    let classification = session_speaker_classification_for_score(score);
+    if real_speech_ms < SESSION_SPEAKER_MIN_NON_TARGET_MS
+        && matches!(
+            classification,
+            SessionSpeakerClassification::NonTarget { .. }
+        )
+    {
+        SessionSpeakerClassification::Uncertain { score }
+    } else {
+        classification
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod platform {
-    use super::{VerificationResult, VoiceprintStatus};
+    use super::{
+        session_speaker_classification_for_evidence, SessionSpeakerClassification,
+        SessionSpeakerProfile, VerificationResult, VoiceprintStatus,
+    };
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     #[cfg(test)]
     use denzic_speaker_verification_v1_core::DEFAULT_SCORE_MILLI;
@@ -107,6 +160,7 @@ mod platform {
     }
 
     static STATE: Lazy<Mutex<State>> = Lazy::new(|| Mutex::new(State::default()));
+    static INFERENCE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct StoredTemplate {
@@ -254,6 +308,7 @@ mod platform {
         }
 
         fn embedding(&self, pcm: &[u8]) -> Result<Vec<f32>, String> {
+            let _inference_guard = INFERENCE_LOCK.lock();
             let samples = prepare_embedding_samples(pcm)?;
             let sample_count =
                 i32::try_from(samples.len()).map_err(|_| "voiceprint audio is too long")?;
@@ -457,6 +512,23 @@ mod platform {
         Ok(&pcm[start..end])
     }
 
+    fn session_speaker_speech_window(pcm: &[u8]) -> Result<&[u8], String> {
+        let max_bytes = DEFAULT_MAX_CANDIDATE_MS as usize * 32;
+        let pcm = &pcm[..pcm.len().min(max_bytes) & !1usize];
+        let frame_bytes = SAMPLE_RATE as usize * 2 * ENROLLMENT_FRAME_MS / 1000;
+        let (first_active, last_active, _, _, _, _) = active_speech_bounds(pcm, frame_bytes, 20.0)?;
+        let frame_count = pcm.len().div_ceil(frame_bytes);
+        let first = first_active.saturating_sub(1);
+        let last = (last_active + 2).min(frame_count);
+        let start = first * frame_bytes;
+        let end = (last * frame_bytes).min(pcm.len()) & !1usize;
+        let speech = &pcm[start..end];
+        if speech.is_empty() {
+            return Err("voiceprint audio contains no active speech".to_string());
+        }
+        Ok(speech)
+    }
+
     fn verification_template_windows(pcm: &[u8]) -> Result<Vec<&[u8]>, String> {
         let max_bytes = DEFAULT_MAX_CANDIDATE_MS as usize * 32;
         let raw = &pcm[..pcm.len().min(max_bytes) & !1usize];
@@ -469,6 +541,19 @@ mod platform {
             windows.extend(evenly_spaced_windows(speech, TEMPLATE_WINDOW_MS, 2));
         }
         Ok(windows)
+    }
+
+    fn pad_session_speaker_pcm(pcm: &[u8]) -> Vec<u8> {
+        let minimum_bytes = SAMPLE_RATE as usize * 2 * VERIFICATION_MIN_SPEECH_MS / 1000;
+        if pcm.len() >= minimum_bytes || pcm.is_empty() {
+            return pcm.to_vec();
+        }
+        let mut padded = Vec::with_capacity(minimum_bytes);
+        while padded.len() < minimum_bytes {
+            let remaining = minimum_bytes - padded.len();
+            padded.extend_from_slice(&pcm[..pcm.len().min(remaining)]);
+        }
+        padded
     }
 
     fn sha256(path: &Path) -> Result<String, String> {
@@ -1048,6 +1133,79 @@ mod platform {
         })
     }
 
+    pub fn session_profile_from_wake(
+        pcm: &[u8],
+        wake_end_seconds: f32,
+        wake_phrase: &str,
+    ) -> Result<SessionSpeakerProfile, String> {
+        let phrase = crate::wake_phrase::normalize_configured_phrase(wake_phrase)?;
+        let enrolled = {
+            let mut state = STATE.lock();
+            load_template_for_phrase_locked(&mut state, &phrase);
+            state
+                .template
+                .as_ref()
+                .filter(|template| template_matches_phrase(template, &phrase))
+                .map(|template| template.embeddings.clone())
+        };
+        if let Some(embeddings) = enrolled {
+            return Ok(SessionSpeakerProfile {
+                embeddings: Arc::new(embeddings),
+            });
+        }
+
+        let wake_end_bytes =
+            ((wake_end_seconds.max(0.0) * 32_000.0).round() as usize).min(pcm.len()) & !1usize;
+        let profile_end_bytes = wake_end_bytes.saturating_add(250 * 32).min(pcm.len()) & !1usize;
+        let profile_window_bytes = TEMPLATE_WINDOW_MS * 32;
+        let profile_start = profile_end_bytes.saturating_sub(profile_window_bytes) & !1usize;
+        let focused = pcm
+            .get(profile_start..profile_end_bytes)
+            .ok_or_else(|| "wake speaker window is outside candidate audio".to_string())?;
+        let speech = session_speaker_speech_window(focused)?;
+        let source_speech_ms = speech.len() / 32;
+        let model_pcm = pad_session_speaker_pcm(speech);
+        let runtime = ensure_runtime()?;
+        let embedding = runtime.embedding(&model_pcm)?;
+        log::info!(
+            "[speaker-verification] ephemeral session target prepared phrase={} wake_end_ms={} speech_ms={} model_ms={}",
+            phrase,
+            (wake_end_seconds * 1000.0).round() as u64,
+            source_speech_ms,
+            model_pcm.len() / 32
+        );
+        Ok(SessionSpeakerProfile {
+            embeddings: Arc::new(vec![embedding]),
+        })
+    }
+
+    pub fn classify_session_speaker(
+        profile: &SessionSpeakerProfile,
+        pcm: &[u8],
+    ) -> Result<SessionSpeakerClassification, String> {
+        let runtime = ensure_runtime()?;
+        let speech = session_speaker_speech_window(pcm)?;
+        let real_speech_ms = speech.len() / 32;
+        let model_pcm = pad_session_speaker_pcm(speech);
+        let candidate = runtime.embedding(&model_pcm)?;
+        let score = profile
+            .embeddings
+            .iter()
+            .filter_map(|target| cosine(target, &candidate).ok())
+            .max_by(f32::total_cmp)
+            .ok_or_else(|| "session speaker dimensions do not match".to_string())?;
+        // Keep a deliberate uncertainty band around the accepted owner threshold.
+        // Repeat-padding is valid for the embedding model, but a subsecond body
+        // fragment does not contain enough independent speech to exclude the
+        // stabilized speaker.
+        let classification = session_speaker_classification_for_evidence(score, real_speech_ms);
+        log::info!(
+            "[speaker-verification] local session sample real_speech_ms={real_speech_ms} model_ms={} score={score:.6} classification={classification:?}",
+            model_pcm.len() / 32
+        );
+        Ok(classification)
+    }
+
     pub fn invalidate_for_phrase_change(
         previous_phrase: &str,
         next_phrase: &str,
@@ -1230,6 +1388,21 @@ mod platform {
         }
 
         #[test]
+        fn session_speaker_padding_repeats_short_wake_audio_to_model_floor() {
+            let short = vec![900i16; 760 * SAMPLE_RATE as usize / 1000]
+                .into_iter()
+                .flat_map(i16::to_le_bytes)
+                .collect::<Vec<_>>();
+            let speech = session_speaker_speech_window(&short)
+                .expect("subsecond active wake must remain eligible for session tracking");
+            assert_eq!(speech.len(), short.len());
+            let padded = pad_session_speaker_pcm(speech);
+            assert_eq!(padded.len(), VERIFICATION_MIN_SPEECH_MS * 32);
+            assert_eq!(&padded[..short.len()], short.as_slice());
+            assert_eq!(&padded[short.len()..], &short[..240 * 32]);
+        }
+
+        #[test]
         fn owner_verification_uses_real_pcm_without_silence_padding() {
             let pcm = vec![32u8; SAMPLE_RATE as usize * 2 * 1_100 / 1000];
             let samples = prepare_embedding_samples(&pcm).expect("1.1 second continuous speech");
@@ -1312,9 +1485,9 @@ mod platform {
 pub(crate) use platform::prepare_runtime_assets;
 #[cfg(target_os = "windows")]
 pub use platform::{
-    delete_template, fail_enrollment, finish_enrollment, invalidate_for_phrase_change,
-    is_enrolled_for_phrase, prepare_for_phrase, start_enrollment, status_for_phrase,
-    take_enrollment_arm, verify,
+    classify_session_speaker, delete_template, fail_enrollment, finish_enrollment,
+    invalidate_for_phrase_change, is_enrolled_for_phrase, prepare_for_phrase,
+    session_profile_from_wake, start_enrollment, status_for_phrase, take_enrollment_arm, verify,
 };
 
 #[cfg(not(target_os = "windows"))]
@@ -1371,6 +1544,23 @@ pub fn verify(_pcm: &[u8], _wake_phrase: &str) -> Result<VerificationResult, Str
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn session_profile_from_wake(
+    _pcm: &[u8],
+    _wake_end_seconds: f32,
+    _wake_phrase: &str,
+) -> Result<SessionSpeakerProfile, String> {
+    Err("session speaker tracking is currently available on Windows only".into())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn classify_session_speaker(
+    _profile: &SessionSpeakerProfile,
+    _pcm: &[u8],
+) -> Result<SessionSpeakerClassification, String> {
+    Err("session speaker tracking is currently available on Windows only".into())
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn prepare_for_phrase(_wake_phrase: &str) -> Result<(), String> {
     Err("voiceprint verification is currently available on Windows only".into())
 }
@@ -1401,5 +1591,37 @@ mod tests {
     fn public_status_has_explicit_local_privacy_contract() {
         assert!(status_for_phrase("开始录音").local_only);
         assert!(status_for_phrase("开始录音").threshold > 0.0);
+    }
+
+    #[test]
+    fn session_speaker_score_has_a_mixed_speech_uncertainty_band() {
+        assert!(matches!(
+            session_speaker_classification_for_score(0.55),
+            SessionSpeakerClassification::Target { .. }
+        ));
+        assert!(matches!(
+            session_speaker_classification_for_score(0.20),
+            SessionSpeakerClassification::NonTarget { .. }
+        ));
+        assert!(matches!(
+            session_speaker_classification_for_score(0.38),
+            SessionSpeakerClassification::Uncertain { .. }
+        ));
+    }
+
+    #[test]
+    fn short_body_speech_cannot_be_confidently_excluded_after_repeat_padding() {
+        assert!(matches!(
+            session_speaker_classification_for_evidence(0.20, 900),
+            SessionSpeakerClassification::Uncertain { score } if score == 0.20
+        ));
+        assert!(matches!(
+            session_speaker_classification_for_evidence(0.20, 1_000),
+            SessionSpeakerClassification::NonTarget { score } if score == 0.20
+        ));
+        assert!(matches!(
+            session_speaker_classification_for_evidence(0.55, 700),
+            SessionSpeakerClassification::Target { score } if score == 0.55
+        ));
     }
 }

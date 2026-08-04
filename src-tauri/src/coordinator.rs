@@ -122,8 +122,9 @@ const EMBEDDED_BLE_WAKE_GUIDANCE_MESSAGE: &str =
 #[cfg(test)]
 use dictation::dictation_error_code;
 use dictation::{
-    begin_session, cancel_session, current_embedded_audio_partial_preview, end_session,
-    handle_pressed, handle_pressed_edge, handle_released_edge, hidden_automatic_candidate_active,
+    acknowledge_automatic_wake_capsule_visible, begin_session, cancel_session,
+    current_embedded_audio_partial_preview, end_session, handle_pressed, handle_pressed_edge,
+    handle_released_edge, hidden_automatic_candidate_active,
     note_device_key_dictation_start_intent, request_embedded_audio_stop_feedback,
     request_embedded_ble_recording_stop_from_host, request_hidden_automatic_candidate_promotion,
     request_stop_during_starting, submit_embedded_audio_ble_once, submit_embedded_audio_ble_stream,
@@ -241,6 +242,15 @@ pub struct Coordinator {
     inner: Arc<Inner>,
 }
 
+#[derive(Clone, Debug)]
+struct AutomaticWakeGuard {
+    session_id: SessionId,
+    phrase: String,
+    latest_audio_ms: u64,
+    initial_body_wait_until_audio_ms: Option<u64>,
+    body_started: bool,
+}
+
 struct Inner {
     app: Mutex<Option<AppHandle>>,
     history: HistoryStore,
@@ -274,9 +284,9 @@ struct Inner {
     /// 嵌入式 BLE 流式 ASR 的最近一次 partial preview。只用于胶囊视觉反馈；
     /// 光标仍只在 final text 完成后写入。
     embedded_audio_partial_preview: Mutex<Option<String>>,
-    /// Session-scoped guard for the activation phrase at the start of an
-    /// automatic wake transcript. Manual sessions never arm this guard.
-    embedded_audio_automatic_wake_guard: Mutex<Option<(SessionId, String)>>,
+    /// Session-scoped activation-prefix and initial-body guard. Manual sessions
+    /// never arm this guard.
+    embedded_audio_automatic_wake_guard: Mutex<Option<AutomaticWakeGuard>>,
     /// 最近一次用于录音胶囊的嵌入式 BLE PCM 电平。ASR partial preview 到达时沿用它，
     /// 避免文字刷新把音量动画刷成 0。
     embedded_audio_last_capsule_level: Mutex<f32>,
@@ -1502,6 +1512,13 @@ impl Coordinator {
 
     pub fn hotkey_capability(&self) -> HotkeyCapability {
         HotkeyMonitor::capability()
+    }
+
+    pub fn acknowledge_automatic_wake_capsule_visible(&self, session_id: &str) {
+        let Ok(session_id) = Uuid::parse_str(session_id) else {
+            return;
+        };
+        acknowledge_automatic_wake_capsule_visible(&self.inner, session_id);
     }
 
     pub async fn start_dictation(&self) -> Result<(), String> {

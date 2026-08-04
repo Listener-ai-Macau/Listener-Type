@@ -707,8 +707,78 @@ fn clear_automatic_wake_text_guard(inner: &Arc<Inner>) {
     *inner.embedded_audio_automatic_wake_guard.lock() = None;
 }
 
-fn arm_automatic_wake_text_guard(inner: &Arc<Inner>, session_id: SessionId, phrase: String) {
-    *inner.embedded_audio_automatic_wake_guard.lock() = Some((session_id, phrase));
+fn arm_automatic_wake_text_guard(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    phrase: String,
+    capsule_audio_boundary_ms: u64,
+) {
+    let wait_for_visible_ack = inner.prefs.get().show_capsule
+        && std::env::var("LISTENER_TYPE_SUPPRESS_CAPSULE_WINDOW")
+            .ok()
+            .as_deref()
+            != Some("1");
+    *inner.embedded_audio_automatic_wake_guard.lock() = Some(AutomaticWakeGuard {
+        session_id,
+        phrase,
+        latest_audio_ms: capsule_audio_boundary_ms,
+        initial_body_wait_until_audio_ms: (!wait_for_visible_ack).then_some(
+            capsule_audio_boundary_ms.saturating_add(EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS),
+        ),
+        body_started: false,
+    });
+}
+
+pub(super) fn acknowledge_automatic_wake_capsule_visible(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) {
+    let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
+    let Some(guard) = slot
+        .as_mut()
+        .filter(|guard| guard.session_id == session_id)
+    else {
+        return;
+    };
+    if guard.initial_body_wait_until_audio_ms.is_some() {
+        return;
+    }
+    guard.initial_body_wait_until_audio_ms = Some(
+        guard
+            .latest_audio_ms
+            .saturating_add(EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS),
+    );
+    log::info!(
+        "[wake-phrase] automatic body wait started from visible capsule session_id={session_id} audio_ms={}",
+        guard.latest_audio_ms
+    );
+}
+
+fn automatic_wake_initial_body_wait_active(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    audio_duration_ms: Option<u64>,
+) -> bool {
+    let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
+    let Some(guard) = slot
+        .as_mut()
+        .filter(|guard| guard.session_id == session_id)
+    else {
+        return false;
+    };
+    if let Some(audio_ms) = audio_duration_ms {
+        guard.latest_audio_ms = guard.latest_audio_ms.max(audio_ms);
+    }
+    guard
+        .initial_body_wait_until_audio_ms
+        .map(|deadline_ms| {
+            !guard.body_started
+                &&
+            audio_duration_ms
+                .map(|audio_ms| audio_ms < deadline_ms)
+                .unwrap_or(true)
+        })
+        .unwrap_or(true)
 }
 
 fn filter_automatic_wake_text(
@@ -721,12 +791,25 @@ fn filter_automatic_wake_text(
         .embedded_audio_automatic_wake_guard
         .lock()
         .as_ref()
-        .filter(|(guard_session_id, _)| *guard_session_id == session_id)
-        .map(|(_, phrase)| phrase.clone());
-    phrase.map_or_else(
+        .filter(|guard| guard.session_id == session_id)
+        .map(|guard| guard.phrase.clone());
+    let filtered = phrase.map_or_else(
         || preserve_recording_transcript(text),
         |phrase| strip_automatic_activation_prefix(text, &phrase, partial),
-    )
+    );
+    if !filtered.trim().is_empty() {
+        let mut slot = inner.embedded_audio_automatic_wake_guard.lock();
+        if let Some(guard) = slot
+            .as_mut()
+            .filter(|guard| guard.session_id == session_id && !guard.body_started)
+        {
+            guard.body_started = true;
+            log::info!(
+                "[wake-phrase] automatic body started after capsule session_id={session_id}"
+            );
+        }
+    }
+    filtered
 }
 
 fn is_dictation_filler_word(word: &str) -> bool {

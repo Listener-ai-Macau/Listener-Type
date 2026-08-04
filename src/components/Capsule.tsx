@@ -749,7 +749,13 @@ export function Capsule() {
       // 立即恢复可见，并取消上一轮可能挂着的离场。
       if (leaving) setLeaving(false);
       setLastVisibleState(state);
-      traceCapsule('visible', { state, detail: { leaving } });
+      traceCapsule('visible', {
+        state,
+        detail: {
+          leaving,
+          sessionId: capsuleOrderingRef.current.activeSessionId,
+        },
+      });
       return undefined;
     }
     // state === 'idle'：判断是不是从可见态过渡过来。

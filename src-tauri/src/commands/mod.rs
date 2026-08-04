@@ -313,7 +313,20 @@ pub struct UiTimelineEvent {
 }
 
 #[tauri::command]
-pub fn record_ui_timeline_event(payload: UiTimelineEvent) {
+pub fn record_ui_timeline_event(coord: CoordinatorState<'_>, payload: UiTimelineEvent) {
+    if payload.source == "frontend.capsule"
+        && payload.event == "visible"
+        && payload.state.as_deref() == Some("recording")
+    {
+        if let Some(session_id) = payload
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("sessionId"))
+            .and_then(Value::as_str)
+        {
+            coord.acknowledge_automatic_wake_capsule_visible(session_id);
+        }
+    }
     crate::capsule_log::record_ui_event(
         &payload.source,
         &payload.event,

@@ -38,6 +38,7 @@
     "test:capsule-display": "node --experimental-strip-types src/lib/capsuleDisplayMessage.test.ts",
     "test:device-health": "node --experimental-strip-types src/lib/deviceHealth.test.ts",
     "test:device-settings-mock": "node --experimental-strip-types src/lib/deviceSettingsMockWrite.test.ts",
+    "test:device-settings-focus": "node --experimental-strip-types src/lib/deviceSettingsRefresh.test.ts",
     "test:device-settings-ui-e2e-contract": "node scripts/windows-installed-device-settings-ui-e2e.test.mjs",
     "test:ble-recovery-ui": "node --experimental-strip-types src/lib/bleRecoveryUi.test.ts",
     "test:first-run-pairing": "node --experimental-strip-types src/lib/firstRunPairingWizard.test.ts",
@@ -45,7 +46,7 @@
     "test:demo-mode": "node --experimental-strip-types src/lib/demoMode.test.ts",
     "test:firmware-ota": "node --experimental-strip-types src/lib/firmwareOta.test.ts",
     "test:marketplace-discovery": "node --experimental-strip-types src/lib/marketplaceDiscovery.test.ts",
-    "test": "npm run test:rules && npm run test:capsule-actions && npm run test:capsule-ordering && npm run test:layout && npm run test:capsule-display && npm run test:device-health && npm run test:device-settings-mock && npm run test:ble-recovery-ui && npm run test:first-run-pairing && npm run test:provider-setup && npm run test:demo-mode && npm run test:firmware-ota && npm run test:marketplace-discovery",
+    "test": "npm run test:rules && npm run test:capsule-actions && npm run test:capsule-ordering && npm run test:layout && npm run test:capsule-display && npm run test:device-health && npm run test:device-settings-mock && npm run test:device-settings-focus && npm run test:ble-recovery-ui && npm run test:first-run-pairing && npm run test:provider-setup && npm run test:demo-mode && npm run test:firmware-ota && npm run test:marketplace-discovery",
     "check:dark-mode": "node scripts/check-dark-mode.mjs",
     "verify": "node scripts/verify-frontend.mjs",
     "release:check": "node scripts/release-check.mjs"

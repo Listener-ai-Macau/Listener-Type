@@ -106,6 +106,19 @@ thread_local! {
     static TEST_DATA_DIR_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
+#[cfg(test)]
+fn default_test_data_dir() -> PathBuf {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        std::env::temp_dir().join(format!(
+            "listener-type-test-data-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        ))
+    })
+    .clone()
+}
+
 fn data_dir() -> Result<PathBuf> {
     #[cfg(test)]
     if let Some(path) = TEST_DATA_DIR_OVERRIDE.with(|slot| slot.borrow().clone()) {
@@ -120,33 +133,40 @@ fn data_dir() -> Result<PathBuf> {
             return Ok(PathBuf::from(trimmed));
         }
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(test)]
     {
-        let home = std::env::var("HOME").context("HOME not set")?;
-        Ok(PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join(app_profile_dir_name()))
+        Ok(default_test_data_dir())
     }
-
-    #[cfg(target_os = "windows")]
+    #[cfg(not(test))]
     {
-        let appdata = std::env::var("APPDATA").context("APPDATA not set")?;
-        Ok(PathBuf::from(appdata).join(app_profile_dir_name()))
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-            if !xdg.is_empty() {
-                return Ok(PathBuf::from(xdg).join(app_profile_dir_name()));
-            }
+        #[cfg(target_os = "macos")]
+        {
+            let home = std::env::var("HOME").context("HOME not set")?;
+            Ok(PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join(app_profile_dir_name()))
         }
-        let home = std::env::var("HOME").context("HOME not set")?;
-        Ok(PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join(app_profile_dir_name()))
+
+        #[cfg(target_os = "windows")]
+        {
+            let appdata = std::env::var("APPDATA").context("APPDATA not set")?;
+            Ok(PathBuf::from(appdata).join(app_profile_dir_name()))
+        }
+
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+                if !xdg.is_empty() {
+                    return Ok(PathBuf::from(xdg).join(app_profile_dir_name()));
+                }
+            }
+            let home = std::env::var("HOME").context("HOME not set")?;
+            Ok(PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join(app_profile_dir_name()))
+        }
     }
 }
 
@@ -2573,14 +2593,25 @@ impl CredentialsVault {
 #[cfg(test)]
 mod tests {
     use super::{
-        chunk_json_payload, list_vocab_presets, read_preferences, recording_path_for_session,
-        recordings_root, save_vocab_presets, sync_style_pack_preferences,
-        validate_correction_rule_syntax, HistoryStore, KEYRING_CHUNK_MAX_UTF16_UNITS,
+        chunk_json_payload, data_dir, list_vocab_presets, read_preferences,
+        recording_path_for_session, recordings_root, save_vocab_presets,
+        sync_style_pack_preferences, validate_correction_rule_syntax, HistoryStore,
+        KEYRING_CHUNK_MAX_UTF16_UNITS,
     };
     use crate::types::DictationSession;
     use crate::types::{builtin_style_packs, CustomStylePrompts, VocabPreset, VocabPresetStore};
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn default_test_data_dir_is_process_scoped_and_outside_production_profile() {
+        let resolved = data_dir().expect("test data dir");
+        assert!(resolved.starts_with(std::env::temp_dir()));
+        assert!(resolved
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("listener-type-test-data-")));
+    }
 
     /// RAII guard: use a thread-local data root so parallel coordinator tests
     /// never observe or delete this test's temporary directory.

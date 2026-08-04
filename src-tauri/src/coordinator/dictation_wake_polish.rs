@@ -1,7 +1,147 @@
 // Wake candidate, speaker gate, streaming polish helpers.
 // Included into `coordinator::dictation` via `include!`.
 
+const LOCAL_SPEAKER_CLASSIFY_WINDOW_MS: usize = 1_200;
+const LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES: usize = LOCAL_SPEAKER_CLASSIFY_WINDOW_MS * 32;
+const LOCAL_SPEAKER_CLASSIFY_MIN_MS: usize = 1_000;
+const LOCAL_SPEAKER_CLASSIFY_MIN_BYTES: usize = LOCAL_SPEAKER_CLASSIFY_MIN_MS * 32;
+const LOCAL_SPEAKER_CLASSIFY_STEP_MS: u64 = 400;
+
+struct LocalSessionSpeakerTracker {
+    profile_rx: Option<
+        std::sync::mpsc::Receiver<Result<crate::speaker_verification::SessionSpeakerProfile, String>>,
+    >,
+    profile: Option<crate::speaker_verification::SessionSpeakerProfile>,
+    classification_rx: Option<
+        std::sync::mpsc::Receiver<
+            Result<
+                (u64, crate::speaker_verification::SessionSpeakerClassification),
+                String,
+            >,
+        >,
+    >,
+    rolling_pcm: Vec<u8>,
+    next_classification_audio_ms: u64,
+}
+
+impl LocalSessionSpeakerTracker {
+    fn from_wake(pcm: Vec<u8>, wake_end_seconds: f32, wake_phrase: String) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tauri::async_runtime::spawn_blocking(move || {
+            let result = crate::speaker_verification::session_profile_from_wake(
+                &pcm,
+                wake_end_seconds,
+                &wake_phrase,
+            );
+            let _ = tx.send(result);
+        });
+        Self {
+            profile_rx: Some(rx),
+            profile: None,
+            classification_rx: None,
+            rolling_pcm: Vec::with_capacity(LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES),
+            next_classification_audio_ms: LOCAL_SPEAKER_CLASSIFY_MIN_MS as u64,
+        }
+    }
+
+    fn observe(
+        &mut self,
+        pcm: &[u8],
+        audio_end_ms: u64,
+        has_speech_energy: bool,
+    ) -> Option<(u64, crate::speaker_verification::SessionSpeakerClassification)> {
+        self.rolling_pcm.extend_from_slice(pcm);
+        if self.rolling_pcm.len() > LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES {
+            let overflow = (self.rolling_pcm.len() - LOCAL_SPEAKER_CLASSIFY_WINDOW_BYTES + 1)
+                & !1usize;
+            self.rolling_pcm.drain(..overflow);
+        }
+
+        if let Some(rx) = self.profile_rx.as_ref() {
+            match rx.try_recv() {
+                Ok(Ok(profile)) => {
+                    self.profile = Some(profile);
+                    self.profile_rx = None;
+                    log::info!("[speaker-verification] local session-speaker tracker ready");
+                }
+                Ok(Err(err)) => {
+                    self.profile_rx = None;
+                    log::warn!(
+                        "[speaker-verification] local session-speaker tracker unavailable: {err}"
+                    );
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.profile_rx = None;
+                    log::warn!(
+                        "[speaker-verification] local session-speaker profile task disconnected"
+                    );
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
+        let mut completed = None;
+        if let Some(rx) = self.classification_rx.as_ref() {
+            match rx.try_recv() {
+                Ok(Ok(result)) => {
+                    completed = Some(result);
+                    self.classification_rx = None;
+                }
+                Ok(Err(err)) => {
+                    self.classification_rx = None;
+                    log::debug!(
+                        "[speaker-verification] local session-speaker sample uncertain: {err}"
+                    );
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.classification_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
+        if has_speech_energy
+            && self.classification_rx.is_none()
+            && self.rolling_pcm.len() >= LOCAL_SPEAKER_CLASSIFY_MIN_BYTES
+            && audio_end_ms >= self.next_classification_audio_ms
+        {
+            if let Some(profile) = self.profile.clone() {
+                let snapshot = self.rolling_pcm.clone();
+                let (tx, rx) = std::sync::mpsc::channel();
+                self.classification_rx = Some(rx);
+                self.next_classification_audio_ms =
+                    audio_end_ms.saturating_add(LOCAL_SPEAKER_CLASSIFY_STEP_MS);
+                tauri::async_runtime::spawn_blocking(move || {
+                    let result = crate::speaker_verification::classify_session_speaker(
+                        &profile,
+                        &snapshot,
+                    )
+                    .map(|classification| (audio_end_ms, classification));
+                    let _ = tx.send(result);
+                });
+            }
+        }
+        completed
+    }
+}
+
 impl EmbeddedAudioDictationSession {
+    fn start_local_speaker_tracking(
+        &mut self,
+        wake_pcm: Vec<u8>,
+        wake_end_seconds: f32,
+        wake_phrase: String,
+    ) {
+        if let Some(asr) = self.volcengine_asr.as_ref() {
+            asr.note_local_speaker_tracking_started(&wake_phrase);
+        }
+        self.local_speaker_tracker = Some(LocalSessionSpeakerTracker::from_wake(
+            wake_pcm,
+            wake_end_seconds,
+            wake_phrase,
+        ));
+    }
+
     fn consume_streaming_pcm(
         &mut self,
         inner: &Arc<Inner>,
@@ -89,6 +229,18 @@ impl EmbeddedAudioDictationSession {
                 source_pcm_offset_ms.saturating_add(chunk_ms),
                 has_speech_energy,
             );
+        }
+        let local_speaker_evidence = self.local_speaker_tracker.as_mut().and_then(|tracker| {
+            tracker.observe(
+                pcm,
+                source_pcm_offset_ms.saturating_add(chunk_ms),
+                has_speech_energy,
+            )
+        });
+        if let (Some(asr), Some((audio_end_ms, classification))) =
+            (self.volcengine_asr.as_ref(), local_speaker_evidence)
+        {
+            asr.note_local_speaker_classification(audio_end_ms, classification);
         }
 
         // 改A: track sustained trailing silence AFTER the body has started so the
@@ -462,6 +614,12 @@ struct BufferedSpeakerCandidate {
     #[cfg(target_os = "windows")]
     local_confirmation_task:
         Option<tauri::async_runtime::JoinHandle<Result<LocalWakeConfirmation, String>>>,
+    #[cfg(target_os = "windows")]
+    local_confirmation_window_origin_bytes: usize,
+    #[cfg(target_os = "windows")]
+    local_confirmation_task_origin_bytes: usize,
+    #[cfg(target_os = "windows")]
+    local_confirmation_task_has_keyword_model_hit: bool,
     local_confirmation_attempts: usize,
     local_confirmation_last_snapshot_bytes: usize,
     /// First KWS hit schedules an immediate local confirm instead of waiting for
@@ -482,6 +640,10 @@ struct BufferedSpeakerCandidate {
     /// user is not left waiting with no UI while post-wake speech is already buffered.
     early_capsule_session_id: Option<SessionId>,
     kws_fed_bytes: usize,
+    /// Absolute PCM offset represented by second 0 of the current detector.
+    /// Long ambient candidates rotate the detector with overlap so later wake
+    /// phrases do not inherit several seconds of unrelated recurrent state.
+    kws_stream_origin_bytes: usize,
     kws_total_ms: u64,
     started_at: Instant,
 }
@@ -506,6 +668,10 @@ struct LocalWakeConfirmation {
 
 const MAX_BUFFERED_SPEAKER_CANDIDATE_BYTES: usize = 2_100_000;
 const STREAMING_KWS_FEED_BATCH_BYTES: usize = 1_600;
+const STREAMING_KWS_ROTATE_AFTER_MS: usize = 2_400;
+const STREAMING_KWS_ROTATE_AFTER_BYTES: usize = STREAMING_KWS_ROTATE_AFTER_MS * 32;
+const STREAMING_KWS_ROTATE_OVERLAP_MS: usize = 1_400;
+const STREAMING_KWS_ROTATE_OVERLAP_BYTES: usize = STREAMING_KWS_ROTATE_OVERLAP_MS * 32;
 /// Proactive trailing-silence stop (改A) — DISABLED. A fixed energy-silence
 /// threshold cannot distinguish a mid-sentence pause from a real
 /// end-of-utterance, so any value that beats the firmware `auto_stop_silence`
@@ -519,10 +685,10 @@ const EMBEDDED_STREAMING_PROACTIVE_STOP_SILENCE_MS: u64 = 30_000;
 const OWNER_VERIFICATION_START_MS: usize = 1_100;
 const OWNER_VERIFICATION_START_BYTES: usize = OWNER_VERIFICATION_START_MS * 32;
 const OWNER_VERIFICATION_SNAPSHOT_MS: [usize; 3] = [OWNER_VERIFICATION_START_MS, 1_800, 2_400];
-// The generic protocol default is 1.8 s. Listener's four-character Mandarin
-// phrase is already complete around 0.8-1.0 s in real captures, so start the
-// local second chance here instead of making a streaming-KWS miss feel broken.
-const LOCAL_CONFIRMATION_START_MS: usize = 1_000;
+// Real accepted captures complete the four-character Mandarin phrase at 0.8 s
+// (but not 0.7 s). Run the exact-start local confirmation speculatively here;
+// incomplete/absent results stay eligible for KWS and later ladder retries.
+const LOCAL_CONFIRMATION_START_MS: usize = 800;
 const LOCAL_CONFIRMATION_START_BYTES: usize = LOCAL_CONFIRMATION_START_MS * 32;
 const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
     LOCAL_CONFIRMATION_START_MS,
@@ -574,6 +740,61 @@ const MIN_TERMINAL_OFFLINE_PCM_BYTES: usize = 16_000 * 2 * 2;
 const TERMINAL_OFFLINE_RECALL_BUDGET_MS: u64 = 500;
 const WAKE_END_PAD_SECONDS: f32 = 0.12;
 const LOCAL_ONLY_START_ENDPOINT_MAX_SECONDS: f32 = 1.20;
+
+fn rolling_kws_rotation_start(
+    total_pcm_bytes: usize,
+    stream_origin_bytes: usize,
+    phrase_already_hit: bool,
+) -> Option<usize> {
+    (!phrase_already_hit
+        && total_pcm_bytes.saturating_sub(stream_origin_bytes)
+            >= STREAMING_KWS_ROTATE_AFTER_BYTES)
+        .then(|| {
+            total_pcm_bytes
+                .saturating_sub(STREAMING_KWS_ROTATE_OVERLAP_BYTES)
+                & !1usize
+        })
+}
+
+#[cfg(target_os = "windows")]
+fn should_advance_local_confirmation_window(
+    rotated: bool,
+    keyword_model_hit: bool,
+    current_origin_bytes: usize,
+    next_origin_bytes: usize,
+) -> bool {
+    rotated && !keyword_model_hit && next_origin_bytes > current_origin_bytes
+}
+
+#[cfg(target_os = "windows")]
+fn local_confirmation_snapshot_for_window(
+    total_pcm_bytes: usize,
+    window_origin_bytes: usize,
+    attempts: usize,
+) -> Option<usize> {
+    let window_pcm_bytes = total_pcm_bytes.saturating_sub(window_origin_bytes);
+    next_local_confirmation_snapshot_bytes(attempts)
+        .filter(|snapshot_bytes| window_pcm_bytes >= *snapshot_bytes)
+}
+
+#[cfg(target_os = "windows")]
+fn local_confirmation_task_is_stale(
+    task_origin_bytes: usize,
+    current_origin_bytes: usize,
+    task_has_keyword_model_hit: bool,
+) -> bool {
+    !task_has_keyword_model_hit && task_origin_bytes < current_origin_bytes
+}
+
+fn offset_streaming_wake_match(
+    found: Option<crate::wake_phrase::Match>,
+    stream_origin_bytes: usize,
+) -> Option<crate::wake_phrase::Match> {
+    found.map(|mut found| {
+        found.end_seconds += stream_origin_bytes as f32 / 32_000.0;
+        found
+    })
+}
 
 fn owner_verification_window_ready(pcm_bytes: usize, enrolled: bool) -> bool {
     // No enrolled voiceprint → phrase hit alone is enough; do not stall for the
@@ -648,6 +869,15 @@ fn post_wake_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
         pcm_len,
         2,
     )
+}
+
+const WAKE_SPEAKER_ANCHOR_MS: usize = 800;
+
+fn wake_speaker_anchor_pcm_offset_bytes(wake_end_seconds: f32, pcm_len: usize) -> usize {
+    let wake_end_bytes = ((wake_end_seconds.max(0.0) * 32_000.0).round() as usize)
+        .min(pcm_len)
+        & !1usize;
+    wake_end_bytes.saturating_sub(WAKE_SPEAKER_ANCHOR_MS * 32) & !1usize
 }
 
 fn wake_phrase_tail_to_capsule_ms(wake_end_seconds: f32, capsule_request_ms: u64) -> u64 {

@@ -1,5 +1,6 @@
 use super::{
-    append_typed_prefix, begin_embedded_audio_dictation_session_id,
+    acknowledge_automatic_wake_capsule_visible, append_typed_prefix, arm_automatic_wake_text_guard,
+    automatic_wake_initial_body_wait_active, begin_embedded_audio_dictation_session_id,
     cancel_embedded_ble_listener_capture, cancel_session, claim_post_dictation_key,
     clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview, default_done_message,
     device_ai_processing_completion_delay, device_ai_processing_io_allowed,
@@ -10,11 +11,12 @@ use super::{
     embedded_ble_session_actor_history, embedded_ble_session_event_should_trace,
     embedded_ble_stream_idle_timeout, embedded_pcm_capsule_level, embedded_pcm_rms_and_peak,
     embedded_pcm_visual_level, embedded_streaming_chunk_is_asr_input,
-    emit_embedded_audio_transcribing_if_active, end_embedded_ble_session, finalize_polished_text,
-    finish_dictation_pipeline_error, finish_dictation_timeout,
-    install_embedded_ble_listener_cancel, mark_embedded_ble_listener_ready,
-    normalize_embedded_pcm_for_asr, normalize_embedded_streaming_pcm_for_asr,
-    preserve_recording_transcript, provider_preview_change, publish_embedded_ble_asr_final,
+    emit_embedded_audio_transcribing_if_active, end_embedded_ble_session,
+    filter_automatic_wake_text, finalize_polished_text, finish_dictation_pipeline_error,
+    finish_dictation_timeout, install_embedded_ble_listener_cancel,
+    mark_embedded_ble_listener_ready, normalize_embedded_pcm_for_asr,
+    normalize_embedded_streaming_pcm_for_asr, preserve_recording_transcript,
+    provider_preview_change, publish_embedded_ble_asr_final,
     record_embedded_ble_session_actor_command, register_embedded_ble_cancel_flag,
     remove_standalone_dictation_fillers, request_embedded_audio_stop_feedback,
     request_embedded_ble_recording_stop_from_host, should_restore_clipboard_after_dictation,
@@ -43,8 +45,8 @@ use std::sync::{Arc, Mutex};
 
 #[test]
 fn local_confirmation_waits_for_pre_roll_plus_speech_observation() {
-    assert_eq!(LOCAL_CONFIRMATION_START_MS, 1_000);
-    assert_eq!(LOCAL_CONFIRMATION_START_BYTES / 32, 1_000);
+    assert_eq!(LOCAL_CONFIRMATION_START_MS, 800);
+    assert_eq!(LOCAL_CONFIRMATION_START_BYTES / 32, 800);
 }
 
 #[test]
@@ -462,6 +464,7 @@ fn embedded_audio_test_session(
         normalized_pcm_bytes: 0,
         streaming_pcm_buffer: Vec::new(),
         streaming_agc: EmbeddedStreamingAgcState::default(),
+        local_speaker_tracker: None,
         device_ai_processing_started: false,
         proactive_stop_body_started: false,
         proactive_stop_silence_ms: 0,
@@ -1270,8 +1273,12 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
     let update = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("1".into()),
         target_speech_end_ms: Some(1_500),
+        provider_audio_duration_ms: Some(2_499),
         audio_duration_ms: Some(2_499),
         local_speech_end_ms: Some(1_500),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: false,
         stable_attributed_speech_end_ms: Some(1_500),
         target_activity_advanced: false,
         pending_unattributed_speech: false,
@@ -1281,6 +1288,7 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
     assert!(!super::target_speaker_endpoint_due(&update));
 
     let due = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(2_500),
         audio_duration_ms: Some(2_500),
         ..update.clone()
     };
@@ -1303,6 +1311,23 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
         &unresolved_recent_local
     ));
 
+    let unresolved_local_is_confidently_other_speaker =
+        crate::asr::volcengine::TargetSpeakerUpdate {
+            local_non_target_speech_end_ms: Some(3_000),
+            ..unresolved_recent_local.clone()
+        };
+    assert!(super::target_speaker_endpoint_due(
+        &unresolved_local_is_confidently_other_speaker
+    ));
+
+    let stale_non_target_classification = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_non_target_speech_end_ms: Some(2_899),
+        ..unresolved_recent_local.clone()
+    };
+    assert!(!super::target_speaker_endpoint_due(
+        &stale_non_target_classification
+    ));
+
     let unresolved_local_has_reached_its_own_one_second_endpoint =
         crate::asr::volcengine::TargetSpeakerUpdate {
             audio_duration_ms: Some(4_000),
@@ -1317,6 +1342,272 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
         ..due
     };
     assert!(!super::target_speaker_endpoint_due(&no_identity));
+
+    let local_wake_target = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: None,
+        target_speech_end_ms: None,
+        provider_audio_duration_ms: None,
+        audio_duration_ms: Some(2_499),
+        local_speech_end_ms: Some(1_500),
+        local_target_speech_end_ms: Some(1_500),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: None,
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: false,
+    };
+    assert!(!super::target_speaker_endpoint_due(&local_wake_target));
+    let local_wake_due = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(2_500),
+        pending_unattributed_speech: true,
+        ..local_wake_target
+    };
+    assert!(super::target_speaker_endpoint_due(&local_wake_due));
+}
+
+#[test]
+fn target_speaker_endpoint_waits_for_provider_coverage_before_stopping_quiet_tail() {
+    let provider_is_behind = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(5_112),
+        provider_audio_duration_ms: Some(6_200),
+        audio_duration_ms: Some(6_900),
+        local_speech_end_ms: Some(5_900),
+        local_target_speech_end_ms: Some(5_700),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(5_112),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(!super::target_speaker_endpoint_due(&provider_is_behind));
+
+    let quiet_tail_arrives = crate::asr::volcengine::TargetSpeakerUpdate {
+        target_speech_end_ms: Some(6_442),
+        provider_audio_duration_ms: Some(6_900),
+        stable_attributed_speech_end_ms: Some(6_442),
+        target_activity_advanced: true,
+        ..provider_is_behind.clone()
+    };
+    assert!(!super::target_speaker_endpoint_due(&quiet_tail_arrives));
+
+    let one_ms_before_exact_endpoint = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(7_441),
+        audio_duration_ms: Some(7_700),
+        ..quiet_tail_arrives.clone()
+    };
+    assert!(!super::target_speaker_endpoint_due(
+        &one_ms_before_exact_endpoint
+    ));
+
+    let exact_endpoint = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(7_442),
+        ..one_ms_before_exact_endpoint
+    };
+    assert!(super::target_speaker_endpoint_due(&exact_endpoint));
+}
+
+#[test]
+fn target_speaker_endpoint_holds_after_one_transient_local_mismatch() {
+    // Installed session 6ef0d4b8 reproduced this exact shape: cloud
+    // diarization had stabilized only the wake phrase while the debounced local
+    // identity still owned the continuing body through 5.2 seconds.
+    let transient_mismatch = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("1".into()),
+        target_speech_end_ms: Some(880),
+        provider_audio_duration_ms: Some(5_500),
+        audio_duration_ms: Some(5_900),
+        local_speech_end_ms: Some(5_200),
+        local_target_speech_end_ms: Some(5_200),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(4_482),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(!super::target_speaker_endpoint_due(&transient_mismatch));
+
+    let confirmed_other_speaker_tail = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(6_200),
+        audio_duration_ms: Some(6_200),
+        local_speech_end_ms: Some(5_600),
+        local_non_target_speech_end_ms: Some(5_600),
+        ..transient_mismatch
+    };
+    assert!(super::target_speaker_endpoint_due(
+        &confirmed_other_speaker_tail
+    ));
+}
+
+#[test]
+fn target_speaker_endpoint_waits_for_startup_body_calibration() {
+    let unresolved_body = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(1_442),
+        provider_audio_duration_ms: Some(2_900),
+        audio_duration_ms: Some(3_100),
+        local_speech_end_ms: Some(3_100),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: Some(3_100),
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(1_442),
+        target_activity_advanced: false,
+        pending_unattributed_speech: true,
+        pending_activity_advanced: true,
+        speaker_info_present: true,
+    };
+    assert!(!super::target_speaker_endpoint_due(&unresolved_body));
+
+    // Once the provider has converged and there is still only confirmed
+    // non-target body speech, the wake speaker's exact endpoint remains bounded.
+    let confirmed_other = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(3_100),
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        ..unresolved_body
+    };
+    assert!(super::target_speaker_endpoint_due(&confirmed_other));
+}
+
+#[test]
+fn automatic_wake_starts_initial_one_second_wait_at_visible_capsule_ack() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
+
+    assert!(automatic_wake_initial_body_wait_active(
+        &coordinator.inner,
+        session_id,
+        Some(5_000)
+    ));
+    assert_eq!(
+        filter_automatic_wake_text(
+            &coordinator.inner,
+            session_id,
+            "开始录音。今天继续测试。",
+            true,
+        ),
+        "今天继续测试。"
+    );
+    assert!(automatic_wake_initial_body_wait_active(
+        &coordinator.inner,
+        session_id,
+        Some(5_100)
+    ));
+    acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
+    assert!(!automatic_wake_initial_body_wait_active(
+        &coordinator.inner,
+        session_id,
+        Some(5_100)
+    ));
+
+    let no_body_session_id = new_session_id();
+    arm_automatic_wake_text_guard(
+        &coordinator.inner,
+        no_body_session_id,
+        "开始录音".into(),
+        1_200,
+    );
+    assert!(automatic_wake_initial_body_wait_active(
+        &coordinator.inner,
+        no_body_session_id,
+        Some(5_000)
+    ));
+    acknowledge_automatic_wake_capsule_visible(&coordinator.inner, no_body_session_id);
+    assert!(automatic_wake_initial_body_wait_active(
+        &coordinator.inner,
+        no_body_session_id,
+        Some(5_999)
+    ));
+    assert!(!automatic_wake_initial_body_wait_active(
+        &coordinator.inner,
+        no_body_session_id,
+        Some(6_000)
+    ));
+
+    let manual_session_id = new_session_id();
+    assert!(!automatic_wake_initial_body_wait_active(
+        &coordinator.inner,
+        manual_session_id,
+        Some(0)
+    ));
+}
+
+#[test]
+fn long_ambient_wake_candidate_rotates_with_overlap_until_phrase_hit() {
+    assert_eq!(
+        super::rolling_kws_rotation_start(2_399 * 32, 0, false),
+        None
+    );
+    assert_eq!(
+        super::rolling_kws_rotation_start(2_400 * 32, 0, false),
+        Some(1_000 * 32)
+    );
+    assert_eq!(
+        super::rolling_kws_rotation_start(3_400 * 32, 1_000 * 32, false),
+        Some(2_000 * 32)
+    );
+    assert_eq!(
+        super::rolling_kws_rotation_start(4_500 * 32, 1_500 * 32, true),
+        None
+    );
+}
+
+#[test]
+fn rolling_wake_match_keeps_absolute_candidate_boundary() {
+    let found = crate::wake_phrase::Match {
+        end_seconds: 0.75,
+        matched_keyword: Some("开始录音".into()),
+    };
+    let adjusted = super::offset_streaming_wake_match(Some(found), 1_500 * 32)
+        .expect("rolling detector match");
+    assert!((adjusted.end_seconds - 2.25).abs() < f32::EPSILON);
+}
+
+#[test]
+fn rolling_local_confirmation_restarts_the_800ms_ladder_per_window() {
+    let origin = 1_000 * 32;
+    assert!(super::should_advance_local_confirmation_window(
+        true, false, 0, origin
+    ));
+    assert!(!super::should_advance_local_confirmation_window(
+        true, true, 0, origin
+    ));
+    assert_eq!(
+        super::local_confirmation_snapshot_for_window(1_799 * 32, origin, 0),
+        None
+    );
+    assert_eq!(
+        super::local_confirmation_snapshot_for_window(1_800 * 32, origin, 0),
+        Some(800 * 32)
+    );
+}
+
+#[test]
+fn rolling_local_confirmation_discards_only_stale_exploratory_tasks() {
+    let old_origin = 1_000 * 32;
+    let current_origin = 2_000 * 32;
+    assert!(super::local_confirmation_task_is_stale(
+        old_origin,
+        current_origin,
+        false
+    ));
+    assert!(!super::local_confirmation_task_is_stale(
+        current_origin,
+        current_origin,
+        false
+    ));
+    assert!(!super::local_confirmation_task_is_stale(
+        old_origin,
+        current_origin,
+        true
+    ));
 }
 
 #[test]
@@ -1690,7 +1981,7 @@ fn phrase_hit_waits_for_real_owner_audio_without_requiring_a_pause() {
 fn local_confirmation_adds_context_with_a_strict_attempt_cap() {
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(0),
-        Some(1_000 * 32)
+        Some(800 * 32)
     );
     assert_eq!(
         super::next_local_confirmation_snapshot_bytes(1),
@@ -1882,11 +2173,13 @@ fn automatic_start_never_bypasses_hidden_candidate_gate() {
         .map(|offset| start + offset)
         .expect("live automatic gate boundary");
     let body = &source[start..end];
-    assert!(body.contains("detector.accept_pcm(&new_pcm)"));
+    assert!(body.contains("detector.accept_pcm(&pcm_to_feed)"));
+    assert!(body.contains("rolling_kws_rotation_start("));
+    assert!(body.contains("STREAMING_KWS_ROTATE_OVERLAP_MS"));
     assert!(body.contains("candidate.kws_fed_bytes = candidate.pcm.len()"));
     assert!(body.contains("crate::speaker_verification::verify(&pcm, &voiceprint_phrase)"));
     assert!(
-        body.find("detector.accept_pcm(&new_pcm)")
+        body.find("detector.accept_pcm(&pcm_to_feed)")
             < body.find("crate::speaker_verification::verify(&pcm, &voiceprint_phrase)")
     );
     assert!(
@@ -2359,19 +2652,24 @@ fn terminal_offline_recall_skips_after_repeated_local_absence() {
 
 #[test]
 fn automatic_wake_discards_pre_wake_pcm_for_local_transcript() {
-    // Regression: LocalTranscript forced post_wake_offset=0 and kept pre-wake speech.
+    // Preserve only a bounded wake-speaker anchor, never the long ambient prefix.
     assert_eq!(super::post_wake_pcm_offset_bytes(0.0, 32_000), 0);
     assert_eq!(
         super::post_wake_pcm_offset_bytes(10.24, 400_000),
         ((10.24_f32 + 0.12) * 32_000.0) as usize
     );
+    assert_eq!(super::wake_speaker_anchor_pcm_offset_bytes(0.76, 64_000), 0);
+    assert_eq!(
+        super::wake_speaker_anchor_pcm_offset_bytes(3.255, 128_000),
+        ((3.255_f32 * 32_000.0).round() as usize - 800 * 32) & !1usize
+    );
     let stream = include_str!("dictation_embedded_stream.rs");
     assert!(
-        stream.contains("post_wake_pcm_offset_bytes(wake_match.end_seconds")
+        stream.contains("wake_speaker_anchor_pcm_offset_bytes(wake_match.end_seconds")
             && !stream.contains(
                 "phrase_signal == denzic_voice_activation_v1_core::PhraseSignal::KeywordModel {\n                    ((wake_match.end_seconds"
             ),
-        "LocalTranscript and KeywordModel must share post-wake PCM drain"
+        "LocalTranscript and KeywordModel must share the bounded wake-speaker anchor"
     );
 }
 
@@ -2653,4 +2951,25 @@ fn volcengine_preview_and_final_share_the_authoritative_session() {
     assert!(source.contains("asr.set_final_intermediate_transcript_callback"));
     let builder_name = ["build", "_volcengine_asr("].concat();
     assert_eq!(source.matches(&builder_name).count(), 3);
+}
+
+#[test]
+fn live_and_terminal_automatic_wake_paths_both_seed_session_speaker_tracking() {
+    let body = include_str!("dictation_embedded_stream.rs");
+    assert_eq!(
+        body.matches("start_local_speaker_tracking(").count(),
+        2,
+        "both automatic-wake acceptance paths must bind endpointing to the wake speaker"
+    );
+
+    let live_accept = body
+        .find("live automatic session activated and released")
+        .expect("live automatic wake path must remain present");
+    let live_seed = body[..live_accept]
+        .rfind("start_local_speaker_tracking(")
+        .expect("live automatic wake path must seed target-speaker tracking");
+    let live_session = body[..live_accept]
+        .rfind("begin_embedded_audio_dictation_session(inner).await?")
+        .expect("live automatic wake path must create a dictation session");
+    assert!(live_session < live_seed && live_seed < live_accept);
 }

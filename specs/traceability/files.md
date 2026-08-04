@@ -265,6 +265,8 @@ Every tracked code/config/script file must be listed here. Regenerate with `npm 
 | `src/lib/deviceSettingsDefaults.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceSettingsMock.ts` | Core app | Build and targeted tests |
 | `src/lib/deviceSettingsMockWrite.test.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsRefresh.test.ts` | Core app | Build and targeted tests |
+| `src/lib/deviceSettingsRefresh.ts` | Core app | Build and targeted tests |
 | `src/lib/embeddedBleProbe.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.test.ts` | Core app | Build and targeted tests |
 | `src/lib/firmwareOta.ts` | Core app | Build and targeted tests |

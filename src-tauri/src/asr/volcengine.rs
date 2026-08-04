@@ -103,8 +103,15 @@ pub struct FinalIntermediateTranscript {
 pub struct TargetSpeakerUpdate {
     pub speaker_id: Option<String>,
     pub target_speech_end_ms: Option<u64>,
+    /// Furthest audio boundary covered by an authoritative provider response.
+    /// This intentionally stays separate from the locally captured duration so
+    /// endpointing cannot outrun a late speaker-attributed sentence tail.
+    pub provider_audio_duration_ms: Option<u64>,
     pub audio_duration_ms: Option<u64>,
     pub local_speech_end_ms: Option<u64>,
+    pub local_target_speech_end_ms: Option<u64>,
+    pub local_non_target_speech_end_ms: Option<u64>,
+    pub local_speaker_tracking_enabled: bool,
     pub stable_attributed_speech_end_ms: Option<u64>,
     pub target_activity_advanced: bool,
     pub pending_unattributed_speech: bool,
@@ -253,9 +260,31 @@ struct SyncState {
     stable_attributed_speech_end_ms: Option<u64>,
     local_audio_duration_ms: Option<u64>,
     local_speech_end_ms: Option<u64>,
+    local_target_speech_end_ms: Option<u64>,
+    local_non_target_speech_end_ms: Option<u64>,
+    local_speaker_classification: Option<crate::speaker_verification::SessionSpeakerClassification>,
+    local_speaker_tracking_enabled: bool,
+    local_speaker_stable_target: bool,
+    local_target_confirmed: bool,
+    local_consecutive_target: u8,
+    local_consecutive_non_target: u8,
+    local_speaker_evidence: Vec<LocalSpeakerEvidence>,
+    wake_speaker_phrase: Option<String>,
     speaker_info_present: bool,
     pending_unattributed_text: String,
 }
+
+#[derive(Clone, Copy, Debug)]
+struct LocalSpeakerEvidence {
+    audio_end_ms: u64,
+    classification: crate::speaker_verification::SessionSpeakerClassification,
+    stable_target: bool,
+}
+
+const LOCAL_SPEAKER_SWITCH_CONFIRMATIONS: u8 = 2;
+const LOCAL_SPEAKER_EVIDENCE_LIMIT: usize = 64;
+const LOCAL_SPEAKER_WINDOW_MS: u64 = 1_200;
+const MAX_WAKE_PHRASE_UTTERANCE_MS: u64 = 1_800;
 
 fn latest_audio_duration_ms(state: &SyncState) -> Option<u64> {
     state
@@ -273,14 +302,29 @@ fn target_speaker_update_from_state(
     TargetSpeakerUpdate {
         speaker_id: state.target_speaker_id.clone(),
         target_speech_end_ms: state.target_speech_end_ms,
+        provider_audio_duration_ms: state.last_server_audio_duration_ms,
         audio_duration_ms: latest_audio_duration_ms(state),
         local_speech_end_ms: state.local_speech_end_ms,
+        local_target_speech_end_ms: state.local_target_speech_end_ms,
+        local_non_target_speech_end_ms: state.local_non_target_speech_end_ms,
+        local_speaker_tracking_enabled: state.local_speaker_tracking_enabled,
         stable_attributed_speech_end_ms: state.stable_attributed_speech_end_ms,
         target_activity_advanced,
         pending_unattributed_speech: !state.pending_unattributed_text.is_empty(),
         pending_activity_advanced,
         speaker_info_present: state.speaker_info_present,
     }
+}
+
+fn local_speaker_allows_optimistic_preview(state: &SyncState) -> bool {
+    if !state.local_speaker_tracking_enabled {
+        return true;
+    }
+    state.local_speaker_stable_target
+        && matches!(
+            state.local_speaker_classification.as_ref(),
+            Some(crate::speaker_verification::SessionSpeakerClassification::Target { .. })
+        )
 }
 
 fn final_partial_coverage_gap_from_state(state: &SyncState) -> Option<(u64, u64)> {
@@ -357,6 +401,26 @@ fn utterance_end_ms(utterance: &Value) -> Option<u64> {
     word_end.into_iter().chain(utterance_end).max()
 }
 
+fn utterance_start_ms(utterance: &Value) -> Option<u64> {
+    let utterance_start = ["start_time", "startTime", "start_ms"]
+        .iter()
+        .find_map(|key| utterance.get(*key))
+        .and_then(time_value_ms);
+    let word_start = utterance
+        .get("words")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|word| {
+            ["start_time", "startTime", "start_ms"]
+                .iter()
+                .find_map(|key| word.get(*key))
+                .and_then(time_value_ms)
+        })
+        .min();
+    utterance_start.into_iter().chain(word_start).min()
+}
+
 fn time_value_ms(value: &Value) -> Option<u64> {
     if let Some(value) = value.as_u64() {
         return Some(value);
@@ -384,6 +448,157 @@ fn filter_result_to_target_speaker(
     result: &Value,
     target_speaker_id: &mut Option<String>,
 ) -> SpeakerFilteredResult {
+    filter_result_to_target_speaker_with_local_evidence(result, target_speaker_id, false, &[], None)
+}
+
+fn locally_bound_target_speaker(
+    utterances: &[Value],
+    evidence: &[LocalSpeakerEvidence],
+) -> Option<String> {
+    let mut votes = std::collections::BTreeMap::<String, (u32, u32)>::new();
+    for utterance in utterances
+        .iter()
+        .filter(|utterance| utterance_is_stable(utterance))
+    {
+        let Some(speaker_id) = utterance_speaker_id(utterance) else {
+            continue;
+        };
+        let Some(end_ms) = utterance_end_ms(utterance) else {
+            continue;
+        };
+        let start_ms = utterance_start_ms(utterance).unwrap_or(end_ms);
+        let entry = votes.entry(speaker_id).or_default();
+        for sample in evidence {
+            let sample_start_ms = sample.audio_end_ms.saturating_sub(LOCAL_SPEAKER_WINDOW_MS);
+            if sample.audio_end_ms < start_ms || sample_start_ms > end_ms {
+                continue;
+            }
+            match sample.classification {
+                crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+                    if sample.stable_target =>
+                {
+                    entry.0 += 1
+                }
+                crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
+                    if !sample.stable_target =>
+                {
+                    entry.1 += 1
+                }
+                _ => {}
+            }
+        }
+    }
+    votes
+        .into_iter()
+        .filter(|(_, (target_votes, _))| *target_votes > 0)
+        .max_by(
+            |(left_id, (left_target, left_other)), (right_id, (right_target, right_other))| {
+                let left_score = i64::from(*left_target) - i64::from(*left_other);
+                let right_score = i64::from(*right_target) - i64::from(*right_other);
+                left_score
+                    .cmp(&right_score)
+                    .then_with(|| left_target.cmp(right_target))
+                    .then_with(|| right_id.cmp(left_id))
+            },
+        )
+        .map(|(speaker_id, _)| speaker_id)
+}
+
+fn wake_phrase_bound_target_speaker(utterances: &[Value], wake_phrase: &str) -> Option<String> {
+    let normalized_phrase = wake_phrase
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .collect::<String>();
+    if normalized_phrase.is_empty() {
+        return None;
+    }
+    utterances.iter().find_map(|utterance| {
+        if !utterance_is_stable(utterance) {
+            return None;
+        }
+        utterance_contains_normalized_phrase(utterance, &normalized_phrase)
+            .then(|| utterance_speaker_id(utterance))
+            .flatten()
+    })
+}
+
+fn utterance_contains_normalized_phrase(utterance: &Value, normalized_phrase: &str) -> bool {
+    !normalized_phrase.is_empty()
+        && utterance
+            .get("text")
+            .and_then(Value::as_str)
+            .map(|text| {
+                text.chars()
+                    .filter(|ch| ch.is_alphanumeric())
+                    .collect::<String>()
+                    .contains(normalized_phrase)
+            })
+            .unwrap_or(false)
+}
+
+fn utterance_is_bounded_wake_phrase(utterance: &Value, normalized_phrase: &str) -> bool {
+    if !utterance_contains_normalized_phrase(utterance, normalized_phrase) {
+        return false;
+    }
+    let Some(start_ms) = utterance_start_ms(utterance) else {
+        return false;
+    };
+    let Some(end_ms) = utterance_end_ms(utterance) else {
+        return false;
+    };
+    end_ms.saturating_sub(start_ms) <= MAX_WAKE_PHRASE_UTTERANCE_MS
+}
+
+fn local_evidence_allows_utterance(
+    utterance: &Value,
+    evidence: &[LocalSpeakerEvidence],
+    wake_speaker_phrase: Option<&str>,
+) -> bool {
+    let normalized_phrase = wake_speaker_phrase
+        .unwrap_or_default()
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .collect::<String>();
+    if utterance_is_bounded_wake_phrase(utterance, &normalized_phrase) {
+        return true;
+    }
+    let Some(end_ms) = utterance_end_ms(utterance) else {
+        return false;
+    };
+    let start_ms = utterance_start_ms(utterance).unwrap_or(end_ms);
+    let mut target_votes = 0u32;
+    let mut non_target_votes = 0u32;
+    for sample in evidence {
+        let sample_center_ms = sample
+            .audio_end_ms
+            .saturating_sub(LOCAL_SPEAKER_WINDOW_MS / 2);
+        if sample_center_ms < start_ms || sample_center_ms > end_ms {
+            continue;
+        }
+        match sample.classification {
+            crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+                if sample.stable_target =>
+            {
+                target_votes += 1
+            }
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. }
+                if !sample.stable_target =>
+            {
+                non_target_votes += 1
+            }
+            _ => {}
+        }
+    }
+    target_votes > 0 && target_votes >= non_target_votes
+}
+
+fn filter_result_to_target_speaker_with_local_evidence(
+    result: &Value,
+    target_speaker_id: &mut Option<String>,
+    local_speaker_tracking_enabled: bool,
+    local_speaker_evidence: &[LocalSpeakerEvidence],
+    wake_speaker_phrase: Option<&str>,
+) -> SpeakerFilteredResult {
     let mut filtered_result = result.clone();
     let utterances = result
         .get("utterances")
@@ -395,12 +610,18 @@ fn filter_result_to_target_speaker(
     });
 
     if target_speaker_id.is_none() {
-        *target_speaker_id = utterances.iter().find_map(|utterance| {
-            let text = utterance.get("text").and_then(Value::as_str)?.trim();
-            (utterance_is_stable(utterance) && !text.is_empty())
-                .then(|| utterance_speaker_id(utterance))
-                .flatten()
-        });
+        *target_speaker_id = if local_speaker_tracking_enabled {
+            wake_speaker_phrase
+                .and_then(|phrase| wake_phrase_bound_target_speaker(&utterances, phrase))
+                .or_else(|| locally_bound_target_speaker(&utterances, local_speaker_evidence))
+        } else {
+            utterances.iter().find_map(|utterance| {
+                let text = utterance.get("text").and_then(Value::as_str)?.trim();
+                (utterance_is_stable(utterance) && !text.is_empty())
+                    .then(|| utterance_speaker_id(utterance))
+                    .flatten()
+            })
+        };
     }
 
     let selected = target_speaker_id
@@ -411,6 +632,12 @@ fn filter_result_to_target_speaker(
                 .filter(|utterance| {
                     utterance_is_stable(utterance)
                         && utterance_speaker_id(utterance).as_deref() == Some(target)
+                        && (!local_speaker_tracking_enabled
+                            || local_evidence_allows_utterance(
+                                utterance,
+                                local_speaker_evidence,
+                                wake_speaker_phrase,
+                            ))
                 })
                 .cloned()
                 .collect::<Vec<_>>()
@@ -457,6 +684,12 @@ fn filter_result_to_target_speaker(
             !utterance_is_stable(utterance)
                 || target_speaker_id.as_deref().is_some_and(|target| {
                     utterance_speaker_id(utterance).as_deref() == Some(target)
+                        && (!local_speaker_tracking_enabled
+                            || local_evidence_allows_utterance(
+                                utterance,
+                                local_speaker_evidence,
+                                wake_speaker_phrase,
+                            ))
                 })
         })
         .cloned()
@@ -772,9 +1005,106 @@ impl VolcengineStreamingASR {
             }
             target_speaker_update_from_state(&state, false, false)
         };
-        if update.speaker_id.is_some() {
+        if update.speaker_id.is_some() || update.local_speaker_tracking_enabled {
             self.emit_target_speaker_update(update);
         }
+    }
+
+    pub fn note_local_speaker_classification(
+        &self,
+        audio_duration_ms: u64,
+        classification: crate::speaker_verification::SessionSpeakerClassification,
+    ) {
+        let (update, stable_target) = {
+            let mut state = self.state.lock();
+            match classification {
+                crate::speaker_verification::SessionSpeakerClassification::Target { .. } => {
+                    state.local_consecutive_target =
+                        state.local_consecutive_target.saturating_add(1);
+                    state.local_consecutive_non_target = 0;
+                    if !state.local_speaker_stable_target
+                        && state.local_consecutive_target >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                    {
+                        state.local_speaker_stable_target = true;
+                    }
+                }
+                crate::speaker_verification::SessionSpeakerClassification::NonTarget { .. } => {
+                    state.local_consecutive_non_target =
+                        state.local_consecutive_non_target.saturating_add(1);
+                    state.local_consecutive_target = 0;
+                    if state.local_speaker_stable_target
+                        && state.local_consecutive_non_target >= LOCAL_SPEAKER_SWITCH_CONFIRMATIONS
+                    {
+                        state.local_speaker_stable_target = false;
+                    }
+                }
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain { .. } => {
+                    state.local_consecutive_target = 0;
+                    state.local_consecutive_non_target = 0;
+                }
+            }
+            let stable_target = state.local_speaker_stable_target;
+            if stable_target
+                && matches!(
+                    classification,
+                    crate::speaker_verification::SessionSpeakerClassification::Target { .. }
+                )
+            {
+                state.local_target_confirmed = true;
+            }
+            // The debounced identity owns the endpoint clock only after body
+            // speech has confirmed the wake anchor at least once. Before that,
+            // provisional cloud body text keeps the endpoint open instead of
+            // turning overlapping false-negative windows into a local authority.
+            if stable_target && state.local_target_confirmed {
+                state.local_target_speech_end_ms = Some(
+                    state
+                        .local_target_speech_end_ms
+                        .unwrap_or_default()
+                        .max(audio_duration_ms),
+                );
+            }
+            if !stable_target {
+                state.local_non_target_speech_end_ms = Some(
+                    state
+                        .local_non_target_speech_end_ms
+                        .unwrap_or_default()
+                        .max(audio_duration_ms),
+                );
+            }
+            state.local_speaker_classification = Some(classification.clone());
+            state.local_speaker_evidence.push(LocalSpeakerEvidence {
+                audio_end_ms: audio_duration_ms,
+                classification,
+                stable_target,
+            });
+            if state.local_speaker_evidence.len() > LOCAL_SPEAKER_EVIDENCE_LIMIT {
+                let overflow = state.local_speaker_evidence.len() - LOCAL_SPEAKER_EVIDENCE_LIMIT;
+                state.local_speaker_evidence.drain(..overflow);
+            }
+            (
+                target_speaker_update_from_state(&state, false, false),
+                stable_target,
+            )
+        };
+        log::info!(
+            "[asr] local session-speaker evidence classification={classification:?} stable_target={stable_target} audio_end_ms={audio_duration_ms}"
+        );
+        if update.speaker_id.is_some() || update.local_speaker_tracking_enabled {
+            self.emit_target_speaker_update(update);
+        }
+    }
+
+    pub fn note_local_speaker_tracking_started(&self, wake_phrase: &str) {
+        let mut state = self.state.lock();
+        state.local_speaker_tracking_enabled = true;
+        state.local_speaker_stable_target = true;
+        state.local_target_confirmed = false;
+        state.local_consecutive_target = 0;
+        state.local_consecutive_non_target = 0;
+        state.local_speaker_evidence.clear();
+        state.wake_speaker_phrase = Some(wake_phrase.to_string());
+        log::info!("[asr] local session-speaker tracking anchored to wake speaker");
     }
 
     pub(crate) fn set_streaming_event_callback(&self, callback: Option<StreamingEventCallback>) {
@@ -875,6 +1205,8 @@ impl VolcengineStreamingASR {
         // Reset sync state for the new session.
         {
             let mut st = self.state.lock();
+            let local_speaker_tracking_requested = st.local_speaker_tracking_enabled;
+            let wake_speaker_phrase = st.wake_speaker_phrase.clone();
             st.pending_audio.clear();
             st.next_sequence = 1;
             st.bytes_sent = 0;
@@ -898,6 +1230,16 @@ impl VolcengineStreamingASR {
             st.stable_attributed_speech_end_ms = None;
             st.local_audio_duration_ms = None;
             st.local_speech_end_ms = None;
+            st.local_target_speech_end_ms = None;
+            st.local_non_target_speech_end_ms = None;
+            st.local_speaker_classification = None;
+            st.local_speaker_tracking_enabled = local_speaker_tracking_requested;
+            st.local_speaker_stable_target = local_speaker_tracking_requested;
+            st.local_target_confirmed = false;
+            st.local_consecutive_target = 0;
+            st.local_consecutive_non_target = 0;
+            st.local_speaker_evidence.clear();
+            st.wake_speaker_phrase = wake_speaker_phrase;
             st.speaker_info_present = false;
             st.pending_unattributed_text.clear();
         }
@@ -1274,7 +1616,16 @@ impl VolcengineStreamingASR {
         let has_final = parsed.is_final();
         let (speaker_filtered_result, target_speaker_update) = {
             let mut state = self.state.lock();
-            let filtered = filter_result_to_target_speaker(result, &mut state.target_speaker_id);
+            let local_speaker_tracking_enabled = state.local_speaker_tracking_enabled;
+            let local_speaker_evidence = state.local_speaker_evidence.clone();
+            let wake_speaker_phrase = state.wake_speaker_phrase.clone();
+            let filtered = filter_result_to_target_speaker_with_local_evidence(
+                result,
+                &mut state.target_speaker_id,
+                local_speaker_tracking_enabled,
+                &local_speaker_evidence,
+                wake_speaker_phrase.as_deref(),
+            );
             let previous_end_ms = state.target_speech_end_ms;
             let previous_pending_text = std::mem::take(&mut state.pending_unattributed_text);
             if let Some(end_ms) = filtered.target_speech_end_ms {
@@ -1303,11 +1654,15 @@ impl VolcengineStreamingASR {
         };
         if target_speaker_update.speaker_id.is_some() {
             log::info!(
-                "[asr] target-speaker state speaker_id={:?} stable_end_ms={:?} audio_duration_ms={:?} local_speech_end_ms={:?} stable_attributed_end_ms={:?} pending_provisional={} target_advanced={} pending_advanced={}",
+                "[asr] target-speaker state speaker_id={:?} stable_end_ms={:?} audio_duration_ms={:?} provider_audio_duration_ms={:?} local_speech_end_ms={:?} local_target_end_ms={:?} local_non_target_end_ms={:?} local_tracking={} stable_attributed_end_ms={:?} pending_provisional={} target_advanced={} pending_advanced={}",
                 target_speaker_update.speaker_id,
                 target_speaker_update.target_speech_end_ms,
                 target_speaker_update.audio_duration_ms,
+                target_speaker_update.provider_audio_duration_ms,
                 target_speaker_update.local_speech_end_ms,
+                target_speaker_update.local_target_speech_end_ms,
+                target_speaker_update.local_non_target_speech_end_ms,
+                target_speaker_update.local_speaker_tracking_enabled,
                 target_speaker_update.stable_attributed_speech_end_ms,
                 target_speaker_update.pending_unattributed_speech,
                 target_speaker_update.target_activity_advanced,
@@ -1320,6 +1675,10 @@ impl VolcengineStreamingASR {
             !speaker_filtered_result.pending_unattributed_text.is_empty();
         if !has_final
             && pending_unattributed_speech
+            && {
+                let state = self.state.lock();
+                local_speaker_allows_optimistic_preview(&state)
+            }
             && self
                 .session_options
                 .endpoint
@@ -2109,7 +2468,7 @@ mod tests {
     }
 
     #[test]
-    fn provisional_other_speaker_preview_retracts_without_entering_authoritative_transcript() {
+    fn local_non_target_speech_never_enters_optimistic_preview() {
         let asr = VolcengineStreamingASR::new(
             VolcengineCredentials {
                 app_id: "app".into(),
@@ -2123,6 +2482,15 @@ mod tests {
         asr.set_partial_transcript_callback(Some(Arc::new(move |text| {
             previews_for_callback.lock().push(text);
         })));
+        asr.note_local_speaker_tracking_started("开始录音");
+        asr.note_local_speaker_classification(
+            700,
+            crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.6 },
+        );
+        asr.note_local_speaker_classification(
+            1700,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.2 },
+        );
 
         let provisional_payload = serde_json::to_vec(&json!({
             "audio_info": { "duration": 1800 },
@@ -2155,7 +2523,7 @@ mod tests {
             None,
         );
         assert!(asr.handle_frame(&provisional_frame));
-        assert_eq!(&*previews.lock(), &["目标正文临时旁人".to_string()]);
+        assert!(previews.lock().is_empty());
         assert_eq!(asr.state.lock().best_transcript_text, "目标正文");
 
         let stable_payload = serde_json::to_vec(&json!({
@@ -2189,13 +2557,419 @@ mod tests {
             None,
         );
         assert!(asr.handle_frame(&stable_frame));
-        assert_eq!(
-            &*previews.lock(),
-            &["目标正文临时旁人".to_string(), "目标正文".to_string()]
-        );
+        assert_eq!(&*previews.lock(), &["目标正文".to_string()]);
         let state = asr.state.lock();
         assert_eq!(state.best_transcript_text, "目标正文");
         assert_eq!(state.last_partial_text, "目标正文");
+    }
+
+    #[test]
+    fn optimistic_preview_gate_allows_unknown_and_target_but_not_mixed_or_non_target() {
+        let mut state = SyncState::default();
+        assert!(local_speaker_allows_optimistic_preview(&state));
+        state.local_speaker_tracking_enabled = true;
+        state.local_speaker_stable_target = true;
+        state.local_speaker_classification =
+            Some(crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.6 });
+        assert!(local_speaker_allows_optimistic_preview(&state));
+        state.local_speaker_classification = Some(
+            crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.38 },
+        );
+        assert!(!local_speaker_allows_optimistic_preview(&state));
+        state.local_speaker_classification = Some(
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.2 },
+        );
+        assert!(!local_speaker_allows_optimistic_preview(&state));
+    }
+
+    #[test]
+    fn local_speaker_identity_requires_consecutive_evidence_to_switch() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_local_speaker_tracking_started("开始录音");
+
+        asr.note_local_speaker_classification(
+            1_000,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.2 },
+        );
+        {
+            let state = asr.state.lock();
+            assert!(state.local_speaker_stable_target);
+            assert_eq!(state.local_non_target_speech_end_ms, None);
+            assert_eq!(state.local_target_speech_end_ms, None);
+        }
+        asr.note_local_speaker_classification(
+            1_400,
+            crate::speaker_verification::SessionSpeakerClassification::Uncertain { score: 0.38 },
+        );
+        asr.note_local_speaker_classification(
+            1_800,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.2 },
+        );
+        assert!(asr.state.lock().local_speaker_stable_target);
+        assert_eq!(asr.state.lock().local_target_speech_end_ms, None);
+        asr.note_local_speaker_classification(
+            2_200,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.2 },
+        );
+        assert!(!asr.state.lock().local_speaker_stable_target);
+        assert_eq!(asr.state.lock().local_target_speech_end_ms, None);
+        assert_eq!(asr.state.lock().local_non_target_speech_end_ms, Some(2_200));
+
+        asr.note_local_speaker_classification(
+            2_600,
+            crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.55 },
+        );
+        assert!(!asr.state.lock().local_speaker_stable_target);
+        asr.note_local_speaker_classification(
+            3_000,
+            crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.55 },
+        );
+        assert!(asr.state.lock().local_speaker_stable_target);
+        assert!(asr.state.lock().local_target_confirmed);
+        assert_eq!(asr.state.lock().local_target_speech_end_ms, Some(3_000));
+    }
+
+    #[test]
+    fn startup_false_negatives_do_not_create_target_endpoint_authority() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_local_speaker_tracking_started("开始录音");
+
+        for (audio_end_ms, classification) in [
+            (
+                1_900,
+                crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                    score: 0.292,
+                },
+            ),
+            (
+                2_300,
+                crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                    score: 0.288,
+                },
+            ),
+            (
+                2_700,
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                    score: 0.371,
+                },
+            ),
+            (
+                3_100,
+                crate::speaker_verification::SessionSpeakerClassification::Uncertain {
+                    score: 0.389,
+                },
+            ),
+            (
+                3_500,
+                crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.493 },
+            ),
+        ] {
+            asr.note_local_speaker_classification(audio_end_ms, classification);
+        }
+        {
+            let state = asr.state.lock();
+            assert!(!state.local_speaker_stable_target);
+            assert!(!state.local_target_confirmed);
+            assert_eq!(state.local_target_speech_end_ms, None);
+            assert_eq!(state.local_non_target_speech_end_ms, Some(3_500));
+        }
+
+        asr.note_local_speaker_classification(
+            3_900,
+            crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.50 },
+        );
+        let state = asr.state.lock();
+        assert!(state.local_speaker_stable_target);
+        assert!(state.local_target_confirmed);
+        assert_eq!(state.local_target_speech_end_ms, Some(3_900));
+    }
+
+    #[test]
+    fn transient_low_score_keeps_advancing_stabilized_target_clock() {
+        let asr = VolcengineStreamingASR::new(
+            VolcengineCredentials {
+                app_id: "app".into(),
+                access_token: "token".into(),
+                resource_id: VolcengineCredentials::default_resource_id().into(),
+            },
+            Vec::new(),
+        );
+        asr.note_local_speaker_tracking_started("开始录音");
+
+        for (audio_end_ms, score) in [(2_500, 0.495), (2_900, 0.499), (3_600, 0.559)] {
+            asr.note_local_speaker_classification(
+                audio_end_ms,
+                crate::speaker_verification::SessionSpeakerClassification::Target { score },
+            );
+        }
+        asr.note_local_speaker_classification(
+            5_200,
+            crate::speaker_verification::SessionSpeakerClassification::NonTarget { score: 0.095 },
+        );
+
+        let state = asr.state.lock();
+        assert!(state.local_speaker_stable_target);
+        assert_eq!(state.local_consecutive_non_target, 1);
+        assert_eq!(state.local_target_speech_end_ms, Some(5_200));
+        assert_eq!(state.local_non_target_speech_end_ms, None);
+    }
+
+    #[test]
+    fn local_wake_speaker_evidence_binds_cloud_target_after_other_speaker() {
+        let result = json!({
+            "text": "旁人先说目标正文",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 1000,
+                    "text": "旁人先说"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 2200,
+                    "end_time": 4000,
+                    "text": "目标正文"
+                }
+            ]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 800,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                        score: 0.2,
+                    },
+                stable_target: false,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 2_800,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.6,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 3_400,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.6,
+                },
+                stable_target: true,
+            },
+        ];
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            None,
+        );
+
+        assert_eq!(target.as_deref(), Some("1"));
+        assert_eq!(filtered.result["text"], "目标正文");
+    }
+
+    #[test]
+    fn stable_wake_phrase_speaker_overrides_misleading_local_embedding() {
+        let result = json!({
+            "text": "旁人正文开始录音目标正文",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 1200,
+                    "text": "旁人正文"
+                },
+                {
+                    "additions": { "speaker_id": "1", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 200,
+                    "end_time": 2600,
+                    "text": "开始录音目标正文"
+                }
+            ]
+        });
+        let misleading_evidence = vec![LocalSpeakerEvidence {
+            audio_end_ms: 1_000,
+            classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                score: 0.7,
+            },
+            stable_target: true,
+        }];
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &misleading_evidence,
+            Some("开始录音"),
+        );
+
+        assert_eq!(target.as_deref(), Some("1"));
+        assert_eq!(filtered.result["text"], "开始录音目标正文");
+    }
+
+    #[test]
+    fn local_timeline_excludes_other_person_when_cloud_collapses_speaker_ids() {
+        let result = json!({
+            "text": "开始录音旁人正文",
+            "utterances": [
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 0,
+                    "end_time": 1200,
+                    "text": "开始录音"
+                },
+                {
+                    "additions": { "speaker_id": "0", "source": "two_pass" },
+                    "definite": true,
+                    "start_time": 1400,
+                    "end_time": 4000,
+                    "text": "旁人正文"
+                }
+            ]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 1_000,
+                classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                    score: 0.7,
+                },
+                stable_target: true,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 2_400,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                        score: 0.2,
+                    },
+                stable_target: false,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 3_000,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                        score: 0.2,
+                    },
+                stable_target: false,
+            },
+        ];
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+        );
+
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], "开始录音");
+        assert_eq!(filtered.target_speech_end_ms, Some(1200));
+    }
+
+    #[test]
+    fn long_cloud_utterance_containing_wake_phrase_still_requires_local_target_evidence() {
+        let result = json!({
+            "text": "开始录音旁人长句",
+            "utterances": [{
+                "additions": { "speaker_id": "0", "source": "two_pass" },
+                "definite": true,
+                "start_time": 0,
+                "end_time": 4000,
+                "text": "开始录音旁人长句"
+            }]
+        });
+        let evidence = vec![
+            LocalSpeakerEvidence {
+                audio_end_ms: 2_400,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                        score: 0.2,
+                    },
+                stable_target: false,
+            },
+            LocalSpeakerEvidence {
+                audio_end_ms: 3_000,
+                classification:
+                    crate::speaker_verification::SessionSpeakerClassification::NonTarget {
+                        score: 0.2,
+                    },
+                stable_target: false,
+            },
+        ];
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+        );
+
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], "");
+        assert_eq!(filtered.target_speech_end_ms, None);
+    }
+
+    #[test]
+    fn word_timing_recovers_missing_utterance_start_for_local_target_evidence() {
+        let result = json!({
+            "text": "开始录音本人正文",
+            "utterances": [{
+                "additions": { "speaker_id": "0", "source": "two_pass" },
+                "definite": true,
+                "end_time": 5400,
+                "text": "开始录音本人正文",
+                "words": [
+                    { "start_time": 100, "end_time": 500, "text": "开始录音" },
+                    { "start_time": 1500, "end_time": 5400, "text": "本人正文" }
+                ]
+            }]
+        });
+        let evidence = vec![LocalSpeakerEvidence {
+            audio_end_ms: 2_100,
+            classification: crate::speaker_verification::SessionSpeakerClassification::Target {
+                score: 0.6,
+            },
+            stable_target: true,
+        }];
+        let mut target = None;
+
+        let filtered = filter_result_to_target_speaker_with_local_evidence(
+            &result,
+            &mut target,
+            true,
+            &evidence,
+            Some("开始录音"),
+        );
+
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], "开始录音本人正文");
+        assert_eq!(filtered.target_speech_end_ms, Some(5400));
     }
 
     #[test]
