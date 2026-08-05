@@ -1126,8 +1126,8 @@ impl Default for EmbeddedStreamingDictation {
 /// 平台差异：
 /// - **macOS**：`switch_to_ascii` 切到 ABC 输入源（规避 CJK / 日文 IME 拦截 Unicode 事件），
 ///   session 结束 `restore_input_source` 切回。`type_unicode_chunk` 走 CGEvent FFI。
-/// - **Windows**：`switch_to_ascii` 是 no-op（SendInput Unicode 绕过 TSF）；
-///   `type_unicode_chunk` 走 `SendInput(KEYEVENTF_UNICODE)`。
+/// - **Windows**：`switch_to_ascii` 临时切 en-US 键盘布局（防 CJK IME 吞字），
+///   session 结束恢复；`type_unicode_chunk` 走 `SendInput(KEYEVENTF_UNICODE)`。
 /// - **Linux（实验）**：`switch_to_ascii` 是 no-op；`type_unicode_chunk` 走 enigo
 ///   `Keyboard::text`。X11 / XTest 稳定，Wayland 看 compositor 给不给 libei 权限。
 ///

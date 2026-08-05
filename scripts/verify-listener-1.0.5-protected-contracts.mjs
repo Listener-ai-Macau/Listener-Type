@@ -118,6 +118,7 @@ const volcengineAsr = read("src-tauri/src/asr/volcengine.rs");
 const wakePolish = read("src-tauri/src/coordinator/dictation_wake_polish.rs");
 const deviceAi = read("src-tauri/src/coordinator/dictation_device_ai.rs");
 const coordinatorRs = read("src-tauri/src/coordinator.rs");
+const windowsImeSessionRs = read("src-tauri/src/windows_ime_session.rs");
 
 gate("recording_automation_polish_and_long_form", () => {
   mustInclude(deviceSection, "longFormDictation", "long-form toggle in automation settings");
@@ -219,8 +220,18 @@ gate("snappy_insert_when_llm_auth_or_tsf_unavailable", () => {
   );
   mustInclude(
     coordinatorRs,
+    "non-TSF IME-safe Unicode insert status=Inserted",
+    "IME-safe Unicode is the preferred non-TSF true-insert path",
+  );
+  mustInclude(
+    coordinatorRs,
     "non-TSF clipboard paste path status=",
-    "clipboard paste is preferred non-TSF path",
+    "clipboard paste remains non-TSF reliability fallback",
+  );
+  mustInclude(
+    windowsImeSessionRs,
+    "TSF not registered",
+    "skip doomed ActivateProfile when TSF DLL is not installed",
   );
 });
 

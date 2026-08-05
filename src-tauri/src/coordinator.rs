@@ -2530,9 +2530,27 @@ fn insert_via_non_tsf_fallback(
     allow_clipboard_fallback: bool,
     paste_shortcut: PasteShortcut,
 ) -> WindowsInsertionResult {
-    // Prefer clipboard+paste when TSF never activated: user CJK IME often
-    // swallows bare Unicode SendInput (false Inserted). Clipboard paste is the
-    // path that actually landed text in owner multi-speaker sessions.
+    // Default MSI does not ship ListenerTypeIme.dll (optional TSF). Prefer
+    // IME-safe Unicode SendInput (en-US layout armor) so stop→Done lands as
+    // Inserted without clipboard paste flash. CJK IME used to swallow bare
+    // Unicode; layout armoring + clipboard fallback keeps reliability.
+    let unicode_status = inner
+        .inserter
+        .insert_via_unicode_keystrokes_ime_safe(polished);
+    if unicode_status == InsertStatus::Inserted {
+        log::info!(
+            "[windows-ime] non-TSF IME-safe Unicode insert status=Inserted chars={}",
+            polished.chars().count()
+        );
+        return WindowsInsertionResult {
+            status: InsertStatus::Inserted,
+            target_confirmed: false,
+        };
+    }
+    log::info!(
+        "[windows-ime] non-TSF IME-safe Unicode insert not clean status={unicode_status:?}; trying clipboard fallback chars={}",
+        polished.chars().count()
+    );
     if allow_clipboard_fallback {
         let status = inner.inserter.insert_via_clipboard_fallback(
             polished,
@@ -2549,28 +2567,14 @@ fn insert_via_non_tsf_fallback(
                 target_confirmed: false,
             };
         }
-    }
-    if inner.inserter.insert_via_unicode_keystrokes(polished) == InsertStatus::Inserted {
-        log::info!(
-            "[windows-ime] TSF unavailable; Unicode SendInput dispatched without target confirmation"
-        );
         WindowsInsertionResult {
-            status: InsertStatus::Inserted,
-            target_confirmed: false,
-        }
-    } else if !allow_clipboard_fallback {
-        log::warn!("[windows-ime] clipboard fallback disabled by final clipboard preference");
-        WindowsInsertionResult {
-            status: InsertStatus::Failed,
+            status,
             target_confirmed: false,
         }
     } else {
+        log::warn!("[windows-ime] clipboard fallback disabled by final clipboard preference");
         WindowsInsertionResult {
-            status: inner.inserter.insert_via_clipboard_fallback(
-                polished,
-                restore_clipboard,
-                paste_shortcut,
-            ),
+            status: InsertStatus::Failed,
             target_confirmed: false,
         }
     }

@@ -77,6 +77,25 @@ impl TextInserter {
         }
     }
 
+    /// IME-safe final insert: temporarily arm en-US layout, then KEYEVENTF_UNICODE.
+    /// Default product MSI does not register the optional TSF DLL; this is the
+    /// primary "true insert" path that avoids clipboard paste flash when CJK IME
+    /// would otherwise swallow bare Unicode events.
+    #[cfg(target_os = "windows")]
+    pub fn insert_via_unicode_keystrokes_ime_safe(&self, text: &str) -> InsertStatus {
+        if text.is_empty() {
+            return InsertStatus::CopiedFallback;
+        }
+        match crate::unicode_keystroke::type_unicode_chunk_ime_safe(text) {
+            Ok(n) if n > 0 || text.is_empty() => InsertStatus::Inserted,
+            Ok(_) => InsertStatus::CopiedFallback,
+            Err(err) => {
+                log::warn!("[insertion] IME-safe Unicode SendInput failed: {err}");
+                InsertStatus::CopiedFallback
+            }
+        }
+    }
+
     /// Insert `text` at the current cursor position.
     /// macOS 走 AX 直写 / Cmd+V：`_restore_clipboard_after_paste` 与 `_paste_shortcut`
     /// 仅为跨平台调用方对齐签名而存在，本路径不读它们。

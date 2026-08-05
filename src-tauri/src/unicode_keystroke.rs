@@ -12,8 +12,8 @@
 //! - **macOS**：手写 CGEvent FFI（与 `insertion.rs::macos` 的 Cmd+V 同源）。
 //!   `CGEventKeyboardSetUnicodeString` 在 CJK / 日文 IME 激活时被拦截 ——
 //!   必须 `switch_to_ascii` 切到 ABC，session 结束再 `restore_input_source` 切回。
-//! - **Windows**：`SendInput(KEYEVENTF_UNICODE)` 直接发 UTF-16 scancode。TSF 不拦
-//!   Unicode 事件（与 keyboard layout / IME 解耦），所以不需要切输入法。
+//! - **Windows**：`SendInput(KEYEVENTF_UNICODE)` 直接发 UTF-16 scancode。CJK IME
+//!   仍可能吞合成事件，所以 `switch_to_ascii` 会临时切到 en-US 键盘布局再恢复。
 //! - **Linux**：enigo `Keyboard::text(...)`。X11 走 XTest 稳定；Wayland 看 compositor
 //!   是否给 libei 权限，stock GNOME-Wayland 经常拒绝，调用方应当容忍失败回落到一次性。
 //!   不切输入法 —— Linux 的 fcitx / ibus 与 enigo 的交互非常碎，v1 不尝试。
@@ -317,13 +317,22 @@ mod windows_impl {
     use super::{TisError, TypeError};
     use std::time::Duration;
     use tauri::{AppHandle, Runtime};
+    use windows::core::w;
+    use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-        KEYEVENTF_UNICODE, VIRTUAL_KEY,
+        ActivateKeyboardLayout, GetKeyboardLayout, LoadKeyboardLayoutW, SendInput, HKL, INPUT,
+        INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+        KLF_ACTIVATE, KLF_SETFORPROCESS, VIRTUAL_KEY,
     };
 
-    /// Windows / Linux 上没有 input source 概念，token 留空。Send/Sync 自动派生。
-    pub struct PreviousInputSource;
+    /// Previous thread keyboard layout so CJK IME can be restored after a
+    /// temporary English layout armoring pass.
+    pub struct PreviousInputSource {
+        previous_hkl: HKL,
+    }
+    // HKL is a pointer-sized handle; layout restore only needs the value.
+    unsafe impl Send for PreviousInputSource {}
+    unsafe impl Sync for PreviousInputSource {}
 
     /// 同一个会话内 keyDown/keyUp 之间的微延迟。Windows SendInput Unicode 在大多数
     /// 应用上不需要延迟，但 Chromium 系（Edge / VSCode）观察到偶尔丢字，保留 1ms
@@ -390,19 +399,54 @@ mod windows_impl {
         }
     }
 
-    /// Windows SendInput Unicode 绕过 TSF 与 IME，无需切换输入法。返回 `Ok(None)`，
-    /// `restore_input_source` 也是 no-op。
+    fn switch_thread_to_english_layout() -> Result<PreviousInputSource, TisError> {
+        let previous_hkl = unsafe { GetKeyboardLayout(GetCurrentThreadId()) };
+        // US English. Temporarily armors KEYEVENTF_UNICODE against CJK IME
+        // composition that otherwise swallows synthetic keystrokes (owner
+        // sessions showed false Inserted / forced clipboard PasteSent).
+        let en_hkl = unsafe { LoadKeyboardLayoutW(w!("00000409"), KLF_ACTIVATE) }
+            .map_err(|err| TisError::MainThreadDispatch(format!("LoadKeyboardLayoutW: {err}")))?;
+        unsafe { ActivateKeyboardLayout(en_hkl, KLF_SETFORPROCESS) }.map_err(|err| {
+            TisError::MainThreadDispatch(format!("ActivateKeyboardLayout(en-US): {err}"))
+        })?;
+        Ok(PreviousInputSource { previous_hkl })
+    }
+
+    fn restore_thread_layout(prev: PreviousInputSource) -> Result<(), TisError> {
+        unsafe { ActivateKeyboardLayout(prev.previous_hkl, KLF_SETFORPROCESS) }.map_err(|err| {
+            TisError::MainThreadDispatch(format!("ActivateKeyboardLayout(restore): {err}"))
+        })?;
+        Ok(())
+    }
+
+    /// Temporarily switch the thread keyboard layout to en-US so CJK IME does
+    /// not swallow KEYEVENTF_UNICODE. Pair with `restore_input_source`.
     pub async fn switch_to_ascii<R: Runtime>(
         _app: &AppHandle<R>,
     ) -> Result<Option<PreviousInputSource>, TisError> {
-        Ok(None)
+        Ok(Some(switch_thread_to_english_layout()?))
     }
 
     pub async fn restore_input_source<R: Runtime>(
         _app: &AppHandle<R>,
-        _prev: Option<PreviousInputSource>,
+        prev: Option<PreviousInputSource>,
     ) -> Result<(), TisError> {
+        if let Some(prev) = prev {
+            restore_thread_layout(prev)?;
+        }
         Ok(())
+    }
+
+    /// Synchronous layout-armored unicode insert for the final non-TSF path.
+    pub fn type_unicode_chunk_ime_safe(text: &str) -> Result<usize, TypeError> {
+        let prev = switch_thread_to_english_layout().map_err(|err| {
+            TypeError::SendInputFailed(format!("switch to en-US layout failed: {err}"))
+        })?;
+        let result = type_unicode_chunk(text);
+        if let Err(restore_err) = restore_thread_layout(prev) {
+            log::warn!("[unicode] restore keyboard layout failed: {restore_err}");
+        }
+        result
     }
 }
 
@@ -508,7 +552,8 @@ pub use macos_impl::{
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
 pub use windows_impl::{
-    restore_input_source, switch_to_ascii, type_unicode_chunk, PreviousInputSource,
+    restore_input_source, switch_to_ascii, type_unicode_chunk, type_unicode_chunk_ime_safe,
+    PreviousInputSource,
 };
 
 #[cfg(target_os = "linux")]
