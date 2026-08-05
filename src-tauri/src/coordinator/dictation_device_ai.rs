@@ -254,18 +254,32 @@ fn clear_embedded_audio_stop_feedback(inner: &Arc<Inner>) {
     inner
         .embedded_audio_stop_feedback_latched
         .store(false, Ordering::SeqCst);
+    *inner.dictation_stop_feedback_at.lock() = None;
 }
 
-fn latch_embedded_audio_stop_feedback(inner: &Arc<Inner>) {
+fn latch_embedded_audio_stop_feedback(inner: &Arc<Inner>, session_id: SessionId) {
     inner
         .embedded_audio_stop_feedback_latched
         .store(true, Ordering::SeqCst);
+    *inner.dictation_stop_feedback_at.lock() = Some((session_id, Instant::now()));
 }
 
 fn embedded_audio_stop_feedback_latched(inner: &Arc<Inner>) -> bool {
     inner
         .embedded_audio_stop_feedback_latched
         .load(Ordering::SeqCst)
+}
+
+fn take_stop_to_done_ms(inner: &Arc<Inner>, session_id: SessionId) -> Option<u64> {
+    let mut guard = inner.dictation_stop_feedback_at.lock();
+    match *guard {
+        Some((sid, started)) if sid == session_id => {
+            let ms = started.elapsed().as_millis() as u64;
+            *guard = None;
+            Some(ms)
+        }
+        _ => None,
+    }
 }
 
 fn embedded_ble_processing_sync_disabled() -> bool {

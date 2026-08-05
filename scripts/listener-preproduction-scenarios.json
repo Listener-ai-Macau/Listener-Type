@@ -673,7 +673,7 @@
       "recorded_at": "2026-07-17T20:05:00+08:00",
       "source": "Product-owner direction: 长话结束后的延迟必须进入技术指标，目标是不可以有很多延迟。",
       "scope": "Installed C:\\Program Files\\Listener Type\\listener-type.exe 的真实 EmbeddedBle 人声会话；长段定义为 8 至 60 秒自然口述。",
-      "requirement": "真实停止按键边沿到最终文本已上屏，或在无焦点时已可靠写入剪贴板，目标并且防回退门禁为 <=500ms。分段必须同时报告：physical-stop-edge 到 Type 停止反馈、停止反馈到 firmware/transport stop、transport stop 到 ASR final、ASR final 到完成/上屏或剪贴板保留。胶囊的 1050ms 成功反馈展示不计入文本可用时间，但必须另行记录，不能用延长胶囊或假进度遮掩慢路径。",
+      "requirement": "真实停止按键边沿到最终文本已上屏，或在无焦点时已可靠写入剪贴板，目标并且防回退门禁为 <=500ms。分段必须同时报告：physical-stop-edge 到 Type 停止反馈、停止反馈到 firmware/transport stop、transport stop 到 ASR final、ASR final 到完成/上屏或剪贴板保留。胶囊的成功反馈展示（约 380ms 量级）不计入文本可用时间，但必须另行记录，不能用延长胶囊或假进度遮掩慢路径。",
       "failure_attribution": "任何阶段或端到端 500ms 超限都必须留下同一 session 的分段实测值、packet/missing 数据、ASR provider/backend、网络/协议结果和完成状态，并归为 internal_transport、provider_or_network、post_process_or_insert 或 unknown；不得把超限直接写成通过，也不得用固定等待掩盖。",
       "sustained_transport_contract": "长话稳定性是录音能力的独立防回退维度。协议音源固定为 16kHz、16-bit、单声道 PCM，即 32000 B/s；每个 45 至 60 秒真人自然语音机器闭环必须同时证明：连续稳态窗口的有效消费速率 >= 32000 B/s、窗口内生产量与确认交付量的差额不扩大、audio_sent 等于 expected_packet_count、queue_full=0、pool_alloc_failed=0、audio_failed=0、pool_high_water_pct <= 20，并且 mbuf/ENOMEM 通知重试各不超过 audio_sent 的 1%。整段 audio_bytes_per_s 仅作辅助诊断，因为它受实时音源节拍和收尾时间影响，不能替代窗口消费速率。任何队列持续增长、窗口消费速率低于 32000 B/s 或中途 Error 都是 internal_transport 失败，不能由下一次偶然正常的短会话抵消。",
       "trigger_coverage": "该指标是录音能力合同，不是 EC11 特例。所有用户可触发或终止 Listener 录音的入口及其产品适配器，都必须按同一物理操作到最终文本可用的 <=500ms 指标留证；任一入口新增、改动或回退时，必须重跑该入口的真实或等效机器证据。",

@@ -170,7 +170,7 @@ impl EmbeddedStreamingDictation {
     fn show_transcribing_after_stop(&self, inner: &Arc<Inner>) {
         if let Some(session) = self.session.as_ref() {
             let already_latched = embedded_audio_stop_feedback_latched(inner);
-            latch_embedded_audio_stop_feedback(inner);
+            latch_embedded_audio_stop_feedback(inner, session.session_id);
             if !already_latched {
                 let _ = emit_embedded_audio_transcribing_if_active(
                     inner,

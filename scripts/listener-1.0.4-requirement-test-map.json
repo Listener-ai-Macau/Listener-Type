@@ -53,15 +53,15 @@
     {
       "id": "REG-END-001",
       "registry_refs": ["endpoint-calibration-20260804"],
-      "behavior": "胶囊可见前不触发自动结束；正文后目标说话人停约 1000 ms 才结束",
+      "behavior": "胶囊可见前不触发自动结束；正文后目标说话人停约 1000 ms 才结束；他人说话不续录/不拖长结束；空 final 用会话账本",
       "level": "L0-L1",
       "automated": true,
       "tests": [
         "scripts/verify-listener-1.0.4-protected-contracts.mjs#target_speaker_end_1000ms",
         "src-tauri/src/coordinator/dictation_tests.rs",
-        ".artifacts/listener-1.0.4-endpoint-calibration-20260804"
+        "src-tauri/src/asr/volcengine.rs"
       ],
-      "pass_rule": "EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS == 1000；端点序列测试 PASS",
+      "pass_rule": "EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS == 1000；端点序列 + NonTarget 不推进本人时钟 + two_pass_empty 账本 PASS",
       "human_residual": "双人实说"
     },
     {
@@ -76,6 +76,23 @@
       ],
       "pass_rule": "NonTarget/Uncertain 不能错误推进目标说话人时钟；机器序列 PASS",
       "human_residual": "双人实说"
+    },
+    {
+      "id": "REG-PREVIEW-001",
+      "registry_refs": ["LST-REC-021", "LST-REC-031", "LST-REC-032", "LST-REC-033"],
+      "behavior": "owner 已验收的顺滑预览：optimistic 流式上屏、burst 揭示≤160ms、同 session 空 payload 不抹字、空 final 用账本、别人说话不拖结束、1s 本人结束",
+      "level": "L0-L1",
+      "automated": true,
+      "tests": [
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#smooth_preview_optimistic_stream",
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#smooth_preview_empty_final_ledger",
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#smooth_preview_other_speaker_no_clock_extend",
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#smooth_preview_stable_attributed_endpoint",
+        "scripts/verify-listener-1.0.4-protected-contracts.mjs#smooth_preview_capsule_preserve_and_burst",
+        "npm run test:rules"
+      ],
+      "pass_rule": "smooth_preview_* 全 PASS；capsulePreviewRules burst/prefix 合同 PASS；不得静默回退",
+      "human_residual": "听写预览手感（owner 已通过则只回归）"
     },
     {
       "id": "REG-FEAT-001",

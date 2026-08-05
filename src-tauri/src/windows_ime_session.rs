@@ -113,17 +113,44 @@ impl WindowsImeSessionController {
                 }
             };
 
-            match self.profile_manager.activate_listener_type_profile() {
-                Ok(()) => PreparedWindowsImeSession {
-                    saved_profile: Some(saved_profile),
-                    listener_type_activated: true,
-                },
-                Err(error) => {
-                    let error = WindowsImeSessionError::Profile(error.to_string());
-                    log::warn!("[windows-ime] activate Listener Type profile failed: {error}");
-                    PreparedWindowsImeSession::activation_failed(saved_profile)
+            // Transient COM / TSF races (0x80004005) show up at wake when many
+            // windows fight for the input profile. A few short retries often
+            // land TSF so we can true-insert instead of clipboard paste.
+            const ACTIVATE_BACKOFF_MS: [u64; 3] = [0, 35, 80];
+            let mut last_error: Option<String> = None;
+            for (attempt, sleep_ms) in ACTIVATE_BACKOFF_MS.iter().enumerate() {
+                if *sleep_ms > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(*sleep_ms));
+                }
+                match self.profile_manager.activate_listener_type_profile() {
+                    Ok(()) => {
+                        if attempt > 0 {
+                            log::info!(
+                                "[windows-ime] activate Listener Type profile succeeded on retry attempt={}",
+                                attempt + 1
+                            );
+                        }
+                        return PreparedWindowsImeSession {
+                            saved_profile: Some(saved_profile),
+                            listener_type_activated: true,
+                        };
+                    }
+                    Err(error) => {
+                        last_error = Some(error.to_string());
+                        log::warn!(
+                            "[windows-ime] activate Listener Type profile failed attempt={}: {error}",
+                            attempt + 1
+                        );
+                    }
                 }
             }
+            let error = WindowsImeSessionError::Profile(
+                last_error.unwrap_or_else(|| "unknown activate failure".to_string()),
+            );
+            log::warn!(
+                "[windows-ime] activate Listener Type profile failed after retries: {error}"
+            );
+            PreparedWindowsImeSession::activation_failed(saved_profile)
         }
 
         #[cfg(not(target_os = "windows"))]

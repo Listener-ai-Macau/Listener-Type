@@ -62,7 +62,9 @@ export const PREVIEW_BURST_REVEAL = {
 
 /** The wake capsule is visible immediately; only its geometry settles. */
 export const CAPSULE_APPEARANCE = {
-  enterAnimMs: 160,
+  // Keep well under 160ms so appear does not add another "wait tick" after the
+  // ~0.8–1.2s wake_to_capsule backend path.
+  enterAnimMs: 110,
   initialOpacity: 1,
 } as const;
 
@@ -100,8 +102,9 @@ export function buildPreviewRevealFrames(current: string, target: string): strin
  * The preview text stays visible through transcribing/polishing so the user sees
  * continuity. Done state replaces it with a compact success mark; actionable
  * fallback messages may still show text.
- * After Done, the normal success path lingers ~1050ms (schedule_capsule_idle) then
- * fades to Idle with EXIT_ANIM_MS = 180ms.
+ * After Done, the normal success path lingers ~380ms (schedule_capsule_idle) then
+ * fades to Idle with EXIT_ANIM_MS = 120ms. Text is already on-screen; this is
+ * only a brief visual close (owner: 结尾拖 was the old 1050ms hang).
  */
 export const PREVIEW_FINAL_TRANSITION = {
   /** Capsule states that display partial preview text. */
@@ -111,9 +114,9 @@ export const PREVIEW_FINAL_TRANSITION = {
   /** Terminal state where preview is replaced by completion feedback. */
   finalState: 'done' as const,
   /** How long the normal success done toast stays visible before idle (ms). */
-  lingerMs: 1050,
+  lingerMs: 380,
   /** Exit animation duration (ms). */
-  exitAnimMs: 180,
+  exitAnimMs: 120,
 };
 
 export type StopFeedbackCapsuleState =

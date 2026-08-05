@@ -559,7 +559,9 @@ impl CredsMarketplace {
 struct CredsAsrEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     apiKey: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Historical vault payloads used `baseUrl`; keep reading them so ASR
+    /// endpoints do not silently fall back to the wrong default.
+    #[serde(alias = "baseUrl", skip_serializing_if = "Option::is_none")]
     baseURL: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
@@ -573,7 +575,7 @@ struct CredsAsrEntry {
     vocabularyId: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     proxyMode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "proxyUrl", skip_serializing_if = "Option::is_none")]
     proxyURL: Option<String>,
 }
 
@@ -598,7 +600,11 @@ struct CredsLlmEntry {
     displayName: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     apiKey: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Settings UI / older vault writes used `baseUrl` (camelCase Url). Without
+    /// this alias, DeepSeek/OpenAI keys stayed valid but the endpoint fell back
+    /// to the ARK default → HTTP 401 "API key format is incorrect" (owner
+    /// 2026-08-05 sessions). Always serialize as `baseURL` going forward.
+    #[serde(alias = "baseUrl", skip_serializing_if = "Option::is_none")]
     baseURL: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
@@ -608,7 +614,7 @@ struct CredsLlmEntry {
     extraHeaders: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     proxyMode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "proxyUrl", skip_serializing_if = "Option::is_none")]
     proxyURL: Option<String>,
 }
 
@@ -2643,6 +2649,30 @@ mod tests {
             r#"{{"id":"{id}","createdAt":"2026-07-26T00:00:00Z","rawTranscript":"r","finalText":"f","mode":"raw","insertStatus":"copiedFallback"}}"#
         ))
         .expect("parse DictationSession")
+    }
+
+    #[test]
+    fn creds_llm_entry_accepts_legacy_base_url_alias() {
+        // Owner vault used `baseUrl` while the Rust field is `baseURL`. Without
+        // the alias, DeepSeek keys were sent to the ARK default host → 401.
+        let entry: super::CredsLlmEntry = serde_json::from_str(
+            r#"{"apiKey":"sk-test","baseUrl":"https://api.deepseek.com/v1","model":"deepseek-v4-flash"}"#,
+        )
+        .expect("parse CredsLlmEntry with baseUrl alias");
+        assert_eq!(
+            entry.baseURL.as_deref(),
+            Some("https://api.deepseek.com/v1")
+        );
+        assert_eq!(entry.apiKey.as_deref(), Some("sk-test"));
+        let encoded = serde_json::to_string(&entry).expect("serialize");
+        assert!(
+            encoded.contains("baseURL"),
+            "serialize must emit baseURL, got {encoded}"
+        );
+        assert!(
+            !encoded.contains("baseUrl"),
+            "serialize must not keep legacy baseUrl key, got {encoded}"
+        );
     }
 
     /// 删一条历史时，对应的 debug 录音归档也必须被清掉（隐私预期 + 避免孤儿 wav）。

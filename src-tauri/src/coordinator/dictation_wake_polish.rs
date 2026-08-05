@@ -731,8 +731,9 @@ const LOCAL_CONFIRMATION_SNAPSHOT_MS: [usize; 6] = [
     5_000,
 ];
 /// Once KWS already heard the phrase, do not wait for the 1.8s ladder floor.
-/// ~0.8s covers a full "开始录音" plus a small pad.
-const KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 800;
+/// ~0.7s covers a full "开始录音" on real captures (0.8s was leaving ~100ms of
+/// dead air on the KeywordModel fail-open path → phrase_tail ~500ms spikes).
+const KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 700;
 const KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_BYTES: usize = KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS * 32;
 /// After a failed immediate confirm, re-try every 400ms of new audio while KWS
 /// stays hot — avoids sitting on the 2.4/3.0/5.0s ladder rungs.
@@ -1354,6 +1355,14 @@ async fn run_streaming_polish(
             log::warn!(
                 "[coord] streaming_insert FAILED: {reason}; typed {typed_chars} chars before failure"
             );
+            // Auth failures (circuit or first 401): quiet raw insert. Owner
+            // sessions felt broken when we still branded the turn polish_failed
+            // after text already landed via clipboard.
+            let auth_failure = reason.contains("credentials were already rejected")
+                || reason.contains("AuthenticationError")
+                || reason.contains("status 401")
+                || reason.contains("status 403")
+                || reason.contains("Unauthorized");
             // 流式失败但已经流了一部分 chars：用户屏幕上有半截 polish。history 应当
             // 跟屏幕一致 —— 记 typed_text 而不是 raw.text，否则保存内容跟用户看见的
             // 内容会分叉（pr-agent #412 \"Wrong final text\" 反馈）。
@@ -1361,11 +1370,17 @@ async fn run_streaming_polish(
             if typed_chars > 0 {
                 (
                     typed_text,
-                    Some(format!(
-                        "streaming polish failed mid-stream after {typed_chars} chars: {reason}"
-                    )),
+                    if auth_failure {
+                        None
+                    } else {
+                        Some(format!(
+                            "streaming polish failed mid-stream after {typed_chars} chars: {reason}"
+                        ))
+                    },
                     true,
                 )
+            } else if auth_failure {
+                (raw.text.clone(), None, false)
             } else {
                 (raw.text.clone(), Some(reason), false)
             }
@@ -1436,31 +1451,39 @@ fn wayland_done_message(status: InsertStatus, polish_failed: bool) -> Option<Str
     }
 }
 
-fn default_done_message(status: InsertStatus, polish_failed: bool) -> Option<String> {
-    if polish_failed {
-        // polish 失败仍写 history error_code，但录音原文已成功落地时不要把整个
-        // dictation 呈现成失败；否则无效 LLM key 会让成功录音看起来像回退。
-        match status {
-            InsertStatus::Inserted => None,
-            InsertStatus::PasteSent => Some("已尝试粘贴原文".to_string()),
-            InsertStatus::CopiedFallback => Some(if cfg!(target_os = "windows") {
-                "已复制原文，请 Ctrl+V".to_string()
+fn default_done_message(
+    status: InsertStatus,
+    polish_failed: bool,
+    clipboard_retained: bool,
+) -> Option<String> {
+    // Successful on-screen delivery (type or paste) should feel quiet. Loud
+    // "已粘贴原文 / 仍在剪贴板" after a working session made owner feel the
+    // product failed even though text already landed (LLM key 401 case).
+    // history still records polishFailed via error_code for diagnostics.
+    match status {
+        InsertStatus::Inserted | InsertStatus::PasteSent => None,
+        InsertStatus::CopiedFallback => Some(if polish_failed {
+            if cfg!(target_os = "windows") {
+                "润色不可用，已复制原文，请 Ctrl+V".to_string()
             } else {
-                "已复制原文，请粘贴".to_string()
-            }),
-            InsertStatus::Failed => Some("润色不可用，插入失败".to_string()),
-        }
-    } else {
-        match status {
-            InsertStatus::Inserted => None,
-            InsertStatus::PasteSent => Some("已尝试粘贴".to_string()),
-            InsertStatus::CopiedFallback => Some(if cfg!(target_os = "windows") {
-                "已复制，请 Ctrl+V".to_string()
+                "润色不可用，已复制原文，请粘贴".to_string()
+            }
+        } else if cfg!(target_os = "windows") {
+            "已复制到剪贴板，请 Ctrl+V".to_string()
+        } else {
+            "已复制到剪贴板，请粘贴".to_string()
+        }),
+        InsertStatus::Failed => Some(if clipboard_retained {
+            if cfg!(target_os = "windows") {
+                "上屏失败，内容在剪贴板，请 Ctrl+V".to_string()
             } else {
-                "已复制，请粘贴".to_string()
-            }),
-            InsertStatus::Failed => Some("插入失败".to_string()),
-        }
+                "上屏失败，内容在剪贴板，请粘贴".to_string()
+            }
+        } else if polish_failed {
+            "润色不可用，插入失败".to_string()
+        } else {
+            "插入失败".to_string()
+        }),
     }
 }
 

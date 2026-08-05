@@ -9,6 +9,7 @@ import {
   getVoiceprintStatus,
   listInstalledApplications,
   deleteVoiceprint,
+  setActiveStylePack,
   setDeviceSettings,
   startVoiceprintEnrollment,
 } from '../../lib/ipc';
@@ -23,6 +24,7 @@ import type {
   DeviceSettingsSnapshot,
   DeviceSettingsUpdateRequest,
   InstalledApplication,
+  PolishMode,
   PostDictationKey,
   ShortcutBinding,
   VoiceprintStatus,
@@ -599,8 +601,8 @@ function DeviceFirmwareSettingsCard() {
         >
           <div className="ol-recording-automation-settings">
             <SettingRow
-              label={t('settings.recording.voiceAutoStartLabel', '检测到人声后自动开始')}
-              desc={t('settings.recording.voiceAutoStartDesc', '仅在设备正常唤醒且蓝牙灯亮时监听；噪声不会触发。')}
+              label={t('settings.recording.voiceAutoStartLabel')}
+              desc={t('settings.recording.voiceAutoStartDesc')}
             >
               <Toggle
                 on={form.voiceAutoStartEnabled}
@@ -686,9 +688,14 @@ function DeviceFirmwareSettingsCard() {
                   {voiceprint?.requiresReenrollment
                     ? t('settings.recording.voiceprintReenrollDesc', '唤醒词已更换。重新录制前，任何人说对新唤醒词都可以启动。')
                     : voiceprint?.enrolled
-                      ? t('settings.recording.voiceprintReadyDesc', '已启用本机声纹校验；旁人说话不会进入转写。')
-                      : t('settings.recording.voiceprintOpenGateDesc', '未录制声纹：任何人说对当前唤醒词都可以启动。')}
+                      ? t('settings.recording.voiceprintReadyDesc')
+                      : t('settings.recording.voiceprintOpenGateDesc')}
                 </div>
+                {!voiceprint?.enrolled && !voiceprint?.requiresReenrollment && (
+                  <div className="ol-voiceprint-status" style={{ opacity: 0.85 }}>
+                    {t('settings.recording.voiceprintNoisyHint')}
+                  </div>
+                )}
                 {wakePhraseError && (
                   <div className="ol-voiceprint-status is-error">{wakePhraseError}</div>
                 )}
@@ -700,8 +707,8 @@ function DeviceFirmwareSettingsCard() {
               </div>
             )}
             <SettingRow
-              label={t('settings.recording.voiceAutoStopLabel', '检测不到人声后自动结束')}
-              desc={t('settings.recording.voiceAutoStopDesc', '持续无人声后结束；人声恢复会取消结束计时。')}
+              label={t('settings.recording.voiceAutoStopLabel')}
+              desc={t('settings.recording.voiceAutoStopDesc')}
             >
               <Toggle
                 on={form.voiceAutoStopEnabled}
@@ -709,6 +716,78 @@ function DeviceFirmwareSettingsCard() {
                   saveVoiceAutomation({ voiceAutoStopEnabled })}
                 disabled={controlsDisabled}
               />
+            </SettingRow>
+            <SettingRow
+              label={t('settings.recording.longFormDictationLabel')}
+              desc={t('settings.recording.longFormDictationDesc')}
+            >
+              <Toggle
+                on={Boolean(prefs.longFormDictation)}
+                onToggle={longFormDictation =>
+                  savePrefs(current => ({ ...current, longFormDictation }))}
+              />
+            </SettingRow>
+            <SettingRow
+              label={t('settings.recording.dictationPolishLabel')}
+              desc={t('settings.recording.dictationPolishDesc')}
+            >
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignSelf: 'flex-start',
+                  padding: 2,
+                  borderRadius: 8,
+                  background: 'var(--ol-control-track)',
+                  flexWrap: 'wrap',
+                  gap: 2,
+                }}
+              >
+                {([
+                  ['raw', 'builtin.raw', t('settings.recording.dictationPolishRaw')] as const,
+                  ['light', 'builtin.light', t('settings.recording.dictationPolishLight')] as const,
+                  ['structured', 'builtin.structured', t('settings.recording.dictationPolishStructured')] as const,
+                  ['formal', 'builtin.formal', t('settings.recording.dictationPolishFormal')] as const,
+                ]).map(([mode, packId, label]) => {
+                  const active = prefs.defaultMode === mode
+                    || prefs.activeStylePackId === packId;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        void (async () => {
+                          try {
+                            await setActiveStylePack(packId);
+                            await savePrefs(current => ({
+                              ...current,
+                              defaultMode: mode as PolishMode,
+                              activeStylePackId: packId,
+                            }));
+                          } catch (error) {
+                            console.warn('[device-settings] set polish mode failed', error);
+                          }
+                        })();
+                      }}
+                      style={{
+                        minWidth: 56,
+                        height: 28,
+                        padding: '0 10px',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        border: 0,
+                        borderRadius: 6,
+                        fontFamily: 'inherit',
+                        background: active ? 'var(--ol-control-active)' : 'transparent',
+                        color: active ? 'var(--ol-ink)' : 'var(--ol-ink-3)',
+                        boxShadow: active ? 'var(--ol-control-active-shadow)' : 'none',
+                        cursor: 'default',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </SettingRow>
             <SettingRow
               label={t('settings.recording.removeFillerWordsLabel')}

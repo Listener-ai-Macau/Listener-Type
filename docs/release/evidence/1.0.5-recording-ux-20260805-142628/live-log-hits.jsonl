@@ -1,0 +1,2 @@
+{"ts":"2026-08-05T14:27:38.4619990+08:00","source":"listener-type.log","line":"2026-08-05T06:26:32.3054824Z [INFO] [embedded-ble] background session completed while keeping notify open pcm_bytes=115200 missing_packets=0"}
+{"ts":"2026-08-05T14:27:38.4995914+08:00","source":"listener-type.log","line":"2026-08-05T06:26:39.465246Z [INFO] [embedded-ble] background session completed while keeping notify open pcm_bytes=144000 missing_packets=0"}

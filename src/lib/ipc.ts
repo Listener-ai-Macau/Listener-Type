@@ -159,6 +159,7 @@ let mockSettings: UserPreferences = {
   restoreClipboardAfterPaste: true,
   copyDictationToClipboard: true,
   removeFillerWords: true,
+  longFormDictation: false,
   sendKeyAfterDictation: false,
   postDictationKey: 'enter',
   voiceWakePhrase: '开始录音',

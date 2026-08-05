@@ -1,6 +1,7 @@
 use super::{
     acknowledge_automatic_wake_capsule_visible, append_typed_prefix, arm_automatic_wake_text_guard,
-    automatic_wake_initial_body_wait_active, begin_embedded_audio_dictation_session_id,
+    automatic_wake_body_started, automatic_wake_initial_body_wait_active,
+    automatic_wake_session_active, begin_embedded_audio_dictation_session_id,
     cancel_embedded_ble_listener_capture, cancel_session, claim_post_dictation_key,
     clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview, default_done_message,
     device_ai_processing_completion_delay, device_ai_processing_io_allowed,
@@ -1269,6 +1270,76 @@ fn proactive_stop_accumulates_trailing_silence_only_after_body_started() {
 }
 
 #[test]
+fn long_form_endpoint_requires_two_seconds_without_that_speaker() {
+    let base = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("1".into()),
+        target_speech_end_ms: Some(1_500),
+        provider_audio_duration_ms: Some(2_500),
+        audio_duration_ms: Some(2_500),
+        local_speech_end_ms: Some(1_500),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: false,
+        stable_attributed_speech_end_ms: Some(1_500),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    // Standard 1.0s is due at +1000, but long-form 2.0s is not yet.
+    assert!(super::target_speaker_endpoint_due(&base));
+    assert!(!super::target_speaker_endpoint_due_with_timeout(&base, 2_000));
+
+    let long_form_due = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(3_500),
+        audio_duration_ms: Some(3_500),
+        ..base
+    };
+    assert!(super::target_speaker_endpoint_due_with_timeout(
+        &long_form_due,
+        2_000
+    ));
+    assert_eq!(super::target_speaker_end_timeout_ms(false), 1_000);
+    assert_eq!(super::target_speaker_end_timeout_ms(true), 2_000);
+    assert_eq!(
+        super::target_speaker_inactive_stop_reason(1_000),
+        "target_speaker_inactive_1000ms"
+    );
+    assert_eq!(
+        super::target_speaker_inactive_stop_reason(2_000),
+        "target_speaker_inactive_2000ms"
+    );
+    // Punctuation must NOT stretch standard mode — Chinese ASR almost always
+    // ends short utterances with 。？！ and that previously made every end 2s.
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("用全刷。")),
+        1_000
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("简单说一下。")),
+        1_000
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("你继续帮我看一下吧")),
+        1_000
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("现在整体是一个什么进度？")),
+        1_000
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(true, Some("用全刷。")),
+        2_000
+    );
+    assert!(super::preview_ends_with_sentence_terminal(Some(
+        "现在整体是一个什么进度？你跟我简单说一下。"
+    )));
+    assert!(!super::preview_ends_with_sentence_terminal(Some(
+        "你继续帮我看一下吧。就是他进入"
+    )));
+}
+
+#[test]
 fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
     let update = crate::asr::volcengine::TargetSpeakerUpdate {
         speaker_id: Some("1".into()),
@@ -1311,6 +1382,8 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
         &unresolved_recent_local
     ));
 
+    // Confirmed other-speaker energy does not refresh the owner clock: once the
+    // owner has been inactive for 1000 ms, auto-end proceeds while others talk.
     let unresolved_local_is_confidently_other_speaker =
         crate::asr::volcengine::TargetSpeakerUpdate {
             local_non_target_speech_end_ms: Some(3_000),
@@ -1359,12 +1432,52 @@ fn target_speaker_endpoint_requires_one_second_without_that_speaker() {
         speaker_info_present: false,
     };
     assert!(!super::target_speaker_endpoint_due(&local_wake_target));
-    let local_wake_due = crate::asr::volcengine::TargetSpeakerUpdate {
+    // Pending provisional body must never auto-end (installed mid-sentence cut
+    // 19df34c4). Local wake authority alone is not enough while unattributed
+    // speech is still streaming.
+    let local_wake_still_pending = crate::asr::volcengine::TargetSpeakerUpdate {
         audio_duration_ms: Some(2_500),
         pending_unattributed_speech: true,
+        ..local_wake_target.clone()
+    };
+    assert!(!super::target_speaker_endpoint_due(&local_wake_still_pending));
+    let local_wake_due = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(2_500),
+        pending_unattributed_speech: false,
         ..local_wake_target
     };
     assert!(super::target_speaker_endpoint_due(&local_wake_due));
+}
+
+#[test]
+fn target_speaker_endpoint_uses_newest_stable_attributed_boundary_after_diarization_flip() {
+    // Installed session 909d8f82 reproduced a same-owner diarization flip:
+    // target speaker stopped at 13772 ms, while the provider had already
+    // stabilized a newer spoken tail through 15742 ms. Stopping at provider
+    // audio 16300 ms therefore waited only 558 ms and truncated the owner.
+    // Newest protection clock is stable_attributed 15742 ms; exact due is +1000.
+    let one_ms_before = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(13_772),
+        provider_audio_duration_ms: Some(16_741),
+        audio_duration_ms: Some(16_800),
+        local_speech_end_ms: Some(15_742),
+        local_target_speech_end_ms: Some(15_200),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(15_742),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(!super::target_speaker_endpoint_due(&one_ms_before));
+
+    let exact_endpoint = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(16_742),
+        ..one_ms_before
+    };
+    assert!(super::target_speaker_endpoint_due(&exact_endpoint));
 }
 
 #[test]
@@ -1428,41 +1541,75 @@ fn target_speaker_endpoint_uses_local_clock_only_for_a_clean_provider_stall() {
         pending_activity_advanced: false,
         speaker_info_present: true,
     };
-    assert!(!super::provider_stall_local_endpoint_due(&one_ms_before));
-    assert!(!super::target_speaker_endpoint_due(&one_ms_before));
+    assert!(!super::provider_stall_local_endpoint_due(
+        &one_ms_before,
+        true,
+        1_000,
+    ));
+    assert!(!super::target_speaker_endpoint_due_with_provider_stall(
+        &one_ms_before,
+        true,
+        1_000,
+    ));
 
     let exact_endpoint = crate::asr::volcengine::TargetSpeakerUpdate {
         audio_duration_ms: Some(10_992),
         ..one_ms_before.clone()
     };
-    assert!(super::provider_stall_local_endpoint_due(&exact_endpoint));
-    assert!(super::target_speaker_endpoint_due(&exact_endpoint));
+    assert!(super::provider_stall_local_endpoint_due(
+        &exact_endpoint,
+        true,
+        1_000,
+    ));
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
+        &exact_endpoint,
+        true,
+        1_000,
+    ));
 
     let ordinary_provider_lag = crate::asr::volcengine::TargetSpeakerUpdate {
         provider_audio_duration_ms: Some(10_493),
         ..exact_endpoint.clone()
     };
     assert!(!super::provider_stall_local_endpoint_due(
-        &ordinary_provider_lag
+        &ordinary_provider_lag,
+        true,
+        1_000,
     ));
-    assert!(!super::target_speaker_endpoint_due(&ordinary_provider_lag));
+    assert!(!super::target_speaker_endpoint_due_with_provider_stall(
+        &ordinary_provider_lag,
+        true,
+        1_000,
+    ));
 
     let pending_tail = crate::asr::volcengine::TargetSpeakerUpdate {
         pending_unattributed_speech: true,
         ..exact_endpoint.clone()
     };
-    assert!(!super::provider_stall_local_endpoint_due(&pending_tail));
-    assert!(!super::target_speaker_endpoint_due(&pending_tail));
+    assert!(!super::provider_stall_local_endpoint_due(
+        &pending_tail,
+        true,
+        1_000,
+    ));
+    assert!(!super::target_speaker_endpoint_due_with_provider_stall(
+        &pending_tail,
+        true,
+        1_000,
+    ));
 
     let noisy_raw_energy_without_target_advance = crate::asr::volcengine::TargetSpeakerUpdate {
         local_speech_end_ms: Some(10_400),
         ..exact_endpoint.clone()
     };
     assert!(super::provider_stall_local_endpoint_due(
-        &noisy_raw_energy_without_target_advance
+        &noisy_raw_energy_without_target_advance,
+        true,
+        1_000,
     ));
-    assert!(super::target_speaker_endpoint_due(
-        &noisy_raw_energy_without_target_advance
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
+        &noisy_raw_energy_without_target_advance,
+        true,
+        1_000,
     ));
 
     let confirmed_other_speaker = crate::asr::volcengine::TargetSpeakerUpdate {
@@ -1472,22 +1619,249 @@ fn target_speaker_endpoint_uses_local_clock_only_for_a_clean_provider_stall() {
         ..exact_endpoint.clone()
     };
     assert!(super::provider_stall_local_endpoint_due(
-        &confirmed_other_speaker
+        &confirmed_other_speaker,
+        true,
+        1_000,
     ));
-    assert!(super::target_speaker_endpoint_due(&confirmed_other_speaker));
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
+        &confirmed_other_speaker,
+        true,
+        1_000,
+    ));
 
-    let unconfirmed_newer_local_target = crate::asr::volcengine::TargetSpeakerUpdate {
-        audio_duration_ms: Some(11_400),
-        local_speech_end_ms: Some(10_300),
-        local_target_speech_end_ms: Some(10_300),
-        ..exact_endpoint
+    let newer_local_target_one_ms_before = crate::asr::volcengine::TargetSpeakerUpdate {
+        target_speech_end_ms: Some(4_572),
+        provider_audio_duration_ms: Some(5_200),
+        audio_duration_ms: Some(5_899),
+        local_speech_end_ms: Some(4_900),
+        local_target_speech_end_ms: Some(4_900),
+        stable_attributed_speech_end_ms: Some(4_572),
+        ..exact_endpoint.clone()
     };
     assert!(!super::provider_stall_local_endpoint_due(
-        &unconfirmed_newer_local_target
+        &newer_local_target_one_ms_before,
+        true,
+        1_000,
     ));
-    assert!(!super::target_speaker_endpoint_due(
-        &unconfirmed_newer_local_target
+    assert!(!super::target_speaker_endpoint_due_with_provider_stall(
+        &newer_local_target_one_ms_before,
+        true,
+        1_000,
     ));
+
+    let newer_local_target_exact_endpoint = crate::asr::volcengine::TargetSpeakerUpdate {
+        audio_duration_ms: Some(5_900),
+        ..newer_local_target_one_ms_before
+    };
+    assert!(super::provider_stall_local_endpoint_due(
+        &newer_local_target_exact_endpoint,
+        true,
+        1_000,
+    ));
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
+        &newer_local_target_exact_endpoint,
+        true,
+        1_000,
+    ));
+
+    // Stalled provider with newer local target: cloud 4572, local target 4900,
+    // provider frozen at 5700. Capture must reach local_target + 1000 ms.
+    let installed_newer_target_stall = crate::asr::volcengine::TargetSpeakerUpdate {
+        target_speech_end_ms: Some(4_572),
+        provider_audio_duration_ms: Some(5_700),
+        audio_duration_ms: Some(6_200),
+        local_speech_end_ms: Some(5_200),
+        local_target_speech_end_ms: Some(4_900),
+        stable_attributed_speech_end_ms: Some(4_572),
+        ..exact_endpoint
+    };
+    assert!(super::provider_stall_local_endpoint_due(
+        &installed_newer_target_stall,
+        true,
+        1_000,
+    ));
+    assert!(super::target_speaker_endpoint_due_with_provider_stall(
+        &installed_newer_target_stall,
+        true,
+        1_000,
+    ));
+}
+
+#[test]
+fn provider_stall_requires_real_time_without_provider_coverage_progress() {
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    let started = Instant::now();
+    let update = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(4_572),
+        provider_audio_duration_ms: Some(5_700),
+        audio_duration_ms: Some(6_200),
+        local_speech_end_ms: Some(5_200),
+        local_target_speech_end_ms: Some(4_900),
+        local_non_target_speech_end_ms: None,
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(4_572),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+
+    assert!(!super::provider_progress_stalled(
+        &coordinator.inner,
+        session_id,
+        &update,
+        started
+    ));
+    assert!(!super::provider_progress_stalled(
+        &coordinator.inner,
+        session_id,
+        &update,
+        started + Duration::from_millis(499)
+    ));
+    assert!(super::provider_progress_stalled(
+        &coordinator.inner,
+        session_id,
+        &update,
+        started + Duration::from_millis(500)
+    ));
+
+    let provider_advanced = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(5_701),
+        ..update.clone()
+    };
+    assert!(!super::provider_progress_stalled(
+        &coordinator.inner,
+        session_id,
+        &provider_advanced,
+        started + Duration::from_millis(501)
+    ));
+    assert!(!super::provider_progress_stalled(
+        &coordinator.inner,
+        new_session_id(),
+        &update,
+        started + Duration::from_secs(1)
+    ));
+}
+
+#[test]
+fn terminal_wake_continuation_is_bounded_session_matched_and_one_shot() {
+    let coordinator = Coordinator::new();
+    let started = Instant::now();
+    let session_id = new_session_id();
+    let wake_pcm = vec![7u8; 32_000];
+
+    assert!(super::stage_terminal_wake_continuation_at(
+        &coordinator.inner,
+        wake_pcm.clone(),
+        0.8,
+        "开始录音".into(),
+        started
+    ));
+    assert!(!super::stage_terminal_wake_continuation_at(
+        &coordinator.inner,
+        wake_pcm.clone(),
+        0.8,
+        "开始录音".into(),
+        started + Duration::from_millis(1)
+    ));
+    assert!(super::bind_terminal_wake_continuation_session_at(
+        &coordinator.inner,
+        session_id,
+        started + Duration::from_millis(2)
+    ));
+    assert!(coordinator
+        .inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .is_some_and(|guard| guard.session_id == session_id));
+
+    let continuation = super::take_terminal_wake_continuation_at(
+        &coordinator.inner,
+        session_id,
+        started + Duration::from_millis(3),
+    )
+    .expect("matching continuation");
+    assert_eq!(continuation.wake_pcm, wake_pcm);
+    assert_eq!(continuation.wake_phrase, "开始录音");
+    assert!(super::take_terminal_wake_continuation_at(
+        &coordinator.inner,
+        session_id,
+        started + Duration::from_millis(4)
+    )
+    .is_none());
+}
+
+#[test]
+fn terminal_wake_continuation_expiry_or_session_mismatch_cannot_leak() {
+    let coordinator = Coordinator::new();
+    let started = Instant::now();
+    let session_id = new_session_id();
+    assert!(super::stage_terminal_wake_continuation_at(
+        &coordinator.inner,
+        vec![1u8; 3_200],
+        0.1,
+        "开始录音".into(),
+        started
+    ));
+    assert!(!super::bind_terminal_wake_continuation_session_at(
+        &coordinator.inner,
+        session_id,
+        started + super::EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL
+    ));
+    assert!(coordinator
+        .inner
+        .embedded_audio_terminal_wake_continuation
+        .lock()
+        .is_none());
+
+    let rebound_session_id = new_session_id();
+    assert!(super::stage_terminal_wake_continuation_at(
+        &coordinator.inner,
+        vec![2u8; 3_200],
+        0.1,
+        "开始录音".into(),
+        started + Duration::from_secs(7)
+    ));
+    assert!(super::bind_terminal_wake_continuation_session_at(
+        &coordinator.inner,
+        rebound_session_id,
+        started + Duration::from_secs(7)
+    ));
+    assert!(super::take_terminal_wake_continuation_at(
+        &coordinator.inner,
+        new_session_id(),
+        started + Duration::from_secs(7)
+    )
+    .is_none());
+    assert!(coordinator
+        .inner
+        .embedded_audio_terminal_wake_continuation
+        .lock()
+        .is_none());
+    assert!(coordinator
+        .inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .is_none());
+}
+
+#[test]
+fn terminal_wake_body_guard_is_bound_before_recording_capsule_emit() {
+    let source = include_str!("hotkey_device_runtime.rs");
+    let start = source
+        .find("async fn request_embedded_ble_recording_start_from_host")
+        .expect("host start function");
+    let body = &source[start..];
+    let bind = body
+        .find("bind_terminal_wake_continuation_session")
+        .expect("terminal continuation bind");
+    let emit = body
+        .find("emit_capsule_for_session")
+        .expect("recording capsule emit");
+    assert!(bind < emit);
 }
 
 #[test]
@@ -1512,6 +1886,8 @@ fn target_speaker_endpoint_holds_after_one_transient_local_mismatch() {
     };
     assert!(!super::target_speaker_endpoint_due(&transient_mismatch));
 
+    // Target clock max(880, 4482, 5200)=5200; other-speaker energy does not
+    // extend it. Exact due is 5200 + 1000 = 6200.
     let confirmed_other_speaker_tail = crate::asr::volcengine::TargetSpeakerUpdate {
         provider_audio_duration_ms: Some(6_200),
         audio_duration_ms: Some(6_200),
@@ -1592,15 +1968,94 @@ fn target_speaker_endpoint_waits_for_startup_body_calibration() {
 }
 
 #[test]
-fn automatic_wake_starts_initial_one_second_wait_at_visible_capsule_ack() {
+fn automatic_wake_no_body_uses_longer_endpoint_timeout() {
+    // Session 72519330: after visible capsule + 700ms body wait, 1.0s snappy
+    // endpoint still measured the wake-phrase clock and empty-ended. Wake
+    // sessions without body text must use the 3.0s abandon timeout; once body
+    // starts, standard 1.0s (or long-form 2.0s) returns.
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
+    acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
+
+    assert!(automatic_wake_session_active(&coordinator.inner, session_id));
+    assert!(!automatic_wake_body_started(&coordinator.inner, session_id));
+
+    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview(false, None);
+    assert_eq!(mode_timeout, 1_000);
+    let no_body_timeout = if automatic_wake_body_started(&coordinator.inner, session_id) {
+        mode_timeout
+    } else if automatic_wake_session_active(&coordinator.inner, session_id) {
+        super::EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS.max(mode_timeout)
+    } else {
+        mode_timeout
+    };
+    assert_eq!(no_body_timeout, 3_000);
+    assert_eq!(
+        super::target_speaker_inactive_stop_reason(no_body_timeout),
+        "target_speaker_inactive_no_body_3000ms"
+    );
+
+    // Wake-only target clock at 1332ms is not yet due at +1000 under no-body
+    // timeout (would have been due under snappy 1.0s).
+    let wake_only = crate::asr::volcengine::TargetSpeakerUpdate {
+        speaker_id: Some("0".into()),
+        target_speech_end_ms: Some(1_332),
+        provider_audio_duration_ms: Some(2_500),
+        audio_duration_ms: Some(2_500),
+        local_speech_end_ms: Some(2_500),
+        local_target_speech_end_ms: None,
+        local_non_target_speech_end_ms: Some(2_500),
+        local_speaker_tracking_enabled: true,
+        stable_attributed_speech_end_ms: Some(1_332),
+        target_activity_advanced: false,
+        pending_unattributed_speech: false,
+        pending_activity_advanced: false,
+        speaker_info_present: true,
+    };
+    assert!(super::target_speaker_endpoint_due_with_timeout(
+        &wake_only, 1_000
+    ));
+    assert!(!super::target_speaker_endpoint_due_with_timeout(
+        &wake_only, 3_000
+    ));
+    let abandoned = crate::asr::volcengine::TargetSpeakerUpdate {
+        provider_audio_duration_ms: Some(4_400),
+        audio_duration_ms: Some(4_400),
+        ..wake_only
+    };
+    assert!(super::target_speaker_endpoint_due_with_timeout(
+        &abandoned, 3_000
+    ));
+
+    // Body text latch restores snappy 1.0s.
+    assert_eq!(
+        filter_automatic_wake_text(
+            &coordinator.inner,
+            session_id,
+            "开始录音。今天继续测试。",
+            true,
+        ),
+        "今天继续测试。"
+    );
+    assert!(automatic_wake_body_started(&coordinator.inner, session_id));
+    assert_eq!(
+        super::target_speaker_inactive_stop_reason(1_000),
+        "target_speaker_inactive_1000ms"
+    );
+}
+
+#[test]
+fn automatic_wake_starts_initial_body_wait_at_visible_capsule_ack() {
     let coordinator = Coordinator::new();
     let session_id = new_session_id();
     arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 1_200);
 
+    // Before visible ack, wait is force-active (deadline not armed yet).
     assert!(automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         session_id,
-        Some(5_000)
+        Some(1_200)
     ));
     assert_eq!(
         filter_automatic_wake_text(
@@ -1611,16 +2066,18 @@ fn automatic_wake_starts_initial_one_second_wait_at_visible_capsule_ack() {
         ),
         "今天继续测试。"
     );
+    // body_started=true; still force-active until visible ack arms/clears path.
     assert!(automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         session_id,
-        Some(5_100)
+        Some(1_300)
     ));
     acknowledge_automatic_wake_capsule_visible(&coordinator.inner, session_id);
+    // First non-empty body ends wait immediately after ack.
     assert!(!automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         session_id,
-        Some(5_100)
+        Some(1_300)
     ));
 
     let no_body_session_id = new_session_id();
@@ -1633,18 +2090,19 @@ fn automatic_wake_starts_initial_one_second_wait_at_visible_capsule_ack() {
     assert!(automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         no_body_session_id,
-        Some(5_000)
+        Some(1_200)
     ));
     acknowledge_automatic_wake_capsule_visible(&coordinator.inner, no_body_session_id);
+    // Deadline = capsule_audio 1200 + body wait 700 = 1900.
     assert!(automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         no_body_session_id,
-        Some(5_999)
+        Some(1_899)
     ));
     assert!(!automatic_wake_initial_body_wait_active(
         &coordinator.inner,
         no_body_session_id,
-        Some(6_000)
+        Some(1_900)
     ));
 
     let manual_session_id = new_session_id();
@@ -2549,27 +3007,47 @@ fn post_dictation_key_claim_is_once_per_session() {
 
 #[test]
 fn default_done_message_treats_raw_insert_after_polish_failure_as_successful_fallback() {
+    // Successful type/paste: silent capsule (text already on screen).
     assert_eq!(
-        default_done_message(InsertStatus::PasteSent, false),
-        Some("已尝试粘贴".to_string())
+        default_done_message(InsertStatus::PasteSent, false, false),
+        None
     );
-    assert_eq!(default_done_message(InsertStatus::Inserted, true), None);
     assert_eq!(
-        default_done_message(InsertStatus::PasteSent, true),
-        Some("已尝试粘贴原文".to_string())
+        default_done_message(InsertStatus::PasteSent, false, true),
+        None
+    );
+    assert_eq!(
+        default_done_message(InsertStatus::Inserted, true, true),
+        None
+    );
+    assert_eq!(
+        default_done_message(InsertStatus::PasteSent, true, true),
+        None
+    );
+    assert_eq!(
+        default_done_message(InsertStatus::Inserted, false, false),
+        None
     );
     let copied_message = if cfg!(target_os = "windows") {
-        "已复制原文，请 Ctrl+V"
+        "润色不可用，已复制原文，请 Ctrl+V"
     } else {
-        "已复制原文，请粘贴"
+        "润色不可用，已复制原文，请粘贴"
     };
     assert_eq!(
-        default_done_message(InsertStatus::CopiedFallback, true),
+        default_done_message(InsertStatus::CopiedFallback, true, false),
         Some(copied_message.to_string())
     );
     assert_eq!(
-        default_done_message(InsertStatus::Failed, true),
+        default_done_message(InsertStatus::Failed, true, false),
         Some("润色不可用，插入失败".to_string())
+    );
+    assert_eq!(
+        default_done_message(InsertStatus::Failed, true, true),
+        Some(if cfg!(target_os = "windows") {
+            "上屏失败，内容在剪贴板，请 Ctrl+V".to_string()
+        } else {
+            "上屏失败，内容在剪贴板，请粘贴".to_string()
+        })
     );
 }
 
@@ -2652,7 +3130,7 @@ fn kws_hit_schedules_immediate_local_confirmation() {
     let polish = include_str!("dictation_wake_polish.rs");
     assert!(
         polish.contains("kws_prompted_local_confirm")
-            && polish.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 800")
+            && polish.contains("KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS: usize = 700")
             && polish.contains("KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400")
             && polish.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 250")
             && polish.contains("KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2")
@@ -2660,6 +3138,7 @@ fn kws_hit_schedules_immediate_local_confirmation() {
         "secondary budget 250ms + 2 Absent rejects + attenuation-only local ASR"
     );
     assert_eq!(super::KWS_SECONDARY_CONFIRM_BUDGET_MS, 250);
+    assert_eq!(super::KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS, 700);
     assert!(
         super::KWS_SECONDARY_CONFIRM_BUDGET_MS + 100 <= 350,
         "keyword fail-open plus actor/control allowance must fit the phrase-tail target"
@@ -3099,13 +3578,26 @@ fn volcengine_preview_and_final_share_the_authoritative_session() {
 }
 
 #[test]
-fn live_and_terminal_automatic_wake_paths_both_seed_session_speaker_tracking() {
+fn every_automatic_wake_path_seeds_session_speaker_tracking() {
     let body = include_str!("dictation_embedded_stream.rs");
     assert_eq!(
         body.matches("start_local_speaker_tracking(").count(),
-        2,
-        "both automatic-wake acceptance paths must bind endpointing to the wake speaker"
+        3,
+        "live, terminal-with-body, and terminal-continuation wake paths must bind endpointing to the wake speaker"
     );
+
+    let continuation_take = body
+        .find("take_terminal_wake_continuation(inner, session.session_id)")
+        .expect("terminal continuation must attach to the next coordinator session");
+    let continuation_seed = body[continuation_take..]
+        .find("start_local_speaker_tracking(")
+        .map(|offset| continuation_take + offset)
+        .expect("terminal continuation must seed target-speaker tracking");
+    let continuation_activate = body[continuation_seed..]
+        .find("activate_embedded_audio_dictation_session")
+        .map(|offset| continuation_seed + offset)
+        .expect("terminal continuation must activate its bound session");
+    assert!(continuation_take < continuation_seed && continuation_seed < continuation_activate);
 
     let live_accept = body
         .find("live automatic session activated and released")

@@ -106,8 +106,12 @@ assertOk(
   'inactive stop acknowledgement should stay hidden',
 );
 assertOk(
-  PREVIEW_FINAL_TRANSITION.exitAnimMs < 200,
-  'exit animation should be fast',
+  PREVIEW_FINAL_TRANSITION.exitAnimMs <= 120,
+  'exit animation should be snappy after silent success',
+);
+assertOk(
+  PREVIEW_FINAL_TRANSITION.lingerMs <= 400,
+  'success linger should not hold the capsule for a full second after text is on screen',
 );
 
 // Layout heights are positive
@@ -119,8 +123,8 @@ assertEqual(
   'wake capsule should be visible on its first frame',
 );
 assertOk(
-  CAPSULE_APPEARANCE.enterAnimMs <= 160,
-  'wake capsule geometry should settle within 160 ms',
+  CAPSULE_APPEARANCE.enterAnimMs <= 120,
+  'wake capsule geometry should settle within 120 ms',
 );
 
 {

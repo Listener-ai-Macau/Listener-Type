@@ -1,0 +1,64 @@
+{
+  "schema": "listener.1.0.5.recording_ux.owner_acceptance",
+  "result": "PASS_WITH_NOTES",
+  "note": "All five steps selected 通过 (parsed from step-*-raw.txt). Notes include product feedback and deferred other-speaker; not a clean silent PASS.",
+  "evidence_dir": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\docs\\release\\evidence\\1.0.5-recording-ux-20260805-142628",
+  "installed_exe_sha256": "51B1A80EAEDB8C5DD5C61A575F3AA464F60F7BA998EF37AFB5ED35D8D618B594",
+  "installed_version": "1.0.5",
+  "steps": [
+    {
+      "id": "00-ready",
+      "progress": "0/4",
+      "title": "Listener 1.0.5 录音验收",
+      "selected": "通过",
+      "note": "所以你现在要我读什么话？描写啊，就是我感觉现在你这样子让我测不出什么东西。",
+      "observed_at": "2026-08-05T14:32:09+08:00"
+    },
+    {
+      "id": "01-short-snappy",
+      "progress": "1/4",
+      "title": "短句跟手（默认1s）",
+      "selected": "通过",
+      "note": "今天天气不错，我们继续测试。",
+      "observed_at": "2026-08-05T14:32:22+08:00"
+    },
+    {
+      "id": "02-no-mid-cut",
+      "progress": "2/4",
+      "title": "中途不掐+句末耐停",
+      "selected": "通过",
+      "note": "我想先说明一下，这个功能主要是为了。让长句在中间换气的时候。不要被系统掐断。",
+      "observed_at": "2026-08-05T14:32:39+08:00"
+    },
+    {
+      "id": "03-long-form",
+      "progress": "3/4",
+      "title": "长文模式（可选）",
+      "selected": "通过",
+      "note": "开长文是什么意思啊？没看懂。可以不开吗？不开会怎么样？不要搞这么多设置给用户。",
+      "triage": "product_feedback_reduce_settings_complexity",
+      "observed_at": "2026-08-05T14:33:05+08:00"
+    },
+    {
+      "id": "04-other-speaker",
+      "progress": "4/4",
+      "title": "别人说话不拖（可选）",
+      "selected": "通过",
+      "note": "现在有别的人在干扰，这个我还没测试，就先暂定吧，不要先测试。",
+      "triage": "deferred_other_speaker",
+      "observed_at": "2026-08-05T14:33:21+08:00"
+    }
+  ],
+  "machine_summary": {
+    "stop_to_transcribing_ms": [1, 1, 1, 2, 2],
+    "stop_to_done_ms": [19, 8, 8, 110, 9],
+    "wake_to_capsule_request_ms": [983, 899, 948, 1680, 931],
+    "wake_to_capsule_fail_count": 1,
+    "long_form": false,
+    "endpoint": "target_speaker_inactive_2000ms sentence_pause=true",
+    "done_message": "已粘贴原文（仍在剪贴板，可 Ctrl+V）",
+    "polish_failed": true,
+    "missing_packets": 0
+  },
+  "finished_at": "2026-08-05T14:33:21+08:00"
+}

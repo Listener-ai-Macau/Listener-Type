@@ -253,6 +253,20 @@ struct AutomaticWakeGuard {
     body_started: bool,
 }
 
+struct ProviderProgressGuard {
+    session_id: SessionId,
+    provider_audio_ms: u64,
+    last_advanced_at: Instant,
+}
+
+struct TerminalWakeContinuation {
+    session_id: Option<SessionId>,
+    wake_pcm: Vec<u8>,
+    wake_end_seconds: f32,
+    wake_phrase: String,
+    expires_at: Instant,
+}
+
 struct Inner {
     app: Mutex<Option<AppHandle>>,
     history: HistoryStore,
@@ -289,12 +303,21 @@ struct Inner {
     /// Session-scoped activation-prefix and initial-body guard. Manual sessions
     /// never arm this guard.
     embedded_audio_automatic_wake_guard: Mutex<Option<AutomaticWakeGuard>>,
+    /// Distinguishes a genuinely stalled provider clock from ordinary
+    /// sub-second streaming lag before local endpoint fallback is allowed.
+    embedded_audio_provider_progress_guard: Mutex<Option<ProviderProgressGuard>>,
+    /// One verified terminal wake may start a fresh body-only firmware capture
+    /// when the VAD segment ended before it contained usable post-wake audio.
+    embedded_audio_terminal_wake_continuation: Mutex<Option<TerminalWakeContinuation>>,
     /// 最近一次用于录音胶囊的嵌入式 BLE PCM 电平。ASR partial preview 到达时沿用它，
     /// 避免文字刷新把音量动画刷成 0。
     embedded_audio_last_capsule_level: Mutex<f32>,
     /// 嵌入式 BLE 收到停止包后锁存胶囊的停止反馈。SessionPhase 仍保持 Listening，
     /// 让 end_session 接管最终处理，同时避免尾包 / partial preview 把 UI 刷回 Recording。
     embedded_audio_stop_feedback_latched: AtomicBool,
+    /// When stop→Transcribing feedback latches, record session + Instant so the
+    /// completion path can log stop_to_done_ms for UX latency observability.
+    dictation_stop_feedback_at: Mutex<Option<(SessionId, Instant)>>,
     /// Listener BLE 输入源的后台订阅代次。设置变化时递增，旧监听循环会自然退出。
     embedded_ble_listener_generation: AtomicU64,
     /// Firmware OTA 正在独占 BLE data plane。期间不要自动重启后台音频监听，避免抢占
@@ -652,8 +675,11 @@ impl Coordinator {
                     embedded_audio_final_result: Mutex::new(None),
                     embedded_audio_partial_preview: Mutex::new(None),
                     embedded_audio_automatic_wake_guard: Mutex::new(None),
+                    embedded_audio_provider_progress_guard: Mutex::new(None),
+                    embedded_audio_terminal_wake_continuation: Mutex::new(None),
                     embedded_audio_last_capsule_level: Mutex::new(0.0),
                     embedded_audio_stop_feedback_latched: AtomicBool::new(false),
+                    dictation_stop_feedback_at: Mutex::new(None),
                     embedded_ble_listener_generation: AtomicU64::new(0),
                     embedded_ble_ota_active: AtomicBool::new(false),
                     embedded_ble_listener_cancel: Mutex::new(None),
@@ -734,8 +760,11 @@ impl Coordinator {
                 embedded_audio_final_result: Mutex::new(None),
                 embedded_audio_partial_preview: Mutex::new(None),
                 embedded_audio_automatic_wake_guard: Mutex::new(None),
+                embedded_audio_provider_progress_guard: Mutex::new(None),
+                embedded_audio_terminal_wake_continuation: Mutex::new(None),
                 embedded_audio_last_capsule_level: Mutex::new(0.0),
                 embedded_audio_stop_feedback_latched: AtomicBool::new(false),
+                dictation_stop_feedback_at: Mutex::new(None),
                 embedded_ble_listener_generation: AtomicU64::new(0),
                 embedded_ble_ota_active: AtomicBool::new(false),
                 embedded_ble_listener_cancel: Mutex::new(None),
@@ -2401,6 +2430,37 @@ async fn insert_with_windows_ime_first(
         };
     };
 
+    // Recording-start activate often fails (0x80004005) while many windows
+    // fight the TIP. Before abandoning TSF, re-prepare once at insert time —
+    // focus is usually calmer after the user finishes speaking, so true
+    // insert can still land. If it still fails, jump straight to non-TSF /
+    // clipboard for snappy stop→Done (owner sessions 7ce523e5 / 6a86d8e3).
+    let prepared = if prepared.is_ready_for_tsf_submit() {
+        prepared
+    } else {
+        log::info!(
+            "[windows-ime] TSF not activated at recording start; retrying prepare at insert time"
+        );
+        inner.windows_ime.restore_session(prepared);
+        let retried = inner.windows_ime.prepare_session();
+        if retried.is_ready_for_tsf_submit() {
+            log::info!("[windows-ime] TSF activated on insert-time retry");
+            retried
+        } else {
+            log::info!(
+                "[windows-ime] TSF still not activated at insert; using non-TSF insert path immediately"
+            );
+            inner.windows_ime.restore_session(retried);
+            return insert_via_non_tsf_fallback(
+                inner,
+                polished,
+                restore_clipboard,
+                allow_clipboard_fallback,
+                paste_shortcut,
+            );
+        }
+    };
+
     let request = crate::windows_ime_ipc::ImeSubmitRequest {
         session_id: Uuid::new_v4().to_string(),
         text: polished.to_string(),
@@ -2417,17 +2477,6 @@ async fn insert_with_windows_ime_first(
             // 剪贴板里此时已有原文，直接 Ctrl+V 走目标窗口 paste handler 绕开 IME。
             log::warn!("[windows-ime] TSF submit failed: {error}");
             inner.windows_ime.restore_session(prepared);
-            if allow_clipboard_fallback {
-                return WindowsInsertionResult {
-                    status: inner.inserter.insert_via_clipboard_fallback(
-                        polished,
-                        restore_clipboard,
-                        paste_shortcut,
-                    ),
-                    target_confirmed: false,
-                };
-            }
-            // 不允许 clipboard 兜底（用户关了剪贴板留存）：退回 SendInput，保持旧行为。
             return insert_via_non_tsf_fallback(
                 inner,
                 polished,
@@ -2481,6 +2530,26 @@ fn insert_via_non_tsf_fallback(
     allow_clipboard_fallback: bool,
     paste_shortcut: PasteShortcut,
 ) -> WindowsInsertionResult {
+    // Prefer clipboard+paste when TSF never activated: user CJK IME often
+    // swallows bare Unicode SendInput (false Inserted). Clipboard paste is the
+    // path that actually landed text in owner multi-speaker sessions.
+    if allow_clipboard_fallback {
+        let status = inner.inserter.insert_via_clipboard_fallback(
+            polished,
+            restore_clipboard,
+            paste_shortcut,
+        );
+        if status == InsertStatus::PasteSent || status == InsertStatus::Inserted {
+            log::info!(
+                "[windows-ime] non-TSF clipboard paste path status={status:?} chars={}",
+                polished.chars().count()
+            );
+            return WindowsInsertionResult {
+                status,
+                target_confirmed: false,
+            };
+        }
+    }
     if inner.inserter.insert_via_unicode_keystrokes(polished) == InsertStatus::Inserted {
         log::info!(
             "[windows-ime] TSF unavailable; Unicode SendInput dispatched without target confirmation"
@@ -3813,13 +3882,20 @@ fn build_active_llm_provider(llm_thinking_enabled: bool) -> anyhow::Result<Activ
         return Ok(ActiveLLMProvider::Codex(CodexOAuthLLMProvider::new(config)));
     }
 
-    let api_key = CredentialsVault::get(CredentialAccount::ArkApiKey)?.unwrap_or_default();
+    let api_key = sanitize_llm_api_key(
+        &CredentialsVault::get(CredentialAccount::ArkApiKey)?.unwrap_or_default(),
+    );
     let model = model.unwrap_or_else(|| "deepseek-v3-2".to_string());
     let endpoint = resolve_ark_endpoint(&active, &api_key)?;
     let base_url = endpoint
         .trim_end_matches("/chat/completions")
         .trim_end_matches('/')
         .to_string();
+    // Guardrail: never send a DeepSeek-shaped key to the Volcengine ARK host
+    // (or vice versa). That combination yields 401 "API key format is
+    // incorrect" and used to block every stop→Done until the auth circuit
+    // opened. Prefer provider defaults when the stored endpoint disagrees.
+    let base_url = reconcile_llm_base_url_for_key(&active, &api_key, &base_url);
     let proxy_config = read_llm_proxy_config(&active)?;
     let config = OpenAICompatibleConfig::new(active, "Listener Type LLM", base_url, api_key, model)
         .with_thinking_enabled(llm_thinking_enabled)
@@ -3827,6 +3903,59 @@ fn build_active_llm_provider(llm_thinking_enabled: bool) -> anyhow::Result<Activ
     Ok(ActiveLLMProvider::OpenAI(OpenAICompatibleLLMProvider::new(
         config,
     )))
+}
+
+fn sanitize_llm_api_key(raw: &str) -> String {
+    let trimmed = raw.trim().trim_matches(|c| c == '"' || c == '\'').trim();
+    let without_bearer = trimmed
+        .strip_prefix("Bearer ")
+        .or_else(|| trimmed.strip_prefix("bearer "))
+        .unwrap_or(trimmed)
+        .trim();
+    without_bearer.to_string()
+}
+
+/// If the stored endpoint is clearly the wrong vendor for this key shape,
+/// force the provider default so polish does not 401 on key-format mismatch.
+fn reconcile_llm_base_url_for_key(provider_id: &str, api_key: &str, base_url: &str) -> String {
+    let key = api_key.trim();
+    let looks_deepseek = key.starts_with("sk-");
+    let looks_openai = key.starts_with("sk-proj-") || key.starts_with("sk-or-");
+    let endpoint_is_ark = base_url.contains("volces.com") || base_url.contains("volcengine");
+    let endpoint_is_deepseek = base_url.contains("api.deepseek.com");
+    if looks_deepseek && !looks_openai && endpoint_is_ark {
+        if let Some(default) = llm_provider_default_endpoint("deepseek") {
+            log::warn!(
+                "[coord] LLM endpoint {base_url} is ARK but api key looks like DeepSeek; using {default}"
+            );
+            return default.to_string();
+        }
+    }
+    if provider_id == "ark" && looks_deepseek && endpoint_is_ark {
+        if let Some(default) = llm_provider_default_endpoint("deepseek") {
+            log::warn!(
+                "[coord] active LLM is ark but api key looks like DeepSeek; using {default}"
+            );
+            return default.to_string();
+        }
+    }
+    if provider_id == "deepseek" && endpoint_is_ark {
+        if let Some(default) = llm_provider_default_endpoint("deepseek") {
+            log::warn!(
+                "[coord] active LLM is deepseek but endpoint is ARK; using {default}"
+            );
+            return default.to_string();
+        }
+    }
+    if provider_id == "ark" && endpoint_is_deepseek && !looks_deepseek {
+        if let Some(default) = llm_provider_default_endpoint("ark") {
+            log::warn!(
+                "[coord] active LLM is ark but endpoint is DeepSeek; using {default}"
+            );
+            return default.to_string();
+        }
+    }
+    base_url.to_string()
 }
 
 fn resolve_ark_endpoint(provider_id: &str, api_key: &str) -> anyhow::Result<String> {

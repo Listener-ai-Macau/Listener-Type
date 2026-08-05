@@ -1,0 +1,9 @@
+{
+  "selected": "通过",
+  "text": "我想先说明一下，这个功能主要是为了。让长句在中间换气的时候。不要被系统掐断。",
+  "spoken_text": "我想先说明一下，这个功能主要是为了让长句在中间换气时不要被系统掐断。",
+  "output_path": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\docs\\release\\evidence\\1.0.5-recording-ux-20260805-142628\\step-02-no-mid-cut-note.txt"
+}
+
+ERR:
+

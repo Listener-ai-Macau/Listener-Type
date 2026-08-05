@@ -46,6 +46,10 @@ const startupScript = read("scripts/check-type-startup-reconnect-speed.ps1");
 const otaSpeedTest = read("scripts/check-ota-transfer-speed-log.test.mjs");
 const firmwareOtaTs = read("src/lib/firmwareOta.test.ts");
 const wakePolish = read("src-tauri/src/coordinator/dictation_wake_polish.rs");
+const volcengineAsr = read("src-tauri/src/asr/volcengine.rs");
+const capsuleTsx = read("src/components/Capsule.tsx");
+const capsulePreviewRules = read("src/lib/capsulePreviewRules.ts");
+const capsulePreviewRulesTest = read("src/lib/capsulePreviewRules.test.ts");
 const speaker = existsSync(join(typeRoot, "src-tauri/src/speaker_verification.rs"))
   ? read("src-tauri/src/speaker_verification.rs")
   : "";
@@ -79,6 +83,127 @@ gate("target_speaker_end_1000ms", () => {
     "target speaker end timeout 1000 ms",
   );
   mustInclude(dictation, "target_speaker_inactive_1000ms", "auto-stop reason string");
+});
+
+gate("body_initial_wait_700ms", () => {
+  mustMatch(
+    dictation,
+    /EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS:\s*u64\s*=\s*700/,
+    "automatic body initial wait 700 ms",
+  );
+});
+
+// Owner-accepted 1.0.4 smooth live preview: fluid optimistic partials, no empty
+// wipe on two_pass_empty, no other-speaker clock extension, progressive burst
+// reveal, and same-session empty payload must not clear the capsule text.
+gate("smooth_preview_optimistic_stream", () => {
+  mustInclude(
+    volcengineAsr,
+    "optimistic partial update",
+    "optimistic partial log path for live preview",
+  );
+  mustInclude(
+    volcengineAsr,
+    "local_speaker_allows_optimistic_preview",
+    "Target-gated optimistic preview gate",
+  );
+  mustInclude(
+    volcengineAsr,
+    "commit_session_transcript_if_stronger",
+    "Target stream promotes into session speech ledger",
+  );
+  mustInclude(
+    volcengineAsr,
+    "fn session_committed_transcript",
+    "session speech ledger for finalization",
+  );
+});
+
+gate("smooth_preview_empty_final_ledger", () => {
+  mustInclude(volcengineAsr, "fn result_marks_two_pass_empty", "detect two_pass_empty finals");
+  mustInclude(
+    volcengineAsr,
+    "two_pass_empty_final_seals_stream_without_erasing_session_speech",
+    "two_pass_empty must keep session speech",
+  );
+  mustInclude(
+    volcengineAsr,
+    "protocol final is two_pass_empty seal-only",
+    "seal-only log for empty protocol final",
+  );
+  mustInclude(
+    dictation,
+    "empty ASR final recovered from partial preview",
+    "coordinator recovers empty final from partial preview",
+  );
+});
+
+gate("smooth_preview_other_speaker_no_clock_extend", () => {
+  mustInclude(
+    volcengineAsr,
+    "transient_non_target_does_not_extend_owner_endpoint_clock",
+    "NonTarget must not refresh owner endpoint clock",
+  );
+  mustInclude(
+    volcengineAsr,
+    "other_person_speech_does_not_lengthen_owner_auto_end",
+    "other person talking must not lengthen auto-end",
+  );
+  mustMatch(
+    volcengineAsr,
+    /SessionSpeakerClassification::Target[\s\S]{0,200}local_target_speech_end_ms/,
+    "local_target_speech_end_ms only advances on Target classification",
+  );
+});
+
+gate("smooth_preview_stable_attributed_endpoint", () => {
+  mustInclude(
+    dictationTests,
+    "target_speaker_endpoint_uses_newest_stable_attributed_boundary_after_diarization_flip",
+    "diarization flip must not cut on stale target boundary",
+  );
+  mustInclude(
+    dictation,
+    "stable_attributed_speech_end_ms",
+    "endpoint clock chains stable attributed speech",
+  );
+});
+
+gate("smooth_preview_capsule_preserve_and_burst", () => {
+  mustInclude(
+    capsuleTsx,
+    "shouldPreserveMessageWithoutPayload",
+    "same-session empty payload must preserve preview",
+  );
+  mustMatch(
+    capsulePreviewRules,
+    /maxCatchUpMs:\s*160/,
+    "progressive burst reveal catch-up budget 160 ms",
+  );
+  // Ceiling contract: settle must stay ≤160ms. Faster (e.g. 110) is an improvement.
+  mustMatch(
+    capsulePreviewRules,
+    /enterAnimMs:\s*(?:[1-9]|[1-9]\d|1[0-5]\d|160)\b/,
+    "wake capsule geometry settle within 160 ms",
+  );
+  {
+    const m = capsulePreviewRules.match(/enterAnimMs:\s*(\d+)/);
+    if (!m || Number(m[1]) > 160) {
+      throw new Error(
+        `wake capsule enterAnimMs must be ≤160 (got ${m ? m[1] : "missing"})`,
+      );
+    }
+  }
+  mustInclude(
+    capsulePreviewRulesTest,
+    "burst reveal should stay within the frame budget",
+    "burst reveal unit contract",
+  );
+  mustInclude(
+    capsulePreviewRulesTest,
+    "every reveal frame must be an exact target prefix",
+    "reveal frames stay pure prefixes",
+  );
 });
 
 gate("default_settings", () => {

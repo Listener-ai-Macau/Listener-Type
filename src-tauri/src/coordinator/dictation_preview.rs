@@ -781,6 +781,22 @@ fn automatic_wake_initial_body_wait_active(
         .unwrap_or(true)
 }
 
+fn automatic_wake_session_active(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .is_some_and(|guard| guard.session_id == session_id)
+}
+
+fn automatic_wake_body_started(inner: &Arc<Inner>, session_id: SessionId) -> bool {
+    inner
+        .embedded_audio_automatic_wake_guard
+        .lock()
+        .as_ref()
+        .is_some_and(|guard| guard.session_id == session_id && guard.body_started)
+}
+
 fn filter_automatic_wake_text(
     inner: &Arc<Inner>,
     session_id: SessionId,
@@ -1143,7 +1159,7 @@ pub(super) fn request_embedded_audio_stop_feedback(
         }
         state.session_id
     };
-    latch_embedded_audio_stop_feedback(inner);
+    latch_embedded_audio_stop_feedback(inner, session_id);
     emit_embedded_audio_transcribing_if_active(
         inner,
         session_id,

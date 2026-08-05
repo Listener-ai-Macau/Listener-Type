@@ -300,16 +300,35 @@ mod windows_impl {
         let clsid = parse_guid(LISTENER_TYPE_TEXT_SERVICE_CLSID_BRACED)?;
         let profile_guid = parse_guid(LISTENER_TYPE_PROFILE_GUID_BRACED)?;
 
-        with_input_processor_profiles(|profiles| unsafe {
-            profiles.EnableLanguageProfile(
+        // Best-effort enable/activate on ITfInputProcessorProfiles. Owner
+        // logs show ChangeCurrentLanguage / ActivateLanguageProfile often
+        // return E_FAIL (0x80004005) when another TIP owns the thread; that
+        // used to abort before ActivateProfile. Soft-fail those steps and
+        // still try the profile manager path, which is what actually lands
+        // Listener Type for true TSF insert.
+        if let Err(error) = with_input_processor_profiles(|profiles| unsafe {
+            let _ = profiles.EnableLanguageProfile(
                 &clsid,
                 LISTENER_TYPE_TSF_LANG_ID,
                 &profile_guid,
                 true,
-            )?;
-            profiles.ChangeCurrentLanguage(LISTENER_TYPE_TSF_LANG_ID)?;
-            profiles.ActivateLanguageProfile(&clsid, LISTENER_TYPE_TSF_LANG_ID, &profile_guid)
-        })?;
+            );
+            if let Err(err) = profiles.ChangeCurrentLanguage(LISTENER_TYPE_TSF_LANG_ID) {
+                log::debug!(
+                    "[windows-ime] ChangeCurrentLanguage soft-fail (continuing ActivateProfile): {err:?}"
+                );
+            }
+            if let Err(err) =
+                profiles.ActivateLanguageProfile(&clsid, LISTENER_TYPE_TSF_LANG_ID, &profile_guid)
+            {
+                log::debug!(
+                    "[windows-ime] ActivateLanguageProfile soft-fail (continuing ActivateProfile): {err:?}"
+                );
+            }
+            Ok(())
+        }) {
+            log::debug!("[windows-ime] ITfInputProcessorProfiles pre-activate soft-fail: {error}");
+        }
 
         with_profile_manager(|manager| unsafe {
             manager.ActivateProfile(

@@ -1,0 +1,9 @@
+{
+  "selected": "通过",
+  "text": "现在有别的人在干扰，这个我还没测试，就先暂定吧，不要先测试。",
+  "spoken_text": null,
+  "output_path": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\docs\\release\\evidence\\1.0.5-recording-ux-20260805-142628\\step-04-other-speaker-note.txt"
+}
+
+ERR:
+

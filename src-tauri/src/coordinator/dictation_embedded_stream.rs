@@ -314,15 +314,28 @@ impl EmbeddedStreamingDictation {
         // User-origin full session: do not auto-promote a later unrelated VA candidate.
         clear_device_key_dictation_takeover_pending();
         self.embedded_session_id = Some(embedded_session_id);
-        let session = begin_embedded_audio_dictation_session(inner).await?;
+        let mut session = begin_embedded_audio_dictation_session(inner).await?;
+        let terminal_wake_continuation =
+            take_terminal_wake_continuation(inner, session.session_id);
+        if let Some(continuation) = terminal_wake_continuation.as_ref() {
+            session.start_local_speaker_tracking(
+                continuation.wake_pcm.clone(),
+                continuation.wake_end_seconds,
+                continuation.wake_phrase.clone(),
+            );
+        }
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
+            if terminal_wake_continuation.is_some() {
+                clear_automatic_wake_text_guard(inner);
+            }
             return Err("嵌入式音频听写会话已被取消".to_string());
         }
         crate::observability::begin_embedded_audio_session(session.session_id, embedded_session_id);
         log::info!(
-            "[coord] embedded audio streaming dictation started (embedded_session_id={embedded_session_id}, coordinator_session_id={}, asr={})",
+            "[coord] embedded audio streaming dictation started (embedded_session_id={embedded_session_id}, coordinator_session_id={}, asr={}, terminal_wake_continuation={})",
             session.session_id,
-            session.active_asr
+            session.active_asr,
+            terminal_wake_continuation.is_some()
         );
         self.session = Some(session);
         Ok(())
@@ -1153,7 +1166,7 @@ impl EmbeddedStreamingDictation {
             const MIN_POST_WAKE_DICTATION_PCM_BYTES: usize = 16_000 * 2; // 1.0 s
             if post_wake_pcm_bytes < MIN_POST_WAKE_DICTATION_PCM_BYTES {
                 log::info!(
-                    "[wake-phrase] terminal accept dropped: post-wake pcm too short for host dictation embedded_session_id={} post_wake_pcm_ms={} min_ms={}",
+                    "[wake-phrase] terminal accept requires body continuation embedded_session_id={} post_wake_pcm_ms={} min_ms={}",
                     embedded_session_id,
                     post_wake_pcm_bytes / 32,
                     MIN_POST_WAKE_DICTATION_PCM_BYTES / 32
@@ -1161,15 +1174,47 @@ impl EmbeddedStreamingDictation {
                 if let Some(sid) = take_early_capsule_session_id(&mut candidate) {
                     dismiss_early_wake_recording_capsule(inner, sid);
                 }
+                if !stage_terminal_wake_continuation(
+                    inner,
+                    local_speaker_seed
+                        .as_ref()
+                        .expect("accepted terminal wake has a speaker seed")
+                        .0
+                        .clone(),
+                    wake_match.end_seconds,
+                    phrase.clone(),
+                ) {
+                    log::warn!(
+                        "[wake-phrase] terminal continuation already active; rejecting duplicate embedded_session_id={embedded_session_id}"
+                    );
+                    reject_hidden_automatic_candidate(
+                        "wake_phrase_continuation_already_active",
+                        embedded_session_id,
+                    );
+                    return Ok(true);
+                }
                 save_bounded_wake_diagnostic(
                     embedded_session_id,
-                    "wake-without-usable-dictation",
-                    &[],
+                    "accepted-terminal-continuation",
+                    &candidate.pcm,
                 );
-                reject_hidden_automatic_candidate(
-                    "wake_phrase_without_usable_dictation",
-                    embedded_session_id,
-                );
+                clear_hidden_automatic_candidate();
+                match request_embedded_ble_recording_start_from_host(
+                    inner,
+                    "terminal_wake_body_continuation",
+                )
+                .await
+                {
+                    Ok(session_id) => log::info!(
+                        "[wake-phrase] terminal continuation recording requested embedded_session_id={embedded_session_id} coordinator_session_id={session_id}"
+                    ),
+                    Err(err) => {
+                        discard_terminal_wake_continuation(inner);
+                        log::warn!(
+                            "[wake-phrase] terminal continuation recording failed embedded_session_id={embedded_session_id}: {err}"
+                        );
+                    }
+                }
                 return Ok(true);
             }
         } else {

@@ -133,7 +133,7 @@ function CompletionMark({ label }: { label: string }) {
         color: 'var(--ol-blue)',
         background: 'color-mix(in srgb, var(--ol-blue-soft) 74%, rgba(255,255,255,.72))',
         boxShadow: '0 0 0 0.5px rgba(101, 123, 112, 0.16) inset, 0 6px 14px -10px rgba(101, 123, 112, 0.42)',
-        animation: 'cap-complete-chip 520ms var(--ol-motion-soft) both',
+        animation: 'cap-complete-chip 280ms var(--ol-motion-soft) both',
       }}
     >
       <span
@@ -160,7 +160,7 @@ function CompletionMark({ label }: { label: string }) {
             style={{
               strokeDasharray: 11,
               strokeDashoffset: 11,
-              animation: 'cap-complete-check 320ms 90ms var(--ol-motion-soft) forwards',
+              animation: 'cap-complete-check 200ms 40ms var(--ol-motion-soft) forwards',
             }}
           />
         </svg>
@@ -176,7 +176,7 @@ function CompletionMark({ label }: { label: string }) {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           color: '#171714',
-          animation: 'cap-complete-label 360ms 140ms var(--ol-motion-soft) both',
+          animation: 'cap-complete-label 200ms 60ms var(--ol-motion-soft) both',
         }}
       >
         {label}
@@ -979,7 +979,8 @@ export function Capsule() {
       <style>{`
         /* 入场首帧即完整可见，只让几何从中央快速展开。 */
         @keyframes capsule-in {
-          from { opacity: ${CAPSULE_APPEARANCE.initialOpacity}; transform: scaleX(.68) scaleY(.97); }
+          /* Less extreme scale so the first visible frame already looks "there". */
+          from { opacity: ${CAPSULE_APPEARANCE.initialOpacity}; transform: scaleX(.86) scaleY(.98); }
           to   { opacity: 1; transform: scaleX(1)   scaleY(1); }
         }
         /* 离场：scaleX 由 1 收回 0.18 + 整体向下偏移 8px + 淡出。

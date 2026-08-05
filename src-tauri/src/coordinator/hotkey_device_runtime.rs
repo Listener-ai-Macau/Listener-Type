@@ -1789,6 +1789,8 @@ async fn request_embedded_ble_recording_start_from_host(
         Some(session_id),
         format!("host start requested reason={reason}"),
     );
+    let terminal_wake_continuation =
+        dictation::bind_terminal_wake_continuation_session(inner, session_id);
     emit_capsule_for_session(
         inner,
         session_id,
@@ -1801,6 +1803,7 @@ async fn request_embedded_ble_recording_start_from_host(
 
     #[cfg(test)]
     {
+        let _ = terminal_wake_continuation;
         crate::timeline::mark(
             "backend.embedded_ble_session_actor",
             "firmware_start_skipped_test",
@@ -1833,6 +1836,9 @@ async fn request_embedded_ble_recording_start_from_host(
                 Ok(session_id)
             }
             Err(err) => {
+                if terminal_wake_continuation {
+                    dictation::clear_terminal_wake_continuation(inner, session_id);
+                }
                 set_phase_idle_if_session_matches(inner, session_id);
                 record_embedded_ble_listener_last_error(inner, &err);
                 record_embedded_ble_recovery_failure(inner, &err);

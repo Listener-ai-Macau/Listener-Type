@@ -49,9 +49,65 @@ const WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES: u64 = 32 * 1024 * 1024;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);
+// Owner dictation endpoint. Standard mode uses 1.0s for snappy completion;
+// optional long-form mode uses 2.0s so users can pause mid-thought without
+// being cut. Only the wake/target speaker's latest speech refreshes this
+// clock — other people talking must not lengthen auto-end. Premature cuts
+// and empty finals are handled separately (stable-attributed boundary hold +
+// session speech ledger). Default remains standard 1.0s (1.0.4 contract).
 const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
+const EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS: u64 = 2_000;
+// Installed session 72519330: wake capsule → ~1.2s host auto-end on the wake
+// clock with empty body → "没有识别到语音". Initial body wait is only 700ms, so
+// 1.0s snappy endpoint after that treats "thinking after wake" as done. Keep
+// 1.0s once body text exists; before body, require a longer abandon silence.
+const EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS: u64 = 3_000;
 const EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS: u64 = 500;
-const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 1_000;
+const EMBEDDED_PROVIDER_STALL_CONFIRM_MS: u64 = 500;
+
+fn target_speaker_end_timeout_ms(long_form: bool) -> u64 {
+    if long_form {
+        EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS
+    } else {
+        EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+    }
+}
+
+/// Endpoint timeout from mode only. Chinese cloud ASR almost always ends a
+/// short utterance with 。？！ so a "sentence terminal → 2s" rule made *every*
+/// snappy dictation feel slow (owner: "怪怪的 / 不跟手"). Mid-phrase cuts are
+/// already guarded by pending_unattributed + provisional clock refresh.
+/// Optional long-form mode is the only intentional 2.0s path.
+fn target_speaker_end_timeout_ms_for_preview(long_form: bool, _preview: Option<&str>) -> u64 {
+    target_speaker_end_timeout_ms(long_form)
+}
+
+/// Retained for diagnostics / tests; no longer stretches the endpoint clock.
+fn preview_ends_with_sentence_terminal(preview: Option<&str>) -> bool {
+    let Some(text) = preview.map(str::trim).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    text.chars()
+        .rev()
+        .find(|ch| !ch.is_whitespace())
+        .is_some_and(|ch| matches!(ch, '。' | '！' | '？' | '.' | '!' | '?' | '…'))
+}
+
+fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
+    if timeout_ms >= EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS {
+        "target_speaker_inactive_no_body_3000ms"
+    } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS {
+        "target_speaker_inactive_2000ms"
+    } else {
+        "target_speaker_inactive_1000ms"
+    }
+}
+// After capsule is visible, block auto-end briefly so the wake phrase alone is
+// not immediately endpointed. First non-empty body preview ends this wait
+// immediately. Keep shorter than the old 1000 ms so startup feels snappier
+// while the exact 1000 ms owner-inactivity endpoint stays unchanged.
+const EMBEDDED_AUTOMATIC_BODY_INITIAL_WAIT_MS: u64 = 700;
+const EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL: Duration = Duration::from_secs(6);
 const EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS: u64 = 200;
 const EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS: u64 = 100;
 static EMBEDDED_ASR_SPEECH_ACTIVITY_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
@@ -312,9 +368,34 @@ fn handle_target_speaker_update(
     if update.target_activity_advanced || update.pending_activity_advanced {
         note_embedded_asr_speech_activity(inner, session_id);
     }
+    let long_form = inner.prefs.get().long_form_dictation;
+    let preview = current_embedded_audio_partial_preview(inner);
+    // Prefer the live filtered preview if present; wake guard body_started is
+    // the durable latch once any non-empty body was seen this session.
+    let body_started = automatic_wake_body_started(inner, session_id)
+        || preview
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty());
+    let mode_timeout_ms =
+        target_speaker_end_timeout_ms_for_preview(long_form, preview.as_deref());
+    let endpoint_timeout_ms = if body_started {
+        mode_timeout_ms
+    } else if automatic_wake_session_active(inner, session_id) {
+        EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS.max(mode_timeout_ms)
+    } else {
+        mode_timeout_ms
+    };
+    let stop_reason = target_speaker_inactive_stop_reason(endpoint_timeout_ms);
     let initial_body_wait_active =
         automatic_wake_initial_body_wait_active(inner, session_id, update.audio_duration_ms);
-    let endpoint_due = !initial_body_wait_active && target_speaker_endpoint_due(&update);
+    let provider_stall_confirmed =
+        provider_progress_stalled(inner, session_id, &update, Instant::now());
+    let endpoint_due = !initial_body_wait_active
+        && target_speaker_endpoint_due_with_provider_stall(
+            &update,
+            provider_stall_confirmed,
+            endpoint_timeout_ms,
+        );
     if !endpoint_due
         || stop_dispatched
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -323,10 +404,14 @@ fn handle_target_speaker_update(
         return;
     }
 
-    let provider_stall_fallback = provider_stall_local_endpoint_due(&update);
+    let provider_stall_fallback = provider_stall_local_endpoint_due(
+        &update,
+        provider_stall_confirmed,
+        endpoint_timeout_ms,
+    );
     if provider_stall_fallback {
         log::info!(
-            "[asr] target endpoint using bounded provider-stall fallback provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?}",
+            "[asr] target endpoint using bounded provider-stall fallback provider_audio_ms={:?} local_audio_ms={:?} cloud_target_end_ms={:?} local_target_end_ms={:?} timeout_ms={endpoint_timeout_ms}",
             update.provider_audio_duration_ms,
             update.audio_duration_ms,
             update.target_speech_end_ms,
@@ -334,11 +419,23 @@ fn handle_target_speaker_update(
         );
     }
 
+    // 1.0.5 A3: latch Transcribing + keep last preview immediately at the
+    // silence threshold so the UI does not hang on Listening while BLE stop
+    // and final-frame work are still in flight.
+    let stop_feedback_started = Instant::now();
+    let feedback_emitted = request_embedded_audio_stop_feedback(inner, stop_reason);
+    if feedback_emitted {
+        log::info!(
+            "[asr] stop_to_transcribing_ms={} session_id={session_id} reason={stop_reason} long_form={long_form} timeout_ms={endpoint_timeout_ms} body_started={body_started} sentence_pause={}",
+            stop_feedback_started.elapsed().as_millis(),
+            preview_ends_with_sentence_terminal(preview.as_deref())
+        );
+    }
+
     let inner = Arc::clone(inner);
     let early_final_asr = clone_volcengine_asr_for_session(&inner, session_id);
     async_runtime::spawn(async move {
-        let stop_future =
-            request_embedded_ble_recording_stop_from_host(&inner, "target_speaker_inactive_1000ms");
+        let stop_future = request_embedded_ble_recording_stop_from_host(&inner, stop_reason);
         let finalization_future = async move {
             let Some(asr) = early_final_asr else {
                 return;
@@ -358,19 +455,34 @@ fn handle_target_speaker_update(
         let (stop_result, ()) = tokio::join!(stop_future, finalization_future);
         match stop_result {
             Ok(true) => log::info!(
-                "[embedded-ble] target-speaker auto-stop sent session_id={session_id}"
+                "[embedded-ble] target-speaker auto-stop sent session_id={session_id} reason={stop_reason}"
             ),
             Ok(false) => log::debug!(
-                "[embedded-ble] target-speaker auto-stop ignored for inactive session_id={session_id}"
+                "[embedded-ble] target-speaker auto-stop ignored for inactive session_id={session_id} reason={stop_reason}"
             ),
             Err(err) => log::warn!(
-                "[embedded-ble] target-speaker auto-stop failed session_id={session_id}: {err}"
+                "[embedded-ble] target-speaker auto-stop failed session_id={session_id} reason={stop_reason}: {err}"
             ),
         }
     });
 }
 
 fn target_speaker_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpdate) -> bool {
+    target_speaker_endpoint_due_with_timeout(update, EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS)
+}
+
+fn target_speaker_endpoint_due_with_timeout(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    endpoint_timeout_ms: u64,
+) -> bool {
+    target_speaker_endpoint_due_with_provider_stall(update, false, endpoint_timeout_ms)
+}
+
+fn target_speaker_endpoint_due_with_provider_stall(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    provider_stall_confirmed: bool,
+    endpoint_timeout_ms: u64,
+) -> bool {
     let unresolved_recent_local_speech = update
         .audio_duration_ms
         .zip(update.local_speech_end_ms)
@@ -386,22 +498,32 @@ fn target_speaker_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpd
             local_speech_ms
                 > attributed_end_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
                 && !confidently_non_target
-                && audio_ms.saturating_sub(local_speech_ms) < EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+                && audio_ms.saturating_sub(local_speech_ms) < endpoint_timeout_ms
         });
     let local_target_authority =
         update.local_speaker_tracking_enabled && update.local_target_speech_end_ms.is_some();
     let cloud_target_authority = update.speaker_info_present && update.speaker_id.is_some();
-    let pending_blocks_endpoint = update.pending_unattributed_speech && !local_target_authority;
+    // Installed session 19df34c4: body text kept growing only in the provisional
+    // channel while stable_attributed stayed on the wake phrase. A local target
+    // clock already existed, so the old "pending only blocks without local
+    // authority" rule let auto-end fire mid-sentence. Any pending unattributed
+    // body speech must block endpoint regardless of local_target_authority.
+    let pending_blocks_endpoint = update.pending_unattributed_speech;
     let target_speech_end_ms = update
         .target_speech_end_ms
         .into_iter()
+        // Provider diarization can briefly split one continuous owner utterance
+        // into a new speaker id. Stable attributed speech must still hold the
+        // endpoint clock even though target-only text filtering remains strict.
+        .chain(update.stable_attributed_speech_end_ms)
         .chain(update.local_target_speech_end_ms)
         .max();
     // Once the provider has reported any covered audio boundary, measure the
     // endpoint only inside that authoritative coverage. Local capture normally
     // runs ahead; using its newer clock with an older attributed target end can
     // stop a quiet sentence tail milliseconds before the next provider update.
-    let provider_stall_fallback = provider_stall_local_endpoint_due(update);
+    let provider_stall_fallback =
+        provider_stall_local_endpoint_due(update, provider_stall_confirmed, endpoint_timeout_ms);
     let endpoint_audio_duration_ms = if provider_stall_fallback {
         update.audio_duration_ms
     } else {
@@ -415,11 +537,15 @@ fn target_speaker_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpd
         && endpoint_audio_duration_ms
             .zip(target_speech_end_ms)
             .is_some_and(|(audio_ms, target_ms)| {
-                audio_ms.saturating_sub(target_ms) >= EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+                audio_ms.saturating_sub(target_ms) >= endpoint_timeout_ms
             })
 }
 
-fn provider_stall_local_endpoint_due(update: &crate::asr::volcengine::TargetSpeakerUpdate) -> bool {
+fn provider_stall_local_endpoint_due(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    provider_stall_confirmed: bool,
+    endpoint_timeout_ms: u64,
+) -> bool {
     let Some(provider_audio_ms) = update.provider_audio_duration_ms else {
         return false;
     };
@@ -432,7 +558,8 @@ fn provider_stall_local_endpoint_due(update: &crate::asr::volcengine::TargetSpea
     let Some(local_target_end_ms) = update.local_target_speech_end_ms else {
         return false;
     };
-    if !update.local_speaker_tracking_enabled
+    if !provider_stall_confirmed
+        || !update.local_speaker_tracking_enabled
         || update.pending_unattributed_speech
         || local_audio_ms.saturating_sub(provider_audio_ms)
             < EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS
@@ -442,14 +569,162 @@ fn provider_stall_local_endpoint_due(update: &crate::asr::volcengine::TargetSpea
 
     // Speaker-agnostic energy is deliberately not an authority here. Room
     // noise can keep advancing it after the stabilized target profile stops.
-    // The local target clock may corroborate the provider, but it may not
-    // invent a newer target tail while the provider is behind.
-    if local_target_end_ms
-        > cloud_target_end_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+    // A newer locally confirmed target tail is authoritative only after that
+    // newer boundary has itself been inactive for the full endpoint interval.
+    // This preserves quiet tails without waiting forever for a stalled provider
+    // to repeat coverage it has already stopped reporting.
+    let newest_target_end_ms = cloud_target_end_ms.max(local_target_end_ms);
+    local_audio_ms.saturating_sub(newest_target_end_ms) >= endpoint_timeout_ms
+}
+
+fn provider_progress_stalled(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    now: Instant,
+) -> bool {
+    let Some(provider_audio_ms) = update.provider_audio_duration_ms else {
+        return false;
+    };
+    let mut slot = inner.embedded_audio_provider_progress_guard.lock();
+    let Some(guard) = slot.as_mut().filter(|guard| guard.session_id == session_id) else {
+        *slot = Some(ProviderProgressGuard {
+            session_id,
+            provider_audio_ms,
+            last_advanced_at: now,
+        });
+        return false;
+    };
+    if provider_audio_ms > guard.provider_audio_ms {
+        guard.provider_audio_ms = provider_audio_ms;
+        guard.last_advanced_at = now;
+        return false;
+    }
+    provider_audio_ms == guard.provider_audio_ms
+        && now.saturating_duration_since(guard.last_advanced_at)
+            >= Duration::from_millis(EMBEDDED_PROVIDER_STALL_CONFIRM_MS)
+}
+
+fn stage_terminal_wake_continuation(
+    inner: &Arc<Inner>,
+    wake_pcm: Vec<u8>,
+    wake_end_seconds: f32,
+    wake_phrase: String,
+) -> bool {
+    stage_terminal_wake_continuation_at(
+        inner,
+        wake_pcm,
+        wake_end_seconds,
+        wake_phrase,
+        Instant::now(),
+    )
+}
+
+fn stage_terminal_wake_continuation_at(
+    inner: &Arc<Inner>,
+    wake_pcm: Vec<u8>,
+    wake_end_seconds: f32,
+    wake_phrase: String,
+    now: Instant,
+) -> bool {
+    let mut slot = inner.embedded_audio_terminal_wake_continuation.lock();
+    if slot
+        .as_ref()
+        .is_some_and(|continuation| continuation.expires_at > now)
     {
         return false;
     }
-    local_audio_ms.saturating_sub(cloud_target_end_ms) >= EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+    *slot = Some(TerminalWakeContinuation {
+        session_id: None,
+        wake_pcm,
+        wake_end_seconds,
+        wake_phrase,
+        expires_at: now + EMBEDDED_TERMINAL_WAKE_CONTINUATION_TTL,
+    });
+    true
+}
+
+pub(super) fn bind_terminal_wake_continuation_session(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) -> bool {
+    bind_terminal_wake_continuation_session_at(inner, session_id, Instant::now())
+}
+
+fn bind_terminal_wake_continuation_session_at(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    now: Instant,
+) -> bool {
+    let phrase = {
+        let mut slot = inner.embedded_audio_terminal_wake_continuation.lock();
+        let Some(continuation) = slot.as_mut() else {
+            return false;
+        };
+        if continuation.expires_at <= now || continuation.session_id.is_some() {
+            *slot = None;
+            return false;
+        }
+        continuation.session_id = Some(session_id);
+        continuation.wake_phrase.clone()
+    };
+    // Bind the visible-capsule body guard before the frontend can acknowledge
+    // the Recording event emitted by the host-start path.
+    arm_automatic_wake_text_guard(inner, session_id, phrase, 0);
+    true
+}
+
+fn take_terminal_wake_continuation(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+) -> Option<TerminalWakeContinuation> {
+    take_terminal_wake_continuation_at(inner, session_id, Instant::now())
+}
+
+fn take_terminal_wake_continuation_at(
+    inner: &Arc<Inner>,
+    session_id: SessionId,
+    now: Instant,
+) -> Option<TerminalWakeContinuation> {
+    let continuation = inner
+        .embedded_audio_terminal_wake_continuation
+        .lock()
+        .take()?;
+    if continuation.expires_at > now && continuation.session_id == Some(session_id) {
+        Some(continuation)
+    } else {
+        clear_automatic_wake_text_guard(inner);
+        None
+    }
+}
+
+pub(super) fn clear_terminal_wake_continuation(inner: &Arc<Inner>, session_id: SessionId) {
+    let cleared = {
+        let mut slot = inner.embedded_audio_terminal_wake_continuation.lock();
+        if slot
+            .as_ref()
+            .is_some_and(|continuation| continuation.session_id == Some(session_id))
+        {
+            *slot = None;
+            true
+        } else {
+            false
+        }
+    };
+    if cleared {
+        clear_automatic_wake_text_guard(inner);
+    }
+}
+
+fn discard_terminal_wake_continuation(inner: &Arc<Inner>) {
+    let had_continuation = inner
+        .embedded_audio_terminal_wake_continuation
+        .lock()
+        .take()
+        .is_some();
+    if had_continuation {
+        clear_automatic_wake_text_guard(inner);
+    }
 }
 
 fn set_volcengine_preview_callbacks(
@@ -1595,39 +1870,69 @@ async fn finish_end_session_after_stop_transition(
     let raw = match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
-            if let Err(e) = asr.send_last_frame().await {
-                log::error!("[coord] send last frame failed: {e}");
-                asr.cancel();
-                finish_dictation_pipeline_error(
-                    inner,
-                    current_session_id,
-                    format!("识别收尾失败: {e}"),
-                );
-                return Err(e.to_string());
-            }
-            // 添加全局超时保护：防止 await_final_result() 永远挂起
             let timeout_duration = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
-            match tokio::time::timeout(timeout_duration, asr.await_final_result()).await {
-                Ok(Ok(r)) => r,
-                Ok(Err(e)) => {
-                    log::error!("[coord] await final failed: {e}");
-                    finish_dictation_pipeline_error(
-                        inner,
-                        current_session_id,
-                        format!("识别失败: {e}"),
-                    );
-                    return Err(e.to_string());
+            let primary = match asr.send_last_frame().await {
+                Ok(()) => {
+                    // 添加全局超时保护：防止 await_final_result() 永远挂起
+                    match tokio::time::timeout(timeout_duration, asr.await_final_result()).await {
+                        Ok(result) => result.map_err(|error| (error, false)),
+                        Err(_) => Err((
+                            crate::asr::volcengine::VolcengineASRError::FinalResultTimeout,
+                            true,
+                        )),
+                    }
                 }
-                Err(_) => {
-                    // 全局超时：最后的防线
-                    log::error!(
-                        "[coord] 全局超时 {} 秒 - 强制恢复",
-                        COORDINATOR_GLOBAL_TIMEOUT_SECS
+                Err(error) => Err((error, false)),
+            };
+            match primary {
+                Ok(result) => result,
+                Err((primary_error, _)) if primary_error.permits_full_audio_replay() => {
+                    log::warn!(
+                        "[coord] Volcengine primary stream failed; attempting one retained-audio replay: {primary_error}"
                     );
-                    // 清理 ASR session，避免资源泄漏
                     asr.cancel();
-                    finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
-                    return Err("global timeout".to_string());
+                    match tokio::time::timeout(timeout_duration, asr.replay_retained_audio_once())
+                        .await
+                    {
+                        Ok(Ok(result)) => result,
+                        Ok(Err(recovery_error)) => {
+                            log::error!(
+                                "[coord] Volcengine retained-audio replay failed after primary error ({primary_error}): {recovery_error}"
+                            );
+                            finish_dictation_pipeline_error(
+                                inner,
+                                current_session_id,
+                                format!("识别恢复失败: {recovery_error}"),
+                            );
+                            return Err(recovery_error.to_string());
+                        }
+                        Err(_) => {
+                            log::error!(
+                                "[coord] Volcengine retained-audio replay timed out after {} seconds (primary_error={primary_error})",
+                                COORDINATOR_GLOBAL_TIMEOUT_SECS
+                            );
+                            finish_dictation_timeout(
+                                inner,
+                                current_session_id,
+                                "识别恢复超时".to_string(),
+                            );
+                            return Err("recovery replay timeout".to_string());
+                        }
+                    }
+                }
+                Err((primary_error, primary_global_timeout)) => {
+                    log::error!("[coord] Volcengine finalization failed: {primary_error}");
+                    asr.cancel();
+                    if primary_global_timeout {
+                        finish_dictation_timeout(inner, current_session_id, "识别超时".to_string());
+                    } else {
+                        finish_dictation_pipeline_error(
+                            inner,
+                            current_session_id,
+                            format!("识别失败: {primary_error}"),
+                        );
+                    }
+                    return Err(primary_error.to_string());
                 }
             }
         }
@@ -1800,6 +2105,24 @@ async fn finish_end_session_after_stop_transition(
             unfiltered_text.chars().count(),
             raw.text.chars().count()
         );
+    }
+    // Live multi-speaker finals can collapse to empty after speaker filtering
+    // even when the capsule already streamed a long owner preview. Prefer that
+    // preview over the false "没有识别到语音" failure path.
+    if raw.text.trim().is_empty() {
+        if let Some(preview) = current_embedded_audio_partial_preview(inner) {
+            let recovered =
+                filter_automatic_wake_text(inner, current_session_id, &preview, false);
+            if !recovered.trim().is_empty() {
+                log::warn!(
+                    "[coord] empty ASR final recovered from partial preview session_id={} preview_chars={} recovered_chars={}",
+                    current_session_id,
+                    preview.chars().count(),
+                    recovered.chars().count()
+                );
+                raw.text = recovered;
+            }
+        }
     }
     if inner.prefs.get().remove_filler_words {
         let before = raw.text.clone();
@@ -1984,15 +2307,24 @@ async fn finish_end_session_after_stop_transition(
     // 流式插入 opt-in 路径：开关打开 + 非翻译 + 非 Raw 模式 → 进入流式分支。
     // 任何不满足都走原一次性 polish_or_passthrough 路径，行为跟历史完全一致。
     let wayland_session = crate::hotkey::is_wayland_session();
+    // Installed sessions 7ce523e5 / 6a86d8e3: LLM key 401 opened the auth
+    // circuit, but we still entered streaming_insert, switched ABC, logged
+    // FAILED, typed 0 chars, then clipboard-pasted. Skip polish entirely when
+    // the circuit is open so stop→Done stays snappy and the UX is quiet raw
+    // insert (owner: "体验一般般").
+    let llm_auth_blocked = current_llm_auth_fingerprint()
+        .ok()
+        .is_some_and(current_llm_auth_is_rejected);
+    let needs_llm_polish = mode != PolishMode::Raw || raw_uses_llm;
     let streaming_eligible = streaming_insert_eligible(
         prefs.streaming_insert,
         translation_active,
         mode,
         raw_uses_llm,
         wayland_session,
-    );
+    ) && !llm_auth_blocked;
     log::info!(
-        "[coord] polish dispatch: translation={translation_active} mode={mode:?} wayland_session={wayland_session} streaming_eligible={streaming_eligible}"
+        "[coord] polish dispatch: translation={translation_active} mode={mode:?} wayland_session={wayland_session} streaming_eligible={streaming_eligible} llm_auth_blocked={llm_auth_blocked}"
     );
 
     let (polished, polish_error, already_streamed) = if translation_active {
@@ -2013,6 +2345,12 @@ async fn finish_end_session_after_stop_transition(
         )
         .await;
         (p, e, false)
+    } else if llm_auth_blocked && needs_llm_polish {
+        log::info!(
+            "[coord] LLM auth circuit open; inserting raw transcript without polish wait (raw_chars={})",
+            raw.text.chars().count()
+        );
+        (raw.text.clone(), None, false)
     } else if streaming_eligible {
         run_streaming_polish(
             inner,
@@ -2274,8 +2612,19 @@ async fn finish_end_session_after_stop_transition(
     } else {
         "failed"
     };
+    let stop_to_done_ms = take_stop_to_done_ms(inner, current_session_id);
+    if let Some(ms) = stop_to_done_ms {
+        log::info!(
+            "[coord] stop_to_done_ms={} session_id={} insertion_status={:?} polish_failed={} clipboard={}",
+            ms,
+            current_session_id,
+            status,
+            polish_error.is_some(),
+            clipboard_result
+        );
+    }
     log::info!(
-        "[coord] final completion actions session_id={} chars={} insertion_status={:?} target_confirmed={} target_restored={} user_stop={} clipboard={} post_key={}",
+        "[coord] final completion actions session_id={} chars={} insertion_status={:?} target_confirmed={} target_restored={} user_stop={} clipboard={} post_key={} stop_to_done_ms={:?}",
         current_session_id,
         polished.chars().count(),
         status,
@@ -2283,7 +2632,8 @@ async fn finish_end_session_after_stop_transition(
         focus_ready_for_paste,
         user_initiated_stop,
         clipboard_result,
-        post_dictation_key_result
+        post_dictation_key_result,
+        stop_to_done_ms
     );
 
     let inserted_chars = polished.chars().count() as u32;
@@ -2377,11 +2727,19 @@ async fn finish_end_session_after_stop_transition(
     {
         None
     } else if tsf_required_insert_failed {
-        Some("TSF 未上屏，已禁止非 TSF 兜底".to_string())
+        if clipboard_retention_satisfied && retain_plain_dictation {
+            Some("TSF 未上屏，内容在剪贴板，请 Ctrl+V".to_string())
+        } else {
+            Some("TSF 未上屏，已禁止非 TSF 兜底".to_string())
+        }
     } else if wayland_session {
         wayland_done_message(status, polish_error.is_some())
     } else {
-        default_done_message(status, polish_error.is_some())
+        default_done_message(
+            status,
+            polish_error.is_some(),
+            clipboard_retention_satisfied && retain_plain_dictation,
+        )
     };
 
     apply_and_publish_dictation_event(
@@ -2428,6 +2786,7 @@ pub(super) fn dictation_error_code(
 }
 
 pub(super) fn cancel_session(inner: &Arc<Inner>) {
+    discard_terminal_wake_continuation(inner);
     if embedded_ble_host_cancel_context_active(inner) {
         cancel_embedded_ble_session_through_actor(inner);
         return;

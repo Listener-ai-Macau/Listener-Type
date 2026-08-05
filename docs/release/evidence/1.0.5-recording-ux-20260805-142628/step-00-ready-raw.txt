@@ -1,0 +1,9 @@
+{
+  "selected": "通过",
+  "text": "所以你现在要我读什么话？描写啊，就是我感觉现在你这样子让我测不出什么东西。",
+  "spoken_text": null,
+  "output_path": "C:\\Users\\Billy\\Desktop\\Denzic\\Listener\\Listener-Type\\docs\\release\\evidence\\1.0.5-recording-ux-20260805-142628\\step-00-ready-note.txt"
+}
+
+ERR:
+
