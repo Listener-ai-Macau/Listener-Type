@@ -17,7 +17,22 @@ use crate::types::{ChineseScriptPreference, OutputLanguagePreference, PolishMode
 
 const DEFAULT_TEMPERATURE: f32 = 0.3;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+/// 润色 SSE 的空转上限：provider 接了连接却长时间不出字时断流报错，让上层
+/// 立刻走原文直插，而不是让胶囊停在 polishing 等满 30s 总超时（2026-08-07
+/// deepseek 连续两次 stall：12s 空流 / 30s 无 delta，owner 体感「卡死」）。
+/// 正常 delta 间隔是亚秒级，8s 只掐真 stall。可用
+/// `LISTENER_POLISH_IDLE_TIMEOUT_MS`（100..=120_000）覆盖，供诊断/测试。
+const POLISH_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(8);
 const BODY_PREVIEW_LIMIT: usize = 200;
+
+fn polish_stream_idle_timeout() -> Duration {
+    std::env::var("LISTENER_POLISH_IDLE_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|ms| (100..=120_000).contains(ms))
+        .map(Duration::from_millis)
+        .unwrap_or(POLISH_STREAM_IDLE_TIMEOUT)
+}
 pub const CODEX_OAUTH_PROVIDER_ID: &str = "codex_oauth";
 pub const CODEX_DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 pub const CODEX_DEFAULT_MODEL: &str = "gpt-5.3-codex-spark";
@@ -864,10 +879,21 @@ impl OpenAICompatibleLLMProvider {
                 cancelled = true;
                 break;
             }
-            let chunk_opt = response
-                .chunk()
+            let chunk_opt = match tokio::time::timeout(polish_stream_idle_timeout(), response.chunk())
                 .await
-                .map_err(|e| LLMError::Network(e.to_string()))?;
+            {
+                Ok(result) => result.map_err(|e| LLMError::Network(e.to_string()))?,
+                Err(_) => {
+                    log::warn!(
+                        "[llm] polish stream idle timeout ({} deltas, {} chars so far); failing fast for raw-insert fallback",
+                        delta_count,
+                        full_text.chars().count()
+                    );
+                    return Err(LLMError::Network(
+                        "polish stream idle timeout".to_string(),
+                    ));
+                }
+            };
             let Some(chunk) = chunk_opt else { break };
             append_utf8_sse_chunk(&mut buffer, &mut utf8_pending, &chunk)?;
 
@@ -2460,6 +2486,64 @@ mod tests {
         assert_eq!(output, "你🙂好");
         assert_eq!(*deltas.lock().unwrap(), "你🙂好");
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn polish_streaming_fails_fast_when_provider_stalls_without_deltas() {
+        // 2026-08-07：deepseek 接了连接却 30s 不出字，胶囊停在 polishing 直到
+        // 30s 总超时（owner 体感「卡死」）。空转上限应让流式润色快速失败，
+        // 由上层走原文直插。
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _request = read_http_request(&mut stream);
+            use std::io::Write;
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n",
+                )
+                .unwrap();
+            // 挂住连接不出 SSE 数据（远超测试用的 300ms 空转上限）。
+            thread::sleep(Duration::from_secs(30));
+        });
+
+        std::env::set_var("LISTENER_POLISH_IDLE_TIMEOUT_MS", "300");
+        let started = std::time::Instant::now();
+        let provider = OpenAICompatibleLLMProvider::new(OpenAICompatibleConfig::new(
+            "ark",
+            "Ark",
+            format!("http://{}", addr),
+            "",
+            "test-model",
+        ));
+        let result = provider
+            .polish_streaming(
+                "原文",
+                PolishMode::Raw,
+                &[],
+                "",
+                &[],
+                ChineseScriptPreference::Auto,
+                OutputLanguagePreference::Auto,
+                None,
+                &[],
+                |_delta| {},
+                || false,
+            )
+            .await;
+        std::env::remove_var("LISTENER_POLISH_IDLE_TIMEOUT_MS");
+
+        let err = result.expect_err("stalled stream must fail");
+        assert!(
+            err.to_string().contains("polish stream idle timeout"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "idle timeout must beat the 30s request timeout"
+        );
+        drop(server);
     }
 
     #[tokio::test]

@@ -2250,7 +2250,51 @@ impl VolcengineStreamingASR {
                 self.emit_streaming_event(VolcengineStreamingEvent::Partial(preview));
             }
         }
-        let result = &speaker_filtered_result.result;
+        // Streaming partials may only see the first stable utterance
+        // ("开始录音，那你") while result.text / optimistic already holds the
+        // longer owner tail. On protocol final we must prefer the longer
+        // owner-safe optimistic text when available — otherwise intermittent
+        // mid-cut finals insert only two chars (installed 4ff44fc3).
+        let prefer_final_optimistic = has_final && {
+            let target_text = speaker_filtered_result
+                .result
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let optimistic_text = speaker_filtered_result
+                .optimistic_result
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let longer = spoken_content_len(optimistic_text) > spoken_content_len(target_text);
+            let owner_ok = {
+                let state = self.state.lock();
+                local_speaker_allows_optimistic_preview(&state)
+                    || spoken_content_len(&state.optimistic_preview_text)
+                        >= spoken_content_len(optimistic_text)
+            };
+            longer && owner_ok
+        };
+        let result = if prefer_final_optimistic {
+            log::info!(
+                "[asr] protocol final prefers longer owner-safe optimistic text target_chars={} optimistic_chars={}",
+                speaker_filtered_result
+                    .result
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(|t| t.chars().count())
+                    .unwrap_or(0),
+                speaker_filtered_result
+                    .optimistic_result
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(|t| t.chars().count())
+                    .unwrap_or(0)
+            );
+            &speaker_filtered_result.optimistic_result
+        } else {
+            &speaker_filtered_result.result
+        };
 
         // 流结束信号只信帧头 flags（lastPacket / negativeSequence）。
         // 之前误把 utterance.definite=true 当成流结束——但那只代表"这一段语音已固化"，
@@ -3060,6 +3104,11 @@ mod tests {
         assert!(confirmed_owner_final_preview_fallback(&manual, "").is_none());
 
         manual.optimistic_preview_text = "这是应该保留的本人正文".into();
+        // Production commits a Target-confirmed owner preview into the ledger
+        // via `commit_session_transcript_if_stronger`; the isolation branch of
+        // `session_committed_transcript` deliberately never reads optimistic
+        // directly (it may have absorbed room speech before the gate closed).
+        manual.best_transcript_text = "这是应该保留的本人正文".into();
         manual.local_speaker_tracking_enabled = true;
         manual.local_target_confirmed = true;
         // Final often arrives after other people / ambient NonTarget frames.
@@ -3337,6 +3386,40 @@ mod tests {
         assert_eq!(
             filtered.optimistic_result["text"],
             "这个东西现在能不能弄？然后帮我看一下"
+        );
+    }
+
+    #[test]
+    fn final_raw_tail_after_first_utterance_is_kept_in_optimistic_text() {
+        // Installed 4ff44fc3: cloud result.text had the full sentence while the
+        // only stable utterance was "开始录音，那你". Final must be able to pick
+        // the longer optimistic text (handle_frame prefers it when owner-safe).
+        let result = json!({
+            "text": "开始录音，那你 哦，搞个目标，修一下这个。这个够了，这个目标。",
+            "utterances": [{
+                "additions": { "speaker_id": "0", "source": "two_pass" },
+                "definite": true,
+                "start_time": 122,
+                "end_time": 2132,
+                "text": "开始录音，那你"
+            }]
+        });
+        let mut target = None;
+        let filtered = filter_result_to_target_speaker(&result, &mut target);
+        assert_eq!(target.as_deref(), Some("0"));
+        assert_eq!(filtered.result["text"], "开始录音，那你");
+        let optimistic = filtered
+            .optimistic_result
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(
+            spoken_content_len(optimistic) > spoken_content_len("开始录音，那你"),
+            "optimistic must keep the raw tail after the first stable utterance, got {optimistic:?}"
+        );
+        assert!(
+            optimistic.contains("搞个目标"),
+            "optimistic should include the later body, got {optimistic:?}"
         );
     }
 
@@ -3811,6 +3894,11 @@ mod tests {
             local_speaker_tracking_enabled: true,
             local_speaker_stable_target: true,
             local_target_confirmed: true,
+            // `local_speaker_allows_optimistic_preview` gates refresh on the
+            // latest classification being Target (matches the only call site).
+            local_speaker_classification: Some(
+                crate::speaker_verification::SessionSpeakerClassification::Target { score: 0.6 },
+            ),
             local_target_speech_end_ms: Some(1_800),
             local_audio_duration_ms: Some(2_800),
             last_server_audio_duration_ms: Some(2_600),

@@ -3,7 +3,8 @@ use super::{
     automatic_wake_body_started, automatic_wake_initial_body_wait_active,
     automatic_wake_session_active, begin_embedded_audio_dictation_session_id,
     cancel_embedded_ble_listener_capture, cancel_session, claim_post_dictation_key,
-    clear_embedded_ble_cancel_flag, current_embedded_audio_partial_preview, default_done_message,
+    clear_automatic_wake_text_guard, clear_embedded_ble_cancel_flag,
+    current_embedded_audio_partial_preview, default_done_message,
     device_ai_processing_completion_delay, device_ai_processing_io_allowed,
     device_processing_final_succeeded, dictation_asr_engine_backend_id,
     dictation_asr_quality_warning, dictation_asr_uses_core_accurate_engine, dictation_error_code,
@@ -1309,8 +1310,9 @@ fn long_form_endpoint_requires_two_seconds_without_that_speaker() {
         super::target_speaker_inactive_stop_reason(2_000),
         "target_speaker_inactive_2000ms"
     );
-    // Punctuation must NOT stretch standard mode — Chinese ASR almost always
-    // ends short utterances with 。？！ and that previously made every end 2s.
+    // Finished sentences with 。？！ stay snappy 1.0s (old "terminal→2s" made
+    // every Chinese short utterance feel slow). Incomplete body holds 1.5s so
+    // mid-thought pauses are not cut (installed "现在是进入" / "你帮").
     assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(false, Some("用全刷。")),
         1_000
@@ -1320,15 +1322,36 @@ fn long_form_endpoint_requires_two_seconds_without_that_speaker() {
         1_000
     );
     assert_eq!(
-        super::target_speaker_end_timeout_ms_for_preview(false, Some("你继续帮我看一下吧")),
-        1_000
-    );
-    assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(false, Some("现在整体是一个什么进度？")),
         1_000
     );
     assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("你继续帮我看一下吧")),
+        1_500
+    );
+    // 5 spoken chars → short-body ladder (≤4 is 2.5s).
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("现在是进入")),
+        1_500
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("那你")),
+        2_500
+    );
+    assert_eq!(
+        super::target_speaker_inactive_stop_reason(1_500),
+        "target_speaker_inactive_1500ms"
+    );
+    assert_eq!(
+        super::target_speaker_inactive_stop_reason(2_500),
+        "target_speaker_inactive_2500ms"
+    );
+    assert_eq!(
         super::target_speaker_end_timeout_ms_for_preview(true, Some("用全刷。")),
+        2_000
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(true, Some("你继续帮我看一下吧")),
         2_000
     );
     assert!(super::preview_ends_with_sentence_terminal(Some(
@@ -1597,17 +1620,36 @@ fn target_speaker_endpoint_uses_local_clock_only_for_a_clean_provider_stall() {
         1_000,
     ));
 
-    let noisy_raw_energy_without_target_advance = crate::asr::volcengine::TargetSpeakerUpdate {
+    // Ongoing unclassified local energy during a provider stall must NOT end
+    // the session (installed mid-cut: ASR text froze while owner kept talking).
+    let mid_sentence_local_energy = crate::asr::volcengine::TargetSpeakerUpdate {
         local_speech_end_ms: Some(10_400),
         ..exact_endpoint.clone()
     };
+    assert!(!super::provider_stall_local_endpoint_due(
+        &mid_sentence_local_energy,
+        true,
+        1_000,
+    ));
+    assert!(!super::target_speaker_endpoint_due_with_provider_stall(
+        &mid_sentence_local_energy,
+        true,
+        1_000,
+    ));
+
+    // Residual energy that has itself been quiet for the full endpoint interval
+    // may still use stall fallback so room noise does not hold the session open.
+    let residual_energy_now_quiet = crate::asr::volcengine::TargetSpeakerUpdate {
+        local_speech_end_ms: Some(9_900),
+        ..exact_endpoint.clone()
+    };
     assert!(super::provider_stall_local_endpoint_due(
-        &noisy_raw_energy_without_target_advance,
+        &residual_energy_now_quiet,
         true,
         1_000,
     ));
     assert!(super::target_speaker_endpoint_due_with_provider_stall(
-        &noisy_raw_energy_without_target_advance,
+        &residual_energy_now_quiet,
         true,
         1_000,
     ));
@@ -1718,13 +1760,13 @@ fn provider_stall_requires_real_time_without_provider_coverage_progress() {
         &coordinator.inner,
         session_id,
         &update,
-        started + Duration::from_millis(499)
+        started + Duration::from_millis(999)
     ));
     assert!(super::provider_progress_stalled(
         &coordinator.inner,
         session_id,
         &update,
-        started + Duration::from_millis(500)
+        started + Duration::from_millis(1_000)
     ));
 
     let provider_advanced = crate::asr::volcengine::TargetSpeakerUpdate {
@@ -1735,7 +1777,7 @@ fn provider_stall_requires_real_time_without_provider_coverage_progress() {
         &coordinator.inner,
         session_id,
         &provider_advanced,
-        started + Duration::from_millis(501)
+        started + Duration::from_millis(1_001)
     ));
     assert!(!super::provider_progress_stalled(
         &coordinator.inner,
@@ -1965,6 +2007,79 @@ fn target_speaker_endpoint_waits_for_startup_body_calibration() {
         ..unresolved_body
     };
     assert!(super::target_speaker_endpoint_due(&confirmed_other));
+}
+
+#[test]
+fn incomplete_body_preview_uses_fifteen_hundred_ms_endpoint() {
+    // Very short incomplete body holds longer (installed "那你" mid-cut).
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("你帮")),
+        2_500
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("那你")),
+        2_500
+    );
+    assert_eq!(
+        super::target_speaker_inactive_stop_reason(2_500),
+        "target_speaker_inactive_2500ms"
+    );
+    // Longer incomplete body keeps 1.5s.
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("你继续帮我看一下吧")),
+        1_500
+    );
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("你帮。")),
+        1_000
+    );
+    // Empty / no body keeps base snappy; no-body abandon is layered separately.
+    assert_eq!(super::target_speaker_end_timeout_ms_for_preview(false, None), 1_000);
+    assert_eq!(
+        super::target_speaker_end_timeout_ms_for_preview(false, Some("   ")),
+        1_000
+    );
+}
+
+#[test]
+fn host_started_wake_guard_survives_embedded_session_begin() {
+    // terminal_wake_body_continuation / host start arms the wake guard before
+    // BLE PCM attaches. begin_embedded_audio_dictation_session_id reuses the
+    // Starting session; the guard for that session must not be wiped or the
+    // no-body path falls back to snappy 1.0s.
+    let coordinator = Coordinator::new();
+    let session_id = new_session_id();
+    {
+        let mut state = coordinator.inner.state.lock();
+        state.session_id = session_id;
+        state.phase = SessionPhase::Starting;
+    }
+    arm_automatic_wake_text_guard(&coordinator.inner, session_id, "开始录音".into(), 0);
+    assert!(automatic_wake_session_active(&coordinator.inner, session_id));
+    assert!(!automatic_wake_body_started(&coordinator.inner, session_id));
+
+    // Mirror begin_embedded_audio_dictation_session preserve rule.
+    if !automatic_wake_session_active(&coordinator.inner, session_id) {
+        clear_automatic_wake_text_guard(&coordinator.inner);
+    }
+    assert!(
+        automatic_wake_session_active(&coordinator.inner, session_id),
+        "host-started wake guard must survive embedded session begin attach"
+    );
+
+    let mode_timeout = super::target_speaker_end_timeout_ms_for_preview(false, None);
+    let no_body_timeout = if automatic_wake_body_started(&coordinator.inner, session_id) {
+        mode_timeout
+    } else if automatic_wake_session_active(&coordinator.inner, session_id) {
+        super::EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS.max(mode_timeout)
+    } else {
+        mode_timeout
+    };
+    assert_eq!(no_body_timeout, 3_000);
+    assert_eq!(
+        super::target_speaker_inactive_stop_reason(no_body_timeout),
+        "target_speaker_inactive_no_body_3000ms"
+    );
 }
 
 #[test]
@@ -3134,8 +3249,8 @@ fn kws_hit_schedules_immediate_local_confirmation() {
             && polish.contains("KWS_LOCAL_CONFIRM_RETRY_MS: usize = 400")
             && polish.contains("KWS_SECONDARY_CONFIRM_BUDGET_MS: u64 = 250")
             && polish.contains("KWS_SECONDARY_ABSENT_REJECT_COUNT: u8 = 2")
-            && polish.contains("limit_pcm16_for_confirmation"),
-        "secondary budget 250ms + 2 Absent rejects + attenuation-only local ASR"
+            && polish.contains("gain_normalized_pcm16"),
+        "secondary budget 250ms + 2 Absent rejects + boosted (min 8x) local ASR"
     );
     assert_eq!(super::KWS_SECONDARY_CONFIRM_BUDGET_MS, 250);
     assert_eq!(super::KWS_IMMEDIATE_LOCAL_CONFIRM_MIN_MS, 700);

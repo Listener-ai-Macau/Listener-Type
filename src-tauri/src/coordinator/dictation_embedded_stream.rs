@@ -323,6 +323,19 @@ impl EmbeddedStreamingDictation {
                 continuation.wake_end_seconds,
                 continuation.wake_phrase.clone(),
             );
+            // Safety net: host-start arms the wake guard before PCM attaches, but
+            // if begin_session raced and cleared it, re-arm so empty-body abandon
+            // stays at 3.0s (body_started=false must not use snappy 1.0s).
+            if !automatic_wake_session_active(inner, session.session_id) {
+                arm_automatic_wake_text_guard(
+                    inner,
+                    session.session_id,
+                    continuation.wake_phrase.clone(),
+                    0,
+                );
+                // Capsule is already visible from the host-start Recording emit.
+                acknowledge_automatic_wake_capsule_visible(inner, session.session_id);
+            }
         }
         if !activate_embedded_audio_dictation_session(inner, session.session_id, 0.0) {
             if terminal_wake_continuation.is_some() {
@@ -778,11 +791,28 @@ impl EmbeddedStreamingDictation {
                                     phrase_signal =
                                         denzic_voice_activation_v1_core::PhraseSignal::LocalTranscript;
                                     Some(found)
-                                } else {
-                                    // Terminal: explicit Absent → reject (precision).
-                                    // Session is ending; no more audio for stage-2 retry.
+                                } else if !crate::speaker_verification::is_enrolled_for_phrase(
+                                    &phrase,
+                                ) {
+                                    // Open-gate (no voiceprint): KWS already hit 「开始录音」
+                                    // but local ASR on device PCM often returns Absent
+                                    // (busy helper, short window, board mic). Prefer
+                                    // KeywordModel recall over terminal reject — owner
+                                    // reported wake not sensitive / worse after
+                                    // precision-only Absent reject.
                                     log::info!(
-                                        "[wake-phrase] terminal stage2 Absent reject KWS embedded_session_id={} prior_absent_count={} (anti false-wake)",
+                                        "[wake-phrase] terminal stage2 Absent fail-open KeywordModel open-gate embedded_session_id={} prior_absent_count={} transcript_chars={}",
+                                        embedded_session_id,
+                                        candidate.kws_local_absent_count,
+                                        result.transcript_chars
+                                    );
+                                    phrase_signal =
+                                        denzic_voice_activation_v1_core::PhraseSignal::KeywordModel;
+                                    Some(found)
+                                } else {
+                                    // Enrolled: keep precision — stage2 Absent rejects KWS.
+                                    log::info!(
+                                        "[wake-phrase] terminal stage2 Absent reject KWS embedded_session_id={} prior_absent_count={} (anti false-wake enrolled)",
                                         embedded_session_id,
                                         candidate.kws_local_absent_count
                                     );

@@ -179,7 +179,18 @@ mod platform {
     const JOINER: &str = "joiner-epoch-13-avg-2-chunk-8-left-64.int8.onnx";
     const TOKENS: &str = "tokens.txt";
     const SAMPLE_RATE: i32 = 16_000;
-    const HOST_LIMITER_PEAK: f32 = 0.707_945_76;
+    // 0.4s warmup (was 0.8s): short "开始录音" often finishes near 0.8s; long
+    // warmup delayed first KWS feed and locked gain on quiet pre-roll only.
+    const STREAM_GAIN_WARMUP_BYTES: usize = SAMPLE_RATE as usize * 2 * 2 / 5;
+    /// p95 target for host-side boost. Board wake-candidate PCM arrives spiky
+    /// and far below KWS training levels (firmware leveling clamps peaks near
+    /// 0.5 while speech p95 sits ~0.015). The old 0.65/48x normalizer boosted
+    /// that into hard clipping and KWS missed anyway; the 3f44ba4 "Firmware AFE
+    /// owns AGC" gain removal missed at 1x. Real missed wake session 548
+    /// (2026-08-07): miss at 1-2x, hit at 4-8x, miss again at 44x clipping.
+    /// 0.12 lands typical candidates in the 4-12x working band.
+    const NORMALIZATION_TARGET_P95: f32 = 0.12;
+    const NORMALIZATION_MAX_GAIN: f32 = 12.0;
     const FINAL_PADDING_SAMPLES: usize = SAMPLE_RATE as usize;
     const CONTINUOUS_SPEECH_TRAILING_BLANKS: i32 = 0;
     const KEYWORD_SCORE: f32 = 1.5;
@@ -714,21 +725,31 @@ mod platform {
         load_cached_runtime(&LIVE_CACHE, phrase, score, threshold, true)
     }
 
+    /// p95 → 0.65 boost (clamp 1..48). The board's wake-candidate PCM arrives
+    /// far below KWS training levels (real candidates RMS ~-40 dBFS), so the
+    /// host must boost — firmware leveling does not cover this path.
     fn normalization_gain(pcm: &[u8]) -> f32 {
-        let peak = pcm
+        let mut absolute = pcm
             .chunks_exact(2)
             .map(|value| i16::from_le_bytes([value[0], value[1]]).unsigned_abs() as f32 / 32768.0)
-            .fold(0.0f32, f32::max);
-        if peak > HOST_LIMITER_PEAK {
-            HOST_LIMITER_PEAK / peak
+            .collect::<Vec<_>>();
+        absolute.sort_by(f32::total_cmp);
+        let reference = if absolute.is_empty() {
+            0.0
+        } else {
+            absolute[(absolute.len() * 95 / 100).min(absolute.len() - 1)]
+        };
+        let gain = if reference > f32::EPSILON {
+            (NORMALIZATION_TARGET_P95 / reference).clamp(1.0, NORMALIZATION_MAX_GAIN)
         } else {
             1.0
-        }
+        };
+        gain
     }
 
-    /// Host-side safety limiter for local confirmation. Firmware AFE owns AGC;
-    /// this path may attenuate an over-peak block but must never boost it.
-    pub fn limit_pcm16_for_confirmation(pcm: &[u8]) -> Vec<u8> {
+    /// PCM16 with full-buffer gain for local paraformer wake confirmation.
+    /// Streaming candidates are often too quiet for ExactStart without this.
+    pub fn gain_normalized_pcm16(pcm: &[u8]) -> Vec<u8> {
         let gain = normalization_gain(pcm);
         let mut out = Vec::with_capacity(pcm.len());
         for sample in samples_with_gain(pcm, gain) {
@@ -753,6 +774,7 @@ mod platform {
 
     #[derive(Default)]
     struct StreamingNormalizer {
+        warmup: Vec<u8>,
         gain: Option<f32>,
         accepted_bytes: usize,
         emitted_bytes: usize,
@@ -764,13 +786,44 @@ mod platform {
                 return Err("唤醒词 PCM16 数据长度无效".into());
             }
             self.accepted_bytes = self.accepted_bytes.saturating_add(pcm.len());
-            self.emitted_bytes = self.emitted_bytes.saturating_add(pcm.len());
-            self.gain = Some(1.0);
-            Ok(samples_with_gain(pcm, 1.0))
+            if let Some(gain) = self.gain {
+                // Keep one gain for the whole candidate. Recomputing it from each
+                // transport chunk makes wake detection depend on BLE packet timing.
+                self.emitted_bytes = self.emitted_bytes.saturating_add(pcm.len());
+                return Ok(samples_with_gain(pcm, gain));
+            }
+
+            let needed = STREAM_GAIN_WARMUP_BYTES.saturating_sub(self.warmup.len());
+            let split = needed.min(pcm.len());
+            self.warmup.extend_from_slice(&pcm[..split]);
+            if self.warmup.len() < STREAM_GAIN_WARMUP_BYTES {
+                return Ok(Vec::new());
+            }
+
+            let gain = normalization_gain(&self.warmup);
+            self.gain = Some(gain);
+            let mut samples = samples_with_gain(&self.warmup, gain);
+            self.emitted_bytes = self.emitted_bytes.saturating_add(self.warmup.len());
+            self.warmup.clear();
+            if split < pcm.len() {
+                samples.extend(samples_with_gain(&pcm[split..], gain));
+                self.emitted_bytes = self
+                    .emitted_bytes
+                    .saturating_add(pcm.len().saturating_sub(split));
+            }
+            Ok(samples)
         }
 
         fn finish(&mut self) -> Vec<f32> {
-            Vec::new()
+            if self.warmup.is_empty() {
+                return Vec::new();
+            }
+            let gain = normalization_gain(&self.warmup);
+            self.gain = Some(gain);
+            self.emitted_bytes = self.emitted_bytes.saturating_add(self.warmup.len());
+            let samples = samples_with_gain(&self.warmup, gain);
+            self.warmup.clear();
+            samples
         }
     }
 
@@ -977,8 +1030,9 @@ mod platform {
         score: f32,
         threshold: f32,
     ) -> Result<Option<Match>, String> {
-        // Firmware AFE owns AGC. The host only attenuates a candidate whose
-        // incoming peak exceeds the -3 dBFS safety ceiling.
+        // Host-side p95 boost: wake-candidate PCM arrives well below KWS
+        // training levels, so recall depends on this gain (see
+        // NORMALIZATION_TARGET_P95 / NORMALIZATION_MAX_GAIN).
         let gain = normalization_gain(pcm);
         log::info!(
             "[wake-phrase] offline detect pcm_bytes={} gain={gain:.2} score={score:.1} threshold={threshold:.2}",
@@ -1177,7 +1231,7 @@ mod platform {
         }
 
         #[test]
-        fn quiet_device_pcm_is_not_boosted_by_keyword_path() {
+        fn quiet_device_pcm_is_boosted_toward_kws_training_level() {
             let pcm = (0..SAMPLE_RATE)
                 .flat_map(|index| {
                     let sample = if index % 2 == 0 { 100i16 } else { -100i16 };
@@ -1185,9 +1239,12 @@ mod platform {
                 })
                 .collect::<Vec<_>>();
             let (samples, gain) = normalized_kws_samples(&pcm);
-            assert_eq!(gain, 1.0);
+            // p95 = 100/32768 → 0.12/ref ≈ 39.3, clamped to the 12x ceiling.
+            assert_eq!(gain, 12.0);
             assert!(samples.iter().all(|sample| sample.abs() <= 1.0));
-            assert!(samples.iter().all(|sample| sample.abs() < 0.01));
+            assert!(samples
+                .iter()
+                .all(|sample| (sample.abs() - 100.0 / 32768.0 * 12.0).abs() < 1e-6));
         }
 
         #[test]
@@ -1230,10 +1287,13 @@ mod platform {
 
         #[test]
         fn short_stream_emits_every_accepted_pcm16_sample_once() {
+            // Shorter than the gain warmup window: accept buffers, finish flushes
+            // exactly the accepted bytes (no loss, no duplication).
             let pcm = vec![7u8; 3_200];
             let mut normalizer = StreamingNormalizer::default();
-            let samples = normalizer.accept(&pcm).expect("short chunk");
-            assert!(normalizer.finish().is_empty());
+            let mut samples = normalizer.accept(&pcm).expect("short chunk");
+            assert!(samples.is_empty());
+            samples.extend(normalizer.finish());
             assert_eq!(samples.len() * 2, pcm.len());
             assert_eq!(normalizer.accepted_bytes, pcm.len());
             assert_eq!(normalizer.emitted_bytes, pcm.len());

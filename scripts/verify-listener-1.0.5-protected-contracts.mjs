@@ -81,6 +81,18 @@ gate("standard_endpoint_still_1000ms_default", () => {
     "fn target_speaker_end_timeout_ms",
     "timeout selected from long-form preference",
   );
+  // Incomplete body (no 。？！) may hold 1.5s; finished sentences stay 1.0s.
+  mustMatch(
+    dictation,
+    /EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS:\s*u64\s*=\s*1_500/,
+    "incomplete-body hold is 1500 ms",
+  );
+  mustInclude(dictation, "target_speaker_inactive_1500ms", "incomplete-body stop reason");
+  mustInclude(
+    dictationTests,
+    "incomplete_body_preview_uses_fifteen_hundred_ms_endpoint",
+    "incomplete-body unit test",
+  );
 });
 
 gate("long_form_endpoint_2000ms_optional", () => {
@@ -154,6 +166,16 @@ gate("wake_no_body_uses_longer_abandon_timeout", () => {
     dictationTests,
     "automatic_wake_no_body_uses_longer_endpoint_timeout",
     "wake-no-body unit test",
+  );
+  mustInclude(
+    dictationTests,
+    "host_started_wake_guard_survives_embedded_session_begin",
+    "host-start / continuation wake guard must survive session begin",
+  );
+  mustInclude(
+    dictation,
+    "if !automatic_wake_session_active(inner, current_session_id)",
+    "begin_embedded_audio preserves host-started wake guard",
   );
 });
 

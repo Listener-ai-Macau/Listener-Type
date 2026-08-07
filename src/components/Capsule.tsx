@@ -496,7 +496,18 @@ function shouldPreserveMessageWithoutPayload(
   if (state !== 'recording' && state !== 'transcribing' && state !== 'polishing') {
     return false;
   }
+  // Sticky body preview for the same recording session: level-only / filtered
+  // status ticks must not wipe the last non-empty partial.
   if (sessionId && messageSessionId === sessionId) {
+    return true;
+  }
+  // Also keep the last preview when backend omits session on a level tick but
+  // we are still in the same recording continuum.
+  if (
+    messageSessionId != null &&
+    (state === 'recording' || state === 'transcribing' || state === 'polishing') &&
+    (previousState === 'recording' || previousState === 'transcribing' || previousState === 'polishing')
+  ) {
     return true;
   }
   return (

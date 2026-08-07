@@ -2610,6 +2610,29 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    #[ignore = "diagnostic: list configured LLM providers (presence only, no secrets)"]
+    fn diagnostic_llm_provider_presence() {
+        let root = super::load_credentials();
+        println!("active llm provider = {}", root.active.llm);
+        for (id, entry) in &root.providers.llm {
+            println!(
+                "llm provider {id}: apiKey={} baseURL={} model={:?}",
+                if entry.apiKey.as_deref().unwrap_or("").is_empty() {
+                    "MISSING"
+                } else {
+                    "set"
+                },
+                if entry.baseURL.as_deref().unwrap_or("").is_empty() {
+                    "MISSING"
+                } else {
+                    "set"
+                },
+                entry.model.as_deref().unwrap_or("<none>")
+            );
+        }
+    }
+
+    #[test]
     fn default_test_data_dir_is_process_scoped_and_outside_production_profile() {
         let resolved = data_dir().expect("test data dir");
         assert!(resolved.starts_with(std::env::temp_dir()));

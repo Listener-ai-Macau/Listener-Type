@@ -49,21 +49,29 @@ const WAKE_DIAGNOSTIC_RETENTION_MAX_BYTES: u64 = 32 * 1024 * 1024;
 const WAKE_DIAGNOSTIC_RETENTION_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const POST_DICTATION_KEY_DELAY: Duration = Duration::from_millis(60);
 const EMBEDDED_ASR_SPEECH_ACTIVITY_TIMEOUT: Duration = Duration::from_millis(300);
-// Owner dictation endpoint. Standard mode uses 1.0s for snappy completion;
-// optional long-form mode uses 2.0s so users can pause mid-thought without
-// being cut. Only the wake/target speaker's latest speech refreshes this
-// clock — other people talking must not lengthen auto-end. Premature cuts
-// and empty finals are handled separately (stable-attributed boundary hold +
-// session speech ledger). Default remains standard 1.0s (1.0.4 contract).
+// Owner dictation endpoint. Standard mode uses 1.0s for snappy completion on
+// finished sentences; optional long-form mode uses 2.0s. Incomplete body text
+// (no 。？！) uses 1.5s; *very short* incomplete body (≤4 spoken chars, e.g.
+// "那你") holds 2.5s so mid-thought / late ASR tails are not cut (installed
+// 4ff44fc3). Only the wake/target speaker's latest speech refreshes this
+// clock — other people talking must not lengthen auto-end. Default
+// complete-sentence path remains 1.0s (1.0.4 contract).
 const EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS: u64 = 1_000;
+const EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS: u64 = 1_500;
+const EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS: u64 = 2_500;
 const EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS: u64 = 2_000;
+// Spoken-content length at/under this is treated as "just started body".
+const EMBEDDED_SHORT_BODY_SPOKEN_CHARS: usize = 4;
 // Installed session 72519330: wake capsule → ~1.2s host auto-end on the wake
 // clock with empty body → "没有识别到语音". Initial body wait is only 700ms, so
 // 1.0s snappy endpoint after that treats "thinking after wake" as done. Keep
 // 1.0s once body text exists; before body, require a longer abandon silence.
 const EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS: u64 = 3_000;
 const EMBEDDED_PROVIDER_STALL_FALLBACK_LAG_MS: u64 = 500;
-const EMBEDDED_PROVIDER_STALL_CONFIRM_MS: u64 = 500;
+// 500ms confirmed stalls still mid-cut live speech when the cloud clock freezes
+// for one network blip. Require a full second of no provider coverage growth
+// before local-clock fallback may end the session.
+const EMBEDDED_PROVIDER_STALL_CONFIRM_MS: u64 = 1_000;
 
 fn target_speaker_end_timeout_ms(long_form: bool) -> u64 {
     if long_form {
@@ -73,16 +81,40 @@ fn target_speaker_end_timeout_ms(long_form: bool) -> u64 {
     }
 }
 
-/// Endpoint timeout from mode only. Chinese cloud ASR almost always ends a
-/// short utterance with 。？！ so a "sentence terminal → 2s" rule made *every*
-/// snappy dictation feel slow (owner: "怪怪的 / 不跟手"). Mid-phrase cuts are
-/// already guarded by pending_unattributed + provisional clock refresh.
-/// Optional long-form mode is the only intentional 2.0s path.
-fn target_speaker_end_timeout_ms_for_preview(long_form: bool, _preview: Option<&str>) -> u64 {
-    target_speaker_end_timeout_ms(long_form)
+fn preview_spoken_char_count(preview: Option<&str>) -> usize {
+    preview
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| {
+            text.chars()
+                .filter(|ch| !ch.is_whitespace() && !matches!(ch, '，' | ',' | '、' | '。' | '！' | '？' | '.' | '!' | '?' | '…'))
+                .count()
+        })
+        .unwrap_or(0)
 }
 
-/// Retained for diagnostics / tests; no longer stretches the endpoint clock.
+/// Endpoint timeout from mode + body completeness.
+///
+/// Historical mistake: "ends with 。？！ → 2s" made *every* Chinese short
+/// dictation feel slow (cloud ASR almost always adds terminal punctuation).
+/// Correct polarity: finished sentences stay snappy 1.0s; incomplete body
+/// holds 1.5s; very short incomplete body holds 2.5s so late cloud tails can
+/// land (intermittent "那你"-only finals).
+/// Optional long-form remains the only intentional flat 2.0s path.
+fn target_speaker_end_timeout_ms_for_preview(long_form: bool, preview: Option<&str>) -> u64 {
+    if long_form {
+        return EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS;
+    }
+    let has_body = preview.map(str::trim).is_some_and(|text| !text.is_empty());
+    if has_body && !preview_ends_with_sentence_terminal(preview) {
+        if preview_spoken_char_count(preview) <= EMBEDDED_SHORT_BODY_SPOKEN_CHARS {
+            return EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS;
+        }
+        return EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS;
+    }
+    EMBEDDED_TARGET_SPEAKER_END_TIMEOUT_MS
+}
+
 fn preview_ends_with_sentence_terminal(preview: Option<&str>) -> bool {
     let Some(text) = preview.map(str::trim).filter(|s| !s.is_empty()) else {
         return false;
@@ -96,8 +128,12 @@ fn preview_ends_with_sentence_terminal(preview: Option<&str>) -> bool {
 fn target_speaker_inactive_stop_reason(timeout_ms: u64) -> &'static str {
     if timeout_ms >= EMBEDDED_AUTOMATIC_WAKE_NO_BODY_END_TIMEOUT_MS {
         "target_speaker_inactive_no_body_3000ms"
+    } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_SHORT_BODY_END_TIMEOUT_MS {
+        "target_speaker_inactive_2500ms"
     } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_LONG_FORM_END_TIMEOUT_MS {
         "target_speaker_inactive_2000ms"
+    } else if timeout_ms >= EMBEDDED_TARGET_SPEAKER_INCOMPLETE_BODY_END_TIMEOUT_MS {
+        "target_speaker_inactive_1500ms"
     } else {
         "target_speaker_inactive_1000ms"
     }
@@ -478,28 +514,43 @@ fn target_speaker_endpoint_due_with_timeout(
     target_speaker_endpoint_due_with_provider_stall(update, false, endpoint_timeout_ms)
 }
 
+fn local_speech_confidently_non_target(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    local_speech_ms: u64,
+) -> bool {
+    update
+        .local_non_target_speech_end_ms
+        .is_some_and(|non_target_ms| {
+            non_target_ms.saturating_add(EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS)
+                >= local_speech_ms
+        })
+}
+
+/// Recent local speech energy that is not yet attributed as non-target. Used to
+/// hold auto-end while the owner may still be talking even if cloud text froze.
+fn has_unresolved_recent_local_speech(
+    update: &crate::asr::volcengine::TargetSpeakerUpdate,
+    endpoint_timeout_ms: u64,
+) -> bool {
+    update
+        .audio_duration_ms
+        .zip(update.local_speech_end_ms)
+        .is_some_and(|(audio_ms, local_speech_ms)| {
+            let attributed_end_ms = update.stable_attributed_speech_end_ms.unwrap_or_default();
+            local_speech_ms
+                > attributed_end_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
+                && !local_speech_confidently_non_target(update, local_speech_ms)
+                && audio_ms.saturating_sub(local_speech_ms) < endpoint_timeout_ms
+        })
+}
+
 fn target_speaker_endpoint_due_with_provider_stall(
     update: &crate::asr::volcengine::TargetSpeakerUpdate,
     provider_stall_confirmed: bool,
     endpoint_timeout_ms: u64,
 ) -> bool {
-    let unresolved_recent_local_speech = update
-        .audio_duration_ms
-        .zip(update.local_speech_end_ms)
-        .is_some_and(|(audio_ms, local_speech_ms)| {
-            let attributed_end_ms = update.stable_attributed_speech_end_ms.unwrap_or_default();
-            let confidently_non_target =
-                update
-                    .local_non_target_speech_end_ms
-                    .is_some_and(|non_target_ms| {
-                        non_target_ms.saturating_add(EMBEDDED_LOCAL_SPEAKER_CLASSIFICATION_SLACK_MS)
-                            >= local_speech_ms
-                    });
-            local_speech_ms
-                > attributed_end_ms.saturating_add(EMBEDDED_LOCAL_SPEECH_ALIGNMENT_SLACK_MS)
-                && !confidently_non_target
-                && audio_ms.saturating_sub(local_speech_ms) < endpoint_timeout_ms
-        });
+    let unresolved_recent_local_speech =
+        has_unresolved_recent_local_speech(update, endpoint_timeout_ms);
     let local_target_authority =
         update.local_speaker_tracking_enabled && update.local_target_speech_end_ms.is_some();
     let cloud_target_authority = update.speaker_info_present && update.speaker_id.is_some();
@@ -522,6 +573,10 @@ fn target_speaker_endpoint_due_with_provider_stall(
     // endpoint only inside that authoritative coverage. Local capture normally
     // runs ahead; using its newer clock with an older attributed target end can
     // stop a quiet sentence tail milliseconds before the next provider update.
+    //
+    // Provider-stall fallback may switch the coverage clock to local audio, but
+    // must NOT bypass unresolved local speech: mid-sentence cloud freezes with
+    // ongoing owner energy were ending on `inactive_1000ms` (2026-08-06 logs).
     let provider_stall_fallback =
         provider_stall_local_endpoint_due(update, provider_stall_confirmed, endpoint_timeout_ms);
     let endpoint_audio_duration_ms = if provider_stall_fallback {
@@ -533,7 +588,7 @@ fn target_speaker_endpoint_due_with_provider_stall(
     };
     (cloud_target_authority || local_target_authority)
         && !pending_blocks_endpoint
-        && (!unresolved_recent_local_speech || provider_stall_fallback)
+        && !unresolved_recent_local_speech
         && endpoint_audio_duration_ms
             .zip(target_speech_end_ms)
             .is_some_and(|(audio_ms, target_ms)| {
@@ -567,8 +622,14 @@ fn provider_stall_local_endpoint_due(
         return false;
     }
 
-    // Speaker-agnostic energy is deliberately not an authority here. Room
-    // noise can keep advancing it after the stabilized target profile stops.
+    // Ongoing unclassified local energy means the owner may still be speaking
+    // while ASR/provider clocks froze. Confirmed non-target (other people) or
+    // energy that has itself been quiet for the full endpoint interval may
+    // still use stall fallback so room noise does not hold the session open.
+    if has_unresolved_recent_local_speech(update, endpoint_timeout_ms) {
+        return false;
+    }
+
     // A newer locally confirmed target tail is authoritative only after that
     // newer boundary has itself been inactive for the full endpoint interval.
     // This preserves quiet tails without waiting forever for a stalled provider
@@ -968,7 +1029,14 @@ async fn begin_embedded_audio_dictation_session(
     let current_session_id = begin_embedded_audio_dictation_session_id(inner)?;
     clear_embedded_audio_stats(inner);
     clear_embedded_audio_partial_preview(inner);
-    clear_automatic_wake_text_guard(inner);
+    // Host-start paths (terminal_wake_body_continuation, KEY start) arm the
+    // automatic wake guard before BLE PCM attaches so empty-body abandon stays
+    // at 3.0s. Unconditionally clearing here dropped that latch and made
+    // body_started=false sessions fall back to snappy 1.0s ("没有识别到语音" /
+    // empty continuation).
+    if !automatic_wake_session_active(inner, current_session_id) {
+        clear_automatic_wake_text_guard(inner);
+    }
     clear_embedded_audio_stop_feedback(inner);
     #[cfg(target_os = "windows")]
     {

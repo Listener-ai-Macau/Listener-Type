@@ -1023,10 +1023,10 @@ fn run_local_wake_confirmation_once(
     phrase: &str,
 ) -> Result<LocalWakeConfirmation, String> {
     let snapshot_pcm_ms = pcm.len() / 32;
-    // Firmware AFE owns AGC. The local helper receives the same waveform with
-    // only an attenuation limiter for the -3 dBFS host ceiling.
-    let limited = crate::wake_phrase::limit_pcm16_for_confirmation(pcm);
-    let result = crate::asr::local::wake_helper::confirm(&limited, phrase, Duration::from_secs(4))
+    // Boost toward KWS/ASR training levels (min 8x): candidate PCM arrives far
+    // below them, and an unboosted phrase reads as garbled Absent (session 548).
+    let boosted = crate::wake_phrase::gain_normalized_pcm16(pcm);
+    let result = crate::asr::local::wake_helper::confirm(&boosted, phrase, Duration::from_secs(4))
         .map_err(|err| format!("local wake confirmation failed: {err}"))?;
     Ok(LocalWakeConfirmation {
         matched: result.matched,

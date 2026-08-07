@@ -1086,6 +1086,9 @@ fn emit_embedded_audio_pcm_capsule_if_active(
         _ => return false,
     };
     let level = remember_embedded_audio_capsule_level(inner, level);
+    // Keep last non-empty partial on level ticks so the capsule does not flash
+    // empty between ASR partials (backend used to emit message=None every PCM).
+    let preview = current_embedded_audio_partial_preview(inner);
     if embedded_ble_actor_context_active(inner) {
         let trace_timeline = should_trace_embedded_ble_pcm_capsule(inner, session_id, after_stop);
         apply_embedded_ble_session_actor_dictation_event_with_trace(
@@ -1099,7 +1102,7 @@ fn emit_embedded_audio_pcm_capsule_if_active(
                 after_stop,
             },
             level,
-            None,
+            preview,
             None,
         )
     } else {
@@ -1110,7 +1113,7 @@ fn emit_embedded_audio_pcm_capsule_if_active(
                 after_stop,
             },
             level,
-            None,
+            preview,
             None,
         )
     }
